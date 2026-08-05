@@ -23,10 +23,6 @@ Run this command and choose the skills and agent destination interactively:
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/refs/heads/master/install.sh | bash
 ```
 
-The installer opens with a colored pixel-art splash and the Tschallacka Skill
-Shop menu. Set `AI_SKILLS_NO_SPLASH=1` to skip the animation. The installer
-source is [`install.sh`](install.sh).
-
 The installer can install all three skills or one skill, and supports these
 global skill roots:
 
