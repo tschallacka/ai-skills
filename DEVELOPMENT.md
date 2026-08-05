@@ -74,15 +74,36 @@ The package contents should include `install.sh`, `package.json`, `README.md`,
 to the existing `install.sh`; do not duplicate the installer in JavaScript or
 move the skills to satisfy npm packaging.
 
-## Publishing
+## Versioning and publishing
 
-Update the version in `package.json` according to the intended release, review
-the dry-run package contents, and then publish from a clean checkout with the
-appropriate npm credentials:
+Use semantic versioning for releases:
+
+- Increase the patch version for bug fixes and documentation-only corrections.
+- Increase the minor version for backwards-compatible new features or new
+  skills.
+- Increase the major version for breaking changes, including removing skills
+  or wholesale altering the behavior or instructions of existing skills.
+
+For each release, update `package.json`, run the validation and npm package
+checks above, commit the changes, and create a matching annotated git tag:
+
+```bash
+git add README.md DEVELOPMENT.md package.json
+git commit -m "Prepare <version> release"
+git tag -a v<version> -m "Release <version>"
+git push origin master --follow-tags
+```
+
+Then publish the exact package version and create the corresponding GitHub
+release:
+
+Review the dry-run package contents, then publish from a clean checkout with
+the appropriate npm credentials:
 
 ```bash
 npm_config_cache="$(mktemp -d)" npm pack --dry-run
 npm publish --access public
+gh release create v<version> --title "<version>" --generate-notes
 ```
 
 Publishing is an external release action. Confirm the version, package name,

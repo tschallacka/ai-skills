@@ -46,7 +46,7 @@ keeps the skills in this repository and links `ai-skills-install` directly to
 the existing `install.sh` script:
 
 ```bash
-npm install --global @tschallacka/ai-skills
+npm install -g @tschallacka/ai-skills
 ai-skills-install
 ```
 
