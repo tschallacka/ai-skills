@@ -20,7 +20,7 @@ user explicitly requests it. Each skill documents when not to activate.
 Run this command and choose the skills and agent destination interactively:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.sh | bash
+curl -fsSL [https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.sh](https://raw.githubusercontent.com/tschallacka/ai-skills/refs/heads/master/install.sh) | bash
 ```
 
 The installer opens with a colored pixel-art splash and the Tschallacka Skill
