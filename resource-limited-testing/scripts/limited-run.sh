@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a command with a memory limit and, where supported, a CPU quota.
-# Linux uses a transient systemd --user cgroup scope. macOS uses the shell's
-# virtual-memory limit because it has no portable built-in cgroup equivalent.
+# Linux uses a transient systemd --user cgroup scope. macOS has no reliable
+# per-process RAM limit, so it uses nice and optionally cpulimit instead.
 #
 # Usage:
 #   limited-run.sh <memory-max> <cpu-quota-percent> -- <command> [args...]
@@ -37,8 +37,12 @@ case "$(uname -s)" in
         fi
         ;;
     Darwin)
-        # macOS has no portable built-in CPU quota. Continue with the memory
-        # limit and keep the interface compatible with the Linux invocation.
+        echo "Warning: macOS cannot enforce the requested RAM limit ($mem)." >&2
+        echo "Applying nice priority; use cpulimit for a best-effort CPU throttle." >&2
+        if command -v cpulimit >/dev/null 2>&1; then
+            exec cpulimit --limit="$cpu" -- nice -n 10 "$@"
+        fi
+        exec nice -n 10 "$@"
         ;;
     *)
         echo "Unsupported operating system: $(uname -s)" >&2

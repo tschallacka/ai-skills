@@ -1,0 +1,28 @@
+{
+  "name": "@tschallacka/ai-skills",
+  "version": "1.0.0",
+  "description": "Reusable skills and an installer for coding agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tschallacka/ai-skills.git"
+  },
+  "homepage": "https://github.com/tschallacka/ai-skills",
+  "bin": {
+    "ai-skills-install": "install.sh"
+  },
+  "scripts": {
+    "install-skills": "./install.sh"
+  },
+  "files": [
+    "install.sh",
+    "planning",
+    "project-specificies",
+    "resource-limited-testing",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=14"
+  }
+}

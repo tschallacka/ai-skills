@@ -22,11 +22,11 @@ On Linux, `scripts/limited-run.sh` runs a command inside a transient
 If the wrapped process tree exceeds the memory ceiling, the operating system
 kills only the processes in that scope.
 
-On macOS, the same script applies a virtual-memory limit with `ulimit`. macOS
-does not provide a portable built-in equivalent to the Linux CPU cgroup quota,
-so the CPU argument is accepted for a consistent interface but cannot be
-enforced by the fallback. Use a separate platform tool when a CPU cap is
-required on macOS.
+On macOS, the kernel does not provide a reliable per-process RAM cap that this
+wrapper can apply. The Linux cgroup memory controls and the shell's
+`ulimit -v` are therefore not available as a safe equivalent. The wrapper uses
+`nice` for lower scheduling priority and, when installed, `cpulimit` for a
+best-effort CPU throttle.
 
 If neither supported mechanism is available, stop and explain the limitation
 before running the command without a cap.
@@ -69,14 +69,20 @@ stability and no adequate limit is available, ask before running it.
 
 ### macOS
 
-- Use the built-in `nice` command for lower scheduling priority and the
-  wrapper's `ulimit` memory protection for temporary limits. Neither is a
-  reliable percentage-based CPU cap.
-- If a percentage-based CPU cap is important, recommend the optional Homebrew
-  `cpulimit` formula (`brew install cpulimit`) and ask for approval before
-  installing it. Explain that it uses process suspension/resumption and may
-  behave poorly with interactive jobs or detached child processes. Use it as
-  `cpulimit --limit=<percent> -- <command> ...` after installation.
+- There is no reliable RAM limit available through this wrapper on macOS.
+  Do not describe `ulimit -v` as RAM protection; it is not a supported
+  substitute for Linux cgroup memory limits here.
+- Prefer a memory ceiling provided by the command's interpreter or runtime,
+  when one exists. Add the appropriate interpreter-specific argument directly
+  to the wrapped command; keep the guidance generic and rely on the agent's
+  knowledge of that runtime.
+- Use the built-in `nice` command for lower scheduling priority. It is not a
+  CPU usage limit.
+- For a best-effort percentage-based CPU throttle, recommend the optional
+  Homebrew `cpulimit` formula (`brew install cpulimit`) and ask for approval
+  before installing it. Explain that it uses process suspension/resumption
+  and may behave poorly with interactive jobs or detached child processes.
+  Use it as `cpulimit --limit=<percent> -- <command> ...` after installation.
 - Do not recommend Linux-only tools such as `systemd-run`, cgroups, or
   `taskset` for macOS.
 - Avoid changing global `launchctl` limits or login configuration unless the
@@ -93,7 +99,8 @@ scripts/limited-run.sh <memory-max> <cpu-quota-percent> -- <command> [args...]
 
 - `<memory-max>`: a size such as `2G`, `6G`, or `512M`.
 - `<cpu-quota-percent>`: a percentage of one core; `400` means up to four
-  cores on Linux. It is accepted but not enforced by the macOS fallback.
+  cores on Linux. On macOS it is passed to `cpulimit` when available and is
+  otherwise represented only by the `nice` priority change.
 
 ## Starting presets
 

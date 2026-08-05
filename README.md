@@ -39,6 +39,26 @@ The universal root is also discovered by OpenCode and OpenClaw. Installing the
 same skill into multiple roots can create duplicate definitions or precedence
 conflicts, so choose only the roots you need.
 
+### npm installation
+
+Install the package globally to expose the installer command. The npm package
+keeps the skills in this repository and links `ai-skills-install` directly to
+the existing `install.sh` script:
+
+```bash
+npm install --global @tschallacka/ai-skills
+ai-skills-install
+```
+
+For a one-off run without a global install:
+
+```bash
+npx --yes --package @tschallacka/ai-skills ai-skills-install
+```
+
+The npm package does not install skills automatically as an npm lifecycle
+side-effect; run the installer command when you are ready to choose a target.
+
 If an installed file differs from the repository version, the installer asks
 before replacing it. Approved replacements create a `.bak` backup first. A
 symlinked skill is skipped for manual review rather than following the link
