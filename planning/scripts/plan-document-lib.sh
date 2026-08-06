@@ -93,7 +93,7 @@ plan_section_spec() {
         goal/dependencies-and-handoffs) printf '%s\t%s\n' '## Dependencies and handoffs' 7 ;;
         goal/implementation-approach-risks-and-edge-cases) printf '%s\t%s\n' '## Implementation approach, risks, and edge cases' 8 ;;
         goal/owned-work-units) printf '%s\t%s\n' '## Owned work units' 9 ;;
-        goal/goal-size-exception) printf '%s\t%s\n' '## Goal-size exception' 10 ;;
+        goal/goal-size-exception) printf '%s\t%s\n' '## Goal-size exception' 11 ;;
         step/objective) printf '%s\t%s\n' '## Objective' 4 ;;
         step/instructions) printf '%s\t%s\n' '## Instructions' 5 ;;
         step/acceptance-criteria) printf '%s\t%s\n' '## Acceptance criteria' 6 ;;
@@ -103,6 +103,83 @@ plan_section_spec() {
         review/rationale) printf '%s\t%s\n' '## Verdict' 3 ;;
         *) plan_die "Section '$section' is not a mutable narrative section for a $kind document" ;;
     esac
+}
+
+plan_replace_testing_requirement() {
+    local file="$1" required="$2" rationale="$3" replacement temporary_file
+    case "$required" in
+        yes|no) ;;
+        *) plan_die "Test requirement must be yes or no" ;;
+    esac
+    plan_require_safe_value rationale "$rationale"
+    replacement="| $required | $rationale |"
+    temporary_file="${file}.tmp.$$"
+    trap 'rm -f "$temporary_file"' RETURN
+    awk -v replacement="$replacement" '
+        $0 == "## Testing requirement" {
+            in_section = 1
+            print
+            next
+        }
+        in_section && /^## / {
+            in_section = 0
+        }
+        in_section && $0 == "| Test required | Rationale |" {
+            header = 1
+            print
+            next
+        }
+        in_section && header && /^\|---\|---\|$/ {
+            separator = 1
+            print
+            next
+        }
+        in_section && separator && /^\|[^|]+\|[^|]+\|$/ {
+            if (data_row++) exit 3
+            print replacement
+            next
+        }
+        { print }
+        END {
+            if (!header || !separator || data_row != 1) exit 2
+        }
+    ' "$file" > "$temporary_file" || plan_die "Testing requirement table was not found exactly once: $file"
+    mv "$temporary_file" "$file"
+    trap - RETURN
+}
+
+plan_testing_requirement_for_goal() {
+    local goal_file="$1"
+    awk -F'|' '
+        $0 == "## Testing requirement" { in_section = 1; next }
+        in_section && /^## / { exit }
+        in_section && /^\|[[:space:]]*(yes|no)[[:space:]]*\|/ {
+            value = $2
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            print value
+            exit
+        }
+    ' "$goal_file"
+}
+
+plan_emit_step_testing_reminder() {
+    local plan_dir="$1" document_id="$2" step_file goal_dir goal_file required companion
+    case "$document_id" in
+        step:*|unit:*) ;;
+        *) return 0 ;;
+    esac
+    step_file="$(plan_document_path "$plan_dir" "$document_id")"
+    goal_dir="$(dirname "$(dirname "$step_file")")"
+    goal_file="$goal_dir/goal.md"
+    [ -f "$goal_file" ] || return 0
+    required="$(plan_testing_requirement_for_goal "$goal_file")"
+    [ "$required" = yes ] || return 0
+    companion="${step_file%.md}-testing.md"
+    if [ -f "$companion" ]; then
+        printf 'Reminder: testing instructions already exist at %s; review them for accuracy and completeness after updating this step.\n' "$companion"
+    else
+        printf 'Reminder: this goal requires testing; continue with its test/proof step before marking the goal complete.\n'
+    fi
 }
 
 plan_render_paragraphs() {
@@ -170,6 +247,127 @@ plan_replace_paragraph() {
         }
         !skipping { print }
         END { if (found != 1) exit 2 }
+    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
+    mv "$temporary_file" "$file"
+    trap - RETURN
+}
+
+plan_render_csv_table() {
+    local columns="$1" csv="$2" csv_file
+    [[ "$columns" =~ ^[1-9][0-9]*$ ]] || plan_die "Table column count must be a positive integer"
+    csv_file="$(mktemp "${TMPDIR:-/tmp}/plan-table.XXXXXX")"
+    trap 'rm -f "$csv_file"' RETURN
+    plan_decode_escaped_newlines "$csv" > "$csv_file"
+    awk -v expected="$columns" '
+        function parse_csv(line, fields,    i, ch, next_ch, quoted, field, count) {
+            for (i = 1; i <= length(line); i++) {
+                ch = substr(line, i, 1)
+                if (ch == "\\" && substr(line, i + 1, 1) == "\"") {
+                    field = field "\""
+                    i++
+                } else if (ch == "\"") {
+                    next_ch = substr(line, i + 1, 1)
+                    if (quoted && next_ch == "\"") {
+                        field = field "\""
+                        i++
+                    } else {
+                        quoted = !quoted
+                    }
+                } else if (ch == "," && !quoted) {
+                    fields[++count] = field
+                    field = ""
+                } else {
+                    field = field ch
+                }
+            }
+            if (quoted) return -1
+            fields[++count] = field
+            return count
+        }
+        function emit_row(fields, count,    i) {
+            printf "|"
+            for (i = 1; i <= count; i++) {
+                if (fields[i] ~ /\|/ || fields[i] ~ /\r/) exit 4
+                printf " %s |", fields[i]
+            }
+            printf "\n"
+        }
+        {
+            if ($0 ~ /^[[:space:]]*$/) exit 5
+            count = parse_csv($0, fields)
+            if (count < 0) exit 2
+            if (count != expected) exit 3
+            emit_row(fields, count)
+            if (NR == 1) {
+                printf "|"
+                for (i = 1; i <= expected; i++) printf "---|"
+                printf "\n"
+            }
+        }
+        END { if (NR == 0) exit 6 }
+    ' "$csv_file" || plan_die "CSV table must have $columns columns on every non-empty row and no pipe characters"
+    rm -f "$csv_file"
+    trap - RETURN
+}
+
+plan_insert_paragraph() {
+    local file="$1" paragraph_id="$2" mode="$3" body_file="$4" temporary_file
+    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
+    case "$mode" in before|after) ;; *) plan_die "Paragraph insertion mode must be before or after" ;; esac
+    temporary_file="${file}.tmp.$$"
+    trap 'rm -f "$temporary_file"' RETURN
+    awk -v wanted="$paragraph_id" -v mode="$mode" -v body_file="$body_file" '
+        function output(line) {
+            print line
+            previous_blank = (line == "")
+        }
+        function emit_insertion(    count, i, lines) {
+            if (!previous_blank) output("")
+            output("§ " target_section "." insertion_number)
+            count = split(body, lines, "\n")
+            for (i = 1; i <= count; i++) output(lines[i])
+            output("")
+        }
+        BEGIN {
+            while ((getline line < body_file) > 0) body = body (body == "" ? "" : "\n") line
+            close(body_file)
+            target_value = wanted
+            sub(/^§ /, "", target_value)
+            split(target_value, target_parts, /\./)
+            target_section = target_parts[1]
+            target_number = target_parts[2] + 0
+            insertion_number = (mode == "after" ? target_number + 1 : target_number)
+        }
+        {
+            line = $0
+            is_paragraph = (line ~ /^§ [0-9]+\.[0-9]+$/)
+            if (is_paragraph) {
+                current_value = line
+                sub(/^§ /, "", current_value)
+                split(current_value, current_parts, /\./)
+                section = current_parts[1]
+                number = current_parts[2] + 0
+                is_target = (section == target_section && number == target_number)
+                if (is_target && target_found++) exit 2
+                if (is_target && mode == "before") emit_insertion()
+                if (pending_after && (is_paragraph || line ~ /^## /)) {
+                    emit_insertion()
+                    pending_after = 0
+                }
+                if (is_target && mode == "after") pending_after = 1
+                if (section == target_section && number >= insertion_number) {
+                    line = "§ " section "." (number + 1)
+                }
+            } else if (pending_after && line ~ /^## /) {
+                emit_insertion()
+                pending_after = 0
+            }
+            output(line)
+        }
+        END {
+            if (pending_after) emit_insertion()
+            if (target_found != 1) exit 3
+        }
     ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
     mv "$temporary_file" "$file"
     trap - RETURN

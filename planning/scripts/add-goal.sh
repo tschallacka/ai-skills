@@ -34,7 +34,11 @@ trap 'rm -f "$temporary_file"; rmdir "$goal_dir/steps" "$goal_dir" 2>/dev/null |
     printf '## Dependencies and handoffs\n\n§ 7.1\n<prerequisites and precise downstream handoffs>\n\n'
     printf '## Implementation approach, risks, and edge cases\n\n§ 8.1\n<approach, risks, and edge cases>\n\n'
     printf '## Owned work units\n\n§ 9.1\n<add work units with add-work-unit.sh>\n\n'
-    printf '## Goal-size exception\n\n§ 10.1\n<required only when this goal has one permitted work unit>\n'
+    printf '## Testing requirement\n\n'
+    printf '| Test required | Rationale |\n'
+    printf '|---|---|\n'
+    printf '| no | <set to yes when this goal has a testable behavior; explain research or other untestable goals> |\n\n'
+    printf '## Goal-size exception\n\n§ 11.1\n<required only when this goal has one permitted work unit>\n'
 } > "$temporary_file"
 mv "$temporary_file" "$goal_file"
 trap - EXIT

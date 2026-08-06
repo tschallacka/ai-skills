@@ -10,27 +10,12 @@ passed in the browser or has an explicit user-approved exclusion.
 
 ## Required UI artifacts
 
-In `plan-description.md`, add this section:
+Use `create-ui-validation.sh` to add the required UI-validation section,
+`ui-user-stories.md`, and `bugs.md`. Use `add-ui-story.sh` for each bounded
+story and `configure-ui-story-cache.sh` for its cache. Do not recreate their
+tables by hand; the helpers enforce the canonical shape.
 
-```markdown
-## UI validation
-- Required: yes
-- Browser target: <base URL, route, or route-discovery method>
-- Story artifact: `ui-user-stories.md`
-```
-
-Create `<planname>/ui-user-stories.md` before writing UI implementation goals.
-Use one row per independently executable story:
-
-```markdown
-# UI user stories: <planname>
-
-| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
-|---|---|---|---|---|---|---|---|---|
-| US-01 | <who and starting state> | <exact navigation and actions> | <mouse click, typed text, keyboard action, or mobile gesture> | <what must be visible, enabled, persisted, or announced> | 💤 untested | — | W01, W02 | `ui-story-runs/US-01.md` |
-```
-
-Use these statuses only:
+Story statuses are:
 
 - `💤 untested`
 - `⏳ in progress`
@@ -42,17 +27,6 @@ Use these statuses only:
 Never mark a story passed because an automated test passes. Browser evidence
 is required for a UI story unless the user explicitly agrees that the story
 cannot be exercised in the available environment.
-
-Create `<planname>/bugs.md` when the plan has UI validation. It is empty until
-a bug is found, then use one row per bug:
-
-```markdown
-# UI bugs: <planname>
-
-| ID | Story | Severity | Reproduction/evidence | Investigation goal | Fix goal | Retest story | Status |
-|---|---|---|---|---|---|---|---|
-| BUG-01 | US-01 | severe|normal | <exact failure> | 03-investigate-<slug> | 04-fix-<slug> | US-01 | ⏳ open |
-```
 
 An open bug row must never be removed or marked resolved merely by changing a
 story to passed. Keep its evidence and link the retest that resolved it.
@@ -103,32 +77,8 @@ the UI-validation section plus empty story and bug artifacts;
 normal plan validation. These commands avoid patches and keep the table and
 cache shape validator-compatible.
 
-Use this exact structure:
-
-```markdown
-# Browser run cache: US-01
-
-## Starting state
-- URL, persona, viewport/device, and visible initial condition
-
-## Buffered interaction sequence
-
-| Order | Direct UI input | Target / value | Expected readiness signal |
-|---|---|---|---|
-| 1 | Mouse click | `<control>` | <state that confirms the click took effect> |
-| 2 | Keyboard type, then Enter | `<field>` / `<value>` | <result is visible> |
-
-## Waits and readiness
-
-| After order | Wait or condition | Maximum wait | Observed result |
-|---|---|---|---|
-| 1 | <visible spinner disappears or element is enabled> | 2 s | <actual elapsed wait> |
-
-## Run result
-- Status: `💤 untested`
-- Evidence: <screenshot, URL, and observed result after execution>
-- Cache validity: <current UI revision or why the sequence remains valid>
-```
+The cache helper supplies the required headings and tables. Fill it only through
+the helper or the approved content-update commands; do not patch its structure.
 
 Cache every action in execution order, its target/value, and every wait. Prefer
 a readiness condition over a blind delay; when a delay is unavoidable, record
@@ -146,6 +96,24 @@ Update the cache with actual timing and evidence after each run. Invalidate and
 rebuild it when a UI change alters a target, starting state, route, timing, or
 expected result. Do not reuse a cache after it fails until its failure and the
 required correction are recorded.
+
+### Revise after review
+
+Use flagged plan-content targets for review corrections. For example, update a
+step's acceptance criterion with
+`--step-paragraph <plan> <goal>/<step> 6.1 "<revised criterion>"`, or replace
+several paragraphs with `--step-section ... -p N.N: "<text>"`. Recheck the
+matching testing companion after any step change. Use
+`configure-ui-story-cache.sh` for structured story-cache fields; do not rewrite
+its table by hand.
+
+For a tabular acceptance record in a plan paragraph, use
+`--table-paragraph <plan> <document-id> <N.N> <columns> "<CSV>"`; quote CSV
+fields and represent literal quotes as doubled quotes (`""`) or shell-friendly
+backslash escapes (`\"`). To add a
+review-driven clarification without renumbering later sections, use
+`--insert-after` or `--insert-before`; numbering shifts only within the target
+section.
 
 ### Design fast, high-signal test steps
 

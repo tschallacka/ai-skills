@@ -33,7 +33,7 @@ bug-priority feedback loop.
   all applicable verification to have passed.
 - Treat decomposition as a design activity, not a formatting activity. Do not
   create goal or step files until the work-unit inventory and ownership map in
-  section 4 pass their checks.
+  section 2.2 pass their checks.
 - Do not hide multiple edits behind a broad verb such as "implement",
   "update", "integrate", or "wire up". Name the concrete file and symbol (or
   file-level scope) that changes.
@@ -166,18 +166,10 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
   "$PLANNING_SKILL_DIR/plans/<planname>" "<plan title>"
 ```
 
-All narrative plan, goal, step, and review paragraphs use a stable label such
-as `§ 2.1`, followed by the paragraph on the next line. A blank line precedes
-every label. Never hand-edit or renumber those labels: use the document update
-commands in section 10 so a replacement always targets one unambiguous
-paragraph and preserves the required Markdown style.
+Use the flagged `update-plan-content.sh` commands for narrative edits; the
+helpers enforce paragraph numbering, spacing, sequencing, and safe content.
 
-Paragraph content is supplied as explicit arguments, not as an unstructured
-body. The shell requires `-p N.N: content` (repeat `-p` for each paragraph),
-requires the section prefix and sequential numbering to match, and immediately
-rejects reserved `§` or `-p` tokens inside paragraph text.
-
-## 3. Write the plan description
+### 2.1 Write the plan description
 
 Create `<planname>/plan-description.md`. It must contain:
 
@@ -197,10 +189,11 @@ details here; put them in the owning goal.
 The canonical plan description has replaceable `title`, `current-state`,
 `desired-outcome`, `approach`, `scope`, `affected-areas`,
 `constraints-and-decisions`, and `risks-and-open-questions` sections. Replace
-their narrative content through `update-plan-content.sh section`; use `title`
-for the document title and `field` for structured values such as `UI affected`.
+their narrative content through flagged `update-plan-content.sh` targets; use
+`--title` for the document title and `--field` for structured values such as
+`UI affected`.
 
-## 4. Compile the work-unit inventory before choosing goals
+### 2.2 Compile the work-unit inventory before choosing goals
 
 Create `<planname>/work-unit-inventory.md` before creating goal directories.
 This is the plan's source of truth for scope and step ownership. It forces the
@@ -220,9 +213,10 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 ```
 
 `add-work-unit.sh` creates both the inventory row and its matching atomic step
-file, so their ownership fields cannot drift. Add the goal first. The older
-`create-work-unit-inventory.sh` remains available only when adopting an
-already-created plan directory.
+file, so their ownership fields cannot drift. Add the goal first. Do not
+continue an older plan whose documents predate the current skill contract. If
+an update is requested for such a plan, stop and ask the user to rewrite it
+with the current helpers before proceeding; do not retrofit it in place.
 
 Work through this sequence in order. Do not skip a question because the answer
 seems obvious:
@@ -254,39 +248,12 @@ seems obvious:
    “Could a reviewer approve this without reviewing a second target?” Split
    the goal or step whenever either answer is no.
 
-Use this exact structure:
+Let `create-plan.sh`, `add-coverage.sh`, `add-work-unit.sh`, and
+`decomposition-review` create and update the inventory. They enforce the table
+columns, stable IDs, ownership, and review checklist. Mark the checklist
+complete only after checking the resulting rows.
 
-```markdown
-# Work-unit inventory: <planname>
-
-## Definition-of-done coverage
-
-| Required outcome or proof | Work unit IDs | Notes |
-|---|---|---|
-| <outcome> | W01, W02 | <why these units cover it> |
-
-## Work units
-
-| ID | Type | File | Primary symbol or file scope | Subscope | Intended change | Depends on | Goal | Step |
-|---|---|---|---|---|---|---|---|---|
-| W01 | source | `path/to/file` | `Class::method()` | `N/A` | <one concrete change> | — | 01-<goal> | 01-step-<slug> |
-| W02 | test | `path/to/test` | `test_method` | `N/A` | <one assertion target> | W01 | 01-<goal> | 02-step-<slug> |
-| W03 | verification | `N/A` | `<one command or flow>` | `N/A` | <proof to run> | W01, W02 | 01-<goal> | 03-step-<slug> |
-
-## Decomposition review
-
-- [ ] Every definition-of-done item maps to one or more work units.
-- [ ] Every known affected file and changing symbol has its own work unit.
-- [ ] Every work unit has exactly one goal and one step.
-- [ ] Each goal has 2–10 work units, or records an allowed exception.
-- [ ] Each step has exactly one work unit and no unnamed incidental edits.
-- [ ] Dependencies form an executable order with no cycle.
-```
-
-Replace every checkbox with `[x]` only after verifying it against the table.
-Use stable IDs (`W01`, `W02`, …); steps must refer to these IDs verbatim.
-
-## 5. Decompose the initiative into goals
+### 2.3 Decompose the initiative into goals
 
 Divide the initiative into a small, ordered set of cohesive goals. Order goals
 by dependency when that matters. Do not split a user-visible outcome merely by
@@ -300,24 +267,6 @@ and all mandatory sections in canonical order:
   "<goal title>" "<outcome and definition of done>"
 ```
 
-The plan must have this structure:
-
-```text
-<planname>/
-├── plan-description.md
-├── work-unit-inventory.md
-├── progress.md
-├── 01-<goal-slug>/
-│   ├── goal.md
-│   ├── progress.md
-│   ├── working-context.md       # optional until useful
-│   └── steps/
-│       ├── 01-step-<short-slug>.md
-│       └── 01-step-<short-slug>-testing.md
-└── 02-<goal-slug>/
-    └── ...
-```
-
 Each `goal.md` must be executable on its own and contain:
 
 - Current state and relevant prior-goal handoffs
@@ -329,6 +278,8 @@ Each `goal.md` must be executable on its own and contain:
 - Implementation approach, risks, and relevant edge cases
 - **Owned work units:** the exact IDs from `work-unit-inventory.md`, with a
   concise explanation of their shared outcome
+- **Testing requirement:** a table declaring `yes` or `no` and a rationale;
+  research-only or genuinely untestable goals may declare `no`
 - **Goal-size exception:** required only when the goal has one work unit; cite
   the applicable hard-gate exception
 
@@ -337,54 +288,39 @@ Keep ownership clear. Document a shared contract once in
 goal depends on an earlier goal, read that goal's completed handoff before
 composing or executing the dependent goal.
 
-## 6. Add working context when needed
+Use `no` only for a genuinely untestable or research-only goal and explain why.
+When the table says `yes`, the goal must own at least one `test` or
+`verification` work unit. When a goal owns a test or verification work unit,
+the table must say `yes`.
+
+### 2.4 Add working context when needed
 
 Create `<goalname>/working-context.md` only when execution produces useful,
 goal-specific facts that do not belong in `goal.md`. Keep it concise and
 factual. Examples include test accounts, fixture IDs, routes, discovered file
 locations, environment quirks, limited commands, and user decisions.
 
-Use this structure when the sections apply:
-
-```markdown
-# Working context: <goalname>
-
-## Current state
-- <confirmed facts, assets, IDs, commands, or prior-goal handoff>
-
-## Next action
-- <next agreed action>
-
-## Handoff
-- Outcome: <what is now present>
-- Files/data/routes/assets: <what later work can rely on>
-- Verification: <checks that passed>
-- Caveats: <remaining constraints or risks>
-```
-
 Update this file as facts are confirmed. Do not rewrite the original goal to
 include runtime discoveries. When the goal is complete, the `Handoff` section
 is required and must state what later goals can rely on.
 
-## 7. Break each goal into atomic steps
+### 2.5 Break each goal into atomic steps
 
 Create one ordered step for each assigned work unit. Do not create a step
 before its work unit exists in the inventory. A goal with N work units must
-contain exactly N implementation/verification step files (plus their optional
+contain exactly N implementation/verification step files (plus any applicable
 testing companion files).
 
-Use `add-work-unit.sh` from section 4 to create the step together with its
+Use `add-work-unit.sh` from section 2.2 to create the step together with its
 inventory row. It creates the mandatory headings, ownership fields, atomicity
 checks, and numbered narrative paragraphs. Update the objective, instructions,
 acceptance criteria, and handoff with `update-plan-content.sh`; do not patch a
 step file directly.
 
-Store steps in `<goalname>/steps/` using two-digit, zero-padded prefixes:
-
-```text
-01-step-<short-slug>.md
-02-step-<short-slug>.md
-```
+When a goal declares `Test required: yes`, the step writer prints a reminder to
+continue with the test/proof step. If a testing companion already exists, the
+reminder directs the agent to review it for accuracy and completeness after
+the step changes.
 
 Each step file must contain:
 
@@ -400,39 +336,6 @@ Each step file must contain:
 - Any handoff needed by a later step
 - An atomicity check confirming that no other change target is included
 
-Use this exact step skeleton:
-
-```markdown
-# <step name>
-
-## Ownership
-- Goal: `01-<goal-slug>`
-- Work unit: `W01`
-- Type: `source`
-
-## Change target
-- File: `path/to/file`
-- Primary symbol or file scope: `Class::method()`
-- Subscope: `N/A`
-
-## Objective
-<one outcome for this target>
-
-## Instructions
-1. <direct action on this one target>
-
-## Acceptance criteria
-- <observable result for this target>
-
-## Handoff
-- <what the next named work unit can rely on>
-
-## Atomicity check
-- [x] This step owns exactly one inventory work unit.
-- [x] No other file, symbol, test target, or verification flow changes here.
-- [x] Any follow-on target has a separately named work unit and step.
-```
-
 The only files permitted in a step are the single target and an explicitly
 listed generated output under the `generated` exception. A source step does
 not also “add tests”; create its test work unit and step separately. A test
@@ -443,19 +346,10 @@ After decomposing a goal, check that its inventory rows and step files are a
 one-to-one mapping. If a material uncertainty remains, create a bounded
 discovery work unit or resolve it before continuing.
 
-## Mandatory classification and independent review
+## 3. Mandatory classification and independent review
 
-Every `plan-description.md` must include these sections, even when concise:
-
-```markdown
-## UI classification
-- UI affected: yes|no
-- Rationale: <why>
-
-## Adversarial review
-- Artifact: `adversarial-review.md`
-- Status: 💤 pending
-```
+`create-plan.sh` creates the mandatory UI classification and adversarial-review
+sections. Keep both concise and update structured values through the CLI.
 
 When `UI affected: yes`, the UI validation reference applies and its `Required`
 value must be `yes`. Never use `UI affected: no` to avoid browser validation
@@ -468,26 +362,6 @@ every unplanned file, symbol, behavior, test, browser interaction, dependency,
 and bug-recovery path needed to execute the request. The plan is rejected
 until every finding is resolved and the review verdict is `✅ approved`.
 
-Use this structure:
-
-```markdown
-# Adversarial review: <planname>
-
-## Review scope
-- Request: <verbatim or precise summary>
-- Repository/context inspected: <what was checked>
-
-## Findings
-
-| ID | Missing or over-broad item | Required plan change | Status |
-|---|---|---|---|
-| AR-01 | No finding recorded yet, or <finding> | N/A, or <specific work unit/goal/story change> | ✅ resolved |
-
-## Verdict
-- Status: `✅ approved`
-- Rationale: <why no unresolved work remains>
-```
-
 Do not allow the planning agent to approve its own review. Re-run the review
 after a material scope change or a discovered bug.
 
@@ -496,11 +370,11 @@ one atomic command (only after the independent reviewer has actually approved
 it):
 
 ```bash
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" review-status \
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status \
   <plan-directory> approved
 ```
 
-Use `review-status <plan-directory> pending` when reopening the review. The
+Use `--review-status <plan-directory> pending` when reopening the review. The
 approved form refuses to proceed while the review still contains an open or
 in-progress `AR-` finding. The validator rejects a missing, pending, or
 mismatched plan-description status.
@@ -511,17 +385,45 @@ plan, then invoke a fresh reviewer again when revisions were material. Only
 after an approved artifact exists may the planning agent run the readiness
 validator and create progress trackers.
 
-## 8. Add verification instructions
+After review, revise only the named document target with the flagged update
+commands. Use `-dp`/`--description-paragraph`, `-gp`/`--goal-paragraph`,
+`-sp`/`--step-paragraph`, or `-rp`/`--review-paragraph` for one paragraph; use
+the corresponding `-ds`, `-gs`, `-ss`, or `-rs` flag for a section with one or
+more `-p N.N: content` paragraphs. For example:
 
-For every step with verifiable behavior, create a companion file with the same
-number and slug:
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" \
+  --description-paragraph <plan-directory> 6.1 "<revised affected area>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" \
+  --step-section <plan-directory> 01-build/02-step-verify acceptance-criteria \
+  -p 6.1: "<updated pass/fail criterion>"
+```
+
+Use `--table-paragraph <plan> <document-id> <N.N> <columns> "<CSV>"` to
+replace one paragraph with a validated Markdown table. Quote the CSV fields;
+use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
+shell-friendly escaped quote is clearer. Use
+`--insert-after` or `--insert-before` with a document ID and paragraph label
+to add one paragraph; later labels in that same section shift automatically.
+
+Run the validator again after revisions and reopen the adversarial review when
+the change affects scope, ownership, dependencies, or acceptance criteria.
+
+### 3.1 Add verification instructions
+
+For every step with verifiable behavior in a goal whose testing requirement is
+`yes`, create a companion file with the same number and slug:
 
 ```text
 <goalname>/steps/01-step-<short-slug>-testing.md
 ```
 
-Omit the file only when there is genuinely nothing to verify, such as a pure
-documentation step.
+Omit the file when the goal's testing requirement is `no` or when there is
+genuinely nothing to verify, such as a pure documentation step. If a step is
+updated through the CLI and its companion already exists, review that
+companion for accuracy and completeness before continuing.
+The validator enforces companions for every non-documentation step in a goal
+marked `yes`.
 
 Include only the relevant sections:
 
@@ -536,7 +438,7 @@ Include only the relevant sections:
 A step may require multiple verification methods. Do not mark it complete until
 all listed checks have actually passed.
 
-## 9. Validate, then create progress trackers
+### 3.2 Validate, then create progress trackers
 
 Run the validator before creating trackers or presenting the plan as ready:
 
@@ -549,38 +451,14 @@ Do not waive validation failures. Correct the inventory, goal boundary, or
 step files and run it again. The validator checks the structural guarantees;
 the decomposition review remains required for semantic completeness.
 
-Every implementation, markup, style, configuration, data, or generated work
-unit must have a downstream `test` or `verification` unit in the dependency
-graph. Add a bounded proof unit rather than asserting that a change is too
-small to test.
+For a goal marked `Test required: yes`, every implementation, markup, style,
+configuration, data, or generated work unit must have a downstream `test` or
+`verification` unit in the dependency graph. A goal marked `no` may omit that
+proof when its rationale records why testing is not meaningful or possible.
+Do not use `no` to avoid testing observable behavior.
 
-Create `<planname>/progress.md` for goals and
-`<goalname>/progress.md` for steps. Initialize every item as `💤 incomplete`.
-
-The plan-level tracker contains one row per goal:
-
-```markdown
-# Progress: <planname>
-
-**Overall progress:** `0%  #### ----------------  100%` 💤
-
-| Goalname | Description | Completion status |
-|---|---|---|
-| 01-<goal-slug> | <short description> | 💤 incomplete |
-```
-
-Each goal-level tracker contains one row per implementation step. Use this
-exact four-column format so the helper scripts can update it:
-
-```markdown
-# Progress: <goalname>
-
-**Progress:** `0%  #### ----------------  100%` 💤
-
-| Goalname | Stepname | Description | Completion status |
-|---|---|---|---|
-| 01-<goal-slug> | 01-step-<short-slug> | <short description> | 💤 incomplete |
-```
+Create plan and goal progress trackers with the bundled creation helpers;
+they enforce the table shape and initialize every item as `💤 incomplete`.
 
 Use these statuses consistently:
 
@@ -592,7 +470,7 @@ Progress percentages count completed items equally. A goal is complete only
 when all its steps and applicable verification are complete. The initiative is
 complete only when all goals are complete.
 
-## 10. Resume and update the plan
+## 4. Resume and update the plan
 
 At the start of every resumed session:
 
@@ -625,7 +503,6 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/create-progress.sh" <goal-directory> <goal-name>
 "$PLANNING_SKILL_DIR/scripts/create-plan-progress.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-plan.sh" <plan-directory> "<plan title>"
-"$PLANNING_SKILL_DIR/scripts/create-work-unit-inventory.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-ui-validation.sh" <plan-directory> "<browser target or discovery method>"
 "$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
@@ -633,17 +510,20 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
 "$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 <type> <file|N/A> <scope> <subscope|N/A> "<change>" <dependencies|—> 01-<goal> 01-step-<slug>
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> completed
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" title <plan-directory> plan "<title>"
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" section <plan-directory> plan affected-areas -p 6.1: "<first paragraph>" -p 6.2: "<second paragraph>"
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" paragraph <plan-directory> plan -p 6.1: "<replacement>"
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" field <plan-directory> plan 'UI affected' no
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" decomposition-review <plan-directory> completed
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" review-status <plan-directory> approved
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --title <plan-directory> plan "<title>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --description-section <plan-directory> affected-areas -p 6.1: "<first paragraph>" -p 6.2: "<second paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --description-paragraph <plan-directory> 6.1 "<replacement>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --table-paragraph <plan-directory> plan 6.1 3 '"Header","Value","Status"\n"Item","He said ""go""","ready"'
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --insert-after <plan-directory> plan 6.1 "<new paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status <plan-directory> approved
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" get <plan-directory> unit:W01 json
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" summary <plan-directory> markdown
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown

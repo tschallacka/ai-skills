@@ -114,7 +114,7 @@ if grep -qi 'TBD' "$inventory"; then
     fail "Inventory contains TBD; add a bounded discovery work unit instead"
 fi
 
-declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units coverage_ids
+declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units coverage_ids goal_testing_required
 unit_ids=()
 
 while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
@@ -246,6 +246,7 @@ depends_on() {
 for id in "${unit_ids[@]}"; do
     case "${unit_type[$id]}" in
         source|markup|style|config|data|generated)
+            [ "${goal_testing_required[${unit_goal[$id]}]:-}" = yes ] || continue
             has_proof=false
             for proof_id in "${unit_ids[@]}"; do
                 case "${unit_type[$proof_id]}" in
@@ -377,6 +378,36 @@ elif grep -Fqx -- '- Required: yes' "$plan_dir/plan-description.md"; then
     fail "Plan requires UI validation but declares UI affected: no"
 fi
 
+validate_goal_testing_requirement() {
+    local goal_name="$1" goal_file="$2" row required rationale
+    require_heading "$goal_file" '## Testing requirement'
+    row="$(awk -F'|' '
+        $0 == "## Testing requirement" { in_section = 1; next }
+        in_section && /^## / { in_section = 0 }
+        in_section && $0 == "| Test required | Rationale |" { headers++ }
+        in_section && $0 == "|---|---|" { separators++ }
+        in_section && /^\|[[:space:]]*(yes|no)[[:space:]]*\|[^|]+\|$/ {
+            rows++
+            value = $2; reason = $3
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", reason)
+        }
+        END {
+            if (headers != 1 || separators != 1 || rows != 1) exit 2
+            printf "%s\t%s\n", value, reason
+        }
+    ' "$goal_file")" || {
+        fail "$goal_file must contain exactly one Test required/Rationale table row"
+        goal_testing_required[$goal_name]=''
+        return
+    }
+    IFS=$'\t' read -r required rationale <<< "$row"
+    if [ -z "$rationale" ] || [[ "$rationale" == *'<'*'>'* ]]; then
+        fail "$goal_file must explain why testing is or is not required"
+    fi
+    goal_testing_required[$goal_name]="$required"
+}
+
 for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
     [ -d "$goal_dir" ] || continue
     goal_name="$(basename "$goal_dir")"
@@ -393,9 +424,11 @@ for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
         '## Affected files, systems, data, and interfaces' \
         '## Dependencies and handoffs' \
         '## Implementation approach, risks, and edge cases' \
-        '## Owned work units'; do
+        '## Owned work units' \
+        '## Testing requirement'; do
         require_heading "$goal_file" "$heading"
     done
+    validate_goal_testing_requirement "$goal_name" "$goal_file"
     count=0
     for id in ${goal_units[$goal_name]:-}; do
         count=$((count + 1))
@@ -413,6 +446,24 @@ for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
         require_heading "$goal_file" '## Goal-size exception'
     elif [ "$count" -gt 10 ]; then
         fail "$goal_name has $count work units; split it at a stable outcome boundary"
+    fi
+    test_units=0
+    for id in ${goal_units[$goal_name]:-}; do
+        case "${unit_type[$id]}" in
+            test|verification) test_units=$((test_units + 1)) ;;
+        esac
+    done
+    if [ "${goal_testing_required[$goal_name]:-}" = yes ] && [ "$test_units" -eq 0 ]; then
+        fail "$goal_name declares testing is required but has no test or verification work unit"
+    elif [ "$test_units" -gt 0 ] && [ "${goal_testing_required[$goal_name]:-}" != yes ]; then
+        fail "$goal_name has a test or verification work unit but its testing requirement is not yes"
+    fi
+    if [ "${goal_testing_required[$goal_name]:-}" = yes ]; then
+        for id in ${goal_units[$goal_name]:-}; do
+            [ "${unit_type[$id]}" = docs ] && continue
+            companion="$plan_dir/$goal_name/steps/${unit_step[$id]}-testing.md"
+            [ -f "$companion" ] || fail "$id requires testing instructions at $companion"
+        done
     fi
 done
 

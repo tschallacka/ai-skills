@@ -80,3 +80,7 @@ else
 fi
 trap - EXIT
 echo "Added $unit_id and $step_file"
+testing_required="$(plan_testing_requirement_for_goal "$goal_file")"
+if [ "$testing_required" = yes ] && [ "$unit_type" != test ] && [ "$unit_type" != verification ]; then
+    printf 'Reminder: goal %s requires testing; continue with its test/proof step. Review any existing testing instructions for accuracy and completeness.\n' "$goal_name"
+fi
