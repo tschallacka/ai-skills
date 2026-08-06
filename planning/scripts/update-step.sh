@@ -36,7 +36,7 @@ fi
 temporary_file="${progress_file}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT
 
-awk -v wanted_step="$step_name" -v replacement="$status" '
+awk -F'|' -v wanted_step="$step_name" -v replacement="$status" '
     BEGIN { found = 0 }
     /^\|/ {
         step = $3
