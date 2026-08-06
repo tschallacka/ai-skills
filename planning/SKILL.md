@@ -38,6 +38,34 @@ bug-priority feedback loop.
   "update", "integrate", or "wire up". Name the concrete file and symbol (or
   file-level scope) that changes.
 
+## Tool discipline and context limits
+
+Planning must stay within the agent's available context budget. When the
+environment provides context-limiting tools—such as bounded reads, result
+limits, pagination, summarization, compaction, or scoped subagent contexts—use
+them while researching and reviewing a plan. Request only the files, symbols,
+logs, and output needed for the current work unit; do not load an entire
+repository or an unbounded command result when a scoped query is sufficient.
+
+Use the planning skill's bundled shell scripts for creating, reading, and
+mutating plan documents, trackers, inventories, reviews, and UI artifacts.
+Do not reconstruct their behavior with ad-hoc patches or one-off text
+rewrites. If a required helper is missing, add it to the skill before using
+the workflow and keep its output validator-compatible.
+
+Use the repository's available code-lookup tools before broad text searches
+when discovering implementation files, symbols, callers, dependencies, or
+blast radius. This may be an indexed code graph, symbol search, language
+server query, IDE index, or another repository-aware lookup facility. Scope
+the lookup to the named work unit and follow its pagination or result limits.
+Use text search only for literals, non-code documents, configuration values,
+or when the repository-aware lookup cannot answer the question.
+
+These rules are agent-generic: use the strongest context limiter, shell
+workflow, and code-lookup facility available in the current environment, and
+record any unavailable facility as a plan constraint when it affects
+discovery or verification.
+
 ## Hard planning gates
 
 These rules are mandatory for a new or materially revised plan. A plan is not
@@ -128,6 +156,27 @@ For the common Claude Code installation, this is:
 
 Use the actual installation directory when the skill is installed elsewhere.
 
+Create it with the bundled command; do not create the directory or its initial
+documents with a patch. It creates a canonical `plan-description.md` and an
+empty work-unit inventory that the other commands can update safely:
+
+```bash
+PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
+"$PLANNING_SKILL_DIR/scripts/create-plan.sh" \
+  "$PLANNING_SKILL_DIR/plans/<planname>" "<plan title>"
+```
+
+All narrative plan, goal, step, and review paragraphs use a stable label such
+as `§ 2.1`, followed by the paragraph on the next line. A blank line precedes
+every label. Never hand-edit or renumber those labels: use the document update
+commands in section 10 so a replacement always targets one unambiguous
+paragraph and preserves the required Markdown style.
+
+Paragraph content is supplied as explicit arguments, not as an unstructured
+body. The shell requires `-p N.N: content` (repeat `-p` for each paragraph),
+requires the section prefix and sequential numbering to match, and immediately
+rejects reserved `§` or `-p` tokens inside paragraph text.
+
 ## 3. Write the plan description
 
 Create `<planname>/plan-description.md`. It must contain:
@@ -145,6 +194,12 @@ Create `<planname>/plan-description.md`. It must contain:
 Use one clear section per topic. Do not duplicate goal-specific implementation
 details here; put them in the owning goal.
 
+The canonical plan description has replaceable `title`, `current-state`,
+`desired-outcome`, `approach`, `scope`, `affected-areas`,
+`constraints-and-decisions`, and `risks-and-open-questions` sections. Replace
+their narrative content through `update-plan-content.sh section`; use `title`
+for the document title and `field` for structured values such as `UI affected`.
+
 ## 4. Compile the work-unit inventory before choosing goals
 
 Create `<planname>/work-unit-inventory.md` before creating goal directories.
@@ -152,13 +207,22 @@ This is the plan's source of truth for scope and step ownership. It forces the
 agent to reason from concrete changes upward rather than guessing a few broad
 goals and writing generic steps beneath them.
 
-Create the required inventory skeleton with the bundled helper, then replace
-every placeholder with discovered facts before validation:
+For a plan created with `create-plan.sh`, add facts to its empty inventory with
+the bundled commands instead of patching table rows:
 
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
-"$PLANNING_SKILL_DIR/scripts/create-work-unit-inventory.sh" <plan-directory>
+"$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> \
+  "<required outcome or proof>" W01,W02 "<why these units cover it>"
+"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 source \
+  path/to/file 'Class::method()' N/A "<one concrete change>" '—' \
+  01-<goal> 01-step-<slug>
 ```
+
+`add-work-unit.sh` creates both the inventory row and its matching atomic step
+file, so their ownership fields cannot drift. Add the goal first. The older
+`create-work-unit-inventory.sh` remains available only when adopting an
+already-created plan directory.
 
 Work through this sequence in order. Do not skip a question because the answer
 seems obvious:
@@ -228,7 +292,15 @@ Divide the initiative into a small, ordered set of cohesive goals. Order goals
 by dependency when that matters. Do not split a user-visible outcome merely by
 technical layer or file type.
 
-Create one directory per goal. The plan must have this structure:
+Create each goal with the helper; it creates the directory, step directory,
+and all mandatory sections in canonical order:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal-slug> \
+  "<goal title>" "<outcome and definition of done>"
+```
+
+The plan must have this structure:
 
 ```text
 <planname>/
@@ -300,6 +372,12 @@ Create one ordered step for each assigned work unit. Do not create a step
 before its work unit exists in the inventory. A goal with N work units must
 contain exactly N implementation/verification step files (plus their optional
 testing companion files).
+
+Use `add-work-unit.sh` from section 4 to create the step together with its
+inventory row. It creates the mandatory headings, ownership fields, atomicity
+checks, and numbered narrative paragraphs. Update the objective, instructions,
+acceptance criteria, and handoff with `update-plan-content.sh`; do not patch a
+step file directly.
 
 Store steps in `<goalname>/steps/` using two-digit, zero-padded prefixes:
 
@@ -403,7 +481,7 @@ Use this structure:
 
 | ID | Missing or over-broad item | Required plan change | Status |
 |---|---|---|---|
-| AR-01 | <finding> | <specific work unit/goal/story change> | ✅ resolved |
+| AR-01 | No finding recorded yet, or <finding> | N/A, or <specific work unit/goal/story change> | ✅ resolved |
 
 ## Verdict
 - Status: `✅ approved`
@@ -413,9 +491,19 @@ Use this structure:
 Do not allow the planning agent to approve its own review. Re-run the review
 after a material scope change or a discovered bug.
 
-When the secondary review approves the plan, update the status in both
-`adversarial-review.md` and `plan-description.md` to `✅ approved`. The
-validator rejects a missing, pending, or mismatched plan-description status.
+When the secondary review approves the plan, synchronize both status fields in
+one atomic command (only after the independent reviewer has actually approved
+it):
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" review-status \
+  <plan-directory> approved
+```
+
+Use `review-status <plan-directory> pending` when reopening the review. The
+approved form refuses to proceed while the review still contains an open or
+in-progress `AR-` finding. The validator rejects a missing, pending, or
+mismatched plan-description status.
 
 Execution order is mandatory: write the complete draft plan first, invoke the
 fresh reviewer, wait for its artifact, resolve every finding by revising the
@@ -529,20 +617,40 @@ During execution:
 - If execution reveals a scope-changing decision or material uncertainty,
   pause and ask the user before changing the plan.
 
-Use the bundled scripts on Bash or Zsh instead of rebuilding tracker logic:
+Use the bundled scripts on Bash or Zsh instead of rebuilding tracker logic or
+patching a plan document:
 
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/create-progress.sh" <goal-directory> <goal-name>
 "$PLANNING_SKILL_DIR/scripts/create-plan-progress.sh" <plan-directory>
+"$PLANNING_SKILL_DIR/scripts/create-plan.sh" <plan-directory> "<plan title>"
 "$PLANNING_SKILL_DIR/scripts/create-work-unit-inventory.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
+"$PLANNING_SKILL_DIR/scripts/create-ui-validation.sh" <plan-directory> "<browser target or discovery method>"
+"$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
+"$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
+"$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
+"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 <type> <file|N/A> <scope> <subscope|N/A> "<change>" <dependencies|—> 01-<goal> 01-step-<slug>
+"$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> completed
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" title <plan-directory> plan "<title>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" section <plan-directory> plan affected-areas -p 6.1: "<first paragraph>" -p 6.2: "<second paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" paragraph <plan-directory> plan -p 6.1: "<replacement>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" field <plan-directory> plan 'UI affected' no
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" decomposition-review <plan-directory> completed
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" review-status <plan-directory> approved
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" get <plan-directory> unit:W01 json
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" summary <plan-directory> markdown
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
 ```
 
 The creation scripts refuse to overwrite existing trackers. The update
 scripts change the requested row and recalculate the relevant progress bar.
+`plan-content.sh` supports `markdown`, `text`, and `json` output for summaries
+and blast radius, plus `path` for a direct document lookup. Document IDs are
+`plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`, and `unit:<WNN>`.

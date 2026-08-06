@@ -38,6 +38,7 @@ Check shell syntax and formatting before committing:
 ```bash
 bash -n install.sh
 bash -n planning/scripts/*.sh
+bash planning/tests/test-plan-commands.sh
 bash -n resource-limited-testing/scripts/limited-run.sh
 git diff --check
 ```

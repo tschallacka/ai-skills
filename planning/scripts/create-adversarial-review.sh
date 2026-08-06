@@ -22,12 +22,13 @@ trap 'rm -f "$temporary_file"' EXIT
 {
     printf '# Adversarial review: %s\n\n' "$(basename "$plan_dir")"
     printf '## Review scope\n\n'
+    printf '§ 1.1\n'
     printf '%s\n' '- Request: <verbatim or precise summary>'
     printf '%s\n\n' '- Repository/context inspected: <what was checked>'
     printf '## Findings\n\n'
     printf '| ID | Missing or over-broad item | Required plan change | Status |\n'
     printf '|---|---|---|---|\n'
-    printf '| AR-01 | <finding, or no finding> | <specific change, or N/A> | 💤 open |\n\n'
+    printf '| AR-01 | No finding recorded yet. | N/A | ✅ resolved |\n\n'
     printf '## Verdict\n\n'
     printf '%s\n' '- Status: `💤 pending`'
     printf '%s\n' '- Rationale: <why no unresolved work remains>'

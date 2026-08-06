@@ -96,6 +96,13 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/create-ui-story-run-cache.sh" <plan-directory> US-01
 ```
 
+For a new plan, prefer the command workflow: `create-ui-validation.sh` creates
+the UI-validation section plus empty story and bug artifacts;
+`add-ui-story.sh` adds a canonical story row and cache; and
+`configure-ui-story-cache.sh` replaces that cache's template values before
+normal plan validation. These commands avoid patches and keep the table and
+cache shape validator-compatible.
+
 Use this exact structure:
 
 ```markdown
