@@ -142,19 +142,20 @@ outcome, and definition of done.
 Choose a short, descriptive, kebab-case `<planname>` such as
 `checkout-totals-own-page`.
 
-Create the plan under the `plans/` directory of the installed planning skill:
+Create the plan under the user-owned `.plans/` root resolved by the helper:
 
 ```text
-<planning-skill-dir>/plans/<planname>/
+<plans-root>/<planname>/
 ```
 
-For the common Claude Code installation, this is:
+For a normal Unix home directory, this is:
 
 ```text
-~/.claude/skills/planning/plans/<planname>/
+~/.plans/<planname>/
 ```
 
-Use the actual installation directory when the skill is installed elsewhere.
+Set `PLANS_ROOT` when a different user-owned location is required. Keep the
+planning skill installation and durable plan storage separate.
 
 Create it with the bundled command; do not create the directory or its initial
 documents with a patch. It creates a canonical `plan-description.md` and an
@@ -162,8 +163,9 @@ empty work-unit inventory that the other commands can update safely:
 
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
+PLANS_ROOT="${PLANS_ROOT:-$HOME/.plans}"
 "$PLANNING_SKILL_DIR/scripts/create-plan.sh" \
-  "$PLANNING_SKILL_DIR/plans/<planname>" "<plan title>"
+  "$PLANS_ROOT/<planname>" "<plan title>"
 ```
 
 Use the flagged `update-plan-content.sh` commands for narrative edits; the
@@ -494,6 +496,47 @@ During execution:
   working context when it exists.
 - If execution reveals a scope-changing decision or material uncertainty,
   pause and ask the user before changing the plan.
+
+### 4.1 Bounded context and portable plan storage
+
+Use the bundled `plan-context.sh` command for bounded reads instead of
+repeatedly loading whole plan directories. Initialize a snapshot, read by
+tagged identifiers, and check only entries that have been processed:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/plan-context.sh" init --plan-dir "$PLANS_ROOT/<plan>"
+"$PLANNING_SKILL_DIR/scripts/plan-context.sh" read --plan-dir "$PLANS_ROOT/<plan>" --unit W55 --view instructions
+"$PLANNING_SKILL_DIR/scripts/plan-context.sh" check --plan-dir "$PLANS_ROOT/<plan>" --changed
+```
+
+Hash drift is reported as `suspect`/`external-edit`; it is not automatically
+overwritten or repaired. Ask for human resolution before refreshing. Agents
+invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
+Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
+with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
+Bash. On the constrained VPS used during this initiative, work sequentially,
+keep at most one subchat active, and close it when complete; this is not a
+generic restriction on other machines.
+
+The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
+takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
+`--max-bytes`, `--max-records`, and `--read-only`; `check` takes exactly one
+of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly one of
+`--entry` or `--stale`. Defaults are `summary`, `text`, 32768 bytes, and 128
+records. `--all` audits without registering entries. Global IDs, Git history,
+versions/changelogs, quarantine, events, compaction, and workers remain
+explicitly deferred from this Phase 1 cache.
+
+At completion boundaries, run the non-registering audit and bounded experiment:
+
+```bash
+bash planning/tests/test-plan-context.sh --audit-triggers
+bash planning/tests/test-plan-context.sh --benchmark
+```
+
+Treat the benchmark as a measurement gate, not proof from shell CPU alone:
+continue only when model-visible input is materially reduced without a
+correctness regression or unacceptable latency increase.
 
 Use the bundled scripts on Bash or Zsh instead of rebuilding tracker logic or
 patching a plan document:

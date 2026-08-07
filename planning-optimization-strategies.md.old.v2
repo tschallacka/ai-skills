@@ -1,0 +1,448 @@
+Planning skill optimization: a minimal dependency-aware cache
+===============================================================
+
+Decision
+--------
+
+Reduce resume-session rereads with a small generated cache experiment. The
+canonical Markdown plan documents remain authoritative: plan-description.md,
+work-unit-inventory.md, goal and step documents, working context, progress,
+handoffs, reviews, and other existing planning artifacts. Existing document
+IDs and helper conventions remain authoritative as well:
+
+  plan
+  goal:<goal>
+  step:<goal>/<step>
+  unit:<WNN>
+
+The cache is derived guidance, never a second source of truth. Phase 1 does
+not introduce a P/G/S/A identity namespace, facts, deltas, compaction, or
+worker orchestration. Those ideas are deferred until measured use shows that
+the cache does not solve the observed token and stale-context costs.
+
+Phase 1 scope
+-------------
+
+Add a generated context directory and a minimal `plan-context.sh` command with
+only `init`, `read`, `check`, and `refresh`. It must use the existing planning
+parsers and document IDs rather than duplicate identity or paragraph rules.
+All selectors and values use explicit long flags; positional numeric goal and
+step indexes are not supported.
+
+Plan initialization must also create a Git repository inside the plan
+directory for local change tracking:
+
+- `init` runs `git init` only when the plan directory has no `.git` directory;
+- an existing plan-local repository is reused and never reinitialized;
+- the plan's initial canonical artifacts receive an initial commit;
+- `.git/` and Git metadata are excluded from cache dependencies and generated
+  content; and
+- initialization refuses to silently absorb unrelated files or pre-existing
+  uncommitted changes.
+
+The plan repository is a history boundary for plan artifacts, not a replacement
+for the parent project's repository. The helper must detect and clearly report
+when the plan directory is already inside another repository, because nested
+repositories can confuse users and parent-repository status output.
+
+Global plan identity and lookup index
+-------------------------------------
+
+Plan creation must allocate one globally incrementing plan ID from the
+planning-skill registry before the plan is considered initialized. Use a fixed
+format such as `P000001`; IDs are never reused, even if plan creation fails or
+the plan is later deleted. Gaps are acceptable and preserve auditability.
+
+The registry is a fixed-schema, lock-protected index at the planning skill's
+plans root, for example:
+
+  <planning-skill-dir>/plans/index.tsv
+
+Each row records at least:
+
+  plan-id | canonical-plan-path | title | status | created-at
+
+The allocated ID must also be written into the plan's canonical metadata during
+creation, using the existing document-generation/update helpers rather than a
+hand-edited line. The plan ID is part of the initial plan-local Git commit.
+
+The registry and plan metadata must agree before initialization succeeds. If
+registry allocation succeeds but plan creation or its initial commit fails,
+the ID remains reserved with a failed/repair-needed status; it must not be
+silently returned to the pool. If the plan is created but registry update fails,
+the helper must block normal use and report a repair-needed state rather than
+creating a second ID or pretending registration succeeded.
+
+All registry mutations require an exclusive registry lock and atomic rewrite.
+The registry is not a substitute for plan-local Git history. The plan-local
+repository tracks plan content; the global registry tracks identity and path.
+Moving a plan directory requires a helper command that updates the canonical
+path in the registry and creates a plan-local Git commit. Direct moves leave a
+path mismatch that must be reported as a repair condition.
+
+Lookups should accept the stable global ID:
+
+  plan-context.sh read --plan-id P000001 --document goal:01-foundation
+  plan-context.sh check --plan-id P000001
+  plan-context.sh lookup --plan-id P000001
+
+The helper resolves the ID through the registry and refuses ambiguous or
+unregistered paths. A direct `--plan-dir` may remain available for bootstrap
+and repair, but normal agent operations should use `--plan-id` so the registry
+provides one canonical path. The plan ID must appear in compact output,
+changelog entries, cache manifests, and Git commit trailers where applicable.
+
+The generated snapshot contains fixed-schema files such as:
+
+  context/snapshots/<generation>/index.tsv
+  context/snapshots/<generation>/manifest.tsv
+  context/snapshots/<generation>/entries/
+  context/current
+
+The index maps existing document IDs to current canonical paths. The manifest
+records source dependencies and hashes for each generated entry, plus the
+cache schema version and generator/parser version. Generated files are never
+included in their own source hash scope.
+
+Cache entries and dependencies
+------------------------------
+
+An entry is a bounded generated view identified by an existing document ID
+and a fixed view name, for example `goal:01-foundation/resume` or
+`unit:W07/acceptance`. Each entry records:
+
+- entry ID and view name;
+- every canonical source path used to produce it;
+- the hash of every dependency at generation time;
+- schema version, generator/parser version, and generation number.
+
+Dependencies are explicit, not inferred from the entry's primary document.
+A goal resume may depend on its goal document, plan description, inventory,
+progress, owned steps, and required completed handoffs. A section read depends
+on the canonical document containing that section. A changed source therefore
+invalidates every entry that names it, using a reverse dependency map. The
+check reports changed sources and affected entry IDs separately.
+
+The processed scope is the set of cache entries with a manifest record. A
+normal bounded `read` registers the selected entry and all dependencies used
+by that view; `--read-only` does not register anything. `init` creates an empty
+cache and reports “no processed dependencies,” not “the plan is globally
+fresh.” Unprocessed sources do not make a routine check stale. This is a cost
+optimization, not proof that the plan's unprocessed scope is unchanged.
+
+Selectors and bounded reads
+---------------------------
+
+Use existing IDs directly:
+
+  plan-context.sh read --plan-dir <dir> --document goal:01-foundation
+  plan-context.sh read --plan-dir <dir> --unit W07
+  plan-context.sh read --plan-dir <dir> --document step:01-foundation/02-verify \
+    --section acceptance-criteria
+
+`read` returns only the requested fixed view or section, with a default byte
+and record limit. It reports the limit and a continuation token when output is
+truncated. `--max-bytes` and `--max-records` may lower the defaults; an
+explicit `--full` is not part of Phase 1. Direct canonical source reads remain
+available through the existing helpers.
+
+Generated reads fail with a machine-readable `stale` result when any recorded
+dependency, index input, schema version, or generator version no longer
+matches. They do not print stale guidance as normal content. A bounded
+`--read-only` read may inspect canonical source content, but it never bypasses
+staleness for generated content.
+
+Freshness, changed scope, and refresh
+-------------------------------------
+
+Examples:
+
+  plan-context.sh check --plan-dir <dir>
+  plan-context.sh check --plan-dir <dir> --changed --format json
+  plan-context.sh refresh --plan-dir <dir> --entry goal:01-foundation/resume
+  plan-context.sh refresh --plan-dir <dir> --stale
+
+`check` compares only processed entries and their complete dependency sets.
+It also verifies the index manifest: a new, removed, renamed, or re-associated
+canonical object makes the processed index scope stale. `--changed` is
+diagnostic only; it emits the changed-source and affected-entry sets from that
+single check and does not create state for a later command. `refresh --stale`
+recomputes freshness and refreshes that exact set under one lock and snapshot.
+Explicit `--entry` selectors refresh only those entries and their required
+dependencies; they do not silently expand to unprocessed entries. A bounded
+fanout summary reports sources changed, entries invalidated, entries rebuilt,
+and whether output was truncated.
+
+Exit categories are stable and machine-readable: `0 fresh`, `1 stale`,
+`2 usage/selector error`, `3 invalid or missing cache`, `4 source missing or
+deleted`, `5 lock contention`, and `6 write or internal failure`. JSON output
+has a versioned fixed schema with arrays for changed sources, affected entries,
+removed objects, and errors. Text output is compact and never expands full
+paths or document content unless requested.
+
+Renames, deletions, and identity
+--------------------------------
+
+Existing logical document, goal, step, and work-unit IDs identify objects;
+paths are mutable attributes. A rename performed through the planning helpers
+preserves the ID and invalidates entries using the old path. A genuine
+deletion tombstones the ID in the index, invalidates dependent entries, and
+never permits that ID to be reused. A path replacement is treated as a
+deletion plus a new object unless the existing helper can prove the logical ID
+was preserved. Phase 1 does not invent artifact IDs or aliases.
+
+Consistency and locking
+-----------------------
+
+Every write builds and validates a complete new snapshot in a temporary
+generation directory, then atomically switches `context/current` to it. The
+helper takes an exclusive plan-context lock for refresh and for source-helper
+cache invalidation; reads take a shared lock or open one immutable generation.
+Check, dependency calculation, refresh, and snapshot publication use the same
+generation, so `check` and `refresh --stale` cannot operate on different
+marker sets. Lock contention returns category 5 without partial files.
+
+Source mutations through existing planning helpers invalidate known dependent
+entries in the same operation when possible. The manifest remains the recovery
+mechanism for external edits, interrupted writes, and missed invalidations.
+
+Helper-managed Git commits
+---------------------------
+
+Every mutating helper command must produce one plan-local Git commit after its
+validated file changes. Read-only commands such as `read`, `check`, and status
+inspection do not commit. A helper must stage only the exact files it changed;
+it must never use broad `git add -A`, `git add .`, or commit unrelated files.
+
+Commit messages must be generated from structured mutation data and contain the
+logical target, operation, and affected work units or document IDs. Use a
+searchable format such as:
+
+  plan(01-foundation): update acceptance criteria [W07]
+
+Include machine-searchable trailers when applicable:
+
+  Plan-Document: goal:01-foundation
+  Work-Units: W07,W08
+  Change-Version: v9
+  Change-Operation: update
+
+The helper should provide compact directed-history commands or documented Git
+equivalents, for example:
+
+  git log --oneline --grep='W07'
+  git log --oneline -- path/to/goal.md
+  git show --stat <commit>
+
+This allows an agent or human to identify what changed and where without
+loading the complete history. The changelog/version lookup in Phase 1.5 and
+Git history should reference the same document IDs and mutation version.
+
+Commit handling is part of the helper transaction:
+
+- source changes, version metadata, changelog, cache invalidation, and the
+  commit are treated as one logical mutation;
+- a commit is created only after formatting and validation pass;
+- if Git identity, locking, staging, or commit creation fails, the helper must
+  report failure and must not claim the mutation is complete or fresh;
+- failed commits leave a bounded `commit-pending` state for human recovery and
+  block subsequent plan mutations until the state is resolved; and
+- helpers must never use `git reset --hard`, discard uncommitted work, rewrite
+  history, or bypass hooks to force a commit.
+
+An external uncommitted edit in the plan repository is a suspect condition. It
+must be reported alongside hash/version mismatches and handled by the
+Phase-1.5 human-review/quarantine rules rather than automatically staged or
+committed by an agent.
+
+Audit boundaries
+----------------
+
+Routine resume checks may use processed scope. A broader `check --all` audit is
+required before declaring a goal complete, after scope/decomposition,
+ownership, or dependency changes, after a source rename or deletion, after a
+validator/helper/schema/parser change, and before a fresh adversarial review.
+The audit reports unprocessed additions and changes but does not register or
+refresh them automatically. Any audit finding that changes scope must be
+reflected in the canonical documents and pass the existing planning review and
+validation gates.
+
+Phase 1.5: versioned source changes and compact changelogs
+-----------------------------------------------------------
+
+Add helper-managed version metadata after the Phase 1 cache behavior is stable.
+Each canonical logical document keeps a monotonic version number, independent
+of its filesystem path. A rename preserves the document ID and version
+history; a genuine deletion tombstones the ID and prevents reuse.
+
+Every mutation performed through an approved planning helper must update, in
+one atomic operation:
+
+- the canonical document version;
+- a compact changelog entry;
+- the affected cache dependency record; and
+- the generated snapshot when the changed entry can be rebuilt safely.
+
+The changelog belongs to the helper-owned document format or its canonical
+document history record. It must not be hand-edited. Each entry records only
+the information needed to explain the change:
+
+  version | operation | document-id | target | summary
+
+Operations are limited to `insert`, `update`, `remove`, `rename`, and
+`external-change`. The target should identify a known section, paragraph, work
+unit, or document field. Do not copy complete old and new paragraphs into the
+default changelog; that would recreate the token bloat this design is intended
+to prevent.
+
+Provide a bounded change lookup:
+
+  plan-context.sh changes --plan-dir <dir> \
+    --document goal:01-foundation --from-version 6 --to-version 9
+
+The default output is a compact summary of inserted, updated, removed, and
+renamed targets. A separately requested diff mode may return the exact bounded
+content change. The normal `read` command must not include changelog history
+unless explicitly requested.
+
+The cache manifest tracks both integrity and semantic change state:
+
+  document-id | version | sha256 | cache-generation
+
+Versions do not replace hashes. A matching version with a mismatching hash is
+an external or corrupted edit and must be stale until reconciled. If a source
+is edited outside a helper, the next check reports `external-change`; it must
+not silently advance the version or declare the cache fresh. Treat this as a
+suspect external-edit incident requiring human intervention. It may be a
+legitimate human edit, but the system must assume that an agent attempted to
+bypass the helper contract until a human confirms otherwise.
+
+Rogue-agent handling
+--------------------
+
+On a version/hash mismatch, the helper must fail closed and create a compact,
+append-only incident record containing:
+
+- logical document ID and path;
+- expected version and hash;
+- observed hash and timestamp;
+- affected cache entries and dependencies; and
+- incident state `suspect-external-edit`.
+
+The helper must preserve the prior manifest/snapshot and must not overwrite the
+source, rewrite its changelog, increment its version, or rebuild its cache in
+response to the mismatch. It may provide read-only diagnostic output, but it
+must not emit the suspect content as trusted generated guidance.
+
+While a suspect incident is open:
+
+- source-mutating planning helpers reject mutations to the affected document;
+- cache refresh, version reconciliation, and compaction for the affected
+  document or dependent entries are rejected;
+- `--force`, `--ignore-hash`, `--accept-current`, and equivalent bypass flags
+  do not exist;
+- repeated attempts are recorded as a bounded attempt count, not allowed to
+  rewrite or clear the incident; and
+- agent instructions say to stop retrying, stop trying alternate mutation
+  commands, preserve the diagnostic output, and request a human decision.
+
+Unrelated plan documents may continue only if their dependency graph is proven
+not to include the quarantined object. A whole-plan write lock is acceptable if
+dependency isolation cannot be established safely.
+
+Clearing the incident requires an out-of-band human approval recognized by the
+execution environment, not merely a flag or text argument that an agent can
+invent. The approval workflow should expose two choices:
+
+1. reject or restore the external edit from a trusted snapshot; or
+2. accept it after review, assigning the next version, recording an
+   `external-change-approved` changelog entry, and rebuilding affected cache
+   entries in one atomic transaction.
+
+If the environment cannot authenticate a human approval, the incident remains
+open and the plan remains quarantined. Never automatically “repair” the file
+just to make the hash pass.
+
+Version-aware freshness allows a helper mutation to update the known version
+and rebuilt cache entry together, making the affected entry fresh again without
+requiring a broad plan reread. If the cache cannot be rebuilt in the same
+operation, the version advances but the entry remains stale until an explicit
+refresh.
+
+Phase 1.5 acceptance criteria:
+
+- helper mutations increment exactly one logical document version per changed
+  document and never reuse a version;
+- renames preserve document identity and version history;
+- changelog entries identify inserted, updated, removed, and renamed targets;
+- changelog output is bounded and excluded from default reads;
+- `changes` supports an explicit version range and fixed compact output;
+- the manifest records version and hash, and both must match for freshness;
+- external edits create a suspect incident, preserve prior state, fail closed,
+  block affected writes and refreshes, and require authenticated human review;
+- retrying alternate mutation commands cannot clear or overwrite a suspect
+  incident; and
+- every approved mutating helper command creates one exact-scope, searchable
+  plan-local Git commit, while read-only commands create none;
+- failed Git commits leave a bounded `commit-pending` state and never cause the
+  helper to discard, reset, or silently commit unrelated files; and
+- version, changelog, manifest, and rebuilt snapshot updates are atomic or leave
+  a recoverable invalid state.
+
+Later phases, conditional on measurement
+-----------------------------------------
+
+Measure representative sessions: bounded read output, cache-generation cost,
+refresh fanout, stale-read incidents, and total model-visible tokens compared
+with the existing helper workflow. If Phase 1 does not provide a material
+benefit, stop.
+
+Only if evidence justifies it, consider append-only events in a later phase.
+Events must have a version, ID, timestamp, kind, message, existing document or
+work-unit relation, snapshot ID, provenance, and promotion status; they must
+never become authoritative silently. Define retention and audit semantics
+before considering compaction. Consider worker boundaries only after measuring
+startup and rediscovery cost; compaction must never be an assumed continuation
+operation for an active worker.
+
+Acceptance criteria
+-------------------
+
+The Phase 1 proposal is implementation-ready when its implementation and
+bounded tests demonstrate:
+
+- canonical Markdown and existing helper/document IDs remain the sole source
+  of truth, with no P/G/S/A namespace;
+- plan creation allocates a globally unique, monotonically increasing `PNNNNNN`
+  ID, records it in canonical metadata, and registers its canonical path in a
+  locked fixed-schema global index;
+- failed creation reserves its ID rather than reusing it, and registry/plan
+  disagreement enters repair-needed state;
+- every cached entry has explicit dependencies, per-dependency hashes, schema
+  and generator versions, and a bounded output contract;
+- normal reads register only the selected processed entry and dependencies;
+  read-only reads do not, and empty processed scope is distinguished from
+  globally fresh scope;
+- stale generated reads fail clearly, while direct canonical reads remain
+  available;
+- `check`, diagnostic `--changed`, explicit refresh, and atomic
+  `refresh --stale` have unambiguous semantics and stable error categories;
+- index changes, renames, deletions, replacements, dependency fanout, and ID
+  tombstones are detected without ID reuse;
+- locking and generation snapshots prevent mixed cache/manifest/index states;
+- helper-managed versions and bounded changelogs report source changes without
+  broad rereads, while hashes still detect external edits;
+- plan creation allocates a globally unique, never-reused plan ID, writes it
+  into canonical plan metadata, and registers the ID with its canonical path
+  under a locked global index;
+- plan initialization creates a plan-local Git history boundary, and every
+  helper mutation produces one exact-scope, searchable commit;
+- output limits, truncation signaling, JSON schema, and fanout summaries are
+  tested;
+- required `--all` audit triggers are documented and exercised; and
+- Phase 2 events, compaction, and workers remain explicitly deferred pending
+  measurements.
+
+No implementation is authorized by this proposal alone. The subsequent plan
+must name the concrete helper, parser, validator, generated-file, and test
+work units under the planning skill's atomic work-unit rules.

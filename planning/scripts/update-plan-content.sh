@@ -30,6 +30,7 @@ USAGE
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+[ -f "$script_dir/plan-context-lib.sh" ] && source "$script_dir/plan-context-lib.sh"
 
 [[ "$command" == -* ]] || usage
 
@@ -338,4 +339,7 @@ case "$command" in
     *) usage ;;
 esac
 
+if declare -F context_invalidate_after_mutation >/dev/null 2>&1 && [ -n "${plan_dir:-}" ] && [ -d "$plan_dir/context" ]; then
+    context_invalidate_after_mutation "$plan_dir" "${document_id:-plan}"
+fi
 echo "Updated $command"

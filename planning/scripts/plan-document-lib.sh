@@ -3,6 +3,37 @@
 
 set -euo pipefail
 
+plan_default_root() {
+    if [ -n "${PLANS_ROOT:-}" ]; then
+        printf '%s\n' "${PLANS_ROOT%/}"
+        return 0
+    fi
+    local home_dir="${HOME:-}"
+    if [ -z "$home_dir" ] && [ -n "${USERPROFILE:-}" ]; then
+        home_dir="$USERPROFILE"
+    fi
+    if [ -z "$home_dir" ] && [ -n "${HOMEDRIVE:-}${HOMEPATH:-}" ]; then
+        home_dir="${HOMEDRIVE:-}${HOMEPATH:-}"
+    fi
+    [ -n "$home_dir" ] || plan_die "Unable to resolve the user home directory; set PLANS_ROOT"
+    printf '%s/.plans\n' "${home_dir%/}"
+}
+
+plan_ensure_root_permissions() {
+    local root="${1:-$(plan_default_root)}" helper_dir="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    local probe
+    mkdir -p "$root" || plan_die "Cannot create plan root: $root"
+    [ -d "$root" ] && [ -r "$root" ] && [ -w "$root" ] && [ -x "$root" ] \
+        || plan_die "Plan root is not readable, writable, and searchable: $root"
+    probe="$root/.permission-probe.$$"
+    ( : > "$probe" && rm -f "$probe" ) || plan_die "Plan root does not permit file editing: $root"
+    [ -d "$helper_dir" ] && [ -r "$helper_dir" ] && [ -x "$helper_dir" ] \
+        || plan_die "Planning helper directory is not readable/searchable: $helper_dir"
+    find "$helper_dir" -maxdepth 1 -type f -name '*.sh' -exec test -r {} \; -exec test -x {} \; \
+        || plan_die "One or more planning helpers cannot be read and executed: $helper_dir"
+    printf '%s\n' "$root"
+}
+
 plan_die() {
     printf '%s\n' "$*" >&2
     exit 64

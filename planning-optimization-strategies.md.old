@@ -1,0 +1,415 @@
+Planning skill optimization: shell-managed context, deltas, and staleness
+==========================================================================
+
+Objective
+---------
+
+Reduce token usage during resumed planning sessions by combining:
+
+3. Section-level retrieval.
+4. Immutable facts plus delta updates.
+5. Hash- and dependency-based freshness checks.
+
+The agent should interact with plan state only through shell commands. It must
+not directly edit, append to, or rewrite plan documents or generated context
+artifacts. Every write must be performed by a bundled helper that enforces the
+canonical formatting contract and writes atomically.
+
+Current problem
+---------------
+
+The resume workflow currently requires the agent to read plan progress, the
+active goal, goal progress, working context, and completed prerequisite
+handoffs. These documents are useful as durable source artifacts, but most of
+their contents are unchanged between sessions. Re-reading them in full wastes
+context tokens and makes large plans increasingly expensive to resume.
+
+Design principles
+-----------------
+
+- Markdown plan documents remain the durable, human-readable source of truth.
+- Generated context files are caches and must never silently override source
+  documents.
+- Stable facts are written once; execution discoveries and decisions are
+  recorded as deltas.
+- The agent receives only the sections needed for the active work unit.
+- Hash checks determine whether generated context is safe to use.
+- All generated files use fixed schemas and are created or changed by helpers.
+- Helpers write through temporary files followed by an atomic rename.
+- Every new format, parser, validator, and mutation path gets bounded tests.
+
+Proposed helper
+---------------
+
+Add one bundled command alongside plan-content.sh:
+
+  plan-context.sh <command> [flags]
+
+The helper owns index creation, context-cache creation, delta recording,
+section retrieval, processed-set registration, and freshness checks. It should
+reuse plan-document-lib.sh for document IDs and section mappings rather than
+duplicating document parsing rules.
+
+All commands must use explicit flags. Do not use positional numeric arguments
+for plan, goal, step, work-unit, artifact, or paragraph selection. A missing
+flag must fail with usage text instead of shifting later arguments into the
+wrong field. Existing paragraph-style update flags remain the deliberate
+exception because their established syntax is already validated by the
+planning helpers.
+
+Required commands
+-----------------
+
+1. init
+
+  plan-context.sh init -p 55 -d <plan-directory>
+
+Create the generated context directory and canonical files:
+
+  <plan>/context/index.tsv
+  <plan>/context/resume.md
+  <plan>/context/facts.tsv
+  <plan>/context/deltas.ndjson
+  <plan>/context/processed.sha256
+
+The command must refuse to overwrite existing files unless an explicit
+rebuild/refresh command is used. It creates index markers but does not place
+every source artifact into the processed set.
+
+2. read
+
+  plan-context.sh read -p 55 -g 3 -s 4
+  plan-context.sh read -p 55 -w W07
+  plan-context.sh read -p 55 -a A12
+  plan-context.sh read -p 55 -g 3 -s 4 -I
+  plan-context.sh read -p 55 -g 3 -s 4 -C -H
+
+The first form is the primary resume lookup: plan 55, goal 3, step 4. The
+helper resolves these numeric selectors through the index and emits compact,
+tagged output such as:
+
+  [P55][G03][S04][W07]
+  target: A12
+  acceptance: ...
+  next: ...
+
+Supported selector rules:
+
+- -p/--plan is required and selects a plan by index.
+- -g/--goal and -s/--step select nested goal and step indexes.
+- -w/--work selects an existing W-style work-unit marker.
+- -a/--artifact selects an existing A-style artifact marker.
+- -O/--objective selects the objective section.
+- -T/--target selects the concrete change-target section.
+- -I/--instructions selects the instructions section.
+- -C/--acceptance-criteria selects the acceptance-criteria section.
+- -H/--handoff selects the handoff section.
+- -D/--dependencies selects the dependencies section.
+- -R/--risks selects the risks or edge-cases section.
+- -V/--verification selects the testing or verification companion.
+- -N/--next selects the next-action entry from compact context.
+- Section flags are boolean and may be combined. The helper emits sections in
+  canonical document order, regardless of flag order.
+- -f/--format accepts text, markdown, or json; text is the default compact
+  format.
+- --full is opt-in and returns the selected flagged sections without expanding
+  unrelated sections.
+
+The helper must reject ambiguous combinations, such as a work-unit selector
+that does not belong to the selected goal and step. It must not require the
+agent to pass a long document ID or section description.
+
+After a successful normal read, the helper registers the resolved source
+artifact in the processed set and records its current hash. A --read-only flag
+may inspect content without registering it.
+
+3. check
+
+  plan-context.sh check -p 55
+  plan-context.sh check -p 55 --changed
+  plan-context.sh check -p 55 --all
+  plan-context.sh check -p 55 --changed -f json
+
+The default check compares only processed artifacts in
+context/processed.sha256. It must not scan or report unread source artifacts.
+The --all form is an explicit audit that compares all source artifacts and may
+report newly discovered files, but it must not silently add them to the
+processed set.
+
+Stable exit codes:
+
+  0  fresh for the selected scope
+  1  stale; one or more processed artifacts changed, were added, or removed
+  2  invalid; index, manifest, or required context files are missing or bad
+
+The normal stale output must remain compact:
+
+  stale P55
+  changed W07 A12
+  removed A09
+  action: plan-context.sh refresh -p 55 -w W07 -a A12
+
+With --changed, return only the changed markers in a machine-friendly form so
+the agent can pass them to refresh without reading long paths. If nothing has
+been processed yet, return fresh with a zero exit status even if untouched
+source files have changed.
+
+4. refresh
+
+  plan-context.sh refresh -p 55 -w W07 -a A12
+  plan-context.sh refresh -p 55 -g 3 -s 4
+  plan-context.sh refresh -p 55 --changed
+
+Refresh only the selected processed artifacts. The --changed form obtains the
+changed-marker set from check and updates that set; it must not refresh
+unprocessed artifacts. A goal/step selector resolves to the processed artifacts
+owned by that scope.
+
+Refresh must:
+
+- Re-read only the selected source artifacts.
+- Update their hashes in processed.sha256.
+- Rebuild only affected compact resume entries.
+- Preserve unaffected facts and deltas.
+- Write generated files through temporary files and atomic rename.
+- Return the changed markers it handled.
+
+5. add-fact
+
+  plan-context.sh add-fact -p 55 -k current-route -v /checkout
+
+Record or replace one confirmed, stable fact in facts.tsv. Keys must be unique,
+values must pass the helper's safe-value rules, and duplicate replacement must
+require an explicit --replace flag. The agent supplies facts as flags; it never
+edits TSV.
+
+6. add-delta
+
+  plan-context.sh add-delta -p 55 -k verification -m 'unit tests passed' -w W07
+
+Append one structured execution event to deltas.ndjson. Supported kinds should
+include decision, discovery, verification, blocker, handoff, and next-action.
+Each event should contain an ID, timestamp, kind, message, related marker, and
+the relevant processed-hash snapshot. The helper must validate the kind and
+escape JSON safely.
+
+7. compact
+
+  plan-context.sh compact -p 55
+
+Fold confirmed deltas into facts.tsv or compact resume entries, retain an
+auditable compaction marker, and update only affected processed hashes. This is
+optional for small plans but prevents unbounded delta growth on long-running
+initiatives.
+
+Compaction is a state operation, not an instruction for the current agent to
+stop. The helper must exit normally and print a compact continuation marker.
+If the host platform performs context compaction that can halt an agent, the
+coordinating agent must invoke compact only after the goal worker has returned
+its completion result.
+
+Processed hash manifest
+-----------------------
+
+Use a generated manifest with one fixed row per processed artifact:
+
+  marker  relative-path  sha256  state
+
+State values should be limited to processed, stale, removed, or superseded.
+The manifest must use stable repository-relative paths and must exclude all
+generated files under context/ to avoid a hash loop.
+
+Registration rules:
+
+- A successful read registers the resolved A marker and its parent W/G/S
+  markers as lookup metadata, but hashes only the source artifact actually
+  read.
+- A section read hashes the source document containing that section.
+- A summary read hashes only the inventory/progress artifacts used to produce
+  that summary.
+- A read-only request does not register or update hashes.
+- Helper mutations to a source document update or invalidate its processed hash
+  as part of the same atomic operation, when the affected marker is known.
+- Unknown or unread artifacts remain outside the normal stale set.
+
+Resume workflow
+---------------
+
+Use this shell-first sequence instead of rereading every plan document:
+
+1. Run:
+
+     plan-context.sh check -p 55
+
+2. If stale, request the compact marker list:
+
+     plan-context.sh check -p 55 --changed
+
+3. Refresh only the reported markers:
+
+     plan-context.sh refresh -p 55 --changed
+
+   Or select a subset explicitly:
+
+     plan-context.sh refresh -p 55 -w W07 -a A12
+
+4. Read compact active context:
+
+     plan-context.sh read -p 55 -g 3 -s 4
+
+5. Retrieve only the sections needed for the next action. Use dedicated flags,
+   not a free-form section label:
+
+     plan-context.sh read -p 55 -g 3 -s 4 -I
+     plan-context.sh read -p 55 -g 3 -s 4 -C
+
+6. Read a prerequisite handoff only when the W-style dependency list requires
+   it, using its marker rather than a long path.
+
+7. Record discoveries, decisions, verification results, blockers, and next
+   actions through add-delta. Record durable facts through add-fact.
+
+8. After helper mutations, run check again. Refresh only affected processed
+   markers before using cached content.
+
+Goal-worker and coordinator model
+----------------------------------
+
+Use one short-lived goal worker per goal when the initiative is large enough
+that a single agent context would accumulate unrelated steps, discoveries, and
+review output. The coordinator remains responsible for sequencing and does not
+carry the full execution history of every goal.
+
+Goal lifecycle:
+
+1. The coordinator reads only the compact plan state and selects the next goal
+   by marker, for example `-p 55 -g 3`.
+2. The coordinator starts a fresh worker with that goal's marker, work-unit
+   list, direct dependencies, and required verification. It does not pass all
+   prior goal documents or the entire repository history.
+3. The worker uses indexed reads and dedicated section flags, performs the goal,
+   records deltas through the helper, and writes the completed handoff through
+   the existing plan mutation commands.
+4. The worker returns a small completion result containing status, changed
+   markers, verification result, blockers, and the next-goal candidate. It does
+   not invoke host-level context compaction.
+5. The coordinator verifies the worker result, runs the plan validator when
+   required, marks the goal complete, and invokes:
+
+     plan-context.sh compact -p 55 -g 3
+
+6. The coordinator then starts the next fresh goal worker. It does not expect
+   the compacting worker to continue after compaction.
+
+This avoids the observed failure mode where an agent halts immediately after a
+compact operation: compaction belongs to the coordinator's handoff boundary,
+not to the worker's active reasoning loop.
+
+Token-cost tradeoff
+-------------------
+
+A fresh worker does have startup cost: it must read the compact resume state,
+the selected goal, and the minimum prerequisite handoffs. That cost is not
+automatically double. It is usually cheaper when the alternative is carrying a
+large multi-goal context or repeatedly rereading completed goals. It can cost
+more when goals are tiny, highly coupled, or require the same large repository
+context to be rediscovered every time.
+
+Use these rules:
+
+- One worker per goal for large or loosely coupled goals.
+- Keep one worker across adjacent tiny steps when the goal boundary would add
+  more startup context than it removes.
+- Always compact at a completed goal boundary when the active context is large,
+  even if the same worker continues only when the host platform guarantees that
+  compact does not terminate it.
+- Prefer the coordinator/worker split when the platform may halt an agent after
+  compaction; it makes continuation explicit and reliable.
+- Measure representative runs by recording input tokens for startup reads,
+  active execution, and handoff. Choose the split only when the saved context
+  exceeds the fresh-worker startup cost.
+
+The helper should expose a compact completion summary so the coordinator pays
+only for the handoff, not for rereading the worker's full delta history.
+
+No-direct-edit rule
+-------------------
+
+The agent-facing planning skill should explicitly say:
+
+- Never use apply_patch, sed -i, perl -i, redirection, or ad-hoc scripts to
+  mutate plan files, progress files, context files, inventories, indexes,
+  manifests, or reviews.
+- Use create-plan.sh, add-goal.sh, add-work-unit.sh, update-plan-content.sh,
+  update-step.sh, progress helpers, plan-content.sh, and plan-context.sh.
+- Read-only shell commands are allowed for diagnosis, but their output is not a
+  substitute for a helper-owned mutation.
+- If a required mutation is unsupported, improve the bundled helper and its
+  tests before continuing.
+
+Formatting and validation requirements
+---------------------------------------
+
+The new helper must follow the maintainer style contract:
+
+- Fixed generated schemas; no decorative or optional columns.
+- Stable P/G/S/W/A markers and repository-relative paths.
+- Explicit flags for all selectors and values wherever possible.
+- Safe shell arguments and JSON escaping.
+- Atomic temporary-file plus rename writes.
+- No hand-edited paragraph labels or duplicated numbering schemes.
+- New mutable Markdown sections must be updated through flagged helper targets.
+- New generated formats must be covered by parser, validator, and regression
+  tests.
+
+Suggested tests include:
+
+- read -p 55 -g 3 -s 4 resolves the correct indexed artifact.
+- Missing selector flags fail without shifting later values.
+- read registers only the artifact actually read.
+- read --read-only does not change the processed manifest.
+- check ignores unread files by default.
+- check --all reports unread changes without registering them.
+- check returns 0 when the processed set is fresh, 1 after a processed source
+  changes, and 2 for malformed or missing context files.
+- --changed emits only compact P/G/S/W/A markers.
+- refresh --changed updates only those markers.
+- generated files are excluded from their own hash scope.
+- dedicated flags return only the requested fixed sections, with no -x free-form
+  section selector and no short-flag collisions.
+- add-fact rejects unsafe or duplicate keys as specified.
+- add-delta emits valid escaped NDJSON and preserves prior events.
+- refresh and compact writes are atomic and leave no partial artifacts.
+- stale context cannot be read until the selected stale markers are refreshed.
+
+Benefits and safeguards
+-----------------------
+
+- Indexed flags avoid repeating long descriptions and paths.
+- Section retrieval prevents loading unrelated narrative.
+- The processed set prevents irrelevant unread changes from causing work.
+- Deltas preserve discoveries without rewriting the original plan.
+- Selective refresh limits both shell output and model context.
+- Hash checks prevent stale cached guidance from being used silently.
+- Shell-only mutations provide one formatting and validation boundary.
+
+Hashes detect file changes, not semantic correctness. Material scope changes
+must still reopen validation and adversarial review. An explicit --all audit
+exists for that case without imposing its cost on every ordinary resume.
+
+Recommended implementation order
+---------------------------------
+
+1. Add plan-context.sh with flag parsing and the P/G/S/W/A index.
+2. Add read with dedicated, collision-free section flags, processed-set
+   registration, check, and selective refresh.
+3. Add generated resume.md and processed.sha256 with fixed schemas.
+4. Add add-fact and add-delta with facts.tsv and deltas.ndjson.
+5. Add compact only after the basic workflow and tests are stable.
+6. Update the planning skill's resume section and command reference.
+7. Update the maintainer contract and bounded tests for every new format.
+
+The intended steady-state interaction is:
+
+  check -p 55 -> --changed -> refresh selected markers ->
+  read -p 55 -g 3 -s 4 -I -> work -> add-delta -> compact at goal boundary

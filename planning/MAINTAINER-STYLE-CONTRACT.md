@@ -24,6 +24,12 @@ sync.
 - `validate-plan.sh` is the readiness and completion gate. Do not weaken it to
   accommodate a malformed fixture; update the fixture through the helpers.
 - Every hard rule needs a regression assertion in `planning/tests/`.
+- `plan-context.sh` and `plan-context-lib.sh` own bounded snapshot reads,
+  SHA-256 freshness checks, processed-entry state, and context writes.
+  Context IDs are tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, and
+  `unit:WNN`); do not replace them with ambiguous positional arguments.
+- Hash drift is a suspect external edit. Helpers report it for human
+  intervention and must not silently overwrite or repair the document.
 
 ## Names, IDs, and paths
 
