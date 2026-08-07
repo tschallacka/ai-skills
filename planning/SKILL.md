@@ -577,3 +577,30 @@ scripts change the requested row and recalculate the relevant progress bar.
 `plan-content.sh` supports `markdown`, `text`, and `json` output for summaries
 and blast radius, plus `path` for a direct document lookup. Document IDs are
 `plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`, and `unit:<WNN>`.
+
+### 4.2 v27 replacement package handoff
+
+The v27 replacement package is repository-owned until its closure plan is
+approved. Its finite installable boundary is the six-column
+`planning/V27-PACKAGE-MANIFEST.txt`; `planning/V27-PACKAGE-MAP.tsv` is the
+source/destination ownership record and the two repository-root v27 brainstorm
+inputs are source-only. The package contains the v27 contract, benchmark and
+oracle records, fixtures, runner evidence, installer proof, this skill, and
+the 21 planning helper scripts listed by that manifest.
+
+The coordinator resume order is: close authority/recovery, transaction/lease,
+package/wire, and benchmark/oracle contracts; generate and verify the bounded
+runner; then compare the full manifest, run the plan validator, and preserve
+the contract-test report. No backward-compatible adapter, legacy mode, or
+inferred default is part of the package. The approval gate is the approved
+adversarial review plus complete plan validation; a design review is not a
+runtime installation.
+
+After approval, install with the repository installer's explicit planning
+target command and the exact manifest: `bash install.sh --install-skill
+planning --target TARGET --approval yes`. Before that boundary, use
+`--print-skill-files planning --format=tsv` and
+`--resolve-source planning RELATIVE_PATH` only for inspection. Declined
+approval and destination collisions fail before copy or backup; preserve the
+target, record the failure, resolve the collision or approval decision, and
+resume the same manifest rather than installing a partial package.

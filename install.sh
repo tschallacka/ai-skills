@@ -12,6 +12,11 @@ TEMP_ROOT=""
 YES=0
 SKILL_SELECTION=""
 TARGET_SELECTION=""
+CLI_MODE=""
+CLI_SKILL=""
+CLI_FORMAT=""
+CLI_RELATIVE=""
+CLI_APPROVAL=""
 
 SKILL_NAMES=(planning project-specificies resource-limited-testing)
 TARGET_NAMES=(
@@ -53,6 +58,34 @@ die() {
     echo "Error: $*" >&2
     exit 1
 }
+
+case "${1:-}" in
+    --print-skill-files)
+        [ "$#" -eq 3 ] || die "--print-skill-files needs skill and --format"
+        CLI_MODE="print"
+        CLI_SKILL="$2"
+        [ "$3" = "--format=tsv" ] || die "--print-skill-files requires --format=tsv"
+        CLI_FORMAT="tsv"
+        set --
+        ;;
+    --resolve-source)
+        [ "$#" -eq 3 ] || die "--resolve-source needs skill and relative path"
+        CLI_MODE="resolve"
+        CLI_SKILL="$2"
+        CLI_RELATIVE="$3"
+        set --
+        ;;
+    --install-skill)
+        [ "$#" -eq 6 ] || die "--install-skill needs skill, --target, and --approval"
+        CLI_MODE="install"
+        CLI_SKILL="$2"
+        [ "$3" = "--target" ] || die "--install-skill requires --target"
+        TARGET_SELECTION="$4"
+        [ "$5" = "--approval" ] || die "--install-skill requires --approval"
+        CLI_APPROVAL="$6"
+        set --
+        ;;
+esac
 
 cleanup() {
     if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
@@ -418,10 +451,43 @@ download_source() {
 skill_files() {
     case "$1" in
         planning)
-            printf '%s\n' SKILL.md
-            for file in "$SOURCE_ROOT/planning/scripts/"*.sh; do
-                [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
-            done
+            cat <<'EOF'
+SKILL.md
+context-v27/brainstorm-limiting-context.v27.md
+context-v27/brainstorm-limiting-context.v27-contract.json
+context-v27/brainstorm-limiting-context.v27-benchmark.json
+context-v27/brainstorm-limiting-context.v27-oracle.json
+tests/fixtures/planning-context-v27/case-matrix.tsv
+tests/fixtures/planning-context-v27/expected-outcomes.jsonl
+tests/fixtures/planning-context-v27/test-signing-key.pub
+tests/fixtures/planning-context-v27/platform-inputs.tsv
+tests/fixtures/planning-context-v27/runner-targets.discovery.txt
+tests/fixtures/planning-context-v27/runner-targets.tsv
+tests/test-planning-context-v27-contract.sh
+tests/test-installer-manifest.sh
+V27-PACKAGE-MANIFEST.txt
+scripts/add-coverage.sh
+scripts/add-goal.sh
+scripts/add-ui-story.sh
+scripts/add-work-unit.sh
+scripts/configure-ui-story-cache.sh
+scripts/create-adversarial-review.sh
+scripts/create-plan-progress.sh
+scripts/create-plan.sh
+scripts/create-progress.sh
+scripts/create-ui-story-run-cache.sh
+scripts/create-ui-validation.sh
+scripts/create-work-unit-inventory.sh
+scripts/plan-content.sh
+scripts/plan-context-lib.sh
+scripts/plan-context.sh
+scripts/plan-document-lib.sh
+scripts/update-plan-content.sh
+scripts/update-plan-progress.sh
+scripts/update-progress.sh
+scripts/update-step.sh
+scripts/validate-plan.sh
+EOF
             ;;
         project-specificies)
             printf '%s\n' SKILL.md
@@ -439,6 +505,46 @@ source_file() {
     local skill="$1"
     local relative="$2"
     printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$relative"
+}
+
+cli_print_skill_files() {
+    [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
+    [ "$CLI_FORMAT" = "tsv" ] || die "unsupported CLI format: $CLI_FORMAT"
+    cat "$SOURCE_ROOT/planning/V27-PACKAGE-MANIFEST.txt"
+}
+
+cli_resolve_source() {
+    [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
+    local source
+    source="$(source_file "$CLI_SKILL" "$CLI_RELATIVE")"
+    [ -f "$source" ] || die "source does not exist: $CLI_RELATIVE"
+    printf '%s\n' "$source"
+}
+
+cli_install_skill() {
+    [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
+    case "$CLI_APPROVAL" in yes|no) ;; *) die "--approval must be yes or no" ;; esac
+    local relative source destination_file collision=0
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$(source_file "$CLI_SKILL" "$relative")"
+        [ -f "$source" ] || die "source does not exist: $relative"
+        destination_file="$TARGET_SELECTION/planning/$relative"
+        if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
+            printf 'Collision: %s\n' "$destination_file" >&2
+            collision=1
+        fi
+    done < <(skill_files "$CLI_SKILL")
+    [ "$collision" -eq 0 ] || return 3
+    [ "$CLI_APPROVAL" = "yes" ] || { printf 'Approval declined; no files changed.\n' >&2; return 2; }
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$(source_file "$CLI_SKILL" "$relative")"
+        destination_file="$TARGET_SELECTION/planning/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(skill_files "$CLI_SKILL")
+    printf 'Installed: %s/planning\n' "$TARGET_SELECTION"
 }
 
 backup_file() {
@@ -546,6 +652,16 @@ legacy_plan_migration() {
 ensure_plan_root_after_install() {
     legacy_plan_migration
 }
+
+if [ -n "$CLI_MODE" ]; then
+    download_source
+    case "$CLI_MODE" in
+        print) cli_print_skill_files ;;
+        resolve) cli_resolve_source ;;
+        install) cli_install_skill ;;
+    esac
+    exit $?
+fi
 
 if [ -z "$SKILL_SELECTION" ] || [ -z "$TARGET_SELECTION" ]; then
     show_splash
