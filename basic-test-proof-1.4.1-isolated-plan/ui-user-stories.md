@@ -1,0 +1,5 @@
+# UI user stories: basic-test-proof-1.4.1-isolated-plan
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-01 | A user opens the future button-chain.html in a rendered browser with exactly one initial button visible | Click the initial button, then click each newly appended current last button until pressing the fourth generated button | Mouse click on the visible initial button and every visible newly appended current last button | Each valid pre-completion press appends exactly one button below; pressing generated button four clears the document and prints finished with a visible white border | ⏭️ excluded | User-approved exclusion: this planning proof explicitly forbids creating, opening, serving, or testing HTML and forbids browser startup; future execution must replace this exclusion with rendered evidence. | W03 | `ui-story-runs/US-01.md` |

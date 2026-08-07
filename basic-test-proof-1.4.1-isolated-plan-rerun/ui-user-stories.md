@@ -1,0 +1,5 @@
+# UI user stories: basic-test-proof-1.4.1-isolated-plan-rerun
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-01 | Future executor; fresh rendered button-chain.html showing one initial button and no generated buttons | Press the initial button, then press each current last generated button in sequence through the fourth generated button | Real mouse clicks or keyboard presses target only the visibly current last button through the rendered UI | Presses before completion append exactly one button below the prior last button; pressing generated button four clears the document and visibly prints finished inside a white border | ⏭️ excluded | User explicitly prohibited creating, editing, opening, serving, or testing HTML and prohibited starting a browser, server, or driver during this planning-only proof; no browser evidence was collected. | W01,W02,W03 | `ui-story-runs/US-01.md` |
