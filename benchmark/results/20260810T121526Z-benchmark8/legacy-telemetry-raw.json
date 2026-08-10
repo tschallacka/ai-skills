@@ -1,0 +1,98 @@
+{
+  "schema": "legacy-telemetry-extract-v1",
+  "run": "20260810T121526Z-benchmark8",
+  "extracted_at": "2026-08-10",
+  "sources": {
+    "database": "/home/mdibbets/.codex/state_5.sqlite",
+    "tables": ["threads", "thread_spawn_edges"],
+    "rollout_format": "timestamped JSONL",
+    "qualifications": {
+      "reviewer_threads": "direct SQLite thread_spawn_edges and threads values",
+      "token_fields": "direct rollout token_count values",
+      "validator_matches": "heuristic string matches in exec payloads",
+      "read_like_write_like": "heuristic command-pattern counts, not filesystem syscall counts"
+    }
+  },
+  "revisions": {
+    "1.0.0": {
+      "thread_id": "019feb99-8bdc-7131-a08d-dca2438a815f",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-15-36-019feb99-8bdc-7131-a08d-dca2438a815f.jsonl",
+      "worker_elapsed_seconds": 229,
+      "tokens": {"input": 510015, "cached_input": 452608, "output": 10799, "reasoning_output": 1476, "total": 520814},
+      "rollout_activity": {"agent_messages": 6, "reasoning_events": 16, "exec_calls": 15, "token_snapshots": 16},
+      "reviewers": [],
+      "command_metrics": {"read_like": 9, "write_like": 7, "validator_matches": 5},
+      "rollout_metrics": {"records": 87, "tool_input_chars": 32024, "tool_output_chars": 69050, "function_calls": 0, "patch_events": 3, "world_state_records": 1}
+    },
+    "1.1.0": {
+      "thread_id": "019feb99-8bfe-7be3-a8df-9e648b2b5a7e",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-15-36-019feb99-8bfe-7be3-a8df-9e648b2b5a7e.jsonl",
+      "worker_elapsed_seconds": 228,
+      "tokens": {"input": 450335, "cached_input": 415488, "output": 10108, "reasoning_output": 1612, "total": 460443},
+      "rollout_activity": {"agent_messages": 4, "reasoning_events": 17, "exec_calls": 16, "token_snapshots": 17},
+      "reviewers": [],
+      "command_metrics": {"read_like": 9, "write_like": 4, "validator_matches": 3},
+      "rollout_metrics": {"records": 88, "tool_input_chars": 30986, "tool_output_chars": 36328, "function_calls": 0, "patch_events": 4, "world_state_records": 1}
+    },
+    "1.2.0": {
+      "thread_id": "019feb99-8be0-7dd1-84e7-154b95333ee7",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-15-36-019feb99-8be0-7dd1-84e7-154b95333ee7.jsonl",
+      "worker_elapsed_seconds": 1396,
+      "tokens": {"input": 5369754, "cached_input": 5222400, "output": 40935, "reasoning_output": 4847, "total": 5410689},
+      "rollout_activity": {"agent_messages": 11, "reasoning_events": 63, "exec_calls": 61, "token_snapshots": 80},
+      "reviewers": [
+        {"thread_id": "019feb9c-a71b-7a21-98f6-97a11a297b98", "duration_seconds": 80, "tokens": 196438},
+        {"thread_id": "019feba0-158e-7b01-a306-2bd3294e69b2", "duration_seconds": 78, "tokens": 168271},
+        {"thread_id": "019feba1-9585-78d1-b050-c0f81b9c2637", "duration_seconds": 168, "tokens": 436424},
+        {"thread_id": "019feba8-0399-7c62-9931-ef8b8c9fe025", "duration_seconds": 81, "tokens": 213125},
+        {"thread_id": "019febaa-03de-7371-985a-b246d7b9edd0", "duration_seconds": 77, "tokens": 210638},
+        {"thread_id": "019febab-6e07-7430-a9f2-037763608bd5", "duration_seconds": 64, "tokens": 206346}
+      ],
+      "command_metrics": {"read_like": 20, "write_like": 30, "validator_matches": 11},
+      "rollout_metrics": {"records": 364, "tool_input_chars": 127325, "tool_output_chars": 179986, "function_calls": 18, "patch_events": 19, "world_state_records": 7}
+    },
+    "1.3.1": {
+      "thread_id": "019febb2-e780-7c71-8c11-ae298689c82a",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-43-18-019febb2-e780-7c71-8c11-ae298689c82a.jsonl",
+      "worker_elapsed_seconds": 1412,
+      "tokens": {"input": 9582635, "cached_input": 9395968, "output": 39170, "reasoning_output": 9000, "total": 9621805},
+      "rollout_activity": {"agent_messages": 7, "reasoning_events": 107, "exec_calls": 102, "token_snapshots": 113},
+      "reviewers": [
+        {"thread_id": "019febb7-55a3-7320-b89c-37026781ced7", "duration_seconds": 81, "tokens": 203615},
+        {"thread_id": "019febba-9d8b-7773-8154-1459570e771e", "duration_seconds": 162, "tokens": 613094},
+        {"thread_id": "019febbd-b2ac-7460-9766-22dbe3d7acc9", "duration_seconds": 114, "tokens": 326263},
+        {"thread_id": "019febc1-1246-7141-9093-3d5e1c1b0873", "duration_seconds": 112, "tokens": 386837},
+        {"thread_id": "019febc3-c8e9-7bd0-a60d-5146924a8ac7", "duration_seconds": 71, "tokens": 193645},
+        {"thread_id": "019febc5-0ad4-73b2-8bff-291eb7209726", "duration_seconds": 80, "tokens": 267181}
+      ],
+      "command_metrics": {"read_like": 41, "write_like": 21, "validator_matches": 9},
+      "rollout_metrics": {"records": 492, "tool_input_chars": 106820, "tool_output_chars": 294466, "function_calls": 10, "patch_events": 12, "world_state_records": 7}
+    },
+    "1.4.0": {
+      "thread_id": "019feb99-8c22-7400-8b1e-6208e3472a16",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-15-36-019feb99-8c22-7400-8b1e-6208e3472a16.jsonl",
+      "worker_elapsed_seconds": 1661,
+      "tokens": {"input": 7229774, "cached_input": 7068160, "output": 48705, "reasoning_output": 6450, "total": 7278479},
+      "rollout_activity": {"agent_messages": 8, "reasoning_events": 77, "exec_calls": 74, "token_snapshots": 95},
+      "reviewers": [
+        {"thread_id": "019feb9d-d14e-7b93-93c8-159163efb7fd", "duration_seconds": 129, "tokens": 254607},
+        {"thread_id": "019feba3-9e71-73c1-af92-dbd4c59b62b8", "duration_seconds": 172, "tokens": 350914},
+        {"thread_id": "019feba8-ea2d-7a81-a1eb-663ca58b5b0f", "duration_seconds": 91, "tokens": 279506},
+        {"thread_id": "019febab-777d-7ca1-89e4-700bb4a3cf42", "duration_seconds": 77, "tokens": 216619},
+        {"thread_id": "019febad-f872-7f71-b84a-ae4b33aa9f12", "duration_seconds": 147, "tokens": 525768}
+      ],
+      "command_metrics": {"read_like": 26, "write_like": 33, "validator_matches": 7},
+      "rollout_metrics": {"records": 409, "tool_input_chars": 162400, "tool_output_chars": 204217, "function_calls": 19, "patch_events": 15, "world_state_records": 6}
+    },
+    "1.4.1": {
+      "thread_id": "019feb99-8bfe-73a0-b67d-cb39762eb397",
+      "rollout_path": "/home/mdibbets/.codex/sessions/2026/08/10/rollout-2026-08-10T14-15-36-019feb99-8bfe-73a0-b67d-cb39762eb397.jsonl",
+      "worker_elapsed_seconds": 447,
+      "tokens": {"input": 2283598, "cached_input": 2161408, "output": 19848, "reasoning_output": 3938, "total": 2303446},
+      "rollout_activity": {"agent_messages": 4, "reasoning_events": 41, "exec_calls": 40, "token_snapshots": 41},
+      "reviewers": [],
+      "command_metrics": {"read_like": 24, "write_like": 15, "validator_matches": 5},
+      "rollout_metrics": {"records": 189, "tool_input_chars": 59019, "tool_output_chars": 205576, "function_calls": 0, "patch_events": 9, "world_state_records": 1}
+    }
+  }
+}

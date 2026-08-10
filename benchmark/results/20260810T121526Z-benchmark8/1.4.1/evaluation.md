@@ -1,0 +1,23 @@
+# Benchmark evaluation 1.4.1 20260810T121526Z-benchmark8
+
+- Status: accepted
+- Revision: 1.4.1 (1.4.1)
+- Isolated directory: /tmp/20260810T121526Z-benchmark8/1.4.1/workspace
+- Tagged source directory: /tmp/20260810T121526Z-benchmark8/1.4.1/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260810T121526Z-benchmark8/1.4.1
+- Plan: basic-test-proof-1.4.1-20260810T121526Z-benchmark8-isolated-plan
+- Worker exit code: 0
+- Session ID: 019feb99-8bfe-73a0-b67d-cb39762eb397
+- Telemetry records: 1
+- Total usage tokens: 2303446
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-10T12:15:36Z
+- End: 2026-08-10T12:23:03Z
+- Elapsed seconds: 447
+- Work-unit count: 1
+- Goal count: 1
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0

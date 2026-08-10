@@ -4,17 +4,73 @@ You may inspect only:
 
 - `{{ANALYSIS_ROOT}}/benchmark-test.md`
 - `{{ANALYSIS_ROOT}}/harness-summary.tsv`
-- result archives under `{{RESULTS_ROOT}}` whose run id is `{{RUN_ID}}`
+- result archives under `{{RESULTS_ROOT}}` for this run
 
 Write the comparison report to:
 
 ```text
-{{RESULTS_ROOT}}/comparison-{{RUN_ID}}.md
+{{RESULTS_ROOT}}/comparison.md
 ```
 
 Include one row per revision and separate worker exit status, validation
 result, HTML/HTM artifact audit, session UUID, telemetry records, token total
 or unavailable status, accepted/tainted status, and taint reasons.
+
+Start the report with a `Batch overview` section stating the total number of
+revisions benchmarked, how many completed successfully, how many were tainted,
+and how many lacked usable telemetry. Then add a `Deliverable inventory by
+revision` table with one row per revision. Count only observable files and
+records in that revision's result archive; include at least:
+
+- revision and benchmark status;
+- goals, work-unit inventory items, UI story/run-cache items, testing
+  companions, review reports, bug-register items, context snapshots, and
+  validation/analysis reports;
+- total files in the plan directory and total files in the result archive;
+- telemetry record count and total usage tokens.
+
+Use the selected plan directory named by `evaluation.md` for all plan counts.
+If extra candidate plan directories are present, report them as an integrity
+warning and exclude them from the counts. Count work units by counting ID rows
+in the work-unit inventory (`WU-01`, `W01`, etc.), never by counting files
+whose names contain `work-unit`. Count review reports and bug-register files
+separately from review findings or bug entries, and state the counting rule.
+The revision result must also contain the exact tagged `planning/` skill; report
+it as missing if this older run predates that archive requirement.
+
+Use exact counts when the artifacts support them. For review rounds, fix
+cycles, or any category whose boundaries are ambiguous, use `not recorded`
+rather than inventing precision. Explain the counting rule in one short note
+below the table so the counts can be reproduced from the archived artifacts.
+
+After that table, add a `Token usage progression` section. Sort revisions by
+semantic version when possible, otherwise use the order in the harness summary.
+For every revision after the first usable-token revision, report the previous
+revision, both token totals, the absolute delta, and percentage change using
+`((current - previous) / previous) * 100`. Label the result as an increase or
+decrease. Also state whether the change is only an observed usage difference or
+appears plausibly related to expansion/reduction in planning work, based on the
+inventory and journey evidence; do not claim causation from token totals alone.
+If either side lacks usable telemetry, say `comparison unavailable` and explain
+why. End this section with a short overall interpretation of token expansion
+or decrease across the batch.
+
+After the comparison table, include a short `Developer journey by revision`
+section with one subsection per revision. Each subsection should be roughly
+2–5 sentences or a compact four-bullet summary covering:
+
+- how the worker approached the planning task;
+- the observable number of review rounds and correction/fix cycles;
+- what changed or was strengthened after review;
+- the final validation, evidence, and notable constraint or failure.
+
+Make the summaries engaging and specific, but describe only observable actions
+and outcomes—not private chain-of-thought or speculative inner reasoning. Use
+the worker JSONL event sequence and the plan artifacts (`progress.md`, review,
+analysis, validation, bug, and context reports) as evidence. If a review or
+fix count cannot be established, say `not recorded` rather than guessing.
+Keep each revision’s journey distinct and mention meaningful differences in
+how the revisions progressed.
 
 Do not repair worker artifacts and do not fill missing telemetry from other
 sessions.

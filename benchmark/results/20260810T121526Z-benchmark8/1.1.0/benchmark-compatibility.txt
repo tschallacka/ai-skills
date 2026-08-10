@@ -1,0 +1,2 @@
+Benchmark compatibility adjustments for v1.1.0
+

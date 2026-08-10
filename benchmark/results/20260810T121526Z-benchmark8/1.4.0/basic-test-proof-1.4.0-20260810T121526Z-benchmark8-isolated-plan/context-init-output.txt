@@ -1,0 +1,8 @@
+command=init
+status=fresh
+snapshot_generation=2
+entry_id=-
+changed_ids=-
+affected_ids=-
+next_token=-
+error_code=-

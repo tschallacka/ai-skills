@@ -348,6 +348,7 @@ After decomposing a goal, check that its inventory rows and step files are a
 one-to-one mapping. If a material uncertainty remains, create a bounded
 discovery work unit or resolve it before continuing.
 
+<!-- REVIEWER_SECTION:START mandatory-review -->
 ## 3. Mandatory classification and independent review
 
 `create-plan.sh` creates the mandatory UI classification and adversarial-review
@@ -410,6 +411,8 @@ to add one paragraph; later labels in that same section shift automatically.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
+
+<!-- REVIEWER_SECTION:END mandatory-review -->
 
 ### 3.1 Add verification instructions
 
@@ -497,6 +500,7 @@ During execution:
 - If execution reveals a scope-changing decision or material uncertainty,
   pause and ask the user before changing the plan.
 
+<!-- REVIEWER_SECTION:START bounded-context -->
 ### 4.1 Bounded context and portable plan storage
 
 Use the bundled `plan-context.sh` command for bounded reads instead of
@@ -537,6 +541,18 @@ bash planning/tests/test-plan-context.sh --benchmark
 Treat the benchmark as a measurement gate, not proof from shell CPU alone:
 continue only when model-visible input is materially reduced without a
 correctness regression or unacceptable latency increase.
+<!-- REVIEWER_SECTION:END bounded-context -->
+
+### 4.2 Reviewer profile generation
+
+`SKILL.md` is the source of truth for reviewer behavior. Sections marked with
+`REVIEWER_SECTION` markers are extracted by
+`scripts/generate-reviewer.sh` into `REVIEWER.md`. The generator has an
+explicit allowlist of reviewer sections and must fail if a required section is
+missing. When reviewer behavior changes, update the marked source section and
+the generator allowlist or extraction logic as needed, then run the generator
+to refresh `REVIEWER.md` and record the source hash. Do not hand-edit
+`REVIEWER.md`.
 
 Use the bundled scripts on Bash or Zsh instead of rebuilding tracker logic or
 patching a plan document:

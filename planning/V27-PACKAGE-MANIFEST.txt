@@ -1,4 +1,5 @@
 planning/SKILL.md	SKILL.md	W11	v27-review-approved	backup-then-replace	false
+planning/REVIEWER.md	REVIEWER.md	reviewer	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27.md	context-v27/brainstorm-limiting-context.v27.md	W01-W02-W03-W04-W06-W09	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27-contract.json	context-v27/brainstorm-limiting-context.v27-contract.json	W05	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27-benchmark.json	context-v27/brainstorm-limiting-context.v27-benchmark.json	W07	v27-review-approved	backup-then-replace	false
@@ -27,6 +28,7 @@ planning/scripts/create-work-unit-inventory.sh	scripts/create-work-unit-inventor
 planning/scripts/plan-content.sh	scripts/plan-content.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/plan-context-lib.sh	scripts/plan-context-lib.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/plan-context.sh	scripts/plan-context.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	v27-review-approved	backup-then-replace	false
 planning/scripts/plan-document-lib.sh	scripts/plan-document-lib.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-plan-content.sh	scripts/update-plan-content.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-plan-progress.sh	scripts/update-plan-progress.sh	installer	v27-review-approved	backup-then-replace	false

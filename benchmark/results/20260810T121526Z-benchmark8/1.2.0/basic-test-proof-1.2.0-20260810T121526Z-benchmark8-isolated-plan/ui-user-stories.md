@@ -1,0 +1,5 @@
+# UI user stories: basic-test-proof-1.2.0-20260810T121526Z-benchmark8-isolated-plan
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-01 | A visitor opens the future local `button-chain.html` at its initial state. | Open the local file; click accessible `Button 0`, then `Button 1`, `Button 2`, `Button 3`, and finally `Button 4`. | Mouse click the named visible button after each append. | Each of the first four clicks adds exactly one button below the prior last button; pressing generated `Button 4` clears the document and leaves exact lowercase `finished` with a visible white border. | 💤 untested | Not executed because this proof forbids creating, opening, inspecting, serving, or testing HTML. Future evidence must include route, click sequence, visible button counts, and one decisive screenshot. | W01, W02, W03, W04, W05 | `ui-story-runs/US-01.md` |

@@ -39,6 +39,11 @@ The universal root is also discovered by OpenCode and OpenClaw. Installing the
 same skill into multiple roots can create duplicate definitions or precedence
 conflicts, so choose only the roots you need.
 
+The interactive installer checks which supported agents are present and omits
+roots for agents it cannot detect. Custom roots are saved in
+`~/.config/tsch-ai-skills/custom-locations` and are offered again when they
+still exist.
+
 ### npm installation
 
 Install the package globally to expose the installer command. The npm package
@@ -59,10 +64,13 @@ npx --yes --package @tschallacka/ai-skills ai-skills-install
 The npm package does not install skills automatically as an npm lifecycle
 side-effect; run the installer command when you are ready to choose a target.
 
-If an installed file differs from the repository version, the installer asks
-before replacing it. Approved replacements create a `.bak` backup first. A
-symlinked skill is skipped for manual review rather than following the link
-and modifying an unexpected location.
+Each installed skill contains a `.version` marker identifying its tag, branch,
+and commit. If an installed file differs from the repository version, the
+installer asks before replacing it. For a managed version transition that the
+user approves, old files are replaced without backups; the previous version
+can be restored by running the installer against its tag. Unmanaged changes
+still receive `.bak` backups. A symlinked skill is skipped for manual review
+rather than following the link and modifying an unexpected location.
 
 ### Non-interactive selection
 
@@ -78,8 +86,9 @@ curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.
   | bash -s -- --skill planning --target "$HOME/.codex/skills"
 ```
 
-Use `--yes` only when unattended replacement is intentional; changed files are
-still backed up before replacement:
+Use `--yes` only when unattended replacement is intentional. Managed version
+transitions are replaced without backups; unmanaged changed files are backed
+up:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.sh \
@@ -101,8 +110,7 @@ are instructions that may guide agents to run commands or access files.
 ## Updating
 
 Run the installer again. It compares each installed file with the repository,
-skips unchanged files, asks before replacing local changes, and creates a
-backup for every replaced file.
+skips unchanged files, and records the installed source in `.version`.
 
 ## Development checkout
 

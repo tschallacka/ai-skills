@@ -9,6 +9,7 @@ REPO_URL="${AI_SKILLS_REPO_URL:-https://github.com/tschallacka/ai-skills}"
 REPO_REF="${AI_SKILLS_REF:-main}"
 SOURCE_ROOT=""
 TEMP_ROOT=""
+SOURCE_VERSION=""
 YES=0
 SKILL_SELECTION=""
 TARGET_SELECTION=""
@@ -35,6 +36,7 @@ TARGET_PATHS=(
     "$HOME/.openclaw/skills"
     "$HOME/.cline/skills"
 )
+CUSTOM_LOCATIONS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/custom-locations"
 
 usage() {
     cat <<'EOF'
@@ -44,7 +46,7 @@ Interactive by default. Options are useful for automation:
   --all                    Install or update all skills
   --skill <name>           Install or update one skill
   --target <path>          Install into one skill root without prompting
-  --yes                    Accept changed-file replacements after making backups
+  --yes                    Accept replacements; managed version changes omit backups
   --help                   Show this help
 
 Supported skills:
@@ -158,6 +160,48 @@ contains() {
     return 1
 }
 
+agent_target_available() {
+    local index="$1"
+    local path="${TARGET_PATHS[$index]}"
+
+    case "$index" in
+        0) return 0 ;; # Universal Agent Skills has no owning application.
+        1) command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ] ;;
+        2) command -v claude >/dev/null 2>&1 || [ -d "$HOME/.claude" ] ;;
+        3) command -v opencode >/dev/null 2>&1 || [ -d "$HOME/.config/opencode" ] ;;
+        4) command -v openclaw >/dev/null 2>&1 || [ -d "$HOME/.openclaw" ] ;;
+        5)
+            [ -d "$path" ] || [ -d "$HOME/.vscode/extensions/saoudrizwan.claude-dev" ] \
+                || compgen -G "$HOME/.vscode/extensions/saoudrizwan.claude-dev-*" >/dev/null 2>&1 \
+                || compgen -G "$HOME/.vscode-server/extensions/saoudrizwan.claude-dev-*" >/dev/null 2>&1 \
+                || [ -d "${XDG_CONFIG_HOME:-$HOME/.config}/Code/User/globalStorage/saoudrizwan.claude-dev" ] \
+                || compgen -G "${XDG_CONFIG_HOME:-$HOME/.config}/Code/User/globalStorage/saoudrizwan.claude-dev*" >/dev/null 2>&1
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+save_custom_location() {
+    local path="$1"
+    mkdir -p "$(dirname "$CUSTOM_LOCATIONS_FILE")"
+    touch "$CUSTOM_LOCATIONS_FILE"
+    if ! grep -Fqx "$path" "$CUSTOM_LOCATIONS_FILE"; then
+        printf '%s\n' "$path" >> "$CUSTOM_LOCATIONS_FILE"
+    fi
+}
+
+load_custom_locations() {
+    SAVED_CUSTOM_LOCATIONS=()
+    [ -f "$CUSTOM_LOCATIONS_FILE" ] || return 0
+    local path
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [[ "$path" = \#* ]] && continue
+        [ -d "$path" ] || continue
+        contains "$path" "${SAVED_CUSTOM_LOCATIONS[@]}" || SAVED_CUSTOM_LOCATIONS+=("$path")
+    done < "$CUSTOM_LOCATIONS_FILE"
+}
+
 color_for() {
     if [ "${#1}" -eq 6 ]; then
         COLOR="$((16#${1:0:2}));$((16#${1:2:2}));$((16#${1:4:2}))"
@@ -230,23 +274,82 @@ render_art() {
     done
 }
 
+menu_wrap_text() {
+    local row="$1"
+    local text="$2"
+    local width="$3"
+    local indent="$4"
+    local line split
+
+    while [ -n "$text" ]; do
+        line="$text"
+        if [ "${#line}" -gt "$width" ]; then
+            line="${text:0:width}"
+            split="${line% *}"
+            if [ -n "$split" ] && [ "$split" != "$line" ]; then
+                line="$split"
+            fi
+        fi
+        printf '\033[%d;1H%*s%s' "$row" "$indent" '' "$line"
+        row=$((row + 1))
+        text="${text:${#line}}"
+        text="${text# }"
+    done
+    MENU_NEXT_ROW="$row"
+}
+
 show_shop_menu() {
-    local row=20
-    MENU_PROMPT_ROW=$((row + 16))
-    printf '\033[2;42H\033[38;2;0;180;70m ▄█▄\033[0m   \033[38;2;0;220;90m ▄█▄\033[0m   \033[38;2;70;255;110m ▄█▄\033[0m'
-    printf '\033[3;42H\033[38;2;0;180;70m ███\033[0m   \033[38;2;0;220;90m ███\033[0m   \033[38;2;70;255;110m ███\033[0m'
-    printf '\033[4;42H\033[38;2;0;180;70m  ▀\033[0m    \033[38;2;0;220;90m  ▀\033[0m    \033[38;2;70;255;110m  ▀\033[0m'
-    printf '\033[%d;1H\033[1;38;2;255;211;64m╭────────────────────────────────────────────────────────────╮\033[0m' "$row"
-    printf '\033[%d;1H\033[1;38;2;255;211;64m│\033[0m                  \033[1;38;2;255;211;64mTSCHALLACKA\x27S SKILL SHOP\033[0m                  \033[1;38;2;255;211;64m│\033[0m' "$((row + 1))"
-    printf '\033[%d;1H\033[38;2;255;211;64m╰────────────────────────────────────────────────────────────╯\033[0m' "$((row + 2))"
-    printf '\033[%d;1H  \033[38;2;0;220;80m◆\033[0m 1) planning' "$((row + 4))"
-    printf '\033[%d;1H     Durable, resumable plans with steps and verification.' "$((row + 5))"
-    printf '\033[%d;1H  \033[38;2;0;220;80m◆\033[0m 2) project-specificies' "$((row + 7))"
-    printf '\033[%d;1H     Records project conventions, quirks, and deviations.' "$((row + 8))"
-    printf '\033[%d;1H  \033[38;2;0;220;80m◆\033[0m 3) resource-limited-testing' "$((row + 10))"
-    printf '\033[%d;1H     Caps CPU and memory for demanding tool runs.' "$((row + 11))"
-    printf '\033[%d;1H  \033[38;2;0;220;80m◆\033[0m 4) all three skills' "$((row + 13))"
-    printf '\033[%d;1H     Installs or updates the complete skill set.' "$((row + 14))"
+    local row=2
+    local title="TSCHALLACKA'S SKILL SHOP"
+    local box_width
+    local inner_width title_padding
+    local horizontal=''
+    local index label description
+    local -a labels=(planning project-specificies resource-limited-testing 'all three skills')
+    local -a descriptions=(
+        'Durable, resumable plans with steps and verification.'
+        'Records project conventions, quirks, and deviations.'
+        'Caps CPU and memory for demanding tool runs.'
+        'Installs or updates the complete skill set.'
+    )
+
+    if [ -z "${MENU_BOX_WIDTH:-}" ]; then
+        local columns="${COLUMNS:-80}"
+        if command -v tput >/dev/null 2>&1; then
+            columns="$(tput cols 2>/dev/null || echo "$columns")"
+        fi
+        MENU_BOX_WIDTH=$((columns - 36))
+        [ "$MENU_BOX_WIDTH" -gt 60 ] && MENU_BOX_WIDTH=60
+        [ "$MENU_BOX_WIDTH" -lt 28 ] && MENU_BOX_WIDTH=28
+        MENU_COMPACT=0
+        [ "${LINES:-24}" -lt 20 ] && MENU_COMPACT=1
+    fi
+    box_width="$MENU_BOX_WIDTH"
+    inner_width=$((box_width - 2))
+    title_padding=$((inner_width - ${#title}))
+
+    for ((index = 0; index < inner_width; index++)); do
+        horizontal+='─'
+    done
+    printf '\033[%d;1H\033[1;38;2;255;211;64m╭%s╮\033[0m' "$row" "$horizontal"
+    printf '\033[%d;1H\033[1;38;2;255;211;64m│%*s%s%*s│\033[0m' \
+        "$((row + 1))" "$((title_padding / 2))" '' "$title" \
+        "$((title_padding - title_padding / 2))" ''
+    printf '\033[%d;1H\033[38;2;255;211;64m╰%s╯\033[0m' "$((row + 2))" "$horizontal"
+
+    row=$((row + 4))
+    for ((index = 0; index < ${#labels[@]}; index++)); do
+        label="$((index + 1))) ${labels[$index]}"
+        menu_wrap_text "$row" "$label" "$((inner_width - 2))" 2
+        row="$MENU_NEXT_ROW"
+        if [ "${MENU_COMPACT:-0}" -eq 0 ]; then
+            description="${descriptions[$index]}"
+            menu_wrap_text "$row" "$description" "$((inner_width - 7))" 5
+            row="$MENU_NEXT_ROW"
+        fi
+        row=$((row + 1))
+    done
+    MENU_PROMPT_ROW="$row"
 }
 
 pixel_message() {
@@ -280,7 +383,7 @@ show_splash() {
     [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return
     [ -t 3 ] || return
 
-    local columns lines scale art_width art_height offset_x offset_y state step anim_scale anim_x anim_y
+    local columns lines scale art_width art_height offset_x offset_y state step anim_scale anim_x anim_y message_y
     columns="${COLUMNS:-80}"
     lines="${LINES:-24}"
     if command -v tput >/dev/null 2>&1; then
@@ -294,10 +397,16 @@ show_splash() {
     done
     art_width=$((scale * 32))
     art_height=$((scale * 16))
-    offset_x=$(( (columns - art_width) / 2 + 1 ))
-    offset_y=$(( (lines - art_height) / 2 + 1 ))
+    offset_x=$((columns - art_width - 1))
+    offset_y=2
     [ "$offset_x" -lt 1 ] && offset_x=1
-    [ "$offset_y" -lt 1 ] && offset_y=1
+    MENU_BOX_WIDTH=$((offset_x - 4))
+    [ "$MENU_BOX_WIDTH" -gt 60 ] && MENU_BOX_WIDTH=60
+    [ "$MENU_BOX_WIDTH" -lt 28 ] && MENU_BOX_WIDTH=28
+    MENU_COMPACT=0
+    [ "$lines" -lt 20 ] && MENU_COMPACT=1
+    message_y=$((lines - 7))
+    [ "$message_y" -lt 1 ] && message_y=1
 
     ART=(
         'f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fdfd5e fcfd5f fcf347 fcf347'
@@ -337,14 +446,14 @@ show_splash() {
 
     for ((step = 1; step <= 9; step++)); do
         printf '\033[2J\033[H'
-        render_art 2 2 1 front
-        pixel_message "$step" 2 19
+        render_art "$offset_x" "$offset_y" 1 front
+        pixel_message "$step" 2 "$message_y"
         sleep 0.15
     done
 
-    # Leave the small mascot in the top-left when the menu opens.
+    # Leave the mascot in the right column when the menu opens.
     printf '\033[2J\033[H'
-    render_art 2 2 1 front
+    render_art "$offset_x" "$offset_y" 1 front
     printf '\033[?25h'
 }
 
@@ -384,41 +493,76 @@ select_targets() {
     if [ -n "$TARGET_SELECTION" ]; then
         SELECTED_TARGET_PATHS=("$TARGET_SELECTION")
         SELECTED_TARGET_NAMES=("$TARGET_SELECTION")
+        if ! contains "$TARGET_SELECTION" "${TARGET_PATHS[@]}"; then
+            save_custom_location "$TARGET_SELECTION"
+        fi
         return
     fi
 
+    AVAILABLE_TARGET_PATHS=()
+    AVAILABLE_TARGET_NAMES=()
+    local index path choice selection custom_choice
+    load_custom_locations
+
+    for index in "${!TARGET_PATHS[@]}"; do
+        if agent_target_available "$index"; then
+            AVAILABLE_TARGET_PATHS+=("${TARGET_PATHS[$index]}")
+            AVAILABLE_TARGET_NAMES+=("${TARGET_NAMES[$index]}")
+        fi
+    done
+    for path in "${SAVED_CUSTOM_LOCATIONS[@]}"; do
+        AVAILABLE_TARGET_PATHS+=("$path")
+        AVAILABLE_TARGET_NAMES+=("Custom: $path")
+    done
+
+    [ "${#AVAILABLE_TARGET_PATHS[@]}" -gt 0 ] || die "No installed agent roots or saved custom locations were found"
+
     echo >&2
     echo "Install into which skill root?" >&2
-    echo "  1) Universal Agent Skills: ${TARGET_PATHS[0]} (recommended)" >&2
-    echo "  2) Codex:                  ${TARGET_PATHS[1]}" >&2
-    echo "  3) Claude Code:            ${TARGET_PATHS[2]}" >&2
-    echo "  4) OpenCode:               ${TARGET_PATHS[3]}" >&2
-    echo "  5) OpenClaw:               ${TARGET_PATHS[4]}" >&2
-    echo "  6) Cline:                  ${TARGET_PATHS[5]}" >&2
-    echo "  7) all listed roots" >&2
-    echo "  8) custom directory" >&2
-    ask "Choose 1-8 or comma-separated numbers [1]: "
-    local selection="${REPLY:-1}"
+    for index in "${!AVAILABLE_TARGET_PATHS[@]}"; do
+        path="${AVAILABLE_TARGET_PATHS[$index]}"
+        if [ -d "$path" ]; then
+            printf '  %d) %s: %s [exists]\n' "$((index + 1))" "${AVAILABLE_TARGET_NAMES[$index]}" "$path" >&2
+        else
+            printf '  %d) %s: %s [will create]\n' "$((index + 1))" "${AVAILABLE_TARGET_NAMES[$index]}" "$path" >&2
+        fi
+    done
+    custom_choice=$(( ${#AVAILABLE_TARGET_PATHS[@]} + 1 ))
+    echo "  $custom_choice) custom directory" >&2
+    echo "  a) all listed roots" >&2
+    ask "Choose 1-$custom_choice, comma-separated numbers, or a [1]: "
+    selection="${REPLY:-1}"
 
-    if [ "$selection" = "7" ] || [ "$selection" = "all" ]; then
-        SELECTED_TARGET_PATHS=("${TARGET_PATHS[@]}")
-        SELECTED_TARGET_NAMES=("${TARGET_NAMES[@]}")
+    if [ "$selection" = "a" ] || [ "$selection" = "all" ]; then
+        SELECTED_TARGET_PATHS=("${AVAILABLE_TARGET_PATHS[@]}")
+        SELECTED_TARGET_NAMES=("${AVAILABLE_TARGET_NAMES[@]}")
         echo "Warning: multiple roots can make the same skill appear more than once." >&2
         return
     fi
 
-    local choice
     IFS=',' read -r -a choices <<< "$selection"
     for choice in "${choices[@]}"; do
-        if [ "$choice" = "8" ]; then
+        if [ "$choice" = "$custom_choice" ]; then
             ask "Custom skill root: "
             [ -n "$REPLY" ] || die "A custom directory is required"
-            SELECTED_TARGET_PATHS+=("${REPLY/#\~/$HOME}")
-            SELECTED_TARGET_NAMES+=("$REPLY")
-        elif [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le 6 ]; then
-            local index=$((choice - 1))
-            SELECTED_TARGET_PATHS+=("${TARGET_PATHS[$index]}")
-            SELECTED_TARGET_NAMES+=("${TARGET_NAMES[$index]}")
+            path="${REPLY/#\~/$HOME}"
+            case "$path" in
+                /*) ;;
+                *) die "Custom directory must be an absolute path" ;;
+            esac
+            if [ ! -d "$path" ]; then
+                if ! confirm "$path does not exist. Create it?"; then
+                    die "Custom directory does not exist: $path"
+                fi
+                mkdir -p "$path"
+            fi
+            save_custom_location "$path"
+            SELECTED_TARGET_PATHS+=("$path")
+            SELECTED_TARGET_NAMES+=("Custom: $path")
+        elif [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "${#AVAILABLE_TARGET_PATHS[@]}" ]; then
+            index=$((choice - 1))
+            SELECTED_TARGET_PATHS+=("${AVAILABLE_TARGET_PATHS[$index]}")
+            SELECTED_TARGET_NAMES+=("${AVAILABLE_TARGET_NAMES[$index]}")
         else
             die "Unknown target choice: $choice"
         fi
@@ -426,11 +570,19 @@ select_targets() {
 }
 
 download_source() {
+    local script_dir ref_prefix archive source_commit source_branch
     if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-        local script_dir
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         if [ -f "$script_dir/planning/SKILL.md" ]; then
             SOURCE_ROOT="$script_dir"
+            source_commit="$(git -C "$SOURCE_ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
+            source_branch="$(git -C "$SOURCE_ROOT" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+            SOURCE_VERSION="$(git -C "$SOURCE_ROOT" describe --tags --exact-match HEAD 2>/dev/null || true)"
+            if [ -n "$SOURCE_VERSION" ]; then
+                SOURCE_VERSION="tag:$SOURCE_VERSION commit:${source_commit:-unknown}"
+            else
+                SOURCE_VERSION="branch:${source_branch:-detached} commit:${source_commit:-unknown}"
+            fi
             return
         fi
     fi
@@ -439,13 +591,34 @@ download_source() {
     command -v tar >/dev/null 2>&1 || die "tar is required"
     TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-skills.XXXXXX")"
     local archive="$TEMP_ROOT/source.tar.gz"
-    local url="${REPO_URL%/}/archive/refs/heads/${REPO_REF}.tar.gz"
+    if [[ "$REPO_REF" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        ref_prefix="refs/tags"
+        SOURCE_VERSION="tag:$REPO_REF"
+        local url="${REPO_URL%/}/archive/${ref_prefix}/${REPO_REF}.tar.gz"
+    elif [[ "$REPO_REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        SOURCE_VERSION="commit:$REPO_REF"
+        local url="${REPO_URL%/}/archive/${REPO_REF}.tar.gz"
+    else
+        ref_prefix="refs/heads"
+        source_commit=""
+        if command -v git >/dev/null 2>&1; then
+            source_commit="$(git ls-remote "$REPO_URL" "refs/heads/$REPO_REF" 2>/dev/null | awk 'NR == 1 {print $1}')"
+        fi
+        SOURCE_VERSION="branch:$REPO_REF commit:${source_commit:-unknown}"
+        local url="${REPO_URL%/}/archive/${ref_prefix}/${REPO_REF}.tar.gz"
+    fi
     echo "Downloading skills from $url" >&2
     curl -fsSL "$url" -o "$archive"
     tar -xzf "$archive" -C "$TEMP_ROOT"
     SOURCE_ROOT="$(find "$TEMP_ROOT" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
     [ -n "$SOURCE_ROOT" ] && [ -f "$SOURCE_ROOT/planning/SKILL.md" ] \
         || die "Downloaded archive does not contain the expected skills"
+}
+
+version_marker_content() {
+    printf 'format=ai-skills-version-1\n'
+    printf 'source_version=%s\n' "$SOURCE_VERSION"
+    printf 'source_ref=%s\n' "$REPO_REF"
 }
 
 skill_files() {
@@ -524,7 +697,7 @@ cli_resolve_source() {
 cli_install_skill() {
     [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
     case "$CLI_APPROVAL" in yes|no) ;; *) die "--approval must be yes or no" ;; esac
-    local relative source destination_file collision=0
+    local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
@@ -533,9 +706,20 @@ cli_install_skill() {
         if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
             printf 'Collision: %s\n' "$destination_file" >&2
             collision=1
+            [ -L "$destination_file" ] && unsafe_collision=1
         fi
     done < <(skill_files "$CLI_SKILL")
-    [ "$collision" -eq 0 ] || return 3
+    if [ -e "$TARGET_SELECTION/$CLI_SKILL/.version" ] || [ -L "$TARGET_SELECTION/$CLI_SKILL/.version" ]; then
+        printf 'Collision: %s\n' "$TARGET_SELECTION/$CLI_SKILL/.version" >&2
+        collision=1
+        [ -L "$TARGET_SELECTION/$CLI_SKILL/.version" ] && unsafe_collision=1
+        if [ -f "$TARGET_SELECTION/$CLI_SKILL/.version" ] && ! cmp -s <(version_marker_content) "$TARGET_SELECTION/$CLI_SKILL/.version"; then
+            managed_version_transition=1
+        fi
+    fi
+    if [ "$collision" -ne 0 ] && { [ "$managed_version_transition" -eq 0 ] || [ "$unsafe_collision" -ne 0 ]; }; then
+        return 3
+    fi
     [ "$CLI_APPROVAL" = "yes" ] || { printf 'Approval declined; no files changed.\n' >&2; return 2; }
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
@@ -544,6 +728,7 @@ cli_install_skill() {
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done < <(skill_files "$CLI_SKILL")
+    version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/planning\n' "$TARGET_SELECTION"
 }
 
@@ -566,6 +751,7 @@ install_skill() {
     local relative source destination_file
     local changed=0
     local missing=0
+    local managed_version_transition=0
     local files
 
     files="$(skill_files "$skill")"
@@ -586,9 +772,28 @@ install_skill() {
 $files
 EOF
 
+    if [ -L "$destination/.version" ]; then
+        echo "Skipping $root/$skill: existing .version symlink requires manual review." >&2
+        return
+    elif [ ! -e "$destination/.version" ]; then
+        missing=1
+    elif ! cmp -s <(version_marker_content) "$destination/.version"; then
+        changed=1
+        managed_version_transition=1
+    fi
+
     if [ "$changed" -eq 1 ]; then
         if [ "$YES" -eq 1 ]; then
-            echo "Changes detected in $destination; replacing after backup." >&2
+            if [ "$managed_version_transition" -eq 1 ]; then
+                echo "Version transition detected in $destination; replacing without backups." >&2
+            else
+                echo "Changes detected in $destination; replacing after backup." >&2
+            fi
+        elif [ "$managed_version_transition" -eq 1 ]; then
+            if ! confirm "Installed version differs in $destination. Replace it without backups?"; then
+                echo "Skipped $destination" >&2
+                return
+            fi
         elif ! confirm "Changes detected in $destination. Replace them and create .bak backups?"; then
             echo "Skipped $destination" >&2
             return
@@ -604,13 +809,19 @@ EOF
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         if [ -e "$destination_file" ] && ! cmp -s "$source" "$destination_file"; then
-            backup_file "$destination_file"
+            if [ "$managed_version_transition" -eq 0 ]; then
+                backup_file "$destination_file"
+            fi
         fi
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done <<EOF
 $files
 EOF
+    if [ -e "$destination/.version" ] && ! cmp -s <(version_marker_content) "$destination/.version" && [ "$managed_version_transition" -eq 0 ]; then
+        backup_file "$destination/.version"
+    fi
+    version_marker_content > "$destination/.version"
     echo "Installed: $destination" >&2
 }
 
