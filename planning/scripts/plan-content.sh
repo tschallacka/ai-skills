@@ -5,7 +5,6 @@ usage() {
     cat >&2 <<'USAGE'
 Usage:
   plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
-  plan-content.sh get <plan-directory> [markdown|text|json|path]   (document-id defaults to 'plan')
   plan-content.sh summary <plan-directory> [markdown|text|json]
   plan-content.sh blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
 USAGE
@@ -43,18 +42,8 @@ collect_units() {
 
 case "$command" in
     get)
-        [ "$#" -ge 1 ] && [ "$#" -le 3 ] || usage
-        plan_dir="$1"
-        case "$#" in
-            1) document_id="plan"; format="markdown" ;;
-            2)
-                case "$2" in
-                    markdown|text|json|path) document_id="plan"; format="$2" ;;
-                    *) document_id="$2"; format="markdown" ;;
-                esac
-                ;;
-            3) document_id="$2"; format="$3" ;;
-        esac
+        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
+        plan_dir="$1"; document_id="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"

@@ -12,32 +12,28 @@ if "$script_dir/update-plan-content.sh" paragraph "$plan_dir" plan -p 2.1: 'Lega
 fi
 
 "$script_dir/create-plan.sh" "$plan_dir" 'Status synchronization'
-# --field three-argument form defaults the document-id to 'plan'.
-"$script_dir/update-plan-content.sh" --field "$plan_dir" 'Rationale' \
+# --field is deterministic: <plan-directory> <document-id> <field-label> <value>.
+"$script_dir/update-plan-content.sh" --field "$plan_dir" plan 'Rationale' \
     'No user-visible component changes; command harness only.'
 grep -Fq -- '- Rationale: No user-visible component changes; command harness only.' "$plan_dir/plan-description.md"
-# The explicit four-argument form (plan + document-id) still works.
-"$script_dir/update-plan-content.sh" --field "$plan_dir" plan 'Rationale' \
-    'Four-argument form uses the explicit plan document id.'
-grep -Fq -- '- Rationale: Four-argument form uses the explicit plan document id.' "$plan_dir/plan-description.md"
-if "$script_dir/update-plan-content.sh" --field "$plan_dir" 'UI affected' >/dev/null 2>&1; then
-    echo 'A --field with too few arguments unexpectedly passed.' >&2
+if "$script_dir/update-plan-content.sh" --field "$plan_dir" 'Rationale' 'x' >/dev/null 2>&1; then
+    echo 'A --field without an explicit document-id unexpectedly passed.' >&2
     exit 1
 fi
-# --title two-argument form defaults the document-id to 'plan'.
-"$script_dir/update-plan-content.sh" --title "$plan_dir" 'Status synchronization v2'
+# --title is deterministic: <plan-directory> <document-id> <title>.
+"$script_dir/update-plan-content.sh" --title "$plan_dir" plan 'Status synchronization v2'
 grep -Fqx '# Plan: Status synchronization v2' "$plan_dir/plan-description.md"
-# --table-paragraph four-argument form defaults the document-id to 'plan'.
-"$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" 5.1 2 \
+if "$script_dir/update-plan-content.sh" --title "$plan_dir" 'Status' >/dev/null 2>&1; then
+    echo 'A --title without an explicit document-id unexpectedly passed.' >&2
+    exit 1
+fi
+# --table-paragraph is deterministic: <plan> <document-id> <N.N> <cols> <CSV>.
+"$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" plan 5.1 2 \
     '"A","B"\n"1","2"'
 grep -Fqx '| A | B |' "$plan_dir/plan-description.md"
 grep -Fqx '| 1 | 2 |' "$plan_dir/plan-description.md"
-if "$script_dir/update-plan-content.sh" --title "$plan_dir" >/dev/null 2>&1; then
-    echo 'A --title with too few arguments unexpectedly passed.' >&2
-    exit 1
-fi
-if "$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" 5.1 2 >/dev/null 2>&1; then
-    echo 'A --table-paragraph with too few arguments unexpectedly passed.' >&2
+if "$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" 5.1 2 'x' >/dev/null 2>&1; then
+    echo 'A --table-paragraph without an explicit document-id unexpectedly passed.' >&2
     exit 1
 fi
 "$script_dir/add-goal.sh" "$plan_dir" 01-sync 'Synchronize status' \
@@ -136,10 +132,13 @@ grep -Fqx -- '- Status: `✅ approved`' "$plan_dir/adversarial-review.md"
 grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"
 
 "$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | grep -Fq '"id":"unit:W01"'
-# plan-content.sh get defaults the document-id to 'plan' when a format is given.
-"$script_dir/plan-content.sh" get "$plan_dir" json | grep -Fq '"id":"plan"'
+# plan-content.sh get is deterministic: <plan> <document-id> [format].
 "$script_dir/plan-content.sh" get "$plan_dir" plan json | grep -Fq '"id":"plan"'
-"$script_dir/plan-content.sh" get "$plan_dir" | grep -Fq '# Plan: '
+"$script_dir/plan-content.sh" get "$plan_dir" plan | grep -Fq '# Plan: '
+if "$script_dir/plan-content.sh" get "$plan_dir" json >/dev/null 2>&1; then
+    echo 'plan-content get without an explicit document-id unexpectedly passed.' >&2
+    exit 1
+fi
 "$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | grep -Fq '"downstream":["W02"]'
 "$script_dir/validate-plan.sh" "$plan_dir"
 
