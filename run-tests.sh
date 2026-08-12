@@ -59,7 +59,6 @@ declare -a unconfigured_names=()
 run_one() {
     local t="$1" label mem cpu
     label="$(sed 's#^.*/tests/##; s#\.sh$##' <<<"$t")"
-    if [ -d "${suite}/" ]; then :; fi
     # benchmark tests spin up worker/reviewer-like processes; give them headroom.
     if [[ "$t" == benchmark/* ]]; then mem=6G; cpu=400; else mem=2G; cpu=400; fi
 
