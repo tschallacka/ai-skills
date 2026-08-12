@@ -3,7 +3,8 @@
 This is an internal maintainer document. It is not part of the agent-facing
 planning instructions. Read it when changing a planning helper, validator, or
 generated artifact; keep the scripts, validator, tests, and this contract in
-sync.
+sync. See `MAINTAINER.md` for the architecture, artifact relations, and
+behavior rules.
 
 ## Source of truth
 
