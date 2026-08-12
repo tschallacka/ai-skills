@@ -1,0 +1,33 @@
+{
+  "counts": {
+    "ambiguous": 0,
+    "duplicates": 0,
+    "false_negatives": 3,
+    "false_positives": 6,
+    "independent_catches": 0,
+    "true_positives": 0,
+    "unresolved": 0
+  },
+  "denominators": {
+    "seeded": 3
+  },
+  "encrypted_map_sha256": "cd6428579ee1e16c8dd8b6fa9070837ec75dc82b6996367406bc0a2536c2b690",
+  "evidence_paths": [
+    "reviewer-selection.json",
+    "reviewer-b-session-binding.json",
+    "reviewer-lifecycle.jsonl",
+    "reviewers/20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165/workspace/reviewer.jsonl"
+  ],
+  "independent_catch_rate": 0.0,
+  "mechanical_exact_id_matches": 0,
+  "mechanical_exact_id_rate": 0.0,
+  "mode": "fresh-review",
+  "oracle_role": "independent-oracle",
+  "revision": "current",
+  "run_id": "20260811T205844Z-clean-current-seeded-fresh",
+  "schema_version": "1.4.2-semantic-blinded-oracle",
+  "semantic_true_positive_rate": 0.0,
+  "target_role": "reviewer-b",
+  "terminal": true,
+  "transcript_sha256": "337771968600a3c46b20bb4b9d94bf63425fae3dfa50769ccc4b8af46aaf1be9"
+}

@@ -1,0 +1,25 @@
+# Benchmark evaluation 1.4.1 20260810T203455Z-pilot-smoke2
+
+- Status: tainted
+- Revision: 1.4.1 (1.4.1)
+- Benchmarked skill: planning/ from tagged source 1.4.1
+- Isolated directory: /tmp/20260810T203455Z-pilot-smoke2/1.4.1/workspace
+- Tagged source directory: /tmp/20260810T203455Z-pilot-smoke2/1.4.1/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260810T203455Z-pilot-smoke2/1.4.1
+- Plan: basic-test-proof-1.4.1-20260810T203455Z-pilot-smoke2-isolated-plan
+- Worker exit code: 0
+- Session ID: 019fed62-b261-7b41-bbf5-e5bc49c82b25
+- Telemetry records: 1
+- Total usage tokens: 3329509
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-10T20:34:56Z
+- End: 2026-08-10T20:48:10Z
+- Elapsed seconds: 794
+- Work-unit count: 8
+- Goal count: 3
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0
+- Reviewer lifecycle status: failed

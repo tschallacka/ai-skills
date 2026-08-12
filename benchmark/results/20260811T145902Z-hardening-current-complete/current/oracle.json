@@ -1,0 +1,31 @@
+{
+  "counts": {
+    "ambiguous": 0,
+    "duplicates": 0,
+    "false_negatives": 3,
+    "false_positives": 5,
+    "independent_catches": 0,
+    "true_positives": 0,
+    "unresolved": 0
+  },
+  "denominators": {
+    "seeded": 3
+  },
+  "encrypted_map_sha256": "41594e3fa1f9c432486076bef6a7541c2e6b38e03e7d7d5b36c38a47bbd21f32",
+  "evidence_paths": [
+    "reviewers/reviewer-b/approval.json",
+    "worker.jsonl"
+  ],
+  "independent_catch_rate": 0.0,
+  "mechanical_exact_id_matches": 0,
+  "mechanical_exact_id_rate": 0.0,
+  "mode": "fresh-review",
+  "oracle_role": "independent-oracle",
+  "revision": "current",
+  "run_id": "20260811T145902Z-hardening-current-complete",
+  "schema_version": "1.4.2-semantic-blinded-oracle",
+  "semantic_true_positive_rate": 0.0,
+  "target_role": "reviewer-b",
+  "terminal": true,
+  "transcript_sha256": "6d9859810d45019b5b12ec3fda4272f3cae1af5ac4e0a13d0fb747075f7d7a89"
+}

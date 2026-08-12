@@ -1,0 +1,2 @@
+run_id	mode	execution	max_verification_passes	max_review_cycles	revisions
+20260810T200537Z-pilot-142	iterative	sequential	3	3	v1.3.1,v1.4.1

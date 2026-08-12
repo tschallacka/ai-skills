@@ -1,0 +1,21 @@
+{
+  "evidence_paths": [
+    "reviewers/reviewer-b/approval.json",
+    "worker.jsonl"
+  ],
+  "findings": [
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-01",
+      "independent": true
+    },
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-02",
+      "independent": true
+    }
+  ],
+  "target_role": "reviewer-b",
+  "terminal": true,
+  "transcript_sha256": "6d9859810d45019b5b12ec3fda4272f3cae1af5ac4e0a13d0fb747075f7d7a89"
+}

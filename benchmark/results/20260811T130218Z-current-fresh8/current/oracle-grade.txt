@@ -1,0 +1,1 @@
+Independent blinded oracle report written: /tmp/current-fresh8/current/workspace/oracle.json

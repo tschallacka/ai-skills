@@ -1,0 +1,83 @@
+{
+  "phase_records": [
+    {
+      "duration_seconds": 936.0,
+      "end": "2026-08-11T12:29:35Z",
+      "phase": "worker",
+      "precision": "exact",
+      "source": "runner",
+      "start": "2026-08-11T12:13:59Z"
+    }
+  ],
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "provenance": {
+    "lifecycle_artifact": "reviewer-lifecycle.jsonl",
+    "lookup_artifact": "telemetry.txt",
+    "telemetry_status": "available",
+    "token_total_precision": "exact"
+  },
+  "reviewer_mode": "fresh-review",
+  "reviewer_records": [
+    {
+      "cycle": 0,
+      "event_count": 3,
+      "session_id": "019ff0c2-88f5-75f0-98e2-5032fecb6b22",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 3,
+      "session_id": "019ff0c6-2c14-7f02-b881-8aadd54bb525",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 3,
+      "session_id": "019ff0c8-c195-7183-a203-bf0767a5b399",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 1,
+      "event_count": 2,
+      "session_id": "20260811T121358Z-current-fresh6-current-B-1786451375710133595",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    }
+  ],
+  "reviewer_session_id": "20260811T121358Z-current-fresh6-current-B-1786451375710133595",
+  "revision": "current",
+  "run_id": "20260811T121358Z-current-fresh6",
+  "schema_version": "1.4.2",
+  "status": "tainted",
+  "taint_causes": [
+    {
+      "code": "REVIEWER_LIFECYCLE_FAILED",
+      "event_ids": [],
+      "evidence_paths": [
+        "reviewer-lifecycle.jsonl"
+      ],
+      "layer": "review"
+    },
+    {
+      "code": "BLINDED_ORACLE_FAILED",
+      "event_ids": [],
+      "evidence_paths": [
+        "oracle-rejection.json"
+      ],
+      "layer": "oracle"
+    }
+  ],
+  "telemetry_source": "threads.tokens_used",
+  "usage": {
+    "records": "1",
+    "total_tokens": 4390875
+  },
+  "worker_thread_id": "019ff0be-6ceb-7983-bbef-70e0fde5081a"
+}

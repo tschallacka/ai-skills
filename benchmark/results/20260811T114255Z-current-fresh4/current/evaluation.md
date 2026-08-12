@@ -1,0 +1,26 @@
+# Benchmark evaluation current 20260811T114255Z-current-fresh4
+
+- Status: tainted
+- Revision: current (current)
+- Benchmarked skill: planning/ from tagged source current
+- Isolated directory: /tmp/current-fresh4/current/workspace
+- Tagged source directory: /tmp/current-fresh4/current/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260811T114255Z-current-fresh4/current
+- Plan: basic-test-proof-current-20260811T114255Z-current-fresh4-isolated-plan
+- Worker exit code: 0
+- Session ID: 019ff0a1-fe08-7c12-9265-11cda4fe3203
+- Telemetry records: 1
+- Total usage tokens: 2649339
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-11T11:42:55Z
+- End: 2026-08-11T11:55:42Z
+- Elapsed seconds: 767
+- Work-unit count: 5
+- Goal count: 1
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0
+- Reviewer lifecycle status: failed
+- Blinded oracle status: rejected

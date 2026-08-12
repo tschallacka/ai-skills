@@ -1,0 +1,6 @@
+# UI user stories: basic-test-proof-1.4.1-20260810T205301Z-pilot-142-final-isolated-plan
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-02 | User starts from the US-01 state with five visible buttons where the fifth visible button is the fourth generated button. | Click the fourth generated button. | Mouse click on the fourth generated visible button only; no developer-tool shortcut, storage edit, or HTTP shortcut. | The document is cleared and shows only the exact lowercase text finished with a visible white border. | 💤 untested | — | W03,W04,W06 | `ui-story-runs/US-02.md` |
+| US-01 | User opens the future local button-chain.html after implementation; initial state has one visible button. | Click the current last button four times, selecting the newly appended last button for each next click. | Mouse clicks on visible button controls only; no developer-tool shortcut, storage edit, or HTTP shortcut. | Exactly one new button appears below the clicked last button after each of the first four clicks, leaving five visible buttons total and no finished text yet. | 💤 untested | — | W02,W05 | `ui-story-runs/US-01.md` |

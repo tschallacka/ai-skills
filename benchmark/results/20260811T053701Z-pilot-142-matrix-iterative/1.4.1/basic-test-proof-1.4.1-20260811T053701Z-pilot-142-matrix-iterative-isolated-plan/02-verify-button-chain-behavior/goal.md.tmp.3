@@ -1,0 +1,63 @@
+# Goal: Verify button-chain behavior
+
+## Current state and prior-goal handoffs
+
+§ 2.1
+This goal begins only after goal 01 completes and hands off button-chain.html with named user-visible button targets and .completion-message styling.
+
+§ 2.2
+During this planning-only proof, these checks are documented but not executed.
+
+## Outcome and definition of done
+
+§ 3.1
+Prove the implemented page meets the required user story and non-browser static acceptance checks. Definition of done: the future executor has run the planned static inspection and direct browser story, recorded evidence, and confirmed no open UI bugs remain.
+
+## Why this goal is needed
+
+§ 4.1
+The requested behavior is interactive and visual, so implementation is not sufficient without static acceptance checks and direct browser evidence.
+
+## Scope
+
+§ 5.1
+Included: static artifact inspection for the single file and exact text contract, plus US-01 browser validation through direct clicks on rendered buttons.
+
+§ 5.2
+Excluded: changing production code, weakening acceptance criteria, using console or injected events, and declaring completion while any required UI story is untested or bug found.
+
+## Affected files, systems, data, and interfaces
+
+§ 6.1
+Verification reads button-chain.html after implementation and writes evidence into plan artifacts. Browser validation opens the local file directly or through the project-approved local route if the executor chooses one later.
+
+## Dependencies and handoffs
+
+§ 7.1
+Depends on W01, W02, W03, and W06 through W04. W05 depends on W04 so obvious static contract failures are caught before browser work.
+
+§ 7.2
+If W04 or W05 fails, execution must add bug investigation and fix goals before resuming completion work.
+
+## Implementation approach, risks, and edge cases
+
+§ 8.1
+Run the cheapest discriminating proof first: inspect the artifact contract, then run the browser story from a fresh state and record decisive evidence.
+
+§ 8.2
+Risks include off-by-one terminal behavior, stale story cache after implementation selector changes, and accidental evidence from non-UI shortcuts. Invalidate the story cache if the implementation changes the user-visible targets.
+
+## Owned work units
+
+§ 9.1
+`W04` — static artifact inspection confirms the single-file and exact-text contract before browser execution.
+
+§ 9.2
+`W05` — Run the direct browser story that clicks the current last button five times, confirms one button is appended when clicking the initial button and generated buttons 1 through 3, and confirms clicking generated button 4 clears the document and shows finished with a visible white border.
+
+## Testing requirement
+
+| Test required | Rationale |
+|---|---|
+| yes | This goal consists of verification work units that must record pass/fail evidence before execution can complete. |
+

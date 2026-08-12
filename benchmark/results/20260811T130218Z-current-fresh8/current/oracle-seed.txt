@@ -1,0 +1,2 @@
+Blinded defect workspace created: /tmp/current-fresh8/current/oracle-target
+Encrypted oracle material stored privately: /tmp/ai-skills-oracle-private/20260811T130218Z-current-fresh8/current

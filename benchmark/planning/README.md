@@ -44,6 +44,10 @@ The menu accepts multiple numbers such as `1,3`, or `all`.
 Pressing Ctrl+C stops the active workers and analyzer, including their child
 processes, and exits with status 130.
 
+Set `CODEX_MODEL` to select the model used by workers, reviewers, and the
+analyzer; the harness default is `gpt-5.5` so a stale interactive model
+selection cannot block a non-interactive run.
+
 Each run is kept in one timestamped, named directory. For example:
 
 ```text
@@ -66,14 +70,40 @@ benchmarked, alongside the worker output. This keeps all single-run reports
 and revision copies together and makes separate benchmark runs easy to
 distinguish.
 
+Protocol 1.4.2 runs are a distinct cohort recorded in
+`protocol-metadata.json`. Use `setup-and-run.sh <name> --sequential
+--fresh-review` (or explicit `--iterative` and `--revisions tag[,tag...]`).
+Legacy archives remain frozen; new capsule inputs and reviewer lifecycle
+evidence stay with the new run archive.
+
 The generated `comparison.md` also contains a batch overview, per-revision
 deliverable inventory, developer journeys, and a post-hoc token progression
 with absolute and percentage changes against the previous usable revision.
 
-Historical planning tests that reference a developer-only context fixture are
-made portable during setup. Set `PLANNING_CONTEXT_CACHE` to run that fixture;
-otherwise the test records an explicit skip instead of failing on a hardcoded
-home directory.
+### Monitor continuation contract
+
+The monitor must treat a worker/reviewer/analyzer status report, partial
+artifact list, unchanged poll, or “I’m working” message as intermediate. While
+the subprocess remains active, continue bounded polling and steer it with an
+explicit next action. Before each steering action, inspect bounded process
+state, latest output, expected artifacts, elapsed time, and retry budget.
+
+Stop only on terminal evidence: process exit with a result, an accepted/
+tainted/rejected archive, a validated completion report, or a recorded blocker
+after the retry budget is exhausted. Preserve the last output, process audit,
+next action, steering/retry count, and terminal reason. Do not restart blindly
+or report success from a status-only message.
+
+For repeated long checks, use an executable `/tmp` helper with the contract
+`helper PROFILE RUN_ID CASE_ROOT RESULT_ROOT`. `PROFILE` must be `1` for
+runner/worker processes, `2` for reviewer/Codex processes, or `3` for all
+in-scope processes; unsupported values fail with exit code 64. Output must be
+bounded and the helper must be removed when it is run-specific.
+
+Historical planning tests that reference a developer-only context fixture
+require `PLANNING_CONTEXT_CACHE` to be set to an existing fixture directory.
+Missing configuration or an unavailable fixture is an error; the tests do not
+fall back to another user's home directory or silently skip required coverage.
 
 ## Benchmark Python environment
 

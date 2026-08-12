@@ -1,0 +1,121 @@
+{
+  "entries": [
+    {
+      "path": "01-button-chain-html/goal.md",
+      "sha256": "3b463841931e334c201f4e8b1531e8bd204801aeea261f0f8e370422e5ebaa35"
+    },
+    {
+      "path": "01-button-chain-html/progress.md",
+      "sha256": "96d43db87582646dbcede18bca4dd490fd39dd68a9572b1bf4f3889503f18cc5"
+    },
+    {
+      "path": "01-button-chain-html/steps/01-step-initial-markup-testing.md",
+      "sha256": "010b60771cd4baa30a735694a9b09807d9e62cd4d72f2c7915ff32a3267b2b99"
+    },
+    {
+      "path": "01-button-chain-html/steps/01-step-initial-markup.md",
+      "sha256": "6a01a03be2fd882f896c3856b142927d5ccbec563e57e3853f6ee54293928750"
+    },
+    {
+      "path": "01-button-chain-html/steps/02-step-button-layout-style-testing.md",
+      "sha256": "71f7e38858d33549399bbe25b9668c6db89384cc21af218aad3aba725f61f9d1"
+    },
+    {
+      "path": "01-button-chain-html/steps/02-step-button-layout-style.md",
+      "sha256": "d51dc2660f8ff5114f9ac6863c65d106c3db2ddbfdb6ac89897012e81472c54a"
+    },
+    {
+      "path": "01-button-chain-html/steps/03-step-append-handler-testing.md",
+      "sha256": "1ac9b5e6c248f2c539185c630d94190cfc518f27cecb52b274d0e825937a8cdf"
+    },
+    {
+      "path": "01-button-chain-html/steps/03-step-append-handler.md",
+      "sha256": "ec0c4c7441e404069834c5575016cef375daa8a516895f866857514b6e1824b5"
+    },
+    {
+      "path": "01-button-chain-html/steps/04-step-finish-handler-testing.md",
+      "sha256": "f8d3fe5573c1cbc11d13b58120951f137d73edf99d1e782a2988c58a14563941"
+    },
+    {
+      "path": "01-button-chain-html/steps/04-step-finish-handler.md",
+      "sha256": "56ba83ea8bc7c410ea047a95b88ed3be5d34050593b28fd68847459607d580e5"
+    },
+    {
+      "path": "01-button-chain-html/steps/05-step-implementation-acceptance-review-testing.md",
+      "sha256": "b4f43ee3ee9b4b9bb7d105bb381224bd26f83487c886475ae531986296e54487"
+    },
+    {
+      "path": "01-button-chain-html/steps/05-step-implementation-acceptance-review.md",
+      "sha256": "d240d19df35aeccb4849791aaf9c18dfec21b6f8051dda61d8f211509e7ef0e3"
+    },
+    {
+      "path": "02-proof-and-handoff/goal.md",
+      "sha256": "695e4e1a2aec6e9b961607574fc0b42e75bf84e5cec7265d4287b13642ced127"
+    },
+    {
+      "path": "02-proof-and-handoff/progress.md",
+      "sha256": "50896b429967da9ab529d7d43db4f4e8adac5b28c525c3392b5d7aa924a0047a"
+    },
+    {
+      "path": "02-proof-and-handoff/steps/01-step-dom-test-testing.md",
+      "sha256": "ee7eb598d7842c51a4b36bfadfc7098a1ffb5594e4064ef6ab04d6431b4d3d93"
+    },
+    {
+      "path": "02-proof-and-handoff/steps/01-step-dom-test.md",
+      "sha256": "807e65393447ca7692ba0e2be06a2b1a0310daf2906ea1109037281b913eb86d"
+    },
+    {
+      "path": "02-proof-and-handoff/steps/02-step-browser-story-testing.md",
+      "sha256": "ffcb27e4800e08e03c696b4454667f59217bf2ebe18d3b785771d75347da6d8a"
+    },
+    {
+      "path": "02-proof-and-handoff/steps/02-step-browser-story.md",
+      "sha256": "c52b9fa5ee6ed7ab8979aa71d2e41ff8b4ecfe1de61ae225f52626830b1e4c50"
+    },
+    {
+      "path": "adversarial-review.md",
+      "sha256": "9080653e7551a4d809953017c5cb0328537e05e88abb04c94a9809ec06676342"
+    },
+    {
+      "path": "analysis-report.md",
+      "sha256": "59cd1415e40895802d889a9b762085cede1347d95f91b3f643331024bd8b4ffd"
+    },
+    {
+      "path": "approval.json",
+      "sha256": "077d443b92c2ac6b80e323c7bbb23798ed4032d62ec0f714efa9a6cc070413f8"
+    },
+    {
+      "path": "bugs.md",
+      "sha256": "ede9022c1b815f40e85626fc4ce8cc1741b0dc0c52a91ca03bf58f5ba49d6aa0"
+    },
+    {
+      "path": "context-snapshot.md",
+      "sha256": "e48bcc0e871745849ea8e2d91e6f84aeacda4b859a0b109345bb6759097cdaca"
+    },
+    {
+      "path": "plan-description.md",
+      "sha256": "f921e8fe07a5094f328e2bea8b58639d35d54a96ac569fd9dde29b36dbd3b6fa"
+    },
+    {
+      "path": "progress.md",
+      "sha256": "f5fa7406ffca55b842a2f897e42ca28f8f58c273391e086fd7b8504497e8e7f6"
+    },
+    {
+      "path": "ui-story-runs/US-01.md",
+      "sha256": "14114901587b113d2f878554bd3a0d48070e34cefcddd54dae911ef253ed32d8"
+    },
+    {
+      "path": "ui-user-stories.md",
+      "sha256": "24e40e5ceb3de8fe5434b6d2139ac20d7a0dd1e0bb2b93aad66926daa3a6d9f7"
+    },
+    {
+      "path": "validation.md",
+      "sha256": "b470e2ab6c748235debf9fe581c521ce8257d4a8e91685771b62d38abee4f3a0"
+    },
+    {
+      "path": "work-unit-inventory.md",
+      "sha256": "b7c5242cfa1b06b1059326b9538fbad8349b2139e50b070dd40cf2fb9d550ebd"
+    }
+  ],
+  "root_sha256": "af277111893fe9d0aa381243351cf8abbc6ebace9f107a0226b0b393bd9e1a21"
+}

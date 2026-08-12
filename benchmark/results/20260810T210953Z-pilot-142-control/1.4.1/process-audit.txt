@@ -1,0 +1,5 @@
+Process audit: pass
+The worker ran in process group 383238.
+The audit checks only matching browser/server/driver processes still belonging
+to that worker-owned process group after completion; unrelated host processes
+and other parallel workers are excluded.

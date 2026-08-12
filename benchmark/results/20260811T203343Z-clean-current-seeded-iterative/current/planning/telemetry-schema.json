@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reviewer-optimization-1.4.2/telemetry",
+  "type": "object",
+  "required": ["schema_version", "protocol_id", "run_id", "revision", "worker_thread_id", "reviewer_mode", "status", "taint_causes", "telemetry_source", "provenance", "phase_records"],
+  "properties": {
+    "schema_version": {"const": "1.4.2"},
+    "protocol_id": {"const": "reviewer-optimization-1.4.2"},
+    "run_id": {"type": "string"}, "revision": {"type": "string"},
+    "worker_thread_id": {"type": "string"},
+    "reviewer_mode": {"enum": ["fresh-review", "iterative"]},
+    "status": {"enum": ["accepted", "tainted", "rejected", "interrupted"]},
+    "taint_causes": {"type": "array"}, "provenance": {"type": "object"},
+    "telemetry_source": {"type": "string"}, "phase_records": {"type": "array"},
+    "reviewer_records": {"type": "array"}
+  }
+}

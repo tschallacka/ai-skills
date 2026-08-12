@@ -1,0 +1,122 @@
+{
+  "phase_records": [
+    {
+      "duration_seconds": 682.0,
+      "end": "2026-08-10T21:52:07Z",
+      "phase": "worker",
+      "precision": "exact",
+      "source": "runner",
+      "start": "2026-08-10T21:40:45Z"
+    }
+  ],
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "provenance": {
+    "lifecycle_artifact": "reviewer-lifecycle.jsonl",
+    "lookup_artifact": "telemetry.txt",
+    "telemetry_status": "available",
+    "token_total_precision": "exact"
+  },
+  "reviewer_mode": "fresh-review",
+  "reviewer_records": [
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda3-01b8-7c00-9037-810f6db3e19b",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda5-384c-73b3-90f1-f129817339c4",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda6-d4c7-7073-a646-a34efb490887",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda3-01b8-7c00-9037-810f6db3e19b",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda3-01b8-7c00-9037-810f6db3e19b",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda5-384c-73b3-90f1-f129817339c4",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda5-384c-73b3-90f1-f129817339c4",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda6-d4c7-7073-a646-a34efb490887",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 0,
+      "event_count": 1,
+      "session_id": "019feda6-d4c7-7073-a646-a34efb490887",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 1,
+      "event_count": 1,
+      "session_id": "20260810T214045Z-pilot-142-control2-1.4.1-B-1786398727756009857",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 1,
+      "event_count": 1,
+      "session_id": "20260810T214045Z-pilot-142-control2-1.4.1-B-1786398727756009857",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    }
+  ],
+  "reviewer_session_id": "20260810T214045Z-pilot-142-control2-1.4.1-B-1786398727756009857",
+  "revision": "1.4.1",
+  "run_id": "20260810T214045Z-pilot-142-control2",
+  "schema_version": "1.4.2",
+  "status": "accepted",
+  "taint_causes": [],
+  "telemetry_source": "threads.tokens_used",
+  "usage": {
+    "records": "1",
+    "total_tokens": 2960156
+  },
+  "worker_thread_id": "019fed9e-f4f6-7053-9794-bdb0b90b000d"
+}

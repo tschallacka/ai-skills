@@ -1,0 +1,16 @@
+{
+  "adoptable": false,
+  "approval_conflict": false,
+  "fail_closed_reasons": [
+    "MISSING_DENOMINATOR",
+    "PLAN_NOT_APPROVED"
+  ],
+  "independent_catch_rate": 0.0,
+  "independent_threshold": null,
+  "oracle_completed": true,
+  "plan_approved": false,
+  "review_completed": true,
+  "seeded_denominator": 3,
+  "semantic_threshold": null,
+  "semantic_true_positive_rate": 0.0
+}

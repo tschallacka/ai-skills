@@ -1,0 +1,1 @@
+Plan validation passed: 8 work units across 2 goals.

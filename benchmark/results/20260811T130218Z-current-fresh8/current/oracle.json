@@ -1,0 +1,29 @@
+{
+  "counts": {
+    "duplicates": 0,
+    "false_negatives": 3,
+    "false_positives": 1,
+    "independent_catches": 0,
+    "true_positives": 0,
+    "unresolved": 0
+  },
+  "denominators": {
+    "seeded": 3
+  },
+  "encrypted_map_sha256": "4ebeb800c61ffdbf91eec6349ad2b575629f104b241e34f56e989540c8cab7a3",
+  "evidence_paths": [
+    "reviewers/reviewer-b/approval.json",
+    "worker.jsonl"
+  ],
+  "independent_catch_rate": 0.0,
+  "mode": "fresh-review",
+  "oracle_role": "independent-oracle",
+  "revision": "current",
+  "run_id": "20260811T130218Z-current-fresh8",
+  "schema_version": "1.4.2-blinded-oracle",
+  "target_role": "reviewer-b",
+  "target_root_sha256": null,
+  "terminal": true,
+  "transcript_sha256": "f71011e1227521fcb03ef6464cdc08fb4fb384cad7e42b40111fb23f01c7db66",
+  "true_positive_rate": 0.0
+}

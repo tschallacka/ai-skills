@@ -1,0 +1,25 @@
+# Benchmark evaluation 1.3.1 20260811T074548Z-pilot-142-fresh-131-restart5
+
+- Status: accepted
+- Revision: 1.3.1 (v1.3.1)
+- Benchmarked skill: planning/ from tagged source v1.3.1
+- Isolated directory: /tmp/20260811T074548Z-pilot-142-fresh-131-restart5/1.3.1/workspace
+- Tagged source directory: /tmp/20260811T074548Z-pilot-142-fresh-131-restart5/1.3.1/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260811T074548Z-pilot-142-fresh-131-restart5/1.3.1
+- Plan: basic-test-proof-1.3.1-20260811T074548Z-pilot-142-fresh-131-restart5-isolated-plan
+- Worker exit code: 0
+- Session ID: 019fefc8-e71e-75e1-83bf-0a0432d7c487
+- Telemetry records: 1
+- Total usage tokens: 3310410
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-11T07:45:48Z
+- End: 2026-08-11T07:59:56Z
+- Elapsed seconds: 848
+- Work-unit count: 5
+- Goal count: 2
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0
+- Reviewer lifecycle status: passed

@@ -1,0 +1,85 @@
+{
+  "contract_id": "planning-context-v27",
+  "schema": 27,
+  "contract_digest": "sha256:<canonical-contract-preimage>",
+  "canonical": {
+    "encoding": "UTF-8 without BOM, LF terminated",
+    "objects": "keys sorted by Unicode code point; duplicate keys rejected; unknown keys rejected",
+    "arrays": "preserve declared order unless a field says sorted-unique",
+    "numbers": "unsigned decimal integers only; no exponent, fraction, negative, or leading zero",
+    "strings": "valid Unicode JSON strings; shortest JSON escaping; lowercase hex escapes",
+    "null": "forbidden; absent optional values are omitted",
+    "paths": "NFC UTF-8 relative slash paths with no empty, dot, traversal, control, NUL, symlink, reparse, or mount-crossing component",
+    "digest_text": "sha256:<64 lowercase hexadecimal characters>",
+    "binary": "base64url without padding"
+  },
+  "types": {
+    "package_id": "PKG-[A-Za-z0-9_-]{1,64}",
+    "transaction_id": "TX-[A-Za-z0-9_-]{1,64}",
+    "event_id": "EVT-[A-Za-z0-9_-]{1,64}",
+    "lease_id": "LSE-[A-Za-z0-9_-]{1,64}",
+    "boot_id": "BOOT-[A-Za-z0-9_-]{1,64}",
+    "snapshot_id": "SNAP-[A-Za-z0-9_-]{1,64}",
+    "request_id": "REQ-[A-Za-z0-9_-]{1,64}",
+    "operator_id": "[A-Za-z0-9._:-]{1,128}",
+    "uint64": "0..18446744073709551615",
+    "digest": "sha256:<64 lowercase hexadecimal characters>",
+    "signature": "base64url without padding",
+    "state": ["normal", "recovery-required", "evidence-built", "operator-approved", "repaired", "outage", "suspect", "conflict"],
+    "latch_state": ["PREPARED", "COMMITTED", "ABORTED"],
+    "event_type": ["INTENT", "COMMIT", "PUBLICATION", "LEASE", "RECOVERY_DECISION"],
+    "lease_state": ["active", "expired", "revoked", "released"],
+    "status": ["success", "blocked", "stale", "suspect", "failure"],
+    "error_code": ["contract-invalid", "authorization", "recovery", "lease", "platform", "suspect", "stale", "conflict", "invalid", "budget", "usage", "not-found", "internal", "legacy-rejected"],
+    "exit": {"success": 0, "stale": 10, "suspect": 11, "invalid": 12, "conflict": 13, "authorization": 14, "lease": 15, "platform": 16, "recovery": 17, "budget": 19, "usage": 21, "internal": 22, "legacy-rejected": 78, "replacement-required": 23}
+  },
+  "objects": {
+    "root": {
+      "required": ["schema", "package_id", "contract_digest", "manifest_digest", "closure_digest", "external_fence_digest", "snapshot_digest", "journal_head", "writer_epoch", "state_digest", "root_digest", "signature", "signer_key_id"],
+      "types": {"schema": "27", "package_id": "package_id", "contract_digest": "digest", "manifest_digest": "digest", "closure_digest": "digest", "external_fence_digest": "digest", "snapshot_digest": "digest", "journal_head": "digest", "writer_epoch": "uint64", "state_digest": "digest", "root_digest": "digest", "signature": "signature", "signer_key_id": "text"},
+      "root_digest_excludes": ["root_digest", "signature"]
+    },
+    "external_fence": {
+      "required": ["schema", "package_id", "writer_epoch", "boot_id", "latch_state", "root_digest", "sequence", "record_digest", "signature", "signer_key_id"],
+      "types": {"schema": "27", "package_id": "package_id", "writer_epoch": "uint64", "boot_id": "boot_id", "latch_state": "latch_state", "root_digest": "digest", "sequence": "uint64", "record_digest": "digest", "signature": "signature", "signer_key_id": "text"},
+      "invariants": ["COMMITTED.sequence strictly increases", "COMMITTED.writer_epoch equals ROOT.writer_epoch", "COMMITTED.root_digest equals signed ROOT.root_digest", "PREPARED is never readable or writable authority", "ABORTED cannot be reused"]
+    },
+    "journal_intent": {
+      "required": ["schema", "event_type", "event_id", "package_id", "transaction_id", "command_digest", "lease_id", "writer_epoch", "fencing_token", "nonce", "prior_root_digest", "prior_journal_head", "target_snapshot_digest", "event_digest", "signature"],
+      "types": {"schema": "27", "event_type": "INTENT", "event_id": "event_id", "package_id": "package_id", "transaction_id": "transaction_id", "command_digest": "digest", "lease_id": "lease_id", "writer_epoch": "uint64", "fencing_token": "uint64", "nonce": "digest", "prior_root_digest": "digest", "prior_journal_head": "digest", "target_snapshot_digest": "digest", "event_digest": "digest", "signature": "signature"}
+    },
+    "journal_commit": {
+      "required": ["schema", "event_type", "event_id", "package_id", "transaction_id", "intent_digest", "publication_digests", "snapshot_digest", "pointer_digest", "journal_head", "root_digest", "prepared_fence_digest", "event_digest", "signature"],
+      "types": {"schema": "27", "event_type": "COMMIT", "event_id": "event_id", "package_id": "package_id", "transaction_id": "transaction_id", "intent_digest": "digest", "publication_digests": "digest[] sorted by event order", "snapshot_digest": "digest", "pointer_digest": "digest", "journal_head": "digest", "root_digest": "digest", "prepared_fence_digest": "digest", "event_digest": "digest", "signature": "signature"}
+    },
+    "lease_event": {
+      "required": ["schema", "event_type", "event_id", "package_id", "lease_id", "owner", "boot_id", "writer_epoch", "fencing_token", "nonce", "transaction_id", "state", "expires_monotonic", "prior_root_digest", "root_digest", "event_digest", "signature"],
+      "types": {"schema": "27", "event_type": "LEASE", "event_id": "event_id", "package_id": "package_id", "lease_id": "lease_id", "owner": "operator_id", "boot_id": "boot_id", "writer_epoch": "uint64", "fencing_token": "uint64", "nonce": "digest", "transaction_id": "transaction_id", "state": "lease_state", "expires_monotonic": "uint64", "prior_root_digest": "digest", "root_digest": "digest", "event_digest": "digest", "signature": "signature"}
+    },
+    "recovery_decision": {
+      "required": ["schema", "event_type", "event_id", "decision_id", "package_id", "transaction_id", "evidence_digest", "prior_root_digest", "prior_journal_head", "intent_digest", "ordered_event_digests", "candidate_snapshot_digest", "candidate_pointer_digest", "resulting_root_digest", "target_external_sequence", "target_writer_epoch", "operator_id", "operator_key_id", "authorization_scope", "admissible", "approval_signature", "event_digest"],
+      "types": {"schema": "27", "event_type": "RECOVERY_DECISION", "event_id": "event_id", "decision_id": "text", "package_id": "package_id", "transaction_id": "transaction_id", "evidence_digest": "digest", "prior_root_digest": "digest", "prior_journal_head": "digest", "intent_digest": "digest", "ordered_event_digests": "digest[] exact order", "candidate_snapshot_digest": "digest", "candidate_pointer_digest": "digest", "resulting_root_digest": "digest", "target_external_sequence": "uint64", "target_writer_epoch": "uint64", "operator_id": "operator_id", "operator_key_id": "text", "authorization_scope": "text[] sorted-unique", "admissible": "boolean", "approval_signature": "signature", "event_digest": "digest"}
+    },
+    "request": {"required": ["schema", "package_id", "request_id", "command", "arguments", "capability_or_absent"], "types": {"schema": "27", "package_id": "package_id", "request_id": "request_id", "command": "text", "arguments": "object command-specific; unknown keys rejected", "capability_or_absent": "capability or omitted"}},
+    "response": {"required": ["schema", "package_id", "root_digest", "command", "request_id", "status", "data_or_absent", "error_or_absent", "output_digest"], "types": {"schema": "27", "package_id": "package_id", "root_digest": "digest", "command": "text", "request_id": "request_id", "status": "status", "data_or_absent": "typed data or omitted", "error_or_absent": "error or omitted", "output_digest": "digest"}, "invariants": ["success has data and no error", "blocked/stale/suspect/failure has error and no data", "absence is omission, never null", "output_digest hashes the complete response without output_digest"]},
+    "error": {"required": ["code", "subcode", "retryable", "state", "root_digest", "snapshot_or_absent", "details", "journal_event_or_absent"], "types": {"code": "error_code", "subcode": "text", "retryable": "boolean", "state": "state", "root_digest": "digest", "snapshot_or_absent": "digest or omitted", "details": "details", "journal_event_or_absent": "digest or omitted"}},
+    "details": {"required": ["items"], "types": {"items": "text[] sorted", "expected_or_absent": "text or omitted", "current_or_absent": "text or omitted"}},
+    "capability": {"required": ["capability_id", "package_id", "command_digest", "lease_id", "boot_id", "writer_epoch", "fencing_token", "nonce", "transaction_id", "expires_monotonic", "signature", "signer_key_id"], "types": {"capability_id": "text", "package_id": "package_id", "command_digest": "digest", "lease_id": "lease_id", "boot_id": "boot_id", "writer_epoch": "uint64", "fencing_token": "uint64", "nonce": "digest", "transaction_id": "transaction_id", "expires_monotonic": "uint64", "signature": "signature", "signer_key_id": "text"}}
+  },
+  "digest_domains": {
+    "contract": "canonical contract object without contract_digest",
+    "root": "ASCII PLANCTX27-ROOT plus canonical ROOT object without root_digest and signature",
+    "external_fence": "ASCII PLANCTX27-FENCE plus canonical external_fence without record_digest and signature",
+    "transaction": "ASCII PLANCTX27-TX plus canonical transaction identity",
+    "event": "ASCII PLANCTX27-EVENT plus canonical event without event_digest and signature",
+    "snapshot": "ASCII PLANCTX27-SNAPSHOT plus framed sorted snapshot records and raw manifest/closure/state digests",
+    "response": "ASCII PLANCTX27-RESPONSE plus canonical response without output_digest",
+    "evidence": "ASCII PLANCTX27-EVIDENCE plus sorted unique verified record digests, observations, and crash-boundary record",
+    "signature": "Ed25519 over the domain bytes and canonical object with its signature field omitted"
+  },
+  "closure": {"root": "manifest entries are sorted unique relative paths", "traversal": "start at ROOT, follow every digest/reference field in schema order, visit each digest once", "cycle": "a repeated digest on the active traversal stack is a cycle and rejects", "missing": "missing referenced record rejects", "extra": "unreferenced package record rejects", "limits": {"records": 4096, "depth": 32, "metadata_bytes": 8388608}},
+  "wire": {"argv": "command followed by sorted unique flags; unknown, duplicate, missing, or positional arguments reject with usage", "stdout": "exactly one canonical response JSON object followed by LF", "stderr": "diagnostic only and never part of output_digest", "malformed": "no response data is emitted; response uses contract-invalid and exit 12 when request framing is readable, otherwise usage exit 21"},
+  "precedence": ["contract-invalid", "authorization", "recovery", "lease", "platform", "suspect", "stale", "conflict", "invalid", "budget", "usage", "not-found", "internal"],
+  "commands": {"status": {"auth": "read", "response": "response"}, "index": {"auth": "read", "response": "response"}, "mutate": {"auth": "writer", "response": "response"}, "recover": {"auth": "operator", "response": "response"}, "validate": {"auth": "coordinator", "response": "response"}},
+  "replacement": {"legacy_markers": ["context_schema_version=1", "context_result_schema_version=1", "planning-context-v1", "planning-context-v26"], "legacy_exit": 78, "replacement_required_exit": 23, "compatibility": "forbidden; no adapter, migration mode, or inferred default"}
+}

@@ -1,0 +1,14 @@
+{
+  "authority": "reviewer-b",
+  "candidates": [
+    {
+      "overall_plan_approval": false,
+      "path": "/tmp/ai-skills-capsules/20260811T203343Z-clean-current-seeded-iterative/current/reviewers/20260811T203343Z-clean-current-seeded-iterative-current-B-1786481534995424311/plan/approval.json",
+      "role": "reviewer-b"
+    }
+  ],
+  "schema_version": "1.4.2-reviewer-authority",
+  "selected_approval_path": "/tmp/ai-skills-capsules/20260811T203343Z-clean-current-seeded-iterative/current/reviewers/20260811T203343Z-clean-current-seeded-iterative-current-B-1786481534995424311/plan/approval.json",
+  "selection_reasons": [],
+  "unauthorized_approvals": []
+}

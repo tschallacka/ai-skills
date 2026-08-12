@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/reviewer-optimization-1.4.2/telemetry",
+  "type": "object",
+  "required": ["schema_version", "protocol_id", "run_id", "revision", "worker_thread_id", "reviewer_mode", "status", "taint_causes", "telemetry_source", "provenance", "phase_records"],
+  "properties": {
+    "schema_version": {"const": "1.4.2"},
+    "protocol_id": {"const": "reviewer-optimization-1.4.2"},
+    "run_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "string", "minLength": 1},
+    "worker_thread_id": {"type": "string", "minLength": 1},
+    "reviewer_mode": {"enum": ["fresh-review", "iterative"]},
+    "reviewer_session_id": {"type": ["string", "null"]},
+    "status": {"enum": ["accepted", "tainted", "rejected", "interrupted"]},
+    "taint_causes": {"type": "array", "items": {"type": "object", "required": ["code", "layer", "evidence_paths", "event_ids"], "properties": {"code": {"type": "string"}, "layer": {"type": "string"}, "evidence_paths": {"type": "array", "items": {"type": "string"}}, "event_ids": {"type": "array", "items": {"type": "string"}}}}},
+    "telemetry_source": {"type": "string", "minLength": 1},
+    "provenance": {"type": "object", "minProperties": 1},
+    "phase_records": {"type": "array", "items": {"type": "object", "required": ["phase", "start", "end", "duration_seconds", "source", "precision"], "properties": {"phase": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "duration_seconds": {"type": "number", "minimum": 0}, "source": {"enum": ["runner", "event", "db", "rollout"]}, "precision": {"enum": ["exact", "heuristic", "unavailable"]}}}},
+    "reviewer_records": {"type": "array", "items": {"type": "object", "required": ["session_id", "cycle", "verification_pass", "event_count", "token_total", "source"], "properties": {"session_id": {"type": "string"}, "cycle": {"type": "integer", "minimum": 0}, "verification_pass": {"type": "integer", "minimum": 0}, "event_count": {"type": "integer", "minimum": 0}, "token_total": {"type": ["integer", "null"]}, "source": {"type": "string"}}}}
+  }
+}

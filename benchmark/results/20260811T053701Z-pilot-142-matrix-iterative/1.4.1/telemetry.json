@@ -1,0 +1,58 @@
+{
+  "phase_records": [
+    {
+      "duration_seconds": 666.0,
+      "end": "2026-08-11T05:48:07Z",
+      "phase": "worker",
+      "precision": "exact",
+      "source": "runner",
+      "start": "2026-08-11T05:37:01Z"
+    }
+  ],
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "provenance": {
+    "lifecycle_artifact": "reviewer-lifecycle.jsonl",
+    "lookup_artifact": "telemetry.txt",
+    "telemetry_status": "available",
+    "token_total_precision": "exact"
+  },
+  "reviewer_mode": "iterative",
+  "reviewer_records": [
+    {
+      "cycle": 0,
+      "event_count": 3,
+      "session_id": "019fef58-32f4-7bc0-8142-413b188e59b1",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 1,
+      "event_count": 2,
+      "session_id": "20260811T053701Z-pilot-142-matrix-iterative-1.4.1-A-1786427288307441210",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    },
+    {
+      "cycle": 1,
+      "event_count": 2,
+      "session_id": "20260811T053701Z-pilot-142-matrix-iterative-1.4.1-B-1786427449586811980",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    }
+  ],
+  "reviewer_session_id": "20260811T053701Z-pilot-142-matrix-iterative-1.4.1-B-1786427449586811980",
+  "revision": "1.4.1",
+  "run_id": "20260811T053701Z-pilot-142-matrix-iterative",
+  "schema_version": "1.4.2",
+  "status": "accepted",
+  "taint_causes": [],
+  "telemetry_source": "threads.tokens_used",
+  "usage": {
+    "records": "1",
+    "total_tokens": 2441020
+  },
+  "worker_thread_id": "019fef52-ffe8-76b3-92b6-765ce90b52a0"
+}

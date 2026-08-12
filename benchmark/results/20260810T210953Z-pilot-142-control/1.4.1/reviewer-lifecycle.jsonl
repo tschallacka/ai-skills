@@ -1,0 +1,2 @@
+{"event_id":"B-start","actor":"reviewer","session_id":"20260810T210953Z-pilot-142-control-1.4.1-B-1786397249981915242","event_type":"launch","cycle":1,"verification_pass":0,"review_mode":"fresh-review","timestamp":"2026-08-10T21:09:53Z"}
+{"event_id":"B-end","actor":"reviewer","session_id":"20260810T210953Z-pilot-142-control-1.4.1-B-1786397249981915242","event_type":"handoff","cycle":1,"verification_pass":1,"review_mode":"fresh-review","exit_code":0,"independence":true,"timestamp":"2026-08-10T21:27:29Z"}

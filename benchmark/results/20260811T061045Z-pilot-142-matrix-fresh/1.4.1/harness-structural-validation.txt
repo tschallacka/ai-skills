@@ -1,0 +1,16 @@
+Structural validation for basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan
+
+PASS: plan description (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/plan-description.md)
+PASS: plan progress tracker (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/progress.md)
+PASS: validation report (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/validation.md)
+PASS: analysis report (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/analysis-report.md)
+PASS: goal (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/02-ui-story-verification/goal.md)
+PASS: work-unit inventory (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/work-unit-inventory.md)
+PASS: UI user story (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/ui-user-stories.md)
+PASS: UI story run/cache (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/ui-story-runs)
+PASS: adversarial review (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/adversarial-review.md)
+PASS: bug register (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/bug-register.md)
+PASS: context snapshot (matching context snapshot artifact)
+PASS: testing companion (/tmp/20260811T061045Z-pilot-142-matrix-fresh/1.4.1/workspace/basic-test-proof-1.4.1-20260811T061045Z-pilot-142-matrix-fresh-isolated-plan/02-ui-story-verification/steps/01-step-browser-story-us-01-testing.md)
+
+result=pass

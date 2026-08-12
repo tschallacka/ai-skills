@@ -1,0 +1,17 @@
+{
+  "reviewer_session_id": "019ff155-8d55-7d91-b7d5-bd770254e924",
+  "mode": "fresh-review-terminal-evidence-without-independent-capsule",
+  "approved_findings": [],
+  "rejected_findings": [
+    {
+      "id": "AR-01",
+      "path": "approval.json",
+      "location": "whole file / final Reviewer B handoff evidence",
+      "observed_contradiction_or_impact": "A true Reviewer B approval requires a fresh independent session/capsule. This planning-only worker can write terminal evidence, but cannot honestly claim independent approval.",
+      "evidence": "The user required Reviewer B to use a fresh session/capsule and receive no Reviewer A conclusions. No such separate reviewer capsule was available inside this worker turn.",
+      "required_correction": "Treat this run as plan_approved=false and adoptable=false unless the harness supplies an independent Reviewer B lifecycle."
+    }
+  ],
+  "overall_plan_approval": false,
+  "approved_at": "2026-08-11T17:04:15+02:00"
+}

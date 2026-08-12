@@ -1,0 +1,4 @@
+Benchmark compatibility adjustments for 1.4.1
+
+Patched planning/tests/test-plan-context.sh: user-specific fixture path is now overrideable and skips cleanly when unavailable.
+Patched planning/tests/test-plan-context-deferred-boundary.sh: user-specific fixture path is now overrideable and skips cleanly when unavailable.

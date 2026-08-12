@@ -1,0 +1,31 @@
+{
+  "evidence_paths": [
+    "reviewers/reviewer-b/approval.json",
+    "worker.jsonl"
+  ],
+  "findings": [
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-07",
+      "independent": true
+    },
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-08",
+      "independent": true
+    },
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-09",
+      "independent": true
+    },
+    {
+      "classification": "true_positive",
+      "finding_id": "AR-10",
+      "independent": true
+    }
+  ],
+  "target_role": "reviewer-b",
+  "terminal": true,
+  "transcript_sha256": "0272ac996cb30c6029416c45cfffe6994fe08df640975debfe80b133466c01c9"
+}

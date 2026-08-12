@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.4.2",
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "status": "rejected",
+  "fixture": null,
+  "reason": "A blinded seeded-defect set and mode-by-mode classifications were not available for the completed live archives.",
+  "true_positives": null,
+  "false_negatives": null,
+  "independent_catches": null,
+  "duplicates": null,
+  "unresolved": null,
+  "denominators": null,
+  "adoption_eligible": false
+}

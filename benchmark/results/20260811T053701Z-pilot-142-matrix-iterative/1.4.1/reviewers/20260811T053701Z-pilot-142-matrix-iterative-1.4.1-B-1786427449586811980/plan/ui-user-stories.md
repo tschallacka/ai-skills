@@ -1,0 +1,5 @@
+# UI user stories: basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-01 | Keyboard-and-mouse user validating a simple button chain | Open the implemented local button-chain.html page, click the initial last button, click generated buttons 1 through 3 to append generated button 4, then click generated button 4 and observe the terminal state. | Mouse click on the current last button for each of five button presses; each target is selected from the rendered UI using normal browser input. | After clicking the initial button and generated buttons 1 through 3, exactly one new button appears below the clicked last button; after clicking generated button 4, the document contains only the exact lowercase text finished and that text has a visible white border. | 💤 untested | — | W02,W03,W05 | `ui-story-runs/US-01.md` |

@@ -1,0 +1,26 @@
+# Benchmark evaluation current 20260811T130218Z-current-fresh8
+
+- Status: accepted
+- Revision: current (current)
+- Benchmarked skill: planning/ from tagged source current
+- Isolated directory: /tmp/current-fresh8/current/workspace
+- Tagged source directory: /tmp/current-fresh8/current/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260811T130218Z-current-fresh8/current
+- Plan: basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan
+- Worker exit code: 0
+- Session ID: 019ff0ea-aa8e-7b03-8468-c5b14316e662
+- Telemetry records: 1
+- Total usage tokens: 3374818
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-11T13:02:18Z
+- End: 2026-08-11T13:19:41Z
+- Elapsed seconds: 1043
+- Work-unit count: 6
+- Goal count: 2
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0
+- Reviewer lifecycle status: passed
+- Blinded oracle status: accepted

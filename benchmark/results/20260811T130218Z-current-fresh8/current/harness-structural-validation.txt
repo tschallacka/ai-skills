@@ -1,0 +1,16 @@
+Structural validation for basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan
+
+PASS: plan description (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/plan-description.md)
+PASS: plan progress tracker (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/progress.md)
+PASS: validation report (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/validation.md)
+PASS: analysis report (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/analysis-report.md)
+PASS: goal (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/02-browser-story-validation/goal.md)
+PASS: work-unit inventory (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/work-unit-inventory.md)
+PASS: UI user story (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/ui-user-stories.md)
+PASS: UI story run/cache (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/ui-story-runs)
+PASS: adversarial review (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/adversarial-review.md)
+PASS: bug register (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/bugs.md)
+PASS: context snapshot (matching context snapshot artifact)
+PASS: testing companion (/tmp/current-fresh8/current/workspace/.plans/basic-test-proof-current-20260811T130218Z-current-fresh8-isolated-plan/02-browser-story-validation/steps/01-step-browser-story-us-01-testing.md)
+
+result=pass

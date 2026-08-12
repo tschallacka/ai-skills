@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.4.2",
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "archives": [
+    {"mode": "fresh-review", "run_id": "20260811T130218Z-current-fresh8", "revision": "current", "tokens": 3374818, "status": "accepted", "protocol_tainted": true, "oracle_true_positive_rate": 0.0, "oracle_independent_catch_rate": 0.0, "oracle_false_negatives": 3, "reviewer_overall_plan_approval": false},
+    {"mode": "iterative", "run_id": "20260811T081559Z-pilot-142-iterative-131-clean", "revision": "1.3.1", "tokens": 1950663, "status": "accepted", "protocol_tainted": false},
+    {"mode": "fresh-review", "run_id": "20260811T074548Z-pilot-142-fresh-131-restart5", "revision": "1.3.1", "tokens": 3310410, "status": "accepted", "protocol_tainted": false},
+    {"mode": "iterative", "run_id": "20260811T053701Z-pilot-142-matrix-iterative", "revision": "1.4.1", "tokens": 2441020, "status": "accepted", "protocol_tainted": false},
+    {"mode": "fresh-review", "run_id": "20260811T061045Z-pilot-142-matrix-fresh", "revision": "1.4.1", "tokens": 2763411, "status": "accepted", "protocol_tainted": false}
+  ],
+  "observed_token_deltas": [
+    {"revision": "1.3.1", "iterative_minus_fresh": -1359747, "percentage": -41.0756, "causal_claim": false},
+    {"revision": "1.4.1", "iterative_minus_fresh": -322391, "percentage": -11.6669, "causal_claim": false}
+  ],
+  "oracle": {"status": "completed-fail-closed", "run_id": "20260811T130218Z-current-fresh8", "seeded": 3, "true_positive_rate": 0.0, "independent_catch_rate": 0.0, "false_negatives": 3, "reason": "Current-only oracle completed, but no seeded defects were independently caught and Reviewer B approval evidence conflicts with the selected plan review text"},
+  "adoption": false,
+  "fail_closed_reasons": ["current oracle true-positive rate is 0.0", "current oracle independent-catch rate is 0.0", "conflicting Reviewer B overall_plan_approval evidence", "historical reports are contextual only and were not rerun"]
+}

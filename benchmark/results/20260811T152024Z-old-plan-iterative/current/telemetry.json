@@ -1,0 +1,76 @@
+{
+  "phase_records": [
+    {
+      "duration_seconds": 596.0,
+      "end": "2026-08-11T15:30:20Z",
+      "phase": "worker",
+      "precision": "exact",
+      "source": "runner",
+      "start": "2026-08-11T15:20:24Z"
+    }
+  ],
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "provenance": {
+    "lifecycle_artifact": "reviewer-lifecycle.jsonl",
+    "lookup_artifact": "telemetry.txt",
+    "telemetry_status": "available",
+    "token_total_precision": "exact"
+  },
+  "review_state": {
+    "adoptable": false,
+    "approval_conflict": true,
+    "fail_closed_reasons": [
+      "APPROVAL_CONFLICT",
+      "INDEPENDENT_THRESHOLD_FAILED",
+      "PLAN_NOT_APPROVED",
+      "SEMANTIC_THRESHOLD_FAILED"
+    ],
+    "independent_catch_rate": 0.0,
+    "independent_threshold": 1.0,
+    "oracle_completed": true,
+    "plan_approved": false,
+    "review_completed": true,
+    "seeded_denominator": 3,
+    "semantic_threshold": 1.0,
+    "semantic_true_positive_rate": 0.0
+  },
+  "reviewer_mode": "iterative",
+  "reviewer_records": [
+    {
+      "cycle": 0,
+      "event_count": 3,
+      "session_id": "019ff16e-539a-7892-b17f-83d1c0f25b87",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 0
+    },
+    {
+      "cycle": 1,
+      "event_count": 2,
+      "session_id": "20260811T152024Z-old-plan-iterative-current-A-1786462220720411889",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    },
+    {
+      "cycle": 1,
+      "event_count": 2,
+      "session_id": "20260811T152024Z-old-plan-iterative-current-B-1786462400350746198",
+      "source": "reviewer-lifecycle.jsonl",
+      "token_total": null,
+      "verification_pass": 1
+    }
+  ],
+  "reviewer_session_id": "20260811T152024Z-old-plan-iterative-current-B-1786462400350746198",
+  "revision": "current",
+  "run_id": "20260811T152024Z-old-plan-iterative",
+  "schema_version": "1.4.2",
+  "status": "accepted",
+  "taint_causes": [],
+  "telemetry_source": "threads.tokens_used",
+  "usage": {
+    "records": "1",
+    "total_tokens": 2723778
+  },
+  "worker_thread_id": "019ff169-1ae4-75b1-a3ce-bfc833a8fd76"
+}

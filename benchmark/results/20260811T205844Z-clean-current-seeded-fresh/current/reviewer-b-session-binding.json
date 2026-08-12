@@ -1,0 +1,13 @@
+{
+  "approval_path": "/tmp/ai-skills-capsules/20260811T205844Z-clean-current-seeded-fresh/current/reviewers/20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165/plan/approval.json",
+  "approved_at": "2026-08-11T21:15:02Z",
+  "binding_status": "passed",
+  "capsule_id": "20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165",
+  "capsule_manifest_sha256": "c80d7000e2c4d952829229035e4c87d21ed992a4cf2febd450b6e37b785df688",
+  "mode": "fresh-review",
+  "overall_plan_approval": false,
+  "reason_codes": [],
+  "reviewer_role": "reviewer-b",
+  "reviewer_session_id": "20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165",
+  "schema_version": "1.4.2-reviewer-binding"
+}

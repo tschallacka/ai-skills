@@ -1,0 +1,21 @@
+{
+  "schema": 27,
+  "benchmark_id": "BENCH-V27-001",
+  "contract_id": "planning-context-v27",
+  "categories": [
+    {"category_id":"summary-read","invocation_id":"INV-summary-read","pair_ids":["PAIR-summary-read-01","PAIR-summary-read-02","PAIR-summary-read-03","PAIR-summary-read-04","PAIR-summary-read-05","PAIR-summary-read-06","PAIR-summary-read-07","PAIR-summary-read-08","PAIR-summary-read-09","PAIR-summary-read-10"]},
+    {"category_id":"instruction-read","invocation_id":"INV-instruction-read","pair_ids":["PAIR-instruction-read-01","PAIR-instruction-read-02","PAIR-instruction-read-03","PAIR-instruction-read-04","PAIR-instruction-read-05","PAIR-instruction-read-06","PAIR-instruction-read-07","PAIR-instruction-read-08","PAIR-instruction-read-09","PAIR-instruction-read-10"]},
+    {"category_id":"fresh-check","invocation_id":"INV-fresh-check","pair_ids":["PAIR-fresh-check-01","PAIR-fresh-check-02","PAIR-fresh-check-03","PAIR-fresh-check-04","PAIR-fresh-check-05","PAIR-fresh-check-06","PAIR-fresh-check-07","PAIR-fresh-check-08","PAIR-fresh-check-09","PAIR-fresh-check-10"]},
+    {"category_id":"stale-delta","invocation_id":"INV-stale-delta","pair_ids":["PAIR-stale-delta-01","PAIR-stale-delta-02","PAIR-stale-delta-03","PAIR-stale-delta-04","PAIR-stale-delta-05","PAIR-stale-delta-06","PAIR-stale-delta-07","PAIR-stale-delta-08","PAIR-stale-delta-09","PAIR-stale-delta-10"]},
+    {"category_id":"review-handoff","invocation_id":"INV-review-handoff","pair_ids":["PAIR-review-handoff-01","PAIR-review-handoff-02","PAIR-review-handoff-03","PAIR-review-handoff-04","PAIR-review-handoff-05","PAIR-review-handoff-06","PAIR-review-handoff-07","PAIR-review-handoff-08","PAIR-review-handoff-09","PAIR-review-handoff-10"]}
+  ],
+  "repetitions": 10,
+  "variants": ["baseline","candidate"],
+  "helpers": {"baseline_digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","candidate_digest":"sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+  "environment": {"model_digest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","provider_digest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","tokenizer_digest":"sha256:5555555555555555555555555555555555555555555555555555555555555555","platform_digest":"sha256:6666666666666666666666666666666666666666666666666666666666666666","cache_digest":"sha256:7777777777777777777777777777777777777777777777777777777777777777","settings_digest":"sha256:8888888888888888888888888888888888888888888888888888888888888888"},
+  "accounting": {"required_fields":["input_tokens","output_tokens","reasoning_tokens","tool_tokens","model_visible_tokens","helper_output_bytes"],"model_visible_tokens":"input_tokens+output_tokens+reasoning_tokens+tool_tokens","cached_tokens":"recorded separately and never added","invalid":"missing, non-integer, negative, digest-mismatched, or pair-mismatched accounting invalidates the entire benchmark","pairing":"each pair has exactly one baseline and one candidate record with the same category, invocation, repetition, input digest, and settings digest"},
+  "thresholds": {"candidate_model_visible_tokens_max_ratio":0.8,"candidate_helper_output_bytes_max_ratio":0.05,"all_pairs_required":true,"all_oracle_cases_required":true},
+  "platform_settings": {"shell":"bash-5.2-compatible","locale":"C.UTF-8","timezone":"UTC","umask":"077","parallelism":1,"seed":270001},
+  "invalid_data_behavior": "fail closed with benchmark-invalid, no comparison result, no mutation, and exit 12",
+  "record_schema": {"pair_id":"text","category_id":"text","invocation_id":"text","repetition":"uint64 1..10","variant":"baseline|candidate","input_digest":"digest","helper_digest":"digest","model_digest":"digest","provider_digest":"digest","tokenizer_digest":"digest","platform_digest":"digest","cache_digest":"digest","settings_digest":"digest","input_tokens":"uint64","output_tokens":"uint64","reasoning_tokens":"uint64","tool_tokens":"uint64","model_visible_tokens":"uint64","helper_output_bytes":"uint64","record_digest":"digest"}
+}

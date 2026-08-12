@@ -1,0 +1,47 @@
+{
+  "access_control": "worker-capsule",
+  "adoptable": false,
+  "approval_conflict": true,
+  "blinded_oracle": "accepted",
+  "capsule": "/tmp/ai-skills-capsules/20260811T152024Z-old-plan-iterative/current/worker",
+  "cohort": "1.4.2",
+  "fail_closed_reasons": [
+    "APPROVAL_CONFLICT",
+    "INDEPENDENT_THRESHOLD_FAILED",
+    "PLAN_NOT_APPROVED",
+    "SEMANTIC_THRESHOLD_FAILED"
+  ],
+  "oracle_completed": true,
+  "plan_approved": false,
+  "protocol_id": "reviewer-optimization-1.4.2",
+  "review_completed": true,
+  "review_mode": "iterative",
+  "review_state": {
+    "adoptable": false,
+    "approval_conflict": true,
+    "fail_closed_reasons": [
+      "APPROVAL_CONFLICT",
+      "INDEPENDENT_THRESHOLD_FAILED",
+      "PLAN_NOT_APPROVED",
+      "SEMANTIC_THRESHOLD_FAILED"
+    ],
+    "independent_catch_rate": 0.0,
+    "independent_threshold": 1.0,
+    "oracle_completed": true,
+    "plan_approved": false,
+    "review_completed": true,
+    "seeded_denominator": 3,
+    "semantic_threshold": 1.0,
+    "semantic_true_positive_rate": 0.0
+  },
+  "revision": "current",
+  "run_id": "20260811T152024Z-old-plan-iterative",
+  "state_schema": {
+    "adoptable": "boolean",
+    "fail_closed_reasons": "string[]",
+    "oracle_completed": "boolean",
+    "plan_approved": "boolean",
+    "review_completed": "boolean"
+  },
+  "tag": "current"
+}

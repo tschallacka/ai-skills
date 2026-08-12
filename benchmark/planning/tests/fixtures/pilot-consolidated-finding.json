@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.4.2-semantic-oracle-fixture",
+  "fixture_id": "pilot-consolidated-finding-ar01",
+  "source": "current-pilot-20260811T130218Z-current-fresh8 semantic finding shape",
+  "defects": [
+    {
+      "id": "SD-01",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "one initial button",
+      "required_correction": "replace two initial buttons with one"
+    },
+    {
+      "id": "SD-02",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "fourth generated button",
+      "required_correction": "replace third generated button with fourth"
+    },
+    {
+      "id": "SD-03",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "visible white border",
+      "required_correction": "replace visible black border with visible white border"
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "AR-01",
+      "location": "plan-description.md § 3.1",
+      "summary": "The desired-outcome summary contradicts the rest of the plan on initial count, completion trigger, and border color.",
+      "required_correction": "Synchronize the summary with one initial button, fourth generated button, and visible white border.",
+      "independent": true
+    }
+  ],
+  "expected": {
+    "semantic_true_positives": ["SD-01", "SD-02", "SD-03"],
+    "mechanical_exact_id_matches": [],
+    "unresolved": [],
+    "review_completed": true,
+    "plan_approved": false,
+    "oracle_completed": true,
+    "adoptable": false
+  }
+}

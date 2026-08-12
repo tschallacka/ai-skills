@@ -1,0 +1,3 @@
+run_id	mode	execution	max_verification_passes	max_review_cycles	revisions
+20260810T202618Z-pilot-smoke	fresh-review	sequential	3	3	1.4.1
+1.4.1	1.4.1	20260810T202618Z-pilot-smoke	/tmp/20260810T202618Z-pilot-smoke/1.4.1	/home/mdibbets/git/ai-skills/benchmark/results/20260810T202618Z-pilot-smoke/1.4.1	1

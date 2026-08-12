@@ -1,0 +1,2 @@
+{"event_id":"B-start","actor":"reviewer","session_id":"20260811T145902Z-hardening-current-complete-current-B-1786460818027269162","event_type":"launch","cycle":1,"verification_pass":0,"review_mode":"fresh-review","timestamp":"2026-08-11T14:59:03Z"}
+{"event_id":"B-end","actor":"reviewer","session_id":"20260811T145902Z-hardening-current-complete-current-B-1786460818027269162","event_type":"handoff","cycle":1,"verification_pass":1,"review_mode":"fresh-review","exit_code":0,"independence":true,"timestamp":"2026-08-11T15:06:57Z"}

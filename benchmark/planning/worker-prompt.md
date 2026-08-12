@@ -48,6 +48,20 @@ This is a planning-only proof. Do not create, edit, open, inspect, serve, or
 test any HTML. Do not start a browser, server, driver, or other execution
 tooling.
 
+The final Reviewer B handoff is protocol evidence, not an adoption shortcut.
+Write one boolean `overall_plan_approval` in `approval.json`, together with
+`reviewer_session_id`, `mode`, `approved_findings`, `rejected_findings`, and
+`approved_at`. A value of `false` is valid terminal evidence and still permits
+detection/oracle grading, but the harness must report `plan_approved=false`
+and `adoptable=false`. Do not omit approval evidence or provide conflicting
+approval artifacts. Each finding must use a stable `AR-NN` `finding_id` and include the
+repository-relative `path`, precise `location`, `summary`,
+`observed_contradiction`, `impact`, `evidence`, `required_correction`, and
+boolean `independent`. Consolidated findings covering multiple defects are
+valid. ID-only strings, narrative-only evidence, and preclassified semantic
+labels such as `true_positive` are invalid; the independent oracle assigns
+classification. Do not invent hidden seed IDs or mutation text.
+
 Use normal runner behavior. Do not force sequential execution, disable
 parallelism, disable subagents, or use ephemeral mode. Preserve the full Codex
 SQLite telemetry for this run.
@@ -113,3 +127,23 @@ artifacts and the expected plan output. Do not audit the repository except for
 the exact allowed source paths above.
 
 End with a concise execution summary and the exact path to the analysis report.
+
+## Reviewer lifecycle contract (protocol 1.4.2)
+
+Fresh-review mode is the default. In explicit iterative mode, Reviewer A may
+verify only stable `AR-NN` findings it owns, receives only changed files,
+bounded diffs, and targeted validation, then writes a concise handoff and
+terminates. A cannot approve the overall plan. Reviewer B must use a fresh
+session/capsule, receive no A conclusions, and perform final independent
+approval. Three verification passes per reviewer and three fresh-review cycles
+per benchmark are hard limits; exceeding either is unresolved.
+
+## Filesystem boundary
+
+The only readable roots are the rendered worker capsule and `BENCH_ROOT`.
+Use the capsule's tagged `planning/SKILL.md`, generated `planning/REVIEWER.md`
+when present, task specification, approved references, and copied helper
+scripts. Do not inspect `SRC_ROOT`, repository history, installed skills,
+parent directories, previous result archives, or unallowlisted validators.
+Report every attempted escape with the path, command, decision, and evidence;
+an unauthorized attempt taints the run.

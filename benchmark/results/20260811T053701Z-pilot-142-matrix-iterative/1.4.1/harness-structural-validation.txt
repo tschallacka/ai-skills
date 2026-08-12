@@ -1,0 +1,16 @@
+Structural validation for basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan
+
+PASS: plan description (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/plan-description.md)
+PASS: plan progress tracker (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/progress.md)
+PASS: validation report (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/validation.md)
+PASS: analysis report (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/analysis-report.md)
+PASS: goal (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/02-verify-button-chain-behavior/goal.md)
+PASS: work-unit inventory (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/work-unit-inventory.md)
+PASS: UI user story (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/ui-user-stories.md)
+PASS: UI story run/cache (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/ui-story-runs)
+PASS: adversarial review (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/adversarial-review.md)
+PASS: bug register (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/bugs.md)
+PASS: context snapshot (matching context snapshot artifact)
+PASS: testing companion (/tmp/20260811T053701Z-pilot-142-matrix-iterative/1.4.1/workspace/basic-test-proof-1.4.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan/02-verify-button-chain-behavior/steps/02-step-browser-story-testing.md)
+
+result=pass

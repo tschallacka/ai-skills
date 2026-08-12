@@ -1,0 +1,5 @@
+# UI user stories: basic-test-proof-current-20260811T152024Z-old-plan-iterative-isolated-plan
+
+| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
+|---|---|---|---|---|---|---|---|---|
+| US-01 | Future tester opens button-chain.html in a browser after implementation with a desktop viewport and no prior generated buttons. | Click the visible initial button, then click each newly appended current-last generated button until the fourth generated button is clicked. | Mouse clicks on visible buttons only; every click targets the current last button rendered in the document. | Exactly one new button appears below the previous last button after each of the first three generated-button-producing clicks; clicking the fourth generated button clears the document and shows the exact lowercase text finished with a visible white border. | 💤 untested | — | W01,W02,W03,W04,W05 | `ui-story-runs/US-01.md` |

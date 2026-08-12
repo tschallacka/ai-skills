@@ -1,0 +1,39 @@
+{
+  "binding": {
+    "archive_path": "reviewer-b-session-binding.json",
+    "sha256": "ed93296e831a47ab742b6db75e3a0831f772a2b253b51597bac4f4c4b4a3d29e"
+  },
+  "defective_plan": {
+    "archive_path": "provenance/defective-plan-manifest.json",
+    "sha256": "af277111893fe9d0aa381243351cf8abbc6ebace9f107a0226b0b393bd9e1a21"
+  },
+  "lifecycle_handoff": {
+    "archive_path": "reviewer-lifecycle.jsonl",
+    "sha256": "247ee9d40d6fc7f254107fb4045e31d1724c1f2eb5ac03a0c16f3b0ede0c47f6"
+  },
+  "reviewer_approval": {
+    "archive_path": "reviewers/20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165/plan/approval.json",
+    "sha256": "e8a8f07eb972bd4bff1df4a9863c437bf21f9780a2c85aa6394d281b412db7f9"
+  },
+  "reviewer_capsule": {
+    "archive_path": "reviewers/20260811T205844Z-clean-current-seeded-fresh-current-B-1786482768027444165/capsule-manifest.json",
+    "sha256": "c80d7000e2c4d952829229035e4c87d21ed992a4cf2febd450b6e37b785df688"
+  },
+  "schema_version": "1.4.2-provenance",
+  "selection": {
+    "archive_path": "reviewer-selection.json",
+    "sha256": "fd26c2580dbcade039fb92c608c0206547f691f6ef7cf5523decfd7a841312df"
+  },
+  "source_plan": {
+    "archive_path": "basic-test-proof-current-20260811T205844Z-clean-current-seeded-fresh-isolated-plan",
+    "sha256": "5f231f106a6363a5f7a15674a06d9bb9f3299d0aee812dbfa96e002c8fca0f2d"
+  },
+  "target_snapshot": {
+    "archive_path": "provenance/target-snapshot-manifest.json",
+    "sha256": "af277111893fe9d0aa381243351cf8abbc6ebace9f107a0226b0b393bd9e1a21"
+  },
+  "transcript": {
+    "archive_path": "worker.jsonl",
+    "sha256": "337771968600a3c46b20bb4b9d94bf63425fae3dfa50769ccc4b8af46aaf1be9"
+  }
+}

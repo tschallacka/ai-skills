@@ -74,3 +74,85 @@ how the revisions progressed.
 
 Do not repair worker artifacts and do not fill missing telemetry from other
 sessions.
+
+Protocol 1.4.2 reports must separate review mode, reviewer sessions, cycles,
+verification passes, finding owners/closures, handoff and termination events,
+independence status, unresolved limits, and final fresh-review approval.
+Missing lifecycle or independence evidence is unavailable/tainted; never infer
+review rounds from token totals or prose.
+
+Every current-protocol comparison row and `evaluation.md` state section must
+preserve this machine-readable approval contract without collapsing it into
+worker exit status or oracle status:
+
+```json
+{
+  "review_completed": true,
+  "plan_approved": true,
+  "oracle_completed": true,
+  "adoptable": true,
+  "semantic_true_positive_rate": 1.0,
+  "independent_catch_rate": 1.0,
+  "seeded_denominator": 3,
+  "fail_closed_reasons": [],
+  "approval_conflict": false
+}
+```
+
+`adoptable` is true only when all four booleans are true, the denominator is
+positive, both configured semantic and independent-catch thresholds exist and
+are met, no ambiguity or taint is present, and `fail_closed_reasons` is empty.
+False approval remains gradeable detection evidence but requires
+`PLAN_NOT_APPROVED` and is non-adoptable. Missing approval also reports
+`APPROVAL_MISSING`; conflicting approval reports `APPROVAL_CONFLICT`.
+Incomplete review/oracle, ambiguous oracle output, tainted runs, missing
+denominators or thresholds, and below-threshold semantic or independent rates
+must use the corresponding enum reason. Reasons are deduplicated and sorted
+lexically; retain all applicable reasons. Mechanical exact-ID diagnostics are
+reported separately from semantic rates. Do not rewrite historical archives or
+infer a state field from prose, exit codes, or a missing artifact.
+
+Worker-internal reviewer subagents may appear in `reviewer-lifecycle.jsonl`
+with `actor=worker-subagent` and `protocol_role=worker-internal`. Report those
+sessions separately as observed worker activity; do not count them as harness
+Reviewer A/B protocol sessions or taint the harness lifecycle merely because
+they are not assigned protocol ownership fields.
+
+The analyzer may read only its run instructions, harness summary, current run
+archive, and its own workspace. It must not read the source checkout,
+installed skills, parent paths, or prior run archives. Preserve access-audit
+evidence and mark any attempted escape as tainted.
+
+Treat archives with `protocol_id=reviewer-optimization-1.4.2` as a distinct
+1.4.2 cohort. Keep legacy archives frozen and report them separately; any
+cross-cohort comparison is contextual only. Within-cohort metrics and
+protocol-labelled lifecycle evidence are authoritative.
+
+For the reviewer lifecycle, report four independent outcomes for every
+current-protocol archive: `authority`, `schema`, `provenance`, and semantic
+oracle/transformation status. Reviewer A is a handoff-only participant and
+cannot make `plan_approved` true; only one role-selected Reviewer B approval
+may be terminal. A Reviewer A approval is an unauthorized-approval failure,
+not an approval conflict with Reviewer B. A missing, duplicate, rejected, or
+conflicting Reviewer B approval must retain its explicit fail-closed reason.
+
+Treat `approval_schema_status` and `reviewer_binding_status` as evidence, not
+labels to infer from exit codes. Schema validation covers required metadata,
+types, complete finding objects, and duplicate finding IDs only. Exact
+Reviewer B session, capsule, mode, manifest, one-to-one identity, and
+freshness checks are provenance binding checks. Report every retained
+provenance hash and its `archive_path` for the source plan, defective-plan
+manifest, target snapshot manifest, selected approval, selected capsule
+manifest, transcript, and lifecycle handoff. A missing hash or a mismatch is
+a provenance/publication failure and cannot be converted into adoption by
+reading prose.
+The machine-readable aliases `source_plan_sha256`, `defective_plan_sha256`,
+`target_snapshot_sha256`, `approval_sha256`, `transcript_sha256`, and
+`lifecycle_handoff_sha256` must agree with the nested provenance records and
+their `provenance_paths`.
+
+When comparing adapter output, distinguish lossless field preservation from
+schema rejection, authority rejection, provenance rejection, and semantic
+oracle classification. Never repair or normalize an approval, fill missing
+finding fields, substitute another Reviewer B session/capsule, or infer
+success from `overall_plan_approval`, filenames, or a human-readable report.

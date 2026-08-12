@@ -1,0 +1,4 @@
+FAIL: Adversarial review is not approved
+FAIL: Plan description does not mirror approved adversarial-review status
+FAIL: Adversarial review has unresolved findings
+Plan validation failed with 3 error(s).

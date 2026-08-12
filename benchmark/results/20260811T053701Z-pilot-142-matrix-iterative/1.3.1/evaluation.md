@@ -1,0 +1,25 @@
+# Benchmark evaluation 1.3.1 20260811T053701Z-pilot-142-matrix-iterative
+
+- Status: tainted
+- Revision: 1.3.1 (v1.3.1)
+- Benchmarked skill: planning/ from tagged source v1.3.1
+- Isolated directory: /tmp/20260811T053701Z-pilot-142-matrix-iterative/1.3.1/workspace
+- Tagged source directory: /tmp/20260811T053701Z-pilot-142-matrix-iterative/1.3.1/source
+- Result archive: /home/mdibbets/git/ai-skills/benchmark/results/20260811T053701Z-pilot-142-matrix-iterative/1.3.1
+- Plan: basic-test-proof-1.3.1-20260811T053701Z-pilot-142-matrix-iterative-isolated-plan
+- Worker exit code: 0
+- Session ID: 019fef61-a96b-7e61-9500-3e102df6a3da
+- Telemetry records: 1
+- Total usage tokens: 1668080
+- Telemetry source: threads.tokens_used
+- Telemetry status: available
+- Start: 2026-08-11T05:53:02Z
+- End: 2026-08-11T06:00:22Z
+- Elapsed seconds: 440
+- Work-unit count: 6
+- Goal count: 2
+- Validation result: pass
+- Structural validation result: pass
+- Process audit result: pass
+- Artifact/process audit result: html_or_htm_files=0
+- Reviewer lifecycle status: failed

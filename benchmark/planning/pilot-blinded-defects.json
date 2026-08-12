@@ -1,0 +1,34 @@
+{
+  "defects": [
+    {
+      "id": "SD-01",
+      "path": "plan-description.md",
+      "old": "fourth generated button",
+      "new": "third generated button",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "fourth generated button",
+      "required_correction": "replace third generated button with fourth",
+      "severity": "high"
+    },
+    {
+      "id": "SD-02",
+      "path": "plan-description.md",
+      "old": "one initial button",
+      "new": "two initial buttons",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "one initial button",
+      "required_correction": "replace two initial buttons with one",
+      "severity": "high"
+    },
+    {
+      "id": "SD-03",
+      "path": "plan-description.md",
+      "old": "visible white border",
+      "new": "visible black border",
+      "location": "plan-description.md § 3.1",
+      "expected_signal": "visible white border",
+      "required_correction": "replace visible black border with visible white border",
+      "severity": "medium"
+    }
+  ]
+}
