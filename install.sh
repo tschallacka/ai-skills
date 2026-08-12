@@ -907,15 +907,21 @@ agent_kind_for_root() {
 }
 
 claude_permissions() {
-    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2"
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" python3 "$cfg" <<'PY'
+    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 "$cfg" <<'PY'
 import json, os, sys
 cfg = sys.argv[1]
 plans = os.environ["PLANS"].rstrip("/")
 scripts = os.environ["SCRIPTS"].rstrip("/")
-entries = [f"Read({plans}/**)", f"Edit({plans}/**)", f"Bash({scripts}/**:*)", f"Read({scripts}/**)"]
+tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
+entries = [
+    f"Read({plans}/**)", f"Edit({plans}/**)",
+    f"Bash({scripts}/**:*)", f"Read({scripts}/**)",
+    f"Read({tmp}/**)", f"Edit({tmp}/**)",
+    f"Bash({tmp}/**:*)",
+]
 data = {}
 try:
     data = json.load(open(cfg))
@@ -937,15 +943,20 @@ PY
 }
 
 opencode_permissions() {
-    local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2"
+    local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2" tmp="$3"
     [ -f "$cfg" ] || { echo "  opencode: no $cfg found; skipped" >&2; return 0; }
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" python3 "$cfg" <<'PY'
+    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 "$cfg" <<'PY'
 import json, os, sys
 cfg = sys.argv[1]
 plans = os.environ["PLANS"].rstrip("/")
 scripts = os.environ["SCRIPTS"].rstrip("/")
-entries = [f"Read({plans}/**)", f"Edit({plans}/**)", f"Bash({scripts}/**:*)"]
+tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
+entries = [
+    f"Read({plans}/**)", f"Edit({plans}/**)",
+    f"Bash({scripts}/**:*)",
+    f"Read({tmp}/**)", f"Edit({tmp}/**)", f"Bash({tmp}/**:*)",
+]
 data = {}
 try:
     data = json.load(open(cfg))
@@ -969,32 +980,84 @@ PY
 }
 
 print_manual_permissions() {
-    local kind="$1" scripts="$2" plans="$3"
+    local kind="$1" scripts="$2" plans="$3" tmp="$4"
     echo "  $kind: no safe auto-editable permission file was modified." >&2
     echo "    - grant $kind read/write on $plans" >&2
     echo "    - allow $kind to execute the planning helpers under $scripts" >&2
+    echo "    - allow $kind read/write/execute under the planning temp dir $tmp" >&2
     echo "    - example (Claude Code settings.json permissions.allow):" >&2
     echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*)" >&2
 }
 
+# Fallback because auto-configuration is not always possible or effective
+# (e.g. Codex/OpenClaw/Cline have no stable JSON permission key, or an agent
+# changed its format). Prints a self-contained prompt the user can paste into
+# their AI agent so the agent configures the correct permissions itself.
+print_agent_permission_prompt() {
+    local plans="$1" tmp="$2"; shift 2
+    local root kind
+    echo >&2
+    echo "If the automatic permission setup above is not effective for your agent," >&2
+    echo "paste the following into your AI agent to configure it for the planning" >&2
+    echo "skill. It is self-contained and refuses broad permissions:" >&2
+    echo >&2
+    printf '%s\n' '--- BEGIN AGENT PROMPT (copy from here) ---'
+    cat <<PROMPT
+Please configure my AI tooling so the "planning" skill can run. Concretely ensure:
+
+1. My plans directory is readable and writable by you and me:
+   $plans
+
+2. My planning scratch directory is readable, writable, and executable by you
+   (the planning skill writes temporary capsules and run artifacts there):
+   $tmp
+   Create it if it does not exist (mkdir -p).
+
+3. The planning helper shell scripts under each of the following scripts
+   directories may be executed by you; do not block them as unknown or
+   suspicious:
+PROMPT
+    for root in "$@"; do
+        kind="$(agent_kind_for_root "$root")"
+        printf '   - %s: %s\n' "$kind" "${root%/}/planning/scripts"
+    done
+    cat <<PROMPT
+Find your own permission/settings file (for example: Claude Code
+settings.json "permissions.allow", OpenCode opencode.json "permission.allow",
+Codex policy/sandbox config, Cline or OpenClaw allowed-tools list) and add
+entries that:
+  - grant read + write under $plans
+  - grant read/write/execute under $tmp
+  - allow executing Bash for the planning helper scripts (Read/Edit/Write plus
+    Bash rules scoped to those scripts)
+Add only entries that are not already present. If you modify a config file,
+first copy it to <file>.bak.<timestamp> before editing, then tell me the exact
+path and the entries you changed. Do not change any other permissions and do
+not grant broad or all-tools access.
+--- END AGENT PROMPT (copy from here) ---
+PROMPT
+}
+
 planning_permission_step() {
-    local plans="$HOME/.plans" root kind scripts
+    local plans="$HOME/.plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
+    (mkdir -p "$agent_tmp" && chmod 700 "$agent_tmp") 2>/dev/null || true
     echo >&2
     echo "== Step 2: planning runtime permissions ==" >&2
     if confirm "Create $plans as the global plans directory?"; then
         mkdir -p "$plans" && echo "  Created $plans" >&2
     fi
-    if confirm "Grant the selected agents read/write on $plans and allow them to execute the planning shell scripts? (Each edited config is backed up as .bak.timestamp)"; then
+    if confirm "Grant the selected agents read/write on $plans and $agent_tmp, and allow them to execute the planning shell scripts? (Each edited config is backed up as .bak.timestamp)"; then
         for root in "${SELECTED_TARGET_PATHS[@]}"; do
             kind="$(agent_kind_for_root "$root")"
             scripts="${root%/}/planning/scripts"
             case "$kind" in
-                claude)   claude_permissions "$scripts" "$plans" ;;
-                opencode) opencode_permissions "$scripts" "$plans" ;;
-                *)        print_manual_permissions "$kind" "$scripts" "$plans" ;;
+                claude)   claude_permissions "$scripts" "$plans" "$agent_tmp" ;;
+                opencode) opencode_permissions "$scripts" "$plans" "$agent_tmp" ;;
+                *)        print_manual_permissions "$kind" "$scripts" "$plans" "$agent_tmp" ;;
             esac
         done
     fi
+    print_agent_permission_prompt "$plans" "$agent_tmp" "${SELECTED_TARGET_PATHS[@]}"
 }
 
 if [ -n "$CLI_MODE" ]; then
