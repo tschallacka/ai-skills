@@ -118,6 +118,14 @@ grep -Fqx '§ 6.2' "$plan_dir/plan-description.md"
 "$script_dir/update-plan-content.sh" --decomposition-review "$plan_dir" completed
 
 "$script_dir/create-adversarial-review.sh" "$plan_dir"
+# update-adversarial-review: --help, stdin, and --file all work.
+"$script_dir/update-adversarial-review.sh" --help >/dev/null 2>&1
+printf 'ID,Missing or over-broad item,Required plan change,Status\nAR-01,"x","y","✅ resolved"\n' | \
+    "$script_dir/update-adversarial-review.sh" "$plan_dir" >/dev/null 2>&1
+grep -Fq '| AR-01 |' "$plan_dir/adversarial-review.md"
+printf 'ID,Missing,Required,Status\nAR-02,a,b,✅ resolved\n' > "$temporary_root/review.csv"
+"$script_dir/update-adversarial-review.sh" "$plan_dir" --file "$temporary_root/review.csv" >/dev/null 2>&1
+grep -Fq '| AR-02 |' "$plan_dir/adversarial-review.md"
 if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/pending-validation.log" 2>&1; then
     echo 'A pending review unexpectedly passed validation.' >&2
     exit 1

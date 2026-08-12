@@ -669,6 +669,7 @@ scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
 scripts/update-plan-content.sh
+scripts/update-adversarial-review.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
