@@ -24,6 +24,22 @@ if "$script_dir/update-plan-content.sh" --field "$plan_dir" 'UI affected' >/dev/
     echo 'A --field with too few arguments unexpectedly passed.' >&2
     exit 1
 fi
+# --title two-argument form defaults the document-id to 'plan'.
+"$script_dir/update-plan-content.sh" --title "$plan_dir" 'Status synchronization v2'
+grep -Fqx '# Plan: Status synchronization v2' "$plan_dir/plan-description.md"
+# --table-paragraph four-argument form defaults the document-id to 'plan'.
+"$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" 5.1 2 \
+    '"A","B"\n"1","2"'
+grep -Fqx '| A | B |' "$plan_dir/plan-description.md"
+grep -Fqx '| 1 | 2 |' "$plan_dir/plan-description.md"
+if "$script_dir/update-plan-content.sh" --title "$plan_dir" >/dev/null 2>&1; then
+    echo 'A --title with too few arguments unexpectedly passed.' >&2
+    exit 1
+fi
+if "$script_dir/update-plan-content.sh" --table-paragraph "$plan_dir" 5.1 2 >/dev/null 2>&1; then
+    echo 'A --table-paragraph with too few arguments unexpectedly passed.' >&2
+    exit 1
+fi
 "$script_dir/add-goal.sh" "$plan_dir" 01-sync 'Synchronize status' \
     'Keep the review verdict and plan description aligned.'
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 01-sync yes \
@@ -120,6 +136,10 @@ grep -Fqx -- '- Status: `✅ approved`' "$plan_dir/adversarial-review.md"
 grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"
 
 "$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | grep -Fq '"id":"unit:W01"'
+# plan-content.sh get defaults the document-id to 'plan' when a format is given.
+"$script_dir/plan-content.sh" get "$plan_dir" json | grep -Fq '"id":"plan"'
+"$script_dir/plan-content.sh" get "$plan_dir" plan json | grep -Fq '"id":"plan"'
+"$script_dir/plan-content.sh" get "$plan_dir" | grep -Fq '# Plan: '
 "$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | grep -Fq '"downstream":["W02"]'
 "$script_dir/validate-plan.sh" "$plan_dir"
 

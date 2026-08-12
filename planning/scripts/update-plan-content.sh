@@ -13,9 +13,11 @@ Usage:
   update-plan-content.sh -rp|--review-paragraph <plan-directory> <N.N> <text>
   update-plan-content.sh -rs|--review-section <plan-directory> <section-id> -p N.N: <content> ...
   update-plan-content.sh -tp|--table-paragraph <plan-directory> <document-id> <N.N> <columns> <CSV>
+  update-plan-content.sh -tp|--table-paragraph <plan-directory> <N.N> <columns> <CSV>   (document-id defaults to 'plan')
   update-plan-content.sh -ia|--insert-after <plan-directory> <document-id> <N.N> <text>
   update-plan-content.sh -ib|--insert-before <plan-directory> <document-id> <N.N> <text>
   update-plan-content.sh -t|--title <plan-directory> <document-id> <title>
+  update-plan-content.sh -t|--title <plan-directory> <title>   (document-id defaults to 'plan')
   update-plan-content.sh -f|--field <plan-directory> <document-id> <field-label> <value>
   update-plan-content.sh -f|--field <plan-directory> <field-label> <value>   (document-id defaults to 'plan')
   update-plan-content.sh -tr|--testing-requirement <plan-directory> <goal-name> <yes|no> <rationale>
@@ -96,8 +98,11 @@ if [[ "$command" == -* ]]; then
             command=section
             ;;
         -tp|--table-paragraph)
-            [ "$#" -eq 5 ] || usage
-            set -- "$1" "$2" "$3" "$4" "$5"
+            case "$#" in
+                4) set -- "$1" plan "$2" "$3" "$4" ;; # omit document-id == plan document
+                5) set -- "$1" "$2" "$3" "$4" "$5" ;;
+                *) usage ;;
+            esac
             command=table-paragraph
             ;;
         -ia|--insert-after)
@@ -115,8 +120,11 @@ if [[ "$command" == -* ]]; then
             command=insert-before
             ;;
         -t|--title)
-            [ "$#" -eq 3 ] || usage
-            set -- "$1" "$2" "$3"
+            case "$#" in
+                2) set -- "$1" plan "$2" ;; # omit document-id == plan document
+                3) set -- "$1" "$2" "$3" ;;
+                *) usage ;;
+            esac
             command=title
             ;;
         -f|--field)
