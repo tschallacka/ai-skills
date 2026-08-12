@@ -13,6 +13,7 @@ plan_arg="$1"
 title="$2"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+planning_ensure_tmpdir
 
 case "$plan_arg" in
     */*)

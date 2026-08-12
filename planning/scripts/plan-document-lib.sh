@@ -39,6 +39,23 @@ plan_die() {
     exit 64
 }
 
+# Scratch directory the planning skill may write temporary capsules and run
+# artifacts into. It lives under the system temp dir so it is fresh per boot;
+# the agent's existing write access to the temp dir suffices to create it.
+planning_tmpdir() {
+    printf '%s\n' "${TMPDIR:-/tmp}/planning-agent"
+}
+
+# Ensure the planning scratch directory exists for this boot. Creating a
+# directory under the (world-writable, sticky) system temp dir needs no extra
+# permission, so this is present, cheap, and idempotent. Failure is ignored:
+# the helpers still work when a nonstandard TMPDIR is unwritable.
+planning_ensure_tmpdir() {
+    local d
+    d="$(planning_tmpdir)"
+    mkdir -p "$d" 2>/dev/null && chmod 700 "$d" 2>/dev/null || true
+}
+
 plan_require_directory() {
     [ -d "$1" ] || plan_die "Plan directory not found: $1"
 }

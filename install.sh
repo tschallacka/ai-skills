@@ -1040,7 +1040,6 @@ PROMPT
 
 planning_permission_step() {
     local plans="$HOME/.plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
-    (mkdir -p "$agent_tmp" && chmod 700 "$agent_tmp") 2>/dev/null || true
     echo >&2
     echo "== Step 2: planning runtime permissions ==" >&2
     if confirm "Create $plans as the global plans directory?"; then
