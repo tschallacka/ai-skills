@@ -166,6 +166,7 @@ export PROTOCOL_ID=$(printf '%q' "$PROTOCOL_ID")
 export COHORT=$(printf '%q' "$COHORT")
 export WORKER_CAPSULE=$(printf '%q' "$CAPSULE_ROOT")
 export CAPSULE_ROOT=$(printf '%q' "$CAPSULE_ROOT")
+export CAPSULE_BASE=$(printf '%q' "$CAPSULE_BASE")
 export WORKER_WORKSPACE=$(printf '%q' "$WORKER_WORKSPACE")
 export REVIEW_MODE=$(printf '%q' "${REVIEW_MODE:-fresh-review}")
 export MAX_VERIFICATION_PASSES=$(printf '%q' "${MAX_VERIFICATION_PASSES:-3}")
@@ -255,7 +256,7 @@ setsid timeout "${WORKER_TIMEOUT:-45m}" codex -a never exec --model "${CODEX_MOD
     --add-dir "$WORKER_WORKSPACE" \
     "$(cat "$BENCH_ROOT/worker-prompt.md")" > "$BENCH_ROOT/worker.jsonl" 2>&1 &
 WORKER_CHILD_PID="$!"
-WORKER_PROCESS_GROUP_ID="$(ps -o pgid= -p "$WORKER_CHILD_PID" | tr -d ' ')"
+WORKER_PROCESS_GROUP_ID="$(ps -o pgid= -p "$WORKER_CHILD_PID" 2>/dev/null | tr -d ' ' || true)"
 if wait "$WORKER_CHILD_PID"; then
     CODE=0
 else

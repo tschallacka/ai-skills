@@ -329,6 +329,9 @@ JSON
 cat > "$fake_bin/codex-worker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Stay alive briefly so the runner can capture this worker's process group for
+# the post-run process audit (a real worker outlives the group-id capture).
+sleep 1
 workspace=''
 capsule=''
 while [ "$#" -gt 0 ]; do

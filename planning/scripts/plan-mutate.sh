@@ -18,6 +18,7 @@ Usage:
   plan-mutate.sh set-goal <plan> <goal-name> <incomplete|in-progress|completed>
   plan-mutate.sh set-review <plan> <pending|approved>
   plan-mutate.sh set-decomposition <plan> <incomplete|completed>
+  plan-mutate.sh update-adversarial-review <plan> [--file CSV]
   plan-mutate.sh rebuild-plan-progress <plan>
   plan-mutate.sh validate <plan>
 
@@ -82,6 +83,7 @@ case "$command" in
     set-goal) exec "$script_dir/update-plan-progress.sh" "$@" ;;
     set-review) exec "$script_dir/update-plan-content.sh" --review-status "$@" ;;
     set-decomposition) exec "$script_dir/update-plan-content.sh" --decomposition-review "$@" ;;
+    update-adversarial-review) exec "$script_dir/update-adversarial-review.sh" "$@" ;;
     rebuild-plan-progress) exec "$script_dir/rebuild-plan-progress.sh" "$@" ;;
     validate)
         [ "$#" -eq 1 ] || usage
