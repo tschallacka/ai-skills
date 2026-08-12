@@ -11,9 +11,17 @@
 #   role-context.sh <role-id|name> -p2     # next page (if "more: ..." is shown)
 # Each page is a deterministic slice; agents never need an interactive TTY.
 #
+# GATING: revealing capabilities are gated by caller identity so an out-of-
+# bounds agent cannot reach them by accident. --paths exposes the on-disk
+# layout, so it requires the caller to run as the maintainer:
+#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>
+# The default (print) mode is open: it only ever emits the requested role's own
+# documents. Shell gates are advisory (not a security boundary); the agent
+# framework is what actually confines the process.
+#
 # Usage:
 #   role-context.sh <role-id|canonical-name> [-p N] [--page-size BYTES]
-#   role-context.sh --paths <role-id|name>
+#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>   # maintainer-only
 #   role-context.sh --list
 #   role-context.sh --help
 #
@@ -117,7 +125,15 @@ id="$(resolve_id "$ROLE")"
 
 case "$MODE" in
     list) list_roles; exit 0 ;;
-    paths) role_docs "$id"; exit 0 ;;
+    paths)
+        # Revealing capability: only the maintainer may list on-disk paths.
+        [ "${ROLE_ID:-}" = maintainer ] || {
+            printf 'role-context: --paths is maintainer-only; run with ROLE_ID=maintainer\n' >&2
+            exit 64
+        }
+        role_docs "$id"
+        exit 0
+        ;;
 esac
 
 # Render the full payload once, then slice it into byte-budgeted pages.
