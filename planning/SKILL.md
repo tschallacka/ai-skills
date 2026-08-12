@@ -148,14 +148,10 @@ Create the plan under the user-owned `.plans/` root resolved by the helper:
 <plans-root>/<planname>/
 ```
 
-For a normal Unix home directory, this is:
-
-```text
-~/.plans/<planname>/
-```
-
-Set `PLANS_ROOT` when a different user-owned location is required. Keep the
-planning skill installation and durable plan storage separate.
+For a normal Unix home directory the default is `~/.plans/<planname>/`. Set
+`PLANS_ROOT` to pin a different root (automation always sets it and never
+prompts). Keep the planning skill installation and durable plan storage
+separate.
 
 Create it with the bundled command; do not create the directory or its initial
 documents with a patch. It creates a canonical `plan-description.md` and an
@@ -163,13 +159,37 @@ empty work-unit inventory that the other commands can update safely:
 
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
-PLANS_ROOT="${PLANS_ROOT:-$HOME/.plans}"
+# Bare plan name: the plans root is resolved by plan-root.sh (may prompt the
+# first time a plan is created in a project).
+"$PLANNING_SKILL_DIR/scripts/create-plan.sh" \
+  "<planname>" "<plan title>"
+
+# Explicit path (unchanged behaviour): use the root directly.
 "$PLANNING_SKILL_DIR/scripts/create-plan.sh" \
   "$PLANS_ROOT/<planname>" "<plan title>"
 ```
 
-Use the flagged `update-plan-content.sh` commands for narrative edits; the
-helpers enforce paragraph numbering, spacing, sequencing, and safe content.
+#### Root resolution (`scripts/plan-root.sh`)
+
+`plan-root.sh resolve` chooses the root in this order:
+
+1. `PLANS_ROOT` if already exported — used verbatim, never prompted.
+2. `<project>/.plans` when it is consistent with the skill (its `.env`
+   records that `.plans` as the plans root) — default, never prompted.
+3. A global directory that already matches a format for this project:
+   `~/.plans/<owner>/<repo>` (from the git remote) or
+   `~/.plans/<user>/<projectdir>`. Recognition is purely by directory format;
+   no marker file is written or read.
+4. Otherwise this is the first plan in the project: on an interactive
+   terminal the user is asked whether to store globally under `~/.plans` or
+   in the project's `./.plans`. When project storage is chosen the user is
+   then asked whether to add `/.plans` to the project's `.gitignore`. On a
+   non-interactive run the installer defaults to project storage and prints a
+   note.
+
+`create-plan.sh <planname>` places the new plan under the resolved root. Use
+the flagged `update-plan-content.sh` commands for narrative edits; the helpers
+enforce paragraph numbering, spacing, sequencing, and safe content.
 
 ### 2.1 Write the plan description
 
@@ -368,6 +388,32 @@ until every finding is resolved and the review verdict is `✅ approved`.
 Do not allow the planning agent to approve its own review. Re-run the review
 after a material scope change or a discovered bug.
 
+The reviewer protocol is version `1.4.2`. Fresh-review mode remains the
+default. Iterative mode is opt-in and must be bounded by a maximum of three
+verification passes per reviewer and three fresh-review cycles per benchmark.
+Reviewer records use `review_cycle`, `reviewer_session`, `finding_owner`,
+`verification_pass`, `closed_findings`, `reviewer_handoff`, and
+`review_mode`. Reviewer A may close only findings it owns and may not issue
+overall plan approval. Reviewer B must perform the final independent review
+and write one reviewer-owned `approval.json` containing
+`reviewer_session_id`, `mode`, `approved_findings`, `rejected_findings`,
+`approved_at`, and boolean `overall_plan_approval`. `false` is valid terminal
+review evidence for detection grading, but it is never an adoption pass. Each
+finding uses a stable `AR-NN` ID and records precise file/section evidence,
+impact, observed contradiction, and required correction. A finding may
+consolidate multiple defects; one finding per defect is not required. A fresh
+reviewer must use a new session and capsule, receive no prior conclusions,
+and perform the final independent approval.
+Exceeding a pass or cycle limit, inheriting prior conclusions, or changing the
+task contract or safety boundary marks the run unresolved and requires a fresh
+review.
+
+The review boundary is filesystem-enforced: each worker and reviewer receives
+only its capsule and workspace, and each fresh reviewer receives a newly built
+capsule. The capsule manifest, lifecycle records, and audit events are part of
+the retained evidence. Missing identity, provenance, lifecycle, or
+independence evidence is a publication failure rather than an inferred pass.
+
 When the secondary review approves the plan, synchronize both status fields in
 one atomic command (only after the independent reviewer has actually approved
 it):
@@ -541,6 +587,33 @@ bash planning/tests/test-plan-context.sh --benchmark
 Treat the benchmark as a measurement gate, not proof from shell CPU alone:
 continue only when model-visible input is materially reduced without a
 correctness regression or unacceptable latency increase.
+
+Context reads are phase-specific and bounded: summaries during drafting,
+ownership/dependency views during review, changed-document views during
+correction, and validator-focused views during final validation. The context
+index namespaces the authoritative `SKILL.md`, generated `REVIEWER.md`, and
+approved relative references; source or plan hash drift invalidates cached
+memory before a read. Per-worker variables and checkpoint state live outside
+counted plan deliverables and are isolated by run, revision, and session.
+
+Every phase checkpoint records only the current state, open finding IDs, next
+action, changed files, and source/plan hashes. Checkpoints are written
+atomically and rejected on identity or hash mismatch. Helper output is quiet
+by default, bounded retries return corrected usage, and size budgets warn or
+fail without replacing required evidence with prose.
+
+### 4.1.1 Dynamic scope additions are plan mutations
+
+When execution discovers new implementation, verification, risk, or handoff
+scope, record the discovery in working context first, then convert it into
+durable plan state before treating it as in scope. A durable addition requires
+an owning goal or existing goal step, a work-unit inventory row with explicit
+dependencies, a step with a concrete acceptance contract, a testing companion
+when behavior is verifiable, progress rows, and a handoff/evidence requirement.
+Run the plan validator after the mutation and ensure the adversarial-review
+artifact explicitly covers the new unit. A note, TODO, status paragraph, or
+journey entry alone is not a valid plan addition and must not be marked
+complete or used as a release dependency.
 <!-- REVIEWER_SECTION:END bounded-context -->
 
 ### 4.2 Reviewer profile generation
@@ -562,6 +635,7 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/create-progress.sh" <goal-directory> <goal-name>
 "$PLANNING_SKILL_DIR/scripts/create-plan-progress.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-plan.sh" <plan-directory> "<plan title>"
+"$PLANNING_SKILL_DIR/scripts/plan-root.sh" resolve   # prints the resolved plans root; prompts on first use in a project
 "$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/create-ui-validation.sh" <plan-directory> "<browser target or discovery method>"
 "$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
@@ -594,6 +668,58 @@ scripts change the requested row and recalculate the relevant progress bar.
 and blast radius, plus `path` for a direct document lookup. Document IDs are
 `plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`, and `unit:<WNN>`.
 
+### 4.3 Persistent monitor steering
+
+Monitoring an active worker, reviewer, analyzer, or test process is an
+execution loop, not a one-shot status query. Treat a status report, partial
+artifact list, unchanged poll, or “I’m working” message as intermediate.
+Continue bounded polling and issue an explicit next-action steering command
+while the process remains active. Before steering, inspect bounded process
+state, latest output, expected artifacts, elapsed time, and retry budget.
+
+Stop only on terminal evidence: process exit with a result, accepted/tainted/
+rejected archive, validated completion report, or a recorded blocker after the
+configured retry budget. Never restart blindly, hide a real error, or report
+success because a subprocess emitted a status-only message. Preserve the last
+output, process audit, next action, steering/retry count, and terminal reason.
+For repeated long checks, use a uniquely named executable helper under `/tmp`
+with explicit run arguments and a bounded selector flag (for example `1` for
+runner/worker, `2` for reviewers, and `3` for all in-scope processes); reject
+unsupported selector values before inspecting processes.
+
+### 4.4 Planning environment contract evolution
+
+The environment manifest is a versioned planning-skill interface, not a
+backward-compatibility layer. When a new variable is needed or an existing
+variable changes, treat it as a coordinated schema migration: record the
+reason and owner in the plan, update the manifest producer, every applicable
+consumer, package inventory, focused rejection/fixture tests, and adversarial
+review evidence in the same change. Re-run the plan validator and the
+installer-manifest check before completion.
+
+Do not preserve old variable names through aliases, adapters, legacy modes, or
+inferred defaults. Replace the manifest and its consumers together; a missing,
+stale, unknown, or schema-mismatched manifest must fail closed with an
+actionable error. Remove superseded variables from the producer, consumer
+allowlists, documentation, and tests, and confirm that no published archive
+contains the local manifest.
+
+### 4.5 Helper-only plan mutations and bulk execution
+
+Durable changes under `.plans/` must go through the planning helpers or the
+canonical `scripts/plan-mutate.sh` dispatcher. This includes creating goals,
+steps, testing companions, inventory rows, progress rows, content changes,
+review status, decomposition status, and validation state. Direct editor,
+patch, redirection, or ad-hoc script writes to plan artifacts are prohibited.
+
+When many helper mutations are needed, prefer one temporary executable batch
+script containing only approved helper commands. Run it with strict mode and
+bounded arguments, capture its output, remove it after completion, and run the
+structural validator once the batch succeeds. Each helper mutation remains
+atomic; a batch failure is recorded as incomplete and is never presented as a
+completed plan update. Do not use batching to bypass helper validation or hide
+an intermediate failure.
+
 ### 4.2 v27 replacement package handoff
 
 The v27 replacement package is repository-owned until its closure plan is
@@ -602,7 +728,7 @@ approved. Its finite installable boundary is the six-column
 source/destination ownership record and the two repository-root v27 brainstorm
 inputs are source-only. The package contains the v27 contract, benchmark and
 oracle records, fixtures, runner evidence, installer proof, this skill, and
-the 21 planning helper scripts listed by that manifest.
+the 28 planning helper scripts listed by that manifest.
 
 The coordinator resume order is: close authority/recovery, transaction/lease,
 package/wire, and benchmark/oracle contracts; generate and verify the bounded
