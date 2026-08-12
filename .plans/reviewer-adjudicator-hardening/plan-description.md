@@ -23,12 +23,12 @@ In scope: benchmark/planning/grade-blinded-run.sh, review-oracle.sh, setup-bench
 ## Affected areas
 
 § 6.1
-benchmark/planning/grade-blinded-run.sh (path/location/signal/correction predicates, per-defect classification, report schema), benchmark/planning/setup-benchmark.sh (oracle evidence adapter, reviewer prompt/schema contract note around lines 495-570 and 771-790, reviewer-state synthesis 1031-1136, threshold export 179-180), benchmark/planning/run-benchmark.sh (threshold export before setup invocation, line 208), benchmark/planning/review-oracle.sh (blinded dispatch unchanged), benchmark/planning/worker-prompt.md and generated reviewer prompt note, benchmark/planning/tests/test-review-oracle.sh and test-review-lifecycle.sh, benchmark/planning/tests/fixtures/.
+benchmark/planning/grade-blinded-run.sh (path/location/signal/correction predicates, per-defect classification, report schema); benchmark/planning/setup-benchmark.sh (oracle evidence adapter; approval schema validator near line 502; reviewer prompt template near line 774; reviewer-state synthesis ~1034-1140; threshold export near lines 182-183); benchmark/planning/run-benchmark.sh (add the threshold export before the setup invocation at line 208); benchmark/planning/review-oracle.sh (blinded dispatch unchanged); benchmark/planning/worker-prompt.md and the generated reviewer prompt note; benchmark/planning/tests/test-review-oracle.sh and test-review-lifecycle.sh; benchmark/planning/tests/fixtures/. Line numbers are approximate and may drift.
 
 ## Constraints and decisions
 
 § 7.1
-Plans live under /home/mdibbets/git/ai-skills/.plans (PLANS_ROOT set) consistent with the two prior hardening plans. All grader changes must preserve terminal/evidence integrity, encrypted-map and defective-file hash verification, malformed-envelope fail-closed, Reviewer B-only authority, and public-report redaction of expected_signal/required_correction/seed IDs. The grader must not rely on hidden defect IDs matching finding IDs. Frozen-archive regrade uses the archived approval.json and pilot-blinded-defects.json only; no archived file is edited.
+Plans live under /home/mdibbets/git/ai-skills/.plans (PLANS_ROOT set) consistent with the two prior hardening plans. All grader changes must preserve terminal/evidence integrity, encrypted-map and defective-file hash verification, malformed-envelope fail-closed, Reviewer B-only authority, and public-report redaction of expected_signal/required_correction/seed IDs. The grader must not rely on hidden defect IDs matching finding IDs. Frozen-archive regrade uses the archived approval.json and pilot-blinded-defects.json only; no archived file is edited. Threshold values default to 1.0 (100% required detection) as a deliberately strict fail-closed adoption policy; this is a policy choice, not derived from the oracle, and may be lowered via SEMANTIC_THRESHOLD and INDEPENDENT_THRESHOLD for experimental grading.
 
 ## Risks and open questions
 
@@ -38,7 +38,7 @@ Risk: over-lenient matching could admit unrelated findings; mitigate with the bo
 ## UI classification
 
 - UI affected: no
-- Rationale: <why>
+- Rationale: No user-visible component, page, interaction, or flow changes; this plan hardens a shell test harness and its grader, so browser-driven UI validation does not apply.
 
 ## Adversarial review
 
