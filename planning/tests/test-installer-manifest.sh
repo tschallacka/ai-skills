@@ -15,14 +15,14 @@ test_v27_manifest_emission() {
     cmp -s "$manifest_file" "$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
     cmp -s "$manifest_file" "$map_installable"
-    [ "$(wc -l < "$manifest_file")" -eq 37 ]
+    [ "$(wc -l < "$manifest_file")" -eq 51 ]
 
     while IFS=$'\t' read -r source destination owner gate collision source_only; do
         [ -n "$source" ] || continue
         [ "$source_only" = false ] || { printf 'source-only row in manifest: %s\n' "$source" >&2; return 1; }
         [ -n "$owner" ] && [ -n "$gate" ] && [ -n "$collision" ]
-        resolved=$(bash "$repo_dir/install.sh" --resolve-source planning "$destination")
-        [ "$resolved" = "$repo_dir/$source" ] || {
+        resolved=$(realpath -m "$(bash "$repo_dir/install.sh" --resolve-source planning "$destination")")
+        [ "$resolved" = "$(realpath -m "$repo_dir/$source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
             return 1
         }
