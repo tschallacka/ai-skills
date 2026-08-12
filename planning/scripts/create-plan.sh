@@ -2,14 +2,29 @@
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <title>" >&2
+    echo "Usage: $(basename "$0") <plan-name|plan-directory> <title>" >&2
+    echo "  <plan-directory> may be an explicit path (existing behaviour)." >&2
+    echo "  <plan-name> (no '/') resolves the plans root via plan-root.sh," >&2
+    echo "             prompting on first use in a project." >&2
     exit 64
 fi
 
-plan_dir="$1"
+plan_arg="$1"
 title="$2"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+
+case "$plan_arg" in
+    */*)
+        plan_dir="$plan_arg"
+        plans_root="${PLANS_ROOT:-$HOME/.plans}"
+        ;;
+    *)
+        resolved_root="$("$script_dir/plan-root.sh" resolve "${PROJECT_DIR:-$PWD}")"
+        plan_dir="$resolved_root/$plan_arg"
+        plans_root="$resolved_root"
+        ;;
+esac
 
 [[ "$(basename "$plan_dir")" =~ ^[a-z0-9][a-z0-9-]*$ ]] || plan_die "Plan directory name must be kebab-case"
 [ ! -e "$plan_dir" ] || plan_die "Plan directory already exists: $plan_dir"
@@ -48,5 +63,8 @@ inventory="$plan_dir/work-unit-inventory.md"
     printf '%s\n' '- [ ] Each step has exactly one work unit and no unnamed incidental edits.'
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$inventory"
+plan_root=$(cd "$plan_dir" && pwd -P)
+"$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
+"$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
 trap - EXIT
 echo "Created $plan_dir"
