@@ -875,6 +875,128 @@ ensure_plan_root_after_install() {
     legacy_plan_migration
 }
 
+# ---------------------------------------------------------------
+# Step 2: planning runtime permissions (interactive main path only)
+# ---------------------------------------------------------------
+# Grants the user-chosen agents read/write on the plans root and execution
+# access to the copied planning shell scripts. Every config file that is
+# modified is first backed up as <file>.bak.<timestamp>. Additions are
+# idempotent: entries already present are never duplicated.
+backup_file_timestamp() {
+    local file="$1" stamp backup n=1
+    stamp="$(date +%Y%m%dT%H%M%S 2>/dev/null || date +%Y%m%dT%H%M%S)"
+    backup="${file}.bak.${stamp}"
+    while [ -e "$backup" ]; do
+        backup="${file}.bak.${stamp}.${n}"
+        n=$((n + 1))
+    done
+    cp -p "$file" "$backup"
+    echo "  Backup: $backup" >&2
+}
+
+agent_kind_for_root() {
+    case "${1%/}" in
+        "$HOME/.claude/skills")          echo claude ;;
+        "$HOME/.config/opencode/skills") echo opencode ;;
+        "$HOME/.codex/skills")           echo codex ;;
+        "$HOME/.openclaw/skills")        echo openclaw ;;
+        "$HOME/.cline/skills")           echo cline ;;
+        "$HOME/.agents/skills")          echo universal ;;
+        *)                               echo custom ;;
+    esac
+}
+
+claude_permissions() {
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2"
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    backup_file_timestamp "$cfg"
+    PLANS="$plans" SCRIPTS="$scripts" python3 "$cfg" <<'PY'
+import json, os, sys
+cfg = sys.argv[1]
+plans = os.environ["PLANS"].rstrip("/")
+scripts = os.environ["SCRIPTS"].rstrip("/")
+entries = [f"Read({plans}/**)", f"Edit({plans}/**)", f"Bash({scripts}/**:*)", f"Read({scripts}/**)"]
+data = {}
+try:
+    data = json.load(open(cfg))
+except Exception:
+    data = {}
+allow = data.setdefault("permissions", {}).setdefault("allow", [])
+if not isinstance(allow, list):
+    allow = data["permissions"]["allow"] = list(allow) if isinstance(allow, (list, tuple)) else []
+added = [e for e in entries if e not in allow]
+allow.extend(added)
+with open(cfg + ".tmp", "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False); f.write("\n")
+os.replace(cfg + ".tmp", cfg)
+if added:
+    print("  claude-code: added to permissions.allow:"); [print("    - " + x) for x in added]
+else:
+    print("  claude-code: permissions already present")
+PY
+}
+
+opencode_permissions() {
+    local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2"
+    [ -f "$cfg" ] || { echo "  opencode: no $cfg found; skipped" >&2; return 0; }
+    backup_file_timestamp "$cfg"
+    PLANS="$plans" SCRIPTS="$scripts" python3 "$cfg" <<'PY'
+import json, os, sys
+cfg = sys.argv[1]
+plans = os.environ["PLANS"].rstrip("/")
+scripts = os.environ["SCRIPTS"].rstrip("/")
+entries = [f"Read({plans}/**)", f"Edit({plans}/**)", f"Bash({scripts}/**:*)"]
+data = {}
+try:
+    data = json.load(open(cfg))
+except Exception:
+    data = {}
+perm = data.setdefault("permission", {})
+allow = perm.setdefault("allow", [])
+if not isinstance(allow, list):
+    allow = perm["allow"] = list(allow) if isinstance(allow, (list, tuple)) else []
+added = [e for e in entries if e not in allow]
+allow.extend(added)
+with open(cfg + ".tmp", "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False); f.write("\n")
+os.replace(cfg + ".tmp", cfg)
+if added:
+    print("  opencode: added to permission.allow:"); [print("    - " + x) for x in added]
+    print("  opencode: pattern syntax varies by version; review the entries above.")
+else:
+    print("  opencode: permissions already present")
+PY
+}
+
+print_manual_permissions() {
+    local kind="$1" scripts="$2" plans="$3"
+    echo "  $kind: no safe auto-editable permission file was modified." >&2
+    echo "    - grant $kind read/write on $plans" >&2
+    echo "    - allow $kind to execute the planning helpers under $scripts" >&2
+    echo "    - example (Claude Code settings.json permissions.allow):" >&2
+    echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*)" >&2
+}
+
+planning_permission_step() {
+    local plans="$HOME/.plans" root kind scripts
+    echo >&2
+    echo "== Step 2: planning runtime permissions ==" >&2
+    if confirm "Create $plans as the global plans directory?"; then
+        mkdir -p "$plans" && echo "  Created $plans" >&2
+    fi
+    if confirm "Grant the selected agents read/write on $plans and allow them to execute the planning shell scripts? (Each edited config is backed up as .bak.timestamp)"; then
+        for root in "${SELECTED_TARGET_PATHS[@]}"; do
+            kind="$(agent_kind_for_root "$root")"
+            scripts="${root%/}/planning/scripts"
+            case "$kind" in
+                claude)   claude_permissions "$scripts" "$plans" ;;
+                opencode) opencode_permissions "$scripts" "$plans" ;;
+                *)        print_manual_permissions "$kind" "$scripts" "$plans" ;;
+            esac
+        done
+    fi
+}
+
 if [ -n "$CLI_MODE" ]; then
     download_source
     case "$CLI_MODE" in
@@ -905,6 +1027,7 @@ done
 
 if contains planning "${SELECTED_SKILLS[@]}"; then
     ensure_plan_root_after_install
+    planning_permission_step
 fi
 
 echo >&2
