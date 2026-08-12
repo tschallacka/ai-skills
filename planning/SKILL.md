@@ -37,6 +37,18 @@ bug-priority feedback loop.
 - Do not hide multiple edits behind a broad verb such as "implement",
   "update", "integrate", or "wire up". Name the concrete file and symbol (or
   file-level scope) that changes.
+- Only invoke this skill when the task explicitly requests a durable plan or
+  resumable plan files. The presence of `.plans/`, `brainstorm.md`, or
+  plan-shaped files does not by itself authorize loading this skill; a
+  subagent must not self-load it just because it recognizes those paths.
+- **Subagent skill policy.** When you hand work to a fresh secondary agent
+  (adversarial review, reviewer, or any subagent), its starting prompt must
+  explicitly say: "Do not load any skill on your own. Use only the skills
+  explicitly named in this starting prompt; do not infer a skill from file
+  names, directories, or paths (for example `.plans/`, `.brainstorm/`, or
+  skill files). If you believe another skill is needed, state it and stop —
+  do not load it." Do not spawn a subagent that could read this skill and
+  then reload it autonomously.
 
 ## Tool discipline and context limits
 
@@ -385,6 +397,25 @@ every unplanned file, symbol, behavior, test, browser interaction, dependency,
 and bug-recovery path needed to execute the request. The plan is rejected
 until every finding is resolved and the review verdict is `✅ approved`.
 
+The fresh adversary must be **bounded-read locked**. Hand it the exact reader
+command, plan directory, and supported entry ids/views. Its starting prompt
+must include verbatim:
+
+"Read plan files and artifacts ONLY through the gated reader:
+  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
+  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
+Valid --document IDs: plan, inventory, progress, adversarial-review,
+goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
+--max-records/--max-bytes for a large inventory if needed. Never load a whole
+plan file, an entire plan directory, or the `.plans/` tree wholesale. A
+wholesale file read of a plan artifact is a context-overflow violation. If the
+gate cannot give you something, report it as a limitation — do not bypass it."
+
+Do not hand the adversary a command that dumps a plan file or directory in
+full. Require the adversary's returned findings to state that all plan reads
+went through the gate and to list any wholesale read it performed, so a
+violation is visible (soft audit).
+
 Do not allow the planning agent to approve its own review. Re-run the review
 after a material scope change or a discovered bug.
 
@@ -562,6 +593,14 @@ tagged identifiers, and check only entries that have been processed:
 Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
+
+**All plan reads go through the gated readers.** Both the planning agent and
+every fresh subagent (adversarial review, reviewer) must read plan documents
+via the bundled gated readers (`plan-context.sh`), never by loading a whole
+plan file or plan directory. Wholesale `Read`/`cat` of a plan artifact is a
+context-overflow violation, because the gated readers strip plan metadata and
+metadata-bearing front-matter that is not needed to act. Subagents receive this
+instruction in their starting prompt (see section 3).
 Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
 with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash. On the constrained VPS used during this initiative, work sequentially,

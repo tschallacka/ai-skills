@@ -73,6 +73,9 @@ context_resolve_document() {
     local plan_dir="$1" document_id="$2"
     case "$document_id" in
         plan) printf '%s/plan-description.md\n' "$plan_dir" ;;
+        inventory) printf '%s/work-unit-inventory.md\n' "$plan_dir" ;;
+        progress) printf '%s/progress.md\n' "$plan_dir" ;;
+        adversarial-review) printf '%s/adversarial-review.md\n' "$plan_dir" ;;
         goal:*) printf '%s/%s/goal.md\n' "$plan_dir" "${document_id#goal:}" ;;
         step:*)
             local value="${document_id#step:}" goal="${value%%/*}" step="${value#*/}"
@@ -92,7 +95,7 @@ context_resolve_document() {
 
 context_entry_id() {
     case "$1" in
-        plan|goal:*|step:*|unit:W*) printf '%s\n' "$1" ;;
+        plan|goal:*|step:*|unit:W*|inventory|progress|adversarial-review) printf '%s\n' "$1" ;;
         *) context_die "usage: unsupported entry id: $1" ;;
     esac
 }
@@ -138,6 +141,15 @@ context_build_index() {
                 [ -f "$file" ] || continue
                 printf 'unit:%s\t%s\tunit\t%s\n' "$unit" "$file" "$(context_hash_file "$file")"
             done
+        if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+            printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"
+        fi
+        if [ -f "$plan_dir/progress.md" ]; then
+            printf 'progress\t%s\tprogress\t%s\n' "$plan_dir/progress.md" "$(context_hash_file "$plan_dir/progress.md")"
+        fi
+        if [ -f "$plan_dir/adversarial-review.md" ]; then
+            printf 'adversarial-review\t%s\tadversarial-review\t%s\n' "$plan_dir/adversarial-review.md" "$(context_hash_file "$plan_dir/adversarial-review.md")"
+        fi
         if [ -n "${CONTEXT_SOURCE_ROOT:-}" ] && [ -f "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" ]; then
             printf 'source:SKILL.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/SKILL.md")"
             if [ -f "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" ]; then

@@ -12,6 +12,15 @@ Usage:
   plan-context.sh check --plan-dir DIR (--entry ID | --changed | --all) [--format text|json]
   plan-context.sh refresh --plan-dir DIR (--entry ID | --stale) [--format text|json]
   plan-context.sh checkpoint --plan-dir DIR --phase PHASE --state STATE --findings-file FILE --changed-files FILE --source-hash HASH --plan-hash HASH
+
+Valid --document IDs:
+  plan                 plan-description.md
+  inventory            work-unit-inventory.md
+  progress             progress.md
+  adversarial-review   adversarial-review.md
+  goal:<goal id>       <goal>/goal.md             (e.g. goal:01-build)
+  step:<goal>/<step>   <goal>/steps/<step>.md     (e.g. step:01-build/02-step-verify)
+  --unit WNN           the step a work unit maps to in work-unit-inventory.md
 EOF
     return 2
 }

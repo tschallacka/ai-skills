@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `81892790a117044d8ae4c452c56a5be81f95c87929e06177ecdc17ef2eb58ea6`
+> Source SHA-256: `178a81234c081947010bac6ad84a746a2e54ef73a3d13a9368fec864017e5d43`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -26,6 +26,25 @@ plan artifacts, but not the planning agent's conclusions. It must identify
 every unplanned file, symbol, behavior, test, browser interaction, dependency,
 and bug-recovery path needed to execute the request. The plan is rejected
 until every finding is resolved and the review verdict is `✅ approved`.
+
+The fresh adversary must be **bounded-read locked**. Hand it the exact reader
+command, plan directory, and supported entry ids/views. Its starting prompt
+must include verbatim:
+
+"Read plan files and artifacts ONLY through the gated reader:
+  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
+  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
+Valid --document IDs: plan, inventory, progress, adversarial-review,
+goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
+--max-records/--max-bytes for a large inventory if needed. Never load a whole
+plan file, an entire plan directory, or the `.plans/` tree wholesale. A
+wholesale file read of a plan artifact is a context-overflow violation. If the
+gate cannot give you something, report it as a limitation — do not bypass it."
+
+Do not hand the adversary a command that dumps a plan file or directory in
+full. Require the adversary's returned findings to state that all plan reads
+went through the gate and to list any wholesale read it performed, so a
+violation is visible (soft audit).
 
 Do not allow the planning agent to approve its own review. Re-run the review
 after a material scope change or a discovered bug.
@@ -116,6 +135,14 @@ tagged identifiers, and check only entries that have been processed:
 Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
+
+**All plan reads go through the gated readers.** Both the planning agent and
+every fresh subagent (adversarial review, reviewer) must read plan documents
+via the bundled gated readers (`plan-context.sh`), never by loading a whole
+plan file or plan directory. Wholesale `Read`/`cat` of a plan artifact is a
+context-overflow violation, because the gated readers strip plan metadata and
+metadata-bearing front-matter that is not needed to act. Subagents receive this
+instruction in their starting prompt (see section 3).
 Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
 with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash. On the constrained VPS used during this initiative, work sequentially,
