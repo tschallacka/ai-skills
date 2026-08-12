@@ -161,3 +161,39 @@ When changing a generated format:
 4. Run shell syntax checks, `git diff --check`, and all bounded planning tests.
 5. Keep this contract precise and keep agent-facing prose limited to workflow
    decisions rather than repeating these implementation details.
+
+## Benchmark-domain roles (not part of the end-user planning lifecycle)
+
+The benchmark harness (benchmark/planning) introduces roles that do not exist
+in normal planning. They are domain-specific and gated here rather than in the
+agent-facing ROLES.md registry, because a user planning their own project never
+encounters them.
+
+| Canonical id | Canonical name | Role | Domain / phase | Authority & limits |
+|---|---|---|---|---|
+| `oracle` | Pythia | Independent Oracle: blinded adjudicator grading seeded defects against the reviewer's finding envelope. Deterministic and fail-closed. | benchmark / execution | Tool, not an agent. Must never leak seed IDs, expected_signal, or required_correction into public reports; bound by terminal-evidence and provenance checks. Only needed to validate the review/grading pipeline, never for end-user plans. |
+| `eve` | Eve | Run Analyzer: reads a completed benchmark run archive and writes the comparison/analysis report. | benchmark / cleanup | Read-only over archived evidence; never edits archived frozen results. |
+
+These roles belong to the benchmark harness that tests and hardens the
+review/adjudication pipeline; they are deliberately excluded from the general
+role registry so end-user-facing context stays scoped.
+
+## Canonical roles master (planning lifecycle)
+
+Single source for every end-user planning-lifecycle role: canonical id, name,
+description, and authority. Phase-scoped copies in `roles/planning.md`,
+`roles/execution.md`, `roles/cleanup.md` reference these ids and must not
+redefine them. Keep this table and the phase docs in sync; no backwards-compat
+shims.
+
+| Canonical id | Canonical name | Description | Phase(s) | Cardinality | Authority & limits |
+|---|---|---|---|---|---|
+| `alex` | Alex | Coordinator: owns the plan lifecycle; decomposes, delegates, verifies, updates progress. Default coordinator steering subcontractors in execution. | planning, execution | 1 | May create/edit plan artifacts and delegate; must not approve its own adversarial review. |
+| `benny-01..benny-N` | Benny | Worker / Subcontractor: produces plan content (planning) or implements one discrete work unit (execution). | planning, execution | 0..N | Changes only its assigned target/work unit; reports back; never approves the overall plan. |
+| `chris` | Chris | Adversarial Reviewer: independent review of plan and delivered work; wraps `christian`/`christoph`. | planning, execution | 1 | Fresh/concealed context; no prior conclusions. |
+| `christian` | Christian | Reviewer A (protocol): handoff-only reviewer verifying owned `AR-NN` findings. | planning | 1 | May not issue overall plan approval. |
+| `christoph` | Christoph | Reviewer B (protocol): final independent approval authority; writes `approval.json`. | planning | 1 | Sole approval authority; `false` is valid terminal evidence but never adoption. |
+| `dana` | Dana | Monitor: steers long-running worker/reviewer processes (bounded polling, next-action commands, terminal-evidence stop). | execution | 1 | Read-only observer of child processes; does not edit plan artifacts directly. |
+| `frank` | Frank | Housekeeper: post-plan cleanup (temp/capsule scratch, `.env` regen, `.gitignore`, archive, final validation). | cleanup | 1 | May delete transient/temp data; never edits archived frozen results. |
+| `maintainer` | Willie | Edits the skill and this registry as one coordinated change. | all | 1..N | Keeps registry and skill in sync; no backwards-compat shims. |
+| `installer` | Felix | Runs `install.sh` to copy the skill, create plan roots, grant agent permissions. | all | 1 | Tool; honors confirm prompts and `.bak.<timestamp>` backups. |

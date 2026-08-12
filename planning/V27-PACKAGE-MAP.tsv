@@ -43,6 +43,7 @@ planning/scripts/plan-context-wrapper.sh	scripts/plan-context-wrapper.sh	install
 planning/scripts/plan-env.sh	scripts/plan-env.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/plan-mutate.sh	scripts/plan-mutate.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/plan-root.sh	scripts/plan-root.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/role-context.sh	scripts/role-context.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-work-unit.sh	scripts/update-work-unit.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/remove-work-unit.sh	scripts/remove-work-unit.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	v27-review-approved	backup-then-replace	false
