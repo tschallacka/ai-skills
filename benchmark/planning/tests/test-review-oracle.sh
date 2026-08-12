@@ -156,4 +156,178 @@ if "$root/seed-blinded-defects.sh" "$seed_root" "$tmp/invalid-target" "$tmp/inva
     exit 1
 fi
 
+# W12: natural reviewer shapes exercised against the blinded grader. Each case
+# seeds a fresh workspace, grades the findings, and pins the per-defect
+# classification plus the exact counts dict (which now includes the partial key).
+natural="$tmp/natural"
+mkdir -p "$natural"
+SEED_NATURAL='one initial button
+fourth generated button
+visible white border
+'
+run_natural_case() {
+    local case="$1" spec="$2" evidence="$3" report="$4"
+    local seed="$natural/$case/seed"
+    local defective="$natural/$case/defective"
+    local private="$natural/$case/private"
+    mkdir -p "$seed"
+    printf '%s' "$SEED_NATURAL" > "$seed/plan.md"
+    "$root/seed-blinded-defects.sh" "$seed" "$defective" "$private" "$spec" >/dev/null
+    ORACLE_ROLE=independent-oracle "$root/review-oracle.sh" blinded "$private" "$defective" "$evidence" "$report" >/dev/null
+}
+check_natural_row() {
+    python3 - "$1" "$2" "$3" "$4" "$5" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+row = next(r for r in report["per_defect"] if r["index"] == "defect_%s" % int(sys.argv[2]))
+assert row["classification"] == sys.argv[3], row
+expected_ids = [] if sys.argv[4] == "-" else sys.argv[4].split(",")
+expected_preds = [] if sys.argv[5] == "-" else sys.argv[5].split(",")
+assert sorted(row["finding_ids"]) == sorted(expected_ids), row
+assert sorted(row["failed_predicates"]) == sorted(expected_preds), row
+PY
+}
+check_natural_counts() {
+    python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = json.loads(sys.argv[2])
+assert report["counts"] == expected, (report["counts"], expected)
+PY
+}
+
+# Consolidated multi-file path (';'-joined): the defect file must appear as one
+# of the path segments. Positive finding lists plan.md among several files.
+cat > "$tmp/natural/spec-buttons.json" <<'JSON'
+{"defects":[{"id":"SD-01","path":"plan.md","old":"one initial button","new":"two initial buttons","location":"plan.md § 3.1","expected_signal":"one initial button","required_correction":"replace two initial buttons with one","severity":"high"}]}
+JSON
+cat > "$tmp/natural/spec-generated.json" <<'JSON'
+{"defects":[{"id":"SD-02","path":"plan.md","old":"fourth generated button","new":"third generated button","location":"plan.md § 3.1","expected_signal":"fourth generated button","required_correction":"replace third generated button with fourth","severity":"medium"}]}
+JSON
+cat > "$tmp/natural/spec-border.json" <<'JSON'
+{"defects":[{"id":"SD-03","path":"plan.md","old":"visible white border","new":"visible black border","location":"plan.md § 3.1","expected_signal":"visible white border","required_correction":"replace visible black border with visible white border","severity":"low"}]}
+JSON
+
+cat > "$tmp/natural/multipath-positive.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md; plan-description.md; work-unit-inventory.md","location":"plan.md § 3.1","summary":"The plan says one initial button at load, but the deliverable requires two initial buttons.","observed_contradiction":"plan-description.md section 3.1 requires two initial buttons while the proof work units require one initial button.","impact":"A future executor could ship the wrong initial state.","evidence":"plan.md § 3.1 states one initial button and two initial buttons.","required_correction":"replace two initial buttons with one","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case multi-path "$tmp/natural/spec-buttons.json" "$tmp/natural/multipath-positive.json" "$tmp/natural/multipath-positive-report.json"
+check_natural_row "$tmp/natural/multipath-positive-report.json" 1 true_positive AR-01 -
+check_natural_counts "$tmp/natural/multipath-positive-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+
+# Negative multi-path: names plan-description.md but is about an unrelated
+# defect (the approval gate), and never lists the defect file plan.md. It must
+# stay false_positive.
+cat > "$tmp/natural/multipath-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan-description.md; work-unit-inventory.md","location":"approval gate status","summary":"The plan's approval gate contradicts the validation verdict.","observed_contradiction":"The plan retains a pending adversarial-review status while the validator reports failures.","impact":"The plan cannot be adopted.","evidence":"validation.md records a pending verdict.","required_correction":"Resolve the approval gate.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case multi-path-negative "$tmp/natural/spec-buttons.json" "$tmp/natural/multipath-negative.json" "$tmp/natural/multipath-negative-report.json"
+check_natural_row "$tmp/natural/multipath-negative-report.json" 1 false_positive - PATH
+check_natural_counts "$tmp/natural/multipath-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":2,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":0}'
+
+# Prose location: a line-style prose citation that names the defect file.
+cat > "$tmp/natural/prose-positive.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md","location":"In plan.md, the line about generated buttons","summary":"The plan requires the fourth generated button, but the draft finishes on the third generated button.","observed_contradiction":"The contract says the fourth generated button; the implementation drafts stop at the third generated button.","impact":"The chain could end one button early.","evidence":"The generated-button line of plan.md and the finish-handler section both reference the third generated button and the fourth generated button.","required_correction":"replace third generated button with fourth","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case prose "$tmp/natural/spec-generated.json" "$tmp/natural/prose-positive.json" "$tmp/natural/prose-positive-report.json"
+check_natural_row "$tmp/natural/prose-positive-report.json" 1 true_positive AR-01 -
+check_natural_counts "$tmp/natural/prose-positive-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+
+# Negative prose location: same file path but the prose never names the defect
+# file, so the location gate rejects it.
+cat > "$tmp/natural/prose-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"The line about the approval gate","summary":"The approval gate is still unresolved.","observed_contradiction":"The retained gate records a pending verdict.","impact":"The plan cannot be adopted.","evidence":"The gate transcript shows open findings.","required_correction":"Close the gate.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case prose-negative "$tmp/natural/spec-generated.json" "$tmp/natural/prose-negative.json" "$tmp/natural/prose-negative-report.json"
+check_natural_row "$tmp/natural/prose-negative-report.json" 1 false_positive - PATH
+check_natural_counts "$tmp/natural/prose-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":2,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":0}'
+
+# Section location variants (section / sec. / § / bare 3.1): each must match.
+section_variant=0
+for location in "plan.md section 3.1" "plan.md sec. 3.1" "plan.md § 3.1" "plan.md 3.1"; do
+    section_variant=$((section_variant + 1))
+    variant="v${section_variant}"
+    cat > "$tmp/natural/section-${variant}.json" <<JSON
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md","location":"$location","summary":"The plan requires a visible white border, but the finish handler draws a visible black border.","observed_contradiction":"The white border and black border requirements conflict.","impact":"The final state could render the wrong border.","evidence":"The border requirement is stated in plan.md alongside the button contract.","required_correction":"replace visible black border with visible white border","independent":true}],"evidence_paths":[]}
+JSON
+    run_natural_case "section-${variant}" "$tmp/natural/spec-border.json" "$tmp/natural/section-${variant}.json" "$tmp/natural/section-${variant}-report.json"
+    check_natural_row "$tmp/natural/section-${variant}-report.json" 1 true_positive AR-01 -
+    check_natural_counts "$tmp/natural/section-${variant}-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+done
+
+# Negative section variant: a different section number must not match.
+cat > "$tmp/natural/section-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md section 4.2","summary":"The plan requires a visible white border, but the finish handler draws a visible black border.","observed_contradiction":"The white border and black border requirements conflict.","impact":"The final state could render the wrong border.","evidence":"The border requirement is stated in plan.md alongside the button contract.","required_correction":"replace visible black border with visible white border","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case section-negative "$tmp/natural/spec-border.json" "$tmp/natural/section-negative.json" "$tmp/natural/section-negative-report.json"
+check_natural_row "$tmp/natural/section-negative-report.json" 1 false_positive - PATH
+check_natural_counts "$tmp/natural/section-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":2,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":0}'
+
+# Hyphenated signal: fourth-generated-button equals fourth generated button.
+cat > "$tmp/natural/hyphen-positive.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The contract requires the fourth-generated-button; the draft creates a third-generated-button instead.","observed_contradiction":"fourth-generated-button completion versus third-generated-button completion","impact":"The chain could end one button early.","evidence":"the fourth-generated-button requirement and the third-generated-button draft both appear in plan.md § 3.1.","required_correction":"replace third-generated-button with the fourth-generated-button","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case hyphen "$tmp/natural/spec-generated.json" "$tmp/natural/hyphen-positive.json" "$tmp/natural/hyphen-positive-report.json"
+check_natural_row "$tmp/natural/hyphen-positive-report.json" 1 true_positive AR-01 -
+check_natural_counts "$tmp/natural/hyphen-positive-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+
+# Negative hyphenated shape: a hyphenated phrase about a different defect in
+# the same file/section shares no signal tokens, so it stays partial.
+cat > "$tmp/natural/hyphen-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"The visible-black-border requirement is unambiguous.","observed_contradiction":"The visible-black-border requirement conflicts with the white-border artifacts.","impact":"A reader could misread the border contract.","evidence":"The visible-black-border requirement appears in plan.md § 3.1.","required_correction":"Keep the visible-black-border requirement.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case hyphen-negative "$tmp/natural/spec-generated.json" "$tmp/natural/hyphen-negative.json" "$tmp/natural/hyphen-negative-report.json"
+check_natural_row "$tmp/natural/hyphen-negative-report.json" 1 partial AR-02 SIGNAL,CORRECTION
+check_natural_counts "$tmp/natural/hyphen-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
+
+# Paraphrase signal: "a single initial-button" paraphrases "one initial button"
+# through the token-overlap fallback.
+cat > "$tmp/natural/paraphrase-positive.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The plan calls for a single initial-button at load, and the proof work units contradict that state.","observed_contradiction":"The deliverable drafts show two initial buttons while the proof requires a single initial-button state.","impact":"The wrong initial state could be built.","evidence":"plan.md § 3.1 and the proof sections describe the initial-button contract.","required_correction":"replace two initial buttons with one","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case paraphrase "$tmp/natural/spec-buttons.json" "$tmp/natural/paraphrase-positive.json" "$tmp/natural/paraphrase-positive-report.json"
+check_natural_row "$tmp/natural/paraphrase-positive-report.json" 1 true_positive AR-01 -
+check_natural_counts "$tmp/natural/paraphrase-positive-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+
+# Negative paraphrase: too little token overlap with the signal, stays partial.
+cat > "$tmp/natural/paraphrase-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"The loading screen presents the buttons at the top of the page.","observed_contradiction":"The buttons are presented identically in every artifact.","impact":"A reader may overlook the layout.","evidence":"plan.md § 3.1 describes the button presentation.","required_correction":"Keep the button presentation unchanged.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case paraphrase-negative "$tmp/natural/spec-buttons.json" "$tmp/natural/paraphrase-negative.json" "$tmp/natural/paraphrase-negative-report.json"
+check_natural_row "$tmp/natural/paraphrase-negative-report.json" 1 partial AR-02 SIGNAL,CORRECTION
+check_natural_counts "$tmp/natural/paraphrase-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
+
+# Ordinal/digit forms: "the fourth generated button (button 4)" and a digit
+# correction "replace generated button 3 with generated button 4".
+cat > "$tmp/natural/ordinal-positive.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"Pressing the fourth generated button (button 4) clears the document; the draft finishes at generated button 3.","observed_contradiction":"The contract requires completion on the fourth generated button, but the implementation stops at the third generated button.","impact":"The chain could end one button early.","evidence":"plan.md § 3.1 pairs the fourth generated button with button 4 and the third generated button with button 3.","required_correction":"replace generated button 3 with generated button 4","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case ordinal "$tmp/natural/spec-generated.json" "$tmp/natural/ordinal-positive.json" "$tmp/natural/ordinal-positive-report.json"
+check_natural_row "$tmp/natural/ordinal-positive-report.json" 1 true_positive AR-01 -
+check_natural_counts "$tmp/natural/ordinal-positive-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":0,"false_positives":0,"independent_catches":1,"true_positives":1,"unresolved":0,"partial":0}'
+
+# Negative ordinal/digit: a different trigger (button 5) shares only one token.
+cat > "$tmp/natural/ordinal-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"Button 5 must also clear the document.","observed_contradiction":"Button 5 is the only clear trigger mentioned.","impact":"A reader could confuse the triggers.","evidence":"plan.md § 3.1 mentions button 5.","required_correction":"Keep button 5 as the clear trigger.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case ordinal-negative "$tmp/natural/spec-generated.json" "$tmp/natural/ordinal-negative.json" "$tmp/natural/ordinal-negative-report.json"
+check_natural_row "$tmp/natural/ordinal-negative-report.json" 1 partial AR-02 SIGNAL,CORRECTION
+check_natural_counts "$tmp/natural/ordinal-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
+
+# Mutated-conflict negative: a bare echo of one value ("one initial button")
+# with no contradiction. It references the defect file/section and the signal
+# matches literally, but it never names the mutated conflict's other side nor
+# proposes the correction, so it must not be a true positive; the grader pins
+# it partial with the CORRECTION predicate failed.
+cat > "$tmp/natural/mutated-negative.json" <<'JSON'
+{"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"The plan requires one initial button.","observed_contradiction":"The plan requires one initial button consistently.","impact":"A reader takes the requirement at face value.","evidence":"plan.md § 3.1.","required_correction":"The plan is consistent; no correction is needed.","independent":true}],"evidence_paths":[]}
+JSON
+run_natural_case mutated-negative "$tmp/natural/spec-buttons.json" "$tmp/natural/mutated-negative.json" "$tmp/natural/mutated-negative-report.json"
+check_natural_row "$tmp/natural/mutated-negative-report.json" 1 partial AR-02 CORRECTION
+check_natural_counts "$tmp/natural/mutated-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
+
 printf 'Review oracle semantic contract tests passed.\n'

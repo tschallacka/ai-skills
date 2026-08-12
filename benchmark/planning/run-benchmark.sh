@@ -205,6 +205,10 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$RUN_ID" "$REVIEW_MODE" "$EXECUTION_MODE" \
 
 START_SCRIPTS=()
 for TAG in "${TAGS[@]}"; do
+    # Default thresholds to 1.0 so the state synthesizer always receives
+    # non-empty values; these defaults match the lifecycle-test values.
+    export SEMANTIC_THRESHOLD="${SEMANTIC_THRESHOLD:-1.0}"
+    export INDEPENDENT_THRESHOLD="${INDEPENDENT_THRESHOLD:-1.0}"
     "$SCRIPT_DIR/setup-benchmark.sh" "$TAG" "$TEST_BASE_DIR" "$RUN_NAME" "$RUN_ID"
     REVISION="${TAG#v}"
     START_SCRIPTS+=("$TEST_BASE_DIR/$REVISION/start-worker.sh")

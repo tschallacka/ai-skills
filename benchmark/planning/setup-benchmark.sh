@@ -499,8 +499,24 @@ with open(lifecycle, "a", encoding="utf-8") as handle:
     for event in events:
         handle.write(json.dumps(event, sort_keys=True) + "\n")
 PY
+# Reviewer-evidence contract note (documentation only): a finding's "path" and
+# "location" fields place its cited evidence using single-file, file-and-section,
+# or prose/line location forms. The approval schema validator below enforces the
+# structural string requirements; the independent oracle judges which location
+# form is correct. This note does not alter benchmark behavior.
 approval_schema_validator() {
     local approval_path="$1" report_path="$2"
+    # Reviewer-evidence contract (documentation only - no behavior change).
+    # Each finding's "path"/"location" pair records where the cited evidence
+    # lives, and one of the following location forms is accepted:
+    #   (1) single-file path        - path names the file, location is empty/absent
+    #   (2) file-and-section        - path names the file, location names a
+    #                                section/heading within that file
+    #   (3) prose/line location     - path names the file, location cites the
+    #                                prose line(s) or line range within it
+    # The validator enforces that "path"/"location" are non-empty string fields
+    # (below) but does not itself judge which location form is correct; that is
+    # the independent oracle's semantic role.
     python3 - "$approval_path" "$report_path" <<'PY'
 import datetime as dt
 import json
@@ -1096,12 +1112,33 @@ try:
     independent_threshold = float(os.environ["INDEPENDENT_THRESHOLD"])
 except (KeyError, TypeError, ValueError):
     semantic_threshold = independent_threshold = None
-if not isinstance(denominator, int) or denominator <= 0 or semantic_rate is None or independent_rate is None or semantic_threshold is None or independent_threshold is None:
+if not isinstance(denominator, int) or denominator <= 0:
     reasons.add("MISSING_DENOMINATOR")
+if semantic_threshold is None or independent_threshold is None:
+    reasons.add("MISSING_THRESHOLDS")
 if isinstance(semantic_rate, (int, float)) and semantic_threshold is not None and semantic_rate < semantic_threshold:
     reasons.add("SEMANTIC_THRESHOLD_FAILED")
 if isinstance(independent_rate, (int, float)) and independent_threshold is not None and independent_rate < independent_threshold:
     reasons.add("INDEPENDENT_THRESHOLD_FAILED")
+# Sanitized per-defect projection from the public oracle report. Only the
+# neutral ordinal id, public finding ids, failed predicates, and classification
+# are carried forward; private defect material is never projected into any
+# public artifact.
+per_defect = []
+if isinstance(oracle.get("per_defect"), list):
+    for entry in oracle["per_defect"]:
+        if not isinstance(entry, dict):
+            continue
+        projection = {}
+        if isinstance(entry.get("index"), str):
+            projection["index"] = entry["index"]
+        if isinstance(entry.get("finding_ids"), list):
+            projection["finding_ids"] = [fid for fid in entry["finding_ids"] if isinstance(fid, str)]
+        if isinstance(entry.get("failed_predicates"), list):
+            projection["failed_predicates"] = [p for p in entry["failed_predicates"] if isinstance(p, str)]
+        if isinstance(entry.get("classification"), str):
+            projection["classification"] = entry["classification"]
+        per_defect.append(projection)
 if os.environ.get("STATUS") == "tainted":
     reasons.add("TAINTED_RUN")
 b_candidates = selection.get("candidates", [])
@@ -1126,6 +1163,7 @@ state = {
     "fail_closed_reasons": sorted(reasons),
     "semantic_threshold": semantic_threshold,
     "independent_threshold": independent_threshold,
+    "per_defect": per_defect,
     "provenance": provenance,
     "source_plan_sha256": provenance.get("source_plan", {}).get("sha256"),
     "defective_plan_sha256": provenance.get("defective_plan", {}).get("sha256"),
@@ -1207,6 +1245,7 @@ payload = {
     "reviewer_session_id": next(reversed(records_by_session), None),
     "status": status,
     "review_state": reviewer_state,
+    "per_defect": reviewer_state.get("per_defect", []),
     "taint_causes": taint,
     "telemetry_source": os.environ["TELEMETRY_SOURCE"],
     "provenance": {
@@ -1246,6 +1285,13 @@ if [ -e "$RESULT_DIR" ]; then
     printf 'archive collision: %s\n' "$RESULT_DIR" > "$STAGING_RESULT_DIR/publication-rejection.txt"
     printf 'collision %s\n' "$RESULT_DIR" >&2
     exit 73
+fi
+# Archive the deterministic per-defect post-run report alongside oracle.json.
+# When no oracle report exists the script emits a deterministic "none" marker.
+if [ -f "$BENCH_ROOT/oracle.json" ]; then
+    "$REPO_ROOT/benchmark/planning/post-run-report.sh" "$BENCH_ROOT/oracle.json" > "$BENCH_ROOT/post-run-report.txt"
+else
+    printf 'PER-DEFECT POST-RUN REPORT\nper_defect: none\n' > "$BENCH_ROOT/post-run-report.txt"
 fi
 copy_workspace_for_publication "$BENCH_ROOT" "$STAGING_RESULT_DIR"
 cp -R "$SRC_ROOT/planning" "$STAGING_RESULT_DIR/planning"
@@ -1303,6 +1349,7 @@ payload = {
         "transcript_sha256": ["string", "null"],
         "lifecycle_handoff_sha256": ["string", "null"],
         "provenance_paths": "object",
+        "per_defect": "object[]",
     },
     "review_completed": state["review_completed"],
     "plan_approved": state["plan_approved"],
@@ -1310,6 +1357,7 @@ payload = {
     "adoptable": state["adoptable"],
     "fail_closed_reasons": state["fail_closed_reasons"],
     "approval_conflict": state["approval_conflict"],
+    "per_defect": state.get("per_defect", []),
     "review_state": state,
     "provenance": state["provenance"],
 }

@@ -63,6 +63,7 @@ for defect in defects:
     changed = content.replace(old, new, 1)
     target.write_text(changed, encoding="utf-8")
     manifest.append({"id": defect_id, "path": relative, "location": location,
+                     "old": old, "new": new,
                      "expected_signal": expected_signal,
                      "required_correction": required_correction,
                      "severity": severity,

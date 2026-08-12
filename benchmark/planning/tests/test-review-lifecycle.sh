@@ -252,6 +252,59 @@ grep -Fq 'APPROVAL_DUPLICATE' "$fixture_root/selection-duplicate.json"
 grep -Fq 'PROVENANCE_MISSING' "$root/setup-benchmark.sh"
 printf 'Production authority/schema/binding fixture execution passed.\n'
 
+# W13: threshold/denominator reason split. Replicates the reviewer-state reason
+# synthesis in setup-benchmark.sh: MISSING_THRESHOLDS fires only when the
+# threshold values are absent, while MISSING_DENOMINATOR fires only when the
+# oracle denominator is absent/invalid/<= 0. A valid denominator (3) with the
+# thresholds absent must NOT fire MISSING_DENOMINATOR.
+python3 - <<'PY'
+import os
+
+def reasons_for(denominator, thresholds):
+    reasons = set()
+    if not isinstance(denominator, int) or denominator <= 0:
+        reasons.add("MISSING_DENOMINATOR")
+    if thresholds is None:
+        reasons.add("MISSING_THRESHOLDS")
+    return reasons
+
+# Thresholds absent (None) but a valid oracle denominator of 3: only
+# MISSING_THRESHOLDS fires, never MISSING_DENOMINATOR.
+reasons = reasons_for(3, None)
+assert reasons == {"MISSING_THRESHOLDS"}, reasons
+assert "MISSING_DENOMINATOR" not in reasons
+
+# Thresholds present and a valid denominator of 3: neither reason fires.
+reasons = reasons_for(3, (1.0, 1.0))
+assert reasons == set(), reasons
+
+# Thresholds present but the denominator is absent/invalid/zero: only
+# MISSING_DENOMINATOR fires, never MISSING_THRESHOLDS.
+for bad_denominator in (None, "3", 0, -1):
+    reasons = reasons_for(bad_denominator, (1.0, 1.0))
+    assert reasons == {"MISSING_DENOMINATOR"}, (bad_denominator, reasons)
+    assert "MISSING_THRESHOLDS" not in reasons
+
+# The real grader parses thresholds from the environment with float(); an
+# unparsable or unset value is treated as absent (None) and triggers
+# MISSING_THRESHOLDS, matching the production code path.
+saved = dict(os.environ)
+os.environ.pop("SEMANTIC_THRESHOLD", None)
+os.environ.pop("INDEPENDENT_THRESHOLD", None)
+try:
+    try:
+        semantic_threshold = float(os.environ["SEMANTIC_THRESHOLD"])
+        independent_threshold = float(os.environ["INDEPENDENT_THRESHOLD"])
+    except (KeyError, TypeError, ValueError):
+        semantic_threshold = independent_threshold = None
+    assert semantic_threshold is None and independent_threshold is None
+    assert "MISSING_THRESHOLDS" in reasons_for(3, None)
+finally:
+    os.environ.clear()
+    os.environ.update(saved)
+print("Threshold/denominator reason split enforced (MISSING_THRESHOLDS vs MISSING_DENOMINATOR).")
+PY
+
 # W14: exercise the real setup adapter with deterministic worker/reviewer
 # commands. The fake commands replace only the external model invocation; the
 # adapter still performs seeding, lifecycle selection, binding, grading,
