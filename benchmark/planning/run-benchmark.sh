@@ -2,7 +2,7 @@
 # Prepare and run tagged planning-skill benchmarks from a normal user shell.
 #
 # Usage:
-#   benchmark/planning/run-benchmark.sh <name> <testing-base-dir> [--parallel|--sequential] [--versions] [tag ...]
+#   benchmark/planning/run-benchmark.sh <name> <testing-base-dir> [--parallel|--sequential] [--iterative|--fresh-review] [--revisions tag[,tag...]] [--versions] [tag ...]
 
 set -euo pipefail
 
@@ -24,6 +24,11 @@ if [[ ! "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
 fi
 
 EXECUTION_MODE="${RUN_MODE:-sequential}"
+REVIEW_MODE="fresh-review"
+REVIEW_MODE_SET=0
+REVISIONS=""
+MAX_VERIFICATION_PASSES="${MAX_VERIFICATION_PASSES:-3}"
+MAX_REVIEW_CYCLES="${MAX_REVIEW_CYCLES:-3}"
 INTERACTIVE_VERSIONS=0
 EXPLICIT_TAGS=0
 TAGS=()
@@ -38,6 +43,24 @@ while [ "$#" -gt 0 ]; do
         --versions)
             INTERACTIVE_VERSIONS=1
             ;;
+        --iterative|--fresh-review)
+            if [ "$REVIEW_MODE_SET" -eq 1 ]; then
+                echo "Review mode may be specified only once." >&2
+                exit 64
+            fi
+            REVIEW_MODE="${1#--}"
+            REVIEW_MODE_SET=1
+            ;;
+        --revisions)
+            shift
+            [ "$#" -gt 0 ] || { echo "--revisions requires tag[,tag...]" >&2; exit 64; }
+            REVISIONS="$1"
+            [ -n "$REVISIONS" ] || { echo "Revision list may not be empty." >&2; exit 64; }
+            ;;
+        --revisions=*)
+            REVISIONS="${1#--revisions=}"
+            [ -n "$REVISIONS" ] || { echo "Revision list may not be empty." >&2; exit 64; }
+            ;;
         --*)
             echo "Unknown option: $1" >&2
             exit 64
@@ -49,6 +72,20 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
+
+if [ -n "$REVISIONS" ]; then
+    IFS=',' read -ra revision_tags <<< "$REVISIONS"
+    for revision_tag in "${revision_tags[@]}"; do
+        [ -n "$revision_tag" ] || { echo "Revision list contains an empty tag." >&2; exit 64; }
+        TAGS+=("$revision_tag")
+        EXPLICIT_TAGS=1
+    done
+fi
+
+case "$REVIEW_MODE" in iterative|fresh-review) ;; *) echo "Invalid review mode: $REVIEW_MODE" >&2; exit 64;; esac
+[[ "$MAX_VERIFICATION_PASSES" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_VERIFICATION_PASSES must be positive." >&2; exit 64; }
+[[ "$MAX_REVIEW_CYCLES" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_REVIEW_CYCLES must be positive." >&2; exit 64; }
+export REVIEW_MODE MAX_VERIFICATION_PASSES MAX_REVIEW_CYCLES
 
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$RUN_NAME}"
 if [[ ! "$RUN_ID" =~ ^[0-9]{8}T[0-9]{6}Z-${RUN_NAME//./\.}$ ]]; then
@@ -162,6 +199,9 @@ fi
 
 mkdir -p "$TEST_BASE_DIR" "$RUN_RESULTS_ROOT"
 printf 'revision\ttag\trun_id\tcase_root\tresult_dir\texit_code\n' > "$SUMMARY"
+printf 'run_id\tmode\texecution\tmax_verification_passes\tmax_review_cycles\trevisions\n' > "$RUN_RESULTS_ROOT/harness-metadata.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$RUN_ID" "$REVIEW_MODE" "$EXECUTION_MODE" \
+    "$MAX_VERIFICATION_PASSES" "$MAX_REVIEW_CYCLES" "${REVISIONS:-auto}" >> "$RUN_RESULTS_ROOT/harness-metadata.tsv"
 
 START_SCRIPTS=()
 for TAG in "${TAGS[@]}"; do
@@ -289,23 +329,30 @@ fi
 
 ANALYSIS_ROOT="$RUN_RESULTS_ROOT/analysis"
 mkdir -p "$ANALYSIS_ROOT"
-cp "$SCRIPT_DIR/benchmark-test.md" "$ANALYSIS_ROOT/benchmark-test.md"
-cp "$SUMMARY" "$ANALYSIS_ROOT/harness-summary.tsv"
+ANALYZER_CAPSULE="${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}/ai-skills-capsules/$RUN_ID/analysis"
+ANALYZER_WORKSPACE="$ANALYSIS_ROOT"
+ANALYSIS_RESULTS_ROOT="$ANALYZER_CAPSULE/results"
+mkdir -p "$ANALYZER_CAPSULE" "$ANALYSIS_RESULTS_ROOT"
+cp "$SCRIPT_DIR/benchmark-test.md" "$ANALYZER_CAPSULE/benchmark-test.md"
+cp "$SUMMARY" "$ANALYZER_CAPSULE/harness-summary.tsv"
+cp -R "$RUN_RESULTS_ROOT"/. "$ANALYSIS_RESULTS_ROOT"/
 
 sed \
     -e "s/{{RUN_ID}}/$RUN_ID/g" \
-    -e "s#{{ANALYSIS_ROOT}}#$ANALYSIS_ROOT#g" \
-    -e "s#{{RESULTS_ROOT}}#$RUN_RESULTS_ROOT#g" \
-    "$SCRIPT_DIR/analyzer-prompt.md" > "$ANALYSIS_ROOT/analyzer-prompt.md"
+    -e "s#{{ANALYSIS_ROOT}}#$ANALYZER_WORKSPACE#g" \
+    -e "s#{{RESULTS_ROOT}}#$ANALYSIS_RESULTS_ROOT#g" \
+    "$SCRIPT_DIR/analyzer-prompt.md" > "$ANALYZER_CAPSULE/analyzer-prompt.md"
+cp "$ANALYZER_CAPSULE/analyzer-prompt.md" "$ANALYSIS_ROOT/analyzer-prompt.md"
 
 echo "Starting analyzer Codex session"
 set +e
-codex -a never exec --json \
-    -C "$ANALYSIS_ROOT" \
+codex -a never exec --model "${CODEX_MODEL:-gpt-5.5}" --json \
+    -C "$ANALYZER_WORKSPACE" \
     --skip-git-repo-check \
     --sandbox workspace-write \
-    --add-dir "$RUN_RESULTS_ROOT" \
-    "$(cat "$ANALYSIS_ROOT/analyzer-prompt.md")" > "$ANALYSIS_ROOT/analyzer.jsonl" 2>&1 &
+    --add-dir "$ANALYZER_CAPSULE" \
+    --add-dir "$ANALYZER_WORKSPACE" \
+    "$(cat "$ANALYZER_CAPSULE/analyzer-prompt.md")" > "$ANALYSIS_ROOT/analyzer.jsonl" 2>&1 &
 ANALYZER_PID="$!"
 if wait "$ANALYZER_PID"; then
     ANALYZER_CODE=0
@@ -316,6 +363,9 @@ ANALYZER_PID=""
 set -e
 
 COMPARISON="$RUN_RESULTS_ROOT/comparison.md"
+if [ -s "$ANALYSIS_RESULTS_ROOT/comparison.md" ]; then
+    cp "$ANALYSIS_RESULTS_ROOT/comparison.md" "$COMPARISON"
+fi
 if [ ! -s "$COMPARISON" ]; then
     echo "Analyzer did not create a non-empty comparison report: $COMPARISON" >&2
     if [ "$ANALYZER_CODE" -eq 0 ]; then
