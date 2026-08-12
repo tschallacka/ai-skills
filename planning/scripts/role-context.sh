@@ -11,18 +11,19 @@
 #   role-context.sh <role-id|name> -p2     # next page (if "more: ..." is shown)
 # Each page is a deterministic slice; agents never need an interactive TTY.
 #
-# GATING: revealing capabilities are gated by caller identity so an out-of-
-# bounds agent cannot reach them by accident. --paths exposes the on-disk
-# layout, so it requires the caller to run as the maintainer:
+# GATING: the script is identity-aware. Content reads require a valid ROLE_ID
+# and are further restricted to the caller's own role (reviewer family or the
+# maintainer may read more). Without ROLE_ID only `--list` works — a safe mode
+# that reveals nothing but role ids/names. `--paths` exposes the on-disk
+# layout and is maintainer-only:
 #   ROLE_ID=maintainer role-context.sh --paths <role-id|name>
-# The default (print) mode is open: it only ever emits the requested role's own
-# documents. Shell gates are advisory (not a security boundary); the agent
-# framework is what actually confines the process.
+# Shell gates are advisory (not a security boundary); the agent framework is
+# what actually confines the process.
 #
 # Usage:
-#   role-context.sh <role-id|canonical-name> [-p N] [--page-size BYTES]
-#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>   # maintainer-only
-#   role-context.sh --list
+#   role-context.sh <role-id|canonical-name> [-p N] [--page-size BYTES]   # needs ROLE_ID
+#   role-context.sh --list                                                 # open (safe mode)
+#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>              # maintainer-only
 #   role-context.sh --help
 #
 # Accepts both the canonical id and the canonical name (case-insensitive),
@@ -98,6 +99,23 @@ list_roles() {
     done
 }
 
+# Identity gate. True when `caller` may read context for `target`:
+# its own role, the reviewer family, or any role if the caller is the
+# maintainer (supervision). Names resolve to ids first.
+can_access() {
+    local caller="$1" target="$2"
+    [ "$caller" = "$target" ] && return 0
+    [ "$caller" = maintainer ] && return 0
+    case "$caller" in
+        chris|christian|christoph)
+            case "$target" in
+                chris|christian|christoph) return 0 ;;
+            esac
+            ;;
+    esac
+    return 1
+}
+
 PAGE=1
 PAGE_BUDGET="${PAGE_BUDGET:-12000}"     # bytes per page
 MODE=print
@@ -114,27 +132,53 @@ while [ "$#" -gt 0 ]; do
         *) [ -z "$ROLE" ] && ROLE="$1" || usage; shift ;;
     esac
 done
-[ -n "$ROLE" ] || usage
+# --list is identity-free and needs no role token; all other modes do.
+if [ "$MODE" != list ]; then
+    [ -n "$ROLE" ] || usage
+    id="$(resolve_id "$ROLE")"
+    [ "$id" = UNKNOWN ] && {
+        printf 'role-context: unknown role or name: %s\n' "$ROLE" >&2
+        printf '  valid: ' >&2; list_roles >&2
+        exit 64
+    }
+else
+    id=""
+fi
 
-id="$(resolve_id "$ROLE")"
-[ "$id" = UNKNOWN ] && {
-    printf 'role-context: unknown role or name: %s\n' "$ROLE" >&2
-    printf '  valid: ' >&2; list_roles >&2
-    exit 64
-}
+# Identity gating. --list is open (id/name meta only). Any content read
+# requires a valid ROLE_ID; unauthenticated callers get a list-only safe mode
+# that reveals nothing else. --paths additionally requires the maintainer.
+caller_id=""
+if [ -n "${ROLE_ID:-}" ]; then
+    caller_id="$(resolve_id "$ROLE_ID")"
+    [ "$caller_id" = UNKNOWN ] && {
+        printf 'role-context: unknown ROLE_ID: %s\n' "$ROLE_ID" >&2
+        exit 64
+    }
+fi
 
 case "$MODE" in
     list) list_roles; exit 0 ;;
     paths)
-        # Revealing capability: only the maintainer may list on-disk paths.
-        [ "${ROLE_ID:-}" = maintainer ] || {
+        [ "$caller_id" = maintainer ] || {
             printf 'role-context: --paths is maintainer-only; run with ROLE_ID=maintainer\n' >&2
             exit 64
         }
         role_docs "$id"
         exit 0
         ;;
+    print) ;;
 esac
+
+[ -n "$caller_id" ] || {
+    printf 'role-context: reading context requires a role identity; set ROLE_ID=<your role> (or use --list)\n' >&2
+    exit 64
+}
+can_access "$caller_id" "$id" || {
+    printf 'role-context: role %s may not read context for %s (own-role gate)\n' "$caller_id" "$id" >&2
+    printf '  your role: %s; valid ids: ' "$caller_id" >&2; list_roles >&2
+    exit 64
+}
 
 # Render the full payload once, then slice it into byte-budgeted pages.
 name="$(canonical_name "$id")"
