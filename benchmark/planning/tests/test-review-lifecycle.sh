@@ -425,6 +425,7 @@ grep -Fq '"selected_capsule_id": "capsule-001"' "$archive/reviewer-state.json"
 grep -Fq '"adoptable": true' "$archive/reviewer-state.json"
 ! grep -Eq 'oracle-key|defect-map.enc|private|seeded-defects' "$archive/oracle.json" "$archive/protocol-metadata.json"
 rm -rf -- "$root/../results/$run_id"
+rm -rf -- "${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}/ai-skills-capsules/$run_id"
 printf 'Real setup adapter integration fixture passed.\n'
 
 printf 'Review lifecycle contract tests passed.\n'

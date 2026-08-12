@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [nextupdate, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run the full deterministic test suite
+        run: ./run-tests.sh
+
+      - name: Verify no temp files leaked outside the runner's scope
+        run: |
+          leftovers="$(find /tmp -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null | wc -l)"
+          echo "leftover temp roots: $leftovers"
+          if [ "$leftovers" -ne 0 ]; then
+            echo "::error::run-tests.sh left temp files behind"
+            exit 1
+          fi
