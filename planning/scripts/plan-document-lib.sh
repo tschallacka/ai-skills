@@ -149,8 +149,40 @@ plan_section_spec() {
         review/review-scope) printf '%s\t%s\n' '## Review scope' 1 ;;
         review/findings) printf '%s\t%s\n' '## Findings' 2 ;;
         review/rationale) printf '%s\t%s\n' '## Verdict' 3 ;;
-        *) plan_die "Section '$section' is not a mutable narrative section for a $kind document" ;;
+        *) plan_die "$(plan_unknown_section "$kind" "$section")" ;;
     esac
+}
+
+# Concise, agent-friendly error for an unknown narrative section: list the
+# valid ids for the document kind and, when one is close, suggest it.
+plan_unknown_section() {
+    local kind="$1" section="$2" valid id close="" best=""
+    case "$kind" in
+        plan) valid="current-state desired-outcome approach scope affected-areas constraints-and-decisions risks-and-open-questions" ;;
+        goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
+        step) valid="objective instructions acceptance-criteria handoff" ;;
+        review) valid="review-scope findings rationale" ;;
+        *) valid="" ;;
+    esac
+    for id in $valid; do
+        if [ "$id" = "$section" ]; then
+            printf 'Section is valid: %s\n' "$section"
+            return 0
+        fi
+        # Simple closeness: same prefix or >50% shared prefix length.
+        if [[ "$id" == "$section"* ]] || [[ "$section" == "$id"* ]]; then
+            [ -z "$close" ] && close="$id"
+        fi
+        if [ -z "$best" ] || [ "${#id}" -lt "${#best}" ]; then
+            # crude nearest: shortest id differing in fewest chars by prefix
+            :
+        fi
+    done
+    printf "Section '%s' is not a mutable narrative section for a %s document.\n" "$section" "$kind"
+    if [ -n "$close" ]; then
+        printf 'Closest match: %s\n' "$close"
+    fi
+    printf 'Valid %s section ids: %s\n' "$kind" "$valid"
 }
 
 plan_replace_testing_requirement() {

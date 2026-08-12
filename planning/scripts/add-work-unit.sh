@@ -10,6 +10,7 @@ plan_dir="$1"; unit_id="$2"; unit_type="$3"; unit_file="$4"; scope="$5"; subscop
 intended="$7"; depends_on="$8"; goal_name="$9"; step_name="${10}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+source "$script_dir/plan-reconcile-lib.sh"
 
 plan_require_directory "$plan_dir"
 [[ "$unit_id" =~ ^W[0-9][0-9]+$ ]] || plan_die "Work-unit ID must use W01"
@@ -84,3 +85,5 @@ testing_required="$(plan_testing_requirement_for_goal "$goal_file")"
 if [ "$testing_required" = yes ] && [ "$unit_type" != test ] && [ "$unit_type" != verification ]; then
     printf 'Reminder: goal %s requires testing; continue with its test/proof step. Review any existing testing instructions for accuracy and completeness.\n' "$goal_name"
 fi
+plan_rebuild_goal_progress "$script_dir" "$plan_dir/$goal_name" "$goal_name"
+plan_rebuild_plan_progress "$script_dir" "$plan_dir"

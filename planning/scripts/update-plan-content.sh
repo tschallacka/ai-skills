@@ -239,7 +239,36 @@ case "$command" in
         [[ "$paragraph_content" != *$'\n'* && "$paragraph_content" != *$'\r'* ]] || plan_die "Paragraph content must be one line"
         [[ "$paragraph_content" != *'§'* ]] || plan_die "Paragraph content must not contain the reserved paragraph marker §"
         [ -n "${paragraph_content//[[:space:]]/}" ] || plan_die "Paragraph content must not be empty"
-        plan_replace_paragraph "$file" "$paragraph_id" "$paragraph_content"
+        section_num="${BASH_REMATCH[1]}"
+        para_num="${BASH_REMATCH[2]}"
+        para_count="$(grep -cFx -- "$paragraph_id" "$file" || true)"
+        if [ "$para_count" -eq 1 ]; then
+            plan_replace_paragraph "$file" "$paragraph_id" "$paragraph_content"
+        elif [ "$para_count" -eq 0 ]; then
+            # Proactive: if the requested number is the next sequential one in
+            # an existing section, create it and report the result so the agent
+            # can verify it is not a duplicate.
+            max_num="$(awk -v s="$section_num" '$0 ~ "^§ " s "\\.[0-9]+$" { split($0, a, "."); n = a[2] + 0; if (n > m) m = n } END { print m + 0 }' "$file")"
+            if [ "$max_num" -ge 1 ] && [ "$para_num" -eq $((max_num + 1)) ]; then
+                body_file="$(mktemp "${TMPDIR:-/tmp}/plan-auto-paragraph.XXXXXX")"
+                trap 'rm -f "$body_file"' EXIT
+                printf '%s\n' "$paragraph_content" > "$body_file"
+                plan_insert_paragraph "$file" "§ $section_num.$max_num" after "$body_file"
+                rm -f "$body_file"
+                trap - EXIT
+                printf 'update-plan-content: added paragraph § %s.%s (auto-created; verify no duplication)\n' "$section_num" "$para_num" >&2
+                printf 'update-plan-content: section now reads:\n' >&2
+                awk -v s="$section_num" '
+                    /^§ [0-9]+\.[0-9]+$/ { sec = $2; sub(/\..*/, "", sec); if (sec == s) { print "  " $0; show = 1 } else show = 0; next }
+                    show && NF { print "  " $0; show = 0 }
+                ' "$file" >&2
+            else
+                existing="$(awk -v s="$section_num" '$0 ~ "^§ " s "\\.[0-9]+$" { print $2 }' "$file" | tr '\n' ' ')"
+                plan_die "Paragraph § $section_num.$para_num not found; section $section_num currently has: ${existing:-none}. Use -dp with an existing paragraph to replace it, or -ds <section> -p N.N: to add sequential paragraphs."
+            fi
+        else
+            plan_replace_paragraph "$file" "$paragraph_id" "$paragraph_content"
+        fi
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
     table-paragraph)

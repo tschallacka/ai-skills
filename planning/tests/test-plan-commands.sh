@@ -208,4 +208,30 @@ if "$script_dir/generate-reviewer.sh" "$empty_dir" "$temporary_root/empty.md" >/
     exit 1
 fi
 
+# ---- proactive helper behaviors (regression) ----
+# -dp auto-creates the next sequential paragraph and reports it.
+"$script_dir/update-plan-content.sh" -dp "$plan_dir" 2.2 'Auto-created paragraph.'
+grep -Fq '§ 2.2' "$plan_dir/plan-description.md"
+# Invalid section ids list the valid ids (actionable error).
+if "$script_dir/update-plan-content.sh" -ds "$plan_dir" bogus-section -p 5.1: x >"$temporary_root/bogus-sec.log" 2>&1; then
+    echo 'An invalid section id unexpectedly passed.' >&2
+    exit 1
+fi
+grep -Fq 'Valid plan section ids' "$temporary_root/bogus-sec.log"
+# remove-work-unit --help exits 0.
+"$script_dir/remove-work-unit.sh" --help >/dev/null 2>&1
+# Removing W02 reconciles inventory, coverage, owned work units, and progress.
+"$script_dir/remove-work-unit.sh" "$plan_dir" W02 >/dev/null 2>&1
+if grep -Fq '| W02 |' "$plan_dir/work-unit-inventory.md"; then
+    echo 'Removed work unit W02 still present in the inventory.' >&2
+    exit 1
+fi
+if grep -Fq 'W02' "$plan_dir/01-sync/goal.md"; then
+    echo 'Removed work unit W02 still referenced in goal.md owned work units.' >&2
+    exit 1
+fi
+if grep -Fq '| W02 |' "$plan_dir/01-sync/progress.md"; then
+    echo 'Removed work unit W02 still present in the goal progress tracker.' >&2
+    exit 1
+fi
 printf 'Planning command regression test passed.\n'

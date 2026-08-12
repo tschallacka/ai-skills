@@ -663,6 +663,7 @@ scripts/plan-context.sh
 scripts/plan-env.sh
 scripts/plan-mutate.sh
 scripts/plan-root.sh
+scripts/plan-reconcile-lib.sh
 scripts/role-context.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh

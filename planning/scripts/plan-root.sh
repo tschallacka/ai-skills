@@ -113,7 +113,7 @@ add_to_gitignore() {
 }
 
 choose_root() {
-    local project="$1"
+    local project="$1" piped=""
     if interactive; then
         ask "Store plans globally under ~/.plans, or in this project's ./.plans? [g/p] (default: p) "
         case "$REPLY" in
@@ -123,7 +123,18 @@ choose_root() {
                printf '%s\n' "$project/.plans"; return 0 ;;
         esac
     fi
-    printf 'plan-root: automated run detected; defaulting to project storage (%s/.plans)\n' "$project" >&2
+    # Non-interactive: accept one piped answer token (g|p for storage, y/n for
+    # the gitignore follow-up). A piped "no" means project storage, no
+    # gitignore — matching what an agent can actually answer.
+    if IFS= read -r piped; then :; fi
+    case "$piped" in
+        g|G|global) printf '%s\n' "$(global_scoped_root "$project")"; return 0 ;;
+    esac
+    case "$piped" in
+        y|Y|yes) PIPED_GITIGNORE=yes ;;
+        n|N|no|N|no) PIPED_GITIGNORE=no ;;
+    esac
+    printf 'plan-root: automated run detected; defaulting to project storage (%s/.plans)%s\n' "$project" "$([ -n "$piped" ] && printf ' (piped answer: %s)' "$piped")" >&2
     printf '%s\n' "$project/.plans"
 }
 
@@ -149,9 +160,15 @@ resolve() {
     root="$(choose_root "$project")"
     [ -n "$root" ] || die "no plans root chosen"
 
-    if [ "$root" = "$project/.plans" ] && interactive; then
-        if confirm "Add /.plans to this project's .gitignore?"; then
-            add_to_gitignore "$project/.gitignore" "/.plans"
+    if [ "$root" = "$project/.plans" ]; then
+        if [ -n "${PIPED_GITIGNORE:-}" ]; then
+            case "$PIPED_GITIGNORE" in
+                yes) add_to_gitignore "$project/.gitignore" "/.plans" ;;
+            esac
+        elif interactive; then
+            if confirm "Add /.plans to this project's .gitignore?"; then
+                add_to_gitignore "$project/.gitignore" "/.plans"
+            fi
         fi
     fi
 

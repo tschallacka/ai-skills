@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${1:-}" in
+    -h|--help)
+        printf "Usage: %s <plan-directory>\n\nRebuilds the plan-level progress tracker from the goal's progress files.\n" "$(basename "$0")"
+        exit 0
+        ;;
+esac
 if [ "$#" -ne 1 ]; then
     printf 'Usage: %s <plan-directory>\n' "$(basename "$0")" >&2
     exit 64
