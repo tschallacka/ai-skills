@@ -17,6 +17,7 @@ Usage:
   update-plan-content.sh -ib|--insert-before <plan-directory> <document-id> <N.N> <text>
   update-plan-content.sh -t|--title <plan-directory> <document-id> <title>
   update-plan-content.sh -f|--field <plan-directory> <document-id> <field-label> <value>
+  update-plan-content.sh -f|--field <plan-directory> <field-label> <value>   (document-id defaults to 'plan')
   update-plan-content.sh -tr|--testing-requirement <plan-directory> <goal-name> <yes|no> <rationale>
   update-plan-content.sh -rv|--review-status <plan-directory> <pending|approved>
   update-plan-content.sh -dr|--decomposition-review <plan-directory> <incomplete|completed>
@@ -119,8 +120,11 @@ if [[ "$command" == -* ]]; then
             command=title
             ;;
         -f|--field)
-            [ "$#" -eq 4 ] || usage
-            set -- "$1" "$2" "$3" "$4"
+            case "$#" in
+                3) set -- "$1" plan "$2" "$3" ;; # omit document-id == plan document
+                4) set -- "$1" "$2" "$3" "$4" ;;
+                *) usage ;;
+            esac
             command=field
             ;;
         -tr|--testing-requirement)

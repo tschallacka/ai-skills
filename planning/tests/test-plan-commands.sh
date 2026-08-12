@@ -12,6 +12,18 @@ if "$script_dir/update-plan-content.sh" paragraph "$plan_dir" plan -p 2.1: 'Lega
 fi
 
 "$script_dir/create-plan.sh" "$plan_dir" 'Status synchronization'
+# --field three-argument form defaults the document-id to 'plan'.
+"$script_dir/update-plan-content.sh" --field "$plan_dir" 'Rationale' \
+    'No user-visible component changes; command harness only.'
+grep -Fq -- '- Rationale: No user-visible component changes; command harness only.' "$plan_dir/plan-description.md"
+# The explicit four-argument form (plan + document-id) still works.
+"$script_dir/update-plan-content.sh" --field "$plan_dir" plan 'Rationale' \
+    'Four-argument form uses the explicit plan document id.'
+grep -Fq -- '- Rationale: Four-argument form uses the explicit plan document id.' "$plan_dir/plan-description.md"
+if "$script_dir/update-plan-content.sh" --field "$plan_dir" 'UI affected' >/dev/null 2>&1; then
+    echo 'A --field with too few arguments unexpectedly passed.' >&2
+    exit 1
+fi
 "$script_dir/add-goal.sh" "$plan_dir" 01-sync 'Synchronize status' \
     'Keep the review verdict and plan description aligned.'
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 01-sync yes \
