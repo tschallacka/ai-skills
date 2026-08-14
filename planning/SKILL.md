@@ -84,6 +84,15 @@ the lookup to the named work unit and follow its pagination or result limits.
 Use text search only for literals, non-code documents, configuration values,
 or when the repository-aware lookup cannot answer the question.
 
+**Comment discipline for produced code** (see
+[`references/comment-discipline-contract.md`](references/comment-discipline-contract.md)).
+Code produced under a plan MUST be self-documenting; comments MUST NOT exceed
+three lines, MUST keep only genuinely useful, non-evident programming specifics,
+and MUST NOT narrate/duplicate what the code already says. Unneeded comments
+MUST be removed. Cross-file discovery MUST use repository-aware lookup (code
+graph, symbol search), not comments. The post-implementation-review skill
+flags violating comments as review findings.
+
 These rules are agent-generic: use the strongest context limiter, shell
 workflow, and code-lookup facility available in the current environment, and
 record any unavailable facility as a plan constraint when it affects

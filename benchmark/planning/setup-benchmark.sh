@@ -148,6 +148,7 @@ fi
 if [ -d "$SRC_ROOT/planning/references" ]; then
     cp "$SRC_ROOT/planning/references/ui-user-story-validation.md" "$CAPSULE_ROOT/planning/references/ui-user-story-validation.md"
     cp "$SRC_ROOT/planning/references/plan-read-contract.md" "$CAPSULE_ROOT/planning/references/plan-read-contract.md"
+    cp "$SRC_ROOT/planning/references/comment-discipline-contract.md" "$CAPSULE_ROOT/planning/references/comment-discipline-contract.md"
 fi
 if [ -f "$SRC_ROOT/basic-test-proof-plan.md" ]; then
     cp "$SRC_ROOT/basic-test-proof-plan.md" "$CAPSULE_ROOT/basic-test-proof-plan.md"

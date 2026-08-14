@@ -80,6 +80,11 @@ Produce a **findings list grounded in the actual code**, not impressions.
   later") now has a concrete answer you can resolve.
 - Keep a strict "test the happy path" mindset: also probe the *unexecuted*
   branches (test seams, fallbacks, alternate agents).
+- **Comment discipline.** Apply the comment-discipline contract (planning
+  `references/comment-discipline-contract.md`): flag every comment that exceeds
+  three lines or lacks a genuinely useful, non-evident programming specific.
+  What qualifies as a finding is defined by that contract's clauses 2–4; apply
+  clause 6 here (flag as a finding, propose removal or whittling).
 
 ## Phase 2 — Independent solutions agent
 
@@ -162,6 +167,12 @@ If fixes are applied and a new regression appears, restart the loop at Phase 1
 - **Be honest about severity.** Not every finding needs a fix; flag
   document-only items.
 - **Respect the user's call.** The user can decline a fix; that is final.
+- **Comment hygiene is a review finding.** Apply the comment-discipline
+  contract (`planning/references/comment-discipline-contract.md`): comments in
+  produced code MUST be ≤3 lines and keep only genuinely useful, non-evident
+  programming specifics; oversized or empty comments are a finding with a
+  proposed removal/whittling fix, in every phase (self-analysis, independent
+  solutions, critical feedback).
 - **Skill-locked subagents.** Every subagent you spawn (solutions agent,
   critical-feedback agent) must be instructed in its starting prompt to load no
   skill other than the one(s) explicitly given, using the "Do not load any
