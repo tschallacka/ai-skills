@@ -17,3 +17,6 @@ benchmark/results/.staging/
 #   !.plans/<plan-under-audit>/
 #   !.plans/<plan-under-audit>/**
 .plans/*
+
+# Agent-session handoff note (not source; regenerated as needed).
+MEMORY.md
