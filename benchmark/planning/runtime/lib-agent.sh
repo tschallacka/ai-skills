@@ -179,3 +179,32 @@ kill_process_tree() {
     fi
     kill -"$signal" "$pid" 2>/dev/null || true
 }
+
+# benchmark_latest_tag(): the latest git tag reachable from HEAD (no abbrev).
+# Used to place a `current` run under results/<agent>/current/<latest-tag>/.
+# Falls back to "-" (unresolvable) so the path remains valid. Resolves the
+# repo root itself so it works whether or not the caller set REPO_ROOT.
+benchmark_latest_tag() {
+    local tag repo
+    if [ -n "${REPO_ROOT:-}" ]; then
+        repo="$REPO_ROOT"
+    else
+        repo="$(cd "$RUNTIME_DIR/../../.." && pwd)"
+    fi
+    tag="$(git -C "$repo" describe --tags --abbrev=0 HEAD 2>/dev/null || true)"
+    [ -n "$tag" ] || tag="-"
+    printf '%s\n' "$tag"
+}
+
+# benchmark_result_parent <tag>: the results subpath (under
+# results/<agent>/) that a run for <tag> belongs to.
+#   non-current tags: the tag itself (revision parent): results/<agent>/<tag>
+#   `current`: current/<latest-tag>:                    results/<agent>/current/<latest-tag>
+benchmark_result_parent() {
+    local tag="$1"
+    if [ "$tag" = current ]; then
+        printf 'current/%s\n' "$(benchmark_latest_tag)"
+    else
+        printf '%s\n' "${tag#v}"
+    fi
+}

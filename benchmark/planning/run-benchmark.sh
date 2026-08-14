@@ -96,8 +96,13 @@ if [[ ! "$RUN_ID" =~ ^[0-9]{8}T[0-9]{6}Z-${RUN_NAME//./\.}$ ]]; then
     echo "RUN_ID must have the form UTC_TIMESTAMP-$RUN_NAME" >&2
     exit 64
 fi
-RESULTS_ROOT="$REPO_ROOT/benchmark/results"
-RUN_RESULTS_ROOT="$RESULTS_ROOT/$RUN_ID"
+# Results live under benchmark/results/<agent>/<revision-parent>/<run-id>/.
+# <revision-parent> is the tag for version runs, or current/<latest-tag> for
+# `current` runs (see benchmark_result_parent). Run-level files (summary,
+# comparison, analysis) stay at the run-id root, preserving one batch per
+# run-id even when it spans multiple revisions.
+RESULTS_ROOT="$REPO_ROOT/benchmark/results/$AGENT_DRIVER"
+RUN_RESULTS_ROOT="$RESULTS_ROOT/$(benchmark_result_parent "${TAGS[0]:-current}")/$RUN_ID"
 SUMMARY="$RUN_RESULTS_ROOT/harness-summary.tsv"
 
 select_latest_tags() {

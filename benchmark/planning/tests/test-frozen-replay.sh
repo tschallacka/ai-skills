@@ -15,7 +15,10 @@ defects_file="$root/pilot-blinded-defects.json"
 
 iterative_approval=""
 fresh_approval=""
-for approval in "$results_root"/*/current/reviewers/*-B-*/plan/approval.json; do
+# Frozen archives now live under results/<agent>/<revision-parent>/<run-id>/
+# (current runs nested under current/<latest-tag>/). Walk the whole tree.
+for approval in "$results_root"/*/*/*/current/reviewers/*-B-*/plan/approval.json \
+               "$results_root"/*/*/*/*/current/reviewers/*-B-*/plan/approval.json; do
     [ -f "$approval" ] || continue
     case "$approval" in
         *20260811T203343Z*)

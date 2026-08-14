@@ -26,6 +26,32 @@ Pass tags to limit the batch:
 benchmark/planning/run-benchmark.sh selected /tmp/ai-skills-benchmark --sequential v1.3.0 1.4.1
 ```
 
+Benchmark **only the current working tree / HEAD** with the special `current`
+tag:
+
+```bash
+benchmark/planning/run-benchmark.sh current /tmp/ai-skills-benchmark --sequential current
+```
+
+`current` is a reserved revision, not a git tag: `setup-benchmark.sh` archives
+the live working tree (HEAD, including any uncommitted changes) instead of
+checking out a tag. Use it to validate the exact state under test, including
+the current commit. It is the smallest possible benchmark (one revision, one
+worker case) and is the right choice for a single-commit smoke run.
+
+For a single-commit smoke run of the current working tree, the verbatim
+command is:
+
+```bash
+BENCHMARK_AGENT=opencode \
+resource-limited-testing/scripts/limited-run.sh 6G 400 -- \
+  benchmark/planning/run-benchmark.sh smoke-current /tmp/ai-skills-benchmark --sequential current
+```
+
+(`OPENCODE_MODEL` selects the model; the driver falls back to its default if
+unset. See `AGENTS.md` → "Smoke-test the current state" for the full recipe and
+done criterion.)
+
 `run-benchmark.sh` requires the run name and testing base directory. It accepts
 `--parallel` or `--sequential` immediately afterward. Parallel mode keeps at
 most five worker cases active; remaining cases are queued.
@@ -81,10 +107,11 @@ Telemetry is always honest: the active agent's documented store is read, or
 `telemetry_status=unavailable:...` is reported instead of a fabricated token
 count.
 
-Each run is kept in one timestamped, named directory. For example:
+Each run is kept in one timestamped, named directory, scoped by the agent
+driver that ran it. For example:
 
 ```text
-benchmark/results/20260810T111517Z-smoke/
+benchmark/results/codex/1.4.1/20260810T111517Z-smoke/
 ├── harness-summary.tsv
 ├── analysis/
 ├── comparison.md
@@ -97,6 +124,12 @@ benchmark/results/20260810T111517Z-smoke/
     ├── planning/
     └── workspace/
 ```
+
+Runs are organized as `benchmark/results/<agent>/<revision-parent>/<run-id>/`,
+where `<revision-parent>` is the tag being benchmarked (`1.4.1` above). A
+`current` run is nested as `benchmark/results/<agent>/current/<latest-tag>/
+<run-id>/` so current-state results are grouped under the release that was
+latest when they ran.
 
 Each revision archive includes the exact tagged `planning/` skill that was
 benchmarked, alongside the worker output. This keeps all single-run reports

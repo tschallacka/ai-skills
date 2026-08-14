@@ -1,9 +1,13 @@
 # Planning benchmark test
 
 Reusable user-run procedure for benchmarking tagged planning skill revisions.
-Workers must be launched by the user from a normal shell, not by an
-already-sandboxed agent, so the active agent can create persisted session state
-and telemetry.
+The benchmark harness is a real process run: the generated `start-worker.sh`
+and the worker/reviewer/analyzer model calls should run from a shell that can
+persist session state and telemetry (a normal shell, not a short-lived
+sandboxed tool call). An agent orchestrator may prepare and launch the
+benchmark and then monitor the produced archive; it is not required to be the
+one holding the worker shell. See `AGENTS.md` → "Smoke-test the current state"
+for the verbatim single-commit recipe.
 
 ## Entry points
 
@@ -30,6 +34,19 @@ benchmark/planning/setup-and-run.sh <name> --parallel
 omitted. The mode can also be passed to `run-benchmark.sh` immediately after
 the testing base directory. Parallel mode keeps at most five worker cases
 active and queues the rest.
+
+**`current` tag.** `current` is a reserved revision (not a git tag) that
+benchmarks the live working tree / HEAD, including uncommitted changes — useful
+for validating the exact state under test (e.g. a single commit). Use it as the
+tag argument:
+
+```bash
+benchmark/planning/run-benchmark.sh current /tmp/ai-skills-benchmark --sequential current
+```
+
+`setup-benchmark.sh` treats `current` specially: it archives the repo working
+tree (excluding `.git`, `.plans`, and `benchmark/results`) instead of running
+`git archive` on a tag. See "Setup behavior" below.
 
 Prepare one case without running it:
 
@@ -63,17 +80,21 @@ repository. Each benchmark test is a subdirectory of that base:
 └── analysis-<run-id>/
 ```
 
-`source/` is an archive checkout of the selected tag. `workspace/` is the
-worker's current directory. `start-worker.sh` is generated for that benchmark
-case and resolves the benchmark runtime through `REPO_ROOT` (exported by
-`benchmark-env.sh`), so it can be run directly from a normal shell.
+`source/` is an archive checkout of the selected tag — or, for the `current`
+revision, an archive of the repo working tree (HEAD plus any uncommitted
+changes, excluding `.git`, `.plans`, and `benchmark/results`). `workspace/` is
+the worker's current directory. `start-worker.sh` is generated for that
+benchmark case and resolves the benchmark runtime through `REPO_ROOT` (exported
+by `benchmark-env.sh`), so it can be run directly from a normal shell.
 
 ## Setup behavior
 
 `setup-benchmark.sh` performs the per-tag setup:
 
 1. Creates one `<testing-base-dir>/<revision>/` subdirectory.
-2. Extracts the tag into `source/`.
+2. Extracts the tag into `source/` — or, for the special `current` revision,
+   archives the repo working tree into `source/` (no tag required; this is how
+   a single-commit / uncommitted-state benchmark is run).
 3. Copies `task-spec.md` into `source/basic-test-proof-plan.md` when the tag
    does not include the task spec.
 4. Copies `benchmark-test.md` and `task-spec.md` into `workspace/`.
@@ -114,7 +135,7 @@ portable benchmark worker failure.
 - `BENCH_ROOT`: worker workspace under `CASE_ROOT/workspace`.
 - `PLAN_NAME`: fresh plan directory name under `BENCH_ROOT`.
 - `RESULT_DIR`: repository archive directory under the run directory
-  `benchmark/results/<UTC_TIMESTAMP>-<name>/<revision>`.
+  `benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>`.
 
 ## Worker startup contract
 
@@ -150,12 +171,12 @@ The analyzer may inspect only:
 
 - the copied benchmark instructions in the analysis directory;
 - the generated harness summary;
-- the current run directory under `benchmark/results/<UTC_TIMESTAMP>-<name>/`.
+- the current run directory under `benchmark/results/<agent>/<revision-parent>/<run-id>/`.
 
 It must write:
 
 ```text
-benchmark/results/<run-id>/comparison.md
+benchmark/results/<agent>/<revision-parent>/<run-id>/comparison.md
 ```
 
 The comparison must include one row per revision and clearly separate worker
@@ -192,8 +213,9 @@ other sessions.
 
 ## Completion checks
 
-- [ ] The user launched the benchmark scripts from a normal shell, not from a
-      sandboxed agent tool call.
+- [ ] The worker/reviewer/analyzer model calls ran from a shell that persists
+      session state and telemetry (not a short-lived sandboxed tool call); an
+      agent orchestrator may prepare and monitor the run.
 - [ ] Each benchmark test lives under its own `<testing-base-dir>/<revision>/`
       subdirectory.
 - [ ] Each benchmark subdirectory contains its generated `start-worker.sh`.
@@ -223,9 +245,10 @@ other sessions.
 - [ ] The worker-owned process-group audit finds no matching browser, server,
       or driver process remaining after the worker; unrelated host processes
       and other parallel workers are excluded.
-- [ ] `benchmark/results/RUN_ID/REVISION/` contains the copied worker output
-      and `evaluation.md`, plus the exact tagged benchmarked skill under
-      `benchmark/results/RUN_ID/REVISION/planning/`.
+- [ ] `benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>/` contains
+      the copied worker output and `evaluation.md`, plus the exact tagged
+      benchmarked skill under
+      `benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>/planning/`.
 - [ ] The archived `planning/` skill is sourced from the tagged
       `SRC_ROOT/planning/` directory and its revision is recorded in
       `evaluation.md`.
@@ -235,13 +258,13 @@ other sessions.
       explicit unavailable), or its absence is explicitly documented and the
       run is tainted.
 - [ ] The analyzer exited successfully and wrote a non-empty
-      `benchmark/results/RUN_ID/comparison.md`.
+      `benchmark/results/<agent>/<revision-parent>/<run-id>/comparison.md`.
 
 ## Result template
 
 | Revision | Isolated root | Result archive | Plan | Session ID | Start | End | Elapsed seconds | Usage tokens | Records | Work units | Goals | Validation | Review | Status |
 |---|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|
-| `REVISION` | `BENCH_ROOT` | `benchmark/results/RUN_ID/REVISION` | `PLAN_NAME` |  |  |  |  |  |  |  |  |  |  |  |
+| `REVISION` | `BENCH_ROOT` | `benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>` | `PLAN_NAME` |  |  |  |  |  |  |  |  |  |  |  |
 
 Runs without persisted telemetry are tainted unless the benchmark purpose
 explicitly allows a no-token smoke test.

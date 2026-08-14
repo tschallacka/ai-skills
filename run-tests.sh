@@ -18,13 +18,13 @@ verbose=false
 # exit so no temp files survive a pass, fail, or interrupted run. The planning
 # skill writes scratch under ${TMPDIR}/planning-agent, the benchmark runner
 # places capsules under PLANNING_AGENT_TMPDIR, and archives are staged under
-# benchmark/results/.staging/ — all three are covered below.
+# benchmark/results/<agent>/.staging/ — all three are covered below.
 run_scratch="$(mktemp -d "${TMPDIR:-/tmp}/ai-skills-tests.XXXXXX")"
 export TMPDIR="$run_scratch"
 export PLANNING_AGENT_TMPDIR="$run_scratch/planning-agent"
 cleanup() {
     rm -rf -- "$run_scratch"
-    rm -rf -- "$repo_root/benchmark/results/.staging"
+    rm -rf -- "$repo_root/benchmark/results"/*/.staging
 }
 trap cleanup EXIT
 

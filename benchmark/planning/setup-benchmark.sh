@@ -26,6 +26,9 @@ if ! resolve_active_agent "$RUNTIME_DIR"; then
 fi
 BENCHMARK_AGENT="$AGENT_DRIVER"
 export BENCHMARK_AGENT
+# Load the shared runtime (defines benchmark_result_parent, persona helpers,
+# launcher) early so the result-path and prompt logic below can use them.
+source "$REPO_ROOT/benchmark/planning/runtime/lib-agent.sh"
 
 TAG="$1"
 TEST_BASE_DIR="$2"
@@ -36,8 +39,12 @@ CASE_ROOT="$TEST_BASE_DIR/$REVISION"
 SRC_ROOT="$CASE_ROOT/source"
 BENCH_ROOT="$CASE_ROOT/workspace"
 PLAN_NAME="basic-test-proof-${REVISION}-${RUN_ID}-isolated-plan"
-RESULT_DIR="$REPO_ROOT/benchmark/results/$RUN_ID/$REVISION"
-STAGING_RESULT_DIR="$REPO_ROOT/benchmark/results/.staging/$RUN_ID/$REVISION"
+# Results live under benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>/
+# where <revision-parent> is the tag (or current/<latest-tag> for `current`).
+# benchmark_result_parent comes from the sourced runtime lib-agent.sh.
+RESULTS_ROOT="$REPO_ROOT/benchmark/results/$AGENT_DRIVER/$(benchmark_result_parent "$TAG")"
+RESULT_DIR="$RESULTS_ROOT/$RUN_ID/$REVISION"
+STAGING_RESULT_DIR="$REPO_ROOT/benchmark/results/$AGENT_DRIVER/.staging/$RUN_ID/$REVISION"
 PROTOCOL_ID="reviewer-optimization-1.4.2"
 COHORT="1.4.2"
 # Capsule/scratch root lives under the scoped planning-agent temp dir so the

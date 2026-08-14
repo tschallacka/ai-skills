@@ -137,6 +137,18 @@ resolved value is persisted into the generated case. A case created with
 opencode driver later, and its copied telemetry/session-id scripts resolve the
 driver via `REPO_ROOT` from `benchmark-env.sh` (with a `dirname` fallback).
 
+To benchmark only the current working tree / HEAD (including uncommitted
+changes), use the reserved `current` revision tag rather than a version tag:
+
+```bash
+BENCHMARK_AGENT=opencode benchmark/planning/setup-benchmark.sh current <dir> <name>
+```
+
+`current` archives the live repo (excluding `.git`, `.plans`,
+`benchmark/results`) instead of running `git archive` on a tag; see
+`benchmark/planning/README.md` and `benchmark-test.md`.
+
+
 Telemetry is always honest: only the active agent's documented store is read,
 and any missing/invalid identity yields `telemetry_status=unavailable:...`
 rather than a fabricated token count.

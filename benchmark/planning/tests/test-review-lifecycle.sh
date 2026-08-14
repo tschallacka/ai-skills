@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$root/runtime/lib-agent.sh"  # defines benchmark_result_parent for the archive path
 grep -Fq 'Fresh-review mode is the default.' "$root/worker-prompt.md"
 grep -Fq 'stable `AR-NN` findings' "$root/worker-prompt.md"
 grep -Fq 'final independent' "$root/worker-prompt.md"
@@ -404,7 +405,7 @@ if ! PATH="$fake_bin:$PATH" timeout 60s bash "$integration_root/testing/current/
     cat "$integration_root/testing/current/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1
 fi
-archive="$root/../results/$run_id/current"
+archive="$root/../results/codex/$(benchmark_result_parent current)/$run_id/current"
 for artifact in oracle-terminal-evidence.json oracle.json reviewer-state.json protocol-metadata.json reviewer-lifecycle.jsonl evaluation.md; do
     if ! test -f "$archive/$artifact"; then
         find "$archive" -maxdepth 3 -type f -print >&2 || true
@@ -424,7 +425,7 @@ grep -Fq '"independent_catch_rate": 1.0' "$archive/oracle.json"
 grep -Fq '"selected_capsule_id": "capsule-001"' "$archive/reviewer-state.json"
 grep -Fq '"adoptable": true' "$archive/reviewer-state.json"
 ! grep -Eq 'oracle-key|defect-map.enc|private|seeded-defects' "$archive/oracle.json" "$archive/protocol-metadata.json"
-rm -rf -- "$root/../results/$run_id"
+rm -rf -- "$root/../results/codex/$(benchmark_result_parent current)/$run_id"
 rm -rf -- "${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}/ai-skills-capsules/$run_id"
 printf 'Real setup adapter integration fixture passed.\n'
 
