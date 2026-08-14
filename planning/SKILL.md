@@ -17,6 +17,17 @@ in full before establishing the plan boundary. Its workflow is mandatory for
 that plan; it adds browser-driven discovery, a user-story artifact, and a
 bug-priority feedback loop.
 
+**Plan reads go through the gated reader, never whole-file `cat`/`Read`.**
+Before reading any plan artifact (plan docs, goal/step files, progress,
+work-unit inventory, adversarial-review), read
+[`references/plan-read-contract.md`](references/plan-read-contract.md) and
+follow it. It applies to the main agent and to every subagent: plan content
+MUST be read via `plan-context.sh read --plan-dir <PLAN_DIR> --document ID`
+(or `--unit WNN`), never by `cat`/`Read`/whole-directory load of a plan file or
+the `.plans/` tree. A wholesale plan read is a context-overflow violation; if
+the gate cannot serve something, report it as a limitation rather than
+bypassing it.
+
 ## Operating rules
 
 - Keep the plan factual, concise, and executable.
@@ -605,13 +616,14 @@ Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
-**All plan reads go through the gated readers.** Both the planning agent and
-every fresh subagent (adversarial review, reviewer) must read plan documents
-via the bundled gated readers (`plan-context.sh`), never by loading a whole
-plan file or plan directory. Wholesale `Read`/`cat` of a plan artifact is a
-context-overflow violation, because the gated readers strip plan metadata and
-metadata-bearing front-matter that is not needed to act. Subagents receive this
-instruction in their starting prompt (see section 3).
+**All plan reads go through the gated readers** (see
+[`references/plan-read-contract.md`](references/plan-read-contract.md)). Both
+the planning agent and every fresh subagent (adversarial review, reviewer) MUST
+read plan documents via the bundled gated readers (`plan-context.sh`), never by
+loading a whole plan file or plan directory. Wholesale `Read`/`cat`/`head`/`tail`
+of a plan artifact is a context-overflow violation, because the gated readers
+strip plan metadata and metadata-bearing front-matter that is not needed to act.
+Subagents receive this instruction in their starting prompt (see section 3).
 Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
 with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash. On the constrained VPS used during this initiative, work sequentially,
