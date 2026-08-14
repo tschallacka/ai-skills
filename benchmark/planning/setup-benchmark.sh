@@ -14,6 +14,19 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Resolve the active benchmark agent at setup time and persist it into the
+# generated case so start-worker.sh and the copied telemetry/session-id scripts
+# honour the active agent when the case runs later. BENCHMARK_AGENT overrides
+# (must name an installed driver); unset resolves to the codex default.
+RUNTIME_DIR="$SCRIPT_DIR/runtime"
+source "$RUNTIME_DIR/agent-env.sh"
+if ! resolve_active_agent "$RUNTIME_DIR"; then
+    echo "setup-benchmark.sh: could not resolve a benchmark agent (BENCHMARK_AGENT=${BENCHMARK_AGENT:-unset})" >&2
+    exit 64
+fi
+BENCHMARK_AGENT="$AGENT_DRIVER"
+export BENCHMARK_AGENT
+
 TAG="$1"
 TEST_BASE_DIR="$2"
 RUN_NAME="$3"
@@ -153,6 +166,7 @@ sed -i "s#$(escape_sed_replacement "$SRC_ROOT")#$(escape_sed_replacement "$CAPSU
 cat > "$CASE_ROOT/benchmark-env.sh" <<EOF
 #!/usr/bin/env bash
 export REPO_ROOT=$(printf '%q' "$REPO_ROOT")
+export BENCHMARK_AGENT=$(printf '%q' "$BENCHMARK_AGENT")
 export TAG=$(printf '%q' "$TAG")
 export REVISION=$(printf '%q' "$REVISION")
 export RUN_ID=$(printf '%q' "$RUN_ID")
@@ -189,6 +203,11 @@ cat > "$CASE_ROOT/start-worker.sh" <<'EOF'
 set -euo pipefail
 
 source "$(dirname "$0")/benchmark-env.sh"
+
+# Resolve the active agent driver through the shared runtime. REPO_ROOT is
+# exported by benchmark-env.sh; lib-agent.sh sources the resolver and driver
+# and exports the launcher (setsid/timeout/mode) and argv builders.
+source "$REPO_ROOT/benchmark/planning/runtime/lib-agent.sh"
 
 copy_workspace_for_publication() {
     local source_root="$1" target_root="$2"
@@ -248,20 +267,14 @@ cleanup_on_signal() {
 }
 trap cleanup_on_signal INT TERM
 
-setsid timeout "${WORKER_TIMEOUT:-45m}" codex -a never exec --model "${CODEX_MODEL:-gpt-5.5}" --json \
-    -C "$BENCH_ROOT" \
-    --skip-git-repo-check \
-    --sandbox workspace-write \
-    --add-dir "$WORKER_CAPSULE" \
-    --add-dir "$WORKER_WORKSPACE" \
-    "$(cat "$BENCH_ROOT/worker-prompt.md")" > "$BENCH_ROOT/worker.jsonl" 2>&1 &
-WORKER_CHILD_PID="$!"
-WORKER_PROCESS_GROUP_ID="$(ps -o pgid= -p "$WORKER_CHILD_PID" 2>/dev/null | tr -d ' ' || true)"
-if wait "$WORKER_CHILD_PID"; then
-    CODE=0
-else
-    CODE="$?"
-fi
+persona_bootstrap worker || exit 64
+persona_bootstrap_prompt "$BENCH_ROOT/worker-prompt.md" worker "$REPO_ROOT/planning/roles/VOICES.md" || exit 64
+agent_argv_worker "$BENCH_ROOT" "$WORKER_CAPSULE" "$BENCH_ROOT/worker-prompt.md"
+launch_agent setsid "${WORKER_TIMEOUT:-45m}" "$BENCH_ROOT/worker.jsonl"
+WORKER_CHILD_PID="$AGENT_PID"
+WORKER_PROCESS_GROUP_ID="$AGENT_PGID"
+wait_agent
+CODE="$AGENT_EXIT"
 WORKER_CHILD_PID=""
 
 END_EPOCH="$(date -u +%s)"
@@ -757,6 +770,8 @@ run_reviewer() {
     [ -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && cp "$CAPSULE_ROOT/planning/REVIEWER.md" "$capsule/REVIEWER.md" || true
     prompt="$capsule/reviewer-prompt.md"
     output="$workspace/reviewer.jsonl"
+    rp_id="$(persona_id_for "reviewer-$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')")"
+    rp_voice="$(persona_voice "$rp_id" "$REPO_ROOT/planning/roles/VOICES.md" 2>/dev/null)"
     python3 - "$capsule" "$session" "$capsule_id" "$review_mode" "$approved_at" <<'PY'
 import hashlib
 import json
@@ -789,6 +804,9 @@ manifest["sha256"] = hashlib.sha256(
 PY
     capsule_manifest_sha256="$(sha256sum "$capsule/capsule-manifest.json" | awk '{print $1}')"
     cat > "$prompt" <<PROMPT
+[PERSONA] id=$rp_id ROLE_ID=$rp_id
+Voice: $rp_voice
+
 Review the plan at $capsule/plan using only this capsule and workspace.
 This is Reviewer $role in protocol 1.4.2. Record stable AR-NN findings and
 write concise evidence. Reviewer A may verify only its owned findings and may
@@ -809,22 +827,32 @@ Do not inspect parent paths, source checkouts, installed skills, or prior
 reviewer capsules.
 PROMPT
     printf '{"event_id":"%s-start","actor":"reviewer","session_id":"%s","reviewer_session_id":"%s","capsule_id":"%s","capsule_manifest_sha256":"%s","event_type":"launch","protocol_role":"reviewer-%s","cycle":1,"verification_pass":0,"review_mode":"%s","approved_at":"%s","timestamp":"%s"}\n' "$role" "$session" "$session" "$capsule_id" "$capsule_manifest_sha256" "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" "$review_mode" "$approved_at" "$reviewer_started_at" >> "$REVIEWER_LIFECYCLE"
-    if [ -n "${REVIEWER_COMMAND:-}" ]; then
-        if REVIEWER_SESSION_ID="$session" REVIEWER_CAPSULE_ID="$capsule_id" REVIEWER_MODE="$review_mode" REVIEWER_APPROVED_AT="$approved_at" \
-            setsid timeout "${REVIEWER_TIMEOUT:-20m}" "$REVIEWER_COMMAND" -a never exec --model "${CODEX_MODEL:-gpt-5.5}" --json -C "$workspace" \
-            --skip-git-repo-check --sandbox workspace-write --add-dir "$capsule" --add-dir "$workspace" \
-            "$(cat "$prompt")" > "$output" 2>&1; then
-            code=0
-        else
-            code="$?"
-        fi
-    elif setsid timeout "${REVIEWER_TIMEOUT:-20m}" codex -a never exec --model "${CODEX_MODEL:-gpt-5.5}" --json -C "$workspace" \
-        --skip-git-repo-check --sandbox workspace-write --add-dir "$capsule" --add-dir "$workspace" \
-        "$(cat "$prompt")" > "$output" 2>&1; then
-        code=0
+    if [ "$role" = A ]; then
+        persona_bootstrap reviewer-a || exit 64
     else
-        code="$?"
+        persona_bootstrap reviewer-b || exit 64
     fi
+    if [ -n "${REVIEWER_COMMAND:-}" ]; then
+        REVIEWER_SESSION_ID="$session"
+        REVIEWER_CAPSULE_ID="$capsule_id"
+        REVIEWER_MODE="$review_mode"
+        REVIEWER_APPROVED_AT="$approved_at"
+        export REVIEWER_SESSION_ID REVIEWER_CAPSULE_ID REVIEWER_MODE REVIEWER_APPROVED_AT
+        if [ "$AGENT_DRIVER" = codex ]; then
+            agent_argv_reviewer "$workspace" "$capsule" "$prompt" "$REVIEWER_COMMAND"
+        else
+            # REVIEWER_COMMAND is a codex-shaped test seam. Under a non-codex
+            # driver the argv is driver-shaped and would leak invalid flags to
+            # REVIEWER_COMMAND, so ignore it and run the real driver.
+            echo "reviewer seam ignored for AGENT_DRIVER=$AGENT_DRIVER (REVIEWER_COMMAND is codex-only); running the real driver" >&2
+            agent_argv_reviewer "$workspace" "$capsule" "$prompt"
+        fi
+    else
+        agent_argv_reviewer "$workspace" "$capsule" "$prompt"
+    fi
+    launch_agent setsid "${REVIEWER_TIMEOUT:-20m}" "$output"
+    wait_agent
+    code="$AGENT_EXIT"
     if [ "$role" = B ]; then
         approval="$capsule/plan/approval.json"
         # Reviewers may write the protocol handoff beside their capsule plan
@@ -861,7 +889,7 @@ PY
     [ "$code" -eq 0 ] || return "$code"
     REVIEWER_STATUS="passed"
 }
-if [ "$CODE" -eq 0 ] && [ "$PLAN_FOUND" -eq 1 ] && command -v codex >/dev/null 2>&1; then
+if [ "$CODE" -eq 0 ] && [ "$PLAN_FOUND" -eq 1 ] && agent_available; then
     if [ "${REVIEW_MODE:-fresh-review}" = iterative ]; then
         run_reviewer A || REVIEWER_STATUS="failed"
     fi

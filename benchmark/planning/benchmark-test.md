@@ -2,8 +2,8 @@
 
 Reusable user-run procedure for benchmarking tagged planning skill revisions.
 Workers must be launched by the user from a normal shell, not by an
-already-sandboxed agent, so Codex can create persisted session state and SQLite
-telemetry.
+already-sandboxed agent, so the active agent can create persisted session state
+and telemetry.
 
 ## Entry points
 
@@ -64,8 +64,9 @@ repository. Each benchmark test is a subdirectory of that base:
 ```
 
 `source/` is an archive checkout of the selected tag. `workspace/` is the
-worker's current directory. `start-worker.sh` is self-contained for that
-benchmark case and can be run directly.
+worker's current directory. `start-worker.sh` is generated for that benchmark
+case and resolves the benchmark runtime through `REPO_ROOT` (exported by
+`benchmark-env.sh`), so it can be run directly from a normal shell.
 
 ## Setup behavior
 
@@ -83,8 +84,8 @@ benchmark case and can be run directly.
 
 `run-benchmark.sh` calls `setup-benchmark.sh` for every requested tag, runs the
 generated startup scripts sequentially or in parallel according to the
-selected mode, and starts one fresh Codex analyzer session after all workers
-finish.
+selected mode, and starts one fresh analyzer session under the active agent
+after all workers finish.
 
 Before setup, semantic-version tags are grouped by `major.minor` and only the
 highest patch version in each group is retained. For example, `v1.3.1` is run
@@ -96,7 +97,7 @@ This mode does not apply patch-version deduplication, so both `v1.3.0` and
 
 The runner must trap `INT` and `TERM`, terminate active worker/analyzer process
 trees, and exit 130 on an interrupted run. A run must not leave benchmark
-workers, Codex sessions, browsers, servers, or drivers running after Ctrl+C.
+workers, agent sessions, browsers, servers, or drivers running after Ctrl+C.
 
 Setup also rewrites known historical tests that reference a developer-specific
 planning-context fixture. `PLANNING_CONTEXT_CACHE` can provide that fixture;
@@ -119,7 +120,9 @@ portable benchmark worker failure.
 
 Each generated `start-worker.sh` must:
 
-1. Run `codex exec` from `BENCH_ROOT` without `--ephemeral`.
+1. Run the active agent driver (default `codex`) from `BENCH_ROOT` without an
+   ephemeral mode; the driver's argv is emitted by `benchmark/planning/runtime/`
+   and executed through the shared launcher.
 2. Capture JSONL output in `workspace/worker.jsonl`.
 3. Require or recover `workspace/session-id.txt`.
 4. Look up telemetry by that UUID and write `workspace/telemetry.txt`.
@@ -138,9 +141,10 @@ inferred most-recent session or a prior report.
 
 ## Analyzer contract
 
-After all workers finish, `run-benchmark.sh` starts a fresh analyzer Codex
-session from `<testing-base-dir>/analysis-<run-id>`. The analyzer prompt comes
-from `analyzer-prompt.md`.
+After all workers finish, `run-benchmark.sh` starts a fresh analyzer session
+under the active agent (default `codex`) from
+`<testing-base-dir>/analysis-<run-id>`. The analyzer prompt comes from
+`analyzer-prompt.md`.
 
 The analyzer may inspect only:
 
@@ -202,7 +206,7 @@ other sessions.
       directory is reported as an integrity warning and excluded from counts.
 - [ ] The plan has the intended revision and exact future task contract.
 - [ ] The worker used only the tagged `planning/` skill and its relative
-      references, not the installed Codex skill.
+      references, not an installed skill.
 - [ ] The worker did not inspect previous proof directories, benchmark
       results, repository notes, `.plans/`, git history, or unrelated files.
 - [ ] `planning/scripts/validate-plan.sh PLAN_NAME` passes from the isolated
@@ -225,9 +229,11 @@ other sessions.
 - [ ] The archived `planning/` skill is sourced from the tagged
       `SRC_ROOT/planning/` directory and its revision is recorded in
       `evaluation.md`.
-- [ ] Telemetry is recorded by discovering the Codex SQLite store under
-      `CODEX_HOME`/`HOME` and matching the worker UUID, or its absence is
-      explicitly documented and the run is tainted.
+- [ ] Telemetry is recorded by the active agent driver (for codex, by
+      discovering the SQLite store under `CODEX_HOME`/`HOME` and matching the
+      worker UUID; other drivers use their own documented store or report
+      explicit unavailable), or its absence is explicitly documented and the
+      run is tainted.
 - [ ] The analyzer exited successfully and wrote a non-empty
       `benchmark/results/RUN_ID/comparison.md`.
 

@@ -78,7 +78,8 @@ context_resolve_document() {
         adversarial-review) printf '%s/adversarial-review.md\n' "$plan_dir" ;;
         goal:*) printf '%s/%s/goal.md\n' "$plan_dir" "${document_id#goal:}" ;;
         step:*)
-            local value="${document_id#step:}" goal="${value%%/*}" step="${value#*/}"
+            local value goal step
+            value="${document_id#step:}"; goal="${value%%/*}"; step="${value#*/}"
             [ "$goal" != "$value" ] && [ -n "$step" ] || context_die "usage: invalid step entry: $document_id"
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
@@ -242,4 +243,66 @@ context_invalidate_after_mutation() {
     temporary="${marker}.tmp.$$"
     printf '%s\n' "$entry" > "$temporary"
     mv "$temporary" "$marker"
+}
+
+# Per-role reader composition.
+#
+# plan-context.sh (bounded plan content) and role-context.sh (persona scope
+# docs) are two distinct gates. This function declares, per role id (ROLE_ID),
+# whether the plan-context gate applies and the capped combined byte budget for
+# its plan reads. There is NO global composition rule; composition is per-role
+# only. installer/oracle/eve read only their role scope and never plan content.
+# When ROLE_ID is unset, plan-context behaves as before (no role restriction),
+# preserving the identity-free probe/reader path.
+#
+# Returns, separated by a tab:
+#   1 = plan-context applies (0/1)
+#   2 = combined plan-read budget cap in bytes (0 = not applied)
+context_role_reader_composition() {
+    local role="$1" applies=1 budget=32768
+    case "$role" in
+        installer|oracle|eve) applies=0; budget=0 ;;
+        maintainer) applies=1; budget=32768 ;;
+        *) applies=1; budget=32768 ;;
+    esac
+    printf '%s\t%s\n' "$applies" "$budget"
+}
+
+# Resolve a ROLE_ID token (id or canonical lowercased name, plus benny-N
+# aliasing) to its canonical id. The persona registry lives ONLY in
+# role-context.sh's ROLES=() array. role-context.sh has a sourcing guard, so we
+# source it to reuse its native resolve_id() — the single source of truth, with
+# no separate parser that can drift from the registry.
+context_roles_file="${PLANNING_ROLE_CONTEXT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/role-context.sh}"
+resolve_role_id() {
+    local token="$1" resolved=""
+    if [ -f "$context_roles_file" ]; then
+        resolved="$(bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "$2"' _ "$context_roles_file" "$token" 2>/dev/null || true)"
+    fi
+    [ -n "$resolved" ] && printf '%s\n' "$resolved" || printf 'UNKNOWN\n'
+}
+
+# context_role_gate <max_bytes_var> : when ROLE_ID is set, enforce the per-role
+# allow-list so only roles that allow the plan-context gate may reach ANY
+# subcommand (read, check, refresh, init, checkpoint). Unknown roles fail
+# closed. Returns 0 on allow; exits 64 on refuse. On allow, caps the byte
+# budget for read-style commands by writing back through $1.
+context_role_gate() {
+    local maxb="${1:-max_bytes}" role applies budget
+    [ -n "${ROLE_ID:-}" ] || return 0
+    role="$(resolve_role_id "$ROLE_ID")"
+    if [ -z "$role" ] || [ "$role" = UNKNOWN ]; then
+        printf 'usage: unknown ROLE_ID "%s"\n' "$ROLE_ID" >&2
+        exit 64
+    fi
+    IFS=$'\t' read -r applies budget <<< "$(context_role_reader_composition "$role")"
+    [ "$applies" -eq 1 ] || {
+        printf 'usage: role %s does not allow the plan-context gate (reader allow-list)\n' "$role" >&2
+        exit 64
+    }
+    if [ "$maxb" != "-" ]; then
+        # Cap via indirect-expansion + printf -v (no eval): functionally the
+        # min of the declared budget and the caller's max_bytes.
+        printf -v "$maxb" '%s' "$(( ${!maxb} < budget ? ${!maxb} : budget ))"
+    fi
 }

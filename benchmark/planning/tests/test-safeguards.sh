@@ -39,4 +39,24 @@ if grep -R --line-number --include='*.json' --include='*.md' \
     exit 1
 fi
 
+# Process-control split after the runtime refactor: the shared launcher
+# (lib-agent.sh) owns setsid/timeout/background-mode argv execution for worker,
+# reviewer, and analyzer, while the generated start-worker heredoc keeps its own
+# trap + WORKER_PROCESS_GROUP_ID + kill_process_tree for worker isolation and
+# run-benchmark.sh keeps batch-level cleanup_on_signal. None of the harness
+# launch paths may hardcode a bare inline `codex exec` anymore.
+runtime="$repo_dir/benchmark/planning/runtime"
+grep -Fq 'launch_agent()' "$runtime/lib-agent.sh"
+grep -Fq 'cmd+=(setsid)' "$runtime/lib-agent.sh"
+grep -Fq 'cmd+=(timeout "$timeout")' "$runtime/lib-agent.sh"
+grep -Fq 'background' "$runtime/lib-agent.sh"
+grep -Fq 'no setsid' "$runtime/lib-agent.sh"
+grep -Fq 'launch_agent setsid "${WORKER_TIMEOUT:-45m}"' "$setup"
+grep -Fq 'launch_agent setsid "${REVIEWER_TIMEOUT:-20m}"' "$setup"
+grep -Fq 'launch_agent background ""' "$runner"
+if grep -Fq 'setsid timeout "${WORKER_TIMEOUT' "$setup" || grep -Fq 'codex -a never exec' "$runner" || grep -Fq 'codex -a never exec' "$setup"; then
+    echo 'inline codex exec launch still present in harness source' >&2
+    exit 1
+fi
+
 printf '%s\n' 'Safeguard contract tests passed.'

@@ -19,7 +19,7 @@ CLI_FORMAT=""
 CLI_RELATIVE=""
 CLI_APPROVAL=""
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review)
 TARGET_NAMES=(
     "Universal Agent Skills"
     "Codex"
@@ -53,6 +53,8 @@ Supported skills:
   planning
   project-specificies
   resource-limited-testing
+  brainstorm
+  post-implementation-review
 EOF
 }
 
@@ -305,11 +307,13 @@ show_shop_menu() {
     local inner_width title_padding
     local horizontal=''
     local index label description
-    local -a labels=(planning project-specificies resource-limited-testing 'all three skills')
+    local -a labels=(planning project-specificies resource-limited-testing brainstorm post-implementation-review 'all five skills')
     local -a descriptions=(
         'Durable, resumable plans with steps and verification.'
         'Records project conventions, quirks, and deviations.'
         'Caps CPU and memory for demanding tool runs.'
+        'Shapes an idea into a recorded, agreed picture before planning.'
+        'After-the-fact review and proposed fixes for built code.'
         'Installs or updates the complete skill set.'
     )
 
@@ -463,11 +467,11 @@ select_skills() {
     if [ -z "$SKILL_SELECTION" ]; then
         show_shop_menu
         printf '\033[%d;1H' "$MENU_PROMPT_ROW"
-        ask "Choose 1-4 or enter comma-separated names [4]: "
-        SKILL_SELECTION="${REPLY:-4}"
+        ask "Choose 1-6 or enter comma-separated names [6]: "
+        SKILL_SELECTION="${REPLY:-6}"
     fi
 
-    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "4" ]; then
+    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "6" ]; then
         SELECTED_SKILLS=("${SKILL_NAMES[@]}")
         return
     fi
@@ -480,6 +484,8 @@ select_skills() {
             1) name="planning" ;;
             2) name="project-specificies" ;;
             3) name="resource-limited-testing" ;;
+            4) name="brainstorm" ;;
+            5) name="post-implementation-review" ;;
         esac
         contains "$name" "${SKILL_NAMES[@]}" || die "Unknown skill: $name"
         contains "$name" "${SELECTED_SKILLS[@]}" || SELECTED_SKILLS+=("$name")
@@ -626,6 +632,8 @@ skill_files() {
         planning)
             cat <<'EOF'
 SKILL.md
+REVIEWER.md
+telemetry-schema.json
 context-v27/brainstorm-limiting-context.v27.md
 context-v27/brainstorm-limiting-context.v27-contract.json
 context-v27/brainstorm-limiting-context.v27-benchmark.json
@@ -636,12 +644,31 @@ tests/fixtures/planning-context-v27/test-signing-key.pub
 tests/fixtures/planning-context-v27/platform-inputs.tsv
 tests/fixtures/planning-context-v27/runner-targets.discovery.txt
 tests/fixtures/planning-context-v27/runner-targets.tsv
+tests/fixtures/progress-shape/progress.md
+tests/fixtures/progress-shape/01-goal-a/goal.md
+tests/fixtures/progress-shape/01-goal-a/progress.md
+tests/fixtures/progress-shape/01-goal-a/steps/01-step-a.md
+tests/fixtures/progress-shape/02-goal-b/goal.md
+tests/fixtures/progress-shape/02-goal-b/progress.md
+tests/fixtures/progress-shape/02-goal-b/steps/01-step-b.md
+tests/fixtures/progress-shape/02-goal-b/steps/02-step-b2.md
 tests/test-planning-context-v27-contract.sh
 tests/test-installer-manifest.sh
 tests/test-plan-env.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
+tests/test-plan-context-reviewer.sh
+tests/test-voice-artifact-drift.sh
+tests/test-supervision-frame.sh
+tests/test-persona-drift.sh
+tests/test-progress-bar-shape.sh
 V27-PACKAGE-MANIFEST.txt
+ROLES.md
+MAINTAINER-STYLE-CONTRACT.md
+roles/planning.md
+roles/execution.md
+roles/cleanup.md
+roles/VOICES.md
 scripts/add-coverage.sh
 scripts/add-adversarial-finding.sh
 scripts/add-goal.sh
@@ -660,16 +687,20 @@ scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
+scripts/plan-context-wrapper.sh
 scripts/plan-env.sh
 scripts/plan-mutate.sh
 scripts/plan-root.sh
 scripts/plan-reconcile-lib.sh
 scripts/role-context.sh
+scripts/monitor-read.sh
+scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
 scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
+scripts/generate-reviewer.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
@@ -684,6 +715,12 @@ EOF
             for file in "$SOURCE_ROOT/resource-limited-testing/scripts/"*.sh; do
                 [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
             done
+            ;;
+        brainstorm)
+            printf '%s\n' SKILL.md
+            ;;
+        post-implementation-review)
+            printf '%s\n' SKILL.md
             ;;
     esac
 }
@@ -709,14 +746,14 @@ cli_resolve_source() {
 }
 
 cli_install_skill() {
-    [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
+    contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
     case "$CLI_APPROVAL" in yes|no) ;; *) die "--approval must be yes or no" ;; esac
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
-        destination_file="$TARGET_SELECTION/planning/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
             printf 'Collision: %s\n' "$destination_file" >&2
             collision=1
@@ -738,12 +775,12 @@ cli_install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
-        destination_file="$TARGET_SELECTION/planning/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done < <(skill_files "$CLI_SKILL")
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
-    printf 'Installed: %s/planning\n' "$TARGET_SELECTION"
+    printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }
 
 backup_file() {

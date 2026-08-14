@@ -13,6 +13,10 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Resolve the active benchmark agent (BENCHMARK_AGENT override, default codex)
+# and load its driver through the shared runtime launcher.
+source "$SCRIPT_DIR/runtime/lib-agent.sh"
 RUN_NAME="$1"
 TEST_BASE_DIR="$2"
 shift
@@ -348,21 +352,15 @@ sed \
     "$SCRIPT_DIR/analyzer-prompt.md" > "$ANALYZER_CAPSULE/analyzer-prompt.md"
 cp "$ANALYZER_CAPSULE/analyzer-prompt.md" "$ANALYSIS_ROOT/analyzer-prompt.md"
 
-echo "Starting analyzer Codex session"
+echo "Starting analyzer $AGENT_DRIVER session"
 set +e
-codex -a never exec --model "${CODEX_MODEL:-gpt-5.5}" --json \
-    -C "$ANALYZER_WORKSPACE" \
-    --skip-git-repo-check \
-    --sandbox workspace-write \
-    --add-dir "$ANALYZER_CAPSULE" \
-    --add-dir "$ANALYZER_WORKSPACE" \
-    "$(cat "$ANALYZER_CAPSULE/analyzer-prompt.md")" > "$ANALYSIS_ROOT/analyzer.jsonl" 2>&1 &
-ANALYZER_PID="$!"
-if wait "$ANALYZER_PID"; then
-    ANALYZER_CODE=0
-else
-    ANALYZER_CODE="$?"
-fi
+persona_bootstrap analyzer || exit 64
+persona_bootstrap_prompt "$ANALYZER_CAPSULE/analyzer-prompt.md" analyzer "$REPO_ROOT/planning/roles/VOICES.md" || exit 64
+agent_argv_analyzer "$ANALYZER_WORKSPACE" "$ANALYZER_CAPSULE" "$ANALYZER_CAPSULE/analyzer-prompt.md"
+launch_agent background "" "$ANALYSIS_ROOT/analyzer.jsonl"
+ANALYZER_PID="$AGENT_PID"
+wait_agent
+ANALYZER_CODE="$AGENT_EXIT"
 ANALYZER_PID=""
 set -e
 

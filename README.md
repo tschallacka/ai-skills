@@ -9,6 +9,8 @@ compatible agent tools.
 | Skill | Purpose | Documentation |
 |---|---|---|
 | Planning | Creates durable plans with goals, steps, verification, progress tracking, and handoffs. | [planning/SKILL.md](planning/SKILL.md) |
+| Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [brainstorm/SKILL.md](brainstorm/SKILL.md) |
+| Post-implementation review | After-the-fact review of built code with proposed fixes, backed by implementer analysis, an independent solutions agent, and a critical-feedback agent. | [post-implementation-review/SKILL.md](post-implementation-review/SKILL.md) |
 | Project-specific deviations | Records confirmed project behavior and environment quirks that future agents should not rediscover. | [project-specificies/SKILL.md](project-specificies/SKILL.md) |
 | Resource-limited testing | Runs resource-intensive commands under platform-appropriate CPU and memory controls. | [resource-limited-testing/SKILL.md](resource-limited-testing/SKILL.md) |
 
@@ -23,7 +25,7 @@ Run this command and choose the skills and agent destination interactively:
 curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/refs/heads/master/install.sh | bash
 ```
 
-The installer can install all three skills or one skill, and supports these
+The installer can install all the skills or one skill, and supports these
 global skill roots:
 
 | Destination | Agent or standard |
@@ -126,6 +128,12 @@ different repository or branch must be used.
 
 ## Notes
 
+- The planning-skill benchmark harness is agent-agnostic. `benchmark/planning/runtime/`
+  makes the worker/reviewer/analyzer launch, session-id extraction, and token
+  telemetry pluggable per CLI: the active agent defaults to `codex` and is
+  selected with `BENCHMARK_AGENT` (`opencode`, `claude`), with a shared launcher
+  (`lib-agent.sh`) owning all setsid/timeout/process-group control. See
+  `benchmark/planning/runtime/README.md` for the contract and first-time setup.
 - Skills are instructions, not standalone applications. They add no
   dependencies unless a skill explicitly documents one.
 - `resource-limited-testing` uses systemd and cgroup v2 for strongest Linux

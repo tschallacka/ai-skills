@@ -406,10 +406,21 @@ must include verbatim:
   bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
 Valid --document IDs: plan, inventory, progress, adversarial-review,
 goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
---max-records/--max-bytes for a large inventory if needed. Never load a whole
+--max-records for a large inventory if needed. Plan-read bytes are capped at
+the per-role budget when ROLE_ID is set (the gate lowers --max-bytes to it) —
+do not rely on --max-bytes above that cap. Never load a whole
 plan file, an entire plan directory, or the `.plans/` tree wholesale. A
 wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
+
+The fresh adversary assumes the **chris placeholder persona** (oriented scout):
+spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
+`bash <PLANNING_SKILL_DIR>/scripts/role-context.sh chris` (which injects its
+stance preamble), and require it to state its persona id in the returned
+findings. The adversary forms its own findings from the bounded-read gate and
+its scoped role docs; it never receives the planning agent's conclusions. A
+spawn that cannot resolve ROLE_ID=chris fails closed (the reader refuses) and
+must be respawned with a valid identity.
 
 Do not hand the adversary a command that dumps a plan file or directory in
 full. Require the adversary's returned findings to state that all plan reads

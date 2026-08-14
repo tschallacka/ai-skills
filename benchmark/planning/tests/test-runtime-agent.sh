@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Runtime contract tests for the benchmark agent runtime.
+#
+# Asserts each runtime/<agent>/agent.sh exports the reserved driver contract
+# (including agent_model_env/agent_default_model), active-agent resolution
+# (BENCHMARK_AGENT default codex, unknown fails closed), and scaffolder
+# idempotence / no-clobber against an isolated temp runtime replica (never the
+# live repo).
+
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime="$root/runtime"
+
+reserved_functions=(
+    agent_argv_worker
+    agent_argv_reviewer
+    agent_argv_analyzer
+    agent_session_id
+    agent_telemetry
+)
+reserved_variables=(
+    AGENT_NAME
+    agent_bin
+    agent_model_env
+    agent_default_model
+)
+
+for agent in codex opencode claude; do
+    driver="$runtime/$agent/agent.sh"
+    [ -f "$driver" ] || { echo "missing driver: $driver" >&2; exit 1; }
+    bash -n "$driver" || { echo "syntax error: $driver" >&2; exit 1; }
+
+    # Shell inherits variables/functions from the parent; capture a clean
+    # marker so sourcing the driver is what defines the contract symbols.
+    marker="__rt_probe_$(date -u +%s%N)__"
+    out="$(bash -c '
+        set -euo pipefail
+        driver="$1"
+        marker="$2"
+        source "$driver"
+        for fn in '"${reserved_functions[*]}"'; do
+            if ! declare -F "$fn" >/dev/null 2>&1; then
+                echo "MISSING_FUNCTION:$fn"
+            fi
+        done
+        for var in '"${reserved_variables[*]}"'; do
+            if [ -z "${!var:-}" ]; then
+                echo "MISSING_VARIABLE:$var"
+            fi
+        done
+        echo "OK:$AGENT_NAME"
+    ' _ "$driver" "$marker")"
+
+    if [ -n "$(printf '%s\n' "$out" | grep -E 'MISSING_' || true)" ]; then
+        printf 'contract missing for %s:\n%s\n' "$agent" "$out" >&2
+        exit 1
+    fi
+    echo "runtime contract: $agent ($out)"
+done
+
+# Active-agent resolution: unset -> codex default.
+export -n BENCHMARK_AGENT 2>/dev/null || true
+if [ -n "${BENCHMARK_AGENT:-}" ]; then
+    unset BENCHMARK_AGENT
+fi
+resolve_out="$(bash -c '
+    set -euo pipefail
+    source "$1/agent-env.sh"
+    resolve_active_agent "$1"
+    echo "$AGENT_DRIVER"
+' _ "$runtime")"
+[ "$resolve_out" = "codex" ] || { echo "default resolver != codex: $resolve_out" >&2; exit 1; }
+
+# Explicit override selects an installed agent.
+for agent in codex opencode claude; do
+    out="$(BENCHMARK_AGENT="$agent" bash -c '
+        set -euo pipefail
+        source "$1/agent-env.sh"
+        resolve_active_agent "$1"
+        echo "$AGENT_DRIVER"
+    ' _ "$runtime")"
+    [ "$out" = "$agent" ] || { echo "BENCHMARK_AGENT=$agent resolved to $out" >&2; exit 1; }
+done
+
+# Unknown agent fails closed (exit 64).
+if BENCHMARK_AGENT=no-such-agent bash -c '
+    set -euo pipefail
+    source "$1/agent-env.sh"
+    resolve_active_agent "$1"
+' _ "$runtime" >/dev/null 2>&1; then
+    echo "unknown BENCHMARK_AGENT did not fail closed" >&2
+    exit 1
+fi
+
+# lib-agent.sh bootstraps the selected driver and the launcher.
+for agent in codex opencode claude; do
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/runtime-argv.$agent.XXXXXX")"
+    trap 'rm -rf -- "$tmp"' EXIT
+    mkdir -p "$tmp/ws" "$tmp/cap"
+    printf 'prompt' > "$tmp/prompt.md"
+    out="$(BENCHMARK_AGENT="$agent" bash -c '
+        set -euo pipefail
+        source "$1/lib-agent.sh"
+        agent_argv_worker "$2/ws" "$2/cap" "$2/prompt.md"
+        printf "%s" "${AGENT_ARGV[0]}"
+        printf "\\n"
+        printf "%s" "${AGENT_ARGV[@]}"
+    ' _ "$runtime" "$tmp")"
+    argv0="$(printf '%s\n' "$out" | head -1)"
+    [ -n "$argv0" ] || { echo "$agent: empty AGENT_ARGV" >&2; exit 1; }
+    echo "runtime argv0: $agent -> $argv0"
+    trap - EXIT
+    rm -rf -- "$tmp"
+done
+
+# Scaffolder: first scaffold creates a working driver; second refuses (no
+# clobber); runs against a temp replica of the runtime, never the live repo.
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/runtime-scaffold.XXXXXX")"
+trap 'rm -rf -- "$tmp"' EXIT
+cp -R "$runtime/." "$tmp/runtime"
+scaffold="$tmp/runtime/scaffold-agent.sh"
+bash "$scaffold" probe probe PROBE_MODEL probe-9 >/dev/null
+[ -f "$tmp/runtime/probe/agent.sh" ] || { echo "first scaffold did not create driver" >&2; exit 1; }
+if bash "$scaffold" probe probe PROBE_MODEL probe-9 >/dev/null 2>&1; then
+    echo "second scaffold did not refuse to clobber" >&2
+    exit 1
+fi
+grep -Fq 'agent_model_env="PROBE_MODEL"' "$tmp/runtime/probe/agent.sh"
+grep -Fq 'agent_default_model="probe-9"' "$tmp/runtime/probe/agent.sh"
+echo "runtime scaffold: first-scaffold created driver, second-scaffold refused (idempotent no-clobber)"
+
+printf 'Runtime contract tests passed.\n'

@@ -3,7 +3,7 @@ planning skill revision {{REVISION}}.
 
 Your current working directory is {{BENCH_ROOT}}. Treat this directory as your
 whole benchmark workspace. At startup it should contain `benchmark-test.md`,
-`task-spec.md`, and `worker-prompt.md`, plus any Codex runtime metadata created
+`task-spec.md`, and `worker-prompt.md`, plus any agent runtime metadata created
 by the runner.
 
 Immediately write your session UUID to:
@@ -12,9 +12,10 @@ Immediately write your session UUID to:
 session-id.txt
 ```
 
-Use `CODEX_THREAD_ID` when it is available. If `CODEX_THREAD_ID` is
-unavailable, write the best session UUID exposed by the runner environment and
-state the source in the analysis report.
+Use the session id exposed by the active agent driver (the runner records it
+from the driver's event stream). If that session id is unavailable, write the
+best session UUID exposed by the runner environment and state the source in the
+analysis report.
 
 Use only this tagged repository-local skill as the benchmark target:
 
@@ -63,8 +64,9 @@ labels such as `true_positive` are invalid; the independent oracle assigns
 classification. Do not invent hidden seed IDs or mutation text.
 
 Use normal runner behavior. Do not force sequential execution, disable
-parallelism, disable subagents, or use ephemeral mode. Preserve the full Codex
-SQLite telemetry for this run.
+parallelism, disable subagents, or use ephemeral mode. Preserve the active
+agent's full telemetry for this run so the harness can look up exact token
+usage by the recorded session id.
 
 Complete the decomposition, atomic work-unit inventory, UI user story, UI story
 run/cache, testing companions, adversarial review, bug register, progress

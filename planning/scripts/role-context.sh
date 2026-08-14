@@ -11,14 +11,24 @@
 #   role-context.sh <role-id|name> -p2     # next page (if "more: ..." is shown)
 # Each page is a deterministic slice; agents never need an interactive TTY.
 #
-# GATING: the script is identity-aware. Content reads require a valid ROLE_ID
-# and are further restricted to the caller's own role (reviewer family or the
-# maintainer may read more). Without ROLE_ID only `--list` works — a safe mode
-# that reveals nothing but role ids/names. `--paths` exposes the on-disk
-# layout and is maintainer-only:
+# GATING: the script is identity-aware and FAILS CLOSED. Any content read
+# requires a valid ROLE_ID resolving to a registered persona; an unset or
+# unknown ROLE_ID is a hard refusal with a "FAIL-CLOSED identity" message, and
+# the worker is denied a persona. Reads are further restricted to the caller's
+# own role (reviewer family or the maintainer may read more). Only `--list` is
+# identity-free (safe mode: reveals nothing but ids/names). `--paths` exposes
+# the on-disk layout and is maintainer-only:
 #   ROLE_ID=maintainer role-context.sh --paths <role-id|name>
 # Shell gates are advisory (not a security boundary); the agent framework is
 # what actually confines the process.
+#
+# Alongside the docs, each payload prefixes the role's voice/stance preamble
+# from roles/VOICES.md (identity preamble; see voice_for). This script is the
+# machine source of the persona registry (ROLES=()) and per-role scope
+# (role_docs()); the ROLES.md persona matrix is a maintained mirror of that
+# scope, and scope-doc shipping is enforced by test-persona-drift.sh. Sourcing
+# this file (not executing it) defines only the registry + resolvers (sourcing
+# guard), so callers reuse resolve_id without running the CLI main flow.
 #
 # Usage:
 #   role-context.sh <role-id|canonical-name> [-p N] [--page-size BYTES]   # needs ROLE_ID
@@ -99,6 +109,21 @@ list_roles() {
     done
 }
 
+# Return the persona's voice/stance line from roles/VOICES.md, keyed by the
+# canonical role id, for injection into the identity preamble. Emits nothing if
+# the voice document is missing (the reader still fails closed on missing docs
+# elsewhere; a missing voice is surfaced by the voice-artifact drift test).
+voice_for() {
+    local id="$1" file="$SKILL_DIR/roles/VOICES.md"
+    [ -f "$file" ] || return 0
+    awk -F'|' -v wanted="$id" '
+        function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v}
+        /^\|/ {
+            rid=trim($2); gsub(/^`|`$/,"",rid)
+            if (rid==wanted) { print trim($3); exit }
+        }' "$file"
+}
+
 # Identity gate. True when `caller` may read context for `target`:
 # its own role, the reviewer family, or any role if the caller is the
 # maintainer (supervision). Names resolve to ids first.
@@ -115,6 +140,14 @@ can_access() {
     esac
     return 1
 }
+
+# Sourcing guard: when this file is sourced (not executed), only the registry
+# (ROLES=()) and the resolver functions are defined; the CLI main flow that
+# parses args / renders context is skipped so the caller can reuse resolve_id
+# without this script's main body running (and its exit / usage firing).
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
 
 PAGE=1
 PAGE_BUDGET="${PAGE_BUDGET:-12000}"     # bytes per page
@@ -152,7 +185,7 @@ caller_id=""
 if [ -n "${ROLE_ID:-}" ]; then
     caller_id="$(resolve_id "$ROLE_ID")"
     [ "$caller_id" = UNKNOWN ] && {
-        printf 'role-context: unknown ROLE_ID: %s\n' "$ROLE_ID" >&2
+        printf 'role-context: FAIL-CLOSED identity: unknown ROLE_ID "%s". This worker has no persona and cannot continue; the coordinator must respawn it with a valid ROLE_ID.\n' "$ROLE_ID" >&2
         exit 64
     }
 fi
@@ -171,7 +204,7 @@ case "$MODE" in
 esac
 
 [ -n "$caller_id" ] || {
-    printf 'role-context: reading context requires a role identity; set ROLE_ID=<your role> (or use --list)\n' >&2
+    printf 'role-context: FAIL-CLOSED identity: no ROLE_ID set. This worker lacks a persona and cannot read scoped context; the coordinator must respawn it with a valid ROLE_ID (or use --list).\n' >&2
     exit 64
 }
 can_access "$caller_id" "$id" || {
@@ -182,9 +215,13 @@ can_access "$caller_id" "$id" || {
 
 # Render the full payload once, then slice it into byte-budgeted pages.
 name="$(canonical_name "$id")"
+voice="$(voice_for "$id")"
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 {
     printf '# Role context: %s (%s)\n\n' "$id" "$name"
+    if [ -n "$voice" ]; then
+        printf '# Voice (%s): %s\n\n' "$id" "$voice"
+    fi
     for rel in $(role_docs "$id"); do
         file="$SKILL_DIR/$rel"
         if [ -f "$file" ]; then

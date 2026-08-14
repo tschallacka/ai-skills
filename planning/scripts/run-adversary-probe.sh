@@ -68,6 +68,10 @@ echo "=== spawn a fresh adversarial reviewer with this starting prompt ==="
 cat <<PROMPT
 You are a fresh, independent adversarial reviewer for a benchmark plan. You are NOT the author of the plan.
 
+YOUR PERSONA: ROLE_ID=chris (oriented scout). Adopt this identity: load your scoped role docs and voice via
+  ROLE_ID=chris bash $SCRIPT_DIR/role-context.sh chris
+(which injects your stance preamble). State your persona id in your self-report. A fresh adversary forms its own findings.
+
 THE REQUEST the plan must satisfy:
 "Add a GET /health endpoint to the example service that returns {\"status\":\"ok\"} with HTTP 200."
 

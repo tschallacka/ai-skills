@@ -84,6 +84,12 @@ context_read_command() {
     local file content bounded count=0 line truncated=0
     [ "$document_selector_count" -eq 1 ] || { printf 'usage: read requires exactly one --document or --unit\n' >&2; exit 2; }
     context_entry_id "$document_id" >/dev/null
+    # Per-role reader composition: when a persona is identified by ROLE_ID, the
+    # plan-context gate applies only if that role's allow-list says so, and its
+    # plan-read budget is capped. installer/oracle/eve read only their role
+    # scope docs and are refused plan content. No ROLE_ID keeps the
+    # identity-free (probe/reader) path unchanged.
+    context_role_gate max_bytes
     file="$(context_resolve_document "$plan_dir" "$document_id")"
     [ -f "$file" ] || { printf 'not-found: %s\n' "$document_id" >&2; exit 66; }
     content="$(context_view_text "$file" "$view")"
@@ -173,10 +179,10 @@ context_checkpoint_command() {
 }
 
 case "$command" in
-    init) [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage; context_init_command ;;
+    init) context_role_gate - ; [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage; context_init_command ;;
     read) [ "$document_selector_count" -eq 1 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage; context_read_command ;;
-    check) [ "$document_selector_count" -eq 0 ] && { [ "$refresh_selector_count" -eq 0 ] || [ "$check_mode" = entry ]; } || usage; context_check_command ;;
-    refresh) [ "$document_selector_count" -eq 0 ] && { [ "$check_selector_count" -eq 0 ] || [ "$refresh_mode" = entry ]; } || usage; context_refresh_command ;;
-    checkpoint) [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage; context_checkpoint_command ;;
+    check) context_role_gate - ; [ "$document_selector_count" -eq 0 ] && { [ "$refresh_selector_count" -eq 0 ] || [ "$check_mode" = entry ]; } || usage; context_check_command ;;
+    refresh) context_role_gate - ; [ "$document_selector_count" -eq 0 ] && { [ "$check_selector_count" -eq 0 ] || [ "$refresh_mode" = entry ]; } || usage; context_refresh_command ;;
+    checkpoint) context_role_gate - ; [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage; context_checkpoint_command ;;
     *) usage ;;
 esac

@@ -91,6 +91,22 @@ Ownership fields must mirror the inventory row exactly.
 `create-adversarial-review.sh` must emit Review scope, Findings, and Verdict.
 The review status and plan-description status are synchronized atomically.
 
+## Persona & reader system
+
+- `role-context.sh`'s `ROLES=()` is the machine registry; its `role_docs()` is
+  the source for the `ROLES.md` persona doc matrix (a maintained mirror, not the
+  truth). `roles/VOICES.md` holds the per-role voice (≤512 B, asserted by
+  `test-voice-artifact-drift.sh`).
+- Per-role **reader composition** (which roles may read plan content, per-role
+  budgets) lives in `plan-context-lib.sh` `context_role_reader_composition` —
+  `installer`/`oracle`/`eve` never read plan content; there is **no global
+  rule**.
+- Adding a role means updating all of: the roles-master table (below),
+  `role-context.sh ROLES=()`, `roles/VOICES.md`, and the `ROLES.md` matrix.
+  `test-persona-drift.sh` + `test-voice-artifact-drift.sh` enforce registry ↔
+  VOICES and registry ↔ shipped scope; the roles-master table and `ROLES.md`
+  matrix are synced manually (unasserted).
+
 ## Table schemas
 
 Every generated Markdown table has a fixed header, separator row, column
@@ -125,6 +141,9 @@ cell. Use the dedicated helper for structured table mutations.
   exclusion.
 - Progress bars use the generated 20-character `#`/`-` bar and matching icon;
   never hand-edit percentages.
+- The plan-level (3-col) and goal-level (4-col) progress shapes and the
+  re-derived percentage are enforced by `tests/test-progress-bar-shape.sh`; do
+  not hand-edit the bar or column widths.
 
 ## Ownership and testing gates
 
@@ -160,6 +179,9 @@ When changing a generated format:
 3. Add or update a regression fixture covering the positive and malformed
    forms.
 4. Run shell syntax checks, `git diff --check`, and all bounded planning tests.
+   When the persona registry, reader scope, `VOICES.md`, or reader-composition
+   changes, re-run `test-persona-drift.sh`, `test-voice-artifact-drift.sh`, and
+   `test-supervision-frame.sh`.
 5. Keep this contract precise and keep agent-facing prose limited to workflow
    decisions rather than repeating these implementation details.
 
@@ -194,7 +216,7 @@ shims.
 | `chris` | Chris | Adversarial Reviewer: independent review of plan and delivered work; wraps `christian`/`christoph`. | planning, execution | 1 | Fresh/concealed context; no prior conclusions. |
 | `christian` | Christian | Reviewer A (protocol): handoff-only reviewer verifying owned `AR-NN` findings. | planning | 1 | May not issue overall plan approval. |
 | `christoph` | Christoph | Reviewer B (protocol): final independent approval authority; writes `approval.json`. | planning | 1 | Sole approval authority; `false` is valid terminal evidence but never adoption. |
-| `dana` | Dana | Monitor: steers long-running worker/reviewer processes (bounded polling, next-action commands, terminal-evidence stop). | execution | 1 | Read-only observer of child processes; does not edit plan artifacts directly. |
+| `dana` | Dana | Monitor: steers long-running worker/reviewer processes (bounded polling, next-action commands, terminal-evidence stop). Process stepper; NOT the supervision-frame monitor. | execution | 1 | Read-only observer of child processes; does not edit plan artifacts directly. Does **not** read supervision frames; those are maintainer-only (`monitor-read.sh`). |
 | `frank` | Frank | Housekeeper: post-plan cleanup (temp/capsule scratch, `.env` regen, `.gitignore`, archive, final validation). | cleanup | 1 | May delete transient/temp data; never edits archived frozen results. |
-| `maintainer` | Willie | Edits the skill and this registry as one coordinated change. | all | 1..N | Keeps registry and skill in sync; no backwards-compat shims. |
+| `maintainer` | Willie | Edits the skill and this registry as one coordinated change. Also the supervision monitor: reads only bounded supervision frames via `monitor-read.sh` (pull-on-exception) and the grant log (case + command, **never reasoning**). | all | 1..N | Keeps registry and skill in sync; no backwards-compat shims. Fails closed to any non-maintainer caller. |
 | `installer` | Felix | Runs `install.sh` to copy the skill, create plan roots, grant agent permissions. | all | 1 | Tool; honors confirm prompts and `.bak.<timestamp>` backups. |
