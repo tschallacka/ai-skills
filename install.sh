@@ -662,6 +662,7 @@ tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
 tests/test-progress-bar-shape.sh
+tests/test-fix-keys.sh
 V27-PACKAGE-MANIFEST.txt
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
@@ -700,6 +701,8 @@ scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
 scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
+scripts/mint-fix-keys.sh
+scripts/verify-fix-keys.sh
 scripts/generate-reviewer.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh

@@ -40,6 +40,7 @@ add_progress_step() {
     plan_require_safe_value description "$description"
     progress_file="$goal_dir/progress.md"
     [ -f "$progress_file" ] || plan_die "Progress file not found: $progress_file"
+    plan_git_snapshot "$(dirname "$goal_dir")"
     ! grep -Fq "| $step_name |" "$progress_file" || plan_die "Progress row already exists: $step_name"
     temporary="${progress_file}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
@@ -55,6 +56,7 @@ rebuild_progress() {
     plan_require_directory "$goal_dir"
     goal_name="$(basename "$goal_dir")"
     progress_file="$goal_dir/progress.md"
+    plan_git_snapshot "$(dirname "$goal_dir")"
     temporary="${progress_file}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
     {

@@ -20,6 +20,10 @@ fail() {
     errors=$((errors + 1))
 }
 
+warn() {
+    printf 'WARN: %s\n' "$*" >&2
+}
+
 trim() {
     local value="$1"
     value="${value#"${value%%[![:space:]]*}"}"
@@ -87,10 +91,21 @@ else
     require_heading "$review_file" '## Review scope'
     require_heading "$review_file" '## Findings'
     require_heading "$review_file" '## Verdict'
-    grep -Fqx -- '- Status: `✅ approved`' "$review_file" || fail "Adversarial review is not approved"
-    grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md" || fail "Plan description does not mirror approved adversarial-review status"
-    if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|$' "$review_file"; then
-        fail "Adversarial review has unresolved findings"
+    grep -Fqx -- '- Status: `✅ approved`' "$review_file" || review_approved=false
+    if [ "${review_approved:-true}" = true ]; then
+        grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md" || fail "Plan description does not mirror approved adversarial-review status"
+        if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|' "$review_file"; then
+            fail "Adversarial review has unresolved findings"
+        fi
+    else
+        if grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"; then
+            fail "Plan description claims approval but adversarial review is not approved"
+        fi
+        if [ "$complete_mode" = true ]; then
+            fail "Adversarial review is not approved"
+        else
+            warn "Adversarial review is not approved (expected mid-cycle; use validate-plan.sh --complete for the strict gate)"
+        fi
     fi
 fi
 
@@ -113,6 +128,31 @@ done
 if grep -qi 'TBD' "$inventory"; then
     fail "Inventory contains TBD; add a bounded discovery work unit instead"
 fi
+
+# --- defect-report hardening: helper-flag-shaped text, duplicate paragraph
+#     labels, and path-like shell fragments must never appear in plan docs ---
+swallowed_flag_regex='(^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*:'
+plan_docs=("$plan_dir/plan-description.md" "$plan_dir/adversarial-review.md")
+while IFS= read -r -d '' goal_file; do
+    plan_docs+=("$goal_file")
+    while IFS= read -r -d '' step_file; do
+        plan_docs+=("$step_file")
+    done < <(find "$(dirname "$goal_file")/steps" -maxdepth 1 -name '*.md' -not -name '*-testing.md' -print0 2>/dev/null)
+done < <(find "$plan_dir" -mindepth 2 -maxdepth 2 -name goal.md -print0 2>/dev/null)
+plan_docs+=("$inventory")
+for doc in "${plan_docs[@]}"; do
+    [ -f "$doc" ] || continue
+    if grep -Eq "$swallowed_flag_regex" "$doc"; then
+        fail "$(basename "$doc") contains helper-flag-shaped text (-p N.N: etc.); mutate plan documents through the helpers, never by hand"
+    fi
+    duplicate_label="$(grep -E '^§ [0-9]+\.[0-9]+$' "$doc" | sort | uniq -d | head -1)" || true
+    if [ -n "$duplicate_label" ]; then
+        fail "$(basename "$doc") has duplicate paragraph label $duplicate_label; renumber through the helpers"
+    fi
+    if grep -Eq '(\$script_dir/|\$PLANNING_SKILL_DIR/)' "$doc"; then
+        fail "$(basename "$doc") contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
+    fi
+done
 
 declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units coverage_ids goal_testing_required
 unit_ids=()

@@ -67,5 +67,11 @@ inventory="$plan_dir/work-unit-inventory.md"
 plan_root=$(cd "$plan_dir" && pwd -P)
 "$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
 "$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
+if command -v git >/dev/null 2>&1; then
+    git init -q "$plan_dir" 2>/dev/null || true
+    git -C "$plan_dir" add -A -- . 2>/dev/null || true
+    git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
+        commit -q -m "plan: initial structure" 2>/dev/null || true
+fi
 trap - EXIT
 echo "Created $plan_dir"

@@ -5,13 +5,23 @@ usage() {
     cat >&2 <<'USAGE'
 Usage:
   update-plan-content.sh -dp|--description-paragraph <plan-directory> <N.N> <text>
-  update-plan-content.sh -ds|--description-section <plan-directory> <section-id> -p N.N: <content> ...
+                                             ONE paragraph; replaces it. Extra -p flags are an error.
+  update-plan-content.sh -ds|--description-section <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+                                             WHOLE section; paragraphs must be sequential from N.1.
   update-plan-content.sh -gp|--goal-paragraph <plan-directory> <goal-name> <N.N> <text>
-  update-plan-content.sh -gs|--goal-section <plan-directory> <goal-name> <section-id> -p N.N: <content> ...
+                                             ONE paragraph; replaces it. Extra -p flags are an error.
+  update-plan-content.sh -gs|--goal-section <plan-directory> <goal-name> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+                                             WHOLE section; paragraphs must be sequential from N.1.
   update-plan-content.sh -sp|--step-paragraph <plan-directory> <goal>/<step> <N.N> <text>
-  update-plan-content.sh -ss|--step-section <plan-directory> <goal>/<step> <section-id> -p N.N: <content> ...
+                                             ONE paragraph; replaces it. Extra -p flags are an error.
+  update-plan-content.sh -ss|--step-section <plan-directory> <goal>/<step> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+                                             WHOLE section; paragraphs must be sequential from N.1.
   update-plan-content.sh -rp|--review-paragraph <plan-directory> <N.N> <text>
-  update-plan-content.sh -rs|--review-section <plan-directory> <section-id> -p N.N: <content> ...
+                                             ONE paragraph; replaces it. Extra -p flags are an error.
+  update-plan-content.sh -rs|--review-section <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+                                             WHOLE section; paragraphs must be sequential from N.1.
+  update-plan-content.sh -ap|--append-paragraph <plan-directory> <document-id> <section-id> <text>
+                                             Appends one paragraph with the next free number in the section.
   update-plan-content.sh -tp|--table-paragraph <plan-directory> <document-id> <N.N> <columns> <CSV>
   update-plan-content.sh -ia|--insert-after <plan-directory> <document-id> <N.N> <text>
   update-plan-content.sh -ib|--insert-before <plan-directory> <document-id> <N.N> <text>
@@ -40,12 +50,23 @@ normalize_flagged_paragraph() {
     printf '%s\n' "${paragraph_id%:}:"
 }
 
+reject_swallowed_flags() {
+    local content="$1" flag_form="$2" section_form
+    case "$flag_form" in -ia|-ib) section_form='' ;; *) section_form="${flag_form%p}s" ;; esac
+    if [[ "$content" =~ (^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*: ]]; then
+        plan_die "Content for $flag_form absorbed flag-shaped text ('-p N.N:' style); $flag_form takes exactly one paragraph and no flags. Use the section form instead:
+  update-plan-content.sh ${section_form:-$flag_form} <plan-directory> ... -p N.1: '...' -p N.2: '...'
+Section form requires sequential paragraphs starting at N.1."
+    fi
+}
+
 if [[ "$command" == -* ]]; then
     case "$command" in
         -dp|--description-paragraph)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" plan -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
             command=paragraph
             ;;
@@ -59,6 +80,7 @@ if [[ "$command" == -* ]]; then
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; goal_name="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" "goal:$goal_name" -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
             command=paragraph
             ;;
@@ -72,6 +94,7 @@ if [[ "$command" == -* ]]; then
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; step_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" "step:$step_id" -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
             command=paragraph
             ;;
@@ -85,6 +108,7 @@ if [[ "$command" == -* ]]; then
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" review -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
             command=paragraph
             ;;
@@ -93,6 +117,11 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; section="$2"; shift 2
             set -- "$plan_dir" review "$section" "$@"
             command=section
+            ;;
+        -ap|--append-paragraph)
+            [ "$#" -eq 4 ] || usage
+            set -- "$1" "$2" "$3" "$4"
+            command=append-paragraph
             ;;
         -tp|--table-paragraph)
             [ "$#" -eq 5 ] || { printf 'update-plan-content.sh: --table-paragraph requires exactly <plan-directory> <document-id> <N.N> <columns> <CSV>\n' >&2; exit 64; }
@@ -103,6 +132,7 @@ if [[ "$command" == -* ]]; then
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; document_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" "$document_id" "${paragraph_id%:}" "$paragraph_content"
             command=insert-after
             ;;
@@ -110,6 +140,7 @@ if [[ "$command" == -* ]]; then
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; document_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
+            reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" "$document_id" "${paragraph_id%:}" "$paragraph_content"
             command=insert-before
             ;;
@@ -193,6 +224,7 @@ case "$command" in
         [ "$#" -eq 3 ] || usage
         plan_dir="$1"; document_id="$2"; title="$3"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         plan_replace_title "$file" "$title"
@@ -202,6 +234,7 @@ case "$command" in
         [ "$#" -ge 4 ] || usage
         plan_dir="$1"; document_id="$2"; section="$3"; shift 3
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         IFS=$'\t' read -r heading number < <(plan_section_spec "$(plan_document_kind "$document_id")" "$section")
@@ -218,6 +251,7 @@ case "$command" in
         [ "$#" -ge 4 ] || usage
         plan_dir="$1"; document_id="$2"; shift 2
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         [ "$1" = '-p' ] || plan_die "Paragraph replacement requires -p N.N: content"
@@ -271,10 +305,33 @@ case "$command" in
         fi
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
+append-paragraph)
+        [ "$#" -eq 4 ] || usage
+        plan_dir="$1"; document_id="$2"; section="$3"; paragraph_content="$4"
+        plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
+        file="$(plan_document_path "$plan_dir" "$document_id")"
+        [ -f "$file" ] || plan_die "Document not found: $file"
+        IFS=$'\t' read -r heading number < <(plan_section_spec "$(plan_document_kind "$document_id")" "$section")
+        [[ "$paragraph_content" != *$'\n'* && "$paragraph_content" != *$'\r'* ]] || plan_die "Paragraph content must be one line"
+        [[ "$paragraph_content" != *'§'* ]] || plan_die "Paragraph content must not contain the reserved paragraph marker §"
+        [ -n "${paragraph_content//[[:space:]]/}" ] || plan_die "Paragraph content must not be empty"
+        max_num="$(awk -v n="$number" '$0 ~ "^§ " n "\\.[0-9]+$" { split($2, a, "."); m = a[2] + 0; if (m > max) max = m } END { print max + 0 }' "$file")"
+        [ "$max_num" -ge 1 ] || plan_die "Section '$section' has no numbered paragraphs; author it with the section form (-ds/-gs/-ss/-rs) from N.1"
+        body_file="$(mktemp "${TMPDIR:-/tmp}/plan-append-paragraph.XXXXXX")"
+        trap 'rm -f "$body_file"' EXIT
+        printf '%s\n' "$paragraph_content" > "$body_file"
+        plan_insert_paragraph "$file" "§ $number.$max_num" after "$body_file"
+        rm -f "$body_file"
+        trap - EXIT
+        printf 'update-plan-content: appended paragraph § %s.%s after § %s.%s\n' "$number" "$((max_num + 1))" "$number" "$max_num" >&2
+        plan_emit_step_testing_reminder "$plan_dir" "$document_id"
+        ;;
     table-paragraph)
         [ "$#" -eq 5 ] || usage
         plan_dir="$1"; document_id="$2"; paragraph_id="$3"; columns="$4"; csv="$5"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
@@ -291,6 +348,7 @@ case "$command" in
         [ "$#" -eq 4 ] || usage
         plan_dir="$1"; document_id="$2"; paragraph_id="$3"; paragraph_content="$4"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
@@ -309,6 +367,7 @@ case "$command" in
         [ "$#" -eq 4 ] || usage
         plan_dir="$1"; document_id="$2"; label="$3"; value="$4"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         plan_replace_field "$file" "$label" "$value"
@@ -321,19 +380,30 @@ case "$command" in
         [[ "$goal_name" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]] || plan_die "Goal name must use 01-kebab-case"
         goal_file="$plan_dir/$goal_name/goal.md"
         [ -f "$goal_file" ] || plan_die "Goal document not found: $goal_file"
+        plan_git_snapshot "$plan_dir"
         plan_replace_testing_requirement "$goal_file" "$required" "$rationale"
         ;;
     review-status)
         [ "$#" -eq 2 ] || usage
         plan_dir="$1"; requested_status="$2"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         review="$plan_dir/adversarial-review.md"; description="$plan_dir/plan-description.md"
         [ -f "$review" ] && [ -f "$description" ] || plan_die "Both plan-description.md and adversarial-review.md are required"
         case "$requested_status" in
             pending) review_status='`💤 pending`'; description_status='💤 pending' ;;
             approved)
-                if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|$' "$review"; then
+                if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|' "$review"; then
                     plan_die "Cannot approve a review with unresolved findings"
+                fi
+                if [ -f "$plan_dir/fix-keys.json" ]; then
+                    if ! verify_output="$("$script_dir/verify-fix-keys.sh" "$plan_dir" 2>&1)"; then
+                        plan_die "Cannot approve: fix-keys verification failed: $verify_output"
+                    fi
+                    session_id="$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                        "$plan_dir/fix-keys.json" | head -1)"
+                    [ -n "$session_id" ] || plan_die "fix-keys.json has no session_id"
+                    rm -rf "$(planning_tmpdir)/review-fix-keys/$session_id"
                 fi
                 review_status='`✅ approved`'; description_status='✅ approved'
                 ;;
@@ -357,6 +427,7 @@ case "$command" in
         [ "$#" -eq 2 ] || usage
         plan_dir="$1"; requested_status="$2"; inventory="$plan_dir/work-unit-inventory.md"
         plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
         [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
         case "$requested_status" in incomplete) mark=' ' ;; completed) mark=x ;; *) plan_die "Decomposition review status must be incomplete or completed" ;; esac
         temporary_file="${inventory}.tmp.$$"

@@ -120,17 +120,23 @@ grep -Fqx '§ 6.2' "$plan_dir/plan-description.md"
 "$script_dir/create-adversarial-review.sh" "$plan_dir"
 # update-adversarial-review: --help, stdin, and --file all work.
 "$script_dir/update-adversarial-review.sh" --help >/dev/null 2>&1
-printf 'ID,Missing or over-broad item,Required plan change,Status\nAR-01,"x","y","✅ resolved"\n' | \
+printf 'ID,Missing or over-broad item,Required plan change,Status,Work unit\nAR-01,"x","y","✅ resolved",\n' | \
     "$script_dir/update-adversarial-review.sh" "$plan_dir" >/dev/null 2>&1
 grep -Fq '| AR-01 |' "$plan_dir/adversarial-review.md"
-printf 'ID,Missing,Required,Status\nAR-02,a,b,✅ resolved\n' > "$temporary_root/review.csv"
+printf 'ID,Missing,Required,Status,Work unit\nAR-02,a,b,✅ resolved,\n' > "$temporary_root/review.csv"
 "$script_dir/update-adversarial-review.sh" "$plan_dir" --file "$temporary_root/review.csv" >/dev/null 2>&1
 grep -Fq '| AR-02 |' "$plan_dir/adversarial-review.md"
-if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/pending-validation.log" 2>&1; then
-    echo 'A pending review unexpectedly passed validation.' >&2
+# A pending review warns in normal mode but passes; --complete stays strict.
+if ! "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/pending-validation.log" 2>&1; then
+    echo 'A pending review should validate with warnings only (not fail).' >&2
     exit 1
 fi
-grep -Fqx 'Plan validation failed with 2 error(s).' "$temporary_root/pending-validation.log"
+grep -Fq 'WARN: Adversarial review is not approved' "$temporary_root/pending-validation.log"
+if "$script_dir/validate-plan.sh" --complete "$plan_dir" >"$temporary_root/complete-pending.log" 2>&1; then
+    echo '--complete mode accepted a pending review.' >&2
+    exit 1
+fi
+grep -Fqx 'FAIL: Adversarial review is not approved' "$temporary_root/complete-pending.log"
 "$script_dir/update-plan-content.sh" --review-section "$plan_dir" findings \
     -p 2.1: 'No unresolved findings remain after review.'
 "$script_dir/update-plan-content.sh" -rp "$plan_dir" 2.1 \
@@ -240,6 +246,61 @@ if grep -Fq 'W02' "$plan_dir/01-sync/goal.md"; then
 fi
 if grep -Fq '| W02 |' "$plan_dir/01-sync/progress.md"; then
     echo 'Removed work unit W02 still present in the goal progress tracker.' >&2
+    exit 1
+fi
+# ---- defect-report hardening (regression) ----
+# P0-1: flag-shaped content in a paragraph edit is rejected with the section hint.
+if "$script_dir/update-plan-content.sh" -gp "$plan_dir" 01-sync 4.1 '-p 2.1: flag-shaped' \
+    >"$temporary_root/swallowed-flag.log" 2>&1; then
+    echo 'Flag-shaped paragraph content unexpectedly passed.' >&2
+    exit 1
+fi
+grep -Fq 'flag-shaped' "$temporary_root/swallowed-flag.log"
+# P0-2: plan-content.sh find locates a literal string; ambiguous hits exit 1.
+"$script_dir/plan-content.sh" find "$plan_dir" '01-step-update-status' --in steps
+if "$script_dir/plan-content.sh" find "$plan_dir" 'Status' >"$temporary_root/find-multi.log" 2>&1; then
+    echo 'An ambiguous find unexpectedly exited 0.' >&2
+    exit 1
+fi
+grep -Fq 'narrow the pattern or scope' "$temporary_root/find-multi.log"
+if "$script_dir/plan-content.sh" find "$plan_dir" 'no-such-string-xyz' >"$temporary_root/find-zero.log" 2>&1; then
+    echo 'A find with no matches unexpectedly exited 0.' >&2
+    exit 1
+fi
+# P1-2: append-paragraph adds the next free paragraph number in the section.
+"$script_dir/update-plan-content.sh" -ap "$plan_dir" step:01-sync/01-step-update-status objective \
+    'Appended objective paragraph.'
+grep -Fq '§ 4.2' "$plan_dir/01-sync/steps/01-step-update-status.md"
+# P1-1: mutating helpers commit a pre-mutation snapshot in the plan git repo.
+git -C "$plan_dir" log --oneline > "$temporary_root/git-log.txt"
+grep -Fq 'snapshot before' "$temporary_root/git-log.txt"
+# P2-1: the validator rejects helper-flag-shaped text in narrative documents.
+printf '\n§ 5.9\nrun update-plan-content.sh -dp 2.3: x\n' >> "$plan_dir/plan-description.md"
+if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/flag-shaped-validation.log" 2>&1; then
+    echo 'Flag-shaped text in a narrative paragraph unexpectedly validated.' >&2
+    exit 1
+fi
+grep -Fq 'helper-flag-shaped text' "$temporary_root/flag-shaped-validation.log"
+git -C "$plan_dir" checkout -- plan-description.md
+# §5c: update-work-unit.sh amends type, depends-on, and description in place;
+# coverage rows are never touched.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 --type docs --depends-on W01 \
+    --description 'Record bounded research findings in the archive.'
+grep -Fq '| W03 | docs |' "$plan_dir/work-unit-inventory.md"
+grep -Fq '| W03 | docs |' "$plan_dir/work-unit-inventory.md"
+grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |' "$plan_dir/work-unit-inventory.md"
+grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
+grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
+grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# P2-2: removal refuses to cascade dependency pruning without --confirm-cascade.
+if "$script_dir/remove-work-unit.sh" "$plan_dir" W01 >"$temporary_root/cascade-refused.log" 2>&1; then
+    echo 'Removal with dependents unexpectedly passed without --confirm-cascade.' >&2
+    exit 1
+fi
+grep -Fq 'still list it in Depends-on' "$temporary_root/cascade-refused.log"
+"$script_dir/remove-work-unit.sh" "$plan_dir" W01 --confirm-cascade >/dev/null 2>&1
+if grep -Fq '| W01 |' "$plan_dir/work-unit-inventory.md"; then
+    echo 'Work unit W01 still present after a confirmed cascade removal.' >&2
     exit 1
 fi
 printf 'Planning command regression test passed.\n'

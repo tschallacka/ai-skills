@@ -6,6 +6,9 @@ if [ "$#" -ne 3 ]; then
     exit 64
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
+
 plan_dir="$1"
 goal_name="$2"
 requested_status="$3"
@@ -32,6 +35,7 @@ if [ ! -f "$progress_file" ]; then
     echo "Progress file not found: $progress_file" >&2
     exit 66
 fi
+plan_git_snapshot "$plan_dir"
 
 temporary_file="${progress_file}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT

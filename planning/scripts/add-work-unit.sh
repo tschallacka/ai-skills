@@ -13,6 +13,7 @@ source "$script_dir/plan-document-lib.sh"
 source "$script_dir/plan-reconcile-lib.sh"
 
 plan_require_directory "$plan_dir"
+plan_git_snapshot "$plan_dir"
 [[ "$unit_id" =~ ^W[0-9][0-9]+$ ]] || plan_die "Work-unit ID must use W01"
 case "$unit_type" in source|markup|style|test|config|docs|data|generated|discovery|verification) ;; *) plan_die "Unsupported work-unit type: $unit_type" ;; esac
 [[ "$goal_name" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]] || plan_die "Goal name must use 01-kebab-case"

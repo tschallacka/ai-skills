@@ -7,6 +7,9 @@ Usage:
   plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
   plan-content.sh summary <plan-directory> [markdown|text|json]
   plan-content.sh blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
+  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|all] [--format text|json]
+                                    literal search; prints docid<TAB>section<TAB>excerpt per match,
+                                    exits 1 on zero or multiple matches
 USAGE
     exit 64
 }
@@ -139,6 +142,103 @@ case "$command" in
                 ;;
             *) plan_die "Unknown format: $format (use markdown, text, or json)" ;;
         esac
+        ;;
+    find)
+        [ "$#" -ge 2 ] || usage
+        plan_dir="$1"; pattern="$2"; shift 2
+        scope=all; format=text
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --in) [ "$#" -ge 2 ] || usage; scope="$2"; shift 2 ;;
+                --format) [ "$#" -ge 2 ] || usage; format="$2"; shift 2 ;;
+                -h|--help) usage ;;
+                -*) usage ;;
+                *) usage ;;
+            esac
+        done
+        plan_require_directory "$plan_dir"
+        case "$scope" in plan|goals|steps|units|review|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, or all)" ;; esac
+        case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
+        matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
+        trap 'rm -f "$matches_file"' EXIT
+        scan_file() {
+            local docid="$1" file="$2"
+            [ -f "$file" ] || return 0
+            awk -v docid="$docid" -v pattern="$pattern" '
+                $0 ~ /^§ [0-9]+\.[0-9]+[[:space:]]*$/ { last = $2; next }
+                index($0, pattern) {
+                    line = $0
+                    sub(/^[[:space:]]*/, "", line)
+                    if (length(line) > 120) line = substr(line, 1, 120) "..."
+                    print docid "\t" (last ? last : "-") "\t" line
+                }
+            ' "$file"
+        }
+        case "$scope" in
+            plan|all) scan_file 'plan' "$plan_dir/plan-description.md" >> "$matches_file" ;;
+        esac
+        case "$scope" in
+            review|all) scan_file 'review' "$plan_dir/adversarial-review.md" >> "$matches_file" ;;
+        esac
+        case "$scope" in
+            goals|all)
+                for goal_file in "$plan_dir"/*/goal.md; do
+                    [ -f "$goal_file" ] || continue
+                    scan_file "goal:$(basename "$(dirname "$goal_file")")" "$goal_file" >> "$matches_file"
+                done
+                ;;
+        esac
+        case "$scope" in
+            steps|all)
+                for step_file in "$plan_dir"/*/steps/*.md; do
+                    [ -f "$step_file" ] || continue
+                    [[ "$(basename "$step_file")" == *-testing.md ]] && continue
+                    goal_name="$(basename "$(dirname "$(dirname "$step_file")")")"
+                    step_name="$(basename "$step_file" .md)"
+                    scan_file "step:$goal_name/$step_name" "$step_file" >> "$matches_file"
+                done
+                ;;
+        esac
+        case "$scope" in
+            units|all)
+                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" '
+                    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
+                        id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
+                        if (index($0, pattern)) {
+                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
+                            if (length(row) > 120) row = substr(row, 1, 120) "..."
+                            print "unit:" id "\t" row "\t" row
+                        }
+                    }
+                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                ;;
+        esac
+        if [ "$format" = json ]; then
+            printf '{"matches":['
+            first=true
+            while IFS=$'\t' read -r docid section excerpt; do
+                [ "$first" = true ] || printf ','
+                first=false
+                printf '{"document":"%s","section":"%s","excerpt":"%s"}' \
+                    "$(printf '%s' "$docid" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')" \
+                    "$(printf '%s' "$section" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')" \
+                    "$(printf '%s' "$excerpt" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')"
+            done < "$matches_file"
+            printf ']}\n'
+        else
+            cat "$matches_file"
+        fi
+        match_count="$(wc -l < "$matches_file")"
+        rm -f "$matches_file"
+        trap - EXIT
+        if [ "$match_count" -eq 0 ]; then
+            printf 'plan-content.sh: find: no matches for %s (scope: %s)\n' "$pattern" "$scope" >&2
+            exit 1
+        fi
+        if [ "$match_count" -gt 1 ]; then
+            printf 'plan-content.sh: find: %s matches for %s (scope: %s); narrow the pattern or scope to get a single hit\n' "$match_count" "$pattern" "$scope" >&2
+            exit 1
+        fi
         ;;
     *) usage ;;
 esac

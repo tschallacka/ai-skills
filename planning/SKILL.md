@@ -223,6 +223,14 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 the flagged `update-plan-content.sh` commands for narrative edits; the helpers
 enforce paragraph numbering, spacing, sequencing, and safe content.
 
+`create-plan.sh` git-initializes the plan directory, and every mutating helper
+commits the pre-mutation state first — `git -C <planname> log` recovers an
+overwritten paragraph. Read plan documents only through `plan-content.sh`;
+its `find` subcommand locates a literal string across plan documents and
+prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
+hits). Use it before a paragraph-level edit to confirm the target is unique:
+`plan-content.sh find <planname> 'Magento_Sales::invoices'`.
+
 ### 2.1 Write the plan description
 
 Create `<planname>/plan-description.md`. It must contain:
@@ -332,6 +340,12 @@ Each `goal.md` must be executable on its own and contain:
 - Implementation approach, risks, and relevant edge cases
 - **Owned work units:** the exact IDs from `work-unit-inventory.md`, with a
   concise explanation of their shared outcome
+
+  Layout note: the section holds a single summary paragraph `§ 9.1`; the
+  per-unit blurbs (`§ 9.2` … `§ 9.N`) come after the Testing-requirement table
+  and are managed by `add-work-unit.sh`/`remove-work-unit.sh`. Never author or
+  renumber them by hand, and never pass `-p 9.2:`+ to `--goal-section …
+  owned-work-units` — that inserts a duplicate ahead of the table.
 - **Testing requirement:** a table declaring `yes` or `no` and a rationale;
   research-only or genuinely untestable goals may declare `no`
 - **Goal-size exception:** required only when the goal has one work unit; cite
@@ -520,9 +534,49 @@ to add one paragraph; later labels in that same section shift automatically.
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
 
+Reviewer duties for reviewer-gated fix keys: when writing or updating the
+`## Findings` table, keep the mandatory-with-blank-allowed `Work unit` column
+(see 3.1 below) and let `update-adversarial-review.sh` re-mint the derived fix
+keys. When recording which key a fix used, write one claim line per
+(finding, work unit) into `fixes.md` (`finding_id`, `work_unit`, `key`,
+tab-separated). The approval gate auto-verifies `fixes.md` claims against
+`fix-keys.json` before flipping the review status to `approved`.
+
 <!-- REVIEWER_SECTION:END mandatory-review -->
 
-### 3.1 Add verification instructions
+### 3.1 Reviewer-gated fix keys
+
+Gated findings bind a reviewer finding to an owning work unit. The
+`## Findings` table in `adversarial-review.md` has a
+**mandatory-with-blank-allowed** `Work unit` column (the last of five): every
+row carries a final `WNN` cell, or an empty/`N/A` cell when the finding needs
+no fix key. `update-adversarial-review.sh` (and the row writers
+`create-adversarial-review.sh` and `add-adversarial-finding.sh`) mint a
+per-(finding, work-unit) HMAC-SHA256 fix key for every gated row and store only
+the derived keys in `fix-keys.json` beside the review file; the secret itself
+lives in the private scratch dir `$(planning_tmpdir)/review-fix-keys/<session-id>/`
+(`chmod 700` dir, `chmod 600` secret) and never enters the plan.
+
+The fixer records which key each fix used in `fixes.md` as tab-separated claim
+lines (`finding_id \t work_unit \t key`, one per gated pair). The approval gate
+runs `verify-fix-keys.sh` before `--review-status approved` flips the verdict:
+every gated pair must be claimed with a matching key, then the session secret
+dir is removed (invalidation) so a stale `fix-keys.json` fails closed on
+re-approval. Plans without `fix-keys.json` (ungated) and plans whose findings
+all carry no work unit approve without verification.
+
+#### Key reuse and rotation
+
+Fix keys are scoped to one review session. Reuse the same derived key within a
+session for repeated claims on the same (finding, work-unit) pair: minting is
+idempotent while the session dir exists, so re-running `update-adversarial-review.sh`
+re-derives identical keys. A new secret is minted only when the session dir is
+gone — which happens at approval (invalidation by the approval gate); keys from
+an invalidated session fail verification (stale keys never pass), and
+re-approval of such a plan refuses. Rotating the secret within a live session
+is never done.
+
+### 3.2 Add verification instructions
 
 For every step with verifiable behavior in a goal whose testing requirement is
 `yes`, create a companion file with the same number and slug:
@@ -551,7 +605,7 @@ Include only the relevant sections:
 A step may require multiple verification methods. Do not mark it complete until
 all listed checks have actually passed.
 
-### 3.2 Validate, then create progress trackers
+### 3.3 Validate, then create progress trackers
 
 Run the validator before creating trackers or presenting the plan as ready:
 
@@ -713,6 +767,10 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
 "$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 <type> <file|N/A> <scope> <subscope|N/A> "<change>" <dependencies|—> 01-<goal> 01-step-<slug>
+"$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place
+Ordering note: goals and steps only append (`NN-kebab-case` is enforced, no
+renumbering helper exists). Appending plus a prose "execution order differs
+from step numbering" note is the sanctioned pattern.
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress

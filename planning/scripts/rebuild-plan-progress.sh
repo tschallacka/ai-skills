@@ -12,10 +12,14 @@ if [ "$#" -ne 1 ]; then
     exit 64
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
+
 plan_dir="$1"
 [ -d "$plan_dir" ] || { printf 'Plan directory not found: %s\n' "$plan_dir" >&2; exit 66; }
 progress_file="$plan_dir/progress.md"
 [ -f "$progress_file" ] || { printf 'Plan progress file not found: %s\n' "$progress_file" >&2; exit 66; }
+plan_git_snapshot "$plan_dir"
 
 completed=0
 total=0

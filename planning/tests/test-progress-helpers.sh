@@ -32,13 +32,13 @@ review_file="$temporary_root/adversarial-review.md"
 {
     printf '# Adversarial review\n\n'
     printf '## Findings\n\n'
-    printf '| ID | Missing or over-broad item | Required plan change | Status |\n'
-    printf '|---|---|---|---|\n'
-    printf '| AR-01 | Baseline. | None. | ✅ resolved |\n\n'
+    printf '| ID | Missing or over-broad item | Required plan change | Status | Work unit |\n'
+    printf '|---|---|---|---|---|\n'
+    printf '| AR-01 | Baseline. | None. | ✅ resolved | N/A |\n\n'
     printf 'No additional substantive finding remains.\n'
 } > "$review_file"
 "$script_dir/plan-mutate.sh" add-finding "$temporary_root" AR-02 'Helper writes must be atomic.' 'Add the focused helper regression.' resolved >/dev/null
-grep -Fqx '| AR-02 | Helper writes must be atomic. | Add the focused helper regression. | ✅ resolved |' "$review_file"
+grep -Fqx '| AR-02 | Helper writes must be atomic. | Add the focused helper regression. | ✅ resolved | N/A |' "$review_file"
 if "$script_dir/plan-mutate.sh" add-finding "$temporary_root" AR-02 'Duplicate.' 'Must fail.' >/dev/null 2>&1; then
     echo 'duplicate adversarial finding unexpectedly succeeded' >&2
     exit 1

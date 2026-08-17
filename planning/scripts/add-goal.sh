@@ -14,6 +14,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
 
 plan_require_directory "$plan_dir"
+plan_git_snapshot "$plan_dir"
 [[ "$goal_name" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]] || plan_die "Goal name must use 01-kebab-case"
 plan_require_safe_value title "$title"
 plan_require_safe_value outcome "$outcome"

@@ -39,6 +39,20 @@ plan_die() {
     exit 64
 }
 
+# Commit the current plan directory state before a mutation so every overwrite
+# is recoverable. Plan directories are usually gitignored by the host repo
+# (agent scratch space), so create-plan.sh git-initializes them and mutating
+# helpers snapshot the pre-mutation state here. No-op without git or without a
+# git-initialized plan dir; skips silently when there is nothing to commit.
+plan_git_snapshot() {
+    local plan_dir="$1"
+    command -v git >/dev/null 2>&1 || return 0
+    [ -d "$plan_dir/.git" ] || return 0
+    git -C "$plan_dir" add -A -- . 2>/dev/null || return 0
+    git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
+        commit -q -m "snapshot before ${0##*/}" 2>/dev/null || true
+}
+
 # Scratch directory the planning skill may write temporary capsules and run
 # artifacts into. It lives under the system temp dir so it is fresh per boot;
 # the agent's existing write access to the temp dir suffices to create it.

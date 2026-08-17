@@ -10,6 +10,7 @@ plan_dir="$1" finding_id="$2" finding="$3" resolution="$4" status="${5:-open}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
 plan_require_directory "$plan_dir"
+plan_git_snapshot "$plan_dir"
 [[ "$finding_id" =~ ^AR-[0-9][0-9]+$ ]] || plan_die 'Finding ID must use AR-NN'
 plan_require_safe_value finding "$finding"
 plan_require_safe_value resolution "$resolution"
@@ -25,7 +26,7 @@ review_file="$plan_dir/adversarial-review.md"
 
 temporary_file="${review_file}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT
-awk -v row="| $finding_id | $finding | $resolution | $status_cell |" '
+awk -v row="| $finding_id | $finding | $resolution | $status_cell | N/A |" '
     /^No additional substantive finding remains\./ && !inserted { print row; print ""; inserted=1 }
     { print }
     END { if (!inserted) exit 2 }

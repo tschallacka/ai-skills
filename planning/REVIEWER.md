@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `cf1f69457b3a911766a7bb05521f850c8af4388d405c81206685315d913289fb`
+> Source SHA-256: `1b6fcb64efa6a8fd26e170fb85ec2fe91d0b9b2970f832599dd6d838c4b7a61f`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -129,6 +129,14 @@ to add one paragraph; later labels in that same section shift automatically.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
+
+Reviewer duties for reviewer-gated fix keys: when writing or updating the
+`## Findings` table, keep the mandatory-with-blank-allowed `Work unit` column
+(see 3.1 below) and let `update-adversarial-review.sh` re-mint the derived fix
+keys. When recording which key a fix used, write one claim line per
+(finding, work unit) into `fixes.md` (`finding_id`, `work_unit`, `key`,
+tab-separated). The approval gate auto-verifies `fixes.md` claims against
+`fix-keys.json` before flipping the review status to `approved`.
 
 
 ### 4.1 Bounded context and portable plan storage

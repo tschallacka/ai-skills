@@ -17,6 +17,7 @@ done
 [[ "$work_units" =~ ^W[0-9][0-9]+(,[[:space:]]*W[0-9][0-9]+)*$ ]] || plan_die "Work units must be comma-separated IDs such as W01,W02"
 inventory="$plan_dir/work-unit-inventory.md"
 [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
+plan_git_snapshot "$plan_dir"
 
 temporary_file="${inventory}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT

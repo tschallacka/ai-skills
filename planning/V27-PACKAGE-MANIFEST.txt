@@ -48,6 +48,8 @@ planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	v27-
 planning/scripts/plan-document-lib.sh	scripts/plan-document-lib.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-plan-content.sh	scripts/update-plan-content.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-adversarial-review.sh	scripts/update-adversarial-review.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/mint-fix-keys.sh	scripts/mint-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/verify-fix-keys.sh	scripts/verify-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-plan-progress.sh	scripts/update-plan-progress.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-progress.sh	scripts/update-progress.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-step.sh	scripts/update-step.sh	installer	v27-review-approved	backup-then-replace	false
@@ -64,6 +66,7 @@ planning/tests/test-voice-artifact-drift.sh	tests/test-voice-artifact-drift.sh	i
 planning/tests/test-supervision-frame.sh	tests/test-supervision-frame.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/test-persona-drift.sh	tests/test-persona-drift.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/test-progress-bar-shape.sh	tests/test-progress-bar-shape.sh	installer	v27-review-approved	backup-then-replace	false
+planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/progress.md	tests/fixtures/progress-shape/progress.md	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/goal.md	tests/fixtures/progress-shape/01-goal-a/goal.md	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/progress.md	tests/fixtures/progress-shape/01-goal-a/progress.md	installer	v27-review-approved	backup-then-replace	false

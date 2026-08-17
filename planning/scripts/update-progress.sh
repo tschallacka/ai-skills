@@ -6,6 +6,9 @@ if [ "$#" -ne 1 ]; then
     exit 64
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
+
 goal_dir="$1"
 progress_file="$goal_dir/progress.md"
 
@@ -13,6 +16,7 @@ if [ ! -f "$progress_file" ]; then
     echo "Progress file not found: $progress_file" >&2
     exit 66
 fi
+plan_git_snapshot "$(dirname "$goal_dir")"
 
 read -r completed total < <(awk -F'|' '
     /^\|/ {
