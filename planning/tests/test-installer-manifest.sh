@@ -2,17 +2,17 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-map_file="$repo_dir/planning/V27-PACKAGE-MAP.tsv"
-manifest_file="$repo_dir/planning/V27-PACKAGE-MANIFEST.txt"
+map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
+manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.txt"
 
-test_v27_manifest_emission() {
+test_manifest_emission() {
     local emitted map_installable source destination owner gate collision source_only resolved manifest_count
     emitted=$(mktemp)
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
 
     # NOTE: --print-skill-files emits the manifest itself (install.sh cats
-    # V27-PACKAGE-MANIFEST.txt), so comparing emitted to the manifest would be a
+    # PACKAGE-MANIFEST.txt), so comparing emitted to the manifest would be a
     # tautology. The real contracts are (a) manifest == map installable rows
     # below, and (b) skill_files() == manifest destinations
     # (test_skill_files_matches_manifest).
@@ -35,11 +35,11 @@ test_v27_manifest_emission() {
         }
     done < "$manifest_file"
 
-    # The source-only brainstorming docs are legitimate context-v27 content and
+    # The source-only brainstorming docs are legitimate context content and
     # appear in the manifest; the installer emission must NOT carry them as
     # installable rows. The real guard is the manifest == map-installable cmp
     # above (map treats these as source_only=true and excludes them).
-    printf '%s\n' 'test_v27_manifest_emission: PASS'
+    printf '%s\n' 'test_manifest_emission: PASS'
 }
 
 # The install set (install.sh skill_files planning heredoc) must equal the
@@ -71,12 +71,12 @@ PY
     sort "$skill_files" -o "$skill_files"
 
     if ! cmp -s "$skill_files" "$manifest_dests"; then
-        echo "skill_files() planning set does not match V27-PACKAGE-MANIFEST.txt destinations:" >&2
+        echo "skill_files() planning set does not match PACKAGE-MANIFEST.txt destinations:" >&2
         diff "$skill_files" "$manifest_dests" >&2 || true
         return 1
     fi
     printf '%s\n' 'test_skill_files_matches_manifest: PASS'
 }
 
-test_v27_manifest_emission "$@"
+test_manifest_emission "$@"
 test_skill_files_matches_manifest "$@"

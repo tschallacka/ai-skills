@@ -638,16 +638,16 @@ references/ui-user-story-validation.md
 references/comment-discipline-contract.md
 telemetry-schema.json
 placeholders.json
-context-v27/brainstorm-limiting-context.v27.md
-context-v27/brainstorm-limiting-context.v27-contract.json
-context-v27/brainstorm-limiting-context.v27-benchmark.json
-context-v27/brainstorm-limiting-context.v27-oracle.json
-tests/fixtures/planning-context-v27/case-matrix.tsv
-tests/fixtures/planning-context-v27/expected-outcomes.jsonl
-tests/fixtures/planning-context-v27/test-signing-key.pub
-tests/fixtures/planning-context-v27/platform-inputs.tsv
-tests/fixtures/planning-context-v27/runner-targets.discovery.txt
-tests/fixtures/planning-context-v27/runner-targets.tsv
+context/brainstorm-limiting-context.md
+context/brainstorm-limiting-context-contract.json
+context/brainstorm-limiting-context-benchmark.json
+context/brainstorm-limiting-context-oracle.json
+tests/fixtures/planning-context/case-matrix.tsv
+tests/fixtures/planning-context/expected-outcomes.jsonl
+tests/fixtures/planning-context/test-signing-key.pub
+tests/fixtures/planning-context/platform-inputs.tsv
+tests/fixtures/planning-context/runner-targets.discovery.txt
+tests/fixtures/planning-context/runner-targets.tsv
 tests/fixtures/progress-shape/progress.md
 tests/fixtures/progress-shape/01-goal-a/goal.md
 tests/fixtures/progress-shape/01-goal-a/progress.md
@@ -665,7 +665,7 @@ tests/fixtures/adversary-probe/adversarial-review.md
 tests/fixtures/adversary-probe/01-health-endpoint/goal.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
-tests/test-planning-context-v27-contract.sh
+tests/test-planning-context-contract.sh
 tests/test-installer-manifest.sh
 tests/test-plan-env.sh
 tests/test-plan-integrity-and-monitor.sh
@@ -678,7 +678,7 @@ tests/test-progress-bar-shape.sh
 tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh
-V27-PACKAGE-MANIFEST.txt
+PACKAGE-MANIFEST.txt
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
 roles/planning.md
@@ -756,7 +756,7 @@ source_file() {
 cli_print_skill_files() {
     [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
     [ "$CLI_FORMAT" = "tsv" ] || die "unsupported CLI format: $CLI_FORMAT"
-    cat "$SOURCE_ROOT/planning/V27-PACKAGE-MANIFEST.txt"
+    cat "$SOURCE_ROOT/planning/PACKAGE-MANIFEST.txt"
 }
 
 cli_resolve_source() {

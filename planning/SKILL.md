@@ -1212,13 +1212,13 @@ atomic; a batch failure is recorded as incomplete and is never presented as a
 completed plan update. Do not use batching to bypass helper validation or hide
 an intermediate failure.
 
-### 4.6 v27 replacement package handoff
+### 4.6 replacement package handoff
 
-The v27 replacement package is repository-owned until its closure plan is
+The replacement package is repository-owned until its closure plan is
 approved. Its finite installable boundary is the six-column
-`planning/V27-PACKAGE-MANIFEST.txt`; `planning/V27-PACKAGE-MAP.tsv` is the
-source/destination ownership record and the two repository-root v27 brainstorm
-inputs are source-only. The package contains the v27 contract, benchmark and
+`planning/PACKAGE-MANIFEST.txt`; `planning/PACKAGE-MAP.tsv` is the
+source/destination ownership record and the two repository-root brainstorm
+inputs are source-only. The package contains the contract, benchmark and
 oracle records, fixtures, runner evidence, installer proof, this skill, and
 the planning helper scripts listed by that manifest.
 

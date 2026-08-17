@@ -144,7 +144,7 @@ defaults verbatim.
 - New/changed skills must be registered in `install.sh` (`SKILL_NAMES`, the
   shop menu, `select_skills`, and copy logic), added to the skills table in
   `README.md`, and to `package.json`'s `files` list. `planning/` also tracks a
-  ship manifest (`planning/V27-PACKAGE-MANIFEST.txt` + `V27-PACKAGE-MAP.tsv` +
+  ship manifest (`planning/PACKAGE-MANIFEST.txt` + `PACKAGE-MAP.tsv` +
   `install.sh skill_files()`), which must stay byte-consistent — the
   installer-manifest test asserts this.
 - Follow DEVELOPMENT.md for release/versioning/publishing. It is a human

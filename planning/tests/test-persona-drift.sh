@@ -5,7 +5,7 @@
 #   - the registry (planning/scripts/role-context.sh ROLES=()),
 #   - the scope docs each persona reads (planning/ROLES.md + role-context.sh
 #     role_docs()),
-#   - the shipped install set (planning/V27-PACKAGE-MANIFEST.txt + the
+#   - the shipped install set (planning/PACKAGE-MANIFEST.txt + the
 #     install.sh skill_files() list).
 #
 # It fails (drift, no backwards compatibility) when:
@@ -23,7 +23,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 registry="$root/scripts/role-context.sh"
 voices="$root/roles/VOICES.md"
-manifest="$root/V27-PACKAGE-MANIFEST.txt"
+manifest="$root/PACKAGE-MANIFEST.txt"
 
 fail=0
 note_fail() { echo "persona drift: $1" >&2; fail=1; }
