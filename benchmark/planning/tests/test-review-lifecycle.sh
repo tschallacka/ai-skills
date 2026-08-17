@@ -396,13 +396,13 @@ if ! PATH="$fake_bin:$PATH" timeout 60s env \
     cat "$integration_root/setup-output.txt" >&2
     exit 1
 fi
-if ! bash -n "$integration_root/testing/current/start-worker.sh"; then
-    nl -ba "$integration_root/testing/current/start-worker.sh" | sed -n '600,620p' >&2
+if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
+    nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$fake_bin:$PATH" timeout 60s bash "$integration_root/testing/current/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$fake_bin:$PATH" timeout 60s bash "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
-    cat "$integration_root/testing/current/workspace/oracle-grade.txt" >&2 2>/dev/null || true
+    cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1
 fi
 archive="$root/../results/codex/$(benchmark_result_parent current)/$run_id/current"

@@ -130,7 +130,8 @@ portable benchmark worker failure.
 - `TAG`: Git tag being benchmarked, such as `v1.3.0` or `1.4.1`.
 - `REVISION`: normalized tag with a leading `v` stripped.
 - `RUN_ID`: batch label in `UTC_TIMESTAMP-NAME` form for named runs.
-- `CASE_ROOT`: per-revision benchmark directory.
+- `CASE_ROOT`: per-revision benchmark directory, run-id-suffixed
+  (`<revision>-<RUN_ID>`) so repeated or concurrent runs never collide.
 - `SRC_ROOT`: tagged source checkout under `CASE_ROOT/source`.
 - `BENCH_ROOT`: worker workspace under `CASE_ROOT/workspace`.
 - `PLAN_NAME`: fresh plan directory name under `BENCH_ROOT`.

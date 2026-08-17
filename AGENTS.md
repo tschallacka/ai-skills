@@ -119,7 +119,15 @@ defaults verbatim.
   when driving from an opencode session). Set that driver's model envar
   (`OPENCODE_MODEL`/`CODEX_MODEL`/`CLAUDE_MODEL`) to avoid a stale default.
 - Use a dedicated testing base dir outside the repo (e.g. `/tmp/
-  ai-skills-benchmark`); revisions become subdirectories there.
+  ai-skills-benchmark`); each run gets its own run-id-suffixed case dir there
+  (`<revision>-<RUN_ID>`, so re-runs and parallel runs never collide).
+- Progress is tailable: `run-benchmark.sh` writes stage updates (preflight,
+  worker start/exit, validation, review findings, oracle, publish) to
+  `/tmp/ai-skills-benchmark-progress-<RUN_ID>.log` (override with
+  `PROGRESS_LOG`). `tail -f` that file to watch a run.
+- When neither `--sequential` nor `--parallel` is given and `RUN_MODE` is
+  unset, the harness prompts interactively for the execution mode; in
+  non-interactive shells it defaults to sequential.
 - Run under a resource cap via `resource-limited-testing`.
 - Results land under `benchmark/results/<agent>/<revision-parent>/<run-id>/`;
   the per-agent `.staging` subdir is transient and gitignored.

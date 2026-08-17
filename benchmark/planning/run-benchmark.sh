@@ -27,7 +27,8 @@ if [[ ! "$RUN_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     exit 64
 fi
 
-EXECUTION_MODE="${RUN_MODE:-sequential}"
+EXECUTION_MODE=""
+RUN_MODE_SET=0
 REVIEW_MODE="fresh-review"
 REVIEW_MODE_SET=0
 REVISIONS=""
@@ -40,9 +41,11 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --parallel)
             EXECUTION_MODE="parallel"
+            RUN_MODE_SET=1
             ;;
         --sequential)
             EXECUTION_MODE="sequential"
+            RUN_MODE_SET=1
             ;;
         --versions)
             INTERACTIVE_VERSIONS=1
@@ -86,6 +89,29 @@ if [ -n "$REVISIONS" ]; then
     done
 fi
 
+if [ "$RUN_MODE_SET" -eq 0 ]; then
+    if [ -n "${RUN_MODE:-}" ]; then
+        EXECUTION_MODE="$RUN_MODE"
+    elif [ -t 0 ]; then
+        printf 'Run benchmarks sequentially or in parallel? [sequential]: ' >&2
+        read -r MODE_ANSWER
+        case "${MODE_ANSWER,,}" in
+            p*|para*) EXECUTION_MODE="parallel" ;;
+            ""|s*|seq*) EXECUTION_MODE="sequential" ;;
+            *)
+                echo "Unknown mode '$MODE_ANSWER'; using sequential" >&2
+                EXECUTION_MODE="sequential"
+                ;;
+        esac
+    else
+        EXECUTION_MODE="sequential"
+    fi
+fi
+case "$EXECUTION_MODE" in
+    sequential|parallel) ;;
+    *) echo "Invalid execution mode: $EXECUTION_MODE" >&2; exit 64 ;;
+esac
+
 case "$REVIEW_MODE" in iterative|fresh-review) ;; *) echo "Invalid review mode: $REVIEW_MODE" >&2; exit 64;; esac
 [[ "$MAX_VERIFICATION_PASSES" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_VERIFICATION_PASSES must be positive." >&2; exit 64; }
 [[ "$MAX_REVIEW_CYCLES" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_REVIEW_CYCLES must be positive." >&2; exit 64; }
@@ -96,6 +122,14 @@ if [[ ! "$RUN_ID" =~ ^[0-9]{8}T[0-9]{6}Z-${RUN_NAME//./\.}$ ]]; then
     echo "RUN_ID must have the form UTC_TIMESTAMP-$RUN_NAME" >&2
     exit 64
 fi
+# Tailable progress log for the invoking process: tail this file to watch
+# stage transitions (preflight, worker, validation, review, oracle, publish).
+PROGRESS_LOG="${PROGRESS_LOG:-${TMPDIR:-/tmp}/ai-skills-benchmark-progress-$RUN_ID.log}"
+export PROGRESS_LOG
+progress_log() {
+    printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$PROGRESS_LOG"
+}
+progress_log "benchmark run $RUN_ID started (mode=$EXECUTION_MODE review=$REVIEW_MODE revisions=${REVISIONS:-auto})"
 # Results live under benchmark/results/<agent>/<revision-parent>/<run-id>/.
 # <revision-parent> is the tag for version runs, or current/<latest-tag> for
 # `current` runs (see benchmark_result_parent). Run-level files (summary,
@@ -220,7 +254,8 @@ for TAG in "${TAGS[@]}"; do
     export INDEPENDENT_THRESHOLD="${INDEPENDENT_THRESHOLD:-1.0}"
     "$SCRIPT_DIR/setup-benchmark.sh" "$TAG" "$TEST_BASE_DIR" "$RUN_NAME" "$RUN_ID"
     REVISION="${TAG#v}"
-    START_SCRIPTS+=("$TEST_BASE_DIR/$REVISION/start-worker.sh")
+    START_SCRIPTS+=("$TEST_BASE_DIR/$REVISION-$RUN_ID/start-worker.sh")
+    progress_log "case prepared: $TAG -> $TEST_BASE_DIR/$REVISION-$RUN_ID"
 done
 
 kill_process_tree() {
@@ -268,12 +303,14 @@ run_case() {
     local code
 
     case_root="$(dirname "$start_script")"
+    progress_log "starting worker: $start_script"
     echo "Running $start_script"
     if "$start_script"; then
         code=0
     else
         code="$?"
     fi
+    progress_log "worker finished: $start_script (code=$code)"
 
     source "$case_root/benchmark-env.sh"
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
@@ -325,6 +362,7 @@ for START_SCRIPT in "${START_SCRIPTS[@]}"; do
         cat "$CASE_ROOT_FOR_SUMMARY/harness-summary-row.tsv" >> "$SUMMARY"
     else
         REVISION_FOR_SUMMARY="$(basename "$CASE_ROOT_FOR_SUMMARY")"
+        REVISION_FOR_SUMMARY="${REVISION_FOR_SUMMARY%-$RUN_ID}"
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$REVISION_FOR_SUMMARY" "unavailable" "$RUN_ID" \
             "$CASE_ROOT_FOR_SUMMARY" "$RUN_RESULTS_ROOT/$REVISION_FOR_SUMMARY" \

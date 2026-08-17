@@ -35,7 +35,9 @@ TEST_BASE_DIR="$2"
 RUN_NAME="$3"
 RUN_ID="${4:-$(date -u +%Y%m%dT%H%M%SZ)-$RUN_NAME}"
 REVISION="${TAG#v}"
-CASE_ROOT="$TEST_BASE_DIR/$REVISION"
+# Case dirs are run-id-suffixed so concurrent or repeated runs never collide;
+# each run gets its own scaffolding under the testing base dir.
+CASE_ROOT="$TEST_BASE_DIR/$REVISION-$RUN_ID"
 SRC_ROOT="$CASE_ROOT/source"
 BENCH_ROOT="$CASE_ROOT/workspace"
 PLAN_NAME="$(printf '%s' "basic-test-proof-${REVISION}-${RUN_ID}-isolated-plan" | tr '[:upper:]' '[:lower:]')"
@@ -198,6 +200,10 @@ export REVIEW_MODE=$(printf '%q' "${REVIEW_MODE:-fresh-review}")
 export MAX_VERIFICATION_PASSES=$(printf '%q' "${MAX_VERIFICATION_PASSES:-3}")
 export MAX_REVIEW_CYCLES=$(printf '%q' "${MAX_REVIEW_CYCLES:-3}")
 export BLINDED_ORACLE_SPEC=$(printf '%q' "$BLINDED_ORACLE_SPEC")
+# Tailable progress log for the invoking process. PROGRESS_LOG may be
+# pre-set by the caller (e.g. run-benchmark.sh); default is a /tmp file
+# keyed by RUN_ID so concurrent runs each have their own log.
+export PROGRESS_LOG=$(printf '%q' "${PROGRESS_LOG:-${TMPDIR:-/tmp}/ai-skills-benchmark-progress-$RUN_ID.log}")
 # Test-only reviewer seam. These values are inert when unset and are accepted
 # only by an isolated harness; the generated adapter still owns authority,
 # envelope, semantic, redaction, and fail-closed validation.
@@ -232,6 +238,12 @@ copy_workspace_for_publication() {
         -cf - . | tar -C "$target_root" -xf -
 }
 
+# Tailable progress log for the invoking process: one timestamped line per
+# stage transition (preflight, worker, validation, review, oracle, publish).
+progress_log() {
+    printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$PROGRESS_LOG"
+}
+
 START_EPOCH="$(date -u +%s)"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -244,6 +256,7 @@ else
 fi
 
 find "$BENCH_ROOT" -maxdepth 1 -mindepth 1 -printf '%f\n' | sort > "$CASE_ROOT/preflight-before-worker.txt"
+progress_log "case $REVISION ($TAG): preflight ready; starting worker"
 
 kill_process_tree() {
     local pid="$1"
@@ -287,6 +300,7 @@ WORKER_CHILD_PID="$AGENT_PID"
 WORKER_PROCESS_GROUP_ID="$AGENT_PGID"
 wait_agent
 CODE="$AGENT_EXIT"
+progress_log "case $REVISION ($TAG): worker exited code=$CODE"
 WORKER_CHILD_PID=""
 
 END_EPOCH="$(date -u +%s)"
@@ -459,6 +473,7 @@ STRUCTURAL_REPORT="$BENCH_ROOT/harness-structural-validation.txt"
     echo
     echo "result=$STRUCTURAL_VALIDATION"
 } > "$STRUCTURAL_REPORT"
+progress_log "case $REVISION ($TAG): structural validation=$STRUCTURAL_VALIDATION"
 
 USAGE_RECORDS="$(sed -n 's/^usage_records=//p' "$BENCH_ROOT/telemetry.txt" | head -1)"
 TOTAL_USAGE="$(sed -n 's/^total_usage_tokens=//p' "$BENCH_ROOT/telemetry.txt" | head -1)"
@@ -935,6 +950,21 @@ fi
 if ! reviewer_b_session_binding "$REVIEWER_SELECTION" "$REVIEWER_LIFECYCLE" "${REVIEW_MODE:-fresh-review}" "$REVIEWER_BINDING"; then
     STATUS="tainted"
 fi
+REVIEW_FINDING_COUNTS="$(python3 - "$REVIEWER_B_APPROVAL" <<'PY'
+import json
+import sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    value = {}
+approved = value.get("approved_findings")
+rejected = value.get("rejected_findings")
+approved_count = len(approved) if isinstance(approved, list) else 0
+rejected_count = len(rejected) if isinstance(rejected, list) else 0
+print(f"approved={approved_count} rejected={rejected_count} total={approved_count + rejected_count}")
+PY
+)"
+progress_log "case $REVISION ($TAG): review complete (mode=${REVIEW_MODE:-fresh-review}); findings $REVIEW_FINDING_COUNTS"
 
 if [ "$ORACLE_STATUS" = seeded ] && [ "$REVIEWER_STATUS" = passed ]; then
     ORACLE_EVIDENCE="$BENCH_ROOT/oracle-terminal-evidence.json"
@@ -1013,6 +1043,7 @@ fi
 if [ "$ORACLE_STATUS" = rejected ]; then
     STATUS="tainted"
 fi
+progress_log "case $REVISION ($TAG): oracle status=$ORACLE_STATUS"
 PROVENANCE_MATERIAL="$BENCH_ROOT/provenance-material.json"
 DEFECTIVE_PLAN_PATH=""
 TARGET_SNAPSHOT_PATH=""
@@ -1452,6 +1483,7 @@ PY
 
 mkdir -p "$(dirname "$RESULT_DIR")"
 mv "$STAGING_RESULT_DIR" "$RESULT_DIR"
+progress_log "case $REVISION ($TAG): published result to $RESULT_DIR"
 
 printf 'completed %s code=%s status=%s result=%s\n' "$REVISION" "$CODE" "$STATUS" "$RESULT_DIR"
 exit "$CODE"
