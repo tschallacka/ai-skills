@@ -5,6 +5,7 @@ complete_mode=false
 propagation_mode=true
 stale_file=""
 stale_only=false
+stale_requested=false
 filtered_args=()
 for arg in "$@"; do
     case "$arg" in
@@ -13,9 +14,11 @@ for arg in "$@"; do
         --no-propagation) propagation_mode=false ;;
         --stale)
             stale_only=true
+            stale_requested=true
             ;;
         --stale=*)
             stale_file="${arg#--stale=}"
+            stale_requested=true
             ;;
         --)
             filtered_args+=("$arg")
@@ -38,7 +41,7 @@ elif [ "$#" -eq 2 ] && [ "$1" = '--complete' ]; then
     complete_mode=true
     plan_dir="$2"
 else
-    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>] <plan-directory>" >&2
+    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>|default] <plan-directory>" >&2
     exit 64
 fi
 
@@ -184,6 +187,23 @@ for doc in "${plan_docs[@]}"; do
     fi
 done
 
+# Default stale phrase list (report 8): case-count wording is the anti-pattern.
+# A count drifts the moment a case is added, so "every case enumerated in the
+# instructions" is the drift-proof form; these phrases flag the countable form
+# so a fix converts "all four states" into the explicit enumeration. A
+# paragraph that also records a history marker is exempt (it is a deliberate
+# corrective reference, not live text). Pass --stale with a file to extend, or
+# --stale default to run this list alone.
+stale_default_phrases=(
+    'all four'
+    'all six'
+    'all three'
+    'all five'
+    'the eleven'
+    'the six states'
+    'all states'
+    'four per-state'
+)
 # --- stale-wording sweep (--stale <file-of-phrases>): a listed phrase that
 #     still appears in a paragraph that does not also record a history marker
 #     (e.g. "an earlier version", "previously") is stale — a fix that removed
@@ -193,6 +213,15 @@ done
 #     itself, so it would mask a match. Deliberate references to corrected
 #     history pass while an unfixed sibling fails.
 stale_markers='an earlier version|previously|superseded by|supersedes|no longer|was removed|historically|now replaced by'
+# The stale sweep scans the same documents as find --in all, INCLUDING the
+# *-testing.md companions — the surface where case-count defects live and the
+# one most likely to drift (report 5 §1 / report 8). plan_docs above excludes
+# companions for the structural hardening checks, so build a separate list here.
+stale_docs=("${plan_docs[@]}")
+for step_file in "$plan_dir"/*/steps/*-testing.md; do
+    [ -f "$step_file" ] || continue
+    stale_docs+=("$step_file")
+done
 stale_scan_doc() {
     local file="$1" phrase="$2"
     awk -v phrase="$phrase" -v markers="$stale_markers" '
@@ -202,26 +231,39 @@ stale_scan_doc() {
             }
             label = ""; content = ""
         }
-        /^§ [0-9]+\.[0-9]+$/ { flush(); label = $0; next }
-        /^## / { flush(); next }
+        /^#+ / { flush(); label = $0; next }
+        /^[[:space:]]*$/ { next }
         { if (label != "") content = content $0 "\n" }
         END { flush() }
     ' "$file"
 }
-if [ -n "$stale_file" ]; then
-    if [ ! -f "$stale_file" ]; then
-        fail "--stale file not found: $stale_file"
+if [ "$stale_requested" = true ]; then
+    # --stale default (or --stale with no file) uses the bundled case-count
+    # phrase list; --stale <file> uses that file. When a file is given, it is
+    # used alone (extend it by adding phrases to the file).
+    if [ -n "$stale_file" ] && [ "$stale_file" != "default" ]; then
+        if [ ! -f "$stale_file" ]; then
+            fail "--stale file not found: $stale_file"
+        fi
+        stale_phrases_file="$stale_file"
     else
-        while IFS= read -r phrase; do
-            [ -n "${phrase//[[:space:]]/}" ] || continue
-            for doc in "${plan_docs[@]}"; do
-                [ -f "$doc" ] || continue
-                hits="$(stale_scan_doc "$doc" "$phrase")"
-                if [ -n "$hits" ]; then
-                    fail "stale phrase '$phrase' appears in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ')"
-                fi
-            done
-        done < "$stale_file"
+        stale_phrases_file="$(mktemp "${TMPDIR:-/tmp}/plan-stale-default.XXXXXX")"
+        trap 'rm -f "$stale_phrases_file"' EXIT
+        printf '%s\n' "${stale_default_phrases[@]}" > "$stale_phrases_file"
+    fi
+    while IFS= read -r phrase; do
+        [ -n "${phrase//[[:space:]]/}" ] || continue
+        for doc in "${stale_docs[@]}"; do
+            [ -f "$doc" ] || continue
+            hits="$(stale_scan_doc "$doc" "$phrase")"
+            if [ -n "$hits" ]; then
+                fail "stale phrase '$phrase' appears in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ')"
+            fi
+        done
+    done < "$stale_phrases_file"
+    if [ -z "$stale_file" ] || [ "$stale_file" = "default" ]; then
+        rm -f "$stale_phrases_file"
+        trap - EXIT
     fi
 fi
 
@@ -671,68 +713,102 @@ fi
 #     agree. A finding cites one surface; a fix must reach the others, and this
 #     is the mechanical part of that contract. ---
 if [ "$propagation_mode" = true ]; then
-    # (a) Naming a class/file/method in instructions does not schedule it:
-    #     every backticked FQCN/path in a step's instructions that is not the
-    #     unit's own change target must be owned by an inventory row.
+    # (a) Naming a class in instructions does not schedule an EDIT to it. The
+    #     robust rule: flag a ::-qualified symbol ONLY when the plan names that
+    #     symbol as a change target somewhere (in some unit's File or scope),
+    #     yet no unit owns it. A plan intending an edit says so in an inventory
+    #     row by definition; a symbol never named as a change target is a mere
+    #     mention or seam (a Magento plan names Magento\Checkout::addProduct,
+    #     AbstractItems::getColumnHtml, or a Vendor_Module::path template to
+    #     record the boundary) and is not a defect.
+    #     Build the set of change-target symbols the plan declares.
+    declare -A change_targets=()
+    for candidate in "${unit_ids[@]}"; do
+        fc="${unit_file[$candidate]}"
+        sc="${unit_scope[$candidate]}"
+        [ -n "$fc" ] && [ "$fc" != "N/A" ] && change_targets["$(basename "$fc" 2>/dev/null)"]=1
+        change_targets["${sc%%::*}"]=1
+        change_targets["${sc##*.}"]=1
+    done
     for id in "${unit_ids[@]}"; do
         step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
         [ -f "$step_file" ] || continue
-        # Section 5 = Instructions; only scan that section.
         instr_section="$(awk '
             /^## Instructions$/ { in_sec = 1; next }
             /^## / && in_sec { exit }
             in_sec { print }
         ' "$step_file")"
         [ -n "$instr_section" ] || continue
-        # Backticked tokens that look like a code symbol to be created — a
-        # ::-qualified FQCN (class/method) — are flagged when no inventory row
-        # owns them. Shell command strings, paths with $vars or command
-        # suffixes, and output paths are deliberately NOT matched: they are
-        # invocations, not change targets, and matching them produces false
-        # positives on any fixture with real commands.
-        for token in $(printf '%s' "$instr_section" | grep -oE '`[^`]+`' | tr -d '`'); do
+        # Edit/create-intent lines: the symbol must sit on a line that also
+        # instructs an edit (create, add, implement, edit, change, update,
+        # modify, rewrite, replace, override).
+        edit_lines="$(printf '%s' "$instr_section" | grep -iE '(create|add|implement|edit|change|update|modify|rewrite|replace|override)' || true)"
+        [ -n "$edit_lines" ] || continue
+        # Well-formed Class::method tokens only. Exclude X::class (a PHP class
+        # constant, not a method) and Vendor_Module::path template identifiers
+        # (which the tokeniser would otherwise truncate into a plausible but
+        # nonexistent Class::method).
+        tokens="$(printf '%s' "$edit_lines" | grep -oE '\b[A-Z][A-Za-z0-9_]*(\\[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*\(?' | sed -E 's/\($//' | sort -u || true)"
+        for token in $tokens; do
             case "$token" in
-                *::*)
-                    [[ "$token" == *'$'* || "$token" == *' '* ]] && continue
-                    [[ "$token" == *'.sh'* || "$token" == *'.json'* || "$token" == *'.md'* ]] && continue
-                    owned=false
-                    for candidate in "${unit_ids[@]}"; do
-                        file_cell="${unit_file[$candidate]}"
-                        scope_cell="${unit_scope[$candidate]}"
-                        [ "$file_cell" = "$token" ] && { owned=true; break; }
-                        [ "$scope_cell" = "$token" ] && { owned=true; break; }
-                    done
-                    if [ "$owned" = false ] && [ "$token" != "$id" ]; then
-                        fail "$id instructions name '$token' which no inventory row owns; add a discovery/ownership row or name the owning work unit"
-                    fi
-                    ;;
+                *'::class'|*'::'*) : ;;
+                *) continue ;;
             esac
-        done
-        # (b) Inventory row vs step body mention drift: a file or unit id
-        #     mentioned in the inventory row but not in the step body (and
-        #     vice versa) is a propagation leak.
-        inv_row="$(awk -F'|' -v wanted="$id" '
-            /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-                x=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", x)
-                if (x == wanted) print $0
-            }' "$inventory")"
-        step_body="$(cat "$step_file")"
-        for token in $(printf '%s' "$inv_row" | grep -oE '\bW[0-9][0-9]+\b' | sort -u); do
-            [ "$token" = "$id" ] && continue
-            if ! printf '%s' "$step_body" | grep -Fq "$token"; then
-                warn "$id inventory row names $token which its step body never mentions"
+            [ "${token%%::*}" != "class" ] || continue
+            # Template-identifier guard: Vendor_Module::<path> (Magento_Weee::
+            # email/items/price/row.phtml) is a template id, not a class method.
+            if [[ "$token" =~ ^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*:: ]]; then
+                # Confirm the full source line carries a path after ::(a slash).
+                if printf '%s' "$edit_lines" | grep -qE "${token%%::*}[A-Za-z0-9_]*::[^ (]*/"; then
+                    continue
+                fi
+            fi
+            # Only symbols the plan names as a change target are candidates.
+            klass="${token%%::*}"
+            klass_short="${klass##*.}"
+            if [ -z "${change_targets[$klass_short]+x}" ] && [ -z "${change_targets[$klass]+x}" ]; then
+                continue
+            fi
+            # Ownership: is this symbol owned by a unit (file basename or scope)?
+            owned=false
+            for candidate in "${unit_ids[@]}"; do
+                file_cell="${unit_file[$candidate]}"
+                scope_cell="${unit_scope[$candidate]}"
+                scope_class="${scope_cell%%::*}"
+                scope_class_short="${scope_class##*.}"
+                [ "$(basename "$file_cell" 2>/dev/null)" = "$klass_short" ] && { owned=true; break; }
+                [ "$file_cell" = "$klass" ] && { owned=true; break; }
+                [ "$scope_class" = "$klass" ] && { owned=true; break; }
+                [ "$scope_class_short" = "$klass_short" ] && { owned=true; break; }
+            done
+            if [ "$owned" = false ] && [ "$token" != "$id" ]; then
+                fail "$id instructions instruct an edit to '$token' which no inventory row owns; add a discovery/ownership row or name the owning work unit"
             fi
         done
-        for token in $(printf '%s' "$step_body" | grep -oE '\bW[0-9][0-9]+\b' | sort -u); do
-            [ "$token" = "$id" ] && continue
-            if ! printf '%s' "$inv_row" | grep -Fq "$token"; then
-                warn "$id step body names $token which its inventory row never mentions"
-            fi
-        done
+        # (b) Removed by report 7: cross-mention warnings fired on any passing
+        #     sibling reference ("W83 owns this payload, do not duplicate it")
+        #     and produced 500+ warnings that penalised the seven-surface prose.
     done
 
-    # (c) A verification unit's instructions must name only units it
-    #     depends on (directly or transitively) or units in the same goal.
+    # (c) A verification unit must be able to reach (transitively) every same-
+    #     goal unit it grades. Reverse edges are deliberate (a baseline-capture
+    #     verification runs FIRST by definition), so an edge in the opposite
+    #     direction is a guard, not a violation. Transitive ordering satisfies
+    #     the rule without a direct edge.
+    dep_reaches() {
+        local from="$1" to="$2" dep key
+        [ "$from" = "$to" ] && return 0
+        key="$from/$to"
+        [ -n "${dep_seen[$key]+x}" ] && return 1
+        dep_seen[$key]=1
+        while IFS= read -r dep; do
+            [ -n "$dep" ] || continue
+            [ "$dep" = "$to" ] && return 0
+            dep_reaches "$dep" "$to" && return 0
+        done < <(printf '%s' "${unit_depends[$from]}" | grep -oE 'W[0-9][0-9]+' || true)
+        return 1
+    }
+    declare -A dep_seen=()
     for id in "${unit_ids[@]}"; do
         [ "${unit_type[$id]}" = verification ] || continue
         step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
@@ -740,14 +816,19 @@ if [ "$propagation_mode" = true ]; then
         named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$step_file" | sort -u)" || true
         for named in $named_units; do
             [ "$named" = "$id" ] && continue
+            # A WNN not in this plan's inventory is a cross-plan reference
+            # ("the extended-rendering plan's W04"), correct prose, not a typo.
             if [ -z "${unit_type[$named]+x}" ]; then
-                fail "$id names unknown work unit $named"
                 continue
             fi
             if [ "${unit_goal[$named]}" = "${unit_goal[$id]}" ]; then
-                # Same-goal sibling; require it be a dependency.
-                if ! printf '%s' "${unit_depends[$id]}" | grep -Fq "$named"; then
-                    fail "$id is a verification unit that grades $named but does not depend on it; add the dependency edge"
+                dep_seen=()
+                if dep_reaches "$id" "$named"; then
+                    : # already transitively ordered
+                elif dep_reaches "$named" "$id"; then
+                    : # reverse edge is a deliberate ordering (e.g. baseline capture)
+                else
+                    fail "$id is a verification unit that grades $named but has no dependency path to it; add a dependency edge"
                 fi
             fi
         done
@@ -764,8 +845,8 @@ if [ "$propagation_mode" = true ]; then
         named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$companion" | sort -u)" || true
         for named in $named_units; do
             [ "$named" = "$id" ] && continue
+            # Cross-plan reference, not a typo: a WNN outside this plan is prose.
             if [ -z "${unit_type[$named]+x}" ]; then
-                fail "$id companion names unknown work unit $named"
                 continue
             fi
             if ! printf '%s ' "$deps" | grep -Fq "$named"; then

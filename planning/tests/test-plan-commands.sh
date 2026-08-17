@@ -367,6 +367,15 @@ if grep -Fq 'stale phrase' "$temporary_root/stale-pass.log"; then
     echo '--stale flagged a phrase inside a history-marked paragraph.' >&2
     exit 1
 fi
+# --stale default ships a bundled case-count list and sweeps companions.
+printf '# Verification: history\n\n## Automated tests\n\nCheck all four states emit a row.\n' \
+    > "$plan_dir/03-wire/steps/01-step-history-testing.md"
+if "$script_dir/validate-plan.sh" --stale default "$plan_dir" >"$temporary_root/stale-default.log" 2>&1; then
+    echo '--stale default missed a case-count phrase in a companion.' >&2
+    exit 1
+fi
+grep -Fq 'stale phrase' "$temporary_root/stale-default.log"
+grep -Fq '01-step-history-testing' "$temporary_root/stale-default.log"
 # propagation: a grader that names a unit it does not depend on fails.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/02-step-verify 4.1 \
     'Verify W10 renders the order history surface.' >/dev/null 2>&1
@@ -377,6 +386,20 @@ if "$script_dir/validate-plan.sh" --propagation "$plan_dir" >"$temporary_root/pr
 fi
 grep -Fq 'verification unit that grades' "$temporary_root/prop.log"
 "$script_dir/update-work-unit.sh" "$plan_dir" W11 --depends-on 'W10' >/dev/null 2>&1
+# report 9: propagation is on by default; short-form seams, template ids, and
+# ::class are NOT ownership violations (the plan never names them as change
+# targets); a cross-plan WNN reference is prose, not a typo.
+"$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history instructions \
+    -p 5.1: 'Call AbstractItems::getColumnHtml() and QuoteManagement::submit — seams to record the boundary.' \
+    -p 5.2: 'Reference Magento_Weee::email/items/price/row.phtml and Foo::class.' \
+    -p 5.3: 'The extended-rendering plan'"'"'s W99 and W98, explicitly outside this plan'"'"'s scope.' >/dev/null 2>&1
+if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/report9.log" 2>&1; then
+    :
+fi
+if grep -qE 'AbstractItems|QuoteManagement|Magento_Weee|::class|W99|W98' "$temporary_root/report9.log"; then
+    echo 'report 9: a seam, template id, ::class, or cross-plan reference was flagged.' >&2
+    exit 1
+fi
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {

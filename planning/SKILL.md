@@ -63,10 +63,13 @@ bypassing it.
 - **Naming a class does not schedule it.** Mentioning a new class, file, or
   method in a unit's instructions does not create an inventory row for it, and
   that unit's own atomicity check forbids touching another file. If a unit's
-  instructions name a symbol that is not its own change target, an inventory
-  row must own it before any plan depends on it. `validate-plan.sh
-  --propagation` checks this: a backticked FQCN or path in instructions that
-  matches no `File` cell in the inventory is flagged.
+  instructions **instruct an edit** to a symbol that is not its own change
+  target, an inventory row must own it before any plan depends on it.
+  `validate-plan.sh --propagation` checks this (on by default): an instruction
+  to edit a well-formed `Class::method` that no inventory row owns is flagged,
+  but only when the plan names that symbol as a change target somewhere — a
+  mere mention of a vendor/core seam is the point of naming it and is not
+  flagged.
 - **When a helper refuses a call, re-issue the call — never patch the script
   that produced it.** If a guard correctly refuses a malformed invocation,
   fix the invocation and re-run it. Editing the invoking script with `sed` or
@@ -772,18 +775,29 @@ Run the validator before creating trackers or presenting the plan as ready:
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" <plan-directory>
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # six-surface consistency: inventory vs step, named-symbol ownership, grader edges, unverified leaves
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # six-surface consistency (on by default); --no-propagation disables it
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # bundled case-count phrase list; sweeps companions too
 ```
 
-`--propagation` encodes the six-surface rule (§ "Resolving a finding"): it
-flags a backticked FQCN/path in a unit's instructions that no inventory row
-owns, an inventory row and step body that name different units, a verification
-unit that grades a unit it does not depend on, and a graph leaf in a goal that
-owns a verification unit. `--stale` turns the "sweep for the old wording"
-discipline into a gate: a phrase listed in the file fails unless every
-paragraph containing it also records a history marker such as "previously" or
-"an earlier version".
+`--propagation` encodes the six-surface rule (§ "Resolving a finding") and runs
+by default. It flags an instruction to edit a class the plan names as a change
+target but no unit owns, a verification unit that grades a sibling with no
+dependency path to it (honouring deliberate reverse/baseline orderings and
+transitive ordering), and a graph leaf in a goal that owns a verification unit.
+It does not flag mere mentions: a symbol the plan never names as a change
+target (a vendor/core seam, a `Vendor_Module::path` template id, or a
+`Foo::class` constant) is a boundary the plan records, not an edit target it
+must own. `--no-propagation` disables it. `--stale` turns the "sweep for the
+old wording" discipline into a gate: a phrase listed in the file fails unless
+every paragraph containing it also records a history marker such as
+"previously" or "an earlier version". `--stale default` runs a bundled
+case-count phrase list (`all four`, `the six states`, etc.) — case-count
+wording is the anti-pattern because it drifts when a case is added, and "every
+case enumerated in the instructions" is the drift-proof form. The stale sweep
+covers the same documents as `find --in all`, including the `*-testing.md`
+companions. Add a closed finding's old wording to the phrase file so each fix
+becomes a permanent regression guard rather than a one-time correction.
 
 Do not waive validation failures. Correct the inventory, goal boundary, or
 step files and run it again. The validator checks the structural guarantees;

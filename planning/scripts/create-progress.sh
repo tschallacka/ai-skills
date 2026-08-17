@@ -21,8 +21,25 @@ if [ -e "$progress_file" ]; then
 fi
 
 step_names=()
+step_descriptions=()
 while IFS= read -r step_file; do
-    step_names+=("$(basename "$step_file" .md)")
+    step_name="$(basename "$step_file" .md)"
+    step_names+=("$step_name")
+    # Derive the row description from the step's Objective paragraph (§ 4.1),
+    # so the tracker reflects the current step intent and survives rebuilds
+    # without hand-filling (which the next rebuild would overwrite).
+    description="$(awk '
+        /^## Objective$/ { in_obj = 1; next }
+        /^§ [0-9]+\.[0-9]+$/ && in_obj { after_label = 1; next }
+        after_label && NF {
+            line = $0; sub(/^[[:space:]]+/, "", line)
+            if (length(line) > 100) line = substr(line, 1, 100) "..."
+            print line; exit
+        }
+        /^## / && in_obj { exit }
+    ' "$step_file")"
+    [ -n "$description" ] || description="<short description>"
+    step_descriptions+=("$description")
 done < <(find "$steps_dir" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' | sort)
 
 if [ "${#step_names[@]}" -eq 0 ]; then
@@ -37,9 +54,9 @@ trap 'rm -f "$temporary_file"' EXIT
     printf '**Progress:** `0%%  #### ----------------  100%%` 💤\n\n'
     printf '| Goalname | Stepname | Description | Completion status |\n'
     printf '|---|---|---|---|\n'
-    for step_name in "${step_names[@]}"; do
-        printf '| %s | %s | <short description> | 💤 incomplete |\n' \
-            "$goal_name" "$step_name"
+    for i in "${!step_names[@]}"; do
+        printf '| %s | %s | %s | 💤 incomplete |\n' \
+            "$goal_name" "${step_names[$i]}" "${step_descriptions[$i]}"
     done
 } > "$temporary_file"
 mv "$temporary_file" "$progress_file"
