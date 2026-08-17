@@ -9,6 +9,10 @@
 # the key must match HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>").
 # Mismatched or unclaimed pairs fail; well-formed claims for pairs that are not
 # gated are ignored with a warning.
+#
+# Optional --claimed-by <id> names the session that recorded the claims; when it
+# equals the session recorded as minted_by in fix-keys.json, the run warns that
+# a fixer minted and then claimed its own keys (self-certification).
 
 set -euo pipefail
 
@@ -24,9 +28,30 @@ cleanup_tmp() {
 trap cleanup_tmp EXIT
 
 usage() {
-    printf 'Usage: %s <plan-directory>\n' "$(basename "$0")" >&2
+    printf 'Usage: %s <plan-directory> [--claimed-by <id>]\n' "$(basename "$0")" >&2
     exit 64
 }
+
+claimed_by=""
+filtered_args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --claimed-by)
+            [ "$#" -ge 2 ] || usage
+            claimed_by="$2"
+            shift 2
+            ;;
+        --claimed-by=*)
+            claimed_by="${1#--claimed-by=}"
+            shift
+            ;;
+        *)
+            filtered_args+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${filtered_args[@]}"
 
 # hmac_key SECRET MESSAGE — lowercase hex HMAC-SHA256 of MESSAGE under SECRET.
 # Must stay byte-identical to the derivation in mint-fix-keys.sh.
@@ -39,8 +64,9 @@ hmac_key() {
 verify_fix_keys() {
     local plan_dir="$1"
     local review_file="$1/adversarial-review.md" json_file="$1/fix-keys.json"
-    local fixes_file="$1/fixes.md" session_id secret_file secret
+    local fixes_file="$1/fixes.md" session_id minted_by secret_file secret
     local pairs_file claims_file line_no failures warnings n fid wu key
+    local claimed_by="${2:-}"
     [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file"
 
     if [ ! -f "$json_file" ]; then
@@ -51,6 +77,8 @@ verify_fix_keys() {
     session_id="$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
         "$json_file" | head -1)"
     [ -n "$session_id" ] || plan_die "fix-keys.json has no session_id"
+    minted_by="$(sed -n 's/.*"minted_by"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$json_file" | head -1)"
 
     pairs_file="$(mktemp)"
     claims_file="$(mktemp)"
@@ -115,13 +143,17 @@ verify_fix_keys() {
     if [ "$failures" -gt 0 ]; then
         plan_die "$(printf 'fix-keys verification failed for %s (%s failure(s), %s warning(s))' "$plan_dir" "$failures" "$warnings")"
     fi
+    if [ -n "$claimed_by" ] && [ -n "$minted_by" ] && [ "$claimed_by" = "$minted_by" ]; then
+        printf 'WARN: fix claims for %s were recorded by the same session (%s) that minted the keys (self-certification)\n' \
+            "$plan_dir" "$claimed_by" >&2
+    fi
     printf 'fix-keys verification passed for %s (%s warning(s))\n' "$plan_dir" "$warnings"
 }
 
 main() {
-    [ "$#" -eq 1 ] || usage
+    [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
     plan_require_directory "$1"
-    verify_fix_keys "$1"
+    verify_fix_keys "$1" "$claimed_by"
 }
 
 main "$@"

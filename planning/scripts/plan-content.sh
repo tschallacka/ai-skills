@@ -7,9 +7,12 @@ Usage:
   plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
   plan-content.sh summary <plan-directory> [markdown|text|json]
   plan-content.sh blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
-  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|all] [--format text|json]
+  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|coverage|stories|all] [--format text|json]
                                     literal search; prints docid<TAB>section<TAB>excerpt per match,
                                     exits 1 on zero or multiple matches
+  plan-content.sh diff <plan-directory> <git-ref> [--format text|json]
+                                    lists documents changed since git-ref and the
+                                    paragraph labels touched in each
 USAGE
     exit 64
 }
@@ -157,7 +160,7 @@ case "$command" in
             esac
         done
         plan_require_directory "$plan_dir"
-        case "$scope" in plan|goals|steps|units|review|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, or all)" ;; esac
+        case "$scope" in plan|goals|steps|units|review|coverage|stories|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, coverage, stories, or all)" ;; esac
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
         matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
         trap 'rm -f "$matches_file"' EXIT
@@ -213,6 +216,31 @@ case "$command" in
                 ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
                 ;;
         esac
+        case "$scope" in
+            coverage|all)
+                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" '
+                    /^## Definition-of-done coverage/ { in_coverage = 1; next }
+                    in_coverage && /^## / { exit }
+                    in_coverage && /^\|/ && index($0, pattern) {
+                        row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
+                        if (length(row) > 120) row = substr(row, 1, 120) "..."
+                        print "coverage\t" row "\t" row
+                    }
+                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                ;;
+        esac
+        case "$scope" in
+            stories|all)
+                [ -f "$plan_dir/ui-user-stories.md" ] && awk -v docid="stories" -v pattern="$pattern" '
+                    /^## / { section = $0 }
+                    index($0, pattern) && $0 !~ /^# / {
+                        line = $0; sub(/^[[:space:]]*/, "", line)
+                        if (length(line) > 120) line = substr(line, 1, 120) "..."
+                        print docid "\t" (section ? section : "-") "\t" line
+                    }
+                ' "$plan_dir/ui-user-stories.md" >> "$matches_file"
+                ;;
+        esac
         if [ "$format" = json ]; then
             printf '{"matches":['
             first=true
@@ -239,6 +267,77 @@ case "$command" in
             printf 'plan-content.sh: find: %s matches for %s (scope: %s); narrow the pattern or scope to get a single hit\n' "$match_count" "$pattern" "$scope" >&2
             exit 1
         fi
+        ;;
+    diff)
+        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
+        plan_dir="$1"; git_ref="$2"; format="${3:-text}"
+        plan_require_directory "$plan_dir"
+        [ -d "$plan_dir/.git" ] || plan_die "Plan directory is not a git repository: $plan_dir"
+        case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
+        changed="$(git -C "$plan_dir" diff --name-only "$git_ref" 2>/dev/null || true)"
+        if [ -z "$changed" ]; then
+            git -C "$plan_dir" rev-parse -q --verify "$git_ref" >/dev/null 2>&1 \
+                || plan_die "git ref not found: $git_ref"
+            printf 'No plan documents changed since %s\n' "$git_ref"
+            exit 0
+        fi
+        # A changed paragraph label is usually an UNCHANGED diff line (only its
+        # content changed), so map each changed line on the new-file side back
+        # to the enclosing "§ N.N" label.
+        python3 - "$plan_dir" "$git_ref" "$format" "$changed" <<'PY'
+import json, subprocess, sys
+
+plan_dir, git_ref, fmt = sys.argv[1], sys.argv[2], sys.argv[3]
+docs = [d for d in sys.argv[4].splitlines() if d]
+
+def diff_lines(doc):
+    out = subprocess.run(
+        ["git", "-C", plan_dir, "diff", "-U0", git_ref, "--", doc],
+        capture_output=True, text=True).stdout
+    # Parse new-file side: after "@@ -a,b +c,d @@", new-file lines are numbered
+    # from c; '+' lines are added content, context lines exist in both.
+    new_line = None
+    added = []
+    for raw in out.splitlines():
+        if raw.startswith("@@"):
+            m = __import__("re").search(r"\+(\d+)", raw)
+            new_line = int(m.group(1)) if m else None
+            continue
+        if new_line is None:
+            continue
+        if raw.startswith("+") and not raw.startswith("+++"):
+            added.append(new_line)
+        if not raw.startswith("-"):
+            new_line += 1
+    if not added:
+        return []
+    # Find the label enclosing each added new-file line.
+    with open(f"{plan_dir}/{doc}", encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    label_by_line = {}
+    current = None
+    for i, line in enumerate(lines, start=1):
+        if line.startswith("§ ") and __import__("re").match(r"^§ [0-9]+\.[0-9]+$", line):
+            current = line
+        label_by_line[i] = current
+    labels = []
+    for ln in added:
+        lab = label_by_line.get(ln)
+        if lab and lab not in labels:
+            labels.append(lab)
+    return labels
+
+if fmt == "text":
+    for doc in docs:
+        print(f"## {doc}")
+        for label in diff_lines(doc):
+            print(label)
+else:
+    rows = []
+    for doc in docs:
+        rows.append({"document": doc, "paragraphs": diff_lines(doc)})
+    print(json.dumps({"ref": git_ref, "documents": rows}))
+PY
         ;;
     *) usage ;;
 esac

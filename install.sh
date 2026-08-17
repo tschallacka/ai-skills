@@ -703,6 +703,7 @@ scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
 scripts/mint-fix-keys.sh
 scripts/verify-fix-keys.sh
+scripts/verify-target.sh
 scripts/generate-reviewer.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh

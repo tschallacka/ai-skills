@@ -50,6 +50,7 @@ planning/scripts/update-plan-content.sh	scripts/update-plan-content.sh	installer
 planning/scripts/update-adversarial-review.sh	scripts/update-adversarial-review.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/mint-fix-keys.sh	scripts/mint-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/verify-fix-keys.sh	scripts/verify-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/verify-target.sh	scripts/verify-target.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-plan-progress.sh	scripts/update-plan-progress.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-progress.sh	scripts/update-progress.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-step.sh	scripts/update-step.sh	installer	v27-review-approved	backup-then-replace	false

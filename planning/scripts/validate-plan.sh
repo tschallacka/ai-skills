@@ -2,13 +2,42 @@
 set -euo pipefail
 
 complete_mode=false
-if [ "$#" -eq 2 ] && [ "$1" = '--complete' ]; then
+propagation_mode=false
+stale_file=""
+stale_only=false
+filtered_args=()
+for arg in "$@"; do
+    case "$arg" in
+        --complete) complete_mode=true ;;
+        --propagation) propagation_mode=true ;;
+        --stale)
+            stale_only=true
+            ;;
+        --stale=*)
+            stale_file="${arg#--stale=}"
+            ;;
+        --)
+            filtered_args+=("$arg")
+            ;;
+        *)
+            if [ "$stale_only" = true ]; then
+                stale_file="$arg"
+                stale_only=false
+            else
+                filtered_args+=("$arg")
+            fi
+            ;;
+    esac
+done
+set -- "${filtered_args[@]}"
+
+if [ "$#" -eq 1 ]; then
+    plan_dir="$1"
+elif [ "$#" -eq 2 ] && [ "$1" = '--complete' ]; then
     complete_mode=true
     plan_dir="$2"
-elif [ "$#" -eq 1 ]; then
-    plan_dir="$1"
 else
-    echo "Usage: $(basename "$0") [--complete] <plan-directory>" >&2
+    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>] <plan-directory>" >&2
     exit 64
 fi
 
@@ -153,6 +182,47 @@ for doc in "${plan_docs[@]}"; do
         fail "$(basename "$doc") contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
     fi
 done
+
+# --- stale-wording sweep (--stale <file-of-phrases>): a listed phrase that
+#     still appears in a paragraph that does not also record a history marker
+#     (e.g. "an earlier version", "previously") is stale — a fix that removed
+#     the phrase from one paragraph but left another unmarked is half-landed.
+#     Markers are multi-word historical signals ONLY: a single adjective such
+#     as "legacy" or "obsolete" may legitimately be part of the stale phrase
+#     itself, so it would mask a match. Deliberate references to corrected
+#     history pass while an unfixed sibling fails.
+stale_markers='an earlier version|previously|superseded by|supersedes|no longer|was removed|historically|now replaced by'
+stale_scan_doc() {
+    local file="$1" phrase="$2"
+    awk -v phrase="$phrase" -v markers="$stale_markers" '
+        function flush() {
+            if (label != "" && index(content, phrase) > 0 && content !~ markers) {
+                printf "%s: %s\n", FILENAME, label
+            }
+            label = ""; content = ""
+        }
+        /^§ [0-9]+\.[0-9]+$/ { flush(); label = $0; next }
+        /^## / { flush(); next }
+        { if (label != "") content = content $0 "\n" }
+        END { flush() }
+    ' "$file"
+}
+if [ -n "$stale_file" ]; then
+    if [ ! -f "$stale_file" ]; then
+        fail "--stale file not found: $stale_file"
+    else
+        while IFS= read -r phrase; do
+            [ -n "${phrase//[[:space:]]/}" ] || continue
+            for doc in "${plan_docs[@]}"; do
+                [ -f "$doc" ] || continue
+                hits="$(stale_scan_doc "$doc" "$phrase")"
+                if [ -n "$hits" ]; then
+                    fail "stale phrase '$phrase' appears in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ')"
+                fi
+            done
+        done < "$stale_file"
+    fi
+fi
 
 declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units coverage_ids goal_testing_required
 unit_ids=()
@@ -581,6 +651,112 @@ if [ "$complete_mode" = true ]; then
             /^\|/ { key=$3; status=$5; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", status); if (key == wanted) print status }
         ' "$goal_progress")"
         [ "$step_status" = '✅ completed' ] || fail "$id is not completed in ${unit_goal[$id]} progress"
+    done
+fi
+
+# --- propagation checks (--propagation): the six surfaces of a work unit must
+#     agree. A finding cites one surface; a fix must reach the others, and this
+#     is the mechanical part of that contract. ---
+if [ "$propagation_mode" = true ]; then
+    # (a) Naming a class/file/method in instructions does not schedule it:
+    #     every backticked FQCN/path in a step's instructions that is not the
+    #     unit's own change target must be owned by an inventory row.
+    for id in "${unit_ids[@]}"; do
+        step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
+        [ -f "$step_file" ] || continue
+        # Section 5 = Instructions; only scan that section.
+        instr_section="$(awk '
+            /^## Instructions$/ { in_sec = 1; next }
+            /^## / && in_sec { exit }
+            in_sec { print }
+        ' "$step_file")"
+        [ -n "$instr_section" ] || continue
+        # Backticked tokens that look like FQCNs (contain :: or / or .php)
+        # or are explicit paths.
+        for token in $(printf '%s' "$instr_section" | grep -oE '`[^`]+`' | tr -d '`'); do
+            case "$token" in
+                *::*|*/*|*.php|*.phtml|*.js|*.xml)
+                    owned=false
+                    for candidate in "${unit_ids[@]}"; do
+                        file_cell="${unit_file[$candidate]}"
+                        scope_cell="${unit_scope[$candidate]}"
+                        [ "$file_cell" = "$token" ] && { owned=true; break; }
+                        [ "$scope_cell" = "$token" ] && { owned=true; break; }
+                        # A file path token matches if it is the file cell or
+                        # its basename appears in the file cell.
+                        if [[ "$file_cell" == *"${token##*/}"* ]] && [ "${token##*/}" != "$token" ]; then
+                            owned=true; break
+                        fi
+                    done
+                    if [ "$owned" = false ] && [ "$token" != "$id" ]; then
+                        fail "$id instructions name '$token' which no inventory row owns; add a discovery/ownership row or name the owning work unit"
+                    fi
+                    ;;
+            esac
+        done
+        # (b) Inventory row vs step body mention drift: a file or unit id
+        #     mentioned in the inventory row but not in the step body (and
+        #     vice versa) is a propagation leak.
+        inv_row="$(awk -F'|' -v wanted="$id" '
+            /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
+                x=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", x)
+                if (x == wanted) print $0
+            }' "$inventory")"
+        step_body="$(cat "$step_file")"
+        for token in $(printf '%s' "$inv_row" | grep -oE '\bW[0-9][0-9]+\b' | sort -u); do
+            [ "$token" = "$id" ] && continue
+            if ! printf '%s' "$step_body" | grep -Fq "$token"; then
+                warn "$id inventory row names $token which its step body never mentions"
+            fi
+        done
+        for token in $(printf '%s' "$step_body" | grep -oE '\bW[0-9][0-9]+\b' | sort -u); do
+            [ "$token" = "$id" ] && continue
+            if ! printf '%s' "$inv_row" | grep -Fq "$token"; then
+                warn "$id step body names $token which its inventory row never mentions"
+            fi
+        done
+    done
+
+    # (c) A verification unit's instructions must name only units it
+    #     depends on (directly or transitively) or units in the same goal.
+    for id in "${unit_ids[@]}"; do
+        [ "${unit_type[$id]}" = verification ] || continue
+        step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
+        [ -f "$step_file" ] || continue
+        named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$step_file" | sort -u)"
+        for named in $named_units; do
+            [ "$named" = "$id" ] && continue
+            if [ -z "${unit_type[$named]+x}" ]; then
+                fail "$id names unknown work unit $named"
+                continue
+            fi
+            if [ "${unit_goal[$named]}" = "${unit_goal[$id]}" ]; then
+                # Same-goal sibling; require it be a dependency.
+                if ! printf '%s' "${unit_depends[$id]}" | grep -Fq "$named"; then
+                    fail "$id is a verification unit that grades $named but does not depend on it; add the dependency edge"
+                fi
+            fi
+        done
+    done
+
+    # (d) Graph leaves in a goal that owns a verification unit: a
+    #     non-verification unit nothing depends on is unverified work.
+    for goal_name in "${!goal_units[@]}"; do
+        goal_has_verifier=false
+        for id in ${goal_units[$goal_name]}; do
+            [ "${unit_type[$id]}" = verification ] && goal_has_verifier=true
+        done
+        [ "$goal_has_verifier" = true ] || continue
+        for id in ${goal_units[$goal_name]}; do
+            [ "${unit_type[$id]}" = verification ] && continue
+            dependent=false
+            for candidate in "${unit_ids[@]}"; do
+                printf '%s' "${unit_depends[$candidate]}" | grep -Fq "$id" && { dependent=true; break; }
+            done
+            if [ "$dependent" = false ]; then
+                warn "$id is a graph leaf in a goal that owns a verification unit; nothing depends on it, so nothing verifies its output"
+            fi
+        done
     done
 fi
 

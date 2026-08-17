@@ -95,6 +95,12 @@ plan_document_path() {
         review)
             printf '%s\n' "$plan_dir/adversarial-review.md"
             ;;
+        coverage)
+            printf '%s\n' "$plan_dir/work-unit-inventory.md"
+            ;;
+        stories)
+            printf '%s\n' "$plan_dir/ui-user-stories.md"
+            ;;
         goal:*)
             goal="${document_id#goal:}"
             printf '%s\n' "$plan_dir/$goal/goal.md"
@@ -129,6 +135,7 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         review) printf '%s\n' review ;;
+        coverage|stories) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
         step:*|unit:*) printf '%s\n' step ;;
         *) plan_die "Unknown document ID: $1" ;;

@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+replace_mode=false
+filtered_args=()
+for arg in "$@"; do
+    case "$arg" in
+        --replace) replace_mode=true ;;
+        *) filtered_args+=("$arg") ;;
+    esac
+done
+set -- "${filtered_args[@]}"
+
 if [ "$#" -ne 4 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes>" >&2
+    echo "Usage: $(basename "$0") <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]" >&2
     exit 64
 fi
 
@@ -21,11 +31,35 @@ plan_git_snapshot "$plan_dir"
 
 temporary_file="${inventory}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT
-awk -v row="| $outcome | $work_units | $notes |" '
-    /^## Work units$/ && !inserted { print row; print ""; inserted = 1 }
-    { print }
-    END { if (!inserted) exit 2 }
-' "$inventory" > "$temporary_file" || plan_die "Inventory has no Work units section"
+if [ "$replace_mode" = true ]; then
+    # Replace the coverage row whose first cell matches the outcome; create it
+    # (before the Work units heading) when no such row exists yet.
+    awk -F'|' -v row="| $outcome | $work_units | $notes |" -v wanted="$outcome" '
+        function cell(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); gsub(/^`|`$/, "", v); return v }
+        /^## Work units$/ && !inserted {
+            if (!found) { print row; print "" }
+            inserted = 1
+        }
+        /^\|/ && cell($2) == wanted {
+            # Collapse every row with this outcome into one replacement at the
+            # position of the first match; drop later duplicates.
+            if (!found) { print row; found = 1 }
+            next
+        }
+        { print }
+        END { if (!inserted) exit 2 }
+    ' "$inventory" > "$temporary_file" || plan_die "Inventory has no Work units section"
+else
+    awk -v row="| $outcome | $work_units | $notes |" '
+        /^## Work units$/ && !inserted { print row; print ""; inserted = 1 }
+        { print }
+        END { if (!inserted) exit 2 }
+    ' "$inventory" > "$temporary_file" || plan_die "Inventory has no Work units section"
+fi
 mv "$temporary_file" "$inventory"
 trap - EXIT
-echo "Added coverage for $work_units"
+if [ "$replace_mode" = true ]; then
+    echo "Replaced (or added) coverage for $work_units"
+else
+    echo "Added coverage for $work_units"
+fi

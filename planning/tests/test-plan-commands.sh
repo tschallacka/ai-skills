@@ -303,4 +303,112 @@ if grep -Fq '| W01 |' "$plan_dir/work-unit-inventory.md"; then
     echo 'Work unit W01 still present after a confirmed cascade removal.' >&2
     exit 1
 fi
+# ---- report 3: propagation, coverage/stories readability, history, --replace,
+#      stale sweep, verify-target, diff ----
+# Re-establish W01/W02 under a fresh goal for the propagation/grader checks
+# (the earlier W01/W02 were removed by the P2-2 cascade test).
+"$script_dir/add-goal.sh" "$plan_dir" 03-wire 'Wire history' \
+    'Wire the order history surface.' >/dev/null 2>&1
+"$script_dir/add-work-unit.sh" "$plan_dir" W10 markup \
+    app/design/frontend/FakeTheme/templates/order/history.phtml '#order_history' N/A \
+    'Render the order history block.' '—' 03-wire 01-step-history >/dev/null 2>&1
+"$script_dir/add-work-unit.sh" "$plan_dir" W11 verification N/A 'verify-history.sh' N/A \
+    'Verify the order history block renders.' W10 03-wire 02-step-verify >/dev/null 2>&1
+"$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 03-wire yes \
+    'The render and its verification have observable output.' >/dev/null 2>&1
+printf '# Verification: history\n\n## Automated tests\n\nRun the render check.\n' \
+    > "$plan_dir/03-wire/steps/01-step-history-testing.md"
+printf '# Verification: verify\n\n## Automated tests\n\nRun the verifier.\n' \
+    > "$plan_dir/03-wire/steps/02-step-verify-testing.md"
+"$script_dir/add-coverage.sh" "$plan_dir" 'Order history renders.' W10 'covers render' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Order history is verified.' W11 'grader' >/dev/null 2>&1
+# coverage and stories are readable document ids for get.
+"$script_dir/plan-content.sh" get "$plan_dir" coverage | grep -Fq '## Definition-of-done coverage'
+"$script_dir/plan-content.sh" get "$plan_dir" stories | grep -Fq 'UI user stories'
+# find --in coverage scopes to the Definition-of-done coverage rows.
+"$script_dir/plan-content.sh" find "$plan_dir" 'Order history renders.' --in coverage >/dev/null
+# add-coverage --replace collapses duplicate coverage rows for the same outcome.
+"$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'first' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'second' --replace >/dev/null 2>&1
+if [ "$(grep -c '| Duplicate-proof outcome.' "$plan_dir/work-unit-inventory.md")" -ne 1 ]; then
+    echo 'add-coverage --replace did not collapse duplicate coverage rows.' >&2
+    exit 1
+fi
+grep -Fq '| Duplicate-proof outcome. | W10 | second |' "$plan_dir/work-unit-inventory.md"
+# update-adversarial-review --cycle archives the PRIOR findings table into
+# history; the new rows land in the live table and are archived by the next cycle.
+printf 'AR-20,old gap,change it,✅ resolved,W10\n' | "$script_dir/update-adversarial-review.sh" "$plan_dir" --cycle 7 >/dev/null 2>&1
+grep -Fq '## Cycle 7' "$plan_dir/adversarial-review-history.md"
+printf 'AR-21,new gap,change it,✅ resolved,W10\n' | "$script_dir/update-adversarial-review.sh" "$plan_dir" --cycle 8 >/dev/null 2>&1
+grep -Fq '## Cycle 8' "$plan_dir/adversarial-review-history.md"
+# cycle 8 archived the cycle-7 table, which held AR-20.
+grep -Fq '| AR-20 |' "$plan_dir/adversarial-review-history.md"
+grep -Fq '## Cycle 7' "$plan_dir/adversarial-review-history.md"
+# stale sweep: a phrase in an unmarked paragraph fails; with a history marker
+# the stale check itself passes (unrelated later-plan failures are ignored here).
+# The phrase is unique to the step objective so it does not collide with the
+# goal owned-unit roster.
+"$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
+    'The rows must still render after the source retarget.' >/dev/null 2>&1
+printf 'rows must still render after the source retarget\n' > "$temporary_root/stale.txt"
+if "$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-fail.log" 2>&1; then
+    echo '--stale accepted a phrase in an unmarked paragraph.' >&2
+    exit 1
+fi
+grep -Fq 'stale phrase' "$temporary_root/stale-fail.log"
+"$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
+    'The rows must still render after the source retarget (previously the rows must still render after the source retarget).' >/dev/null 2>&1
+"$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-pass.log" 2>&1 || true
+if grep -Fq 'stale phrase' "$temporary_root/stale-pass.log"; then
+    echo '--stale flagged a phrase inside a history-marked paragraph.' >&2
+    exit 1
+fi
+# propagation: a grader that names a unit it does not depend on fails.
+"$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/02-step-verify 4.1 \
+    'Verify W10 renders the order history surface.' >/dev/null 2>&1
+"$script_dir/update-work-unit.sh" "$plan_dir" W11 --depends-on '—' >/dev/null 2>&1
+if "$script_dir/validate-plan.sh" --propagation "$plan_dir" >"$temporary_root/prop.log" 2>&1; then
+    echo '--propagation accepted a grader with no dependency edge.' >&2
+    exit 1
+fi
+grep -Fq 'verification unit that grades' "$temporary_root/prop.log"
+"$script_dir/update-work-unit.sh" "$plan_dir" W11 --depends-on 'W10' >/dev/null 2>&1
+# retargeting a unit lists the verification units that grade it.
+retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
+printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {
+    echo 'retargeting did not list the grading verification unit.' >&2
+    exit 1
+}
+# verify-target: a markup unit whose block is removed by a layout fails.
+fake_repo="$temporary_root/fakerepo"
+mkdir -p "$fake_repo/app/code/Fake/Module/view/frontend/layout" \
+    "$fake_repo/app/design/frontend/FakeTheme/templates/order"
+printf 'rendered template\n' > "$fake_repo/app/design/frontend/FakeTheme/templates/order/history.phtml"
+if "$script_dir/verify-target.sh" "$plan_dir" W10 --repo "$fake_repo" >"$temporary_root/verify-target-ok.log" 2>&1; then
+    :
+else
+    echo "verify-target passed on a reachable target." >&2
+    cat "$temporary_root/verify-target-ok.log" >&2
+    exit 1
+fi
+grep -Fq 'PASS' "$temporary_root/verify-target-ok.log"
+printf '<layout><referenceBlock name="order_history" remove="true"/></layout>\n' \
+    > "$fake_repo/app/code/Fake/Module/view/frontend/layout/catalog.xml"
+if "$script_dir/verify-target.sh" "$plan_dir" W10 --repo "$fake_repo" >"$temporary_root/verify-target-fail.log" 2>&1; then
+    echo 'verify-target accepted a target whose block is removed by a layout.' >&2
+    cat "$temporary_root/verify-target-fail.log" >&2
+    exit 1
+fi
+grep -Fq 'a layout removes block' "$temporary_root/verify-target-fail.log"
+# plan-content.sh diff lists documents changed since a git ref. Mutating
+# helpers snapshot (commit) their own change, so capture the ref BEFORE the
+# mutation and diff against it.
+git -C "$plan_dir" add -A -- . >/dev/null 2>&1
+git -C "$plan_dir" -c user.name=plan-skill -c user.email=plan-skill@localhost \
+    commit -q -m 'before diff' 2>/dev/null || true
+before_ref="$(git -C "$plan_dir" rev-parse HEAD)"
+"$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
+    'The rows must still render after the diff baseline.' >/dev/null 2>&1
+"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '03-wire/steps/01-step-history.md'
+"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '§ 4.1'
 printf 'Planning command regression test passed.\n'

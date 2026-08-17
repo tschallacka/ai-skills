@@ -12,19 +12,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/plan-document-lib.sh"
 source "$SCRIPT_DIR/plan-reconcile-lib.sh"
 
-readonly HELP=$'Updates the adversarial-review "## Findings" table.\n\nUsage: update-adversarial-review.sh <plan-directory> [--file CSV]\n\nReads CSV rows (ID, Missing or over-broad item, Required plan change, Status,\nWork unit) from stdin by default (heredoc-friendly), or from --file PATH, and\nrewrites only the Findings section of adversarial-review.md. Work unit is\nmandatory-with-blank-allowed: leave it empty (or N/A) for findings that carry\nno fix key, or name the owning work unit (WNN) to gate the finding.\n\nInput rules: cells must not contain `|`; input must be LF, not CRLF (no\nWindows line endings).\n\nNote: this does not set the Verdict to approved. Author the Verdict and run\n`update-plan-content.sh --review-status <plan> approved` separately.'
+readonly HELP=$'Updates the adversarial-review "## Findings" table.\n\nUsage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N]\n\nReads CSV rows (ID, Missing or over-broad item, Required plan change, Status,\nWork unit) from stdin by default (heredoc-friendly), or from --file PATH, and\nrewrites only the Findings section of adversarial-review.md. Work unit is\nmandatory-with-blank-allowed: leave it empty (or N/A) for findings that carry\nno fix key, or name the owning work unit (WNN) to gate the finding.\n\nInput rules: cells must not contain `|`; input must be LF, not CRLF (no\nWindows line endings).\n\nThe previous Findings table is archived into adversarial-review-history.md\nunder a `## Cycle N` heading (use --cycle to number it; the next free number is\nused otherwise) so reviewers of later cycles can see what earlier ones found.\n\nNote: this does not set the Verdict to approved. Author the Verdict and run\n`update-plan-content.sh --review-status <plan> approved` separately.'
 
 case "${1:-}" in
     -h|--help) printf '%s\n' "$HELP"; exit 0 ;;
 esac
-[ "$#" -ge 1 ] && [ "$#" -le 3 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+[ "$#" -ge 1 ] && [ "$#" -le 5 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
 
 plan_dir="$1"; shift
 csv_source=""
-if [ "$#" -gt 0 ]; then
-    [ "$1" = --file ] && [ "$#" -eq 2 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
-    csv_source="$2"
-fi
+cycle_number=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --file)
+            [ "$#" -ge 2 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+            csv_source="$2"; shift 2
+            ;;
+        --cycle)
+            [ "$#" -ge 2 ] || plan_err "--cycle requires a number"
+            cycle_number="$2"; shift 2
+            ;;
+        *) plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" ;;
+    esac
+done
 
 plan_require_directory "$plan_dir" || plan_err "plan directory not found: $plan_dir (pass an absolute path, e.g. .plans/<plan-name>)"
 plan_git_snapshot "$plan_dir"
@@ -48,6 +58,35 @@ fi
 [ -s "$csv_file" ] || plan_err "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
 
 plan_render_csv_table 5 "$(awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
+
+# Archive the prior Findings rows (if any) into adversarial-review-history.md
+# so reviewers of later cycles can see what earlier ones found.
+history_file="$plan_dir/adversarial-review-history.md"
+history_rows="$(awk '
+    /^## Findings$/ { in_findings = 1; next }
+    in_findings && /^## Verdict$/ { exit }
+    in_findings && /^\|/ { print }
+' "$review_file")"
+# Record a cycle entry whenever a rewrite happens, even when the prior table
+# was replaced by narrative (no row-level rows to archive) — the cycle marker
+# itself is the history a later reviewer needs. Guard against re-archiving the
+# same review file twice by comparing the last archived row set.
+if [ -z "$cycle_number" ]; then
+    cycle_number="$(grep -c '^## Cycle ' "$history_file" 2>/dev/null || true)"
+    cycle_number=$((cycle_number + 1))
+fi
+last_cycle="$(grep -oE '^## Cycle [0-9]+' "$history_file" 2>/dev/null | tail -1 | awk '{print $3}')" || true
+if [ "$last_cycle" != "$cycle_number" ]; then
+    {
+        printf '\n## Cycle %s\n\n' "$cycle_number"
+        if [ -n "$history_rows" ]; then
+            printf '%s\n' "$history_rows"
+        else
+            printf '%s\n' '_No row-level findings were recorded for this cycle._'
+        fi
+    } >> "$history_file"
+    printf 'Archived previous Findings table to %s (Cycle %s)\n' "$history_file" "$cycle_number"
+fi
 
 awk -v replacement_file="$rendered_file" '
     function emit_replacement(    line) {

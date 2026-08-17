@@ -60,6 +60,24 @@ bypassing it.
   skill files). If you believe another skill is needed, state it and stop —
   do not load it." Do not spawn a subagent that could read this skill and
   then reload it autonomously.
+- **Naming a class does not schedule it.** Mentioning a new class, file, or
+  method in a unit's instructions does not create an inventory row for it, and
+  that unit's own atomicity check forbids touching another file. If a unit's
+  instructions name a symbol that is not its own change target, an inventory
+  row must own it before any plan depends on it. `validate-plan.sh
+  --propagation` checks this: a backticked FQCN or path in instructions that
+  matches no `File` cell in the inventory is flagged.
+- **When a helper refuses a call, re-issue the call — never patch the script
+  that produced it.** If a guard correctly refuses a malformed invocation,
+  fix the invocation and re-run it. Editing the invoking script with `sed` or
+  a one-off rewrite to force the call through is how literal shell commands
+  end up inside plan prose and paragraphs get truncated. The guard worked; the
+  workaround is the defect.
+- **Record the reason for a decision as carefully as the decision.** A false
+  recorded reason propagates into downstream fixes exactly as a false fact
+  does. Verify a claim before writing it into a plan as a fact; when a decision
+  is right but the reason is unverified, mark the reason as an assumption and
+  verify it.
 
 ## Tool discipline and context limits
 
@@ -148,6 +166,26 @@ Every goal needs its own definition of done that can be demonstrated without
 claiming completion of later goals. If it cannot be demonstrated independently,
 it is a segment of another goal, not a goal.
 
+### Target reachability gate
+
+Before a work unit may target a template, block, or layout, the plan must
+record evidence that the target actually renders on the surface in question. A
+file existing is not evidence. Record per target, in order:
+
+1. the file exists, and whether it is core's, a module's, or a theme's;
+2. no layout in `app/code` or `vendor` removes the block that renders it
+   (`<referenceBlock ... remove="true"/>`);
+3. no layout re-points it to another template (`<action method="setTemplate">`
+   or a re-registered `<block ... template>`);
+4. the theme actually in use for that area resolves to it, including every
+   intermediate theme in the inheritance chain;
+5. for a module template, whether any theme overrides it.
+
+A goal whose units target templates must own a discovery unit that records this
+evidence per target, and that unit's acceptance criteria must require the
+recorded evidence — not merely that a search was performed. Steps 2 and 3 are
+the ones repeatedly missed: a theme-override search finds neither.
+
 ## 1. Establish the plan boundary
 
 Before creating plan files, establish enough information to write an
@@ -231,6 +269,13 @@ prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
 hits). Use it before a paragraph-level edit to confirm the target is unique:
 `plan-content.sh find <planname> 'Magento_Sales::invoices'`.
 
+**Reserved characters and identifiers.** Plan narrative may not contain the
+reserved paragraph marker `§` (the helpers reject it) or a Markdown table
+separator `|`; input must be LF, not CRLF. Finding IDs must match `^AR-[0-9]+$`
+and work-unit IDs `^W[0-9]{2,}$` — `mint-fix-keys.sh` silently skips a
+non-conforming row, and a silently-skipped gated row disables the entire fix-key
+gate, so use the exact formats.
+
 ### 2.1 Write the plan description
 
 Create `<planname>/plan-description.md`. It must contain:
@@ -289,7 +334,9 @@ seems obvious:
 2. **Discover the change surface.** Inspect the repository, design, and
    environment. List every known file and symbol to create or change. When an
    exact file or symbol is not yet knowable, add a bounded discovery work unit
-   first; never place `TBD` into an implementation step.
+   first; never place `TBD` into an implementation step. When a target is a
+   template, block, or layout, apply the target reachability gate: record how
+   the target renders (or why it cannot be confirmed), not just that it exists.
 3. **Atomize.** Turn each target into one work unit under the atomic limit.
    Split a file that has multiple independently changing functions or classes
    into one work unit per symbol. Split HTML markup, CSS selectors, and
@@ -484,6 +531,54 @@ Exceeding a pass or cycle limit, inheriting prior conclusions, or changing the
 task contract or safety boundary marks the run unresolved and requires a fresh
 review.
 
+**A finding is a hypothesis, not a work order.** Verify a finding's factual
+claims against the codebase before acting. Findings are evidence-backed
+hypotheses: some are wrong, some are narrower than stated, and some name the
+right defect at the wrong location. Acting on a finding without verifying it
+produces a second defect on top of the first.
+
+**A review that finds nothing blocking is a valid and valuable result.** Say so
+plainly. Prior cycles finding real defects do not obligate this one to.
+
+**Resolving a finding.** A finding names a symptom, not the full extent of the
+defect. A work unit's behaviour is defined across **six surfaces**, and a
+finding cites exactly one. Before recording a resolution, sweep all six:
+
+1. **Instructions** — step `.md` §5.x; the implementer builds what is written
+   here, so a fix that lands only here has not reached the other five.
+2. **Acceptance criteria** — step `.md` §6.x; an unfixed criterion is worse
+   than an unfixed pair, because the gate now certifies the defect. Move the
+   criterion with the instruction, in the same edit.
+3. **Inventory description** — the `work-unit-inventory.md` row; the scheduler
+   reads the old intent here, and no prose edit reaches a table row. Check the
+   row's description, target, type, and dependencies explicitly.
+4. **Change target / file / scope** — the same row plus the step header; if it
+   lags, work lands on the wrong file.
+5. **Goal owned-unit roster** — `goal.md` §9.1; a unit omitted here is
+   effectively unowned.
+6. **Dependency edges** — the row's Depends-on column; a verification runs
+   before what it verifies when the edge lags.
+
+Mechanically: search the whole plan for the **old** wording, not the new
+(`plan-content.sh find <plan> "<old phrase>" --in all`), fix every site it
+appears in including sibling units and goal documents, check the inventory row
+(3), move the acceptance criteria with the instruction (2), confirm the unit is
+named in its goal roster (5), and re-run the search to confirm the only
+remaining hits are deliberate references to the corrected history.
+
+A resolution recorded without the sweep is a claim, not a fix. The
+verification-one-unit-away variant is the hardest: a unit may be correct across
+all six surfaces while the verification unit that grades it still checks the
+old behaviour. Whenever a unit's change target, scope, or behaviour changes,
+re-read the verification unit that grades it (`--propagation` surfaces which
+verification units name it).
+
+**Prose ordering is not a plan addition.** Goals and steps append only
+(`NN-kebab-case` is enforced; there is no renumbering helper). A prose note that
+"execution order differs from step numbering" is sanctioned documentation when
+the dependency edges are also recorded; it is not a substitute for those edges.
+Reviewers reject ordering prose used as a substitute for recorded dependencies.
+
 The review boundary is filesystem-enforced: each worker and reviewer receives
 only its capsule and workspace, and each fresh reviewer receives a newly built
 capsule. The capsule manifest, lifecycle records, and audit events are part of
@@ -542,6 +637,15 @@ keys. When recording which key a fix used, write one claim line per
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
 
+**Reviewers mint fix keys; fixers claim them. Never the same session.** A
+reviewer mints the keys by publishing its findings; the fixer claims the keys
+in `fixes.md`. Minting and claiming in the same session is self-certification:
+`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
+the session recorded as `minted_by`, and a warning is a review finding, not a
+pass. If a fixer must mint its own keys to record a finding the reviewer
+missed, surface it as an open finding for a fresh review rather than resolving
+it on its own authority.
+
 <!-- REVIEWER_SECTION:END mandatory-review -->
 
 ### 3.1 Reviewer-gated fix keys
@@ -550,12 +654,17 @@ Gated findings bind a reviewer finding to an owning work unit. The
 `## Findings` table in `adversarial-review.md` has a
 **mandatory-with-blank-allowed** `Work unit` column (the last of five): every
 row carries a final `WNN` cell, or an empty/`N/A` cell when the finding needs
-no fix key. `update-adversarial-review.sh` (and the row writers
-`create-adversarial-review.sh` and `add-adversarial-finding.sh`) mint a
-per-(finding, work-unit) HMAC-SHA256 fix key for every gated row and store only
+no fix key. `update-adversarial-review.sh` mints a
+per-(finding, work-unit) HMAC-SHA256 fix key for every gated row and stores only
 the derived keys in `fix-keys.json` beside the review file; the secret itself
 lives in the private scratch dir `$(planning_tmpdir)/review-fix-keys/<session-id>/`
-(`chmod 700` dir, `chmod 600` secret) and never enters the plan.
+(`chmod 700` dir, `chmod 600` secret) and never enters the plan. Finding IDs
+must match `^AR-[0-9]+$` and work-unit IDs `^W[0-9]+$`: minting warns per
+non-conforming gated row and fails the run if any gated row could not be
+minted, so a typo cannot silently disable the whole gate. `fix-keys.json`
+records `minted_by` (the session that minted; override with `MINTED_BY`), and
+`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
+the minting session (self-certification).
 
 The fixer records which key each fix used in `fixes.md` as tab-separated claim
 lines (`finding_id \t work_unit \t key`, one per gated pair). The approval gate
@@ -612,7 +721,18 @@ Run the validator before creating trackers or presenting the plan as ready:
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" <plan-directory>
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # six-surface consistency: inventory vs step, named-symbol ownership, grader edges, unverified leaves
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
 ```
+
+`--propagation` encodes the six-surface rule (§ "Resolving a finding"): it
+flags a backticked FQCN/path in a unit's instructions that no inventory row
+owns, an inventory row and step body that name different units, a verification
+unit that grades a unit it does not depend on, and a graph leaf in a goal that
+owns a verification unit. `--stale` turns the "sweep for the old wording"
+discipline into a gate: a phrase listed in the file fails unless every
+paragraph containing it also records a history marker such as "previously" or
+"an earlier version".
 
 Do not waive validation failures. Correct the inventory, goal boundary, or
 step files and run it again. The validator checks the structural guarantees;
@@ -767,11 +887,14 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
 "$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 <type> <file|N/A> <scope> <subscope|N/A> "<change>" <dependencies|—> 01-<goal> 01-step-<slug>
-"$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place
+"$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place; retargeting lists the verification units that grade it
 Ordering note: goals and steps only append (`NN-kebab-case` is enforced, no
 renumbering helper exists). Appending plus a prose "execution order differs
-from step numbering" note is the sanctioned pattern.
-"$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"
+from step numbering" note is the sanctioned pattern. Reviewers must not reject
+ordering prose that accompanies recorded dependency edges.
+"$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"            # append a coverage row
+"$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01,W02 "<notes>" --replace  # amend (collapses duplicate rows for the same outcome)
+"$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
@@ -789,13 +912,21 @@ from step numbering" note is the sanctioned pattern.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" get <plan-directory> unit:W01 json
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" summary <plan-directory> markdown
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<old phrase>' --in all
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --in coverage   # Definition-of-done coverage rows
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --in stories    # ui-user-stories.md
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" diff <plan-directory> HEAD   # documents and § paragraphs changed since a git ref
 ```
+
+Document IDs are `plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`,
+`unit:<WNN>`, `coverage` (Definition-of-done coverage table), and `stories`
+(`ui-user-stories.md`). `find` scopes cover `plan`, `goals`, `steps`, `units`,
+`review`, `coverage`, `stories`, and `all`.
 
 The creation scripts refuse to overwrite existing trackers. The update
 scripts change the requested row and recalculate the relevant progress bar.
 `plan-content.sh` supports `markdown`, `text`, and `json` output for summaries
-and blast radius, plus `path` for a direct document lookup. Document IDs are
-`plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`, and `unit:<WNN>`.
+and blast radius, plus `path` for a direct document lookup.
 
 ### 4.3 Persistent monitor steering
 

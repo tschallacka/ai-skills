@@ -83,10 +83,17 @@ hmac_key() {
 # work unit carry no key. Fails when the session secret is unavailable — the
 # production creation path is ensure_session_secret (W12); tests seed the
 # secret dir themselves.
+#
+# Non-conforming rows fail loudly: a gated row (work unit present) whose
+# finding id or work-unit id does not match ^AR-[0-9]+$ / ^W[0-9]+$ is warned
+# per row, and the whole run exits non-zero when any gated row could not be
+# minted. A silently skipped row would otherwise disable the entire fix-key
+# gate (verify then reports "no gated pairs … no fix verification required").
 mint_fix_keys() {
     local plan_dir="$1" review_file="$1/adversarial-review.md"
     local json_file="$1/fix-keys.json"
-    local session_id="${2:-}" secret_file secret pairs_file tsv_file
+    local session_id="${2:-}" secret_file secret pairs_file tsv_file minted_by
+    local gated_rows skipped_rows fid wu
     [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file"
     if [ -z "$session_id" ]; then
         session_id="$(plan_session_id "$plan_dir")"
@@ -99,6 +106,48 @@ mint_fix_keys() {
     pairs_file="$(mktemp)"
     tsv_file="$(mktemp)"
     tmp_files+=("$pairs_file" "$tsv_file")
+
+    # Two passes: first count gated rows and rows that could not be minted
+    # (counts written to a file so they survive the pipeline subshell), then
+    # derive keys for the conforming pairs.
+    count_file="$(mktemp)"
+    tmp_files+=("$count_file")
+    awk -F'|' '
+        /^## Findings$/ { in_findings = 1; next }
+        in_findings && /^## Verdict$/ { exit }
+        in_findings && /^\|/ {
+            fid = $2; wu = $6
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
+            # Skip header and separator rows (ID column is a marker or ---).
+            if (fid ~ /^(ID|---)$/ || wu ~ /^---$/) next
+            if (wu == "" || wu == "N/A" || wu == "—") next
+            gated_rows++
+            if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) mintable++
+            else skipped_rows++
+        }
+        END {
+            printf "%d\t%d\n", gated_rows + 0, skipped_rows + 0
+        }
+    ' "$review_file" > "$count_file"
+    IFS=$'\t' read -r gated_rows skipped_rows < "$count_file"
+
+    if [ "$skipped_rows" -gt 0 ]; then
+        awk -F'|' -v seen=0 '
+            /^## Findings$/ { in_findings = 1; next }
+            in_findings && /^## Verdict$/ { exit }
+            in_findings && /^\|/ {
+                fid = $2; wu = $6
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
+                if (fid ~ /^(ID|---)$/ || wu ~ /^---$/) next
+                if (wu == "" || wu == "N/A" || wu == "—") next
+                if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) next
+                printf "mint-fix-keys: WARN skipping gated row with non-conforming id: finding id \"%s\" work unit \"%s\" (expect ^AR-[0-9]+$ and ^W[0-9]+$)\n", fid, wu > "/dev/stderr"
+            }
+        ' "$review_file"
+        plan_die "mint-fix-keys: $skipped_rows gated row(s) could not be minted; fix the finding/work-unit ids so the fix-key gate is not silently disabled"
+    fi
 
     awk -F'|' '
         /^## Findings$/ { in_findings = 1; next }
@@ -116,8 +165,13 @@ mint_fix_keys() {
         printf '%s\t%s\t%s\n' "$fid" "$wu" "$(hmac_key "$secret" "$session_id|$fid|$wu")"
     done < "$pairs_file" > "$tsv_file"
 
-    awk -v sid="$session_id" '
-        BEGIN { print "{"; printf "  \"session_id\": \"%s\",\n", sid; print "  \"keys\": {" }
+    # Record the identity that minted so the approval gate can detect a fixer
+    # claiming its own keys (self-certification). MINTED_BY overrides; default
+    # to the session id that names the secret dir.
+    minted_by="${MINTED_BY:-$session_id}"
+
+    awk -v sid="$session_id" -v minted_by="$minted_by" '
+        BEGIN { print "{"; printf "  \"session_id\": \"%s\",\n", sid; printf "  \"minted_by\": \"%s\",\n", minted_by; print "  \"keys\": {" }
         { fid = $1; wu = $2; key = $3
           if (fid != current_fid) {
               if (current_fid != "") print "    },"

@@ -92,6 +92,49 @@ grep -Fq '"session_id": "test-session-a"' "$plan_a/fix-keys.json" \
 grep -Fq "\"W05\": \"$key_01\"" "$plan_a/fix-keys.json" \
     && fail 're-mint derived keys from the invalidated session secret'
 
+# --- report 3 §4.2: non-conforming finding ids fail loudly instead of silently
+#     disabling the gate; minted_by identity is recorded; verify warns when the
+#     claiming session is the minting session (self-certification). ---
+plan_bad="$temporary_root/plan-bad"
+seed_gated_plan "$plan_bad" test-session-bad
+sed -i 's/| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |/| AR6-01 | First gap. | Implement W05. | ✅ resolved | W05 |/' \
+    "$plan_bad/adversarial-review.md"
+seed_secret_session test-session-bad
+if "$script_dir/mint-fix-keys.sh" "$plan_bad" >"$temporary_root/mint-bad.log" 2>&1; then
+    fail 'mint accepted a non-conforming finding id (AR6-01) instead of failing loudly'
+fi
+grep -Fq 'non-conforming id' "$temporary_root/mint-bad.log" \
+    || fail 'mint did not warn about the non-conforming row'
+grep -Fq 'silently disabled' "$temporary_root/mint-bad.log" \
+    || fail 'mint did not explain the silent-disable risk'
+
+# minted_by defaults to the session id; verify warns on a same-session claim.
+plan_by="$temporary_root/plan-by"
+seed_gated_plan "$plan_by" test-session-by
+seed_secret_session test-session-by
+MINTED_BY=reviewer-session-1 "$script_dir/mint-fix-keys.sh" "$plan_by" >/dev/null 2>&1 \
+    || fail 'mint rejected a valid gated plan'
+grep -Fq '"minted_by": "reviewer-session-1"' "$plan_by/fix-keys.json" \
+    || fail 'mint did not record the minted_by identity'
+key_by1="$(expected_key test-session-by AR-01 W05)"
+key_by3="$(expected_key test-session-by AR-03 W07)"
+write_claims "$plan_by" "AR-01	W05	$key_by1" "AR-03	W07	$key_by3"
+if "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by reviewer-session-1 \
+    >"$temporary_root/verify-self.log" 2>&1; then
+    :
+else
+    fail 'verify rejected a valid claim with a same-session warning'
+fi
+grep -Fq 'self-certification' "$temporary_root/verify-self.log" \
+    || fail 'verify did not warn about a same-session claim'
+"$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by fixer-session-9 \
+    >"$temporary_root/verify-distinct.log" 2>&1 \
+    || fail 'verify rejected a distinct-session claim'
+grep -Fq 'self-certification' "$temporary_root/verify-distinct.log" \
+    && fail 'verify warned about a distinct-session claim'
+"$script_dir/verify-fix-keys.sh" "$plan_by" >"$temporary_root/verify-noclaimant.log" 2>&1 \
+    || fail 'verify rejected a claim with no --claimed-by'
+
 # --- W04: verify failure matrix ---
 plan_b="$temporary_root/plan-b"
 seed_gated_plan "$plan_b" test-session-b

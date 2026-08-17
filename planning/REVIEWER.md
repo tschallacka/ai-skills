@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `1b6fcb64efa6a8fd26e170fb85ec2fe91d0b9b2970f832599dd6d838c4b7a61f`
+> Source SHA-256: `128eca81ff2b80c633226519dc4fd9fa89fe093d1590afa4d5f1be258eacca65`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -80,6 +80,54 @@ Exceeding a pass or cycle limit, inheriting prior conclusions, or changing the
 task contract or safety boundary marks the run unresolved and requires a fresh
 review.
 
+**A finding is a hypothesis, not a work order.** Verify a finding's factual
+claims against the codebase before acting. Findings are evidence-backed
+hypotheses: some are wrong, some are narrower than stated, and some name the
+right defect at the wrong location. Acting on a finding without verifying it
+produces a second defect on top of the first.
+
+**A review that finds nothing blocking is a valid and valuable result.** Say so
+plainly. Prior cycles finding real defects do not obligate this one to.
+
+**Resolving a finding.** A finding names a symptom, not the full extent of the
+defect. A work unit's behaviour is defined across **six surfaces**, and a
+finding cites exactly one. Before recording a resolution, sweep all six:
+
+1. **Instructions** — step `.md` §5.x; the implementer builds what is written
+   here, so a fix that lands only here has not reached the other five.
+2. **Acceptance criteria** — step `.md` §6.x; an unfixed criterion is worse
+   than an unfixed pair, because the gate now certifies the defect. Move the
+   criterion with the instruction, in the same edit.
+3. **Inventory description** — the `work-unit-inventory.md` row; the scheduler
+   reads the old intent here, and no prose edit reaches a table row. Check the
+   row's description, target, type, and dependencies explicitly.
+4. **Change target / file / scope** — the same row plus the step header; if it
+   lags, work lands on the wrong file.
+5. **Goal owned-unit roster** — `goal.md` §9.1; a unit omitted here is
+   effectively unowned.
+6. **Dependency edges** — the row's Depends-on column; a verification runs
+   before what it verifies when the edge lags.
+
+Mechanically: search the whole plan for the **old** wording, not the new
+(`plan-content.sh find <plan> "<old phrase>" --in all`), fix every site it
+appears in including sibling units and goal documents, check the inventory row
+(3), move the acceptance criteria with the instruction (2), confirm the unit is
+named in its goal roster (5), and re-run the search to confirm the only
+remaining hits are deliberate references to the corrected history.
+
+A resolution recorded without the sweep is a claim, not a fix. The
+verification-one-unit-away variant is the hardest: a unit may be correct across
+all six surfaces while the verification unit that grades it still checks the
+old behaviour. Whenever a unit's change target, scope, or behaviour changes,
+re-read the verification unit that grades it (`--propagation` surfaces which
+verification units name it).
+
+**Prose ordering is not a plan addition.** Goals and steps append only
+(`NN-kebab-case` is enforced; there is no renumbering helper). A prose note that
+"execution order differs from step numbering" is sanctioned documentation when
+the dependency edges are also recorded; it is not a substitute for those edges.
+Reviewers reject ordering prose used as a substitute for recorded dependencies.
+
 The review boundary is filesystem-enforced: each worker and reviewer receives
 only its capsule and workspace, and each fresh reviewer receives a newly built
 capsule. The capsule manifest, lifecycle records, and audit events are part of
@@ -137,6 +185,15 @@ keys. When recording which key a fix used, write one claim line per
 (finding, work unit) into `fixes.md` (`finding_id`, `work_unit`, `key`,
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
+
+**Reviewers mint fix keys; fixers claim them. Never the same session.** A
+reviewer mints the keys by publishing its findings; the fixer claims the keys
+in `fixes.md`. Minting and claiming in the same session is self-certification:
+`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
+the session recorded as `minted_by`, and a warning is a review finding, not a
+pass. If a fixer must mint its own keys to record a finding the reviewer
+missed, surface it as an open finding for a fresh review rather than resolving
+it on its own authority.
 
 
 ### 4.1 Bounded context and portable plan storage

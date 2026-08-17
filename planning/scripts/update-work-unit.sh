@@ -79,3 +79,22 @@ changed=()
 [ -n "$new_depends" ] && changed+=("depends-on")
 [ -n "$new_description" ] && changed+=("description")
 printf 'Updated %s: %s\n' "$unit" "$(IFS=,; printf '%s' "${changed[*]}")"
+
+# Retargeting a unit (file or scope) can invalidate the verification unit that
+# grades it, even when that grader's own surfaces are unchanged. Surface the
+# graders so the fixer re-reads them.
+if [ -n "$new_file" ] || [ -n "$new_scope" ]; then
+    graders="$(awk -F'|' -v wanted="$unit" '
+        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
+            id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
+            t=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
+            if (t != "verification") next
+            deps=$8; gsub(/^[[:space:]]+|[[:space:]]+$/, "", deps)
+            n = split(deps, dp, ",")
+            for (i = 1; i <= n; i++) { p = dp[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) { print id; break } }
+        }' "$inventory")"
+    if [ -n "$graders" ]; then
+        printf 'plan: %s retargeted; re-read its grader(s) %s — a grader checks the old behaviour until its own surfaces are updated\n' \
+            "$unit" "$(printf '%s' "$graders" | tr '\n' ' ')"
+    fi
+fi
