@@ -1,5 +1,0 @@
-# UI user stories: basic-test-proof-current-20260811T114255Z-current-fresh4-isolated-plan
-
-| ID | Persona / precondition | Browser actions | Interaction evidence | Expected observable result | Status | Evidence | Related work units | Run cache |
-|---|---|---|---|---|---|---|---|---|
-| US-01 | Keyboard-and-mouse user opening the local HTML file after implementation | Open button-chain.html, click the visible current last button to create generated buttons one through four, then click the fourth generated button. | Mouse click on the visible current last button for the initial button and generated buttons one through four; the completion click is on the fourth generated button. | After the first four clicks, exactly one new generated button appears below the previous last button each time; after clicking the fourth generated button, previous content is cleared and only exact lowercase finished remains with a visible white border. | 💤 untested | — | W01,W02,W03,W04,W05 | `ui-story-runs/US-01.md` |

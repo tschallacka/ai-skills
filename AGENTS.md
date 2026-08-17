@@ -77,12 +77,19 @@ When the request is "run a benchmark / smoke-test the current state" with no
 other detail, do **not** hunt for parameters. Run this exact command:
 
 ```bash
-BENCHMARK_AGENT=opencode \
-MODEL="$(git config user.email >/dev/null 2>&1; echo ${OPENCODE_MODEL:-gpt-5.5})" \
+export BENCHMARK_AGENT=opencode
+export OPENCODE_MODEL="${OPENCODE_MODEL:-$(benchmark/planning/runtime/opencode/current-model.sh)}"
 mkdir -p /tmp/ai-skills-benchmark && \
 resource-limited-testing/scripts/limited-run.sh 6G 400 -- \
   benchmark/planning/run-benchmark.sh smoke-current /tmp/ai-skills-benchmark --sequential current
 ```
+
+Use `export`, not `VAR=x cmd` prefixes: a prefix applies only to that single
+command (e.g. `BENCHMARK_AGENT=opencode mkdir ... && ...` would silently leave
+the harness on its default driver). The harness reads `OPENCODE_MODEL` (not
+`MODEL`); when unset, `current-model.sh` resolves the model of the user's most
+recent interactive opencode session (benchmark sessions excluded) and falls
+back to the driver default `opencode/big-pickle`.
 
 Concretely: use **name** `smoke-current`, **base dir** `/tmp/ai-skills-benchmark`,
 **mode** `--sequential`, **tag** `current` (the live working tree/HEAD), agent

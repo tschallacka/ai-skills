@@ -1,4 +1,0 @@
-benchmark-compatibility.txt
-benchmark-test.md
-task-spec.md
-worker-prompt.md

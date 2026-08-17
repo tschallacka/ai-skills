@@ -1,1 +1,0 @@
-telemetry schema validation passed

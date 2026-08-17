@@ -1,6 +1,0 @@
-thread_id=019ff090-5356-7d43-a8df-2a5fa2163b6b
-telemetry_db=/home/mdibbets/.codex/state_5.sqlite
-usage_records=1
-total_usage_tokens=4063281
-telemetry_source=threads.tokens_used
-telemetry_status=available

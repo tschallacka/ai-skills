@@ -38,7 +38,7 @@ REVISION="${TAG#v}"
 CASE_ROOT="$TEST_BASE_DIR/$REVISION"
 SRC_ROOT="$CASE_ROOT/source"
 BENCH_ROOT="$CASE_ROOT/workspace"
-PLAN_NAME="basic-test-proof-${REVISION}-${RUN_ID}-isolated-plan"
+PLAN_NAME="$(printf '%s' "basic-test-proof-${REVISION}-${RUN_ID}-isolated-plan" | tr '[:upper:]' '[:lower:]')"
 # Results live under benchmark/results/<agent>/<revision-parent>/<run-id>/<revision>/
 # where <revision-parent> is the tag (or current/<latest-tag> for `current`).
 # benchmark_result_parent comes from the sourced runtime lib-agent.sh.
@@ -191,6 +191,9 @@ export WORKER_CAPSULE=$(printf '%q' "$CAPSULE_ROOT")
 export CAPSULE_ROOT=$(printf '%q' "$CAPSULE_ROOT")
 export CAPSULE_BASE=$(printf '%q' "$CAPSULE_BASE")
 export WORKER_WORKSPACE=$(printf '%q' "$WORKER_WORKSPACE")
+# plan-root.sh rule 1: an exported PLANS_ROOT wins over home/project defaults,
+# pinning every worker-created plan inside the isolated benchmark workspace.
+export PLANS_ROOT=$(printf '%q' "$BENCH_ROOT/.plans")
 export REVIEW_MODE=$(printf '%q' "${REVIEW_MODE:-fresh-review}")
 export MAX_VERIFICATION_PASSES=$(printf '%q' "${MAX_VERIFICATION_PASSES:-3}")
 export MAX_REVIEW_CYCLES=$(printf '%q' "${MAX_REVIEW_CYCLES:-3}")

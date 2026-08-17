@@ -1,2 +1,0 @@
-Blinded defect workspace created: /tmp/reviewer-oracle-hardening-current-complete/current/oracle-target
-Encrypted oracle material stored privately: /tmp/ai-skills-oracle-private/20260811T145902Z-hardening-current-complete/current

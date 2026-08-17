@@ -1,9 +1,0 @@
-record	command	rg -n --max-count 40 '^(main\(\)|test_authority_recovery\(\)|test_transaction_lease\(\)|test_package_wire\(\)|test_benchmark_oracle_legacy\(\))' planning/tests/test-planning-context-v27-contract.sh
-record	source_digest	dc3f31668e2a66f9476bb0c7a3f8895d2532fa4fde7a480101509db8300f58a5
-record	evidence_path	planning/tests/fixtures/planning-context-v27/runner-targets.discovery.txt
-resolved_target	name	main
-resolved_target	name	test_authority_recovery
-resolved_target	name	test_transaction_lease
-resolved_target	name	test_package_wire
-resolved_target	name	test_benchmark_oracle_legacy
-result	status	PASS

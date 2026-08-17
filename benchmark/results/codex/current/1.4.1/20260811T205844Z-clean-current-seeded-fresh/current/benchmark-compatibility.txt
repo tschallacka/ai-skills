@@ -1,1 +1,0 @@
-No compatibility fallback is permitted for current.
