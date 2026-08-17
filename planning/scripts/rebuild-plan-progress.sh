@@ -44,17 +44,7 @@ trap 'rm -f "$temporary"' EXIT
         # Derive the Description from the goal's Outcome (Definition of done),
         # never a literal placeholder — a plan-level tracker with a hardcoded
         # <short description> carries no information.
-        desc="$(awk '
-            /^## Outcome and definition of done$/ { in_sec = 1; next }
-            in_sec && /^## / { exit }
-            in_sec && /^§ [0-9]+\.[0-9]+[[:space:]]*$/ { next }
-            in_sec && NF {
-                line = $0; sub(/^[[:space:]]+/, "", line)
-                if (length(line) > 100) line = substr(line, 1, 100) "..."
-                print line; exit
-            }
-        ' "$goal_dir/goal.md" 2>/dev/null)"
-        [ -n "$desc" ] || desc="$goal_name"
+        desc="$(plan_goal_definition_of_done "$goal_dir/goal.md" "$goal_name")"
         printf '| %s | %s | %s |\n' "$goal_name" "$desc" "$status"
     done < <(find "$plan_dir" -mindepth 1 -maxdepth 1 -type d | sort)
     [ "$total" -gt 0 ] || { printf 'No goal directories found\n' >&2; exit 66; }

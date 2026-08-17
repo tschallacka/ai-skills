@@ -14,7 +14,7 @@ printf '# First step\n' > "$goal_dir/steps/01-step-first.md"
 "$script_dir/update-step.sh" "$goal_dir" 01-step-first completed
 "$script_dir/create-step-testing.sh" "$goal_dir" 01-step-first 'Run the focused regression test.'
 
-grep -Fqx '| demo | 01-step-first | <short description> | ✅ completed |' "$goal_dir/progress.md"
+grep -Fqx '| demo | 01-step-first | 01-step-first | ✅ completed |' "$goal_dir/progress.md"
 grep -Fqx '**Progress:** `100%  ####################  100%` ✅' "$goal_dir/progress.md"
 grep -Fqx '# Verification: 01-step-first' "$goal_dir/steps/01-step-first-testing.md"
 grep -Fqx 'Run the focused regression test.' "$goal_dir/steps/01-step-first-testing.md"

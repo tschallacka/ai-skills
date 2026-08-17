@@ -67,7 +67,10 @@ rebuild_progress() {
         printf '| Goalname | Stepname | Description | Completion status |\n|---|---|---|---|\n'
         while IFS= read -r step_file; do
             step_name="$(basename "$step_file" .md)"
-            printf '| %s | %s | <short description> | 💤 incomplete |\n' "$goal_name" "$step_name"
+            # Derive the row description from the step's Objective (§ 4.1);
+            # never a literal placeholder in a generated table.
+            step_desc="$(plan_step_objective "$step_file" "$step_name")"
+            printf '| %s | %s | %s | 💤 incomplete |\n' "$goal_name" "$step_name" "$step_desc"
         done < <(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' -print | sort)
     } > "$temporary"
     mv "$temporary" "$progress_file"

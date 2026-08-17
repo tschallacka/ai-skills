@@ -588,3 +588,48 @@ plan_replace_title() {
     mv "$temporary_file" "$file"
     trap - RETURN
 }
+
+# Derive a single-line row description from a step's Objective paragraph
+# (§ 4.1) — the text after the first "§ N.N" label inside "## Objective".
+# Truncated to 100 chars; falls back to "$2" (the step name) when there is no
+# Objective or no § label, so a generated progress table never carries a
+# literal placeholder (report 15 §2 / report 16). Shared by every goal-level
+# progress-tracker builder.
+plan_step_objective() {
+    local step_file="$1" fallback="$2"
+    local desc
+    desc="$(awk '
+        /^## Objective$/ { in_obj = 1; next }
+        /^§ [0-9]+\.[0-9]+$/ && in_obj { after_label = 1; next }
+        after_label && NF {
+            line = $0; sub(/^[[:space:]]+/, "", line)
+            if (length(line) > 100) line = substr(line, 1, 100) "..."
+            print line; exit
+        }
+        /^## / && in_obj { exit }
+    ' "$step_file" 2>/dev/null)"
+    [ -n "$desc" ] || desc="$fallback"
+    printf '%s\n' "$desc"
+}
+
+# Derive a single-line row description from a goal's "## Outcome and definition
+# of done" section, skipping "§ N.N" labels. Truncated to 100 chars; falls back
+# to "$2" (the goal name) when there is no DoD, so a generated plan-level
+# tracker never carries a literal placeholder. Shared by every plan-level
+# progress-tracker builder.
+plan_goal_definition_of_done() {
+    local goal_file="$1" fallback="$2"
+    local desc
+    desc="$(awk '
+        /^## Outcome and definition of done$/ { in_sec = 1; next }
+        in_sec && /^## / { exit }
+        in_sec && /^§ [0-9]+\.[0-9]+[[:space:]]*$/ { next }
+        in_sec && NF {
+            line = $0; sub(/^[[:space:]]+/, "", line)
+            if (length(line) > 100) line = substr(line, 1, 100) "..."
+            print line; exit
+        }
+    ' "$goal_file" 2>/dev/null)"
+    [ -n "$desc" ] || desc="$fallback"
+    printf '%s\n' "$desc"
+}

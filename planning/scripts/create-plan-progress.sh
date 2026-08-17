@@ -8,6 +8,8 @@ fi
 
 plan_dir="$1"
 progress_file="$plan_dir/progress.md"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
 
 if [ -e "$progress_file" ]; then
     echo "Progress file already exists: $progress_file" >&2
@@ -34,7 +36,8 @@ trap 'rm -f "$temporary_file"' EXIT
     printf '| Goalname | Description | Completion status |\n'
     printf '|---|---|---|\n'
     for goal_name in "${goal_names[@]}"; do
-        printf '| %s | <short description> | 💤 incomplete |\n' "$goal_name"
+        desc="$(plan_goal_definition_of_done "$plan_dir/$goal_name/goal.md" "$goal_name")"
+        printf '| %s | %s | 💤 incomplete |\n' "$goal_name" "$desc"
     done
 } > "$temporary_file"
 mv "$temporary_file" "$progress_file"

@@ -10,6 +10,8 @@ goal_dir="$1"
 goal_name="$2"
 steps_dir="$goal_dir/steps"
 progress_file="$goal_dir/progress.md"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
 
 if [ ! -d "$steps_dir" ]; then
     echo "Steps directory not found: $steps_dir" >&2
@@ -27,19 +29,9 @@ while IFS= read -r step_file; do
     step_names+=("$step_name")
     # Derive the row description from the step's Objective paragraph (§ 4.1),
     # so the tracker reflects the current step intent and survives rebuilds
-    # without hand-filling (which the next rebuild would overwrite).
-    description="$(awk '
-        /^## Objective$/ { in_obj = 1; next }
-        /^§ [0-9]+\.[0-9]+$/ && in_obj { after_label = 1; next }
-        after_label && NF {
-            line = $0; sub(/^[[:space:]]+/, "", line)
-            if (length(line) > 100) line = substr(line, 1, 100) "..."
-            print line; exit
-        }
-        /^## / && in_obj { exit }
-    ' "$step_file")"
-    [ -n "$description" ] || description="<short description>"
-    step_descriptions+=("$description")
+    # without hand-filling (which the next rebuild would overwrite). Never fall
+    # back to a literal placeholder — a generated table must not carry one.
+    step_descriptions+=("$(plan_step_objective "$step_file" "$step_name")")
 done < <(find "$steps_dir" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' | sort)
 
 if [ "${#step_names[@]}" -eq 0 ]; then
