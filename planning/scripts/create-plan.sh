@@ -68,10 +68,35 @@ plan_root=$(cd "$plan_dir" && pwd -P)
 "$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
 "$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
 if command -v git >/dev/null 2>&1; then
-    git init -q "$plan_dir" 2>/dev/null || true
-    git -C "$plan_dir" add -A -- . 2>/dev/null || true
-    git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
-        commit -q -m "plan: initial structure" 2>/dev/null || true
+    # Decide which repo owns the plan's history. A git-excluded plans root
+    # (a project's /.plans in .gitignore) or a plans root outside any repo
+    # gets its own repo at the root so the whole plans tree is versioned and
+    # cross-plan diffs (plan-content.sh diff walking up) work; re-initializes
+    # the root repo when its .git is missing. A plan inside an already-versioned
+    # tree commits into that tree. An explicit path outside any repo keeps its
+    # own per-plan repo (existing behaviour).
+    git_repo=""
+    if top="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+        if git -C "$top" check-ignore -q "$plan_dir" 2>/dev/null; then
+            git_repo="$plans_root"
+        else
+            git_repo="$top"
+        fi
+    elif [[ "$plan_arg" != */* ]]; then
+        git_repo="$plans_root"
+    fi
+    if [ -n "$git_repo" ]; then
+        mkdir -p "$git_repo"
+        git init -q "$git_repo" 2>/dev/null || true
+        git -C "$git_repo" add -A -- "$plan_dir" 2>/dev/null || true
+        git -C "$git_repo" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
+            commit -q -m "plan: initial structure" 2>/dev/null || true
+    else
+        git init -q "$plan_dir" 2>/dev/null || true
+        git -C "$plan_dir" add -A -- . 2>/dev/null || true
+        git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
+            commit -q -m "plan: initial structure" 2>/dev/null || true
+    fi
 fi
 trap - EXIT
 echo "Created $plan_dir"

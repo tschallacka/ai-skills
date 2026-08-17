@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `128eca81ff2b80c633226519dc4fd9fa89fe093d1590afa4d5f1be258eacca65`
+> Source SHA-256: `af5ba90aa940ae928b96fbff0b2f16f26de761e32a5afad845b8ff123a90f5c6`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -26,6 +26,13 @@ plan artifacts, but not the planning agent's conclusions. It must identify
 every unplanned file, symbol, behavior, test, browser interaction, dependency,
 and bug-recovery path needed to execute the request. The plan is rejected
 until every finding is resolved and the review verdict is `✅ approved`.
+
+**Environment facts go to a reviewer from the plan's own working context, not
+from prose in the brief.** A reviewer brief that hard-codes a schema name,
+socket, or active theme and gets it wrong carries a false fact into every
+parallel review session. Prefer putting such facts in `working-context.md`
+(verified) and telling the reviewer to read it from there; when a fact cannot
+be verified, mark it as an assumption rather than asserting it.
 
 The fresh adversary must be **bounded-read locked**. Hand it the exact reader
 command, plan directory, and supported entry ids/views. Its starting prompt
@@ -90,11 +97,11 @@ produces a second defect on top of the first.
 plainly. Prior cycles finding real defects do not obligate this one to.
 
 **Resolving a finding.** A finding names a symptom, not the full extent of the
-defect. A work unit's behaviour is defined across **six surfaces**, and a
-finding cites exactly one. Before recording a resolution, sweep all six:
+defect. A work unit's behaviour is defined across **seven surfaces**, and a
+finding cites exactly one. Before recording a resolution, sweep all seven:
 
 1. **Instructions** — step `.md` §5.x; the implementer builds what is written
-   here, so a fix that lands only here has not reached the other five.
+   here, so a fix that lands only here has not reached the other six.
 2. **Acceptance criteria** — step `.md` §6.x; an unfixed criterion is worse
    than an unfixed pair, because the gate now certifies the defect. Move the
    criterion with the instruction, in the same edit.
@@ -107,6 +114,18 @@ finding cites exactly one. Before recording a resolution, sweep all six:
    effectively unowned.
 6. **Dependency edges** — the row's Depends-on column; a verification runs
    before what it verifies when the edge lags.
+7. **Testing companion** — `<step>-testing.md`; the executor runs the old
+   procedure when this lags. It is a real surface with its own writer:
+   `update-plan-content.sh -ss <plan> step:<goal>/<step>-testing automated-tests
+   -p 2.1: …` (and `create-step-testing.sh --overwrite` to replace it). Read
+   the companion first, not last — on plans with verification-heavy goals it is
+   where execution actually happens.
+
+Two further artifacts became readable in later cycles and are worth sweeping
+when a finding mentions them: the **Definition-of-done coverage table** and
+**`ui-user-stories.md`** (call them 8 and 9 for an exhaustive checklist) — a
+finding is not closed until every surface that mentions the behaviour says the
+same thing.
 
 Mechanically: search the whole plan for the **old** wording, not the new
 (`plan-content.sh find <plan> "<old phrase>" --in all`), fix every site it
@@ -185,6 +204,13 @@ keys. When recording which key a fix used, write one claim line per
 (finding, work unit) into `fixes.md` (`finding_id`, `work_unit`, `key`,
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
+
+**Reviewers may write `adversarial-review-incoming.md`** (the one plan file a
+reviewer may write, so findings survive the coordinator's context).
+`update-adversarial-review.sh` consumes it as its findings source and removes
+it after the table is rewritten. A reviewer writes its Findings CSV rows there;
+the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
+land them.
 
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys

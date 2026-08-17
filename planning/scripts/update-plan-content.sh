@@ -25,6 +25,9 @@ Usage:
   update-plan-content.sh -tp|--table-paragraph <plan-directory> <document-id> <N.N> <columns> <CSV>
   update-plan-content.sh -ia|--insert-after <plan-directory> <document-id> <N.N> <text>
   update-plan-content.sh -ib|--insert-before <plan-directory> <document-id> <N.N> <text>
+  update-plan-content.sh --delete-paragraph <plan-directory> <document-id> <N.N>
+                                              Deletes ONE paragraph and renumbers the
+                                              following paragraphs in the same section.
   update-plan-content.sh -t|--title <plan-directory> <document-id> <title>
   update-plan-content.sh -f|--field <plan-directory> <document-id> <field-label> <value>
   update-plan-content.sh -tr|--testing-requirement <plan-directory> <goal-name> <yes|no> <rationale>
@@ -143,6 +146,11 @@ if [[ "$command" == -* ]]; then
             reject_swallowed_flags "$paragraph_content" "$command"
             set -- "$plan_dir" "$document_id" "${paragraph_id%:}" "$paragraph_content"
             command=insert-before
+            ;;
+        --delete-paragraph)
+            [ "$#" -eq 3 ] || usage
+            set -- "$1" "$2" "$3"
+            command=delete-paragraph
             ;;
         -t|--title)
             [ "$#" -eq 3 ] || { printf 'update-plan-content.sh: --title requires exactly <plan-directory> <document-id> <title>\n' >&2; exit 64; }
@@ -361,6 +369,17 @@ append-paragraph)
         plan_insert_paragraph "$file" "§ $paragraph_id" "${command#insert-}" "$insert_file"
         rm -f "$insert_file"
         trap - EXIT
+        plan_emit_step_testing_reminder "$plan_dir" "$document_id"
+        ;;
+    delete-paragraph)
+        [ "$#" -eq 3 ] || usage
+        plan_dir="$1"; document_id="$2"; paragraph_id="$3"
+        plan_require_directory "$plan_dir"
+        plan_git_snapshot "$plan_dir"
+        file="$(plan_document_path "$plan_dir" "$document_id")"
+        [ -f "$file" ] || plan_die "Document not found: $file"
+        [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
+        plan_delete_paragraph "$file" "§ $paragraph_id"
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
     field)

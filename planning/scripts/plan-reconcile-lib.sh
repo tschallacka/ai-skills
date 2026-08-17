@@ -124,7 +124,10 @@ plan_rewrite_owned_work_units() {
     trap - RETURN
 }
 
-# Rebuild a goal progress tracker from its step files (overwrites).
+# Rebuild a goal progress tracker from its step files (overwrites). If the
+# tracker does not exist yet and the goal has step files, create it first —
+# goals added after create-plan.sh never had a per-goal tracker otherwise, and
+# without one the validator's completion gate has nothing to read.
 plan_rebuild_goal_progress() {
     local script_dir="$1" goal_dir="$2" goal="$3" progress_file
     progress_file="$goal_dir/progress.md"
@@ -132,6 +135,9 @@ plan_rebuild_goal_progress() {
         rm -f "$progress_file"
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2
+    elif find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' -print -quit 2>/dev/null | grep -q .; then
+        "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
+            printf 'plan: could not create goal progress for %s\n' "$goal" >&2
     fi
 }
 

@@ -14,6 +14,8 @@ Usage:
   plan-mutate.sh add-finding <plan> <AR-NN> <finding> <resolution> [open|in-progress|resolved]
   plan-mutate.sh set-unit-scope <plan> <WNN> <new-primary-scope>
   plan-mutate.sh remove-work-unit <plan> <WNN>
+  plan-mutate.sh remove-plan <plan-directory>
+  plan-mutate.sh cleanup-plans [--list] [<plan-name> ...] [--yes]
   plan-mutate.sh set-step <goal-directory> <step-name> <incomplete|in-progress|completed>
   plan-mutate.sh set-goal <plan> <goal-name> <incomplete|in-progress|completed>
   plan-mutate.sh set-review <plan> <pending|approved>
@@ -80,6 +82,8 @@ case "$command" in
     add-finding) exec "$script_dir/add-adversarial-finding.sh" "$@" ;;
     set-unit-scope) exec "$script_dir/update-work-unit.sh" "$@" ;;
     remove-work-unit) exec "$script_dir/remove-work-unit.sh" "$@" ;;
+    remove-plan) exec "$script_dir/remove-plan.sh" "$@" ;;
+    cleanup-plans) exec "$script_dir/cleanup-plans.sh" "$@" ;;
     rebuild-progress) rebuild_progress "$@" ;;
     set-step) exec "$script_dir/update-step.sh" "$@" ;;
     set-goal) exec "$script_dir/update-plan-progress.sh" "$@" ;;

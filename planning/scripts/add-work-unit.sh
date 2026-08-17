@@ -72,6 +72,30 @@ else
             print ""
             inserted = 1
         }
+        /^## Testing requirement$/ && !inserted && !goal_size_seen {
+            # No Goal-size exception section (add-goal omits it by default):
+            # append the owned-unit blurbs after the Testing-requirement table
+            # that follows this heading.
+            print
+            in_testing = 1
+            next
+        }
+        in_testing && /^\|/ {
+            print
+            if ($0 ~ /\|/) {
+                if (seen_separator) {
+                    print ""
+                    print "§ 9." (count + 1)
+                    print addition
+                    print ""
+                    inserted = 1
+                    in_testing = 0
+                }
+                seen_separator = 1
+            }
+            next
+        }
+        in_testing { print; next }
         { print }
         END {
             if (!inserted) exit 2

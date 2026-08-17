@@ -6,19 +6,21 @@ set -euo pipefail
 #
 # Usage:
 #   update-work-unit.sh <plan-directory> <WNN> [<new-primary-scope>] [<new-file>]
-#                       [--type <type>] [--depends-on <WNN[,WNN...]|—>]
+#                       [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>]
 #                       [--description <text>]
 #
 # The inventory row columns are: | ID | Type | File | Primary symbol or file
 # scope | Subscope | Intended change | Depends on | Goal | Step |. The third
 # positional updates *Primary scope* (column 5); the optional fourth updates
-# *File* (column 4). Flags update the remaining columns; nothing else changes,
-# so coverage rows, the goal Owned work units section, and progress trackers
-# are untouched — changing a dependency must never go through remove + re-add
-# (that would drop the unit from its coverage rows and require manual repair).
+# *File* (column 4). --scope is the flag form of the scope update (equivalent
+# to the third positional, for callers who prefer flags); flags update the
+# remaining columns; nothing else changes, so coverage rows, the goal Owned
+# work units section, and progress trackers are untouched — changing a
+# dependency must never go through remove + re-add (that would drop the unit
+# from its coverage rows and require manual repair).
 
 usage() {
-    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")" >&2
     exit 64
 }
 
@@ -27,6 +29,7 @@ plan_dir="$1" unit="$2"; shift 2
 new_scope='' new_file='' new_type='' new_depends='' new_description=''
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --scope) [ "$#" -ge 2 ] || usage; new_scope="$2"; shift 2 ;;
         --type) [ "$#" -ge 2 ] || usage; new_type="$2"; shift 2 ;;
         --depends-on) [ "$#" -ge 2 ] || usage; new_depends="$2"; shift 2 ;;
         --description) [ "$#" -ge 2 ] || usage; new_description="$2"; shift 2 ;;
@@ -80,10 +83,10 @@ changed=()
 [ -n "$new_description" ] && changed+=("description")
 printf 'Updated %s: %s\n' "$unit" "$(IFS=,; printf '%s' "${changed[*]}")"
 
-# Retargeting a unit (file or scope) can invalidate the verification unit that
-# grades it, even when that grader's own surfaces are unchanged. Surface the
-# graders so the fixer re-reads them.
-if [ -n "$new_file" ] || [ -n "$new_scope" ]; then
+# Changing a unit's behaviour (file, scope, or dependency edges) can invalidate
+# the verification unit that grades it, even when that grader's own surfaces
+# are unchanged. Surface the graders so the fixer re-reads them.
+if [ -n "$new_file" ] || [ -n "$new_scope" ] || [ -n "$new_depends" ]; then
     graders="$(awk -F'|' -v wanted="$unit" '
         /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
             id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
@@ -94,7 +97,7 @@ if [ -n "$new_file" ] || [ -n "$new_scope" ]; then
             for (i = 1; i <= n; i++) { p = dp[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) { print id; break } }
         }' "$inventory")"
     if [ -n "$graders" ]; then
-        printf 'plan: %s retargeted; re-read its grader(s) %s — a grader checks the old behaviour until its own surfaces are updated\n' \
+        printf 'plan: %s changed behaviour; re-read its grader(s) %s — a grader checks the old behaviour until its own surfaces are updated\n' \
             "$unit" "$(printf '%s' "$graders" | tr '\n' ' ')"
     fi
 fi

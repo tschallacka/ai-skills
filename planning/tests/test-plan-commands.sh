@@ -174,6 +174,10 @@ mv "$missing_companion.missing" "$missing_companion"
     'The discovery work unit owns the research record.'
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 02-research no \
     'Research findings have no reproducible behavior to exercise.'
+# 02-research owns exactly one work unit, so it needs the goal-size exception
+# section with a reason (add-goal no longer emits the placeholder).
+"$script_dir/update-plan-content.sh" -gs "$plan_dir" 02-research goal-size-exception \
+    -p 11.1: 'Genuinely standalone discovery outcome, exempted under the single-unit goal gate.'
 "$script_dir/validate-plan.sh" "$plan_dir" >/dev/null
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 02-research yes \
     'This deliberately exercises the missing-test validation.'
@@ -411,4 +415,38 @@ before_ref="$(git -C "$plan_dir" rev-parse HEAD)"
     'The rows must still render after the diff baseline.' >/dev/null 2>&1
 "$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '03-wire/steps/01-step-history.md'
 "$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '§ 4.1'
+# ---- report 5: companion find scope, --delete-paragraph, --scope, story
+#      placeholder-free cache, goal-size placeholder omission ----
+# find reaches the *-testing.md companions via --in testing and --in all.
+"$script_dir/create-step-testing.sh" "$plan_dir/03-wire" 01-step-history \
+    'Verify the rows still render.\nRecord the observed result.' --overwrite >/dev/null 2>&1
+"$script_dir/plan-content.sh" find "$plan_dir" 'Verify the rows still render' --in testing \
+    | grep -Fq 'step:03-wire/01-step-history-testing'
+# --delete-paragraph removes one paragraph and renumbers the rest of the section.
+"$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history instructions \
+    -p 5.1: 'Instruction one.' -p 5.2: 'Instruction two.' -p 5.3: 'Instruction three.' >/dev/null 2>&1
+"$script_dir/update-plan-content.sh" --delete-paragraph "$plan_dir" step:03-wire/01-step-history 5.2 >/dev/null 2>&1
+if grep -Fqx '§ 5.3' "$plan_dir/03-wire/steps/01-step-history.md"; then
+    echo '--delete-paragraph did not renumber the following paragraph.' >&2
+    exit 1
+fi
+grep -Fqx '§ 5.2' "$plan_dir/03-wire/steps/01-step-history.md"
+grep -Fq 'Instruction three.' "$plan_dir/03-wire/steps/01-step-history.md"
+# --scope is the flag form of the scope positional; ' and ' scope text passes.
+"$script_dir/update-work-unit.sh" "$plan_dir" W10 --scope \
+    'Renderer::render() and the History value object, both new in this file' >/dev/null 2>&1
+grep -Fq 'Renderer::render() and the History value object' "$plan_dir/work-unit-inventory.md"
+# add-goal emits the Goal-size exception heading empty, never the placeholder text.
+"$script_dir/add-goal.sh" "$plan_dir" 04-clean 'Clean' 'No placeholder.' >/dev/null 2>&1
+if grep -Fq '<required only when this goal has one permitted work unit>' "$plan_dir/04-clean/goal.md"; then
+    echo 'add-goal still emits the goal-size placeholder text.' >&2
+    exit 1
+fi
+# add-ui-story leaves a cache that validates (no <...> template placeholders).
+if [ -f "$plan_dir/ui-story-runs/US-01.md" ]; then
+    if grep -Eq '<[^>]+>' "$plan_dir/ui-story-runs/US-01.md"; then
+        echo 'add-ui-story emitted a cache with template placeholders.' >&2
+        exit 1
+    fi
+fi
 printf 'Planning command regression test passed.\n'

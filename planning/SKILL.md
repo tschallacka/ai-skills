@@ -78,6 +78,14 @@ bypassing it.
   does. Verify a claim before writing it into a plan as a fact; when a decision
   is right but the reason is unverified, mark the reason as an assumption and
   verify it.
+- **State what a correction replaced and why.** A corrected paragraph should
+  say what the earlier version said and why it was wrong (for example: "an
+  earlier version of this criterion took that direction from a configured
+  parameter; it is not an open question"). This lets the next reviewer verify
+  the fix landed instead of re-deriving it, prevents the same question being
+  reopened, and makes a stale-wording sweep self-documenting — a `find` hit on
+  old wording is instantly classifiable as live text or a deliberate
+  corrective reference. The cost is verbosity; it is worth it.
 
 ## Tool discipline and context limits
 
@@ -263,11 +271,28 @@ enforce paragraph numbering, spacing, sequencing, and safe content.
 
 `create-plan.sh` git-initializes the plan directory, and every mutating helper
 commits the pre-mutation state first — `git -C <planname> log` recovers an
-overwritten paragraph. Read plan documents only through `plan-content.sh`;
+overwritten paragraph. When the plans root is git-excluded from its enclosing
+work tree (a project's `/.plans` in `.gitignore`) or sits outside any repo,
+`create-plan.sh` initializes one repo at the plans root itself so the whole
+plans tree is versioned and cross-plan diffs work; `cleanup-plans.sh` clears
+that root history when the last plan is removed, and the next `create-plan.sh`
+re-initializes it. Read plan documents only through `plan-content.sh`;
 its `find` subcommand locates a literal string across plan documents and
 prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
 hits). Use it before a paragraph-level edit to confirm the target is unique:
 `plan-content.sh find <planname> 'Magento_Sales::invoices'`.
+
+**A fix is verified by finding the wording at the surface the finding named,
+never by finding it somewhere in the plan.** The plan-wide probe
+(`--in all`) returns true whenever any other unit happens to mention the same
+symbol, which produced false "verified" marks. Scope with `--document <docid>`
+(or `--in unit:W24`) to ask the precise question the finding asked.
+
+`find` reaches the `*-testing.md` companions via the `--in testing` scope and
+within `--in all` (document id `step:<goal>/<step>-testing`). Always include
+companions in a stale-wording sweep: they are where execution actually happens
+and were historically the surface most likely to drift. A sweep that relies on
+`--in all` without companions is incomplete by construction.
 
 **Reserved characters and identifiers.** Plan narrative may not contain the
 reserved paragraph marker `§` (the helpers reject it) or a Markdown table
@@ -478,6 +503,13 @@ every unplanned file, symbol, behavior, test, browser interaction, dependency,
 and bug-recovery path needed to execute the request. The plan is rejected
 until every finding is resolved and the review verdict is `✅ approved`.
 
+**Environment facts go to a reviewer from the plan's own working context, not
+from prose in the brief.** A reviewer brief that hard-codes a schema name,
+socket, or active theme and gets it wrong carries a false fact into every
+parallel review session. Prefer putting such facts in `working-context.md`
+(verified) and telling the reviewer to read it from there; when a fact cannot
+be verified, mark it as an assumption rather than asserting it.
+
 The fresh adversary must be **bounded-read locked**. Hand it the exact reader
 command, plan directory, and supported entry ids/views. Its starting prompt
 must include verbatim:
@@ -541,11 +573,11 @@ produces a second defect on top of the first.
 plainly. Prior cycles finding real defects do not obligate this one to.
 
 **Resolving a finding.** A finding names a symptom, not the full extent of the
-defect. A work unit's behaviour is defined across **six surfaces**, and a
-finding cites exactly one. Before recording a resolution, sweep all six:
+defect. A work unit's behaviour is defined across **seven surfaces**, and a
+finding cites exactly one. Before recording a resolution, sweep all seven:
 
 1. **Instructions** — step `.md` §5.x; the implementer builds what is written
-   here, so a fix that lands only here has not reached the other five.
+   here, so a fix that lands only here has not reached the other six.
 2. **Acceptance criteria** — step `.md` §6.x; an unfixed criterion is worse
    than an unfixed pair, because the gate now certifies the defect. Move the
    criterion with the instruction, in the same edit.
@@ -558,6 +590,18 @@ finding cites exactly one. Before recording a resolution, sweep all six:
    effectively unowned.
 6. **Dependency edges** — the row's Depends-on column; a verification runs
    before what it verifies when the edge lags.
+7. **Testing companion** — `<step>-testing.md`; the executor runs the old
+   procedure when this lags. It is a real surface with its own writer:
+   `update-plan-content.sh -ss <plan> step:<goal>/<step>-testing automated-tests
+   -p 2.1: …` (and `create-step-testing.sh --overwrite` to replace it). Read
+   the companion first, not last — on plans with verification-heavy goals it is
+   where execution actually happens.
+
+Two further artifacts became readable in later cycles and are worth sweeping
+when a finding mentions them: the **Definition-of-done coverage table** and
+**`ui-user-stories.md`** (call them 8 and 9 for an exhaustive checklist) — a
+finding is not closed until every surface that mentions the behaviour says the
+same thing.
 
 Mechanically: search the whole plan for the **old** wording, not the new
 (`plan-content.sh find <plan> "<old phrase>" --in all`), fix every site it
@@ -636,6 +680,13 @@ keys. When recording which key a fix used, write one claim line per
 (finding, work unit) into `fixes.md` (`finding_id`, `work_unit`, `key`,
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
+
+**Reviewers may write `adversarial-review-incoming.md`** (the one plan file a
+reviewer may write, so findings survive the coordinator's context).
+`update-adversarial-review.sh` consumes it as its findings source and removes
+it after the table is rewritten. A reviewer writes its Findings CSV rows there;
+the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
+land them.
 
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
@@ -906,13 +957,25 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --description-paragraph <plan-directory> 6.1 "<replacement>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --table-paragraph <plan-directory> plan 6.1 3 '"Header","Value","Status"\n"Item","He said ""go""","ready"'
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --insert-after <plan-directory> plan 6.1 "<new paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --delete-paragraph <plan-directory> step:01-g/01-step-a 5.2   # delete one paragraph; later labels in the section renumber
+"$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W88 --scope "RequestEmployeeSet::forCustomer()"   # --scope is the flag form of the scope positional
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status <plan-directory> approved
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" get <plan-directory> unit:W01 json
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" summary <plan-directory> markdown
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
+"$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>"
+"$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --overwrite   # replace a companion; input is validated before any file is touched
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> step:<goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> step:<goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<old phrase>' --in all
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --document step:<goal>/<step>-testing   # verify wording at the surface a finding named
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --full   # no excerpt truncation
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" get <plan-directory> inventory   # full work-unit inventory
+"$PLANNING_SKILL_DIR/scripts/plan-content.sh" diff <plan-directory> <git-ref>   # walks up to the enclosing repo, scoped to the plan subdir
+"$PLANNING_SKILL_DIR/scripts/cleanup-plans.sh" --list                          # list plans under the root, marking completed
+"$PLANNING_SKILL_DIR/scripts/cleanup-plans.sh" <plan-name> ... [--yes]         # remove selected plans (confirms unless --yes); clears the plans-root git history when the last plan is removed
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --in coverage   # Definition-of-done coverage rows
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --in stories    # ui-user-stories.md
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" diff <plan-directory> HEAD   # documents and § paragraphs changed since a git ref

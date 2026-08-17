@@ -39,10 +39,18 @@ trap 'rm -f "$temporary_file"; rmdir "$goal_dir/steps" "$goal_dir" 2>/dev/null |
     printf '| Test required | Rationale |\n'
     printf '|---|---|\n'
     printf '| no | <set to yes when this goal has a testable behavior; explain research or other untestable goals> |\n\n'
-    printf '## Goal-size exception\n\n§ 11.1\n<required only when this goal has one permitted work unit>\n'
+    # The Goal-size exception heading is emitted empty (no placeholder text —
+    # a placeholder is valid to write and invalid to keep). It is filled via
+    # `-gs <plan> <goal> goal-size-exception -p 11.1: <reason>` when the goal
+    # actually owns a single work unit; the validator requires it then.
+    printf '## Goal-size exception\n'
 } > "$temporary_file"
 mv "$temporary_file" "$goal_file"
 trap - EXIT
+# The per-goal progress tracker is created by add-work-unit.sh (its
+# create-progress.sh needs step files to exist), so a freshly added goal gets
+# one the moment its first work unit lands. The plan-level tracker is created
+# here and rebuilt on every goal change.
 if [ ! -f "$plan_dir/progress.md" ]; then
     "$script_dir/create-plan-progress.sh" "$plan_dir" >/dev/null
 fi

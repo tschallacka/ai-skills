@@ -55,6 +55,8 @@ planning/scripts/update-plan-progress.sh	scripts/update-plan-progress.sh	install
 planning/scripts/update-progress.sh	scripts/update-progress.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/update-step.sh	scripts/update-step.sh	installer	v27-review-approved	backup-then-replace	false
 planning/scripts/validate-plan.sh	scripts/validate-plan.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/remove-plan.sh	scripts/remove-plan.sh	installer	v27-review-approved	backup-then-replace	false
+planning/scripts/cleanup-plans.sh	scripts/cleanup-plans.sh	installer	v27-review-approved	backup-then-replace	false
 planning/ROLES.md	ROLES.md	installer	v27-review-approved	backup-then-replace	false
 planning/MAINTAINER-STYLE-CONTRACT.md	MAINTAINER-STYLE-CONTRACT.md	installer	v27-review-approved	backup-then-replace	false
 planning/roles/planning.md	roles/planning.md	installer	v27-review-approved	backup-then-replace	false

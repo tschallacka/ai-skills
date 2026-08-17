@@ -7,9 +7,11 @@ Usage:
   plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
   plan-content.sh summary <plan-directory> [markdown|text|json]
   plan-content.sh blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
-  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|coverage|stories|all] [--format text|json]
+  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
                                     literal search; prints docid<TAB>section<TAB>excerpt per match,
-                                    exits 1 on zero or multiple matches
+                                    exits 1 on zero or multiple matches; --document scopes to one document
+                                    (plan, review, coverage, stories, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
+                                    step:-testing id); --full disables excerpt truncation
   plan-content.sh diff <plan-directory> <git-ref> [--format text|json]
                                     lists documents changed since git-ref and the
                                     paragraph labels touched in each
@@ -149,10 +151,12 @@ case "$command" in
     find)
         [ "$#" -ge 2 ] || usage
         plan_dir="$1"; pattern="$2"; shift 2
-        scope=all; format=text
+        scope=all; format=text; document=""; full=false
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --in) [ "$#" -ge 2 ] || usage; scope="$2"; shift 2 ;;
+                --document) [ "$#" -ge 2 ] || usage; document="$2"; shift 2 ;;
+                --full) full=true; shift ;;
                 --format) [ "$#" -ge 2 ] || usage; format="$2"; shift 2 ;;
                 -h|--help) usage ;;
                 -*) usage ;;
@@ -160,34 +164,87 @@ case "$command" in
             esac
         done
         plan_require_directory "$plan_dir"
-        case "$scope" in plan|goals|steps|units|review|coverage|stories|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, coverage, stories, or all)" ;; esac
+        case "$scope" in plan|goals|steps|units|review|testing|coverage|stories|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, testing, coverage, stories, or all)" ;; esac
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
-        matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
-        trap 'rm -f "$matches_file"' EXIT
+        # Literal scan of one document (used by both --document and the scoped
+        # branches below; defined here so --document can call it).
         scan_file() {
-            local docid="$1" file="$2"
+            local docid="$1" file="$2" maxlen="$3"
             [ -f "$file" ] || return 0
-            awk -v docid="$docid" -v pattern="$pattern" '
+            [ "$maxlen" = full ] && maxlen=0
+            awk -v docid="$docid" -v pattern="$pattern" -v maxlen="$maxlen" '
                 $0 ~ /^§ [0-9]+\.[0-9]+[[:space:]]*$/ { last = $2; next }
                 index($0, pattern) {
                     line = $0
                     sub(/^[[:space:]]*/, "", line)
-                    if (length(line) > 120) line = substr(line, 1, 120) "..."
+                    if (maxlen > 0 && length(line) > maxlen) line = substr(line, 1, maxlen) "..."
                     print docid "\t" (last ? last : "-") "\t" line
                 }
             ' "$file"
         }
+        if [ -n "$document" ]; then
+            [ "$scope" = all ] || plan_die "--document and --in are mutually exclusive"
+            # Resolve the document to a file; scoping to one document answers
+            # "is this wording present at the surface the finding named?" —
+            # plan-wide probes answer a weaker question.
+            doc_file="$(plan_document_path "$plan_dir" "$document" 2>/dev/null)" || plan_die "unknown document id: $document"
+            [ -f "$doc_file" ] || plan_die "document not found: $doc_file"
+            matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
+            trap 'rm -f "$matches_file"' EXIT
+            case "$document" in
+                coverage) awk -F'|' -v pattern="$pattern" -v full="$full" '
+                        /^## Definition-of-done coverage/ { in_coverage = 1; next }
+                        in_coverage && /^## / { exit }
+                        in_coverage && /^\|/ && index($0, pattern) {
+                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
+                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
+                            print "coverage\t" row "\t" row
+                        }
+                    ' "$doc_file" >> "$matches_file"
+                    ;;
+                *) scan_file "$document" "$doc_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file" ;;
+            esac
+            if [ "$format" = json ]; then
+                printf '{"matches":['
+                first=true
+                while IFS=$'\t' read -r docid section excerpt; do
+                    [ "$first" = true ] || printf ','
+                    first=false
+                    printf '{"document":"%s","section":"%s","excerpt":"%s"}' \
+                        "$(printf '%s' "$docid" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')" \
+                        "$(printf '%s' "$section" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')" \
+                        "$(printf '%s' "$excerpt" | awk '{ gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); print }')"
+                done < "$matches_file"
+                printf ']}\n'
+            else
+                cat "$matches_file"
+            fi
+            match_count="$(wc -l < "$matches_file")"
+            rm -f "$matches_file"
+            trap - EXIT
+            if [ "$match_count" -eq 0 ]; then
+                printf 'plan-content.sh: find: no matches for %s (document: %s)\n' "$pattern" "$document" >&2
+                exit 1
+            fi
+            if [ "$match_count" -gt 1 ]; then
+                printf 'plan-content.sh: find: %s matches for %s (document: %s); narrow the pattern to get a single hit\n' "$match_count" "$pattern" "$document" >&2
+                exit 1
+            fi
+            exit 0
+        fi
+        matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
+        trap 'rm -f "$matches_file"' EXIT
         case "$scope" in
-            plan|all) scan_file 'plan' "$plan_dir/plan-description.md" >> "$matches_file" ;;
+            plan|all) scan_file 'plan' "$plan_dir/plan-description.md" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file" ;;
         esac
         case "$scope" in
-            review|all) scan_file 'review' "$plan_dir/adversarial-review.md" >> "$matches_file" ;;
+            review|all) scan_file 'review' "$plan_dir/adversarial-review.md" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file" ;;
         esac
         case "$scope" in
             goals|all)
                 for goal_file in "$plan_dir"/*/goal.md; do
                     [ -f "$goal_file" ] || continue
-                    scan_file "goal:$(basename "$(dirname "$goal_file")")" "$goal_file" >> "$matches_file"
+                    scan_file "goal:$(basename "$(dirname "$goal_file")")" "$goal_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file"
                 done
                 ;;
         esac
@@ -198,18 +255,28 @@ case "$command" in
                     [[ "$(basename "$step_file")" == *-testing.md ]] && continue
                     goal_name="$(basename "$(dirname "$(dirname "$step_file")")")"
                     step_name="$(basename "$step_file" .md)"
-                    scan_file "step:$goal_name/$step_name" "$step_file" >> "$matches_file"
+                    scan_file "step:$goal_name/$step_name" "$step_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file"
+                done
+                ;;
+        esac
+        case "$scope" in
+            testing|all)
+                for step_file in "$plan_dir"/*/steps/*-testing.md; do
+                    [ -f "$step_file" ] || continue
+                    goal_name="$(basename "$(dirname "$(dirname "$step_file")")")"
+                    step_name="$(basename "$step_file" .md)"
+                    scan_file "step:$goal_name/$step_name" "$step_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file"
                 done
                 ;;
         esac
         case "$scope" in
             units|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" '
+                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
                     /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
                         id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
                         if (index($0, pattern)) {
                             row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                            if (length(row) > 120) row = substr(row, 1, 120) "..."
+                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
                             print "unit:" id "\t" row "\t" row
                         }
                     }
@@ -218,12 +285,12 @@ case "$command" in
         esac
         case "$scope" in
             coverage|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" '
+                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
                     /^## Definition-of-done coverage/ { in_coverage = 1; next }
                     in_coverage && /^## / { exit }
                     in_coverage && /^\|/ && index($0, pattern) {
                         row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                        if (length(row) > 120) row = substr(row, 1, 120) "..."
+                        if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
                         print "coverage\t" row "\t" row
                     }
                 ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
@@ -231,11 +298,11 @@ case "$command" in
         esac
         case "$scope" in
             stories|all)
-                [ -f "$plan_dir/ui-user-stories.md" ] && awk -v docid="stories" -v pattern="$pattern" '
+                [ -f "$plan_dir/ui-user-stories.md" ] && awk -v docid="stories" -v pattern="$pattern" -v full="$full" '
                     /^## / { section = $0 }
                     index($0, pattern) && $0 !~ /^# / {
                         line = $0; sub(/^[[:space:]]*/, "", line)
-                        if (length(line) > 120) line = substr(line, 1, 120) "..."
+                        if (full != "true" && length(line) > 120) line = substr(line, 1, 120) "..."
                         print docid "\t" (section ? section : "-") "\t" line
                     }
                 ' "$plan_dir/ui-user-stories.md" >> "$matches_file"
@@ -272,11 +339,24 @@ case "$command" in
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
         plan_dir="$1"; git_ref="$2"; format="${3:-text}"
         plan_require_directory "$plan_dir"
-        [ -d "$plan_dir/.git" ] || plan_die "Plan directory is not a git repository: $plan_dir"
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
-        changed="$(git -C "$plan_dir" diff --name-only "$git_ref" 2>/dev/null || true)"
+        # The plan may be a subdirectory of a repo that covers it (e.g. a
+        # git-excluded .plans root or an initiative repo holding sibling plans),
+        # so walk up to the enclosing repo and scope the diff to the plan dir.
+        repo_root="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [ -z "$repo_root" ]; then
+            plan_die "plan directory is not inside a git repository: $plan_dir"
+        fi
+        repo_root="$(cd "$repo_root" && pwd -P)"
+        plan_abs="$(cd "$plan_dir" && pwd -P)"
+        plan_rel="."
+        if [ "$plan_abs" != "$repo_root" ]; then
+            plan_rel="${plan_abs#"$repo_root"/}"
+        fi
+        # name-only, scoped to the plan subtree (relative paths).
+        changed="$(git -C "$repo_root" diff --name-only "$git_ref" -- "$plan_rel" 2>/dev/null | sed "s#^$plan_rel/##" | grep -v '^$' || true)"
         if [ -z "$changed" ]; then
-            git -C "$plan_dir" rev-parse -q --verify "$git_ref" >/dev/null 2>&1 \
+            git -C "$repo_root" rev-parse -q --verify "$git_ref" >/dev/null 2>&1 \
                 || plan_die "git ref not found: $git_ref"
             printf 'No plan documents changed since %s\n' "$git_ref"
             exit 0
@@ -284,15 +364,16 @@ case "$command" in
         # A changed paragraph label is usually an UNCHANGED diff line (only its
         # content changed), so map each changed line on the new-file side back
         # to the enclosing "§ N.N" label.
-        python3 - "$plan_dir" "$git_ref" "$format" "$changed" <<'PY'
+        python3 - "$plan_abs" "$plan_rel" "$repo_root" "$git_ref" "$format" "$changed" <<'PY'
 import json, subprocess, sys
 
-plan_dir, git_ref, fmt = sys.argv[1], sys.argv[2], sys.argv[3]
-docs = [d for d in sys.argv[4].splitlines() if d]
+plan_abs, plan_rel, repo_root, git_ref, fmt = sys.argv[1:6]
+docs = [d for d in sys.argv[6].splitlines() if d]
 
 def diff_lines(doc):
+    path = f"{plan_rel}/{doc}" if plan_rel != "." else doc
     out = subprocess.run(
-        ["git", "-C", plan_dir, "diff", "-U0", git_ref, "--", doc],
+        ["git", "-C", repo_root, "diff", "-U0", git_ref, "--", path],
         capture_output=True, text=True).stdout
     # Parse new-file side: after "@@ -a,b +c,d @@", new-file lines are numbered
     # from c; '+' lines are added content, context lines exist in both.
@@ -312,7 +393,7 @@ def diff_lines(doc):
     if not added:
         return []
     # Find the label enclosing each added new-file line.
-    with open(f"{plan_dir}/{doc}", encoding="utf-8") as fh:
+    with open(f"{plan_abs}/{doc}", encoding="utf-8") as fh:
         lines = fh.read().splitlines()
     label_by_line = {}
     current = None

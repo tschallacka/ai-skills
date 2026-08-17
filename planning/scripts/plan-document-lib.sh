@@ -95,7 +95,7 @@ plan_document_path() {
         review)
             printf '%s\n' "$plan_dir/adversarial-review.md"
             ;;
-        coverage)
+        coverage|inventory)
             printf '%s\n' "$plan_dir/work-unit-inventory.md"
             ;;
         stories)
@@ -110,6 +110,9 @@ plan_document_path() {
             step="${goal#*/}"
             goal="${goal%%/*}"
             [ -n "$step" ] && [ "$step" != "$goal" ] || plan_die "Step document IDs use step:<goal>/<step>"
+            # A trailing -testing names the step's testing companion, which is
+            # a writable surface of its own (executors run the procedure it
+            # records). It resolves to steps/<step>-testing.md.
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         unit:W*)
@@ -135,9 +138,17 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         review) printf '%s\n' review ;;
-        coverage|stories) printf '%s\n' reference ;;
+        coverage|inventory|stories) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
-        step:*|unit:*) printf '%s\n' step ;;
+        step:*)
+            # A step id ending in -testing names the step's testing companion,
+            # which has its own writable sections (Automated tests, ...).
+            case "$1" in
+                *-testing) printf '%s\n' testing ;;
+                *) printf '%s\n' step ;;
+            esac
+            ;;
+        unit:*) printf '%s\n' step ;;
         *) plan_die "Unknown document ID: $1" ;;
     esac
 }
@@ -167,6 +178,10 @@ plan_section_spec() {
         step/instructions) printf '%s\t%s\n' '## Instructions' 5 ;;
         step/acceptance-criteria) printf '%s\t%s\n' '## Acceptance criteria' 6 ;;
         step/handoff) printf '%s\t%s\n' '## Handoff' 7 ;;
+        testing/automated-tests) printf '%s\t%s\n' '## Automated tests' 2 ;;
+        testing/browser-verification) printf '%s\t%s\n' '## Browser verification' 3 ;;
+        testing/backend-verification) printf '%s\t%s\n' '## Backend verification' 4 ;;
+        testing/manual-verification) printf '%s\t%s\n' '## Manual verification' 5 ;;
         review/review-scope) printf '%s\t%s\n' '## Review scope' 1 ;;
         review/findings) printf '%s\t%s\n' '## Findings' 2 ;;
         review/rationale) printf '%s\t%s\n' '## Verdict' 3 ;;
@@ -182,6 +197,7 @@ plan_unknown_section() {
         plan) valid="current-state desired-outcome approach scope affected-areas constraints-and-decisions risks-and-open-questions" ;;
         goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
         step) valid="objective instructions acceptance-criteria handoff" ;;
+        testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
         review) valid="review-scope findings rationale" ;;
         *) valid="" ;;
     esac
@@ -469,6 +485,50 @@ plan_insert_paragraph() {
             if (pending_after) emit_insertion()
             if (target_found != 1) exit 3
         }
+    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
+    mv "$temporary_file" "$file"
+    trap - RETURN
+}
+
+# Delete one numbered paragraph and renumber the following paragraphs in the
+# same section so labels stay sequential. Deleting content by re-emitting the
+# whole section risks a transcription slip that damages paragraphs no finding
+# was about; a targeted delete removes that hazard.
+plan_delete_paragraph() {
+    local file="$1" paragraph_id="$2" temporary_file
+    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
+    temporary_file="${file}.tmp.$$"
+    trap 'rm -f "$temporary_file"' RETURN
+    awk -v wanted="$paragraph_id" '
+        BEGIN {
+            target_value = wanted
+            sub(/^§ /, "", target_value)
+            split(target_value, target_parts, /\./)
+            target_section = target_parts[1]
+            target_number = target_parts[2] + 0
+        }
+        /^§ [0-9]+\.[0-9]+$/ {
+            current_value = $0
+            sub(/^§ /, "", current_value)
+            split(current_value, current_parts, /\./)
+            section = current_parts[1]
+            number = current_parts[2] + 0
+            if (section == target_section && number == target_number) {
+                if (target_found++) exit 2
+                skipping = 1
+                next
+            }
+            skipping = 0
+            if (section == target_section && number > target_number) {
+                print "§ " section "." (number - 1)
+            } else {
+                print
+            }
+            next
+        }
+        skipping { next }
+        { print }
+        END { if (target_found != 1) exit 3 }
     ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
     mv "$temporary_file" "$file"
     trap - RETURN

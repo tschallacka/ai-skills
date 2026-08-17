@@ -709,6 +709,8 @@ scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
 scripts/validate-plan.sh
+scripts/remove-plan.sh
+scripts/cleanup-plans.sh
 EOF
             ;;
         project-specificies)

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 complete_mode=false
-propagation_mode=false
+propagation_mode=true
 stale_file=""
 stale_only=false
 filtered_args=()
@@ -10,6 +10,7 @@ for arg in "$@"; do
     case "$arg" in
         --complete) complete_mode=true ;;
         --propagation) propagation_mode=true ;;
+        --no-propagation) propagation_mode=false ;;
         --stale)
             stale_only=true
             ;;
@@ -224,9 +225,9 @@ if [ -n "$stale_file" ]; then
     fi
 fi
 
-declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units coverage_ids goal_testing_required
+declare -A unit_type unit_file unit_scope unit_subscope unit_goal unit_step unit_depends seen_steps goal_units goal_testing_required
+declare -A coverage_ids=()
 unit_ids=()
-
 while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
     [ -n "$id" ] || continue
     if [[ ! "$id" =~ ^W[0-9][0-9]+$ ]]; then
@@ -253,8 +254,17 @@ while IFS=$'\t' read -r id type file scope subscope intended depends goal step; 
     if [[ "$file" == *'*'* || "$file" == */ ]]; then
         fail "$id must name one concrete file, not a glob or directory: $file"
     fi
-    if [ "$type" != verification ] && { [[ "$scope" == *','* ]] || [[ "$scope" == *' and '* ]]; }; then
-        fail "$id lists multiple symbols or scopes: $scope"
+    # A scope names one symbol. Key on the count of ::-qualified symbols, not
+    # on conjunctions: "X::m() and the EmployeeSet value object, both new in
+    # this file" is a legitimate single-file description that a plain ' and '
+    # check would wrongly reject. A comma list still signals multiple scopes.
+    if [ "$type" != verification ]; then
+        sym_count="$(printf '%s' "$scope" | grep -oE '[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*(\(\))?' | wc -l | tr -d ' ')" || true
+        if [ "$sym_count" -gt 1 ]; then
+            fail "$id lists multiple symbols or scopes: $scope"
+        elif [[ "$scope" == *','* ]]; then
+            fail "$id lists multiple symbols or scopes: $scope"
+        fi
     fi
     if [ "$type" = style ] && [[ ! "$scope" =~ ^[.#][A-Za-z_-][A-Za-z0-9_-]*$ ]]; then
         fail "$id style scope must be one CSS selector, such as .completion-message"
@@ -539,6 +549,9 @@ for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
         require_heading "$goal_file" "$heading"
     done
     validate_goal_testing_requirement "$goal_name" "$goal_file"
+    if grep -Fq '<required only when this goal has one permitted work unit>' "$goal_file"; then
+        fail "$goal_name has an unfilled goal-size placeholder; fill the reason or remove the section"
+    fi
     count=0
     for id in ${goal_units[$goal_name]:-}; do
         count=$((count + 1))
@@ -671,22 +684,23 @@ if [ "$propagation_mode" = true ]; then
             in_sec { print }
         ' "$step_file")"
         [ -n "$instr_section" ] || continue
-        # Backticked tokens that look like FQCNs (contain :: or / or .php)
-        # or are explicit paths.
+        # Backticked tokens that look like a code symbol to be created — a
+        # ::-qualified FQCN (class/method) — are flagged when no inventory row
+        # owns them. Shell command strings, paths with $vars or command
+        # suffixes, and output paths are deliberately NOT matched: they are
+        # invocations, not change targets, and matching them produces false
+        # positives on any fixture with real commands.
         for token in $(printf '%s' "$instr_section" | grep -oE '`[^`]+`' | tr -d '`'); do
             case "$token" in
-                *::*|*/*|*.php|*.phtml|*.js|*.xml)
+                *::*)
+                    [[ "$token" == *'$'* || "$token" == *' '* ]] && continue
+                    [[ "$token" == *'.sh'* || "$token" == *'.json'* || "$token" == *'.md'* ]] && continue
                     owned=false
                     for candidate in "${unit_ids[@]}"; do
                         file_cell="${unit_file[$candidate]}"
                         scope_cell="${unit_scope[$candidate]}"
                         [ "$file_cell" = "$token" ] && { owned=true; break; }
                         [ "$scope_cell" = "$token" ] && { owned=true; break; }
-                        # A file path token matches if it is the file cell or
-                        # its basename appears in the file cell.
-                        if [[ "$file_cell" == *"${token##*/}"* ]] && [ "${token##*/}" != "$token" ]; then
-                            owned=true; break
-                        fi
                     done
                     if [ "$owned" = false ] && [ "$token" != "$id" ]; then
                         fail "$id instructions name '$token' which no inventory row owns; add a discovery/ownership row or name the owning work unit"
@@ -723,7 +737,7 @@ if [ "$propagation_mode" = true ]; then
         [ "${unit_type[$id]}" = verification ] || continue
         step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
         [ -f "$step_file" ] || continue
-        named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$step_file" | sort -u)"
+        named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$step_file" | sort -u)" || true
         for named in $named_units; do
             [ "$named" = "$id" ] && continue
             if [ -z "${unit_type[$named]+x}" ]; then
@@ -735,6 +749,27 @@ if [ "$propagation_mode" = true ]; then
                 if ! printf '%s' "${unit_depends[$id]}" | grep -Fq "$named"; then
                     fail "$id is a verification unit that grades $named but does not depend on it; add the dependency edge"
                 fi
+            fi
+        done
+    done
+
+    # (c2) A testing companion must not reference work units the step does not
+    #      own or depend on: the executor runs the companion, so a stale unit
+    #      reference there (a test that moved, a file owned by another unit)
+    #      directs execution at the wrong target.
+    for id in "${unit_ids[@]}"; do
+        companion="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}-testing.md"
+        [ -f "$companion" ] || continue
+        deps="$(printf '%s' "${unit_depends[$id]}" | grep -oE 'W[0-9][0-9]+' | sort -u | tr '\n' ' ')" || true
+        named_units="$(grep -oE '\bW[0-9][0-9]+\b' "$companion" | sort -u)" || true
+        for named in $named_units; do
+            [ "$named" = "$id" ] && continue
+            if [ -z "${unit_type[$named]+x}" ]; then
+                fail "$id companion names unknown work unit $named"
+                continue
+            fi
+            if ! printf '%s ' "$deps" | grep -Fq "$named"; then
+                warn "$id companion references $named, which $id neither owns nor depends on; update the companion or add the dependency edge"
             fi
         done
     done

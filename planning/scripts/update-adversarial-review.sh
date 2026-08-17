@@ -46,12 +46,19 @@ rendered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-rendered.XXXXXX")"
 temporary_file="${review_file}.tmp.$$"
 trap 'rm -f "$csv_file" "$rendered_file" "$temporary_file"' EXIT
 
+# Reviewers write their findings to adversarial-review-incoming.md (the one
+# plan file a reviewer may write); this is its only consumer. It takes
+# precedence over stdin so a reviewer report survives the coordinator's context.
+incoming_file="$plan_dir/adversarial-review-incoming.md"
 if [ -n "$csv_source" ]; then
     [ -f "$csv_source" ] || plan_err "CSV file not found: $csv_source"
     cp "$csv_source" "$csv_file"
+elif [ -f "$incoming_file" ]; then
+    cp "$incoming_file" "$csv_file"
+    printf 'Consumed reviewer findings from %s\n' "$incoming_file"
 else
     if [ -t 0 ]; then
-        plan_err "no CSV provided. Pipe rows or a heredoc to stdin, or pass --file PATH (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+        plan_err "no CSV provided. Pipe rows or a heredoc to stdin, pass --file PATH, or let reviewers write adversarial-review-incoming.md (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
     fi
     cat > "$csv_file"
 fi
@@ -110,6 +117,7 @@ awk -v replacement_file="$rendered_file" '
     { print }
 ' "$review_file" > "$temporary_file"
 mv "$temporary_file" "$review_file"
+[ -f "$incoming_file" ] && rm -f "$incoming_file"
 "$SCRIPT_DIR/mint-fix-keys.sh" "$plan_dir"
 trap - EXIT
 printf 'Updated findings table in %s\n' "$review_file"
