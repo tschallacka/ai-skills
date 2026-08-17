@@ -9,6 +9,10 @@ trap 'rm -rf "$tmp"' EXIT
 "$scripts/plan-context.sh" init --plan-dir "$tmp/plan" >/dev/null
 grep -Fq 'Current state' <("$scripts/plan-context.sh" read --plan-dir "$tmp/plan" --document plan --view summary)
 grep -Fq 'Current state' <("$scripts/plan-context.sh" read --plan-dir "$tmp/plan" --document goal:01-context --view changed-documents)
+# --max-records bounds the returned row count (accepted and exercised).
+recs="$("$scripts/plan-context.sh" read --plan-dir "$tmp/plan" --document inventory --max-records 5 2>/dev/null || true)"
+[ "$(printf '%s\n' "$recs" | wc -l)" -le 10 ] && echo "PASS: --max-records bounds reads" \
+    || { echo "FAIL: --max-records did not bound reads" >&2; exit 1; }
 printf 'AR-01\n' > "$tmp/findings"
 : > "$tmp/changed"
 hash=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

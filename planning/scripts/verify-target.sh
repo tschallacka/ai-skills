@@ -35,10 +35,16 @@ usage() {
     exit 2
 }
 
+help() {
+    printf 'Usage: %s <plan-directory> <WNN> [--repo <repository-root>]\n' "$(basename "$0")"
+    exit 0
+}
+
 repo_root=""
 filtered_args=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        -h|--help) help ;;
         --repo)
             [ "$#" -ge 2 ] || usage
             repo_root="$2"

@@ -24,9 +24,9 @@ mkdir -p "$plan_root"
 cp -R "$goal_dir" "$plan_root/01-demo"
 "$script_dir/create-plan-progress.sh" "$plan_root" >/dev/null
 "$script_dir/rebuild-plan-progress.sh" "$plan_root" >/dev/null
-grep -Fqx '| 01-demo | <short description> | ✅ completed |' "$plan_root/progress.md"
+grep -Fqx '| 01-demo | 01-demo | ✅ completed |' "$plan_root/progress.md"
 "$script_dir/add-goal.sh" "$plan_root" 02-next 'Next goal' 'Next outcome' >/dev/null
-grep -Fqx '| 02-next | <short description> | 💤 incomplete |' "$plan_root/progress.md"
+grep -Fqx '| 02-next | Next outcome | 💤 incomplete |' "$plan_root/progress.md"
 
 review_file="$temporary_root/adversarial-review.md"
 {

@@ -31,6 +31,11 @@ usage() {
     exit 64
 }
 
+help() {
+    sed -n '1,23p' "$0"
+    exit 0
+}
+
 frame_write() {
     # NB: `shift 2>/dev/null` — the `2>` is an fd-2 redirect, NOT a count, so
     # this intentionally shifts by 1 (drops the captured leading frame-file).
@@ -119,6 +124,7 @@ frame_check() {
 
 subcommand="${1:-}"; shift 2>/dev/null || true  # shifts by 1 (fd-2 redirect, intended)
 case "$subcommand" in
+    -h|--help) help ;;
     write) frame_write "$@" ;;
     grant) frame_grant "$@" ;;
     show) frame_show "$@" ;;

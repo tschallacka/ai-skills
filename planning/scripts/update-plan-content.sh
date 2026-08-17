@@ -2,6 +2,7 @@
 set -euo pipefail
 
 usage() {
+    local rc="${1:-64}"
     cat >&2 <<'USAGE'
 Usage:
   update-plan-content.sh -dp|--description-paragraph <plan-directory> <N.N> <text>
@@ -36,10 +37,15 @@ Usage:
 
 Document IDs: plan, review, goal:<goal>, step:<goal>/<step>, or unit:<WNN>.
 USAGE
-    exit 64
+    exit "$rc"
 }
 
+help() { usage 0; }
+
 [ "$#" -ge 1 ] || usage
+if [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
+    help
+fi
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"

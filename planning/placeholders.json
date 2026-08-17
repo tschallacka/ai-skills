@@ -1,0 +1,29 @@
+{
+  "comment": "Registered in-document template placeholders. Any <placeholder> found in a plan artifact that is NOT listed here is an unregistered/stale placeholder and FAILS validation. Authoring-template placeholders (below) are expected mid-draft and allowed; generated artifacts (progress trackers, run-caches, goal-size section) must not contain placeholders at all.",
+  "placeholders": [
+    "<agreed sequence and major implementation decisions>",
+    "<confirmed facts, available assets, and relevant prior work>",
+    "<definition of done>",
+    "<files, modules, layouts, services, data, and systems>",
+    "<included and explicitly excluded behavior>",
+    "<items that could affect execution>",
+    "<permissions, ownership, conventions, and user choices>",
+    "<why>",
+    "<add work units with add-work-unit.sh>",
+    "<approach, risks, and edge cases>",
+    "<concrete affected areas>",
+    "<confirmed facts and prerequisite handoffs>",
+    "<how this goal contributes to the initiative>",
+    "<prerequisites and precise downstream handoffs>",
+    "<set to yes when this goal has a testable behavior; explain research or other untestable goals>",
+    "<direct action on this one target>",
+    "<observable result for this target>",
+    "<what the next named work unit can rely on>",
+    "<one concrete change>",
+    "<outcome>",
+    "<why this work unit covers it>",
+    "<verbatim or precise summary>",
+    "<what was checked>",
+    "<why no unresolved work remains>"
+  ]
+}

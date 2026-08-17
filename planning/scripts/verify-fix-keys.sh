@@ -27,6 +27,13 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
+case "${1:-}" in
+    -h|--help)
+        printf 'Usage: %s <plan-directory> [--claimed-by <id>]\n' "$(basename "$0")" >&2
+        exit 0
+        ;;
+esac
+
 usage() {
     printf 'Usage: %s <plan-directory> [--claimed-by <id>]\n' "$(basename "$0")" >&2
     exit 64

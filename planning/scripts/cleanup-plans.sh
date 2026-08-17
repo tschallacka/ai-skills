@@ -19,8 +19,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/plan-document-lib.sh"
 
 usage() {
-    printf 'Usage: %s [--list] [<plan-name> ...] [--yes]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s [-l|--list] [<plan-name> ...] [-y|--yes]\n' "$(basename "$0")" >&2
+    printf '  -l, --list       list plans under the root, marking completed\n' >&2
+    printf '  -y, --yes        skip the confirmation prompt\n' >&2
     exit 64
+}
+
+help() {
+    printf 'Usage: %s [-l|--list] [<plan-name> ...] [-y|--yes]\n' "$(basename "$0")"
+    printf '  -l, --list       list plans under the root, marking completed\n'
+    printf '  -y, --yes        skip the confirmation prompt\n'
+    exit 0
 }
 
 yes_flag=false
@@ -28,7 +37,7 @@ list_only=false
 wanted=()
 for arg in "$@"; do
     case "$arg" in
-        -h|--help) usage ;;
+        -h|--help) help ;;
         --yes|-y) yes_flag=true ;;
         --list|-l) list_only=true ;;
         --*) usage ;;

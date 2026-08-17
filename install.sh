@@ -637,6 +637,7 @@ references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
 telemetry-schema.json
+placeholders.json
 context-v27/brainstorm-limiting-context.v27.md
 context-v27/brainstorm-limiting-context.v27-contract.json
 context-v27/brainstorm-limiting-context.v27-benchmark.json
@@ -675,6 +676,8 @@ tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
 tests/test-progress-bar-shape.sh
 tests/test-fix-keys.sh
+tests/test-coverage-gaps.sh
+tests/test-flag-coverage.sh
 V27-PACKAGE-MANIFEST.txt
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md

@@ -17,6 +17,10 @@ overwrite=false
 filtered_args=()
 for arg in "$@"; do
     case "$arg" in
+        -h|--help)
+            printf 'Usage: %s <goal-directory> <step-name> <verification-instructions> [--overwrite]\n' "$(basename "$0")" >&2
+            exit 0
+            ;;
         --overwrite) overwrite=true ;;
         *) filtered_args+=("$arg") ;;
     esac

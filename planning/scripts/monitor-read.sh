@@ -33,6 +33,11 @@ usage() {
     exit 64
 }
 
+help() {
+    sed -n '1,20p' "$0"
+    exit 0
+}
+
 require_maintainer() {
     # Fail-closed identity: only the maintainer (Willie) may read supervision
     # frames. Resolve ROLE_ID through the shared persona resolver (role-context.sh)
@@ -108,6 +113,7 @@ monitor_verify() {
 
 subcommand="${1:-}"; shift 2>/dev/null || true  # shifts by 1 (fd-2 redirect, intended)
 case "$subcommand" in
+    -h|--help) help ;;
     show) monitor_show "$@" ;;
     status) monitor_status "$@" ;;
     summary) monitor_summary "$@" ;;

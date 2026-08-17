@@ -91,6 +91,25 @@ Ownership fields must mirror the inventory row exactly.
 `create-adversarial-review.sh` must emit Review scope, Findings, and Verdict.
 The review status and plan-description status are synchronized atomically.
 
+## Placeholder registry
+
+Every `<...>` placeholder the skill emits must be registered in
+`planning/placeholders.json`. `validate-plan.sh` scans plan artifacts for
+multi-word `<...>` tokens outside fenced code blocks and jq-checks each against
+the registry:
+
+- A placeholder **in** the registry is a registered authoring-template
+  placeholder (e.g. `<definition of done>`, `<why>`) and is allowed mid-draft.
+- A placeholder **not** in the registry is stale/unregistered and FAILS
+  validation everywhere (progress trackers, UI-story run caches, and the
+  goal-size-exception section must contain no placeholders at all).
+- Single-word HTML/XML tags (`<block>`, `<referenceBlock>`) are not
+  placeholders and never match.
+
+Adding a new template placeholder to any generator script requires registering
+it in `placeholders.json`; the installer-manifest test keeps `placeholders.json`
+listed in `install.sh`, `V27-PACKAGE-MANIFEST.txt`, and `V27-PACKAGE-MAP.tsv`.
+
 ## Persona & reader system
 
 - `role-context.sh`'s `ROLES=()` is the machine registry; its `role_docs()` is

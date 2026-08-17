@@ -23,6 +23,9 @@ fi
 # --title is deterministic: <plan-directory> <document-id> <title>.
 "$script_dir/update-plan-content.sh" --title "$plan_dir" plan 'Status synchronization v2'
 grep -Fqx '# Plan: Status synchronization v2' "$plan_dir/plan-description.md"
+# -t is the short form of --title (the accepted -t flag must be covered too).
+"$script_dir/update-plan-content.sh" -t "$plan_dir" plan 'Status synchronization v3'
+grep -Fqx '# Plan: Status synchronization v3' "$plan_dir/plan-description.md"
 if "$script_dir/update-plan-content.sh" --title "$plan_dir" 'Status' >/dev/null 2>&1; then
     echo 'A --title without an explicit document-id unexpectedly passed.' >&2
     exit 1
@@ -464,6 +467,25 @@ if grep -qE 'roster (omits|lists)' "$temporary_root/roster13.log"; then
     echo 'report 13: a summary-roster goal with partial blurbs and a cross-plan ref was flagged.' >&2
     exit 1
 fi
+# report 15 §4: a literal multi-word <...> placeholder in a GENERATED artifact
+# (progress tracker) is a validator FAIL, even when the rest of the plan is fine.
+printf '\n## Work units\n\n| Goalname | Description | Status |\n|---|---|---|\n| 03-wire | <short description> | ok |\n' >> "$plan_dir/progress.md"
+if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder.log" 2>&1; then
+    echo 'report 15: a generated artifact placeholder validated clean.' >&2
+    exit 1
+fi
+grep -Fq 'unregistered/stale placeholder' "$temporary_root/placeholder.log"
+git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
+# A REGISTERED authoring placeholder (e.g. <definition of done>) is allowed: the
+# registry is the allowlist, and only unregistered/stale placeholders fail.
+printf '\n## Work units\n\n| Goalname | Description | Status |\n|---|---|---|\n| 03-wire | <definition of done> | ok |\n' >> "$plan_dir/progress.md"
+"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder-ok.log" 2>&1 || true
+if grep -Fq 'unregistered/stale placeholder' "$temporary_root/placeholder-ok.log"; then
+    echo 'report 15: a registered authoring placeholder was flagged.' >&2
+    cat "$temporary_root/placeholder-ok.log" >&2
+    exit 1
+fi
+git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {

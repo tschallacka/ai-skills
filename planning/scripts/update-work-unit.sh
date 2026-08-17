@@ -24,6 +24,15 @@ usage() {
     exit 64
 }
 
+help() {
+    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")"
+    exit 0
+}
+
+case " $* " in
+    *' --help '*|*' -h '*) help ;;
+esac
+
 [ "$#" -ge 2 ] || usage
 plan_dir="$1" unit="$2"; shift 2
 new_scope='' new_file='' new_type='' new_depends='' new_description=''
@@ -33,7 +42,7 @@ while [ "$#" -gt 0 ]; do
         --type) [ "$#" -ge 2 ] || usage; new_type="$2"; shift 2 ;;
         --depends-on) [ "$#" -ge 2 ] || usage; new_depends="$2"; shift 2 ;;
         --description) [ "$#" -ge 2 ] || usage; new_description="$2"; shift 2 ;;
-        -h|--help) usage ;;
+        -h|--help) help ;;
         -*) usage ;;
         *)
             if [ -z "$new_scope" ]; then new_scope="$1"

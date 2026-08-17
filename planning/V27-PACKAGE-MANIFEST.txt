@@ -4,6 +4,7 @@ planning/references/plan-read-contract.md	references/plan-read-contract.md	insta
 planning/references/ui-user-story-validation.md	references/ui-user-story-validation.md	installer	v27-review-approved	backup-then-replace	false
 planning/references/comment-discipline-contract.md	references/comment-discipline-contract.md	installer	v27-review-approved	backup-then-replace	false
 planning/telemetry-schema.json	telemetry-schema.json	W52	v27-review-approved	backup-then-replace	false
+planning/placeholders.json	placeholders.json	installer	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27.md	context-v27/brainstorm-limiting-context.v27.md	W01-W02-W03-W04-W06-W09	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27-contract.json	context-v27/brainstorm-limiting-context.v27-contract.json	W05	v27-review-approved	backup-then-replace	false
 planning/context-v27/brainstorm-limiting-context.v27-benchmark.json	context-v27/brainstorm-limiting-context.v27-benchmark.json	W07	v27-review-approved	backup-then-replace	false
@@ -74,6 +75,8 @@ planning/tests/test-supervision-frame.sh	tests/test-supervision-frame.sh	install
 planning/tests/test-persona-drift.sh	tests/test-persona-drift.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/test-progress-bar-shape.sh	tests/test-progress-bar-shape.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	v27-review-approved	backup-then-replace	false
+planning/tests/test-coverage-gaps.sh	tests/test-coverage-gaps.sh	installer	v27-review-approved	backup-then-replace	false
+planning/tests/test-flag-coverage.sh	tests/test-flag-coverage.sh	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/progress.md	tests/fixtures/progress-shape/progress.md	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/goal.md	tests/fixtures/progress-shape/01-goal-a/goal.md	installer	v27-review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/progress.md	tests/fixtures/progress-shape/01-goal-a/progress.md	installer	v27-review-approved	backup-then-replace	false

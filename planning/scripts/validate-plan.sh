@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case "${1:-}" in
+    -h|--help)
+        echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] <plan-directory>" >&2
+        exit 0
+        ;;
+esac
+
 complete_mode=false
 propagation_mode=true
 stale_file=""
@@ -186,6 +193,80 @@ for doc in "${plan_docs[@]}"; do
         fail "$(basename "$doc") contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
     fi
 done
+
+# Template-placeholder check (report 15 §4), registry-driven: a literal <...>
+# outside a fenced code block is an unfilled placeholder UNLESS it is a
+# registered authoring-template placeholder (planning/placeholders.json).
+# Generated artifacts (progress trackers, UI-story run caches, goal-size
+# exception section) must not contain ANY placeholder; authoring templates
+# (plan-description/goal/step prose, where <definition of done> is expected
+# mid-draft) legitimately contain registered placeholders. A placeholder that
+# is not in the registry is stale/unregistered and fails everywhere.
+# Single-word HTML/XML tags (<block>, <referenceBlock>) are not placeholders.
+registry_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/placeholders.json"
+# Multi-word <...> token: single-word HTML/XML tags (<block>, <referenceBlock>)
+# are not placeholders and never match. Every multi-word placeholder must be
+# registered in placeholders.json or it is stale/unregistered and FAILS.
+placeholder_re='<[A-Za-z][A-Za-z0-9_.,;:/()&|-]* [A-Za-z0-9 _.,;:/()&|-]*>'
+is_registered_placeholder() {
+    # "$1" is the full <...> token. Registered -> 0 (allowed); else 1 (unregistered).
+    [ -f "$registry_file" ] || return 1
+    jq -e --arg p "$1" '.placeholders | index($p) != null' "$registry_file" >/dev/null 2>&1
+}
+scan_placeholders() {
+    awk -v re="$placeholder_re" '
+        /^```/ { in_fence = !in_fence; next }
+        !in_fence {
+            while (match($0, re)) {
+                tok = substr($0, RSTART, RLENGTH)
+                if (!seen[tok]++) { print tok }
+                $0 = substr($0, RSTART + RLENGTH)
+            }
+        }
+    ' "$1" | while IFS= read -r tok; do
+        if ! is_registered_placeholder "$tok"; then
+            printf '%s\n' "$tok"
+        fi
+    done
+}
+# Plan-level progress tracker.
+[ -f "$plan_dir/progress.md" ] && {
+    hit="$(scan_placeholders "$plan_dir/progress.md")"
+    [ -z "$hit" ] || fail "plan progress.md contains an unregistered/stale placeholder: '$hit'"
+}
+# Goal progress trackers and goal-size-exception sections.
+for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
+    [ -d "$goal_dir" ] || continue
+    if [ -f "$goal_dir/progress.md" ]; then
+        hit="$(scan_placeholders "$goal_dir/progress.md")"
+        [ -z "$hit" ] || fail "$(basename "$goal_dir") progress.md contains an unregistered/stale placeholder: '$hit'"
+    fi
+    [ -f "$goal_dir/goal.md" ] || continue
+    hit="$(awk -v re="$placeholder_re" '
+        /^## Goal-size exception/ { in_sec = 1; next }
+        in_sec && /^## / && !/^## Goal-size exception/ { exit }
+        in_sec && /^```/ { in_fence = !in_fence; next }
+        in_sec && !in_fence {
+            while (match($0, re)) {
+                tok = substr($0, RSTART, RLENGTH)
+                if (!seen[tok]++) { print tok }
+                $0 = substr($0, RSTART + RLENGTH)
+            }
+        }
+    ' "$goal_dir/goal.md" | while IFS= read -r tok; do
+        if ! is_registered_placeholder "$tok"; then
+            printf '%s\n' "$tok"
+        fi
+    done)"
+    [ -z "$hit" ] || fail "$(basename "$goal_dir") goal-size exception contains an unregistered/stale placeholder: '$hit'"
+done
+# UI-story run caches.
+if [ -d "$plan_dir/ui-story-runs" ]; then
+    while IFS= read -r cache_file; do
+        hit="$(scan_placeholders "$cache_file")"
+        [ -z "$hit" ] || fail "$(basename "$cache_file") run cache contains an unregistered/stale placeholder: '$hit'"
+    done < <(find "$plan_dir/ui-story-runs" -maxdepth 1 -name '*.md' -type f 2>/dev/null)
+fi
 
 # Default stale phrase list (report 8): case-count wording is the anti-pattern.
 # A count drifts the moment a case is added, so "every case enumerated in the

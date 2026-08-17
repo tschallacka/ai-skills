@@ -5,6 +5,10 @@ replace_mode=false
 filtered_args=()
 for arg in "$@"; do
     case "$arg" in
+        -h|--help)
+            echo "Usage: $(basename "$0") <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]" >&2
+            exit 0
+            ;;
         --replace) replace_mode=true ;;
         *) filtered_args+=("$arg") ;;
     esac

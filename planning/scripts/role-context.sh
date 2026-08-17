@@ -7,9 +7,11 @@
 # ("future-phase") knowledge.
 #
 # Output is BYTE-budgeted and paginated for non-interactive agents: run
-#   role-context.sh <role-id|name> -p1     # first page
+#   role-context.sh <role-id|name> -p1     # first page  (-p|--page N)
 #   role-context.sh <role-id|name> -p2     # next page (if "more: ..." is shown)
 # Each page is a deterministic slice; agents never need an interactive TTY.
+#   -l|--list  list roles (identity-free); --paths (maintainer) prints doc paths;
+#   --page-size BYTES sets the per-page byte budget (default 12000).
 #
 # GATING: the script is identity-aware and FAILS CLOSED. Any content read
 # requires a valid ROLE_ID resolving to a registered persona; an unset or
@@ -160,7 +162,7 @@ while [ "$#" -gt 0 ]; do
         --page-size) [ "$#" -ge 2 ] || usage; PAGE_BUDGET="$2"; shift 2 ;;
         --paths) MODE=paths; shift ;;
         --list|-l) MODE=list; shift ;;
-        -h|--help) usage ;;
+        -h|--help) sed -n '1,43p' "$0"; exit 0 ;;
         -*) usage ;;
         *) [ -z "$ROLE" ] && ROLE="$1" || usage; shift ;;
     esac

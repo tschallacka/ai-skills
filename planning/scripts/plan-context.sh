@@ -25,13 +25,18 @@ EOF
     return 2
 }
 
+help() {
+    usage || true
+    exit 0
+}
+
 plan_dir= command= document_id= entry_id= check_mode= refresh_mode= phase= checkpoint_state= findings_file= changed_files_file= source_hash= plan_hash=
 document_selector_count=0 check_selector_count=0 refresh_selector_count=0
 view=summary format=text read_only=0 max_bytes=32768 max_records=128
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        init|read|check|refresh|checkpoint) [ -z "$command" ] || usage; command="$1"; shift ;;
+        -h|--help) help ;;        init|read|check|refresh|checkpoint) [ -z "$command" ] || usage; command="$1"; shift ;;
         --plan-dir) [ "$#" -ge 2 ] || usage; plan_dir="$2"; shift 2 ;;
         --document) [ "$#" -ge 2 ] || usage; document_id="$2"; document_selector_count=$((document_selector_count + 1)); shift 2 ;;
         --unit) [ "$#" -ge 2 ] || usage; document_id="unit:$2"; document_selector_count=$((document_selector_count + 1)); shift 2 ;;

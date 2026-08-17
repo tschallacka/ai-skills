@@ -2,6 +2,7 @@
 set -euo pipefail
 
 usage() {
+    local rc="${1:-64}"
     cat >&2 <<'USAGE'
 Usage:
   plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
@@ -16,10 +17,15 @@ Usage:
                                     lists documents changed since git-ref and the
                                     paragraph labels touched in each
 USAGE
-    exit 64
+    exit "$rc"
 }
 
+help() { usage 0; }
+
 [ "$#" -ge 1 ] || usage
+if [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
+    help
+fi
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
