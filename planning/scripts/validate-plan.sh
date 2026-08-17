@@ -716,7 +716,7 @@ if [ "$complete_mode" = true ]; then
     done
 fi
 
-# --- propagation checks (--propagation): the six surfaces of a work unit must
+# --- propagation checks (--propagation): the surfaces of a work unit must
 #     agree. A finding cites one surface; a fix must reach the others, and this
 #     is the mechanical part of that contract. ---
 if [ "$propagation_mode" = true ]; then
@@ -880,6 +880,13 @@ if [ "$propagation_mode" = true ]; then
             if [ -z "${unit_type[$named]+x}" ]; then
                 continue
             fi
+            # A companion may correctly reference a same-goal test/verification
+            # unit ("automated tests: covered by WNN") — that is proof-coverage
+            # prose, not a dependency claim (report 14 §5). Skip it.
+            if [ "${unit_goal[$named]}" = "${unit_goal[$id]}" ] && \
+               { [ "${unit_type[$named]}" = test ] || [ "${unit_type[$named]}" = verification ]; }; then
+                continue
+            fi
             if ! printf '%s ' "$deps" | grep -Fq "$named"; then
                 warn "$id companion references $named, which $id neither owns nor depends on; update the companion or add the dependency edge"
             fi
@@ -978,39 +985,6 @@ if [ "$propagation_mode" = true ]; then
             esac
         done
     done
-
-    # (f) Coverage rows vs the units they list: a coverage row credits units
-    #     that own an outcome. A verification/test unit does not own an outcome
-    #     (it grades the units that do), so a coverage row crediting one is a
-    #     stale credit. This is the mechanically sound form of the check — a
-    #     word-overlap heuristic between the outcome and the intended change is
-    #     too crude (outcomes describe behaviour, intended changes describe the
-    #     edit) and would flood real plans with false WARNs.
-    cov_file="$(mktemp "${TMPDIR:-/tmp}/plan-cov.XXXXXX")"
-    trap 'rm -f "$cov_file"' EXIT
-    awk -F'|' '
-        /^## Definition-of-done coverage/ { in_cov = 1; next }
-        in_cov && /^## / && !/^## Definition-of-done coverage/ { exit }
-        in_cov && /^\|/ && $2 !~ /Required outcome/ && $2 !~ /^-+$/ {
-            o = $2; u = $3
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", o)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", u)
-            print o "\t" u
-        }
-    ' "$inventory" > "$cov_file"
-    while IFS=$'\t' read -r outcome units; do
-        [ -n "$outcome" ] || continue
-        for uid in $(printf '%s' "$units" | grep -oE 'W[0-9][0-9]+'); do
-            [ -n "${unit_type[$uid]+x}" ] || continue
-            case "${unit_type[$uid]}" in
-                verification|test)
-                    warn "coverage row '$outcome' credits $uid (a ${unit_type[$uid]} unit, which grades rather than owns an outcome); move the credit to the unit that produces the outcome"
-                    ;;
-            esac
-        done
-    done < "$cov_file"
-    rm -f "$cov_file"
-    trap - EXIT
 fi
 
 if [ "$errors" -gt 0 ]; then

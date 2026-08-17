@@ -16,7 +16,7 @@ The key terms below use RFC 2119 meaning: **MUST** = absolute requirement,
 | 1. Gated reads only | Plan reads **MUST** go through the gated reader (`plan-context.sh`). The main agent and every subagent **MUST** use `plan-context.sh read --plan-dir <PLAN_DIR> --document ID` (or `--unit WNN`) for any plan content. |
 | 2. No whole-file reads | Agents **MUST NOT** read plan artifacts with `cat`, a native `Read`/file tool, `head`/`tail`, or any tool that loads an entire plan file, an entire plan directory, or the `.plans/` tree wholesale. A wholesale plan read is a **context-overflow violation**. |
 | 3. No bypass | Agents **MUST NOT** bypass the gate when it cannot serve a document — they **MUST** report it as a limitation instead of falling back to a raw file read. |
-| 4. Subagents locked | Every spawned subagent's starting prompt **MUST** include the verbatim bounded-read lock (the gated-read + no-skill-load clause in SKILL.md §3). |
+| 4. Subagents locked | Every spawned subagent's starting prompt **MUST** include the verbatim bounded-read lock (SKILL.md §3) **and** the no-skill-load clause (SKILL.md Operating rules). |
 | 5. Byte-bounded | Plan reads **SHOULD** prefer the default summary view and honor `--max-records`/`--max-bytes`; when `ROLE_ID` is set, the gate caps `--max-bytes` to the per-role budget, and agents **MUST NOT** work around that cap. |
 | 6. Read discipline reported | Subagents **MUST** state in their returned findings that every plan read went through the gate and list any wholesale read they performed, so a violation is visible (soft audit). |
 

@@ -30,6 +30,21 @@ placeholders such as `<plan-directory>`, `<planname>`, `<goal>`, `<step>`,
 `<WNN>`, and `<text>` are literal tokens to be substituted with real values,
 not literal text.
 
+**Normative language.** Requirement keywords follow RFC 2119 / RFC 8174
+meaning: **MUST / MUST NOT** = absolute requirement; **SHOULD / SHOULD NOT** =
+recommendation that may be overridden only with a stated reason; **MAY / OPTIONAL**
+= permitted. Bare imperatives in the Operating rules are MUSTs. When a rule says
+"never", it is a MUST NOT. This convention is stated here once and applies to
+this file and the three references.
+
+**Numbered paragraphs.** Plan documents are organized into numbered paragraphs
+labeled `§ N.N` (section.number, e.g. `§ 2.1`, `§ 9.2`), maintained by the
+helpers. Address one via `-p N.N: <text>`; the helper flags map to sections
+(`--description-paragraph … 6.1`, `--goal-paragraph … 5.1`, etc.). The **change
+target** of a work unit is its one file plus primary symbol (or file scope),
+from its inventory row and step header. The goal **roster** is the goal's
+`§9.1` owned-work-units list naming every unit the inventory assigns to it.
+
 When an initiative creates, changes, repairs, or validates any UI component,
 page, interaction, visual state, or user-facing flow, read
 [`references/ui-user-story-validation.md`](references/ui-user-story-validation.md)
@@ -173,7 +188,7 @@ A **work unit** is one independently reviewable change target:
 - **Verification:** one named command or one bounded browser/API flow. It has
   no implementation file, but it is still its own work unit and step.
 
-One implementation step owns exactly one work unit. It may not include a
+One implementation step owns exactly one work unit. It MUST NOT include a
 second source file, second symbol, second test target, or a catch-all such as
 "related callers." Make those separate, ordered steps even when the changes
 are mechanically small. Do not use globs, directory names, or "all affected
@@ -186,11 +201,11 @@ exception for ordinary source, configuration, test, or documentation edits.
 
 ### Goal size limit
 
-A goal owns one coherent, independently demonstrable outcome and normally
-contains **2–10 work units**. A single-work-unit goal is allowed only for a
+A goal owns one coherent, independently demonstrable outcome and contains
+**2–10 work units** (MUST). A single-work-unit goal is allowed only for a
 genuinely standalone documentation, configuration, discovery, or verification
 outcome; state the reason in its `goal.md`. A goal with more than 10 work
-units is invalid and must be split at the next stable product, contract,
+units is invalid and MUST be split at the next stable product, contract,
 deployability, or ownership boundary. Do not split merely by file type.
 
 Every goal needs its own definition of done that can be demonstrated without
@@ -212,20 +227,22 @@ file existing is not evidence. Record per target, in order:
    intermediate theme in the inheritance chain;
 5. for a module template, whether any theme overrides it.
 
-A goal whose units target templates must own a discovery unit that records this
-evidence per target, and that unit's acceptance criteria must require the
-recorded evidence — not merely that a search was performed. Steps 2 and 3 are
-the ones repeatedly missed: a theme-override search finds neither.
+A goal whose units target templates, blocks, or layouts must own a discovery
+unit that records this evidence per target, and that unit's acceptance
+criteria must require the recorded evidence — not merely that a search was
+performed. Steps 2 and 3 are the ones repeatedly missed: a theme-override
+search finds neither.
 
 **Marker pre-check (required first step for any unit whose change target is a
-template).** Static reachability evidence is necessary but not sufficient: it
-cannot tell which route actually renders a template that several themes or a
-re-pointed layout could serve. Before building anything on an assumption about
-which file renders, add a visible literal marker to the candidate template,
-confirm which route and block render it (browser or live block tree), then
-remove the marker and record the confirmed surface. This is the only mitigation
-that reliably catches a "wrong target surface" defect — the class no validator
-can detect because it requires reading live block trees and theme chains.
+template, and for any template-ambiguous block/layout target).** Static
+reachability evidence is necessary but not sufficient: it cannot tell which
+route actually renders a target that several themes or a re-pointed layout
+could serve. Before building anything on an assumption about which file
+renders, add a visible literal marker to the candidate template, confirm which
+route and block render it (browser or live block tree), then remove the marker
+and record the confirmed surface. This is the only mitigation that reliably
+catches a "wrong target surface" defect — the class no validator can detect
+because it requires reading live block trees and theme chains.
 
 ## 1. Establish the plan boundary
 
@@ -324,6 +341,33 @@ hits). Use it before a paragraph-level edit to confirm the target is unique:
 `--document` answers "is this wording at the surface the finding named" and
 `--in` sweeps a whole class of documents.
 
+**`find` output formats are for different purposes — pick before you run.**
+- `text` (default) — for reading. The match rows are followed by a
+  human-readable diagnostic line (`N matches …; narrow the pattern or scope`)
+  that is **NOT part of the result set**.
+- `json` — for enumeration and any post-processing. It contains only
+  `{"matches":[{document,section,excerpt}]}` with **no diagnostic line**. Use
+  `json` whenever you intend to feed the output to another command.
+
+**Worked examples:**
+```bash
+# every document mentioning a phrase, machine-readable:
+plan-content.sh find <plan> "<pattern>" --in all --format json | jq -r '.matches[].document'
+
+# did a fix land at THIS surface (not merely somewhere in the plan)?
+plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
+```
+
+> **Do not grep or filter the text output to strip its diagnostic line** — that
+> is what `--format json` is for. If you are post-processing, you are in the
+> wrong format.
+
+**Exit code is a disambiguation signal, not a pass/fail.** `find` exits `1` on
+zero **or** multiple matches — deliberately (a unique target is the goal).
+"Exit 1 with matches present" means *narrow the pattern*, not *error*, so a
+caller checking only the exit code will misread it. With `json`,
+`jq '.matches | length'` gives the count directly.
+
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
 (`--in all`) returns true whenever any other unit happens to mention the same
@@ -336,12 +380,12 @@ companions in a stale-wording sweep: they are where execution actually happens
 and were historically the surface most likely to drift. A sweep that relies on
 `--in all` without companions is incomplete by construction.
 
-**Reserved characters and identifiers.** Plan narrative may not contain the
+**Reserved characters and identifiers.** Plan narrative MUST NOT contain the
 reserved paragraph marker `§` (the helpers reject it) or a Markdown table
 separator `|`; input must be LF, not CRLF. Finding IDs must match `^AR-[0-9]+$`
-and work-unit IDs `^W[0-9]{2,}$` — `mint-fix-keys.sh` silently skips a
-non-conforming row, and a silently-skipped gated row disables the entire fix-key
-gate, so use the exact formats.
+and work-unit IDs `^W[0-9]+$` — `mint-fix-keys.sh` warns per non-conforming
+gated row and fails the run if any gated row could not be minted, so a typo
+cannot silently disable the fix-key gate; use the exact formats.
 
 ### 2.1 Write the plan description
 
@@ -432,8 +476,13 @@ seems obvious:
 Let `create-plan.sh`, `add-coverage.sh`, and `add-work-unit.sh` create and
 update the inventory. They enforce the table columns, stable IDs, ownership,
 and review checklist. The decomposition review is a checklist of six completed
-statements in `work-unit-inventory.md`'s `## Decomposition review` section; mark
-it complete (only after checking the resulting rows) with
+statements in `work-unit-inventory.md`'s `## Decomposition review` section
+(every definition-of-done item maps to work units; every known affected file
+and changing symbol has its own work unit; every work unit has exactly one goal
+and one step; each goal has 2–10 work units or records an exception; each step
+has exactly one work unit and no incidental edits; dependencies form an
+acyclic executable order). Mark it complete (only after checking the resulting
+rows) with
 `update-plan-content.sh --decomposition-review <plan-directory> completed`.
 
 ### 2.3 Decompose the initiative into goals
@@ -601,20 +650,31 @@ its scoped role docs; it never receives the planning agent's conclusions. A
 spawn that cannot resolve ROLE_ID=chris fails closed (the reader refuses) and
 must be respawned with a valid identity.
 
+**Scope note: the persona, capsule, and Reviewer A/B machinery describe the
+review harness.** When the role-context/capsule tooling (`role-context.sh`, a
+capsule workspace) is present in the environment, use it as described. When it
+is not — an ordinary plan in a generic environment — the requirement reduces
+to: use a **fresh secondary agent with a new session and no prior conclusions**
+(bounded-read locked and skill-locked as above) to produce the adversarial
+review; the persona, capsule manifest, and two-reviewer A/B split are
+harness-specific and OPTIONAL.
+
 Do not hand the adversary a command that dumps a plan file or directory in
 full. Require the adversary's returned findings to state that all plan reads
 went through the gate and to list any wholesale read it performed, so a
 violation is visible (soft audit).
 
-Do not allow the planning agent to approve its own review. Re-run the review
-after a material scope change or a discovered bug.
+Do not allow the planning agent to approve its own review. **Re-run a fresh
+reviewer whenever a revision changes scope, ownership, dependencies, or
+acceptance criteria (a material change), or when a bug is discovered** — see
+"Execution order is mandatory" below for the exact cadence.
 
 The reviewer protocol is version `1.4.2`. Fresh-review mode remains the
 default. Iterative mode is opt-in and must be bounded by a maximum of three
 verification passes per reviewer and three fresh-review cycles per benchmark.
 Reviewer records use `review_cycle`, `reviewer_session`, `finding_owner`,
 `verification_pass`, `closed_findings`, `reviewer_handoff`, and
-`review_mode`. Reviewer A may close only findings it owns and may not issue
+`review_mode`. Reviewer A MAY close only findings it owns and MUST NOT issue
 overall plan approval. Reviewer B must perform the final independent review
 and write one reviewer-owned `approval.json` containing
 `reviewer_session_id`, `mode`, `approved_findings`, `rejected_findings`,
@@ -846,7 +906,8 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 `--propagation` encodes the surface rule (§ "Resolving a finding") and runs
 by default. It flags a verification unit that grades a sibling with no
 dependency path to it (honouring deliberate reverse/baseline orderings and
-transitive ordering) and a graph leaf in a goal that owns a verification unit.
+transitive ordering), a graph leaf in a goal that owns a verification unit, and
+a goal whose §9.x roster does not match the units the inventory assigns to it.
 It also WARNs (never blocks) when a unit's instructions mention a project
 symbol (one whose namespace root or path prefix the plan edits) that no
 inventory row owns — this rule cannot distinguish "edit this" from "this is
@@ -863,6 +924,16 @@ case enumerated in the instructions" is the drift-proof form. The stale sweep
 covers the same documents as `find --in all`, including the `*-testing.md`
 companions. Add a closed finding's old wording to the phrase file so each fix
 becomes a permanent regression guard rather than a one-time correction.
+
+**Coverage rows.** The Definition-of-done coverage table's header is
+`Required outcome or proof | Work unit IDs` — it deliberately maps both
+outcomes *and* their proofs to units, so crediting a `test` or `verification`
+unit is the sanctioned convention, not drift. A coverage row should name the
+unit that produces the outcome **as well as** the one that proves it; this is
+enforced by review, not by the validator (there is no mechanical form that
+avoids false warnings). A testing companion may reference a same-goal
+`test`/`verification` unit ("automated tests: covered by WNN") — that is
+proof-coverage prose, not a dependency claim.
 
 Do not waive validation failures. Correct the inventory, goal boundary, or
 step files and run it again. The validator checks the structural guarantees;
@@ -888,6 +959,11 @@ when all its steps and applicable verification are complete. The initiative is
 complete only when all goals are complete.
 
 ## 4. Resume and update the plan
+
+Run `validate-plan.sh` MUST be re-run at the start of each resumed session
+before executing steps, after any plan edit, and before presenting any plan or
+plan revision as ready. The validator is the gate that confirms the plan is
+still structurally sound after changes.
 
 At the start of every resumed session:
 
@@ -939,9 +1015,7 @@ strip plan metadata and metadata-bearing front-matter that is not needed to act.
 Subagents receive this instruction in their starting prompt (see section 3).
 Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
 with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
-Bash. On the constrained VPS used during this initiative, work sequentially,
-keep at most one subchat active, and close it when complete; this is not a
-generic restriction on other machines.
+Bash.
 
 The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
 takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
@@ -1052,8 +1126,16 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>"
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --overwrite   # replace a companion; input is validated before any file is touched
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> <goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
+ "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> <goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> <goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
+```
+**Document-id prefix rule for `update-plan-content.sh`.** The short flag forms
+`-sp/-ss/-gp/-gs/-rp/-rs` take the document id **bare** (`<goal>/<step>` or
+`<goal>` or `review`) — the script prepends the `step:`/`goal:`/`review:`
+prefix itself. The long forms that replace a whole document (`--paragraph`,
+`--table-paragraph`, `--delete-paragraph`, `--field`, `--title`) take the full
+prefixed id (`step:<goal>/<step>`); do not add the prefix when the flag is a
+short `-s*`/`-g*`/`-r*` form, or you get a doubled `step:step:…` id.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<old phrase>' --in all
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --document step:<goal>/<step>-testing   # verify wording at the surface a finding named
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --full   # no excerpt truncation

@@ -164,6 +164,8 @@ by bypassing the rendered UI:
    a direct interaction or change a user-visible assertion merely to make the
    sequence faster.
 
+#### Story execution and recording sequence
+
 1. Navigate to the real route or use the project’s approved route-discovery
    method. Establish the relevant persona, data, viewport, and feature flags.
 2. Capture the current state with browser evidence: the exact URL, visible

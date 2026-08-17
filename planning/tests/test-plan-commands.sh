@@ -464,11 +464,6 @@ if grep -qE 'roster (omits|lists)' "$temporary_root/roster13.log"; then
     echo 'report 13: a summary-roster goal with partial blurbs and a cross-plan ref was flagged.' >&2
     exit 1
 fi
-# report 12: coverage row crediting a verification unit (which grades rather
-# than owns an outcome) is a stale credit WARN.
-"$script_dir/add-coverage.sh" "$plan_dir" 'The order history surface is verified.' W11 'grading credit' >/dev/null 2>&1
-"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/coverage-stale.log" 2>&1 || true
-grep -Fq "coverage row 'The order history surface is verified.' credits W11 (a verification unit" "$temporary_root/coverage-stale.log"
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {

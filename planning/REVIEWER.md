@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `e9304c1efc2abd60ff10c3994b29bbace1c6dfe2a61238c0fa4f9181f87e02ab`
+> Source SHA-256: `cb6caade4b46afdbf583c2faf4b2e62a6e84ead87e04be32626328bd62ca0a62`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -59,20 +59,31 @@ its scoped role docs; it never receives the planning agent's conclusions. A
 spawn that cannot resolve ROLE_ID=chris fails closed (the reader refuses) and
 must be respawned with a valid identity.
 
+**Scope note: the persona, capsule, and Reviewer A/B machinery describe the
+review harness.** When the role-context/capsule tooling (`role-context.sh`, a
+capsule workspace) is present in the environment, use it as described. When it
+is not — an ordinary plan in a generic environment — the requirement reduces
+to: use a **fresh secondary agent with a new session and no prior conclusions**
+(bounded-read locked and skill-locked as above) to produce the adversarial
+review; the persona, capsule manifest, and two-reviewer A/B split are
+harness-specific and OPTIONAL.
+
 Do not hand the adversary a command that dumps a plan file or directory in
 full. Require the adversary's returned findings to state that all plan reads
 went through the gate and to list any wholesale read it performed, so a
 violation is visible (soft audit).
 
-Do not allow the planning agent to approve its own review. Re-run the review
-after a material scope change or a discovered bug.
+Do not allow the planning agent to approve its own review. **Re-run a fresh
+reviewer whenever a revision changes scope, ownership, dependencies, or
+acceptance criteria (a material change), or when a bug is discovered** — see
+"Execution order is mandatory" below for the exact cadence.
 
 The reviewer protocol is version `1.4.2`. Fresh-review mode remains the
 default. Iterative mode is opt-in and must be bounded by a maximum of three
 verification passes per reviewer and three fresh-review cycles per benchmark.
 Reviewer records use `review_cycle`, `reviewer_session`, `finding_owner`,
 `verification_pass`, `closed_findings`, `reviewer_handoff`, and
-`review_mode`. Reviewer A may close only findings it owns and may not issue
+`review_mode`. Reviewer A MAY close only findings it owns and MUST NOT issue
 overall plan approval. Reviewer B must perform the final independent review
 and write one reviewer-owned `approval.json` containing
 `reviewer_session_id`, `mode`, `approved_findings`, `rejected_findings`,
@@ -248,9 +259,7 @@ strip plan metadata and metadata-bearing front-matter that is not needed to act.
 Subagents receive this instruction in their starting prompt (see section 3).
 Plans use `PLANS_ROOT` when set, otherwise the home directory plus `.plans`,
 with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
-Bash. On the constrained VPS used during this initiative, work sequentially,
-keep at most one subchat active, and close it when complete; this is not a
-generic restriction on other machines.
+Bash.
 
 The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
 takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
