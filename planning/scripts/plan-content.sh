@@ -164,7 +164,7 @@ case "$command" in
             esac
         done
         plan_require_directory "$plan_dir"
-        case "$scope" in plan|goals|steps|units|review|testing|coverage|stories|all) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, testing, coverage, stories, or all)" ;; esac
+        case "$scope" in plan|goals|steps|units|review|testing|coverage|stories|all|inventory) ;; *) plan_die "Unknown scope: $scope (use plan, goals, steps, units, review, testing, coverage, stories, inventory, or all)" ;; esac
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
         # Literal scan of one document (used by both --document and the scoped
         # branches below; defined here so --document can call it).
@@ -270,7 +270,7 @@ case "$command" in
                 ;;
         esac
         case "$scope" in
-            units|all)
+            units|inventory|all)
                 [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
                     /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
                         id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)

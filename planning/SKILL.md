@@ -996,9 +996,11 @@ ordering prose that accompanies recorded dependency edges.
 ```
 
 Document IDs are `plan`, `review`, `goal:<goal>`, `step:<goal>/<step>`,
-`unit:<WNN>`, `coverage` (Definition-of-done coverage table), and `stories`
-(`ui-user-stories.md`). `find` scopes cover `plan`, `goals`, `steps`, `units`,
-`review`, `coverage`, `stories`, and `all`.
+`unit:<WNN>`, `coverage` (Definition-of-done coverage table), `stories`
+(`ui-user-stories.md`), `inventory` (the work-unit inventory), `fixes`
+(`fixes.md`), `fix-keys` (`fix-keys.json`), and `approval` (`approval.json`).
+`find` scopes cover `plan`, `goals`, `steps`, `units`, `review`, `testing`,
+`coverage`, `stories`, `inventory` (alias for `units`), and `all`.
 
 The creation scripts refuse to overwrite existing trackers. The update
 scripts change the requested row and recalculate the relevant progress bar.

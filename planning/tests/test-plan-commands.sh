@@ -400,6 +400,29 @@ if grep -qE 'AbstractItems|QuoteManagement|Magento_Weee|::class|W99|W98' "$tempo
     echo 'report 9: a seam, template id, ::class, or cross-plan reference was flagged.' >&2
     exit 1
 fi
+# report 10: --delete-paragraph of the last paragraph in a section must not
+# destroy the following heading (acceptance criteria content stays its own).
+"$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history instructions \
+    -p 5.1: 'Only instruction.' >/dev/null 2>&1
+"$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history acceptance-criteria \
+    -p 6.1: 'Only criterion.' >/dev/null 2>&1
+before_headings="$(grep -c '^## ' "$plan_dir/03-wire/steps/01-step-history.md")"
+"$script_dir/update-plan-content.sh" --delete-paragraph "$plan_dir" step:03-wire/01-step-history 5.1 >/dev/null 2>&1
+if [ "$(grep -c '^## ' "$plan_dir/03-wire/steps/01-step-history.md")" -ne "$before_headings" ]; then
+    echo 'report 10: deleting the last instruction paragraph removed a section heading.' >&2
+    exit 1
+fi
+grep -Fq '## Acceptance criteria' "$plan_dir/03-wire/steps/01-step-history.md"
+grep -Fq 'Only criterion.' "$plan_dir/03-wire/steps/01-step-history.md"
+# report 10: fixes.md, fix-keys.json, approval.json are readable doc ids; find
+# --in inventory is an alias for --in units.
+printf 'AR-01\tW10\tkey\n' > "$plan_dir/fixes.md"
+printf '{"session_id":"s1","keys":{}}\n' > "$plan_dir/fix-keys.json"
+printf '{"status":"pending"}\n' > "$plan_dir/approval.json"
+"$script_dir/plan-content.sh" get "$plan_dir" fixes | grep -Fq 'AR-01'
+"$script_dir/plan-content.sh" get "$plan_dir" fix-keys | grep -Fq 'session_id'
+"$script_dir/plan-content.sh" get "$plan_dir" approval | grep -Fq 'pending'
+"$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | grep -Fq 'unit:'
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {

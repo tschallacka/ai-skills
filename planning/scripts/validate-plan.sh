@@ -713,22 +713,37 @@ fi
 #     agree. A finding cites one surface; a fix must reach the others, and this
 #     is the mechanical part of that contract. ---
 if [ "$propagation_mode" = true ]; then
-    # (a) Naming a class in instructions does not schedule an EDIT to it. The
-    #     robust rule: flag a ::-qualified symbol ONLY when the plan names that
-    #     symbol as a change target somewhere (in some unit's File or scope),
-    #     yet no unit owns it. A plan intending an edit says so in an inventory
-    #     row by definition; a symbol never named as a change target is a mere
-    #     mention or seam (a Magento plan names Magento\Checkout::addProduct,
-    #     AbstractItems::getColumnHtml, or a Vendor_Module::path template to
-    #     record the boundary) and is not a defect.
-    #     Build the set of change-target symbols the plan declares.
-    declare -A change_targets=()
+    # (a) Naming a class in instructions does not schedule an EDIT to it.
+    #     Flag a ::-symbol or path on an edit-intent line when ALL hold:
+    #       1. its namespace root or path prefix is one the plan itself edits
+    #          (derived from the inventory's File column — e.g. BigBridge\,
+    #          Proforto\, app/code/, app/design/), which excludes vendor seams
+    #          (Magento\, Amasty\, Magestore_, a vendor/ path) by construction,
+    #          because a plan never lists a vendor path as a change target;
+    #       2. no inventory row owns it;
+    #       3. the naming line instructs an edit, not a boundary statement.
+    #     This catches "instruct an edit to a project symbol no unit owns"
+    #     (the RequestEmployeeSet class three plans consumed but none built)
+    #     without a hardcoded vendor list.
+    declare -a project_prefixes=()
     for candidate in "${unit_ids[@]}"; do
         fc="${unit_file[$candidate]}"
-        sc="${unit_scope[$candidate]}"
-        [ -n "$fc" ] && [ "$fc" != "N/A" ] && change_targets["$(basename "$fc" 2>/dev/null)"]=1
-        change_targets["${sc%%::*}"]=1
-        change_targets["${sc##*.}"]=1
+        [ -n "$fc" ] && [ "$fc" != "N/A" ] || continue
+        # File column forms: Namespace\Class.php, app/code/V/M/File.php,
+        # app/design/.../file.phtml, path/to/file.php. Derive the namespace
+        # root or the leading directory segments.
+        case "$fc" in
+            *'\\'*)
+                ns_root="${fc%%\\*}"
+                ;;
+            app/*|vendor/*)
+                ns_root="${fc%%/*}"
+                ;;
+            *)
+                ns_root="$(dirname "$fc" 2>/dev/null)"
+                ;;
+        esac
+        [ -n "$ns_root" ] && project_prefixes+=("$ns_root")
     done
     for id in "${unit_ids[@]}"; do
         step_file="$plan_dir/${unit_goal[$id]}/steps/${unit_step[$id]}.md"
@@ -763,19 +778,25 @@ if [ "$propagation_mode" = true ]; then
                     continue
                 fi
             fi
-            # Only symbols the plan names as a change target are candidates.
+            # Condition 1: the symbol's namespace root must be a project prefix
+            # the plan edits (vendor seams drop out here by construction).
             klass="${token%%::*}"
-            klass_short="${klass##*.}"
-            if [ -z "${change_targets[$klass_short]+x}" ] && [ -z "${change_targets[$klass]+x}" ]; then
-                continue
-            fi
-            # Ownership: is this symbol owned by a unit (file basename or scope)?
+            klass_short="${klass##*\\}"
+            prefix_match=false
+            for prefix in "${project_prefixes[@]}"; do
+                case "$klass" in
+                    "$prefix"*|"$klass_short") prefix_match=true; break ;;
+                esac
+                [[ "$klass_short" == "$prefix"* ]] && { prefix_match=true; break; }
+            done
+            [ "$prefix_match" = true ] || continue
+            # Condition 2: no inventory row owns it (file basename or scope).
             owned=false
             for candidate in "${unit_ids[@]}"; do
                 file_cell="${unit_file[$candidate]}"
                 scope_cell="${unit_scope[$candidate]}"
                 scope_class="${scope_cell%%::*}"
-                scope_class_short="${scope_class##*.}"
+                scope_class_short="${scope_class##*\\}"
                 [ "$(basename "$file_cell" 2>/dev/null)" = "$klass_short" ] && { owned=true; break; }
                 [ "$file_cell" = "$klass" ] && { owned=true; break; }
                 [ "$scope_class" = "$klass" ] && { owned=true; break; }

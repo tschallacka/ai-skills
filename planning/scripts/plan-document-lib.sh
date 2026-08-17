@@ -101,6 +101,15 @@ plan_document_path() {
         stories)
             printf '%s\n' "$plan_dir/ui-user-stories.md"
             ;;
+        fixes)
+            printf '%s\n' "$plan_dir/fixes.md"
+            ;;
+        fix-keys|fixkeys)
+            printf '%s\n' "$plan_dir/fix-keys.json"
+            ;;
+        approval)
+            printf '%s\n' "$plan_dir/approval.json"
+            ;;
         goal:*)
             goal="${document_id#goal:}"
             printf '%s\n' "$plan_dir/$goal/goal.md"
@@ -138,7 +147,7 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         review) printf '%s\n' review ;;
-        coverage|inventory|stories) printf '%s\n' reference ;;
+        coverage|inventory|stories|fixes|fix-keys|fixkeys|approval) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
         step:*)
             # A step id ending in -testing names the step's testing companion,
@@ -524,6 +533,14 @@ plan_delete_paragraph() {
             } else {
                 print
             }
+            next
+        }
+        /^## / {
+            # A section boundary always stops the delete: never swallow a
+            # following heading even when the deleted paragraph was the last in
+            # its section (that would re-parent the next section under it).
+            skipping = 0
+            print
             next
         }
         skipping { next }
