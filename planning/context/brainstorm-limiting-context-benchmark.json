@@ -1,7 +1,7 @@
 {
   "schema": 27,
   "benchmark_id": "BENCH-V27-001",
-  "contract_id": "planning-context-v27",
+  "contract_id": "planning-context",
   "categories": [
     {"category_id":"summary-read","invocation_id":"INV-summary-read","pair_ids":["PAIR-summary-read-01","PAIR-summary-read-02","PAIR-summary-read-03","PAIR-summary-read-04","PAIR-summary-read-05","PAIR-summary-read-06","PAIR-summary-read-07","PAIR-summary-read-08","PAIR-summary-read-09","PAIR-summary-read-10"]},
     {"category_id":"instruction-read","invocation_id":"INV-instruction-read","pair_ids":["PAIR-instruction-read-01","PAIR-instruction-read-02","PAIR-instruction-read-03","PAIR-instruction-read-04","PAIR-instruction-read-05","PAIR-instruction-read-06","PAIR-instruction-read-07","PAIR-instruction-read-08","PAIR-instruction-read-09","PAIR-instruction-read-10"]},

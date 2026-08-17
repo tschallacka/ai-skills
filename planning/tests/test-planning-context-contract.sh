@@ -2,10 +2,10 @@
 set -u
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-MATRIX="$ROOT_DIR/planning/tests/fixtures/planning-context-v27/case-matrix.tsv"
-OUTCOMES="$ROOT_DIR/planning/tests/fixtures/planning-context-v27/expected-outcomes.jsonl"
-ORACLE="$ROOT_DIR/planning/context-v27/brainstorm-limiting-context.v27-oracle.json"
-BENCHMARK="$ROOT_DIR/planning/context-v27/brainstorm-limiting-context.v27-benchmark.json"
+MATRIX="$ROOT_DIR/planning/tests/fixtures/planning-context/case-matrix.tsv"
+OUTCOMES="$ROOT_DIR/planning/tests/fixtures/planning-context/expected-outcomes.jsonl"
+ORACLE="$ROOT_DIR/planning/context/brainstorm-limiting-context-oracle.json"
+BENCHMARK="$ROOT_DIR/planning/context/brainstorm-limiting-context-benchmark.json"
 
 selected_case=""
 selected_input=""

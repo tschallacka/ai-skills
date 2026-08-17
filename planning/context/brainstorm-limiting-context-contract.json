@@ -1,5 +1,5 @@
 {
-  "contract_id": "planning-context-v27",
+  "contract_id": "planning-context",
   "schema": 27,
   "contract_digest": "sha256:<canonical-contract-preimage>",
   "canonical": {

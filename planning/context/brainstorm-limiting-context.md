@@ -1,10 +1,10 @@
-# Brainstorm: limiting duplicated planning context v27
+# Brainstorm: limiting duplicated planning context
 
 ## One authority model
 
-V27 is the sole replacement design; backward compatibility is forbidden.
+This is the sole replacement design; backward compatibility is forbidden.
 
-The package root is `planning/context-v27/`. Its signed `ROOT` record is the
+The package root is `planning/context/`. Its signed `ROOT` record is the
 only authority for package, plan, lease, recovery, and fixture state. The root
 record contains contract digest, manifest digest, closure digest, external
 boot-fencing digest, authoritative snapshot, journal head, writer epoch, and
@@ -244,7 +244,7 @@ response with only `output_digest` omitted; stderr is never included.
 Every error is exactly `{code, subcode, retryable, state, root_digest,
 snapshot_or_absent, details, journal_event_or_absent}`. `details` is
 `{items: sorted text[], expected_or_absent, current_or_absent}` with omitted
-optional fields. The error code set and exit mapping are closed by the v27
+optional fields. The error code set and exit mapping are closed by the
 contract: contract-invalid 12, authorization 14, recovery 17, lease 15,
 platform 16, suspect 11, stale 10, conflict 13, invalid 12, budget 19,
 usage 21, not-found 20, internal 22, legacy-rejected 78, and
@@ -277,17 +277,17 @@ fencing, lease acquisition, nonce allocation, or any writer-store mutation.
 The input is legacy when it contains `context_schema_version=1`,
 `context_result_schema_version=1`, a `planning-context-v1` or
 `planning-context-v26` package marker, an unsigned or rootless package, or an
-old command/schema marker listed by the v27 contract. Detection is based on
-the raw package marker and does not infer a v27 default from an absent ROOT.
+old command/schema marker listed by the contract. Detection is based on
+the raw package marker and does not infer a default from an absent ROOT.
 
 Every detected legacy input returns one canonical response with status
 `failure`, error code `legacy-rejected`, subcode identifying the marker class,
 state `legacy-rejected`, no data, `retryable=false`, no journal event, and
-exit 78. The response output digest uses the normal v27 response domain and
+exit 78. The response output digest uses the normal response domain and
 the input is not allowed to consume a nonce, create a lease, write a journal
 event, update a snapshot or pointer, or change ROOT. A package that cannot be
 classified because its framing is unreadable follows the usage/contract-invalid
-rules instead; it is never treated as v27.
+rules instead; it is never treated as this design.
 
 No adapter, translator, migration mode, compatibility flag, inferred schema,
 or legacy repair path exists. The four legacy fixture cases are
@@ -311,7 +311,7 @@ transcript digest, signer key, and signature domain.
 
 ## Acceptance
 
-V27 is implementable when the single signed ROOT package contains these closed
+This design is implementable when the single signed ROOT package contains these closed
 records and fixtures, and all recovery, writer, replay, platform, benchmark,
 oracle, and legacy-rejection tests pass. No implementation output is required
 to approve the design.
