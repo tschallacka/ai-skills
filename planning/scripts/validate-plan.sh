@@ -765,11 +765,9 @@ if [ "$propagation_mode" = true ]; then
         # nonexistent Class::method).
         tokens="$(printf '%s' "$edit_lines" | grep -oE '\b[A-Z][A-Za-z0-9_]*(\\[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*\(?' | sed -E 's/\($//' | sort -u || true)"
         for token in $tokens; do
-            case "$token" in
-                *'::class'|*'::'*) : ;;
-                *) continue ;;
-            esac
-            [ "${token%%::*}" != "class" ] || continue
+            # Skip X::class — a PHP class constant (Foo::class, Bar::class),
+            # not a method call, and not an edit target.
+            [ "${token##*::}" = "class" ] && continue
             # Template-identifier guard: Vendor_Module::<path> (Magento_Weee::
             # email/items/price/row.phtml) is a template id, not a class method.
             if [[ "$token" =~ ^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*:: ]]; then
@@ -802,8 +800,13 @@ if [ "$propagation_mode" = true ]; then
                 [ "$scope_class" = "$klass" ] && { owned=true; break; }
                 [ "$scope_class_short" = "$klass_short" ] && { owned=true; break; }
             done
+            # This rule cannot distinguish "edit this" from "this is where we
+            # attach" from text alone (the short class form carries no
+            # namespace, so the project-prefix gate cannot help). It is a
+            # heuristic: surface it as a WARN for a human to skim, never a
+            # blocking FAIL — 17 warnings read fine, 17 FAILs block the plan.
             if [ "$owned" = false ] && [ "$token" != "$id" ]; then
-                fail "$id instructions instruct an edit to '$token' which no inventory row owns; add a discovery/ownership row or name the owning work unit"
+                warn "$id instructions mention '$token' which no inventory row owns; verify it is a seam description, or add a discovery/ownership row if it is an edit target"
             fi
         done
         # (b) Removed by report 7: cross-mention warnings fired on any passing

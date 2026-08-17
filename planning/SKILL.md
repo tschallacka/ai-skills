@@ -66,10 +66,10 @@ bypassing it.
   instructions **instruct an edit** to a symbol that is not its own change
   target, an inventory row must own it before any plan depends on it.
   `validate-plan.sh --propagation` checks this (on by default): an instruction
-  to edit a well-formed `Class::method` that no inventory row owns is flagged,
-  but only when the plan names that symbol as a change target somewhere — a
-  mere mention of a vendor/core seam is the point of naming it and is not
-  flagged.
+  to edit a well-formed `Class::method` that no inventory row owns is surfaced
+  as a WARN (never a blocking FAIL), because the rule cannot tell an edit
+  instruction from a seam description in short form. A mere mention of a
+  vendor/core seam is the point of naming it and is not flagged.
 - **When a helper refuses a call, re-issue the call — never patch the script
   that produced it.** If a guard correctly refuses a malformed invocation,
   fix the invocation and re-run it. Editing the invoking script with `sed` or
@@ -781,14 +781,16 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 ```
 
 `--propagation` encodes the six-surface rule (§ "Resolving a finding") and runs
-by default. It flags an instruction to edit a class the plan names as a change
-target but no unit owns, a verification unit that grades a sibling with no
+by default. It flags a verification unit that grades a sibling with no
 dependency path to it (honouring deliberate reverse/baseline orderings and
-transitive ordering), and a graph leaf in a goal that owns a verification unit.
-It does not flag mere mentions: a symbol the plan never names as a change
-target (a vendor/core seam, a `Vendor_Module::path` template id, or a
-`Foo::class` constant) is a boundary the plan records, not an edit target it
-must own. `--no-propagation` disables it. `--stale` turns the "sweep for the
+transitive ordering) and a graph leaf in a goal that owns a verification unit.
+It also WARNs (never blocks) when a unit's instructions mention a project
+symbol (one whose namespace root or path prefix the plan edits) that no
+inventory row owns — this rule cannot distinguish "edit this" from "this is
+where we attach" from text alone, so it is a skimmable signal, not a gate. It
+does not flag mere vendor/core seams (`Magento\...`, `Amasty\...`,
+`Vendor_Module::path` templates), `X::class` constants, or cross-plan
+references. `--no-propagation` disables it. `--stale` turns the "sweep for the
 old wording" discipline into a gate: a phrase listed in the file fails unless
 every paragraph containing it also records a history marker such as
 "previously" or "an earlier version". `--stale default` runs a bundled

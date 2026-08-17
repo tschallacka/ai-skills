@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `5343ef50339677a51c54445bf07a51b0fcd179c1e45b44947a509ba6c4ecba17`
+> Source SHA-256: `7967467a850930ea2bf44d0dbf482cf201dc5119dbd3426fda366de3fa7634cc`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
