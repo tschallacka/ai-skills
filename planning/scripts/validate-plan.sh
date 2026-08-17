@@ -203,6 +203,13 @@ stale_default_phrases=(
     'the six states'
     'all states'
     'four per-state'
+    # Class B (report 12): a criterion demanding an identical/byte-identical
+    # output the target cannot produce (embedded metadata, live dates) is a
+    # gate that fails correct work. Flag the wording so it is revisited.
+    'byte-identical'
+    'byte-for-byte'
+    'pixel-identical'
+    'exactly identical'
 )
 # --- stale-wording sweep (--stale <file-of-phrases>): a listed phrase that
 #     still appears in a paragraph that does not also record a history marker
@@ -898,6 +905,70 @@ if [ "$propagation_mode" = true ]; then
             fi
         done
     done
+
+    # (e) Roster vs inventory: a goal's §9.x Owned-work-units roster must be
+    #     exactly the set the inventory assigns to it. The loose grep above
+    #     lets a unit mentioned anywhere in goal.md satisfy the check; this
+    #     extracts the actual §9.x roster and compares both directions.
+    for goal_name in "${!goal_units[@]}"; do
+        goal_file="$plan_dir/$goal_name/goal.md"
+        [ -f "$goal_file" ] || continue
+        roster="$(awk '
+            /^## Owned work units$/ { in_section = 1; next }
+            /^## Goal-size exception$/ { in_section = 0 }
+            in_section && /`W[0-9][0-9]+`/ { print $0 }
+        ' "$goal_file")"
+        roster_ids="$(printf '%s\n' "$roster" | grep -oE 'W[0-9][0-9]+' | sort -u | tr '\n' ' ')"
+        # Units the inventory assigns to this goal.
+        assigned="$(for id in ${goal_units[$goal_name]:-}; do printf '%s ' "$id"; done)"
+        # Roster-only units (in §9.x but not assigned to this goal).
+        for rid in $roster_ids; do
+            case " $assigned " in
+                *" $rid "*) : ;;
+                *) fail "$goal_name §9.x roster lists $rid which the inventory does not assign to this goal; reconcile the roster and the inventory" ;;
+            esac
+        done
+        # Assigned units missing from the roster (inventory assigns, §9.x omits).
+        for aid in $assigned; do
+            case " $roster_ids " in
+                *" $aid "*) : ;;
+                *) fail "$goal_name §9.x roster omits $aid which the inventory assigns to this goal; add it to the roster" ;;
+            esac
+        done
+    done
+
+    # (f) Coverage rows vs the units they list: a coverage row credits units
+    #     that own an outcome. A verification/test unit does not own an outcome
+    #     (it grades the units that do), so a coverage row crediting one is a
+    #     stale credit. This is the mechanically sound form of the check — a
+    #     word-overlap heuristic between the outcome and the intended change is
+    #     too crude (outcomes describe behaviour, intended changes describe the
+    #     edit) and would flood real plans with false WARNs.
+    cov_file="$(mktemp "${TMPDIR:-/tmp}/plan-cov.XXXXXX")"
+    trap 'rm -f "$cov_file"' EXIT
+    awk -F'|' '
+        /^## Definition-of-done coverage/ { in_cov = 1; next }
+        in_cov && /^## / && !/^## Definition-of-done coverage/ { exit }
+        in_cov && /^\|/ && $2 !~ /Required outcome/ && $2 !~ /^-+$/ {
+            o = $2; u = $3
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", o)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", u)
+            print o "\t" u
+        }
+    ' "$inventory" > "$cov_file"
+    while IFS=$'\t' read -r outcome units; do
+        [ -n "$outcome" ] || continue
+        for uid in $(printf '%s' "$units" | grep -oE 'W[0-9][0-9]+'); do
+            [ -n "${unit_type[$uid]+x}" ] || continue
+            case "${unit_type[$uid]}" in
+                verification|test)
+                    warn "coverage row '$outcome' credits $uid (a ${unit_type[$uid]} unit, which grades rather than owns an outcome); move the credit to the unit that produces the outcome"
+                    ;;
+            esac
+        done
+    done < "$cov_file"
+    rm -f "$cov_file"
+    trap - EXIT
 fi
 
 if [ "$errors" -gt 0 ]; then

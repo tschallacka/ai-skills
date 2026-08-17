@@ -10,6 +10,26 @@ another agent can resume and execute without reconstructing missing context.
 
 Do not use it for a small, self-contained change or a temporary in-chat plan.
 
+## Setup / prerequisites
+
+Every helper command in this skill is written as
+`"$PLANNING_SKILL_DIR/scripts/<name>.sh" ...`, where `<installed-planning-skill-directory>`
+and `<PLANNING_SKILL_DIR>` both mean **the directory containing this `SKILL.md`**
+(the `planning/` directory of the installed skill). Before running any helper,
+set it to that path, for example:
+
+```bash
+PLANNING_SKILL_DIR="<installed-planning-skill-directory>"   # e.g. the installed planning/ dir
+export PLANNING_SKILL_DIR
+```
+
+Plans live under a **plans root**, resolved by `scripts/plan-root.sh` (see
+section 2): `PLANS_ROOT` if set, else `<project>/.plans`, else `~/.plans`. Set
+`PLANS_ROOT` explicitly when automation must never prompt. Angle-bracket
+placeholders such as `<plan-directory>`, `<planname>`, `<goal>`, `<step>`,
+`<WNN>`, and `<text>` are literal tokens to be substituted with real values,
+not literal text.
+
 When an initiative creates, changes, repairs, or validates any UI component,
 page, interaction, visual state, or user-facing flow, read
 [`references/ui-user-story-validation.md`](references/ui-user-story-validation.md)
@@ -197,6 +217,16 @@ evidence per target, and that unit's acceptance criteria must require the
 recorded evidence — not merely that a search was performed. Steps 2 and 3 are
 the ones repeatedly missed: a theme-override search finds neither.
 
+**Marker pre-check (required first step for any unit whose change target is a
+template).** Static reachability evidence is necessary but not sufficient: it
+cannot tell which route actually renders a template that several themes or a
+re-pointed layout could serve. Before building anything on an assumption about
+which file renders, add a visible literal marker to the candidate template,
+confirm which route and block render it (browser or live block tree), then
+remove the marker and record the confirmed surface. This is the only mitigation
+that reliably catches a "wrong target surface" defect — the class no validator
+can detect because it requires reading live block trees and theme chains.
+
 ## 1. Establish the plan boundary
 
 Before creating plan files, establish enough information to write an
@@ -283,7 +313,16 @@ re-initializes it. Read plan documents only through `plan-content.sh`;
 its `find` subcommand locates a literal string across plan documents and
 prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
 hits). Use it before a paragraph-level edit to confirm the target is unique:
-`plan-content.sh find <planname> 'Magento_Sales::invoices'`.
+`plan-content.sh find <plan-directory> 'Magento_Sales::invoices'`.
+
+**`find` scoping grammar.** The first positional after the pattern is either
+`--in <scope>` (one of `plan`, `goals`, `steps`, `units`, `review`, `testing`,
+`coverage`, `stories`, `inventory` — an alias for `units`, or `all`) or
+`--document <docid>` (one exact document: `plan`, `review`, `goal:<g>`,
+`step:<g>/<s>`, `unit:<WNN>`, `coverage`, `stories`, `inventory`, `fixes`,
+`fix-keys`, `approval`). `--in` and `--document` are mutually exclusive;
+`--document` answers "is this wording at the surface the finding named" and
+`--in` sweeps a whole class of documents.
 
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
@@ -328,12 +367,15 @@ their narrative content through flagged `update-plan-content.sh` targets; use
 `--title` for the document title and `--field` for structured values such as
 `UI affected`.
 
-### 2.2 Compile the work-unit inventory before choosing goals
+### 2.2 Reason about the work-unit inventory before choosing goals
 
-Create `<planname>/work-unit-inventory.md` before creating goal directories.
-This is the plan's source of truth for scope and step ownership. It forces the
-agent to reason from concrete changes upward rather than guessing a few broad
-goals and writing generic steps beneath them.
+`create-plan.sh` already creates an empty `work-unit-inventory.md`. This section
+is a **reasoning pass** — enumerate the work units and their ownership *before*
+physically creating any goal directories. It forces the agent to reason from
+concrete changes upward rather than guessing a few broad goals and writing
+generic steps beneath them. It does not create files; the physical inventory
+rows and step files are created later by `add-work-unit.sh` **after** the
+goal exists (section 2.3).
 
 For a plan created with `create-plan.sh`, add facts to its empty inventory with
 the bundled commands instead of patching table rows:
@@ -348,10 +390,12 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 ```
 
 `add-work-unit.sh` creates both the inventory row and its matching atomic step
-file, so their ownership fields cannot drift. Add the goal first. Do not
-continue an older plan whose documents predate the current skill contract. If
-an update is requested for such a plan, stop and ask the user to rewrite it
-with the current helpers before proceeding; do not retrofit it in place.
+file, so their ownership fields cannot drift. **Create the goal first** (section
+2.3), then `add-work-unit.sh` for each of its units — `add-work-unit.sh`
+requires the goal to already exist. Do not continue an older plan whose
+documents predate the current skill contract. If an update is requested for
+such a plan, stop and ask the user to rewrite it with the current helpers
+before proceeding; do not retrofit it in place.
 
 Work through this sequence in order. Do not skip a question because the answer
 seems obvious:
@@ -385,10 +429,12 @@ seems obvious:
    “Could a reviewer approve this without reviewing a second target?” Split
    the goal or step whenever either answer is no.
 
-Let `create-plan.sh`, `add-coverage.sh`, `add-work-unit.sh`, and
-`decomposition-review` create and update the inventory. They enforce the table
-columns, stable IDs, ownership, and review checklist. Mark the checklist
-complete only after checking the resulting rows.
+Let `create-plan.sh`, `add-coverage.sh`, and `add-work-unit.sh` create and
+update the inventory. They enforce the table columns, stable IDs, ownership,
+and review checklist. The decomposition review is a checklist of six completed
+statements in `work-unit-inventory.md`'s `## Decomposition review` section; mark
+it complete (only after checking the resulting rows) with
+`update-plan-content.sh --decomposition-review <plan-directory> completed`.
 
 ### 2.3 Decompose the initiative into goals
 
@@ -484,6 +530,23 @@ listed generated output under the `generated` exception. A source step does
 not also “add tests”; create its test work unit and step separately. A test
 step does not also change production code. A verification step does not also
 make fixes.
+
+**A criterion that cannot be satisfied is worse than a missing criterion.**
+Before writing an acceptance criterion, check that the target can actually
+produce the observable it names — a renderer that emits four per-state lines
+cannot be asked for a `Backordered` label it has no source for, and a generated
+PDF cannot be byte-identical when embedded metadata differs every run. A gate
+on an impossible observable fails correct work and passes wrong work. This
+class is hard to detect mechanically; once you are looking for it, it is easy
+to spot. The `--stale` phrase list flags the loudest wording (`identical`,
+`byte-identical`, `pixel-identical`).
+
+**Test-first units need a red baseline.** A unit that authors a test before the
+code it tests exists must state its pass condition as an explicit red baseline
+(the test fails, then the following source unit makes it pass), not as a green
+suite at a position where the code does not exist yet. Record this in the
+step's instructions and in the unit's intended change (for example
+`type: test-first`), so the executor does not read "test passes" as "done".
 
 After decomposing a goal, check that its inventory rows and step files are a
 one-to-one mapping. If a material uncertainty remains, create a bounded
@@ -595,7 +658,7 @@ finding cites exactly one. Before recording a resolution, sweep all seven:
    before what it verifies when the edge lags.
 7. **Testing companion** — `<step>-testing.md`; the executor runs the old
    procedure when this lags. It is a real surface with its own writer:
-   `update-plan-content.sh -ss <plan> step:<goal>/<step>-testing automated-tests
+   `update-plan-content.sh -ss <plan> <goal>/<step>-testing automated-tests
    -p 2.1: …` (and `create-step-testing.sh --overwrite` to replace it). Read
    the companion first, not last — on plans with verification-heavy goals it is
    where execution actually happens.
@@ -615,7 +678,7 @@ remaining hits are deliberate references to the corrected history.
 
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
-all six surfaces while the verification unit that grades it still checks the
+all seven surfaces while the verification unit that grades it still checks the
 old behaviour. Whenever a unit's change target, scope, or behaviour changes,
 re-read the verification unit that grades it (`--propagation` surfaces which
 verification units name it).
@@ -775,12 +838,12 @@ Run the validator before creating trackers or presenting the plan as ready:
 ```bash
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" <plan-directory>
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # six-surface consistency (on by default); --no-propagation disables it
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # surface-consistency checks (on by default); --no-propagation disables it
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # bundled case-count phrase list; sweeps companions too
 ```
 
-`--propagation` encodes the six-surface rule (§ "Resolving a finding") and runs
+`--propagation` encodes the surface rule (§ "Resolving a finding") and runs
 by default. It flags a verification unit that grades a sibling with no
 dependency path to it (honouring deliberate reverse/baseline orderings and
 transitive ordering) and a graph leaf in a goal that owns a verification unit.
@@ -975,6 +1038,12 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --insert-after <plan-directory> plan 6.1 "<new paragraph>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --delete-paragraph <plan-directory> step:01-g/01-step-a 5.2   # delete one paragraph; later labels in the section renumber
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W88 --scope "RequestEmployeeSet::forCustomer()"   # --scope is the flag form of the scope positional
+"$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W88 --type source --description "<new intended change>"   # amend type/description in place
+"$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --file review.csv      # rewrite the Findings table from a CSV file
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table into adversarial-review-history.md under Cycle 7
+"$PLANNING_SKILL_DIR/scripts/mint-fix-keys.sh" <plan-directory>                                     # (re)derive per-(finding,work-unit) fix keys into fix-keys.json
+"$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; warn on self-certification
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status <plan-directory> approved
@@ -983,8 +1052,8 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>"
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --overwrite   # replace a companion; input is validated before any file is touched
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> step:<goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
-"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> step:<goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> <goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
+"$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> <goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<old phrase>' --in all
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --document step:<goal>/<step>-testing   # verify wording at the surface a finding named
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" find <plan-directory> '<phrase>' --full   # no excerpt truncation
@@ -1061,7 +1130,7 @@ atomic; a batch failure is recorded as incomplete and is never presented as a
 completed plan update. Do not use batching to bypass helper validation or hide
 an intermediate failure.
 
-### 4.2 v27 replacement package handoff
+### 4.6 v27 replacement package handoff
 
 The v27 replacement package is repository-owned until its closure plan is
 approved. Its finite installable boundary is the six-column
@@ -1069,7 +1138,7 @@ approved. Its finite installable boundary is the six-column
 source/destination ownership record and the two repository-root v27 brainstorm
 inputs are source-only. The package contains the v27 contract, benchmark and
 oracle records, fixtures, runner evidence, installer proof, this skill, and
-the 28 planning helper scripts listed by that manifest.
+the planning helper scripts listed by that manifest.
 
 The coordinator resume order is: close authority/recovery, transaction/lease,
 package/wire, and benchmark/oracle contracts; generate and verify the bounded

@@ -633,6 +633,9 @@ skill_files() {
             cat <<'EOF'
 SKILL.md
 REVIEWER.md
+references/plan-read-contract.md
+references/ui-user-story-validation.md
+references/comment-discipline-contract.md
 telemetry-schema.json
 context-v27/brainstorm-limiting-context.v27.md
 context-v27/brainstorm-limiting-context.v27-contract.json
@@ -652,6 +655,15 @@ tests/fixtures/progress-shape/02-goal-b/goal.md
 tests/fixtures/progress-shape/02-goal-b/progress.md
 tests/fixtures/progress-shape/02-goal-b/steps/01-step-b.md
 tests/fixtures/progress-shape/02-goal-b/steps/02-step-b2.md
+tests/fixtures/adversary-probe/FIXTURE-VERSION
+tests/fixtures/adversary-probe/README.md
+tests/fixtures/adversary-probe/plan-description.md
+tests/fixtures/adversary-probe/progress.md
+tests/fixtures/adversary-probe/work-unit-inventory.md
+tests/fixtures/adversary-probe/adversarial-review.md
+tests/fixtures/adversary-probe/01-health-endpoint/goal.md
+tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
+tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
 tests/test-planning-context-v27-contract.sh
 tests/test-installer-manifest.sh
 tests/test-plan-env.sh
@@ -711,6 +723,7 @@ scripts/update-step.sh
 scripts/validate-plan.sh
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
+scripts/run-adversary-probe.sh
 EOF
             ;;
         project-specificies)

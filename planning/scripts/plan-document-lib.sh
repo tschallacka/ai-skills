@@ -138,7 +138,7 @@ plan_document_path() {
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         *)
-            plan_die "Unknown document ID: $document_id (use plan, review, goal:<goal>, step:<goal>/<step>, or unit:<WNN>)"
+            plan_die "Unknown document ID: $document_id (use plan, review, goal:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, stories, fixes, fix-keys, or approval)"
             ;;
     esac
 }

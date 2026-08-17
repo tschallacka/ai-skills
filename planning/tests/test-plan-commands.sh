@@ -423,6 +423,28 @@ printf '{"status":"pending"}\n' > "$plan_dir/approval.json"
 "$script_dir/plan-content.sh" get "$plan_dir" fix-keys | grep -Fq 'session_id'
 "$script_dir/plan-content.sh" get "$plan_dir" approval | grep -Fq 'pending'
 "$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | grep -Fq 'unit:'
+# report 12: roster↔inventory set check — a goal §9.x roster that omits an
+# inventory-assigned unit is a propagation fail.
+git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
+python3 - "$plan_dir/03-wire/goal.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+for block in ("§ 9.2\n`W11` — Verify the order history block renders.\n",):
+    s = s.replace(block, "")
+open(p, "w").write(s)
+PY
+if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/roster.log" 2>&1; then
+    echo 'report 12: roster omitting an assigned unit validated clean.' >&2
+    exit 1
+fi
+grep -Fq 'roster omits W11' "$temporary_root/roster.log"
+git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
+# report 12: coverage row crediting a verification unit (which grades rather
+# than owns an outcome) is a stale credit WARN.
+"$script_dir/add-coverage.sh" "$plan_dir" 'The order history surface is verified.' W11 'grading credit' >/dev/null 2>&1
+"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/coverage-stale.log" 2>&1 || true
+grep -Fq "coverage row 'The order history surface is verified.' credits W11 (a verification unit" "$temporary_root/coverage-stale.log"
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {

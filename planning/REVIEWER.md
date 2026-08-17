@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `7967467a850930ea2bf44d0dbf482cf201dc5119dbd3426fda366de3fa7634cc`
+> Source SHA-256: `e9304c1efc2abd60ff10c3994b29bbace1c6dfe2a61238c0fa4f9181f87e02ab`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -116,7 +116,7 @@ finding cites exactly one. Before recording a resolution, sweep all seven:
    before what it verifies when the edge lags.
 7. **Testing companion** — `<step>-testing.md`; the executor runs the old
    procedure when this lags. It is a real surface with its own writer:
-   `update-plan-content.sh -ss <plan> step:<goal>/<step>-testing automated-tests
+   `update-plan-content.sh -ss <plan> <goal>/<step>-testing automated-tests
    -p 2.1: …` (and `create-step-testing.sh --overwrite` to replace it). Read
    the companion first, not last — on plans with verification-heavy goals it is
    where execution actually happens.
@@ -136,7 +136,7 @@ remaining hits are deliberate references to the corrected history.
 
 A resolution recorded without the sweep is a claim, not a fix. The
 verification-one-unit-away variant is the hardest: a unit may be correct across
-all six surfaces while the verification unit that grades it still checks the
+all seven surfaces while the verification unit that grades it still checks the
 old behaviour. Whenever a unit's change target, scope, or behaviour changes,
 re-read the verification unit that grades it (`--propagation` surfaces which
 verification units name it).
