@@ -467,25 +467,57 @@ if grep -qE 'roster (omits|lists)' "$temporary_root/roster13.log"; then
     echo 'report 13: a summary-roster goal with partial blurbs and a cross-plan ref was flagged.' >&2
     exit 1
 fi
-# report 15 §4: a literal multi-word <...> placeholder in a GENERATED artifact
-# (progress tracker) is a validator FAIL, even when the rest of the plan is fine.
+# report 16: a registered placeholder in a GENERATED artifact (progress tracker)
+# is a validator FAIL, even without --complete (no author ever fills it).
 printf '\n## Work units\n\n| Goalname | Description | Status |\n|---|---|---|\n| 03-wire | <short description> | ok |\n' >> "$plan_dir/progress.md"
 if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder.log" 2>&1; then
-    echo 'report 15: a generated artifact placeholder validated clean.' >&2
+    echo 'report 16: a generated artifact placeholder validated clean.' >&2
     exit 1
 fi
-grep -Fq 'unregistered/stale placeholder' "$temporary_root/placeholder.log"
+grep -Fq 'registered placeholder that no author will fill' "$temporary_root/placeholder.log"
 git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
-# A REGISTERED authoring placeholder (e.g. <definition of done>) is allowed: the
-# registry is the allowlist, and only unregistered/stale placeholders fail.
+# report 16: a registered authored placeholder in a generated artifact FAILS too
+# (the artifact is generated, so no human fills it), regardless of surface.
 printf '\n## Work units\n\n| Goalname | Description | Status |\n|---|---|---|\n| 03-wire | <definition of done> | ok |\n' >> "$plan_dir/progress.md"
-"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder-ok.log" 2>&1 || true
-if grep -Fq 'unregistered/stale placeholder' "$temporary_root/placeholder-ok.log"; then
-    echo 'report 15: a registered authoring placeholder was flagged.' >&2
-    cat "$temporary_root/placeholder-ok.log" >&2
+if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder-gen.log" 2>&1; then
+    echo 'report 16: a registered authored placeholder in a generated artifact validated clean.' >&2
+    exit 1
+fi
+grep -Fq 'registered placeholder that no author will fill' "$temporary_root/placeholder-gen.log"
+git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
+# report 16: author-written <...> prose/patterns that are NOT registered are
+# never flagged (literal registry match; no code-span exemption needed).
+printf '\n## Work units\n\n| Goalname | Description | Status |\n|---|---|---|\n| 03-wire | `<ticket number>` and `<my own tag>` in prose | ok |\n' >> "$plan_dir/progress.md"
+"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/placeholder-prose.log" 2>&1 || true
+if grep -Fq 'ticket number' "$temporary_root/placeholder-prose.log" || grep -Fq 'my own tag' "$temporary_root/placeholder-prose.log"; then
+    echo 'report 16: unregistered author prose/patterns were flagged.' >&2
+    cat "$temporary_root/placeholder-prose.log" >&2
     exit 1
 fi
 git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
+# report 16 (authored docs): a registered placeholder in an AUTHORED doc is a
+# WARN without --complete and a FAIL under --complete. Build a fresh plan with
+# the real generators (create-plan + add-goal + add-work-unit) so its authored
+# docs carry genuine template placeholders.
+fresh_plan="$temporary_root/fresh-plan"
+"$script_dir/create-plan.sh" "$fresh_plan" 'Fresh plan' >/dev/null
+"$script_dir/add-goal.sh" "$fresh_plan" 01-goal 'Fresh goal' 'Fresh outcome' >/dev/null
+"$script_dir/add-work-unit.sh" "$fresh_plan" 01-goal W01 code N/A 'scope' N/A 'change' '—' 01-goal 01-step-fresh >/dev/null 2>&1 || true
+"$script_dir/validate-plan.sh" "$fresh_plan" >"$temporary_root/fresh-warn.log" 2>&1 || true
+if ! grep -q 'WARN: .* contains a registered placeholder (fill before completion)' "$temporary_root/fresh-warn.log"; then
+    echo 'report 16: a fresh plan did not WARN on its emitted authored placeholders.' >&2
+    cat "$temporary_root/fresh-warn.log" >&2
+    exit 1
+fi
+if "$script_dir/validate-plan.sh" --complete "$fresh_plan" >"$temporary_root/fresh-complete.log" 2>&1; then
+    echo 'report 16: a fresh plan with emitted placeholders validated clean under --complete.' >&2
+    exit 1
+fi
+if ! grep -Fq 'still contains a registered placeholder' "$temporary_root/fresh-complete.log"; then
+    echo 'report 16: a fresh plan with emitted placeholders did not FAIL under --complete.' >&2
+    cat "$temporary_root/fresh-complete.log" >&2
+    exit 1
+fi
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
 printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {
@@ -558,4 +590,46 @@ if [ -f "$plan_dir/ui-story-runs/US-01.md" ]; then
         exit 1
     fi
 fi
+# ---- report 16 §5 case 5: registry hygiene ----
+# Every in-document placeholder the authoring/generated templates can emit must
+# be registered in placeholders.json (a literal-list contract). CLI usage/arg
+# tokens are NOT document placeholders and must stay out of the registry.
+registry="$script_dir/../placeholders.json"
+jq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
+    echo 'placeholders.json is not a JSON array.' >&2; exit 1
+}
+# (1) Every registered token is a well-formed <...> literal.
+while IFS= read -r tok; do
+    case "$tok" in
+        '<'*'>') ;;
+        *) echo "registry entry is not a <...> token: $tok" >&2; exit 1 ;;
+    esac
+done < <(jq -r '.placeholders[].token' "$registry")
+# (2) Every authoring-template in-document placeholder is registered.
+missing=0
+for t in \
+    '<agreed sequence and major implementation decisions>' \
+    '<confirmed facts, available assets, and relevant prior work>' \
+    '<definition of done>' '<files, modules, layouts, services, data, and systems>' \
+    '<included and explicitly excluded behavior>' '<items that could affect execution>' \
+    '<permissions, ownership, conventions, and user choices>' '<why>' \
+    '<add work units with add-work-unit.sh>' '<approach, risks, and edge cases>' \
+    '<concrete affected areas>' '<confirmed facts and prerequisite handoffs>' \
+    '<how this goal contributes to the initiative>' \
+    '<prerequisites and precise downstream handoffs>' \
+    '<set to yes when this goal has a testable behavior; explain research or other untestable goals>' \
+    '<direct action on this one target>' '<observable result for this target>' \
+    '<what the next named work unit can rely on>' '<one concrete change>' \
+    '<outcome>' '<why this work unit covers it>' '<verbatim or precise summary>' \
+    '<what was checked>' '<why no unresolved work remains>'; do
+    jq -e --arg t "$t" '.placeholders[] | select(.token == $t)' "$registry" >/dev/null 2>&1 || {
+        echo "registry missing emitted placeholder: $t" >&2; missing=1
+    }
+done
+# (3) The generated-artifact placeholders are registered as surface:generated.
+for t in '<short description>' '<required only when this goal has one permitted work unit>'; do
+    surf="$(jq -r --arg t "$t" '.placeholders[] | select(.token == $t) | .surface' "$registry" 2>/dev/null)"
+    [ "$surf" = generated ] || { echo "registry: $t must be surface=generated (got '$surf')" >&2; missing=1; }
+done
+[ "$missing" -eq 0 ] || exit 1
 printf 'Planning command regression test passed.\n'

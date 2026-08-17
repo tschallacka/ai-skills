@@ -194,77 +194,83 @@ for doc in "${plan_docs[@]}"; do
     fi
 done
 
-# Template-placeholder check (report 15 §4), registry-driven: a literal <...>
-# outside a fenced code block is an unfilled placeholder UNLESS it is a
-# registered authoring-template placeholder (planning/placeholders.json).
-# Generated artifacts (progress trackers, UI-story run caches, goal-size
-# exception section) must not contain ANY placeholder; authoring templates
-# (plan-description/goal/step prose, where <definition of done> is expected
-# mid-draft) legitimately contain registered placeholders. A placeholder that
-# is not in the registry is stale/unregistered and fails everywhere.
-# Single-word HTML/XML tags (<block>, <referenceBlock>) are not placeholders.
+# Template-placeholder check (report 15 §4, report 16): detection is LITERAL
+# registry membership. planning/placeholders.json is the exact, finite list of
+# <...> tokens the skill's templates emit. A token is a placeholder iff it is
+# registered here — no shape heuristic, so single-word (<why>), spaced, and
+# hyphenated tokens are all handled by construction, and author-written <...>
+# prose/patterns are never flagged because they are not in the list (no
+# code-span exemption needed). Fenced code blocks are still skipped. Each entry
+# carries a surface (authored | generated) that drives the verdict:
+#   - not registered              -> ignored (author's own prose)
+#   - registered, authored doc    -> WARN; FAIL under --complete
+#   - registered, generated doc   -> FAIL always (no human ever fills it)
 registry_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/placeholders.json"
-# Multi-word <...> token: single-word HTML/XML tags (<block>, <referenceBlock>)
-# are not placeholders and never match. Every multi-word placeholder must be
-# registered in placeholders.json or it is stale/unregistered and FAILS.
-placeholder_re='<[A-Za-z][A-Za-z0-9_.,;:/()&|-]* [A-Za-z0-9 _.,;:/()&|-]*>'
-is_registered_placeholder() {
-    # "$1" is the full <...> token. Registered -> 0 (allowed); else 1 (unregistered).
+placeholder_re='<[^<>]*[A-Za-z][^<>]*>'
+
+# Print the registry surface for a token; empty if not registered.
+token_surface() {
     [ -f "$registry_file" ] || return 1
-    jq -e --arg p "$1" '.placeholders | index($p) != null' "$registry_file" >/dev/null 2>&1
+    jq -r --arg t "$1" '.placeholders[] | select(.token == $t) | .surface' "$registry_file" 2>/dev/null
 }
-scan_placeholders() {
-    awk -v re="$placeholder_re" '
+
+# Scan one file for registered placeholders and apply the surface-based verdict.
+#   check_placeholders <authored|generated> <label> <file>
+check_placeholders() {
+    local surface_arg="$1" label="$2" file="$3" tok surf
+    [ -f "$file" ] || return 0
+    while IFS= read -r tok; do
+        surf="$(token_surface "$tok")"
+        [ -n "$surf" ] || continue   # not registered -> author prose, ignore
+        if [ "$surface_arg" = generated ]; then
+            fail "$label contains a registered placeholder that no author will fill: $tok"
+        elif [ "$complete_mode" = true ]; then
+            fail "$label still contains a registered placeholder: $tok"
+        else
+            warn "$label contains a registered placeholder (fill before completion): $tok"
+        fi
+    done < <(awk -v re="$placeholder_re" '
         /^```/ { in_fence = !in_fence; next }
         !in_fence {
             while (match($0, re)) {
-                tok = substr($0, RSTART, RLENGTH)
-                if (!seen[tok]++) { print tok }
+                print substr($0, RSTART, RLENGTH)
                 $0 = substr($0, RSTART + RLENGTH)
             }
         }
-    ' "$1" | while IFS= read -r tok; do
-        if ! is_registered_placeholder "$tok"; then
-            printf '%s\n' "$tok"
-        fi
-    done
+    ' "$file" | sort -u)
 }
-# Plan-level progress tracker.
-[ -f "$plan_dir/progress.md" ] && {
-    hit="$(scan_placeholders "$plan_dir/progress.md")"
-    [ -z "$hit" ] || fail "plan progress.md contains an unregistered/stale placeholder: '$hit'"
-}
-# Goal progress trackers and goal-size-exception sections.
+# Authored documents: plan narrative, review, inventory, goals, and steps.
+for doc in "${plan_docs[@]}"; do
+    [ -f "$doc" ] || continue
+    check_placeholders authored "$(basename "$doc")" "$doc"
+done
+# Generated artifacts: plan progress tracker.
+[ -f "$plan_dir/progress.md" ] && check_placeholders generated "plan progress.md" "$plan_dir/progress.md"
+# Generated artifacts: goal progress trackers and goal-size-exception sections.
 for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
     [ -d "$goal_dir" ] || continue
-    if [ -f "$goal_dir/progress.md" ]; then
-        hit="$(scan_placeholders "$goal_dir/progress.md")"
-        [ -z "$hit" ] || fail "$(basename "$goal_dir") progress.md contains an unregistered/stale placeholder: '$hit'"
-    fi
+    [ -f "$goal_dir/progress.md" ] && check_placeholders generated "$(basename "$goal_dir") progress.md" "$goal_dir/progress.md"
     [ -f "$goal_dir/goal.md" ] || continue
-    hit="$(awk -v re="$placeholder_re" '
+    while IFS= read -r tok; do
+        surf="$(token_surface "$tok")"
+        [ -n "$surf" ] || continue
+        fail "$(basename "$goal_dir") goal-size exception contains a registered placeholder that no author will fill: $tok"
+    done < <(awk -v re="$placeholder_re" '
         /^## Goal-size exception/ { in_sec = 1; next }
         in_sec && /^## / && !/^## Goal-size exception/ { exit }
         in_sec && /^```/ { in_fence = !in_fence; next }
-        in_sec && !in_fence {
+        !in_fence && in_sec {
             while (match($0, re)) {
-                tok = substr($0, RSTART, RLENGTH)
-                if (!seen[tok]++) { print tok }
+                print substr($0, RSTART, RLENGTH)
                 $0 = substr($0, RSTART + RLENGTH)
             }
         }
-    ' "$goal_dir/goal.md" | while IFS= read -r tok; do
-        if ! is_registered_placeholder "$tok"; then
-            printf '%s\n' "$tok"
-        fi
-    done)"
-    [ -z "$hit" ] || fail "$(basename "$goal_dir") goal-size exception contains an unregistered/stale placeholder: '$hit'"
+    ' "$goal_dir/goal.md" | sort -u)
 done
-# UI-story run caches.
+# Generated artifacts: UI-story run caches.
 if [ -d "$plan_dir/ui-story-runs" ]; then
     while IFS= read -r cache_file; do
-        hit="$(scan_placeholders "$cache_file")"
-        [ -z "$hit" ] || fail "$(basename "$cache_file") run cache contains an unregistered/stale placeholder: '$hit'"
+        check_placeholders generated "$(basename "$cache_file") run cache" "$cache_file"
     done < <(find "$plan_dir/ui-story-runs" -maxdepth 1 -name '*.md' -type f 2>/dev/null)
 fi
 

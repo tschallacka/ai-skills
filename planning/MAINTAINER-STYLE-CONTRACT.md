@@ -94,21 +94,28 @@ The review status and plan-description status are synchronized atomically.
 ## Placeholder registry
 
 Every `<...>` placeholder the skill emits must be registered in
-`planning/placeholders.json`. `validate-plan.sh` scans plan artifacts for
-multi-word `<...>` tokens outside fenced code blocks and jq-checks each against
-the registry:
+`planning/placeholders.json` with a `surface` (`authored` | `generated`).
+Detection is **literal** registry membership — a token is a placeholder iff it
+is registered, so single-word (`<why>`), spaced, and hyphenated tokens are all
+handled by construction and author-written `<...>` prose/patterns are never
+flagged (they are not in the list; no code-span exemption needed). Fenced code
+blocks are skipped.
 
-- A placeholder **in** the registry is a registered authoring-template
-  placeholder (e.g. `<definition of done>`, `<why>`) and is allowed mid-draft.
-- A placeholder **not** in the registry is stale/unregistered and FAILS
-  validation everywhere (progress trackers, UI-story run caches, and the
-  goal-size-exception section must contain no placeholders at all).
-- Single-word HTML/XML tags (`<block>`, `<referenceBlock>`) are not
-  placeholders and never match.
+Verdict by document surface:
+
+- Token **not** in the registry → ignored entirely (author's own prose).
+- Registered, in an **authored** document (plan narrative, review, inventory,
+  goal, step) → `WARN`; `FAIL` under `--complete` (a plan is not complete with
+  an unwritten objective).
+- Registered, in a **generated** artifact (progress trackers, UI-story run
+  caches, goal-size-exception section) → `FAIL` always, even without
+  `--complete` — no author ever fills a machine table.
 
 Adding a new template placeholder to any generator script requires registering
-it in `placeholders.json`; the installer-manifest test keeps `placeholders.json`
-listed in `install.sh`, `V27-PACKAGE-MANIFEST.txt`, and `V27-PACKAGE-MAP.tsv`.
+it (with the correct `surface`) in `placeholders.json`; the installer-manifest
+test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.txt`,
+and `PACKAGE-MAP.tsv`. A typo'd placeholder (`<shortdescription>`) is a
+maintainer bug caught by the test suite, not by the validator.
 
 ## Persona & reader system
 
