@@ -907,28 +907,70 @@ if [ "$propagation_mode" = true ]; then
     done
 
     # (e) Roster vs inventory: a goal's §9.x Owned-work-units roster must be
-    #     exactly the set the inventory assigns to it. The loose grep above
-    #     lets a unit mentioned anywhere in goal.md satisfy the check; this
-    #     extracts the actual §9.x roster and compares both directions.
+    #     exactly the set the inventory assigns to it. The authoritative roster
+    #     is the summary paragraph §9.1 (ids written bare, before the em-dash),
+    #     NOT the per-unit blurbs §9.2+, which accumulate as units are added and
+    #     are not guaranteed to exist for every unit (report 13). Extract the
+    #     union of the leading comma-separated run of §9.1 and the backticked
+    #     blurb ids, then compare both directions.
     for goal_name in "${!goal_units[@]}"; do
         goal_file="$plan_dir/$goal_name/goal.md"
         [ -f "$goal_file" ] || continue
-        roster="$(awk '
+        # Assigned set: the inventory's units for this goal.
+        assigned="$(for id in ${goal_units[$goal_name]:-}; do printf '%s ' "$id"; done)"
+        roster_ids="$(awk -v assigned=" $assigned " '
+            # Capture the §9.1 paragraph (the line after the § 9.1 label, until
+            # the next § label or heading).
+            /^§ 9\.1$/ { in_91 = 1; next }
+            in_91 && /^§ / { in_91 = 0 }
+            in_91 && /^## / { in_91 = 0 }
+            in_91 && !/^[[:space:]]*$/ {
+                para = para " " $0
+            }
+            END {
+                if (para != "") {
+                    # Leading run: everything before em-dash / " - " / period /
+                    # "in that order". Split on those and take the head.
+                    head = para
+                    sub(/ —.*/, "", head)
+                    sub(/ - .*/, "", head)
+                    sub(/\..*/, "", head)
+                    sub(/, in that order.*/, "", head)
+                    sub(/ in that order.*/, "", head)
+                    # Bare WNN in the leading run.
+                    n = split(head, parts, /[ ,]+/)
+                    for (i = 1; i <= n; i++) {
+                        if (parts[i] ~ /^W[0-9][0-9]+$/) print parts[i]
+                    }
+                }
+            }
+        ' "$goal_file")"
+        # Add backticked blurb ids (the per-unit paragraphs) across the whole
+        # owned-work-units region.
+        blurb_ids="$(awk '
             /^## Owned work units$/ { in_section = 1; next }
             /^## Goal-size exception$/ { in_section = 0 }
-            in_section && /`W[0-9][0-9]+`/ { print $0 }
+            in_section && /`W[0-9][0-9]+`/ {
+                line = $0; gsub(/`/, "", line)
+                n = split(line, toks, /[ `,]+/)
+                for (i = 1; i <= n; i++) if (toks[i] ~ /^W[0-9][0-9]+$/) print toks[i]
+            }
         ' "$goal_file")"
-        roster_ids="$(printf '%s\n' "$roster" | grep -oE 'W[0-9][0-9]+' | sort -u | tr '\n' ' ')"
-        # Units the inventory assigns to this goal.
-        assigned="$(for id in ${goal_units[$goal_name]:-}; do printf '%s ' "$id"; done)"
-        # Roster-only units (in §9.x but not assigned to this goal).
+        roster_ids="$(printf '%s\n%s\n' "$roster_ids" "$blurb_ids" | grep -E '^W[0-9][0-9]+$' | sort -u | tr '\n' ' ')"
+        # Roster-only units: a roster id that the inventory does not assign to
+        # this goal. Skip ids not in the plan at all (cross-plan references such
+        # as "the critical-path plan's W83" appear after the em-dash and so are
+        # already excluded from the leading run, but a defensive skip is cheap).
         for rid in $roster_ids; do
+            if [ -z "${unit_type[$rid]+x}" ]; then
+                continue
+            fi
             case " $assigned " in
                 *" $rid "*) : ;;
                 *) fail "$goal_name §9.x roster lists $rid which the inventory does not assign to this goal; reconcile the roster and the inventory" ;;
             esac
         done
-        # Assigned units missing from the roster (inventory assigns, §9.x omits).
+        # Assigned units missing from the roster.
         for aid in $assigned; do
             case " $roster_ids " in
                 *" $aid "*) : ;;

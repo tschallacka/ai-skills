@@ -440,6 +440,30 @@ if "$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/roster.log" 2>&1
 fi
 grep -Fq 'roster omits W11' "$temporary_root/roster.log"
 git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
+# report 13: a summary §9.1 that lists all units bare before the em-dash (with
+# a cross-plan W99 after it) plus only ONE per-unit blurb is a valid roster —
+# the per-unit blurbs are NOT guaranteed to exist for every unit. Must not FAIL.
+python3 - "$plan_dir/03-wire/goal.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+start = s.index('## Owned work units')
+end = s.index('## Goal-size exception')
+repl = ("## Owned work units\n\n"
+        "§ 9.1\n"
+        "W10, W11, in that order as steps 01 to 02 — both units, including the extended-rendering plan's W99\n\n"
+        "## Testing requirement\n\n"
+        "| Test required | Rationale |\n|---|---|\n"
+        "| yes | observable |\n\n"
+        "§ 9.2\n`W10` — Render the order history block.\n")
+s = s[:start] + repl + s[end:]
+open(p, 'w').write(s)
+PY
+"$script_dir/validate-plan.sh" "$plan_dir" >"$temporary_root/roster13.log" 2>&1 || true
+if grep -qE 'roster (omits|lists)' "$temporary_root/roster13.log"; then
+    echo 'report 13: a summary-roster goal with partial blurbs and a cross-plan ref was flagged.' >&2
+    exit 1
+fi
 # report 12: coverage row crediting a verification unit (which grades rather
 # than owns an outcome) is a stale credit WARN.
 "$script_dir/add-coverage.sh" "$plan_dir" 'The order history surface is verified.' W11 'grading credit' >/dev/null 2>&1
