@@ -14,7 +14,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    sed -n '2,7p' "$0" >&2
+    awk 'NR == 1 { next }
+         /^#/ {
+             sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
+             print; next
+         }
+         { exit }' "$0" >&2
     exit 64
 }
 
@@ -23,7 +29,10 @@ usage() {
 AGENT_NAME="$1"
 AGENT_CLI="${2:-$AGENT_NAME}"
 MODEL_ENV="${3:-$(printf '%s_MODEL' "$(printf '%s' "$AGENT_NAME" | tr '[:lower:]' '[:upper:]')")}"
-MODEL_DEFAULT="${4:-}"
+# A driver with an empty agent_default_model fails the runtime contract test
+# (an unset agent_model_env would then resolve to no model at all), so the
+# default is a loud placeholder the implementer must replace.
+MODEL_DEFAULT="${4:-TODO-set-default-model}"
 
 if [[ ! "$AGENT_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     echo "Agent name must start with a letter or number and contain only letters, numbers, '.', '_' or '-'" >&2

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# W14: deterministic frozen-archive replay. The two sealed Reviewer B
-# approvals (iterative 20260811T203343Z and fresh 20260811T205844Z) are
-# re-graded against pilot-blinded-defects.json using a mirror of the grader's
-# predicate logic (PATH / LOCATION / SIGNAL / CORRECTION / mutated-conflict),
-# and the pinned classifications are asserted. No archived file is edited.
+# Deterministic frozen-archive replay: the two sealed Reviewer B approvals are
+# re-graded against pilot-blinded-defects.json through a mirror of the grader's
+# predicates, and the pinned classifications asserted. No archived file is edited.
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 results_root="$(cd "$root/.." && pwd)/results"

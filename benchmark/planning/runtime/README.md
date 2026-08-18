@@ -32,22 +32,30 @@ data; they must not launch the agent themselves — `launch_agent` in
 | `agent_bin` | variable | CLI name the driver puts at the front of `AGENT_ARGV`, e.g. `codex`. Used by the reviewer-presence gate (`command -v "$agent_bin"`). |
 | `agent_model_env` | variable | environment variable that overrides the model (e.g. `CODEX_MODEL`). |
 | `agent_default_model` | variable | model string used when `agent_model_env` is unset. |
-| `agent_argv_worker <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV` for a worker run: `cwd=<workspace>`, capsule/workspace made readable, `<prompt>` content as the message. |
-| `agent_argv_reviewer <workspace> <capsule> <prompt> [binary]` | function | fills `AGENT_ARGV` for a Reviewer A/B run. Optional `$4` is the `REVIEWER_COMMAND` test seam: it replaces the driver binary (argv[0]) rather than appending codex flags. For a non-codex driver the seam is documented codex-only; when set it must not leak invalid flags. |
-| `agent_argv_analyzer <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV` for the batch analyzer run. |
-| `agent_session_id <agent-output.jsonl>` | function | prints the session id extracted from the agent's output stream, or empty for an honest degrade. |
-| `agent_telemetry <session-id>` | function | prints `thread_id`, `usage_records`, `total_usage_tokens`, `telemetry_status` (plus optional `telemetry_db`/`telemetry_source`). Never fabricate token numbers; when no documented store exists for the agent print `telemetry_status=unavailable:...`. |
+| `agent_argv_worker <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV` and `AGENT_CWD` for a worker run: `AGENT_CWD=<workspace>`, capsule/workspace made readable, `<prompt>` content as the message. |
+| `agent_argv_reviewer <workspace> <capsule> <prompt> [binary]` | function | fills `AGENT_ARGV`/`AGENT_CWD` for a Reviewer A/B run. Optional `$4` is the `REVIEWER_COMMAND` test seam: it replaces the driver binary (argv[0]) rather than appending codex flags. For a non-codex driver the seam is documented codex-only; when set it must not leak invalid flags. |
+| `agent_argv_analyzer <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV`/`AGENT_CWD` for the batch analyzer run. |
+| `AGENT_CWD` | variable (set by every `agent_argv_*`) | the directory the agent must run in — always the workspace. `launch_agent` cds there before exec, because not every CLI has a cwd flag (codex `-C`, opencode `--dir`, claude none) and `env -C` is GNU-only. |
+| `agent_session_id <agent-output.jsonl>` | function | prints the session id extracted from the agent's output stream, or empty for an honest degrade. Parse line by line and return 0 on a missing/unparsable stream: the file is JSONL with the agent's stderr merged in, and the harness turns empty output into `SESSION_ID=unavailable` (tainted) rather than aborting the case. |
+| `agent_telemetry <session-id>` | function | prints one `KEY=VALUE` per line, each key at column 0, first match per key wins: `thread_id`, `usage_records`, `total_usage_tokens`, `telemetry_status` (plus optional `telemetry_db`/`telemetry_source`). Never fabricate token numbers; when no documented store exists for the agent print `telemetry_status=unavailable:...`. |
 
 The resolved model for the active driver is `"${!agent_model_env:-agent_default_model}"`;
 `agent_resolve_model` (from `lib-agent.sh`) prints it. `agent_argv_*` functions
 must call it so each role honours `CODEX_MODEL`/`OPENCODE_MODEL`/`CLAUDE_MODEL`.
+A driver is **sourced**, never executed, so it must never `exit`: guard arity
+with `[ "$#" -eq 3 ] || return 64` and return a sysexits code, letting the
+harness decide what an argv failure means. Never hardcode a model in the argv
+either — that silently stops the role honouring the harness override.
 
 ## Active-agent resolution
 
 `agent-env.sh` `resolve_active_agent <runtime_dir>` exports `AGENT_DRIVER`:
 
 1. `BENCHMARK_AGENT` set and a driver exists under `runtime/<agent>/` → selected.
-2. `BENCHMARK_AGENT` set to an unknown agent → fail closed (exit 64).
+2. `BENCHMARK_AGENT` set to an unknown agent → fail closed (exit 64). Because
+   `lib-agent.sh` is *sourced*, it propagates that status with `exit "$?"`, so a
+   typo in `BENCHMARK_AGENT` refuses the run instead of producing an empty,
+   apparently successful batch.
 3. `BENCHMARK_AGENT` unset → `codex` (the unchanged default harness path and
    test integration need no env).
 4. No `codex` driver → best-effort detection: if exactly one installed CLI
@@ -64,12 +72,24 @@ Sourcing `lib-agent.sh` resolves `RUNTIME_DIR` from its own location, sources
 `agent-env.sh`, resolves `AGENT_DRIVER`, sources the driver, and exports:
 
 - `launch_agent <mode> <timeout> <output|'-'>` — runs `${AGENT_ARGV[@]}`
-  (set by a driver argv function first) in the background, then records
-  `AGENT_PID` and (for `setsid` mode) `AGENT_PGID`.
-  - `mode=setsid` wraps with `setsid` and the given `timeout` (e.g. `45m`);
-    this is used by workers and reviewers.
+  (set by a driver argv function first) from `AGENT_CWD` in the background, then
+  records `AGENT_PID` and (for `setsid` mode) `AGENT_PGID`.
+  - `mode=setsid` wraps with `setsid --wait` and the given `timeout` (e.g.
+    `45m`); this is used by workers and reviewers. `setsid` **forks** rather
+    than execs when it already leads a process group, so without `--wait` `$!`
+    can be a parent that exits 0 while the agent still runs — `wait_agent`
+    would then record `AGENT_EXIT=0` for an unfinished agent and the harness
+    would read `worker.jsonl` before it was written.
+  - `setsid` and `timeout` are Linux/util-linux + GNU tools. Both are guarded:
+    a host without `setsid` gets exit 69 with a message, and `gtimeout` (GNU
+    coreutils on macOS) is used when `timeout` is absent.
+  - `AGENT_PGID` is polled rather than read once, because a not-yet-scheduled
+    agent has no observable process group and an empty `AGENT_PGID` silently
+    disables the process-group kill and taints the run's process audit.
   - `mode=background` is a plain background run with **no setsid and no
-    timeout**; it preserves the pre-refactor analyzer semantics exactly.
+    timeout**; it preserves the pre-refactor analyzer semantics exactly. That
+    means the batch analyzer — which gates the batch exit code — is unbounded
+    by construction; see the risk note below.
 - `wait_agent` — waits for `AGENT_PID` and stores the exit code in
   `AGENT_EXIT`.
 - `kill_process_tree <pid> <signal>` — recursive child-tree kill.
@@ -115,8 +135,12 @@ their own `agent_session_id`.
    (see the contract table above), including the model env/default pair.
 3. Give the agent real capsule/workspace readability through its native
    mechanism (e.g. codex `--add-dir`, claude `--add-dir`, opencode
-   `--dir` + `-f` attachments / `--auto`). Do not fake a normalized flag
-   layer; record the mechanism in the driver.
+   `--dir` + `-f` attachments enumerated from the capsule / `--auto`). Do not
+   fake a normalized flag layer; record the mechanism in the driver. Never
+   hardcode capsule-relative paths: the three capsules have different layouts
+   (worker nests `planning/`, reviewer is flat with the reviewed plan under
+   `plan/`, analyzer holds `benchmark-test.md` + `harness-summary.tsv` +
+   `results/`), so enumerate what the role was handed.
 4. If the agent has a documented telemetry store, implement
    `agent_telemetry`; otherwise keep the honest `unavailable` fallback.
 5. Run a real worker invocation (like the `W13`/`W15` proofs) and record
@@ -152,3 +176,23 @@ BENCHMARK_AGENT=opencode benchmark/planning/setup-benchmark.sh current <dir> <na
 Telemetry is always honest: only the active agent's documented store is read,
 and any missing/invalid identity yields `telemetry_status=unavailable:...`
 rather than a fabricated token count.
+
+## Known risk: the analyzer has no timeout
+
+`run-benchmark.sh` launches the batch analyzer with `launch_agent background ""`,
+which by the definition above applies neither `setsid` nor a timeout — and the
+analyzer's exit code is what gates the whole batch's exit code. A hung analyzer
+therefore hangs the batch indefinitely, after every worker and reviewer has
+already been paid for. This is deliberate (it preserves the pre-refactor
+analyzer semantics) and asserted by `tests/test-safeguards.sh`, so changing it
+is a maintainer decision, not a cleanup.
+
+## Known risk: the `REVIEWER_COMMAND` seam can spend real tokens
+
+`REVIEWER_COMMAND` substitutes argv[0] only, so an override still receives the
+active driver's flags. `setup-benchmark.sh` guards the non-codex case by
+*ignoring the seam and running the real driver*, which means a test that sets
+`REVIEWER_COMMAND` under `BENCHMARK_AGENT=opencode` (or `claude`) silently
+launches a live reviewer and spends real model budget instead of failing. A
+non-codex seam should refuse the run rather than fall through to the real agent;
+that is a maintainer decision because it changes harness behaviour under test.

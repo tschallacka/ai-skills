@@ -3,10 +3,22 @@
 # opencode CLI (`opencode run`).
 #
 # Capsule-read mechanism: the worker/reviewer/analyzer run with `--dir` set to
-# the isolated workspace and attach the key capsule files with `-f` so the
-# prompt can reference them; `--auto` approves the explicit file reads inside
-# the isolated roots. This is opencode's native mechanism (no codex-shaped
-# sandbox flags are faked).
+# the isolated workspace and attach the capsule's files with `-f`; `--auto`
+# approves the file access inside the isolated roots. `opencode run` has no
+# `--add-dir` equivalent, so `-f` attachments plus `--auto` *are* its native
+# mechanism (no codex-shaped sandbox flags are faked).
+#
+# The attachment list is enumerated from the capsule that was actually handed
+# to this role, never hardcoded. The three capsule layouts differ — the worker
+# capsule nests planning/SKILL.md, the reviewer capsule is flat and carries the
+# reviewed plan under plan/, the analyzer capsule carries benchmark-test.md,
+# harness-summary.tsv and results/ — so the previous fixed list of four
+# worker-shaped relative paths granted the reviewer only task-spec.md (never
+# the plan it had to review) and the analyzer nothing at all.
+#
+# Ordering is shallowest-first so the role's top-level instructions and the
+# reviewed plan lead the list; the count is capped and a truncation is reported
+# on stderr rather than silently dropping capsule material.
 #
 # Session id comes from opencode's JSON event stream (`sessionID`).
 # Telemetry reads opencode's own SQLite session store (opencode.db) by session
@@ -19,28 +31,45 @@ agent_bin="opencode"
 agent_model_env="OPENCODE_MODEL"
 agent_default_model="opencode/big-pickle"
 
+# Maximum capsule files attached to one opencode run. A capsule is a handful
+# of documents plus a plan tree; a far larger count means the caller handed us
+# the wrong directory, and truncating loudly beats an unbounded argv.
+_AGENT_OPENCODE_MAX_ATTACHMENTS=200
+
 _agent_opencode_attachments() {
-    # $1 = capsule dir; prints -f flag pairs for the capsule reference files.
-    local capsule="$1" file
-    for file in task-spec.md planning/SKILL.md planning/REVIEWER.md basic-test-proof-plan.md; do
-        if [ -f "$capsule/$file" ]; then
-            printf -- '-f\n%s\n' "$capsule/$file"
+    # $1 = capsule dir; prints '-f <path>' pairs, one per line, for every file
+    # in the capsule, shallowest path first.
+    local capsule="$1" file count=0
+    [ -d "$capsule" ] || { printf 'opencode: capsule directory not found: %s\n' "$capsule" >&2; return 0; }
+    while IFS= read -r file; do
+        if [ "$count" -ge "$_AGENT_OPENCODE_MAX_ATTACHMENTS" ]; then
+            printf 'opencode: capsule %s has more than %s files; attaching the first %s\n' \
+                "$capsule" "$_AGENT_OPENCODE_MAX_ATTACHMENTS" "$_AGENT_OPENCODE_MAX_ATTACHMENTS" >&2
+            break
         fi
-    done
+        printf -- '-f\n%s\n' "$file"
+        count=$((count + 1))
+    done < <(find "$capsule" -type f -print |
+        awk -F/ '{ printf "%03d\t%s\n", NF, $0 }' |
+        LC_ALL=C sort |
+        cut -f2-)
+    [ "$count" -gt 0 ] || printf 'opencode: capsule %s has no files to attach\n' "$capsule" >&2
 }
 
 _agent_opencode_argv() {
     # $1 = binary, $2 = workspace, $3 = capsule, $4 = prompt
+    [ "$#" -eq 4 ] || return 64
     local -a attachments=()
-    local file
+    local line
     while IFS= read -r line; do
         attachments+=("$line")
     done < <(_agent_opencode_attachments "$3")
+    AGENT_CWD="$2"
     AGENT_ARGV=(
         "$1" run --format json
         --dir "$2"
         --model "$(agent_resolve_model)"
-        "${attachments[@]}"
+        ${attachments[@]+"${attachments[@]}"}
         --auto
         "$(cat "$4")"
     )
@@ -63,9 +92,14 @@ agent_argv_analyzer() {
 }
 
 agent_session_id() {
-    # $1 = opencode JSON event stream; first sessionID wins.
+    # $1 = opencode JSON event stream; first sessionID wins. A missing stream
+    # degrades to empty output (SESSION_ID=unavailable -> tainted) instead of
+    # aborting the case, which `sed | head` under pipefail did.
     [ "$#" -eq 1 ] || return 64
-    sed -nE 's/.*"sessionID"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -1
+    [ -f "$1" ] || return 0
+    # `sed -n '1p'`, not `head -1`: head closes the pipe early (SIGPIPE).
+    sed -nE 's/.*"sessionID"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" 2>/dev/null |
+        sed -n '1p'
 }
 
 _agent_opencode_db() {

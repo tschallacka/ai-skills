@@ -17,6 +17,9 @@ if [ "$#" -ne 1 ]; then
     exit 64
 fi
 
+# Deliberately not shared with telemetry.sh's near-identical copy: that one must
+# degrade to the documented telemetry keys, this one may fail closed. An
+# unresolvable driver exits 64 here, and the harness taints the case.
 source_agent_lib() {
     if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/benchmark/planning/runtime/lib-agent.sh" ]; then
         source "$REPO_ROOT/benchmark/planning/runtime/lib-agent.sh"

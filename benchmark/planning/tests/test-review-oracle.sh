@@ -318,11 +318,9 @@ run_natural_case ordinal-negative "$tmp/natural/spec-generated.json" "$tmp/natur
 check_natural_row "$tmp/natural/ordinal-negative-report.json" 1 partial AR-02 SIGNAL,CORRECTION
 check_natural_counts "$tmp/natural/ordinal-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
 
-# Mutated-conflict negative: a bare echo of one value ("one initial button")
-# with no contradiction. It references the defect file/section and the signal
-# matches literally, but it never names the mutated conflict's other side nor
-# proposes the correction, so it must not be a true positive; the grader pins
-# it partial with the CORRECTION predicate failed.
+# Mutated-conflict negative: echoes one value with no contradiction. Path,
+# location and signal all match, but the other side of the conflict is never
+# named, so the grader must pin it partial with CORRECTION failed.
 cat > "$tmp/natural/mutated-negative.json" <<'JSON'
 {"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"The plan requires one initial button.","observed_contradiction":"The plan requires one initial button consistently.","impact":"A reader takes the requirement at face value.","evidence":"plan.md § 3.1.","required_correction":"The plan is consistent; no correction is needed.","independent":true}],"evidence_paths":[]}
 JSON

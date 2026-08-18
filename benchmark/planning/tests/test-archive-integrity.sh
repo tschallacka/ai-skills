@@ -2,14 +2,22 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-grep -Fq 'PROTOCOL_ID="reviewer-optimization-1.4.2"' "$root/setup-benchmark.sh"
-grep -Fq 'protocol-metadata.json' "$root/setup-benchmark.sh"
+# The generated-case source spans setup-benchmark.sh *and* the extracted
+# benchmark/planning/case/*.sh, so harness-wide assertions search both, matching
+# the harness_grep idiom in test-safeguards.sh.
+harness_sources=("$root/setup-benchmark.sh")
+for case_source in "$root/case"/*.sh; do
+    [ -f "$case_source" ] && harness_sources+=("$case_source")
+done
+harness_grep() { grep -Fq -- "$1" "${harness_sources[@]}"; }
+harness_grep 'PROTOCOL_ID="reviewer-optimization-1.4.2"'
+harness_grep 'protocol-metadata.json'
 grep -Fq 'distinct' "$root/analyzer-prompt.md"
 grep -Fq '1.4.2 cohort' "$root/analyzer-prompt.md"
 grep -Fq 'Legacy archives remain frozen' "$root/README.md"
-grep -Fq 'copy_workspace_for_publication' "$root/setup-benchmark.sh"
-grep -Fq -- "--exclude='.env'" "$root/setup-benchmark.sh"
-grep -Fq -- "--exclude='*/.env'" "$root/setup-benchmark.sh"
+harness_grep 'copy_workspace_for_publication'
+harness_grep "--exclude='.env'"
+harness_grep "--exclude='*/.env'"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

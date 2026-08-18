@@ -11,6 +11,8 @@ agent_default_model="gpt-5.5"
 
 _agent_codex_argv() {
     # shared caps/workspace open flags for codex exec
+    [ "$#" -eq 4 ] || return 64
+    AGENT_CWD="$2"
     AGENT_ARGV=(
         "$1" -a never exec --model "$(agent_resolve_model)" --json
         -C "$2"
@@ -38,16 +40,37 @@ agent_argv_analyzer() {
     _agent_codex_argv "${agent_bin:-codex}" "$1" "$2" "$3"
 }
 
+# Session-id key precedence, most authoritative first. One sed per pattern: a
+# single combined sed makes precedence "first matching *line*", so a stray
+# "session_id" in a tool result would beat the thread.started event.
+_AGENT_CODEX_ID_PATTERNS='
+s/.*"type"[[:space:]]*:[[:space:]]*"thread\.started".*"thread_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p
+s/.*"thread_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p
+s/.*"threadId"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p
+s/.*"conversation_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p
+s/.*"session_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p
+'
+
 agent_session_id() {
-    # $1 = worker output jsonl; port of session-id-from-jsonl.sh.
+    # $1 = worker output jsonl. A missing/unreadable stream degrades to empty
+    # output and must never abort the case, which a bare `sed | head` under
+    # pipefail would.
     [ "$#" -eq 1 ] || return 64
-    sed -nE \
-        -e 's/.*"type"[[:space:]]*:[[:space:]]*"thread.started".*"thread_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-        -e 's/.*"thread_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-        -e 's/.*"threadId"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-        -e 's/.*"conversation_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-        -e 's/.*"session_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-        "$1" | head -1
+    [ -f "$1" ] || return 0
+    local pattern value
+    while IFS= read -r pattern; do
+        [ -n "$pattern" ] || continue
+        # `sed -n '1p'` rather than `head -1`: head closes the pipe early,
+        # which is SIGPIPE for sed and a failure under pipefail.
+        value="$(sed -nE "$pattern" "$1" 2>/dev/null | sed -n '1p')"
+        if [ -n "$value" ]; then
+            printf '%s\n' "$value"
+            return 0
+        fi
+    done <<EOF
+$_AGENT_CODEX_ID_PATTERNS
+EOF
+    return 0
 }
 
 agent_telemetry() {
@@ -78,7 +101,10 @@ agent_telemetry() {
     fi
 
     local -a db_candidates=()
-    mapfile -t db_candidates < <(
+    local db_candidate
+    while IFS= read -r db_candidate; do
+        db_candidates+=("$db_candidate")
+    done < <(
         {
             if [ -n "${CODEX_TELEMETRY_DB:-}" ]; then
                 printf '%s\n' "$CODEX_TELEMETRY_DB"
@@ -88,7 +114,7 @@ agent_telemetry() {
     )
 
     if command -v python3 >/dev/null 2>&1; then
-    if python3 - "$thread_id" "${db_candidates[@]}" <<'PY'
+    if python3 - "$thread_id" ${db_candidates[@]+"${db_candidates[@]}"} <<'PY'
 import re
 import sqlite3
 import sys
@@ -175,7 +201,7 @@ PY
 
     if command -v sqlite3 >/dev/null 2>&1; then
         local sqlite_log_db="" sqlite_log_records=0 sqlite_log_total="" database thread_tokens log_bodies log_values
-        for database in "${db_candidates[@]}"; do
+        for database in ${db_candidates[@]+"${db_candidates[@]}"}; do
             thread_tokens="$(sqlite3 -batch -noheader "$database" \
                 "pragma query_only=on; select tokens_used from threads where id = '$thread_id' limit 1;" \
                 2>/dev/null || true)"

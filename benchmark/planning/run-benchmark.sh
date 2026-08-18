@@ -7,7 +7,13 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
-    sed -n '2,6p' "$0" >&2
+    awk 'NR == 1 { next }
+         /^#/ {
+             sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
+             print; next
+         }
+         { exit }' "$0" >&2
     exit 64
 fi
 
@@ -94,12 +100,13 @@ if [ "$RUN_MODE_SET" -eq 0 ]; then
         EXECUTION_MODE="$RUN_MODE"
     elif [ -t 0 ]; then
         printf 'Run benchmarks sequentially or in parallel? [sequential]: ' >&2
-        read -r MODE_ANSWER
-        case "${MODE_ANSWER,,}" in
-            p*|para*) EXECUTION_MODE="parallel" ;;
-            ""|s*|seq*) EXECUTION_MODE="sequential" ;;
+        read -r mode_answer
+        # bash 3.2 has no ${var,,}; the rest of this runtime already uses tr.
+        case "$(printf '%s' "$mode_answer" | tr '[:upper:]' '[:lower:]')" in
+            p*) EXECUTION_MODE="parallel" ;;
+            ""|s*) EXECUTION_MODE="sequential" ;;
             *)
-                echo "Unknown mode '$MODE_ANSWER'; using sequential" >&2
+                echo "Unknown mode '$mode_answer'; using sequential" >&2
                 EXECUTION_MODE="sequential"
                 ;;
         esac
@@ -130,44 +137,58 @@ progress_log() {
     printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$PROGRESS_LOG"
 }
 progress_log "benchmark run $RUN_ID started (mode=$EXECUTION_MODE review=$REVIEW_MODE revisions=${REVISIONS:-auto})"
-# Results live under benchmark/results/<agent>/<revision-parent>/<run-id>/.
-# <revision-parent> is the tag for version runs, or current/<latest-tag> for
-# `current` runs (see benchmark_result_parent). Run-level files (summary,
-# comparison, analysis) stay at the run-id root, preserving one batch per
-# run-id even when it spans multiple revisions.
+# RUN_RESULTS_ROOT must wait for tag resolution below: computed here it reads an
+# empty TAGS and splits the results tree in two.
 RESULTS_ROOT="$REPO_ROOT/benchmark/results/$AGENT_DRIVER"
-RUN_RESULTS_ROOT="$RESULTS_ROOT/$(benchmark_result_parent "${TAGS[0]:-current}")/$RUN_ID"
-SUMMARY="$RUN_RESULTS_ROOT/harness-summary.tsv"
 
+# select_latest_tags <tag...>: print every non-semver tag, then the newest patch
+# of each major.minor, ascending. bash 3.2 has no associative arrays, so keys and
+# winners live in parallel arrays with a linear lookup.
 select_latest_tags() {
-    declare -A latest_patch=()
-    declare -A latest_tag=()
-    declare -A seen_non_semver=()
-    local tag key patch
-    local -a non_semver_tags=()
+    local -a keys=() winners=() patches=() non_semver=()
+    local tag key patch index found
 
     for tag in "$@"; do
         if [[ "$tag" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             key="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
             patch="${BASH_REMATCH[3]}"
-            if [ -z "${latest_patch[$key]+set}" ] || ((10#$patch > 10#${latest_patch[$key]})); then
-                latest_patch["$key"]="$patch"
-                latest_tag["$key"]="$tag"
+            found=-1
+            index=0
+            while [ "$index" -lt "${#keys[@]}" ]; do
+                if [ "${keys[$index]}" = "$key" ]; then
+                    found="$index"
+                    break
+                fi
+                index=$((index + 1))
+            done
+            if [ "$found" -lt 0 ]; then
+                keys+=("$key")
+                winners+=("$tag")
+                patches+=("$patch")
+            elif [ "$((10#$patch))" -gt "$((10#${patches[$found]}))" ]; then
+                winners[found]="$tag"
+                patches[found]="$patch"
             fi
         else
-            if [ -z "${seen_non_semver[$tag]+set}" ]; then
-                non_semver_tags+=("$tag")
-                seen_non_semver["$tag"]=1
-            fi
+            case " ${non_semver[*]-} " in
+                *" $tag "*) ;;
+                *) non_semver+=("$tag") ;;
+            esac
         fi
     done
 
-    if [ "${#non_semver_tags[@]}" -gt 0 ]; then
-        printf '%s\n' "${non_semver_tags[@]}"
+    if [ "${#non_semver[@]}" -gt 0 ]; then
+        printf '%s\n' "${non_semver[@]}"
     fi
-    for key in "${!latest_tag[@]}"; do
-        printf '%s\n' "${latest_tag[$key]}"
-    done | sort -V
+    if [ "${#winners[@]}" -gt 0 ]; then
+        # `sort -V` is GNU-only; sort on a zero-padded numeric key instead.
+        printf '%s\n' "${winners[@]}" |
+            awk '{ tag = $0; version = tag; sub(/^v/, "", version)
+                   split(version, part, ".")
+                   printf "%010d.%010d.%010d\t%s\n", part[1], part[2], part[3], tag }' |
+            LC_ALL=C sort |
+            cut -f2-
+    fi
 }
 
 choose_versions() {
@@ -225,20 +246,46 @@ if [ "$INTERACTIVE_VERSIONS" -eq 1 ]; then
         echo "--versions cannot be combined with explicit tags." >&2
         exit 64
     fi
-    mapfile -t TAGS < <(git -C "$REPO_ROOT" tag --sort=version:refname)
-    SELECTED_VERSIONS="$(choose_versions "${TAGS[@]}")"
-    mapfile -t TAGS <<< "$SELECTED_VERSIONS"
+    TAGS=()
+    while IFS= read -r tag_line; do
+        [ -n "$tag_line" ] || continue
+        TAGS+=("$tag_line")
+    done < <(git -C "$REPO_ROOT" tag --sort=version:refname)
+    SELECTED_VERSIONS="$(choose_versions ${TAGS[@]+"${TAGS[@]}"})"
+    TAGS=()
+    while IFS= read -r tag_line; do
+        [ -n "$tag_line" ] || continue
+        TAGS+=("$tag_line")
+    done <<TAG_LIST
+$SELECTED_VERSIONS
+TAG_LIST
 else
     if [ "${#TAGS[@]}" -eq 0 ]; then
-        mapfile -t TAGS < <(git -C "$REPO_ROOT" tag --sort=creatordate)
+        while IFS= read -r tag_line; do
+            [ -n "$tag_line" ] || continue
+            TAGS+=("$tag_line")
+        done < <(git -C "$REPO_ROOT" tag --sort=creatordate)
     fi
-    mapfile -t TAGS < <(select_latest_tags "${TAGS[@]}")
+    SELECTED_VERSIONS="$(select_latest_tags ${TAGS[@]+"${TAGS[@]}"})"
+    TAGS=()
+    while IFS= read -r tag_line; do
+        [ -n "$tag_line" ] || continue
+        TAGS+=("$tag_line")
+    done <<TAG_LIST
+$SELECTED_VERSIONS
+TAG_LIST
 fi
 
 if [ "${#TAGS[@]}" -eq 0 ]; then
     echo "No tags found to benchmark." >&2
     exit 1
 fi
+
+# Run-level files stay at the first tag's run-id root, so a batch spanning
+# several revisions is still one batch; each case's own published directory goes
+# in CASE_RESULT_DIRS, since it lives under its own revision parent.
+RUN_RESULTS_ROOT="$RESULTS_ROOT/$(benchmark_result_parent "${TAGS[0]}")/$RUN_ID"
+SUMMARY="$RUN_RESULTS_ROOT/harness-summary.tsv"
 
 mkdir -p "$TEST_BASE_DIR" "$RUN_RESULTS_ROOT"
 printf 'revision\ttag\trun_id\tcase_root\tresult_dir\texit_code\n' > "$SUMMARY"
@@ -247,6 +294,7 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$RUN_ID" "$REVIEW_MODE" "$EXECUTION_MODE" \
     "$MAX_VERIFICATION_PASSES" "$MAX_REVIEW_CYCLES" "${REVISIONS:-auto}" >> "$RUN_RESULTS_ROOT/harness-metadata.tsv"
 
 START_SCRIPTS=()
+CASE_RESULT_DIRS=()
 for TAG in "${TAGS[@]}"; do
     # Default thresholds to 1.0 so the state synthesizer always receives
     # non-empty values; these defaults match the lifecycle-test values.
@@ -255,30 +303,20 @@ for TAG in "${TAGS[@]}"; do
     "$SCRIPT_DIR/setup-benchmark.sh" "$TAG" "$TEST_BASE_DIR" "$RUN_NAME" "$RUN_ID"
     REVISION="${TAG#v}"
     START_SCRIPTS+=("$TEST_BASE_DIR/$REVISION-$RUN_ID/start-worker.sh")
+    # Mirrors setup-benchmark.sh's RESULT_DIR exactly, so the analyzer input and
+    # the fallback summary row point at the tree the case really publishes to.
+    CASE_RESULT_DIRS+=("$RESULTS_ROOT/$(benchmark_result_parent "$TAG")/$RUN_ID/$REVISION")
     progress_log "case prepared: $TAG -> $TEST_BASE_DIR/$REVISION-$RUN_ID"
 done
 
-kill_process_tree() {
-    local pid="$1"
-    local signal="${2:-TERM}"
-    local child
-
-    [ "$pid" -gt 0 ] 2>/dev/null || return 0
-    if command -v ps >/dev/null 2>&1; then
-        while read -r child; do
-            [ -n "$child" ] || continue
-            kill_process_tree "$child" "$signal"
-        done < <(ps -eo pid=,ppid= | awk -v parent="$pid" '$2 == parent {print $1}')
-    fi
-    kill -"$signal" "$pid" 2>/dev/null || true
-}
-
+# kill_process_tree comes from runtime/lib-agent.sh (sourced above); this file
+# used to carry a third verbatim copy of it.
 WORKER_PIDS=()
 ANALYZER_PID=""
 cleanup_on_signal() {
     trap - INT TERM
 
-    for pid in "${WORKER_PIDS[@]}"; do
+    for pid in ${WORKER_PIDS[@]+"${WORKER_PIDS[@]}"}; do
         kill_process_tree "$pid" TERM
     done
     if [ -n "$ANALYZER_PID" ]; then
@@ -287,7 +325,7 @@ cleanup_on_signal() {
 
     sleep 1
 
-    for pid in "${WORKER_PIDS[@]}"; do
+    for pid in ${WORKER_PIDS[@]+"${WORKER_PIDS[@]}"}; do
         kill_process_tree "$pid" KILL
     done
     if [ -n "$ANALYZER_PID" ]; then
@@ -356,8 +394,9 @@ else
     done
 fi
 
-for START_SCRIPT in "${START_SCRIPTS[@]}"; do
-    CASE_ROOT_FOR_SUMMARY="$(dirname "$START_SCRIPT")"
+CASE_INDEX=0
+while [ "$CASE_INDEX" -lt "${#START_SCRIPTS[@]}" ]; do
+    CASE_ROOT_FOR_SUMMARY="$(dirname "${START_SCRIPTS[$CASE_INDEX]}")"
     if [ -f "$CASE_ROOT_FOR_SUMMARY/harness-summary-row.tsv" ]; then
         cat "$CASE_ROOT_FOR_SUMMARY/harness-summary-row.tsv" >> "$SUMMARY"
     else
@@ -365,11 +404,12 @@ for START_SCRIPT in "${START_SCRIPTS[@]}"; do
         REVISION_FOR_SUMMARY="${REVISION_FOR_SUMMARY%-$RUN_ID}"
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$REVISION_FOR_SUMMARY" "unavailable" "$RUN_ID" \
-            "$CASE_ROOT_FOR_SUMMARY" "$RUN_RESULTS_ROOT/$REVISION_FOR_SUMMARY" \
+            "$CASE_ROOT_FOR_SUMMARY" "${CASE_RESULT_DIRS[$CASE_INDEX]}" \
             "unavailable" >> "$SUMMARY"
         FAILED_WORKERS=1
         echo "Missing harness summary row: $CASE_ROOT_FOR_SUMMARY" >&2
     fi
+    CASE_INDEX=$((CASE_INDEX + 1))
 done
 
 SUMMARY_ROWS="$(tail -n +2 "$SUMMARY" | wc -l | tr -d ' ')"
@@ -386,7 +426,24 @@ ANALYSIS_RESULTS_ROOT="$ANALYZER_CAPSULE/results"
 mkdir -p "$ANALYZER_CAPSULE" "$ANALYSIS_RESULTS_ROOT"
 cp "$SCRIPT_DIR/benchmark-test.md" "$ANALYZER_CAPSULE/benchmark-test.md"
 cp "$SUMMARY" "$ANALYZER_CAPSULE/harness-summary.tsv"
-cp -R "$RUN_RESULTS_ROOT"/. "$ANALYSIS_RESULTS_ROOT"/
+# `cp -R src/. dst` has unspecified behaviour with a trailing `/.` (CODE-STYLE
+# §1); tar copies the tree portably.
+copy_tree() {
+    local src="$1" dst="$2"
+    [ -d "$src" ] || return 0
+    mkdir -p "$dst"
+    (cd "$src" && tar cf - .) | (cd "$dst" && tar xf -)
+}
+copy_tree "$RUN_RESULTS_ROOT" "$ANALYSIS_RESULTS_ROOT"
+# Only the first tag's case publishes under RUN_RESULTS_ROOT; every other
+# revision lives under its own revision parent and would otherwise reach the
+# analyzer as no case results at all.
+for CASE_RESULT_DIR in "${CASE_RESULT_DIRS[@]}"; do
+    case "$CASE_RESULT_DIR" in
+        "$RUN_RESULTS_ROOT"/*) continue ;;
+    esac
+    copy_tree "$CASE_RESULT_DIR" "$ANALYSIS_RESULTS_ROOT/$(basename "$CASE_RESULT_DIR")"
+done
 
 sed \
     -e "s/{{RUN_ID}}/$RUN_ID/g" \

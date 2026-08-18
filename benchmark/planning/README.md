@@ -198,6 +198,42 @@ benchmark/planning/setup-benchmark.sh v1.3.0 /tmp/ai-skills-benchmark smoke
 /tmp/ai-skills-benchmark/1.3.0/start-worker.sh
 ```
 
+## The two halves of a case
+
+`setup-benchmark.sh` prepares a case; `case/start-worker.sh` runs it. They used
+to be one file: the runner lived inside `setup-benchmark.sh` as a 1270-line
+quoted (`<<'EOF'`) heredoc, 84% of the file, invisible to `bash -n`, to
+`shellcheck`, and to every test - which is why the lifecycle test used to carve
+functions out of it by awk line range. The runner is now a real file that setup
+copies verbatim, and the Python and cohesive shell blocks inside it are real
+files too:
+
+| File | Owns |
+|---|---|
+| `case/start-worker.sh` | stage orchestration, `run_reviewer`, the oracle stage |
+| `lib-portable.sh` | GNU-vs-BSD primitives: sha256, literal in-place replace, basenames, unique suffix, the `python3` guard |
+| `lib-process.sh` | process-group teardown and the post-run browser/server audit |
+| `lib-structural-gate.sh` | the required-artifact checks and the five matchers |
+| `lib-approval.py` | reviewer authority, approval schema, session binding |
+| `synthesize-state.py` | provenance digests and the fail-closed reviewer state |
+| `emit-telemetry.py` | `telemetry.json` |
+
+Two contracts are easy to break by accident and are stated in the files
+themselves:
+
+- **`benchmark-env.sh` is the only channel.** 30 `printf '%q'`-quoted exports.
+  `case/start-worker.sh`'s header enumerates all of them; add or rename one in
+  the emitter and that header moves in the same commit.
+- **Verdicts travel as return codes, never as shared globals.** The structural
+  gate's verdict used to be a variable mutated inside a `{ ... } > report` brace
+  group and read afterwards, which is correct only because bash does not fork
+  for a redirected group. `structural_gate_report` returns it instead, so the
+  caller is right either way.
+
+The case runner's final `exit` is the **worker's** exit code, not the run
+verdict: a fully tainted run with a clean worker exits 0. The verdict lives in
+`telemetry.json`'s `status` and `reviewer-state.json`'s `adoptable`.
+
 ## Files
 
 - `benchmark-test.md`: benchmark procedure and acceptance rules.
@@ -206,6 +242,13 @@ benchmark/planning/setup-benchmark.sh v1.3.0 /tmp/ai-skills-benchmark smoke
 - `analyzer-prompt.md`: analyzer prompt template copied/rendered for the final
   comparison pass.
 - `setup-benchmark.sh`: prepares one tag's source/workspace/startup files.
+- `case/start-worker.sh`: the case runner, copied verbatim into each case root.
+  Its header lists the 30 `benchmark-env.sh` exports it consumes - the single
+  channel between the two halves.
+- `lib-portable.sh`, `lib-process.sh`, `lib-structural-gate.sh`: sourced by the
+  case runner (`lib-portable.sh` also by `setup-benchmark.sh`).
+- `lib-approval.py`, `synthesize-state.py`, `emit-telemetry.py`: the case
+  runner's Python entry points.
 - `run-benchmark.sh`: prepares and runs one or more tags, then starts the
   analyzer.
 - `telemetry.sh`: dispatches token accounting to the active agent driver's
