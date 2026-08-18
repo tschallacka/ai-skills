@@ -25,3 +25,9 @@ MEMORY.md
 # Benchmark evidence tagged `current` (live working tree smoke runs) is
 # transient, never published evidence: never index it.
 benchmark/results/*/current/
+
+# nix build output symlinks and direnv cache. The dev environment is a
+# development dependency only; see CONTRIBUTING.md.
+/result
+/result-*
+.direnv/
