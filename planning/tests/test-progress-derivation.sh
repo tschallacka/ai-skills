@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # test-progress-derivation.sh — every progress-tracker builder must derive the
 # row Description from source intent, never write a literal placeholder into a
-# generated table. The derivation is duplicated across four scripts, so this
-# asserts each one independently (report 15 §2 / report 16 follow-up):
+# generated table. The derivation is duplicated across four builders, so each
+# is asserted independently:
 #   - create-progress.sh        (goal-level, step -> §4.1 Objective)
 #   - plan-mutate.sh rebuild-progress (goal-level, step -> §4.1 Objective)
 #   - create-plan-progress.sh   (plan-level, goal -> Outcome/DoD)
 #   - rebuild-plan-progress.sh  (plan-level, goal -> Outcome/DoD)
 # A step/goal with a real Objective/DoD must surface that text (truncated to
-# 100 chars); a step/goal with NO Objective/DoD must fall back to its name —
-# and never to "<short description>" (which would fail plan validation).
+# 100 chars); one with none falls back to its name, never "<short description>",
+# which would fail plan validation.
+set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-derivation-test.XXXXXX")"

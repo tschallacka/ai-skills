@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 env_tool="$repo_dir/planning/scripts/plan-env.sh"
 tmp="$(mktemp -d)"
@@ -12,8 +14,8 @@ PLANS_ROOT="$plans_root" "$repo_dir/planning/scripts/create-plan.sh" "$plan_root
 
 [ -f "$plans_root/.env" ]
 [ -f "$plan_root/.env" ]
-[ "$(stat -c '%a' "$plans_root/.env")" = 600 ]
-[ "$(stat -c '%a' "$plan_root/.env")" = 600 ]
+[ "$(t_stat_mode "$plans_root/.env")" = 600 ]
+[ "$(t_stat_mode "$plan_root/.env")" = 600 ]
 "$env_tool" check "$plan_root" "$plans_root" >/dev/null
 
 global_before="$(sha256sum "$plans_root/.env")"
@@ -92,7 +94,7 @@ fi
 
 cp "$plan_root/.env" "$bad/.env"
 chmod 600 "$bad/.env"
-sed -i "s|^PLAN_STEPS_ROOT=.*|PLAN_STEPS_ROOT=$tmp/outside|" "$bad/.env"
+t_sed_i "s|^PLAN_STEPS_ROOT=.*|PLAN_STEPS_ROOT=$tmp/outside|" "$bad/.env"
 if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
     printf '%s\n' 'foreign derived path was accepted' >&2
     exit 1
@@ -100,7 +102,7 @@ fi
 
 cp "$plan_root/.env" "$bad/.env"
 chmod 600 "$bad/.env"
-sed -i "s|^PLANS_ROOT=.*|PLANS_ROOT=$tmp/other-plans|" "$bad/.env"
+t_sed_i "s|^PLANS_ROOT=.*|PLANS_ROOT=$tmp/other-plans|" "$bad/.env"
 if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
     printf '%s\n' 'mismatched local root was accepted' >&2
     exit 1
@@ -116,7 +118,7 @@ fi
 
 cp "$plan_root/.env" "$bad/.env"
 chmod 600 "$bad/.env"
-sed -i 's|^PLAN_NAME=.*|PLAN_NAME=$HOME|' "$bad/.env"
+t_sed_i 's|^PLAN_NAME=.*|PLAN_NAME=$HOME|' "$bad/.env"
 if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
     printf '%s\n' 'variable expansion was accepted' >&2
     exit 1

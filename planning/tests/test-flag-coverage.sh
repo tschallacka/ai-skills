@@ -14,8 +14,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scripts="$root/scripts"
 tests="$root/tests"
 
-# Library files are sourced by helpers, not run standalone; they need no --help.
-LIB_FILES='plan-document-lib.sh plan-reconcile-lib.sh plan-context-lib.sh'
+# Sourced libraries are not run standalone and need no --help. Membership is the
+# `*-lib.sh` suffix, not a hand-kept list: a list silently demands a --help from
+# every library left off it.
 HELP_FLAGS='-h --help'
 
 extract_flags() {
@@ -31,7 +32,7 @@ checked=0
 for script in "$scripts"/*.sh; do
     name="$(basename "$script")"
     is_lib=0
-    case " $LIB_FILES " in *" $name "*) is_lib=1 ;; esac
+    case "$name" in *-lib.sh) is_lib=1 ;; esac
     flags="$(extract_flags "$script")"
     [ -n "$flags" ] || [ "$is_lib" -eq 1 ] || continue
 

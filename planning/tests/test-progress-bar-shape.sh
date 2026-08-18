@@ -113,9 +113,8 @@ recompute_goal_bar() {
 }
 
 # recompute_plan_bar <progress-file> : derive plan % from its goal dirs'
-# completion, mirroring rebuild-plan-progress.sh (a goal is complete only when
-# its progress.md shows `**Progress:** `100%`; a goal dir with goal.md but no
-# progress.md counts in total and as incomplete).
+# completion. A goal counts complete only at `**Progress:** `100%`; a goal dir
+# with goal.md but no progress.md counts in the total, as incomplete.
 recompute_plan_bar() {
     local f="$1" plan_dir ptotal=0 pdone=0 pe declared_p gdir
     plan_dir="$(dirname "$f")"

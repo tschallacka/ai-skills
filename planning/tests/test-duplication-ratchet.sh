@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# test-duplication-ratchet — the known duplication may shrink, never grow.
+#
+# Usage: test-duplication-ratchet.sh
+#
+# MAINTAINER.md section 3 inventories logic that exists in several places and
+# should be one helper. That table used to be 58 `# DEDUPE:` comments scattered
+# through the scripts, 51 of which named a helper that had already landed: a
+# comment nobody re-reads becomes misinformation. A table has the same failure
+# mode unless something checks it, so these caps are the check.
+#
+# On a genuine migration the count drops: lower the cap in the same commit and
+# update the table. Never raise a cap to make this pass.
+set -euo pipefail
+export LC_ALL=C
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+scripts="$root/scripts"
+
+fail=0
+note_fail() { printf 'duplication-ratchet: %s\n' "$1" >&2; fail=1; }
+
+# Cap, label, and the counting command. Keep in step with MAINTAINER.md §3.
+check_cap() {
+    local label="$1" cap="$2" actual="$3"
+    if [ "$actual" -gt "$cap" ]; then
+        note_fail "$label grew to $actual (cap $cap): use the helper in MAINTAINER.md section 3 instead of adding a copy"
+    elif [ "$actual" -lt "$cap" ]; then
+        note_fail "$label is down to $actual (cap $cap): lower the cap and update MAINTAINER.md section 3 in this commit"
+    fi
+}
+
+# Hand-rolled `"$f.tmp.$$"` temp files, which plan_atomic_write/plan_track_tmp own.
+check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
+    "$( { grep -ho '\.tmp\.\$\$' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+
+# Inline inventory-row parsing with hard-coded field indices; plan_inventory_row
+# does not exist yet, so this is the row most in need of a helper.
+check_cap "inline awk -F'|' parsers" 38 \
+    "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+
+# The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
+# migration must stay byte-identical.
+check_cap 'seed progress-bar literal copies' 4 \
+    "$( { grep -l '0%%  #### ' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+
+# percent/bar/icon derivation; update-progress.sh is the canonical copy.
+check_cap 'percent/bar/icon derivation copies' 4 \
+    "$( { grep -l 'completed \* 100 + total / 2' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+
+# Repo-wide, not just $scripts: two `# DEDUPE:` markers once survived in
+# benchmark/ while this check was scoped to a single directory.
+markers="$( { grep -rl '# DEDUPE:' --include='*.sh' "$root/.." 2>/dev/null || true; } \
+    | { grep -v '/benchmark/results/' || true; } \
+    | { grep -v 'test-duplication-ratchet' || true; } | wc -l | tr -d ' ')"
+[ "$markers" -eq 0 ] \
+    || note_fail "$markers file(s) reintroduced a '# DEDUPE:' comment; record it in MAINTAINER.md section 3 instead"
+
+# ── Deliberate duplicates that must stay byte-identical ──────────────────────
+# Not everything duplicated should shrink. These pairs are intentionally copied
+# and are only correct while they match; a silent divergence is the failure.
+assert_identical() {
+    local label="$1" fn="$2" a="$3" b="$4"
+    local left right
+    left="$(awk "/^${fn}\\(\\)/,/^}/" "$a")"
+    right="$(awk "/^${fn}\\(\\)/,/^}/" "$b")"
+    if [ -z "$left" ] || [ -z "$right" ]; then
+        note_fail "$label: could not extract $fn() from both files"
+    elif [ "$left" != "$right" ]; then
+        note_fail "$label: $fn() has diverged between $(basename "$a") and $(basename "$b")"
+    fi
+}
+
+# A fix key is HMAC(secret, "sid|finding|unit"). If the minting and verifying
+# derivations drift, every previously minted key silently stops verifying.
+assert_identical 'fix-key derivation' hmac_key \
+    "$scripts/mint-fix-keys.sh" "$scripts/verify-fix-keys.sh"
+
+# The table must actually exist and name every capped row, so the caps and the
+# prose cannot drift apart.
+maintainer="$root/MAINTAINER.md"
+[ -f "$maintainer" ] || note_fail 'MAINTAINER.md is missing'
+if [ -f "$maintainer" ]; then
+    grep -Fq '## 3. Pending consolidation' "$maintainer" \
+        || note_fail 'MAINTAINER.md has no "Pending consolidation" section for these caps'
+    for helper in plan_atomic_write plan_inventory_row plan_progress_bar plan_status_label; do
+        grep -Fq "$helper" "$maintainer" \
+            || note_fail "MAINTAINER.md section 3 does not mention $helper"
+    done
+fi
+
+# A helper the table calls "not written" must really be absent, or the table is
+# stale in the same way the comments were.
+for helper in plan_inventory_row plan_status_label; do
+    if grep -rq "^[[:space:]]*${helper}()" "$scripts"/*.sh; then
+        note_fail "$helper now exists; MAINTAINER.md section 3 still calls it not written"
+    fi
+done
+
+# A helper the table calls "exists" must really exist.
+for helper in plan_atomic_write plan_track_tmp plan_progress_bar plan_stat_mode; do
+    grep -rq "${helper}()" "$scripts"/*.sh \
+        || note_fail "$helper is referenced by MAINTAINER.md section 3 but no longer exists"
+done
+
+[ "$fail" -eq 0 ] || exit 1
+printf '%s\n' 'test-duplication-ratchet: PASS'

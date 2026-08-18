@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-command-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
@@ -50,7 +52,7 @@ fi
 step_writer_output="$temporary_root/step-writer-output.log"
 "$script_dir/add-work-unit.sh" "$plan_dir" W01 source planning/scripts/update-plan-content.sh \
     'review-status command' N/A 'Update both review status fields atomically.' '—' \
-    01-sync 01-step-update-status >"$step_writer_output"
+    01-sync 01-step-update-status 2>"$step_writer_output"
 grep -Fq 'Reminder: goal 01-sync requires testing; continue with its test/proof step.' "$step_writer_output"
 "$script_dir/add-work-unit.sh" "$plan_dir" W02 verification N/A 'validate-plan.sh' N/A \
     'Validate the status fields after synchronization.' W01 01-sync 02-step-validate-status
@@ -61,7 +63,7 @@ printf '# Verification: validate status\n\n## Automated tests\n\nRun the validat
 step_update_output="$temporary_root/step-update-output.log"
 "$script_dir/update-plan-content.sh" --step-section "$plan_dir" \
     01-sync/01-step-update-status objective \
-    -p 4.1: 'Update both status fields atomically.' >"$step_update_output"
+    -p 4.1: 'Update both status fields atomically.' 2>"$step_update_output"
 grep -Fq 'Reminder: testing instructions already exist at ' "$step_update_output"
 "$script_dir/add-coverage.sh" "$plan_dir" 'Status fields are synchronized.' W01 \
     'The update command owns the mutation.'
@@ -213,7 +215,7 @@ missing_dir="$temporary_root/missing-section"
 mkdir -p "$missing_dir"
 missing_source="$missing_dir/SKILL.md"
 cp "$script_dir/../SKILL.md" "$missing_source"
-sed -i '/REVIEWER_SECTION:END bounded-context/d' "$missing_source"
+t_sed_i '/REVIEWER_SECTION:END bounded-context/d' "$missing_source"
 if "$script_dir/generate-reviewer.sh" "$missing_dir" "$temporary_root/missing.md" >/dev/null 2>&1; then
     echo 'A missing reviewer section unexpectedly passed generation.' >&2
     exit 1
@@ -223,7 +225,7 @@ empty_dir="$temporary_root/empty-section"
 mkdir -p "$empty_dir"
 empty_source="$empty_dir/SKILL.md"
 cp "$script_dir/../SKILL.md" "$empty_source"
-sed -i '/REVIEWER_SECTION:START bounded-context/,/REVIEWER_SECTION:END bounded-context/{ /START/d; /END/!d; }' "$empty_source"
+t_sed_i '/REVIEWER_SECTION:START bounded-context/,/REVIEWER_SECTION:END bounded-context/{ /START/d; /END/!d; }' "$empty_source"
 if "$script_dir/generate-reviewer.sh" "$empty_dir" "$temporary_root/empty.md" >/dev/null 2>&1; then
     echo 'An empty reviewer section unexpectedly passed generation.' >&2
     exit 1
@@ -312,8 +314,7 @@ if grep -Fq '| W01 |' "$plan_dir/work-unit-inventory.md"; then
 fi
 # ---- report 3: propagation, coverage/stories readability, history, --replace,
 #      stale sweep, verify-target, diff ----
-# Re-establish W01/W02 under a fresh goal for the propagation/grader checks
-# (the earlier W01/W02 were removed by the P2-2 cascade test).
+# W01/W02 are re-established here; the P2-2 cascade test removed the originals.
 "$script_dir/add-goal.sh" "$plan_dir" 03-wire 'Wire history' \
     'Wire the order history surface.' >/dev/null 2>&1
 "$script_dir/add-work-unit.sh" "$plan_dir" W10 markup \
@@ -351,10 +352,9 @@ grep -Fq '## Cycle 8' "$plan_dir/adversarial-review-history.md"
 # cycle 8 archived the cycle-7 table, which held AR-20.
 grep -Fq '| AR-20 |' "$plan_dir/adversarial-review-history.md"
 grep -Fq '## Cycle 7' "$plan_dir/adversarial-review-history.md"
-# stale sweep: a phrase in an unmarked paragraph fails; with a history marker
-# the stale check itself passes (unrelated later-plan failures are ignored here).
-# The phrase is unique to the step objective so it does not collide with the
-# goal owned-unit roster.
+# stale sweep: an unmarked paragraph fails, a history-marked one passes. The
+# phrase is unique to the step objective so it cannot collide with the goal's
+# owned-unit roster.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the source retarget.' >/dev/null 2>&1
 printf 'rows must still render after the source retarget\n' > "$temporary_root/stale.txt"
@@ -496,9 +496,8 @@ if grep -Fq 'ticket number' "$temporary_root/placeholder-prose.log" || grep -Fq 
 fi
 git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
 # report 16 (authored docs): a registered placeholder in an AUTHORED doc is a
-# WARN without --complete and a FAIL under --complete. Build a fresh plan with
-# the real generators (create-plan + add-goal + add-work-unit) so its authored
-# docs carry genuine template placeholders.
+# WARN without --complete and a FAIL under --complete. The plan is built with
+# the real generators so its authored docs carry genuine template placeholders.
 fresh_plan="$temporary_root/fresh-plan"
 "$script_dir/create-plan.sh" "$fresh_plan" 'Fresh plan' >/dev/null
 "$script_dir/add-goal.sh" "$fresh_plan" 01-goal 'Fresh goal' 'Fresh outcome' >/dev/null
@@ -554,8 +553,13 @@ git -C "$plan_dir" -c user.name=plan-skill -c user.email=plan-skill@localhost \
 before_ref="$(git -C "$plan_dir" rev-parse HEAD)"
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the diff baseline.' >/dev/null 2>&1
-"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '03-wire/steps/01-step-history.md'
-"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '§ 4.1'
+# Capture once and grep the capture rather than piping into `grep -q`: under
+# `pipefail` a matching `grep -q` exits immediately, the producer gets SIGPIPE,
+# and the pipeline reports 141 even though the assertion held.
+diff_output="$temporary_root/plan-content-diff.log"
+"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" >"$diff_output"
+grep -Fq '03-wire/steps/01-step-history.md' "$diff_output"
+grep -Fq '§ 4.1' "$diff_output"
 # ---- report 5: companion find scope, --delete-paragraph, --scope, story
 #      placeholder-free cache, goal-size placeholder omission ----
 # find reaches the *-testing.md companions via --in testing and --in all.
@@ -591,9 +595,8 @@ if [ -f "$plan_dir/ui-story-runs/US-01.md" ]; then
     fi
 fi
 # ---- report 16 §5 case 5: registry hygiene ----
-# Every in-document placeholder the authoring/generated templates can emit must
-# be registered in placeholders.json (a literal-list contract). CLI usage/arg
-# tokens are NOT document placeholders and must stay out of the registry.
+# Every in-document placeholder the templates can emit must be registered; CLI
+# usage/arg tokens are not document placeholders and must stay out.
 registry="$script_dir/../placeholders.json"
 jq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
     echo 'placeholders.json is not a JSON array.' >&2; exit 1

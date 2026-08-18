@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+
 # test-fix-keys.sh — reviewer-gated fix keys: mint (W01/W12), verify (W02),
 # failure matrix (W04), schema conformance of the 5-column findings table
 # (W14), and the approval hook (W07) exercised through the real scripts.
@@ -97,7 +99,7 @@ grep -Fq "\"W05\": \"$key_01\"" "$plan_a/fix-keys.json" \
 #     claiming session is the minting session (self-certification). ---
 plan_bad="$temporary_root/plan-bad"
 seed_gated_plan "$plan_bad" test-session-bad
-sed -i 's/| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |/| AR6-01 | First gap. | Implement W05. | ✅ resolved | W05 |/' \
+t_sed_i 's/| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |/| AR6-01 | First gap. | Implement W05. | ✅ resolved | W05 |/' \
     "$plan_bad/adversarial-review.md"
 seed_secret_session test-session-bad
 if "$script_dir/mint-fix-keys.sh" "$plan_bad" >"$temporary_root/mint-bad.log" 2>&1; then
@@ -187,7 +189,7 @@ rm -f "$plan_b/fix-keys.json"
 plan_c="$temporary_root/plan-c"
 mkdir -p "$plan_c"
 "$script_dir/create-adversarial-review.sh" "$plan_c" >/dev/null
-sed -i '/^## Verdict$/i No additional substantive finding remains.' \
+t_sed_insert_before '^## Verdict$' 'No additional substantive finding remains.' \
     "$plan_c/adversarial-review.md"
 grep -Fqx '| ID | Missing or over-broad item | Required plan change | Status | Work unit |' \
     "$plan_c/adversarial-review.md" || fail 'create-adversarial-review.sh did not emit the 5-column header'
@@ -241,7 +243,7 @@ if "$script_dir/update-plan-content.sh" --review-status "$plan_c2" approved \
     >"$temporary_root/reapprove-open.log" 2>&1; then
     fail 'approval accepted a review with an open 5-column finding row'
 fi
-sed -i 's/| AR-09 | Open gap. | Fix it. | 💤 open | W01 |/| AR-09 | Open gap. | Fix it. | ✅ resolved | W01 |/' \
+t_sed_i 's/| AR-09 | Open gap. | Fix it. | 💤 open | W01 |/| AR-09 | Open gap. | Fix it. | ✅ resolved | W01 |/' \
     "$plan_c2/adversarial-review.md"
 if "$script_dir/validate-plan.sh" "$plan_c2" >"$temporary_root/validate-resolved.log" 2>&1; then
     :
@@ -331,7 +333,7 @@ fi
 plan_g="$temporary_root/plan-g"
 seed_gated_plan "$plan_g" test-session-g
 seed_secret_session test-session-g
-sed -i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 | First gap. | Implement W05. | ✅ resolved | N/A |#; s#| AR-03 | Third gap. | Implement W07. | ✅ resolved | W07 |#| AR-03 | Third gap. | Implement W07. | ✅ resolved | N/A |#' \
+t_sed_i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 | First gap. | Implement W05. | ✅ resolved | N/A |#; s#| AR-03 | Third gap. | Implement W07. | ✅ resolved | W07 |#| AR-03 | Third gap. | Implement W07. | ✅ resolved | N/A |#' \
     "$plan_g/adversarial-review.md"
 "$script_dir/mint-fix-keys.sh" "$plan_g" >/dev/null 2>&1
 "$script_dir/update-plan-content.sh" --review-status "$plan_g" approved >/dev/null 2>&1 \

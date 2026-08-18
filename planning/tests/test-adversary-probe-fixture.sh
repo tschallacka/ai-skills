@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture="$root/tests/fixtures/adversary-probe"
 
@@ -45,7 +47,7 @@ declared_generator="$(sed -n 's/^reader_generator_version=//p' "$fixture/FIXTURE
 # the CURRENT reader serves every entry id the probe relies on.
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/adversary-probe-fixture.XXXXXX")"
 trap 'rm -rf -- "$tmp"' EXIT
-cp -R "$fixture"/. "$tmp/plan"/
+t_copy_tree "$fixture" "$tmp/plan"
 reader="$root/scripts/plan-context.sh"
 bash "$reader" init --plan-dir "$tmp/plan" >/dev/null
 
