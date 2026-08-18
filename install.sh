@@ -1,12 +1,53 @@
 #!/usr/bin/env bash
+# GENERATED FILE — do not edit. Assembled from installer/src/*.sh by:
+#   installer/build.sh
 set -euo pipefail
 
 # Interactive installer for the skills in this repository.
 # It is intentionally self-contained so it can be used as:
 #   curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.sh | bash
+#
+# Staying one file is a hard constraint, not an oversight: the curl|bash form has
+# no siblings to source, and download_source() distinguishes a local checkout
+# from a download purely by whether ${BASH_SOURCE[0]} is a readable file. So the
+# sections below take the place of separate files. Table of contents, in order:
+#
+#   1.  Configuration and registries
+#   2.  CLI-mode argument parsing
+#   3.  Interactive input channel
+#   4.  Runtime tool verification
+#   5.  Agent target detection
+#   6.  Terminal capability, splash, and menu rendering
+#   7.  Skill and target selection
+#   8.  Source acquisition
+#   9.  Per-skill file manifest
+#   10. CLI-mode handlers
+#   11. Interactive install, backup, and merge
+#   12. Post-install plan root migration
+#   13. Step 2: planning runtime permissions (interactive main path only)
+#   14. Main
+#
+# Usage:
+#   install.sh [--all | --skill <name>] [--target <path>] [--yes]
+#   install.sh --help
+#
+# Exit codes: 0 success, 1 any error, plus the machine contract of the
+# --install-skill CLI mode: 2 = approval declined, 3 = unsafe collision.
+
+# ---------------------------------------------------------------
+# 1. Configuration and registries
+# ---------------------------------------------------------------
+# SKILL_NAMES/SKILL_DESCRIPTIONS and TARGET_NAMES/TARGET_PATHS/TARGET_KINDS are
+# index-parallel: usage(), the shop menu, the numeric menu map, and
+# agent_kind_for_root() all derive from them, so a new skill or agent is one
+# edit here. TARGET_* index order is load-bearing: agent_target_available()
+# switches on the index, and index 5 (Cline) owns six alternative detection
+# globs. Never reorder or insert; append only.
 
 REPO_URL="${AI_SKILLS_REPO_URL:-https://github.com/tschallacka/ai-skills}"
-REPO_REF="${AI_SKILLS_REF:-main}"
+# The repository's default branch is master; a "main" default 404s on both the
+# raw install.sh URL and the archive tarball, which breaks the curl|bash form.
+REPO_REF="${AI_SKILLS_REF:-master}"
 SOURCE_ROOT=""
 TEMP_ROOT=""
 SOURCE_VERSION=""
@@ -19,7 +60,24 @@ CLI_FORMAT=""
 CLI_RELATIVE=""
 CLI_APPROVAL=""
 
+# Filled by verify_runtime_tools() (section 4) and read by main and the summary:
+# the installable subset of the selection, and the space-joined names that a
+# missing hard requirement removed from it.
+RUNTIME_READY_SKILLS=()
+RUNTIME_BLOCKED_SKILLS=""
+# One formatted line per destination, appended by install_skill() (section 11)
+# and printed as the end-of-run summary (section 11b).
+SUMMARY_LINES=()
+SUMMARY_PRINTED=0
+
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review)
+SKILL_DESCRIPTIONS=(
+    'Durable, resumable plans with steps and verification.'
+    'Records project conventions, quirks, and deviations.'
+    'Caps CPU and memory for demanding tool runs.'
+    'Shapes an idea into a recorded, agreed picture before planning.'
+    'After-the-fact review and proposed fixes for built code.'
+)
 TARGET_NAMES=(
     "Universal Agent Skills"
     "Codex"
@@ -36,7 +94,42 @@ TARGET_PATHS=(
     "$HOME/.openclaw/skills"
     "$HOME/.cline/skills"
 )
+TARGET_KINDS=(
+    universal
+    codex
+    claude
+    opencode
+    openclaw
+    cline
+)
 CUSTOM_LOCATIONS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/custom-locations"
+
+# Detected once by detect_color_mode(); see section 6.
+COLOR_MODE=""
+
+# Mascot pixel art: 16 rows of 16 six-hex-digit pixels, one row per line, each
+# pixel doubled horizontally by render_art() so the sprite comes out square.
+# Rows 8 and 9 are the eyes and are substituted per frame by render_art(). This
+# lives here rather than inside show_splash() because render_art() reads it as an
+# implicit global, which used to make render_art() unusable before show_splash().
+ART=(
+    'f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fdfd5e fcfd5f fcf347 fcf347'
+    'f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fbfb5d fdfd5e fcf347 fcf347'
+    'e8be38 e8be38 fcd84b fcd84b fdc100 fdc100 fcdb28 fcdb28 fcdb28 fcdb28 e8b11a e8b11a fddc51 fddc51 fdbb37 fdbb37'
+    'e8be38 e8be38 fcd84b fcd84b fdc100 fdc100 fcdb28 fcdb28 fcdb28 fcdb28 e8b11a e8b11a fcdc51 fcdc51 fdbb37 fdbb37'
+    'c37f18 c37f18 fdc127 fdc127 e6a621 e6a621 fcd22b fcd22b fdc127 fdc127 e6a621 e6a621 e6a621 e6a621 c37f18 c37f18'
+    'c37f18 c37f18 fdc127 fdc127 e6a621 e6a621 fcd22b fcd22b fdc127 fdc127 e6a621 e6a621 e6a621 e6a621 c37f18 c37f18'
+    'd8a521 d8a521 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 c37f18 c37f18'
+    'd8a521 d8a521 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 c37f18 c37f18'
+    'c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 dd8100 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
+    'c27f18 c27f18 6c3100 6c3100 c27f18 c27f18 67522d 67522d 67522d 67522d 883300 883300 c27f18 c27f18 6c3100 6c3100'
+    '623b00 623b00 321400 321400 3a2910 3a2910 67522d 67522d 67522d 67522d 3a2910 3a2910 6c3100 6c3100 210000 210000'
+    '623b00 623b00 321400 321400 3a2910 3a2910 67522d 67522d 67522d 67522d 3a2910 3a2910 6c3100 6c3100 210000 210000'
+    '280c02 280c02 300d0a 300d0a 240a00 240a00 67522d 67522d 67522d 67522d 3e0907 3e0907 300d0a 300d0a 210000 210000'
+    '280c02 280c02 300d0a 300d0a 240a00 240a00 67522d 67522d 67522d 67522d 3e0907 3e0907 300d0a 300d0a 210000 210000'
+    '300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00'
+    '300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00'
+)
 
 usage() {
     cat <<'EOF'
@@ -53,12 +146,8 @@ Interactive prompts accept a for "yes to all" (auto-accepts every
 remaining confirmation, e.g. replace/backup prompts and permission grants).
 
 Supported skills:
-  planning
-  project-specificies
-  resource-limited-testing
-  brainstorm
-  post-implementation-review
 EOF
+    printf '  %s\n' "${SKILL_NAMES[@]}"
 }
 
 die() {
@@ -66,6 +155,13 @@ die() {
     exit 1
 }
 
+# ---------------------------------------------------------------
+# 2. CLI-mode argument parsing
+# ---------------------------------------------------------------
+# The machine-facing modes are consumed FIRST and then `set --` away, because
+# the generic flag loop below dies on anything it does not know. Moving this
+# case after that loop makes --print-skill-files an "Unknown option".
+# `trap cleanup EXIT` must be installed before the first mktemp -d.
 case "${1:-}" in
     --print-skill-files)
         [ "$#" -eq 3 ] || die "--print-skill-files needs skill and --format"
@@ -95,6 +191,13 @@ case "${1:-}" in
 esac
 
 cleanup() {
+    # The summary is printed here as well as at the end of main so a run that
+    # dies part-way still reports what it wrote; print_install_summary is
+    # idempotent, so the normal path prints it exactly once.
+    if [ -z "$CLI_MODE" ] \
+        && { [ "${#SUMMARY_LINES[@]}" -gt 0 ] || [ -n "$RUNTIME_BLOCKED_SKILLS" ]; }; then
+        print_install_summary
+    fi
     if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
         rm -rf "$TEMP_ROOT"
     fi
@@ -131,10 +234,23 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# ---------------------------------------------------------------
+# 3. Interactive input channel
+# ---------------------------------------------------------------
+# fd 3 is the one place prompts read from, so it is opened here, before anything
+# can call ask/confirm and before show_splash's `[ -t 3 ]` guard. Order-critical:
+# keep this block above every consumer.
+#
+# `ps -p $$ -o tty=` is not a usable tty probe: Linux prints `?` for no tty but
+# macOS prints `??`, so a string compare against `?` passed on macOS, /dev/tty
+# always exists as a node, and `exec 3</dev/tty` then failed with ENXIO — killing
+# the installer under `set -e` instead of falling through to the closed-fd case.
+# Just try the open and let it fail quietly. The probe runs in a subshell so a
+# failed `exec` redirection cannot take the installer down with it — bash exits a
+# non-interactive shell on a redirection error to a special builtin.
 if [ -t 0 ]; then
     exec 3<&0
-elif [ "$(ps -p "$$" -o tty= 2>/dev/null | tr -d ' ')" != "?" ] \
-    && [ -e /dev/tty ]; then
+elif ( exec 3</dev/tty ) 2>/dev/null; then
     exec 3</dev/tty
 else
     exec 3<&-
@@ -173,61 +289,127 @@ contains() {
 }
 
 # ---------------------------------------------------------------
-# Runtime tool verification
+# 4. Runtime tool verification
 # ---------------------------------------------------------------
-# Some skills need tools on the target system at runtime (not at install
-# time). When one is missing the skill would be installed broken, so abort
-# with system-specific install commands for the detected platform.
+# Some skills need tools on the target system at runtime (not at install time).
+# Requirement strength decides what a missing one costs, and it is per skill so
+# one unsatisfiable dependency never stops the others:
+#   hard — the skill does not work at all, so it is not installed and the run
+#          exits non-zero (a partial install must not read as success in CI)
+#   soft — the skill degrades honestly, so it is installed with a warning
+#          naming the capability that is lost; the exit status is unaffected
+#
+# A requirement may be platform- and arch-conditional: resource-limited-testing
+# only names memlimit on Darwin:arm64, because memlimit does not support Intel
+# Macs and demanding it there would refuse a skill whose degraded path works.
+#
+# The four tables below are GENERATED by installer/build.sh from each skill's
+# requires.tsv and the shared installer/tools.tsv. Edit those files, not this
+# block, and re-run installer/build.sh.
+# BEGIN GENERATED DEPENDENCY BLOCK
 runtime_requirements() {
+    local platform
+    platform="$(uname -s):$(uname -m)"
     case "$1" in
-        planning) printf '%s\n' jq ;;
+        brainstorm)
+            ;;
+        planning)
+            case "$platform" in *:*) printf '%s\n' jq ;; esac
+            ;;
+        post-implementation-review)
+            ;;
+        project-specificies)
+            ;;
+        resource-limited-testing)
+            case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
+            ;;
+    esac
+}
+
+runtime_requirement_strength() {
+    local platform
+    platform="$(uname -s):$(uname -m)"
+    case "$1:$2" in
+        planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
+    esac
+}
+
+runtime_requirement_why() {
+    local platform
+    platform="$(uname -s):$(uname -m)"
+    case "$1:$2" in
+        planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
+        resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
+    esac
+}
+
+runtime_tool_verify() {
+    case "$1" in
+        jq) command -v jq >/dev/null 2>&1 ;;
+        memlimit) command -v memlimit >/dev/null 2>&1 ;;
+        *) command -v "$1" >/dev/null 2>&1 ;;
     esac
 }
 
 runtime_tool_install_hint() {
-    local tool="$1"
+    local tool="$1" platform
+    platform="$(uname -s):$(uname -m)"
     case "$tool" in
         jq)
-            case "$(uname -s)" in
-                Darwin)
+            case "$platform" in
+                Darwin:*)
                     if command -v brew >/dev/null 2>&1; then
-                        printf '  brew install jq\n'
+                        printf '%s\n' '  brew install jq'
                     elif command -v port >/dev/null 2>&1; then
-                        printf '  sudo port install jq\n'
+                        printf '%s\n' '  sudo port install jq'
                     else
-                        printf '  install Homebrew (https://brew.sh) then: brew install jq\n'
+                        printf '%s\n' '  install Homebrew (https://brew.sh) then: brew install jq'
                     fi
                     ;;
-                Linux)
+                Linux:*)
                     if command -v apt-get >/dev/null 2>&1; then
-                        printf '  sudo apt-get install -y jq\n'
+                        printf '%s\n' '  sudo apt-get install -y jq'
                     elif command -v dnf >/dev/null 2>&1; then
-                        printf '  sudo dnf install -y jq\n'
+                        printf '%s\n' '  sudo dnf install -y jq'
                     elif command -v pacman >/dev/null 2>&1; then
-                        printf '  sudo pacman -S --noconfirm jq\n'
+                        printf '%s\n' '  sudo pacman -S --noconfirm jq'
                     elif command -v zypper >/dev/null 2>&1; then
-                        printf '  sudo zypper install -y jq\n'
+                        printf '%s\n' '  sudo zypper install -y jq'
                     elif command -v apk >/dev/null 2>&1; then
-                        printf '  sudo apk add jq\n'
+                        printf '%s\n' '  sudo apk add jq'
                     elif command -v snap >/dev/null 2>&1; then
-                        printf '  sudo snap install jq\n'
+                        printf '%s\n' '  sudo snap install jq'
                     else
-                        printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                        printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
                     fi
                     ;;
-                MINGW*|MSYS*|CYGWIN*)
+                MINGW*:*|MSYS*:*|CYGWIN*:*)
                     if command -v winget >/dev/null 2>&1; then
-                        printf '  winget install jqlang.jq\n'
+                        printf '%s\n' '  winget install jqlang.jq'
                     elif command -v choco >/dev/null 2>&1; then
-                        printf '  choco install jq\n'
+                        printf '%s\n' '  choco install jq'
                     elif command -v scoop >/dev/null 2>&1; then
-                        printf '  scoop install jq\n'
+                        printf '%s\n' '  scoop install jq'
                     else
-                        printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                        printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
                     fi
                     ;;
-                *)
-                    printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                *:*)
+                    printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
+                    ;;
+            esac
+            ;;
+        memlimit)
+            case "$platform" in
+                *:*)
+                    printf '%s\n' '  curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh'
+                    if command -v brew >/dev/null 2>&1; then
+                        printf '%s\n' '  or: brew tap pingiun/memlimit https://github.com/pingiun/memlimit && brew install --HEAD memlimit'
+                    elif command -v cargo >/dev/null 2>&1; then
+                        printf '%s\n' '  or: cargo install --git https://github.com/pingiun/memlimit memlimit'
+                    fi
+                    printf '%s\n' '  (memlimit is MIT-licensed, by Jelle Besseling; Apple Silicon only)'
                     ;;
             esac
             ;;
@@ -236,37 +418,91 @@ runtime_tool_install_hint() {
             ;;
     esac
 }
+# END GENERATED DEPENDENCY BLOCK
 
-verify_runtime_tools() {
-    local skill tool missing=0
-    for skill in "$@"; do
-        while IFS= read -r tool; do
-            [ -n "$tool" ] || continue
-            if ! command -v "$tool" >/dev/null 2>&1; then
-                [ "$missing" -eq 0 ] && {
-                    echo >&2
-                    echo "The selected skills need these tools at runtime; they are missing:" >&2
-                    missing=1
-                }
-                echo "  - $tool (required by $skill)" >&2
-            fi
-        done < <(runtime_requirements "$skill")
-    done
-    [ "$missing" -eq 0 ] && return 0
-    echo >&2
-    echo "Install them first, then re-run this installer:" >&2
-    for skill in "$@"; do
-        while IFS= read -r tool; do
-            [ -n "$tool" ] || continue
-            command -v "$tool" >/dev/null 2>&1 || {
-                echo "  $tool:" >&2
-                runtime_tool_install_hint "$tool" >&2
-            }
-        done < <(runtime_requirements "$skill")
-    done
-    die "missing runtime tools"
+# A skill is installable when every hard requirement is met. A missing soft one
+# is deliberately not consulted here — it costs a warning, not the install.
+skill_runtime_tools_present() {
+    local tool
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        [ "$(runtime_requirement_strength "$1" "$tool")" = hard ] || continue
+        runtime_tool_verify "$tool" || return 1
+    done < <(runtime_requirements "$1")
+    return 0
 }
 
+# The unmet requirements of one skill at one strength, one tool per line.
+runtime_unmet_tools() {
+    local skill="$1" strength="$2" tool
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        [ "$(runtime_requirement_strength "$skill" "$tool")" = "$strength" ] || continue
+        runtime_tool_verify "$tool" || printf '%s\n' "$tool"
+    done < <(runtime_requirements "$skill")
+}
+
+runtime_report_missing() {
+    local skill="$1" tool="$2"
+    printf '  - %s (%s requirement of %s)\n' "$tool" \
+        "$(runtime_requirement_strength "$skill" "$tool")" "$skill" >&2
+    printf '    lost without it: %s\n' "$(runtime_requirement_why "$skill" "$tool")" >&2
+    printf '    install it with:\n' >&2
+    runtime_tool_install_hint "$tool" >&2
+}
+
+# Ready-to-paste lines for the skills that are installable now, so a blocked
+# --all is never a dead end. The end-of-run summary carries the full replay.
+runtime_report_way_forward() {
+    local skill ready=""
+    for skill in "$@"; do
+        skill_runtime_tools_present "$skill" && ready="$ready $skill"
+    done
+    [ -n "$ready" ] || return 0
+    echo >&2
+    echo "The skills that are ready now can be installed one at a time:" >&2
+    # Unquoted on purpose: $ready is a space-joined list of skill names.
+    for skill in $ready; do
+        printf '  install.sh --skill %s\n' "$skill" >&2
+    done
+}
+
+# Partitions "$@" into RUNTIME_READY_SKILLS and RUNTIME_BLOCKED_SKILLS and
+# reports every gap on stderr. Callers install the ready list and exit non-zero
+# when the blocked list is not empty.
+verify_runtime_tools() {
+    local skill tool
+    RUNTIME_READY_SKILLS=()
+    RUNTIME_BLOCKED_SKILLS=""
+    for skill in "$@"; do
+        while IFS= read -r tool; do
+            [ -n "$tool" ] || continue
+            echo >&2
+            printf 'Warning: %s installs in a degraded form.\n' "$skill" >&2
+            runtime_report_missing "$skill" "$tool"
+        done < <(runtime_unmet_tools "$skill" soft)
+        if skill_runtime_tools_present "$skill"; then
+            RUNTIME_READY_SKILLS+=("$skill")
+            continue
+        fi
+        RUNTIME_BLOCKED_SKILLS="$RUNTIME_BLOCKED_SKILLS $skill"
+        echo >&2
+        printf 'Not installing %s: a hard requirement is missing.\n' "$skill" >&2
+        while IFS= read -r tool; do
+            [ -n "$tool" ] || continue
+            runtime_report_missing "$skill" "$tool"
+        done < <(runtime_unmet_tools "$skill" hard)
+    done
+    [ -n "$RUNTIME_BLOCKED_SKILLS" ] || return 0
+    runtime_report_way_forward "$@"
+}
+
+# ---------------------------------------------------------------
+# 5. Agent target detection
+# ---------------------------------------------------------------
+# Which agents are installed on this machine, plus the user's remembered custom
+# skill roots. agent_target_available() switches on the TARGET_* index, so the
+# registry order in section 1 must not change.
 agent_target_available() {
     local index="$1"
     local path="${TARGET_PATHS[$index]}"
@@ -305,8 +541,89 @@ load_custom_locations() {
         [ -n "$path" ] || continue
         [[ "$path" = \#* ]] && continue
         [ -d "$path" ] || continue
-        contains "$path" "${SAVED_CUSTOM_LOCATIONS[@]}" || SAVED_CUSTOM_LOCATIONS+=("$path")
+        # ${arr[@]+…}: expanding an empty array is an unbound-variable abort
+        # under `set -u` on bash < 4.4 (macOS ships 3.2).
+        contains "$path" ${SAVED_CUSTOM_LOCATIONS[@]+"${SAVED_CUSTOM_LOCATIONS[@]}"} \
+            || SAVED_CUSTOM_LOCATIONS+=("$path")
     done < "$CUSTOM_LOCATIONS_FILE"
+}
+
+# ---------------------------------------------------------------
+# 6. Terminal capability, splash, and menu rendering
+# ---------------------------------------------------------------
+# Everything here writes absolute cursor positions to stdout and is only reached
+# on a real terminal (show_splash returns early unless fd 3 is a tty).
+#
+# Implicit globals crossing function boundaries in this section — all of them
+# deliberate, because bash 3.2 has no way to return a value:
+#   COLOR_MODE       set by detect_color_mode, read by fg_sgr
+#   FG_SGR           set by fg_sgr, read by its caller on the next line
+#   COLOR            set by color_for, read by render_art
+#   ART              constant (section 1), read by render_art
+#   MENU_BOX_WIDTH   set by show_splash (or defaulted by show_shop_menu itself)
+#   MENU_COMPACT     set by show_splash, read by show_shop_menu
+#   MENU_COL         set by show_shop_menu, read by menu_wrap_text
+#   MENU_NEXT_ROW    set by menu_wrap_text, read by show_shop_menu
+#   MENU_PROMPT_ROW  set by show_shop_menu, read by select_skills
+#   REPLY            set by ask (section 3), read by confirm and every caller
+#   YES_ALL          set by confirm on "a", read by every later confirm
+
+# 24-bit SGR is not universal — macOS Terminal.app has never supported it, and
+# there the splash used to come out as literal escape residue. Probe once and let
+# fg_sgr downgrade to 256-colour, then to the 8 ANSI colours, then to nothing.
+detect_color_mode() {
+    local colors=0
+    if command -v tput >/dev/null 2>&1; then
+        colors="$(tput colors 2>/dev/null || echo 0)"
+    fi
+    case "$colors" in
+        ''|*[!0-9]*) colors=0 ;;
+    esac
+    case "${COLORTERM:-}" in
+        truecolor|24bit)
+            COLOR_MODE=truecolor
+            return
+            ;;
+    esac
+    if [ "$colors" -ge 16777216 ]; then
+        COLOR_MODE=truecolor
+    elif [ "$colors" -ge 256 ]; then
+        COLOR_MODE=256
+    elif [ "$colors" -ge 8 ]; then
+        COLOR_MODE=8
+    else
+        COLOR_MODE=none
+    fi
+}
+
+# Sets FG_SGR to the best foreground escape this terminal understands for the
+# "R;G;B" triple in $1, with the optional SGR attribute prefix $2 (e.g. '1;').
+# printf -v avoids a subshell: this runs once per art pixel.
+fg_sgr() {
+    local rgb="$1" attr="${2:-}" r g b rest
+    [ -n "$COLOR_MODE" ] || detect_color_mode
+    case "$COLOR_MODE" in
+        truecolor)
+            printf -v FG_SGR '\033[%s38;2;%sm' "$attr" "$rgb"
+            return
+            ;;
+        none)
+            FG_SGR=''
+            return
+            ;;
+    esac
+    r="${rgb%%;*}"
+    rest="${rgb#*;}"
+    g="${rest%%;*}"
+    b="${rest##*;}"
+    if [ "$COLOR_MODE" = "256" ]; then
+        # xterm 6x6x6 colour cube, which starts at index 16.
+        printf -v FG_SGR '\033[%s38;5;%dm' "$attr" \
+            "$(( 16 + 36 * (r * 5 / 255) + 6 * (g * 5 / 255) + (b * 5 / 255) ))"
+    else
+        printf -v FG_SGR '\033[%s3%dm' "$attr" \
+            "$(( (r >= 128) + 2 * (g >= 128) + 4 * (b >= 128) ))"
+    fi
 }
 
 color_for() {
@@ -372,7 +689,8 @@ render_art() {
                 char="${pixels[$x]}"
                 color_for "$char"
                 if [ -n "$COLOR" ]; then
-                    printf '\033[38;2;%sm%s\033[0m' "$COLOR" "$blocks"
+                    fg_sgr "$COLOR"
+                    printf '%s%s\033[0m' "$FG_SGR" "$blocks"
                 else
                     printf '%*s' "$pixel_width" ''
                 fi
@@ -412,16 +730,12 @@ show_shop_menu() {
     local inner_width title_padding
     local horizontal=''
     local index label description
-    local -a labels=(planning project-specificies resource-limited-testing brainstorm post-implementation-review 'all five skills')
-    local -a descriptions=(
-        'Durable, resumable plans with steps and verification.'
-        'Records project conventions, quirks, and deviations.'
-        'Caps CPU and memory for demanding tool runs.'
-        'Shapes an idea into a recorded, agreed picture before planning.'
-        'After-the-fact review and proposed fixes for built code.'
-        'Installs or updates the complete skill set.'
-    )
+    # The registry from section 1, plus the synthetic "everything" entry whose
+    # number select_skills() treats as "all".
+    local -a labels=("${SKILL_NAMES[@]}" 'all five skills')
+    local -a descriptions=("${SKILL_DESCRIPTIONS[@]}" 'Installs or updates the complete skill set.')
 
+    [ -n "$COLOR_MODE" ] || detect_color_mode
     if [ -z "${MENU_BOX_WIDTH:-}" ]; then
         local columns="${COLUMNS:-80}"
         if command -v tput >/dev/null 2>&1; then
@@ -441,11 +755,13 @@ show_shop_menu() {
     for ((index = 0; index < inner_width; index++)); do
         horizontal+='─'
     done
-    printf '\033[%d;%dH\033[1;38;2;255;211;64m╭%s╮\033[0m' "$row" "$MENU_COL" "$horizontal"
-    printf '\033[%d;%dH\033[1;38;2;255;211;64m│%*s%s%*s│\033[0m' \
-        "$((row + 1))" "$MENU_COL" "$((title_padding / 2))" '' "$title" \
+    fg_sgr '255;211;64' '1;'
+    printf '\033[%d;%dH%s╭%s╮\033[0m' "$row" "$MENU_COL" "$FG_SGR" "$horizontal"
+    printf '\033[%d;%dH%s│%*s%s%*s│\033[0m' \
+        "$((row + 1))" "$MENU_COL" "$FG_SGR" "$((title_padding / 2))" '' "$title" \
         "$((title_padding - title_padding / 2))" ''
-    printf '\033[%d;%dH\033[38;2;255;211;64m╰%s╯\033[0m' "$((row + 2))" "$MENU_COL" "$horizontal"
+    fg_sgr '255;211;64'
+    printf '\033[%d;%dH%s╰%s╯\033[0m' "$((row + 2))" "$MENU_COL" "$FG_SGR" "$horizontal"
 
     row=$((row + 4))
     for ((index = 0; index < ${#labels[@]}; index++)); do
@@ -466,8 +782,9 @@ pixel_message() {
     local frame="$1" base_x="$2" base_y="$3" row col char glyph line
     local -a chars glyph_rows
     chars=(m h h h - m h h h)
+    fg_sgr '255;211;64'
     for ((row = 0; row < 7; row++)); do
-        printf '\033[%d;%dH\033[38;2;255;211;64m' "$((base_y + row))" "$base_x"
+        printf '\033[%d;%dH%s' "$((base_y + row))" "$base_x" "$FG_SGR"
         for ((col = 0; col < ${#chars[@]}; col++)); do
             if [ "$col" -ge "$frame" ]; then
                 printf '          '
@@ -492,6 +809,9 @@ pixel_message() {
 show_splash() {
     [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return
     [ -t 3 ] || return
+    [ -n "$COLOR_MODE" ] || detect_color_mode
+    # A terminal with no colour at all gets no pixel mascot; the menu still works.
+    [ "$COLOR_MODE" = "none" ] && return
 
     local columns lines scale art_width art_height offset_x offset_y state step anim_scale anim_x anim_y message_y
     columns="${COLUMNS:-80}"
@@ -517,25 +837,6 @@ show_splash() {
     [ "$lines" -lt 20 ] && MENU_COMPACT=1
     message_y=$((lines - 7))
     [ "$message_y" -lt 1 ] && message_y=1
-
-    ART=(
-        'f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fdfd5e fcfd5f fcf347 fcf347'
-        'f2cf38 f2cf38 fdc100 fdc100 fcf246 fcf246 e8b11a e8b11a fcdb28 fcdb28 fcd228 fcd228 fbfb5d fdfd5e fcf347 fcf347'
-        'e8be38 e8be38 fcd84b fcd84b fdc100 fdc100 fcdb28 fcdb28 fcdb28 fcdb28 e8b11a e8b11a fddc51 fddc51 fdbb37 fdbb37'
-        'e8be38 e8be38 fcd84b fcd84b fdc100 fdc100 fcdb28 fcdb28 fcdb28 fcdb28 e8b11a e8b11a fcdc51 fcdc51 fdbb37 fdbb37'
-        'c37f18 c37f18 fdc127 fdc127 e6a621 e6a621 fcd22b fcd22b fdc127 fdc127 e6a621 e6a621 e6a621 e6a621 c37f18 c37f18'
-        'c37f18 c37f18 fdc127 fdc127 e6a621 e6a621 fcd22b fcd22b fdc127 fdc127 e6a621 e6a621 e6a621 e6a621 c37f18 c37f18'
-        'd8a521 d8a521 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 c37f18 c37f18'
-        'd8a521 d8a521 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 2d1b00 c37f18 c37f18'
-        'c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 dd8100 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-        'c27f18 c27f18 6c3100 6c3100 c27f18 c27f18 67522d 67522d 67522d 67522d 883300 883300 c27f18 c27f18 6c3100 6c3100'
-        '623b00 623b00 321400 321400 3a2910 3a2910 67522d 67522d 67522d 67522d 3a2910 3a2910 6c3100 6c3100 210000 210000'
-        '623b00 623b00 321400 321400 3a2910 3a2910 67522d 67522d 67522d 67522d 3a2910 3a2910 6c3100 6c3100 210000 210000'
-        '280c02 280c02 300d0a 300d0a 240a00 240a00 67522d 67522d 67522d 67522d 3e0907 3e0907 300d0a 300d0a 210000 210000'
-        '280c02 280c02 300d0a 300d0a 240a00 240a00 67522d 67522d 67522d 67522d 3e0907 3e0907 300d0a 300d0a 210000 210000'
-        '300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00'
-        '300d0a 300d0a 280c02 280c02 240a00 240a00 67522d 67522d 67522d 67522d 210000 210000 3e0907 3e0907 240a00 240a00'
-    )
 
     printf '\033[?25l\033[2J\033[H'
     for ((anim_scale = 1; anim_scale <= scale; anim_scale++)); do
@@ -567,6 +868,11 @@ show_splash() {
     printf '\033[?25h'
 }
 
+# ---------------------------------------------------------------
+# 7. Skill and target selection
+# ---------------------------------------------------------------
+# Resolves SKILL_SELECTION/TARGET_SELECTION (from the flags) or asks, and leaves
+# the answers in SELECTED_SKILLS, SELECTED_TARGET_PATHS and SELECTED_TARGET_NAMES.
 select_skills() {
     SELECTED_SKILLS=()
 
@@ -586,15 +892,19 @@ select_skills() {
     IFS=',' read -r -a choices <<< "$SKILL_SELECTION"
     for choice in "${choices[@]}"; do
         name="$choice"
+        # A menu number selects by position in SKILL_NAMES. The patterns exclude
+        # a leading zero so `08` cannot reach $(( )) and be read as octal; an
+        # out-of-range number falls through to the name check and dies there.
         case "$name" in
-            1) name="planning" ;;
-            2) name="project-specificies" ;;
-            3) name="resource-limited-testing" ;;
-            4) name="brainstorm" ;;
-            5) name="post-implementation-review" ;;
+            [1-9]|[1-9][0-9])
+                if [ "$name" -le "${#SKILL_NAMES[@]}" ]; then
+                    name="${SKILL_NAMES[$((name - 1))]}"
+                fi
+                ;;
         esac
         contains "$name" "${SKILL_NAMES[@]}" || die "Unknown skill: $name"
-        contains "$name" "${SELECTED_SKILLS[@]}" || SELECTED_SKILLS+=("$name")
+        contains "$name" ${SELECTED_SKILLS[@]+"${SELECTED_SKILLS[@]}"} \
+            || SELECTED_SKILLS+=("$name")
     done
 }
 
@@ -622,7 +932,7 @@ select_targets() {
             AVAILABLE_TARGET_NAMES+=("${TARGET_NAMES[$index]}")
         fi
     done
-    for path in "${SAVED_CUSTOM_LOCATIONS[@]}"; do
+    for path in ${SAVED_CUSTOM_LOCATIONS[@]+"${SAVED_CUSTOM_LOCATIONS[@]}"}; do
         AVAILABLE_TARGET_PATHS+=("$path")
         AVAILABLE_TARGET_NAMES+=("Custom: $path")
     done
@@ -681,6 +991,12 @@ select_targets() {
     done
 }
 
+# ---------------------------------------------------------------
+# 8. Source acquisition
+# ---------------------------------------------------------------
+# Local checkout or downloaded tarball, decided solely by whether
+# ${BASH_SOURCE[0]} is a readable file next to planning/SKILL.md — that is what
+# makes the curl|bash form work, so do not replace the probe with $0 or a marker.
 download_source() {
     local script_dir ref_prefix archive source_commit source_branch
     if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -727,6 +1043,13 @@ download_source() {
         || die "Downloaded archive does not contain the expected skills"
 }
 
+# ---------------------------------------------------------------
+# 9. Per-skill file manifest
+# ---------------------------------------------------------------
+# The planning list is a deliberate second copy of planning/PACKAGE-MANIFEST.txt:
+# the two are diffed by planning/tests/test-installer-manifest.sh, which extracts
+# this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
+# not derive it from the manifest — the duplication IS the cross-check.
 version_marker_content() {
     printf 'format=ai-skills-version-1\n'
     printf 'source_version=%s\n' "$SOURCE_VERSION"
@@ -775,6 +1098,7 @@ tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
 tests/test-planning-context-contract.sh
 tests/test-installer-manifest.sh
+tests/lib-test.sh
 tests/test-plan-env.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
@@ -787,6 +1111,7 @@ tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh
 PACKAGE-MANIFEST.txt
+requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
 roles/planning.md
@@ -810,6 +1135,7 @@ scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
+scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
 scripts/plan-context-wrapper.sh
@@ -823,6 +1149,7 @@ scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
+scripts/plan-map-lib.sh
 scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
 scripts/mint-fix-keys.sh
@@ -833,25 +1160,36 @@ scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
 scripts/validate-plan.sh
+scripts/validate-plan-common-lib.sh
+scripts/validate-plan-docs-lib.sh
+scripts/validate-plan-placeholders-lib.sh
+scripts/validate-plan-stale-lib.sh
+scripts/validate-plan-inventory-lib.sh
+scripts/validate-plan-ui-lib.sh
+scripts/validate-plan-goals-lib.sh
+scripts/validate-plan-serve-lib.sh
+scripts/validate-plan-commands-lib.sh
+scripts/validate-plan-propagation-lib.sh
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
 EOF
             ;;
         project-specificies)
-            printf '%s\n' SKILL.md
+            printf '%s\n' SKILL.md requires.tsv
             ;;
         resource-limited-testing)
-            printf '%s\n' SKILL.md
+            printf '%s\n' SKILL.md requires.tsv
+            local file
             for file in "$SOURCE_ROOT/resource-limited-testing/scripts/"*.sh; do
                 [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
             done
             ;;
         brainstorm)
-            printf '%s\n' SKILL.md
+            printf '%s\n' SKILL.md requires.tsv
             ;;
         post-implementation-review)
-            printf '%s\n' SKILL.md
+            printf '%s\n' SKILL.md requires.tsv
             ;;
     esac
 }
@@ -862,6 +1200,12 @@ source_file() {
     printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$relative"
 }
 
+# ---------------------------------------------------------------
+# 10. CLI-mode handlers
+# ---------------------------------------------------------------
+# Machine-facing entry points for the planning skill's own tooling. The exit
+# codes of cli_install_skill are a contract: 2 = approval declined (nothing
+# written), 3 = a collision that is not a managed-version upgrade, or a symlink.
 cli_print_skill_files() {
     [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
     [ "$CLI_FORMAT" = "tsv" ] || die "unsupported CLI format: $CLI_FORMAT"
@@ -879,6 +1223,8 @@ cli_resolve_source() {
 cli_install_skill() {
     contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
     verify_runtime_tools "$CLI_SKILL"
+    [ -z "$RUNTIME_BLOCKED_SKILLS" ] \
+        || die "$CLI_SKILL is missing a hard runtime requirement; nothing was written"
     case "$CLI_APPROVAL" in yes|no) ;; *) die "--approval must be yes or no" ;; esac
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
@@ -915,6 +1261,12 @@ cli_install_skill() {
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }
 
+# ---------------------------------------------------------------
+# 11. Interactive install, backup, and merge
+# ---------------------------------------------------------------
+# The interactive counterpart to section 10: compares every managed file against
+# the source, then asks once per destination. A .version marker that differs is a
+# managed upgrade and replaces without backups; anything else backs up first.
 backup_file() {
     local file="$1"
     local backup="$file.bak"
@@ -944,6 +1296,7 @@ install_skill() {
         destination_file="$destination/$relative"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
             echo "Skipping $root/$skill: existing symlink requires manual review." >&2
+            summary_add "Skipped:   $destination — existing symlink requires manual review"
             return
         fi
         if [ ! -e "$destination_file" ]; then
@@ -957,6 +1310,7 @@ EOF
 
     if [ -L "$destination/.version" ]; then
         echo "Skipping $root/$skill: existing .version symlink requires manual review." >&2
+        summary_add "Skipped:   $destination — existing .version symlink requires manual review"
         return
     elif [ ! -e "$destination/.version" ]; then
         missing=1
@@ -975,14 +1329,17 @@ EOF
         elif [ "$managed_version_transition" -eq 1 ]; then
             if ! confirm "Installed version differs in $destination. Replace it without backups?"; then
                 echo "Skipped $destination" >&2
+                summary_add "Skipped:   $destination — replacement declined"
                 return
             fi
         elif ! confirm "Changes detected in $destination. Replace them and create .bak backups?"; then
             echo "Skipped $destination" >&2
+            summary_add "Skipped:   $destination — replacement declined"
             return
         fi
     elif [ "$missing" -eq 0 ]; then
         echo "Up to date: $destination" >&2
+        summary_add "Up to date: $destination$(summary_soft_note "$skill")"
         return
     fi
 
@@ -1006,8 +1363,100 @@ EOF
     fi
     version_marker_content > "$destination/.version"
     echo "Installed: $destination" >&2
+    summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }
 
+# ---------------------------------------------------------------
+# 11b. End-of-run summary and replay commands
+# ---------------------------------------------------------------
+# The run's result, as one contiguous block on stdout. It goes to stdout and not
+# stderr because it is the answer to "what happened" (CODE-STYLE.md §10), which
+# also means `install.sh > run.txt` keeps the outcome and `2>/dev/null` keeps it
+# readable; the per-item progress and diagnostics stay on stderr as before.
+#
+# install_skill() records one line per destination through summary_add(), so the
+# summary reports what actually happened rather than what was selected. A blocked
+# skill is reported once, not once per root, and carries the commands that finish
+# the job — the install step for its missing tool and a replay of this very run.
+summary_add() {
+    SUMMARY_LINES+=("$1")
+}
+
+# The install path as the user invoked it. Under `curl … | bash` there is no
+# script file at all ($0 is "bash", BASH_SOURCE is empty), so the documented
+# piped form is emitted instead of a path that does not exist.
+replay_prefix() {
+    local raw
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        printf '%s' "$0"
+        return
+    fi
+    raw="${REPO_URL%/}"
+    raw="https://raw.githubusercontent.com/${raw#https://github.com/}"
+    printf 'curl -fsSL %s/%s/install.sh | bash -s --' "$raw" "$REPO_REF"
+}
+
+# One replay line per selected root: --target takes a single directory and --skill
+# a single selection, so a multi-root run needs one command per root.
+replay_commands() {
+    local skill="$1" root yes=""
+    [ "$YES" -eq 1 ] && yes=" --yes"
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        printf '  %s --skill %s --target %s%s\n' \
+            "$(replay_prefix)" "$skill" "$root" "$yes"
+    done
+}
+
+summary_blocked_block() {
+    local skill="$1" tool step=1
+    printf 'Skipped:   %s — a hard requirement is missing, nothing was written\n' "$skill"
+    printf 'To install %s once its requirements are met:\n' "$skill"
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        printf '  %d. install %s:\n' "$step" "$tool"
+        runtime_tool_install_hint "$tool" | sed 's/^/  /'
+        step=$((step + 1))
+    done < <(runtime_unmet_tools "$skill" hard)
+    printf '  %d. replay this run:\n' "$step"
+    replay_commands "$skill"
+}
+
+# The suffix appended to an Installed: line when a soft requirement is unmet.
+summary_soft_note() {
+    local skill="$1" tool note=""
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        note="$note   (warning: $tool missing — $(runtime_requirement_why "$skill" "$tool"))"
+    done < <(runtime_unmet_tools "$skill" soft)
+    printf '%s' "$note"
+}
+
+# Idempotent, because cleanup() calls it too: a run that dies part-way (the
+# permission step needs a tty) must still end with the block that says what was
+# written, which for a headless run is the whole user-facing story.
+print_install_summary() {
+    local line skill
+    [ "$SUMMARY_PRINTED" -eq 0 ] || return 0
+    SUMMARY_PRINTED=1
+    printf '\n== Summary ==\n'
+    # PORTABILITY(empty-array-setu): nothing is recorded when every selected
+    # skill was blocked, and bash 3.2 treats the empty expansion as unbound.
+    for line in ${SUMMARY_LINES[@]+"${SUMMARY_LINES[@]}"}; do
+        printf '%s\n' "$line"
+    done
+    # Unquoted on purpose: $RUNTIME_BLOCKED_SKILLS is a space-joined name list.
+    for skill in $RUNTIME_BLOCKED_SKILLS; do
+        summary_blocked_block "$skill"
+    done
+}
+
+# ---------------------------------------------------------------
+# 12. Post-install plan root migration
+# ---------------------------------------------------------------
+# Moves plans out of the old per-agent planning/plans directories into the single
+# portable plan root. This sources plan-document-lib.sh from the files this very
+# run just installed, so it must stay after the install loop, and it reads that
+# library from SELECTED_TARGET_PATHS[0] only.
 legacy_plan_migration() {
     local root plan_skill_dir plan_root source_dir plan marker destination state_dir
     plan_skill_dir="${SELECTED_TARGET_PATHS[0]}/planning"
@@ -1038,7 +1487,12 @@ legacy_plan_migration() {
                 printf 'Plan migration blocked; rerun after fixing permissions: %s\n' "$plan" >&2
                 printf '%s\n' "$plan" > "${marker}.blocked"
             fi
-        done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -print0 | LC_ALL=C sort -z)
+            # Unsorted on purpose: `sort -z` is GNU-only, and on BSD it errored
+            # out, leaving the NUL read loop with zero records — every plan was
+            # silently skipped while the success line below still printed. Each
+            # plan is moved independently and keyed by a cksum of its own path,
+            # so sibling order carries no meaning.
+        done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -print0)
     done
     printf 'Portable plan root ready: %s\n' "$plan_root" >&2
 }
@@ -1048,7 +1502,7 @@ ensure_plan_root_after_install() {
 }
 
 # ---------------------------------------------------------------
-# Step 2: planning runtime permissions (interactive main path only)
+# 13. Step 2: planning runtime permissions (interactive main path only)
 # ---------------------------------------------------------------
 # Grants the user-chosen agents read/write on the plans root and execution
 # access to the copied planning shell scripts. Every config file that is
@@ -1056,7 +1510,7 @@ ensure_plan_root_after_install() {
 # idempotent: entries already present are never duplicated.
 backup_file_timestamp() {
     local file="$1" stamp backup n=1
-    stamp="$(date +%Y%m%dT%H%M%S 2>/dev/null || date +%Y%m%dT%H%M%S)"
+    stamp="$(date +%Y%m%dT%H%M%S)"
     backup="${file}.bak.${stamp}"
     while [ -e "$backup" ]; do
         backup="${file}.bak.${stamp}.${n}"
@@ -1066,119 +1520,172 @@ backup_file_timestamp() {
     echo "  Backup: $backup" >&2
 }
 
+# Index lookup against the registry in section 1; anything not in it is custom.
 agent_kind_for_root() {
-    case "${1%/}" in
-        "$HOME/.claude/skills")          echo claude ;;
-        "$HOME/.config/opencode/skills") echo opencode ;;
-        "$HOME/.codex/skills")           echo codex ;;
-        "$HOME/.openclaw/skills")        echo openclaw ;;
-        "$HOME/.cline/skills")           echo cline ;;
-        "$HOME/.agents/skills")          echo universal ;;
-        *)                               echo custom ;;
-    esac
+    local root="${1%/}" index
+    for index in "${!TARGET_PATHS[@]}"; do
+        if [ "$root" = "${TARGET_PATHS[$index]%/}" ]; then
+            printf '%s\n' "${TARGET_KINDS[$index]}"
+            return
+        fi
+    done
+    printf '%s\n' custom
 }
 
+# Trailing-slash trim. The python implementations these replaced used
+# rstrip("/"), which removes every trailing slash, not just one.
+strip_trailing_slashes() {
+    local value="$1"
+    while [ "$value" != "${value%/}" ]; do
+        value="${value%/}"
+    done
+    printf '%s\n' "$value"
+}
+
+# Both permission editors are reached only from planning_permission_step, inside
+# main's `contains planning "${SELECTED_SKILLS[@]}"` branch, and planning declares
+# jq in runtime_requirements() — so verify_runtime_tools has already refused to
+# get this far without jq. jq is therefore guaranteed, and the command -v check
+# below only turns a hypothetical `set -e` abort into a clear message plus manual
+# instructions. It has to precede backup_file_timestamp, or a failure here leaves
+# an orphaned .bak.<timestamp> behind. python3 is deliberately not used anywhere:
+# jq is the only runtime dependency this installer is allowed to add.
 claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
+    local doc added tmpfile program
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "  claude-code: jq is not installed; cannot edit $cfg safely." >&2
+        print_manual_permissions claude "$scripts" "$plans" "$tmp"
+        return 0
+    fi
+    plans="$(strip_trailing_slashes "$plans")"
+    scripts="$(strip_trailing_slashes "$scripts")"
+    tmp="$(strip_trailing_slashes "$tmp")"
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 - "$cfg" <<'PY'
-import json, os, sys
-cfg = sys.argv[1]
-plans = os.environ["PLANS"].rstrip("/")
-scripts = os.environ["SCRIPTS"].rstrip("/")
-tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
-entries = [
-    f"Read({plans}/**)", f"Edit({plans}/**)",
-    f"Bash({scripts}/**:*)", f"Read({scripts}/**)",
-    f"Bash(bash {scripts}/**:*)", f"Bash(sh {scripts}/**:*)", f"Bash(python3 {scripts}/**:*)",
-    f"Read({tmp}/**)", f"Edit({tmp}/**)",
-    f"Bash({tmp}/**:*)",
-]
-data = {}
-try:
-    data = json.load(open(cfg))
-except Exception:
-    data = {}
-allow = data.setdefault("permissions", {}).setdefault("allow", [])
-if not isinstance(allow, list):
-    allow = data["permissions"]["allow"] = list(allow) if isinstance(allow, (list, tuple)) else []
-added = [e for e in entries if e not in allow]
-allow.extend(added)
-with open(cfg + ".tmp", "w") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False); f.write("\n")
-os.replace(cfg + ".tmp", cfg)
-if added:
-    print("  claude-code: added to permissions.allow:"); [print("    - " + x) for x in added]
-else:
-    print("  claude-code: permissions already present")
-PY
+
+    # An unparseable or non-object settings.json is rebuilt from {} rather than
+    # edited. `objectify` is the same defensive read at every level.
+    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program='
+def objectify: if type == "object" then . else {} end;
+def entries: [
+    "Read(\($plans)/**)", "Edit(\($plans)/**)",
+    "Bash(\($scripts)/**:*)", "Read(\($scripts)/**)",
+    "Bash(bash \($scripts)/**:*)",
+    "Read(\($tmp)/**)", "Edit(\($tmp)/**)",
+    "Bash(\($tmp)/**:*)"
+];
+def allowed: objectify | .permissions | objectify | .allow
+    | if type == "array" then . else [] end;
+'
+    added="$(printf '%s' "$doc" | jq -r \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
+        "$program"'(entries - allowed)[]')"
+
+    # mktemp in the config's own directory so the rename is atomic, and cp -p to
+    # inherit the user's mode before jq truncates it.
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | jq \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
+        "$program"'
+        objectify
+        | (.permissions | objectify) as $perm
+        | ($perm.allow | if type == "array" then . else [] end) as $allow
+        | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "jq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ -n "$added" ]; then
+        printf '  claude-code: added to permissions.allow:\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  claude-code: permissions already present\n'
+    fi
 }
 
 opencode_permissions() {
     local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2" tmp="$3"
+    local doc added legacy tmpfile program
     [ -f "$cfg" ] || { echo "  opencode: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "  opencode: jq is not installed; cannot edit $cfg safely." >&2
+        print_manual_permissions opencode "$scripts" "$plans" "$tmp"
+        return 0
+    fi
+    plans="$(strip_trailing_slashes "$plans")"
+    scripts="$(strip_trailing_slashes "$scripts")"
+    tmp="$(strip_trailing_slashes "$tmp")"
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 - "$cfg" <<'PY'
-import json, os, sys
-cfg = sys.argv[1]
-plans = os.environ["PLANS"].rstrip("/")
-scripts = os.environ["SCRIPTS"].rstrip("/")
-tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
 
-# opencode's permission block is keyed by tool name; each value is either an
-# action string ("ask"/"allow"/"deny") or a {pattern: action} object.
-wanted = {
-    "read": [f"{plans}/**", f"{scripts}/**", f"{tmp}/**"],
-    "edit": [f"{plans}/**", f"{tmp}/**"],
-    "bash": [f"{scripts}/**", f"bash {scripts}/**", f"sh {scripts}/**", f"python3 {scripts}/**", f"{tmp}/**"],
-    "external_directory": [f"{plans}/**", f"{scripts}/**", f"{tmp}/**"],
-}
+    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    # opencode's permission block is keyed by tool name; each value is either an
+    # action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
+    # action string is preserved as the "*" fallback pattern. A stray
+    # Claude-style allow/deny/ask list is not valid here, so `base` migrates it
+    # out — that removal is what the legacy notice below reports.
+    program='
+def objectify: if type == "object" then . else {} end;
+def wanted: [
+    ["read",               ["\($plans)/**", "\($scripts)/**", "\($tmp)/**"]],
+    ["edit",               ["\($plans)/**", "\($tmp)/**"]],
+    ["bash",               ["\($scripts)/**", "bash \($scripts)/**", "\($tmp)/**"]],
+    ["external_directory", ["\($plans)/**", "\($scripts)/**", "\($tmp)/**"]]
+];
+def rules: if type == "object" then . elif type == "string" then {"*": .} else {} end;
+def base:
+    objectify
+    | .permission as $p
+    | (if ($p | type) == "string"
+       then reduce wanted[] as $w ({}; .[$w[0]] = {"*": $p})
+       else ($p | objectify) end)
+    | del(.allow, .deny, .ask);
+'
+    legacy="$(printf '%s' "$doc" | jq -r '
+        (if type == "object" then . else {} end) | .permission
+        | if type == "object" and (.allow | type) == "array" and (.allow | length) > 0
+          then "yes" else "no" end')"
+    added="$(printf '%s' "$doc" | jq -r \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
+        "$program"'
+        [ wanted[] as $w
+          | ($w[0]) as $tool
+          | (base[$tool] | rules) as $rule
+          | $w[1][] as $pattern
+          | select($rule[$pattern] != "allow")
+          | "\($tool): \($pattern)" ][]')"
 
-try:
-    data = json.load(open(cfg))
-except Exception:
-    data = {}
-if not isinstance(data, dict):
-    data = {}
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | jq \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
+        "$program"'
+        (if type == "object" then . else {} end) as $data
+        | (reduce wanted[] as $w (base;
+              .[$w[0]] = (reduce $w[1][] as $pattern ((.[$w[0]] | rules); .[$pattern] = "allow"))
+          )) as $perm
+        | $data | .permission = $perm' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "jq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
 
-perm = data.get("permission")
-if isinstance(perm, str):
-    # a bare action applied to everything; keep it as the fallback pattern
-    perm = {tool: {"*": perm} for tool in wanted}
-elif not isinstance(perm, dict):
-    perm = {}
-
-# a stray Claude-style allow list is not valid here; migrate it out
-legacy = perm.pop("allow", None)
-legacy_note = isinstance(legacy, list) and bool(legacy)
-perm.pop("deny", None)
-perm.pop("ask", None)
-
-added = []
-for tool, patterns in wanted.items():
-    rule = perm.get(tool)
-    if isinstance(rule, str):
-        rule = {"*": rule}  # preserve the old blanket action as the fallback
-    elif not isinstance(rule, dict):
-        rule = {}
-    for pattern in patterns:
-        if rule.get(pattern) != "allow":
-            rule[pattern] = "allow"
-            added.append(f"{tool}: {pattern}")
-    perm[tool] = rule
-
-data["permission"] = perm
-with open(cfg + ".tmp", "w") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False); f.write("\n")
-os.replace(cfg + ".tmp", cfg)
-if legacy_note:
-    print("  opencode: removed invalid claude-style permission.allow list")
-if added:
-    print("  opencode: allowed in permission:"); [print("    - " + x) for x in added]
-else:
-    print("  opencode: permissions already present")
-PY
+    if [ "$legacy" = "yes" ]; then
+        printf '  opencode: removed invalid claude-style permission.allow list\n'
+    fi
+    if [ -n "$added" ]; then
+        printf '  opencode: allowed in permission:\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  opencode: permissions already present\n'
+    fi
 }
 
 print_manual_permissions() {
@@ -1261,6 +1768,16 @@ planning_permission_step() {
     print_agent_permission_prompt "$plans" "$agent_tmp" "${SELECTED_TARGET_PATHS[@]}"
 }
 
+# ---------------------------------------------------------------
+# 14. Main
+# ---------------------------------------------------------------
+# Order is load-bearing: show_splash before download_source (the splash is the
+# thing that covers the download), selection before verify_runtime_tools, and the
+# plan migration and permission step strictly after the install loop.
+#
+# verify_runtime_tools narrows SELECTED_SKILLS to what is installable and runs
+# before select_targets, so the replay commands in the summary — which need the
+# chosen roots — are printed at the end of the run rather than there.
 if [ -n "$CLI_MODE" ]; then
     download_source
     case "$CLI_MODE" in
@@ -1276,24 +1793,38 @@ if [ -z "$SKILL_SELECTION" ] || [ -z "$TARGET_SELECTION" ]; then
 fi
 select_skills
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
+# PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
+# 3.2 treats the empty expansion as unbound under set -u.
+SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})
 select_targets
 download_source
 
-echo >&2
-echo "Selected skills: ${SELECTED_SKILLS[*]}" >&2
-echo "Selected roots:  ${SELECTED_TARGET_NAMES[*]}" >&2
-echo >&2
+if [ "${#SELECTED_SKILLS[@]}" -eq 0 ]; then
+    echo >&2
+    echo "Nothing was installed: every requested skill is missing a hard requirement." >&2
+else
+    echo >&2
+    echo "Selected skills: ${SELECTED_SKILLS[*]}" >&2
+    echo "Selected roots:  ${SELECTED_TARGET_NAMES[*]}" >&2
+    echo >&2
 
-for root in "${SELECTED_TARGET_PATHS[@]}"; do
-    for skill in "${SELECTED_SKILLS[@]}"; do
-        install_skill "$skill" "$root"
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        for skill in "${SELECTED_SKILLS[@]}"; do
+            install_skill "$skill" "$root"
+        done
     done
-done
 
-if contains planning "${SELECTED_SKILLS[@]}"; then
-    ensure_plan_root_after_install
-    planning_permission_step
+    if contains planning "${SELECTED_SKILLS[@]}"; then
+        ensure_plan_root_after_install
+        planning_permission_step
+    fi
+
+    echo >&2
+    echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi
 
-echo >&2
-echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
+print_install_summary
+
+# Non-zero when a requested skill was blocked, so a partial install cannot read
+# as success in CI. A soft warning never changes the status.
+[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1
