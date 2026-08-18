@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
+# plan-context.sh — bounded reader and freshness gate for one plan's documents.
+#
+# Owns the plan-context cache: `init` snapshots every plan document with its
+# hash, `read` returns one document view under byte and record budgets, `check`
+# reports which snapshotted documents drifted, `refresh` re-snapshots, and
+# `checkpoint` records a phase state. Budgets are accounted in BYTES.
+#
+# Usage:
+#   plan-context.sh init|read|check|refresh|checkpoint --plan-dir DIR [...]
+#   plan-context.sh --help
+#
+# Exit codes: 2 bad invocation, 64 refused by the ROLE_ID reader allow-list,
+# 66 plan directory or document missing.
+
 set -euo pipefail
+export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-context-lib.sh"
 
 usage() {
-    cat >&2 <<'EOF'
+    local rc="${1:-2}"
+    cat <<'EOF'
 Usage:
   plan-context.sh init --plan-dir DIR
   plan-context.sh read --plan-dir DIR (--document ID | --unit WNN) [--view VIEW] [--format text|json] [--max-bytes N] [--max-records N] [--read-only]
@@ -22,21 +38,39 @@ Valid --document IDs:
   step:<goal>/<step>   <goal>/steps/<step>.md     (e.g. step:01-build/02-step-verify)
   --unit WNN           the step a work unit maps to in work-unit-inventory.md
 EOF
-    return 2
+    exit "$rc"
 }
 
-help() {
-    usage || true
-    exit 0
-}
-
-plan_dir= command= document_id= entry_id= check_mode= refresh_mode= phase= checkpoint_state= findings_file= changed_files_file= source_hash= plan_hash=
-document_selector_count=0 check_selector_count=0 refresh_selector_count=0
-view=summary format=text read_only=0 max_bytes=32768 max_records=128
+plan_dir=""
+command=""
+document_id=""
+entry_id=""
+check_mode=""
+refresh_mode=""
+phase=""
+checkpoint_state=""
+findings_file=""
+changed_files_file=""
+source_hash=""
+plan_hash=""
+document_selector_count=0
+check_selector_count=0
+refresh_selector_count=0
+view=summary
+format=text
+read_only=0
+max_bytes=32768
+max_records=128
+# Spool paths for the bounded read, at script scope so the EXIT trap can still
+# see them after context_read_command returns (a `local` would be out of scope
+# by then and trip set -u inside the handler).
+read_full_file=""
+read_bounded_file=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -h|--help) help ;;        init|read|check|refresh|checkpoint) [ -z "$command" ] || usage; command="$1"; shift ;;
+        -h|--help) usage 0 ;;
+        init|read|check|refresh|checkpoint) [ -z "$command" ] || usage; command="$1"; shift ;;
         --plan-dir) [ "$#" -ge 2 ] || usage; plan_dir="$2"; shift 2 ;;
         --document) [ "$#" -ge 2 ] || usage; document_id="$2"; document_selector_count=$((document_selector_count + 1)); shift 2 ;;
         --unit) [ "$#" -ge 2 ] || usage; document_id="unit:$2"; document_selector_count=$((document_selector_count + 1)); shift 2 ;;
@@ -71,7 +105,7 @@ context_init_command() {
         plan_dir="$1"; source "$2"
         generation="$(context_allocate_generation "$plan_dir")"
         staging="$(mktemp -d "$(context_root "$plan_dir")/init.XXXXXX")"
-        trap "rm -rf \"$staging\"" EXIT
+        trap '\''rm -rf "$staging"'\'' EXIT
         context_build_index "$plan_dir" "$staging/index.tsv"
         printf "schema_version\\tgenerator_version\\tresult_schema_version\\n%s\\t%s\\t%s\\n" "$context_schema_version" "$context_generator_version" "$context_result_schema_version" > "$staging/manifest.tsv"
         mkdir -p "$staging/entries"
@@ -85,15 +119,52 @@ context_init_command() {
     fi
 }
 
+# --max-bytes is a byte budget, so `head -c` can split one of the multi-byte
+# glyphs plan documents are full of (§ 💤 ⏳ ✅ —) and emit invalid UTF-8 inside
+# the JSON "content" string. Drop any sequence shorter than it declares.
+context_trim_partial_utf8() {
+    local file="$1" size bytes byte index count need have keep
+    size="$(wc -c < "$file" | tr -d ' ')"
+    [ "$size" -gt 0 ] || return 0
+    bytes="$(tail -c 4 "$file" | od -An -tu1 | tr '\n' ' ')"
+    # Intentional word split: od emits space-separated decimal byte values.
+    # shellcheck disable=SC2086
+    set -- $bytes
+    count="$#"
+    index="$count"
+    while [ "$index" -ge 1 ]; do
+        eval "byte=\${$index}"
+        [ "$byte" -ge 128 ] || return 0
+        if [ "$byte" -ge 192 ]; then
+            if [ "$byte" -ge 240 ]; then need=4
+            elif [ "$byte" -ge 224 ]; then need=3
+            else need=2
+            fi
+            have=$((count - index + 1))
+            if [ "$have" -lt "$need" ]; then
+                keep=$((size - have))
+                head -c "$keep" "$file" > "$file.trimmed"
+                mv -f "$file.trimmed" "$file"
+            fi
+            return 0
+        fi
+        index=$((index - 1))
+    done
+}
+
+context_read_cleanup() {
+    [ -z "$read_full_file" ] || rm -f "$read_full_file"
+    [ -z "$read_bounded_file" ] || rm -f "$read_bounded_file" "$read_bounded_file.trimmed"
+}
+
 context_read_command() {
     local file content bounded count=0 line truncated=0
+    local content_bytes bounded_bytes
     [ "$document_selector_count" -eq 1 ] || { printf 'usage: read requires exactly one --document or --unit\n' >&2; exit 2; }
     context_entry_id "$document_id" >/dev/null
-    # Per-role reader composition: when a persona is identified by ROLE_ID, the
-    # plan-context gate applies only if that role's allow-list says so, and its
-    # plan-read budget is capped. installer/oracle/eve read only their role
-    # scope docs and are refused plan content. No ROLE_ID keeps the
-    # identity-free (probe/reader) path unchanged.
+    # With a ROLE_ID the gate applies only if that role's allow-list says so,
+    # and caps its plan-read budget. No ROLE_ID must keep the identity-free
+    # probe/reader path unchanged.
     context_role_gate max_bytes
     file="$(context_resolve_document "$plan_dir" "$document_id")"
     [ -f "$file" ] || { printf 'not-found: %s\n' "$document_id" >&2; exit 66; }
@@ -101,13 +172,23 @@ context_read_command() {
     if [ "$read_only" -eq 0 ]; then
         context_with_lock "$plan_dir" context_register_processed_entry "$plan_dir" "$document_id"
     fi
+    # Budget accounting is in BYTES: derive the truncation flag from wc -c on
+    # both sides, never ${#var}. mktemp plus a trap, so an interrupt cannot
+    # leak the spool or collide with a reused PID.
+    trap context_read_cleanup EXIT
+    read_full_file="$(mktemp "${TMPDIR:-/tmp}/plan-context-read.XXXXXX")"
+    read_bounded_file="$(mktemp "${TMPDIR:-/tmp}/plan-context-read.XXXXXX")"
+    printf '%s\n' "$content" > "$read_full_file"
     while IFS= read -r line; do
-        count=$((count + 1));
+        count=$((count + 1))
         if [ "$count" -le "$max_records" ]; then printf '%s\n' "$line"; else truncated=1; break; fi
-    done <<< "$content" | head -c "$max_bytes" > "${TMPDIR:-/tmp}/plan-context-read.$$"
-    bounded="$(cat "${TMPDIR:-/tmp}/plan-context-read.$$")"
-    rm -f "${TMPDIR:-/tmp}/plan-context-read.$$"
-    [ "${#bounded}" -lt "${#content}" ] && truncated=1
+    done < "$read_full_file" | head -c "$max_bytes" > "$read_bounded_file"
+    context_trim_partial_utf8 "$read_bounded_file"
+    content_bytes="$(wc -c < "$read_full_file" | tr -d ' ')"
+    bounded_bytes="$(wc -c < "$read_bounded_file" | tr -d ' ')"
+    if [ "$bounded_bytes" -lt "$content_bytes" ]; then truncated=1; fi
+    bounded="$(cat "$read_bounded_file")"
+    context_read_cleanup
     if [ "$format" = json ]; then
         bounded="${bounded//$'\\'/\\\\}"
         bounded="${bounded//$'"'/\\\"}"
@@ -119,7 +200,11 @@ context_read_command() {
 }
 
 context_check_command() {
-    local generation changed status= fresh_count=0 changed_ids='-' affected_ids='-'
+    local generation changed
+    local status=""
+    local fresh_count=0
+    local changed_ids='-'
+    local affected_ids='-'
     [ -n "$check_mode" ] || { printf 'usage: check requires --entry, --changed, or --all\n' >&2; exit 2; }
     [ "$check_selector_count" -eq 1 ] || { printf 'usage: check requires exactly one --entry, --changed, or --all\n' >&2; exit 2; }
     generation="$(context_load_manifest "$plan_dir")"

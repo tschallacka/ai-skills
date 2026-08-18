@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Shared implementation for the bounded planning context cache.
+# plan-context-lib.sh — shared implementation for the bounded planning context
+# cache: snapshot generations, the plan-directory lock, document resolution,
+# views, the freshness index, and the per-role reader gate.
+#
+# Usage:
+#   source "$script_dir/plan-context-lib.sh"    # sourced, never executed
+#
+# Sourced by plan-context.sh (and by the `bash -c` worker it spawns for init).
+# Every function here is prefixed `context_` so nothing shadows a caller's name.
 
 set -euo pipefail
+export LC_ALL=C
 
 context_schema_version=1
 context_generator_version=1
@@ -29,6 +38,15 @@ context_current_file() { printf '%s/context/current\n' "$1"; }
 context_processed_file() { printf '%s/context/processed.tsv\n' "$1"; }
 context_lock_dir() { printf '%s/context/.lock\n' "$1"; }
 
+# Fractional sleep is a GNU/BSD extension, not POSIX: busybox ash's sleep
+# rejects "0.1" and, under set -e, context_with_lock would die instead of
+# retrying. Probe once and fall back to a whole second.
+if sleep 0.0 2>/dev/null; then
+    context_lock_retry_delay=0.1
+else
+    context_lock_retry_delay=1
+fi
+
 context_with_lock() {
     local plan_dir="$1"; shift
     local lock; lock="$(context_lock_dir "$plan_dir")"
@@ -46,7 +64,7 @@ context_with_lock() {
         fi
         now="$(date +%s)"
         [ $((now - start)) -lt "$timeout" ] || context_die "lock: context lock timeout: $lock"
-        sleep 0.1
+        sleep "$context_lock_retry_delay"
     done
     printf '%s\n' "$$" > "$lock/pid"
     trap 'rm -rf "$lock"' RETURN
@@ -85,7 +103,7 @@ context_resolve_document() {
             ;;
         unit:W*)
             local unit="${document_id#unit:}" row goal step
-            row="$(awk -F'|' -v wanted="$unit" 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {if(trim($2)==wanted) print trim($9) "\t" trim($10)}' "$plan_dir/work-unit-inventory.md")"
+            row="$(awk -F'|' -v wanted="$unit" 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {if(trim($2)==wanted) print trim($9) "\t" trim($10)}' "$plan_dir/work-unit-inventory.md")"
             IFS=$'\t' read -r goal step <<< "$row"
             [ -n "${goal:-}" ] && [ -n "${step:-}" ] || context_die "not-found: work unit $unit"
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
@@ -136,7 +154,7 @@ context_build_index() {
             goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
             printf 'step:%s/%s\t%s\tstep\t%s\n' "$goal" "$step" "$file" "$(context_hash_file "$file")"
         done
-        awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {printf "%s\t%s/steps/%s.md\n",trim($2),trim($9),trim($10)}' "$plan_dir/work-unit-inventory.md" |
+        awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {printf "%s\t%s/steps/%s.md\n",trim($2),trim($9),trim($10)}' "$plan_dir/work-unit-inventory.md" |
             while IFS=$'\t' read -r unit relative; do
                 file="$plan_dir/$relative"
                 [ -f "$file" ] || continue
@@ -176,9 +194,12 @@ context_publish_snapshot() {
     mkdir -p "$target/entries"
     cp "$index" "$target/index.tsv"
     cp "$manifest" "$target/manifest.tsv"
-    cp -R "$entries"/. "$target/entries/"
+    # A source path ending in "/." is unspecified in POSIX and BSD cp has
+    # historically differed, so copy the tree contents through tar instead.
+    ( cd "$entries" && tar cf - . ) | ( cd "$target/entries" && tar xf - )
     printf '%s\n' "$generation" > "$target/READY"
-    local current_tmp="$(context_current_file "$plan_dir").tmp.$$"
+    local current_tmp
+    current_tmp="$(context_current_file "$plan_dir").tmp.$$"
     printf '%s\n' "$generation" > "$current_tmp"
     mv "$current_tmp" "$(context_current_file "$plan_dir")"
 }
@@ -245,19 +266,12 @@ context_invalidate_after_mutation() {
     mv "$temporary" "$marker"
 }
 
-# Per-role reader composition.
-#
-# plan-context.sh (bounded plan content) and role-context.sh (persona scope
-# docs) are two distinct gates. This function declares, per role id (ROLE_ID),
-# whether the plan-context gate applies and the capped combined byte budget for
-# its plan reads. There is NO global composition rule; composition is per-role
-# only. installer/oracle/eve read only their role scope and never plan content.
-# When ROLE_ID is unset, plan-context behaves as before (no role restriction),
-# preserving the identity-free probe/reader path.
-#
-# Returns, separated by a tab:
-#   1 = plan-context applies (0/1)
-#   2 = combined plan-read budget cap in bytes (0 = not applied)
+# Per-role reader composition. Composition is per-role only; there is no global
+# rule, and unset ROLE_ID means no gate at all.
+# ---- quoted: emitted fields, tab-separated ----
+# 1 = plan-context applies (0/1)
+# 2 = combined plan-read budget cap in bytes (0 = not applied)
+# ---- end quoted ----
 context_role_reader_composition() {
     local role="$1" applies=1 budget=32768
     case "$role" in
@@ -268,13 +282,11 @@ context_role_reader_composition() {
     printf '%s\t%s\n' "$applies" "$budget"
 }
 
-# Resolve a ROLE_ID token (id or canonical lowercased name, plus benny-N
-# aliasing) to its canonical id. The persona registry lives ONLY in
-# role-context.sh's ROLES=() array. role-context.sh has a sourcing guard, so we
-# source it to reuse its native resolve_id() — the single source of truth, with
-# no separate parser that can drift from the registry.
+# Resolve a ROLE_ID token to its canonical id by sourcing role-context.sh and
+# reusing its native resolve_id(): its ROLES=() array is the only persona
+# registry, and a second parser here would drift from it.
 context_roles_file="${PLANNING_ROLE_CONTEXT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/role-context.sh}"
-resolve_role_id() {
+context_resolve_role_id() {
     local token="$1" resolved=""
     if [ -f "$context_roles_file" ]; then
         resolved="$(bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "$2"' _ "$context_roles_file" "$token" 2>/dev/null || true)"
@@ -282,15 +294,13 @@ resolve_role_id() {
     [ -n "$resolved" ] && printf '%s\n' "$resolved" || printf 'UNKNOWN\n'
 }
 
-# context_role_gate <max_bytes_var> : when ROLE_ID is set, enforce the per-role
-# allow-list so only roles that allow the plan-context gate may reach ANY
-# subcommand (read, check, refresh, init, checkpoint). Unknown roles fail
-# closed. Returns 0 on allow; exits 64 on refuse. On allow, caps the byte
-# budget for read-style commands by writing back through $1.
+# context_role_gate <max_bytes_var> : with ROLE_ID set, enforce the per-role
+# allow-list on every subcommand; unknown roles fail closed. Returns 0 on allow
+# (capping the byte budget through $1), exits 64 on refuse.
 context_role_gate() {
     local maxb="${1:-max_bytes}" role applies budget
     [ -n "${ROLE_ID:-}" ] || return 0
-    role="$(resolve_role_id "$ROLE_ID")"
+    role="$(context_resolve_role_id "$ROLE_ID")"
     if [ -z "$role" ] || [ "$role" = UNKNOWN ]; then
         printf 'usage: unknown ROLE_ID "%s"\n' "$ROLE_ID" >&2
         exit 64

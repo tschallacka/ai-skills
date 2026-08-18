@@ -7,45 +7,64 @@
 # bounded and paginated so a green frame costs ~zero context and Willie pulls
 # deeper only when a frame flags escalated/out-of-bounds/blocked.
 #
-# Commands:
+# Usage:
 #   monitor-read.sh show <frame-file>                      # bounded frame text
 #   monitor-read.sh status <frame-file>                    # one-line: subagent,status
 #   monitor-read.sh summary <dir>                          # all frames under <dir>
 #   monitor-read.sh grants <grant-log> [--last N]          # grant log (case+command)
-#   monitor-read.sh verify <frame-file>                    # fail-closed identity (ROLE_ID=maintainer)
+#   monitor-read.sh verify <frame-file>                    # fail-closed identity
+#   monitor-read.sh --help
 #
 # Gating: Willie is the maintainer. Reading a frame requires ROLE_ID resolving
-# to `maintainer` (the same identity gate used elsewhere). Non-maintainer
-# callers are refused (fail closed). Budget is enforced per frame via
-# supervision-frame.sh check.
+# to `maintainer`; non-maintainer callers are refused (fail closed). Budget is
+# enforced per frame via supervision-frame.sh check.
+
+# NOTE: `usage` below prints lines 1-20 of this file as the help text, so the
+# docblock above MUST stay within the first 20 lines (CODE-STYLE.md section 2).
+# Anything added here goes below this comment, never into the docblock.
 
 set -euo pipefail
+export LC_ALL=C
 
-# Resolve SCRIPT_DIR through readlink -f so a symlinked install (common for
-# agent skill dirs, e.g. ~/.claude/skills/planning) resolves sub-scripts
-# relative to the REAL location, not the symlink's directory, and never locks
-# the maintainer out.
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
 FRAME_BUDGET="${FRAME_BUDGET:-2048}"
 
-usage() {
-    sed -n '1,20p' "$0" >&2
-    exit 64
+# PORTABILITY(readlink-f): a symlinked skill dir (~/.claude/skills/planning)
+# is the common case, so this must resolve for real or the maintainer is
+# locked out of the monitor.
+resolve_symlink() {
+    local path="$1" target hops=0
+    while [ -L "$path" ]; do
+        hops=$((hops + 1))
+        [ "$hops" -le 40 ] || break     # cycle guard: give up, do not spin
+        target="$(readlink "$path")"
+        case "$target" in
+            /*) path="$target" ;;
+            *) path="$(dirname "$path")/$target" ;;
+        esac
+    done
+    printf '%s\n' "$path"
 }
 
-help() {
-    sed -n '1,20p' "$0"
-    exit 0
+script_dir="$(cd "$(dirname "$(resolve_symlink "${BASH_SOURCE[0]}")")" && pwd)"
+
+usage() {
+    local rc="${1:-64}"
+    awk 'NR == 1 { next }
+         /^#/ {
+             sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
+             print; next
+         }
+         { exit }' "$0"
+    exit "$rc"
 }
 
 require_maintainer() {
-    # Fail-closed identity: only the maintainer (Willie) may read supervision
-    # frames. Resolve ROLE_ID through the shared persona resolver (role-context.sh)
-    # so both the canonical id ("maintainer") and the canonical name ("willie")
-    # are accepted, consistent with every other identity gate. Unknown/unset
-    # identities are refused.
+    # Fail-closed: only the maintainer may read frames. Resolving through the
+    # shared persona resolver is what makes both the canonical id and the
+    # canonical name acceptable here; unknown or unset identities are refused.
     local resolved
-    resolved="$(ROLE_ID="${ROLE_ID:-}" bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "${ROLE_ID:-UNSET}"' _ "$SCRIPT_DIR/role-context.sh" 2>/dev/null || true)"
+    resolved="$(ROLE_ID="${ROLE_ID:-}" bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "${ROLE_ID:-UNSET}"' _ "$script_dir/role-context.sh" 2>/dev/null || true)"
     if [ "$resolved" != maintainer ]; then
         printf 'monitor-read: FAIL-CLOSED identity: only the maintainer (Willie) may read supervision frames; got ROLE_ID="%s"\n' "${ROLE_ID:-}" >&2
         exit 64
@@ -57,7 +76,7 @@ monitor_show() {
     require_maintainer
     local frame_file="$1"
     [ -f "$frame_file" ] || { printf 'monitor-read: no frame at %s\n' "$frame_file" >&2; return 66; }
-    bash "$SCRIPT_DIR/supervision-frame.sh" check "$frame_file" "$FRAME_BUDGET" >/dev/null || {
+    bash "$script_dir/supervision-frame.sh" check "$frame_file" "$FRAME_BUDGET" >/dev/null || {
         printf 'monitor-read: frame %s over budget; refusing to load\n' "$frame_file" >&2; return 64
     }
     cat "$frame_file"
@@ -87,8 +106,13 @@ monitor_grants() {
     local log_file="" last=20
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --last) last="$2"; shift 2 ;;
-            *) [ -z "$log_file" ] && log_file="$1" || usage; shift ;;
+            --last) [ "$#" -ge 2 ] || usage; last="$2"; shift 2 ;;
+            -*) usage ;;
+            *)
+                [ -z "$log_file" ] || usage
+                log_file="$1"
+                shift
+                ;;
         esac
     done
     require_maintainer
@@ -113,7 +137,7 @@ monitor_verify() {
 
 subcommand="${1:-}"; shift 2>/dev/null || true  # shifts by 1 (fd-2 redirect, intended)
 case "$subcommand" in
-    -h|--help) help ;;
+    -h|--help) usage 0 ;;
     show) monitor_show "$@" ;;
     status) monitor_status "$@" ;;
     summary) monitor_summary "$@" ;;

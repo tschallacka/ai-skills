@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # create-step-testing.sh — create or (with --overwrite) replace a step's
 # testing companion. Input is validated BEFORE any filesystem change, so a
 # rejected call never leaves the plan with the old companion already deleted.
@@ -8,30 +6,42 @@ set -euo pipefail
 # Usage:
 #   create-step-testing.sh <goal-directory> <step-name> <verification-instructions>
 #   create-step-testing.sh <goal-directory> <step-name> <verification-instructions> --overwrite
+#   create-step-testing.sh --help
 #
 # The instructions are rendered as a numbered §2.x section under "## Automated
 # tests"; separate paragraphs with "\n" escapes or real newlines
 # (multi-paragraph companions are supported and are what reviewers actually
 # proofread; every paragraph gets its own § 2.N label).
 
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <goal-directory> <step-name> <verification-instructions> [--overwrite]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+# A flag loop, not a "$@" pre-scan into an array: -h belongs in band, and
+# re-setting "$@" from a possibly-empty array aborts under set -u on bash 3.2.
 overwrite=false
-filtered_args=()
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help)
-            printf 'Usage: %s <goal-directory> <step-name> <verification-instructions> [--overwrite]\n' "$(basename "$0")" >&2
-            exit 0
-            ;;
-        --overwrite) overwrite=true ;;
-        *) filtered_args+=("$arg") ;;
+positional=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage 0 ;;
+        --overwrite) overwrite=true; shift ;;
+        --) shift; break ;;
+        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
+        *) positional+=("$1"); shift ;;
     esac
 done
-set -- "${filtered_args[@]}"
+while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done
 
-if [ "$#" -ne 3 ]; then
-    printf 'Usage: %s <goal-directory> <step-name> <verification-instructions> [--overwrite]\n' "$(basename "$0")" >&2
-    exit 64
-fi
+set -- ${positional[@]+"${positional[@]}"}
+[ "$#" -eq 3 ] || usage
 
 goal_dir="$1"
 step_name="$2"
@@ -43,24 +53,27 @@ source "$script_dir/plan-document-lib.sh"
 plan_require_directory "$goal_dir"
 [[ "$step_name" =~ ^[0-9][0-9]-step-[a-z0-9-]+$ ]] || plan_die "Step name must use 01-step-kebab-case"
 step_file="$goal_dir/steps/$step_name.md"
-[ -f "$step_file" ] || plan_die "Implementation step not found: $step_file"
+if [ ! -f "$step_file" ]; then
+    printf '%s: %s\n' "${0##*/}" "Implementation step not found: $step_file" >&2
+    exit 66
+fi
 testing_file="$goal_dir/steps/${step_name}-testing.md"
 if [ -e "$testing_file" ] && [ "$overwrite" = false ]; then
-    plan_die "Testing companion already exists: $testing_file (pass --overwrite to replace it)"
+    printf '%s: %s\n' "${0##*/}" \
+        "Testing companion already exists: $testing_file (pass --overwrite to replace it)" >&2
+    exit 73
 fi
 [ -n "${instructions//[[:space:]]/}" ] || plan_die "Verification instructions must not be empty"
 [[ "$instructions" != *'|'* ]] || plan_die "Verification instructions must not contain a Markdown table separator (|)"
 [[ "$instructions" != *'§'* ]] || plan_die "Verification instructions must not contain the reserved paragraph marker §"
 
-# Multi-paragraph instructions: every paragraph becomes its own numbered §2.x
-# block. Paragraphs may be separated by literal "\n" escapes (documented
-# convention) or by real newlines/blank lines. Normalize escapes to real
-# newlines, then split on any newline run, so both spellings produce one label
-# per paragraph — an unlabeled paragraph would silently receive edits aimed at
-# the labeled one. split() with a regex separator (/\\n/ matches literal
-# backslash-n, /\n+/ matches newline runs) keeps mawk and one-true-awk/BSD awk
-# consistent, unlike a multi-char RS which mawk treats as a regex but others
-# match literally.
+# Literal "\n" escapes and real newlines both separate paragraphs; each needs its
+# own § 2.x label or it silently receives edits aimed at the labeled one. A regex
+# split separator keeps mawk and BSD awk agreeing; a multi-char RS does not.
+# ---- quoted: split separators ----
+# /\\n/   literal backslash-n
+# /\n+/   runs of real newlines
+# ---- end quoted ----
 body_file="$(mktemp "${TMPDIR:-/tmp}/plan-testing.XXXXXX")"
 trap 'rm -f "$body_file"' EXIT
 printf '%s' "$instructions" | awk '
@@ -87,5 +100,4 @@ trap 'rm -f "$body_file" "$temporary_file"' EXIT
     cat "$body_file"
 } > "$temporary_file"
 mv "$temporary_file" "$testing_file"
-trap - EXIT
-printf 'Created testing companion %s\n' "$testing_file"
+printf 'Created %s\n' "$testing_file"

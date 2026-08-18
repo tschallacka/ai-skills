@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# add-goal.sh — create one goal directory (goal.md plus an empty steps/) in a
+# plan and refresh the plan-level progress tracker.
+#
+# The goal's own progress.md is deliberately NOT created here: create-progress.sh
+# needs step files to exist, so add-work-unit.sh creates it with the goal's first
+# work unit. Fill the emitted placeholders with update-plan-content.sh; the
+# Goal-size exception heading is emitted empty on purpose (see below).
+#
+# Usage:
+#   add-goal.sh <plan-directory> <goal-name> <title> <outcome>
+#   add-goal.sh --help
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <goal-name> <title> <outcome>" >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory> <goal-name> <title> <outcome>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 4 ] || usage
 
 plan_dir="$1"
 goal_name="$2"
@@ -19,10 +39,14 @@ plan_git_snapshot "$plan_dir"
 plan_require_safe_value title "$title"
 plan_require_safe_value outcome "$outcome"
 goal_dir="$plan_dir/$goal_name"
-[ ! -e "$goal_dir" ] || plan_die "Goal already exists: $goal_dir"
+if [ -e "$goal_dir" ]; then
+    printf '%s: %s\n' "${0##*/}" "Goal already exists: $goal_dir" >&2
+    exit 73
+fi
 
 mkdir -p "$goal_dir/steps"
 goal_file="$goal_dir/goal.md"
+# The trap also removes the directories this script created, not just the temp.
 temporary_file="${goal_file}.tmp.$$"
 trap 'rm -f "$temporary_file"; rmdir "$goal_dir/steps" "$goal_dir" 2>/dev/null || true' EXIT
 {
@@ -39,20 +63,17 @@ trap 'rm -f "$temporary_file"; rmdir "$goal_dir/steps" "$goal_dir" 2>/dev/null |
     printf '| Test required | Rationale |\n'
     printf '|---|---|\n'
     printf '| no | <set to yes when this goal has a testable behavior; explain research or other untestable goals> |\n\n'
-    # The Goal-size exception heading is emitted empty (no placeholder text —
-    # a placeholder is valid to write and invalid to keep). It is filled via
-    # `-gs <plan> <goal> goal-size-exception -p 11.1: <reason>` when the goal
-    # actually owns a single work unit; the validator requires it then.
+    # Emitted empty on purpose: a placeholder is valid to write and invalid to
+    # keep. The validator requires content here once the goal owns a single
+    # work unit.
     printf '## Goal-size exception\n'
 } > "$temporary_file"
 mv "$temporary_file" "$goal_file"
 trap - EXIT
-# The per-goal progress tracker is created by add-work-unit.sh (its
-# create-progress.sh needs step files to exist), so a freshly added goal gets
-# one the moment its first work unit lands. The plan-level tracker is created
-# here and rebuilt on every goal change.
+# No per-goal tracker here: generating one needs step files, which do not exist
+# until the goal's first work unit lands.
 if [ ! -f "$plan_dir/progress.md" ]; then
     "$script_dir/create-plan-progress.sh" "$plan_dir" >/dev/null
 fi
 "$script_dir/rebuild-plan-progress.sh" "$plan_dir" >/dev/null
-echo "Created $goal_dir"
+printf 'Created %s\n' "$goal_dir"

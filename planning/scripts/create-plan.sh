@@ -1,13 +1,34 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# create-plan.sh — create a plan directory with its plan-description.md,
+# work-unit-inventory.md, commands.json, env files, and initial git commit.
+#
+# Where the plan lands depends on the argument: a path (containing "/") is used
+# verbatim, a bare name resolves the plans root via plan-root.sh, prompting on
+# first use in a project. Which repository owns the plan's history is decided
+# further down, next to the rules it follows.
+#
+# Usage:
+#   create-plan.sh <plan-name|plan-directory> <title>
+#   create-plan.sh --help
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $(basename "$0") <plan-name|plan-directory> <title>" >&2
-    echo "  <plan-directory> may be an explicit path (existing behaviour)." >&2
-    echo "  <plan-name> (no '/') resolves the plans root via plan-root.sh," >&2
-    echo "             prompting on first use in a project." >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-name|plan-directory> <title>
+       ${0##*/} --help
+
+  <plan-directory>  an explicit path (existing behaviour).
+  <plan-name>       no '/': resolves the plans root via plan-root.sh,
+                    prompting on first use in a project.
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 2 ] || usage
 
 plan_arg="$1"
 title="$2"
@@ -28,11 +49,16 @@ case "$plan_arg" in
 esac
 
 [[ "$(basename "$plan_dir")" =~ ^[a-z0-9][a-z0-9-]*$ ]] || plan_die "Plan directory name must be kebab-case"
-[ ! -e "$plan_dir" ] || plan_die "Plan directory already exists: $plan_dir"
+if [ -e "$plan_dir" ]; then
+    printf '%s: %s\n' "${0##*/}" "Plan directory already exists: $plan_dir" >&2
+    exit 73
+fi
 plan_require_safe_value title "$title"
 
 mkdir -p "$plan_dir"
 description="$plan_dir/plan-description.md"
+# The trap unwinds a partial creation (it also removes the new plan directory),
+# so it is released on success rather than left to run.
 temporary_file="${description}.tmp.$$"
 trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
 {
@@ -71,13 +97,9 @@ plan_root=$(cd "$plan_dir" && pwd -P)
 "$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
 "$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
 if command -v git >/dev/null 2>&1; then
-    # Decide which repo owns the plan's history. A git-excluded plans root
-    # (a project's /.plans in .gitignore) or a plans root outside any repo
-    # gets its own repo at the root so the whole plans tree is versioned and
-    # cross-plan diffs (plan-content.sh diff walking up) work; re-initializes
-    # the root repo when its .git is missing. A plan inside an already-versioned
-    # tree commits into that tree. An explicit path outside any repo keeps its
-    # own per-plan repo (existing behaviour).
+    # A git-excluded plans root, or one outside any repo, gets its own repo at
+    # the root so cross-plan diffs work; a plan inside an already-versioned
+    # tree commits into that tree instead.
     git_repo=""
     if top="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)"; then
         if git -C "$top" check-ignore -q "$plan_dir" 2>/dev/null; then
@@ -102,4 +124,4 @@ if command -v git >/dev/null 2>&1; then
     fi
 fi
 trap - EXIT
-echo "Created $plan_dir"
+printf 'Created %s\n' "$plan_dir"

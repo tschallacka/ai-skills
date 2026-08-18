@@ -7,12 +7,22 @@
 # secret dir under the planning scratch dir (see W12 session lifecycle). The
 # plan only ever holds the derived keys plus the session id that names the
 # secret dir.
+#
+# Usage:
+#   mint-fix-keys.sh <plan-directory>
+#   mint-fix-keys.sh --help
+#
+# Exit codes: 65 = a gated findings row has non-conforming ids; 69 = openssl is
+# unavailable (no other tool computes HMAC-SHA256).
 
 set -euo pipefail
+export LC_ALL=C
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/plan-document-lib.sh"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
 
+# The `-gt 0` guard is required: expanding a possibly-empty array is unbound
+# under `set -u` before bash 4.4.
 tmp_files=()
 cleanup_tmp() {
     if [ "${#tmp_files[@]}" -gt 0 ]; then
@@ -22,9 +32,19 @@ cleanup_tmp() {
 trap cleanup_tmp EXIT
 
 usage() {
-    printf 'Usage: %s <plan-directory>\n' "$(basename "$0")" >&2
-    exit 64
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
 }
+
+# HMAC-SHA256 has no coreutils equivalent, so openssl is a hard requirement
+# rather than a guarded optimisation: refuse up front with 69 instead of
+# minting keys that would never verify.
+command -v openssl >/dev/null 2>&1 || \
+    plan_die 'openssl (or LibreSSL) is required to derive fix keys via HMAC-SHA256' 69
 
 # plan_session_id PLAN_DIR — the session id recorded in fix-keys.json, or empty.
 plan_session_id() {
@@ -36,7 +56,9 @@ plan_session_id() {
 # new_session_id — a fresh session id for a newly created session secret.
 new_session_id() {
     local id
-    id="$(openssl rand -hex 8 2>/dev/null || printf '%s-%s' "$$" "$(date +%s%N)")"
+    # PORTABILITY(date-nanoseconds): a literal "N" is non-empty, so it would
+    # pass the check below while carrying no sub-second entropy.
+    id="$(openssl rand -hex 8 2>/dev/null || printf '%s-%s-%s' "$$" "$(date +%s)" "$RANDOM$RANDOM")"
     [ -n "$id" ] || plan_die "cannot generate a session id"
     printf '%s\n' "$id"
 }
@@ -45,11 +67,9 @@ session_secret_dir() {
     printf '%s/review-fix-keys/%s\n' "$(planning_tmpdir)" "$1"
 }
 
-# ensure_session_secret PLAN_DIR — establish the session secret for a plan and
-# print the session id. Reuses the existing session while its secret dir is
-# present (minting stays idempotent within a cycle, so keys derived earlier
-# keep verifying); a missing dir — e.g. after the approval gate invalidated the
-# previous session — starts a fresh session (re-mint).
+# Reuse the session while its secret dir exists, so minting stays idempotent
+# within a cycle and keys derived earlier keep verifying. A missing dir means
+# the previous session was invalidated and a fresh one must be started.
 ensure_session_secret() {
     local plan_dir="$1" session_id secret_file
     planning_ensure_tmpdir
@@ -76,24 +96,20 @@ hmac_key() {
         | od -An -vtx1 | tr -d ' \n'
 }
 
-# mint_fix_keys PLAN_DIR [SESSION_ID] — parse the 5-column findings table
-# (ID | Missing or over-broad item | Required plan change | Status | Work unit)
-# and write fix-keys.json: one hex key per (finding, work unit) row, derived as
-# HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>"). Rows without a
-# work unit carry no key. Fails when the session secret is unavailable — the
-# production creation path is ensure_session_secret (W12); tests seed the
-# secret dir themselves.
-#
-# Non-conforming rows fail loudly: a gated row (work unit present) whose
-# finding id or work-unit id does not match ^AR-[0-9]+$ / ^W[0-9]+$ is warned
-# per row, and the whole run exits non-zero when any gated row could not be
-# minted. A silently skipped row would otherwise disable the entire fix-key
-# gate (verify then reports "no gated pairs … no fix verification required").
+# A gated row whose ids fail ^AR-[0-9]+$ / ^W[0-9]+$ must fail the whole run,
+# not be skipped: with no minted pairs left, verification reports "no gated
+# pairs" and the fix-key gate silently disappears.
+# ---- quoted: findings table columns ----
+# ID | Missing or over-broad item | Required plan change | Status | Work unit
+# ---- end quoted ----
+# ---- quoted: fix-key derivation ----
+# HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>")
+# ---- end quoted ----
 mint_fix_keys() {
     local plan_dir="$1" review_file="$1/adversarial-review.md"
     local json_file="$1/fix-keys.json"
     local session_id="${2:-}" secret_file secret pairs_file tsv_file minted_by
-    local gated_rows skipped_rows fid wu
+    local gated_rows skipped_rows fid wu count_file json_tmp
     [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file"
     if [ -z "$session_id" ]; then
         session_id="$(plan_session_id "$plan_dir")"
@@ -103,14 +119,15 @@ mint_fix_keys() {
     [ -f "$secret_file" ] || plan_die "session secret missing: $secret_file"
     secret="$(cat "$secret_file")"
 
-    pairs_file="$(mktemp)"
-    tsv_file="$(mktemp)"
+    # Named templates so a leaked temp is identifiable as this script's.
+    pairs_file="$(mktemp "${TMPDIR:-/tmp}/mint-fix-keys-pairs.XXXXXX")"
+    tsv_file="$(mktemp "${TMPDIR:-/tmp}/mint-fix-keys-tsv.XXXXXX")"
     tmp_files+=("$pairs_file" "$tsv_file")
 
     # Two passes: first count gated rows and rows that could not be minted
     # (counts written to a file so they survive the pipeline subshell), then
     # derive keys for the conforming pairs.
-    count_file="$(mktemp)"
+    count_file="$(mktemp "${TMPDIR:-/tmp}/mint-fix-keys-count.XXXXXX")"
     tmp_files+=("$count_file")
     awk -F'|' '
         /^## Findings$/ { in_findings = 1; next }
@@ -170,6 +187,14 @@ mint_fix_keys() {
     # to the session id that names the secret dir.
     minted_by="${MINTED_BY:-$session_id}"
 
+    # A tracked temp in the target's own directory: the rename is atomic and the
+    # cleanup trap removes it if awk fails. `$f.tmp.$$` had no trap at all.
+    json_tmp="$(mktemp "$plan_dir/fix-keys.json.XXXXXX")"
+    tmp_files+=("$json_tmp")
+    # mktemp creates 0600; restore the mode a plain `>` redirect would have
+    # produced so fix-keys.json keeps the permissions it had before.
+    chmod "$(printf '%03o' "$(( 0666 & ~0$(umask) ))")" "$json_tmp"
+
     awk -v sid="$session_id" -v minted_by="$minted_by" '
         BEGIN { print "{"; printf "  \"session_id\": \"%s\",\n", sid; printf "  \"minted_by\": \"%s\",\n", minted_by; print "  \"keys\": {" }
         { fid = $1; wu = $2; key = $3
@@ -188,11 +213,14 @@ mint_fix_keys() {
             print "  }"
             print "}"
         }
-    ' "$tsv_file" > "$json_file.tmp.$$"
-    mv "$json_file.tmp.$$" "$json_file"
+    ' "$tsv_file" > "$json_tmp"
+    mv -f "$json_tmp" "$json_file"
 }
 
 main() {
+    case "${1:-}" in
+        -h|--help) usage 0 ;;
+    esac
     [ "$#" -eq 1 ] || usage
     plan_require_directory "$1"
     plan_git_snapshot "$1"

@@ -1,25 +1,46 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# add-coverage.sh — add (or with --replace, replace) one row in a plan's
+# "## Definition-of-done coverage" table, linking a required outcome or proof to
+# the work units that deliver it.
+#
+# The row is inserted immediately above the "## Work units" heading, so coverage
+# rows accumulate in the order they were added. --replace collapses every row
+# carrying the same outcome into one at the position of the first match, and adds
+# the row when no such outcome exists yet.
+#
+# Usage:
+#   add-coverage.sh <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
+#   add-coverage.sh --help
 
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+# A flag loop, not a "$@" pre-scan into an array: -h belongs in band, and
+# re-setting "$@" from a possibly-empty array aborts under set -u on bash 3.2.
 replace_mode=false
-filtered_args=()
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help)
-            echo "Usage: $(basename "$0") <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]" >&2
-            exit 0
-            ;;
-        --replace) replace_mode=true ;;
-        *) filtered_args+=("$arg") ;;
+positional=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage 0 ;;
+        --replace) replace_mode=true; shift ;;
+        --) shift; break ;;
+        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
+        *) positional+=("$1"); shift ;;
     esac
 done
-set -- "${filtered_args[@]}"
+while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]" >&2
-    exit 64
-fi
-
+set -- ${positional[@]+"${positional[@]}"}
+[ "$#" -eq 4 ] || usage
 plan_dir="$1"; outcome="$2"; work_units="$3"; notes="$4"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
@@ -30,7 +51,10 @@ for value_name in outcome work_units notes; do
 done
 [[ "$work_units" =~ ^W[0-9][0-9]+(,[[:space:]]*W[0-9][0-9]+)*$ ]] || plan_die "Work units must be comma-separated IDs such as W01,W02"
 inventory="$plan_dir/work-unit-inventory.md"
-[ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
+if [ ! -f "$inventory" ]; then
+    printf '%s: %s\n' "${0##*/}" "Work-unit inventory not found: $inventory" >&2
+    exit 66
+fi
 plan_git_snapshot "$plan_dir"
 
 temporary_file="${inventory}.tmp.$$"
@@ -61,9 +85,8 @@ else
     ' "$inventory" > "$temporary_file" || plan_die "Inventory has no Work units section"
 fi
 mv "$temporary_file" "$inventory"
-trap - EXIT
 if [ "$replace_mode" = true ]; then
-    echo "Replaced (or added) coverage for $work_units"
+    printf 'Replaced coverage for %s\n' "$work_units"
 else
-    echo "Added coverage for $work_units"
+    printf 'Added coverage for %s\n' "$work_units"
 fi

@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# create-plan-progress.sh — generate a plan's top-level progress.md: one row per
+# goal directory holding a goal.md, each carrying that goal's definition of done.
+#
+# Row order is the goal directories in byte order (export LC_ALL=C above, so the
+# generated order is the same for every developer on every locale). Refuses to
+# overwrite an existing tracker (73); rebuild-plan-progress.sh refreshes one.
+#
+# Usage:
+#   create-plan-progress.sh <plan-directory>
+#   create-plan-progress.sh --help
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $(basename "$0") <plan-directory>" >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 1 ] || usage
 
 plan_dir="$1"
 progress_file="$plan_dir/progress.md"
@@ -41,6 +60,5 @@ trap 'rm -f "$temporary_file"' EXIT
     done
 } > "$temporary_file"
 mv "$temporary_file" "$progress_file"
-trap - EXIT
 
-echo "Created $progress_file with ${#goal_names[@]} goal rows"
+printf 'Created %s\n' "$progress_file"

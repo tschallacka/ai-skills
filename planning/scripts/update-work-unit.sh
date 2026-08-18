@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
 # update-work-unit.sh — amend a work-unit inventory row and its matching step
 # file in place.
 #
@@ -8,6 +6,7 @@ set -euo pipefail
 #   update-work-unit.sh <plan-directory> <WNN> [<new-primary-scope>] [<new-file>]
 #                       [--scope <text>] [--file <path>] [--type <type>]
 #                       [--depends-on <WNN[,WNN...]|—>] [--description <text>]
+#   update-work-unit.sh --help
 #
 # The inventory row columns are: | ID | Type | File | Primary symbol or file
 # scope | Subscope | Intended change | Depends on | Goal | Step |. The third
@@ -19,21 +18,28 @@ set -euo pipefail
 # the goal Owned work units section, and progress trackers are untouched —
 # changing a dependency must never go through remove + re-add (that would drop
 # the unit from its coverage rows and require manual repair).
+#
+# Exit codes: 64 bad invocation or malformed value, 66 plan directory missing.
+
+set -euo pipefail
+export LC_ALL=C
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
 
 usage() {
-    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")" >&2
-    exit 64
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
 }
 
-help() {
-    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")"
-    exit 0
-}
-
-case " $* " in
-    *' --help '*|*' -h '*) help ;;
+# -h/--help is handled in band by the flag loop below, so no pre-scan of "$@".
+case "${1:-}" in
+    -h|--help) usage 0 ;;
 esac
-
 [ "$#" -ge 2 ] || usage
 plan_dir="$1" unit="$2"; shift 2
 new_scope='' new_file='' new_type='' new_depends='' new_description=''
@@ -45,7 +51,7 @@ while [ "$#" -gt 0 ]; do
         --type) [ "$#" -ge 2 ] || usage; new_type="$2"; shift 2 ;;
         --depends-on) [ "$#" -ge 2 ] || usage; new_depends="$2"; shift 2 ;;
         --description) [ "$#" -ge 2 ] || usage; new_description="$2"; shift 2 ;;
-        -h|--help) help ;;
+        -h|--help) usage 0 ;;
         -*) usage ;;
         *)
             # Positional count, not -z: an empty positional means "leave
@@ -65,8 +71,6 @@ if [ -z "$new_scope" ] && [ -z "$new_file" ] && [ -z "$new_type" ] && [ -z "$new
     usage
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
 [[ "$unit" =~ ^W[0-9][0-9]+$ ]] || plan_die 'Work-unit ID must use WNN'
@@ -80,8 +84,12 @@ if [ -n "$new_depends" ]; then
 fi
 inventory="$plan_dir/work-unit-inventory.md"
 [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
+
 step_file="$(awk -F'|' -v wanted="$unit" '$0 ~ /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 == wanted) {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $9); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $10); print "'"$plan_dir"'/"$9"/steps/"$10".md"}}' "$inventory")"
 [ -n "$step_file" ] && [ -f "$step_file" ] || plan_die "Work unit not found: $unit"
+
+# One trap covers every temp: installed before the first write and never
+# released with `trap - EXIT`, which would discard the library's handler (§8).
 inventory_tmp="${inventory}.tmp.$$"; step_tmp="${step_file}.tmp.$$"
 trap 'rm -f "$inventory_tmp" "$step_tmp"' EXIT
 awk -F'|' -v wanted="$unit" -v replacement="$new_scope" -v newfile="$new_file" -v newtype="$new_type" -v newdeps="$new_depends" 'BEGIN{OFS="|"} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id); if(id==wanted){if(replacement != ""){$5=" " replacement " "}; if(newfile != ""){$4=" " newfile " "}; if(newtype != ""){$3=" " newtype " "}; if(newdeps != ""){$8=" " newdeps " "}}} {print}' "$inventory" > "$inventory_tmp"
@@ -93,18 +101,16 @@ if [ -n "$new_description" ]; then
     awk -F'|' -v wanted="$unit" -v desc="$new_description" 'BEGIN{OFS="|"} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id); if(id==wanted){$7=" " desc " "}} {print}' "$inventory" > "$inventory_tmp"
     mv "$inventory_tmp" "$inventory"
 fi
-trap - EXIT
 changed=()
 [ -n "$new_scope" ] && changed+=("scope")
 [ -n "$new_file" ] && changed+=("file")
 [ -n "$new_type" ] && changed+=("type")
 [ -n "$new_depends" ] && changed+=("depends-on")
 [ -n "$new_description" ] && changed+=("description")
-printf 'Updated %s: %s\n' "$unit" "$(IFS=,; printf '%s' "${changed[*]}")"
 
-# Changing a unit's behaviour (file, scope, or dependency edges) can invalidate
-# the verification unit that grades it, even when that grader's own surfaces
-# are unchanged. Surface the graders so the fixer re-reads them.
+# Changing file, scope or dependency edges can invalidate the verification unit
+# that grades this one, even with the grader's own surfaces unchanged. The
+# graders go to stderr: stdout carries exactly the one result line.
 if [ -n "$new_file" ] || [ -n "$new_scope" ] || [ -n "$new_depends" ]; then
     graders="$(awk -F'|' -v wanted="$unit" '
         /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
@@ -117,6 +123,8 @@ if [ -n "$new_file" ] || [ -n "$new_scope" ] || [ -n "$new_depends" ]; then
         }' "$inventory")"
     if [ -n "$graders" ]; then
         printf 'plan: %s changed behaviour; re-read its grader(s) %s — a grader checks the old behaviour until its own surfaces are updated\n' \
-            "$unit" "$(printf '%s' "$graders" | tr '\n' ' ')"
+            "$unit" "$(printf '%s' "$graders" | tr '\n' ' ')" >&2
     fi
 fi
+
+printf 'Updated %s: %s\n' "$unit" "$(IFS=,; printf '%s' "${changed[*]}")"

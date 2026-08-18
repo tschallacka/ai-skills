@@ -1,21 +1,57 @@
 #!/usr/bin/env bash
-# Generate the compact reviewer contract from marked SKILL.md sections.
+# generate-reviewer.sh — project the marked SKILL.md sections into REVIEWER.md.
+#
+# Copies each `<!-- REVIEWER_SECTION:START <name> -->` … `:END` block out of the
+# source skill into a compact reviewer contract, prefixed with the reviewer
+# profile version and the source's SHA-256. The recorded hash is what
+# test-reviewer-projection.sh compares, so neither the projection nor the hash
+# format may change without regenerating REVIEWER.md.
+#
+# Usage:
+#   generate-reviewer.sh [<skill-directory>] [<output-file>]
+#   generate-reviewer.sh --help
+#
+# Defaults: the skill directory is this script's parent, the output is
+# <skill-directory>/REVIEWER.md.
+#
+# Exit codes: 65 = a reviewer section is missing, duplicated, or empty;
+# 66 = the source skill is absent; 69 = no SHA-256 implementation.
 
 set -euo pipefail
+export LC_ALL=C
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="${1:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-SOURCE="$SKILL_DIR/SKILL.md"
-OUTPUT="${2:-$SKILL_DIR/REVIEWER.md}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-EXPECTED_SECTIONS=(mandatory-review bounded-context)
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [<skill-directory>] [<output-file>]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in
+    -h|--help) usage 0 ;;
+    -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
+esac
+[ "$#" -le 2 ] || usage
+
+skill_dir="${1:-$(cd "$script_dir/.." && pwd)}"
+source_file="$skill_dir/SKILL.md"
+output="${2:-$skill_dir/REVIEWER.md}"
+
+expected_sections=(mandatory-review bounded-context)
+# Parsed by test-adversary-probe-fixture.sh with an anchored ^NAME="..."$ regex;
+# the name and the assignment layout are part of that contract.
 REVIEWER_PROFILE_VERSION="1.4.2"
 
-if [ ! -f "$SOURCE" ]; then
-    printf 'source skill not found: %s\n' "$SOURCE" >&2
+if [ ! -f "$source_file" ]; then
+    printf 'source skill not found: %s\n' "$source_file" >&2
     exit 66
 fi
 
+# Hash helper: GNU, BSD, and openssl-only boxes all appear in the wild.
 sha256_file() {
     local file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -30,27 +66,27 @@ sha256_file() {
     fi
 }
 
-SOURCE_HASH="$(sha256_file "$SOURCE")"
-TEMP_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/reviewer.XXXXXX")"
-TEMP_SECTION="$(mktemp "${TMPDIR:-/tmp}/reviewer-section.XXXXXX")"
-trap 'rm -f "$TEMP_OUTPUT" "$TEMP_SECTION"' EXIT
+source_hash="$(sha256_file "$source_file")"
+temp_output="$(mktemp "${TMPDIR:-/tmp}/reviewer.XXXXXX")"
+temp_section="$(mktemp "${TMPDIR:-/tmp}/reviewer-section.XXXXXX")"
+trap 'rm -f "$temp_output" "$temp_section"' EXIT
 
 {
     printf '# Reviewer contract\n\n'
     printf '> Generated from `%s` by `scripts/generate-reviewer.sh`.\n' \
-        "${SOURCE#$SKILL_DIR/}"
+        "${source_file#"$skill_dir"/}"
     printf '> Reviewer profile contract: `%s`\n' "$REVIEWER_PROFILE_VERSION"
-    printf '> Source SHA-256: `%s`\n\n' "$SOURCE_HASH"
+    printf '> Source SHA-256: `%s`\n\n' "$source_hash"
     printf 'This file is a review-scoped projection of the tagged `SKILL.md`; '
     printf 'the tagged skill remains authoritative.\n\n'
     printf '## Generated sections\n\n'
-    for section in "${EXPECTED_SECTIONS[@]}"; do
+    for section in "${expected_sections[@]}"; do
         printf -- '- `%s`\n' "$section"
     done
     printf '\n'
-} > "$TEMP_OUTPUT"
+} > "$temp_output"
 
-for section in "${EXPECTED_SECTIONS[@]}"; do
+for section in "${expected_sections[@]}"; do
     if ! awk -v wanted="$section" '
         BEGIN { start = "<!-- REVIEWER_SECTION:START " wanted " -->"; end = "<!-- REVIEWER_SECTION:END " wanted " -->" }
         $0 == start {
@@ -68,18 +104,18 @@ for section in "${EXPECTED_SECTIONS[@]}"; do
         END {
             if (!found || inside) exit 22
         }
-    ' "$SOURCE" > "$TEMP_SECTION"; then
+    ' "$source_file" > "$temp_section"; then
         printf 'invalid or missing reviewer section: %s\n' "$section" >&2
         exit 65
     fi
-    if ! grep -q '[^[:space:]]' "$TEMP_SECTION"; then
+    if ! grep -q '[^[:space:]]' "$temp_section"; then
         printf 'empty reviewer section: %s\n' "$section" >&2
         exit 65
     fi
-    cat "$TEMP_SECTION" >> "$TEMP_OUTPUT"
-    printf '\n' >> "$TEMP_OUTPUT"
+    cat "$temp_section" >> "$temp_output"
+    printf '\n' >> "$temp_output"
 done
 
-mkdir -p "$(dirname "$OUTPUT")"
-mv "$TEMP_OUTPUT" "$OUTPUT"
-printf 'generated %s from %s sha256=%s\n' "$OUTPUT" "$SOURCE" "$SOURCE_HASH"
+mkdir -p "$(dirname "$output")"
+mv "$temp_output" "$output"
+printf 'generated %s from %s sha256=%s\n' "$output" "$source_file" "$source_hash"

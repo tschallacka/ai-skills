@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# create-progress.sh — generate a goal's progress.md: one row per implementation
+# step, in step-name order, each carrying the step's own Objective text.
+#
+# Refuses to overwrite an existing tracker (73): rebuilding one is
+# update-progress.sh's and rebuild-plan-progress.sh's job, not this script's.
+# Testing companions (*-testing.md) are not steps and get no row.
+#
+# Usage:
+#   create-progress.sh <goal-directory> <goal-name>
+#   create-progress.sh --help
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $(basename "$0") <goal-directory> <goal-name>" >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <goal-directory> <goal-name>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 2 ] || usage
 
 goal_dir="$1"
 goal_name="$2"
@@ -27,10 +46,9 @@ step_descriptions=()
 while IFS= read -r step_file; do
     step_name="$(basename "$step_file" .md)"
     step_names+=("$step_name")
-    # Derive the row description from the step's Objective paragraph (§ 4.1),
-    # so the tracker reflects the current step intent and survives rebuilds
-    # without hand-filling (which the next rebuild would overwrite). Never fall
-    # back to a literal placeholder — a generated table must not carry one.
+    # Derive the description from the step's § 4.1 Objective: text hand-filled
+    # here is lost on the next rebuild, and a generated table must never fall
+    # back to a literal placeholder.
     step_descriptions+=("$(plan_step_objective "$step_file" "$step_name")")
 done < <(find "$steps_dir" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' | sort)
 
@@ -52,6 +70,5 @@ trap 'rm -f "$temporary_file"' EXIT
     done
 } > "$temporary_file"
 mv "$temporary_file" "$progress_file"
-trap - EXIT
 
-echo "Created $progress_file with ${#step_names[@]} step rows"
+printf 'Created %s\n' "$progress_file"

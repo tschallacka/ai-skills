@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# create-work-unit-inventory.sh — seed a plan's work-unit-inventory.md with the
+# coverage table, the work-unit table, and the decomposition-review checklist.
+#
+# create-plan.sh already emits an inventory (without the example rows), so this
+# is the repair path for a plan whose inventory was lost: it refuses to overwrite
+# an existing one (73). The example rows are placeholders the validator warns
+# about until they are replaced by add-coverage.sh / add-work-unit.sh rows.
+#
+# Usage:
+#   create-work-unit-inventory.sh <plan-directory>
+#   create-work-unit-inventory.sh --help
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $(basename "$0") <plan-directory>" >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 1 ] || usage
 
 plan_dir="$1"
 inventory="$plan_dir/work-unit-inventory.md"
@@ -39,6 +59,5 @@ trap 'rm -f "$temporary_file"' EXIT
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$temporary_file"
 mv "$temporary_file" "$inventory"
-trap - EXIT
 
-echo "Created $inventory"
+printf 'Created %s\n' "$inventory"

@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# create-adversarial-review.sh — seed a plan's adversarial-review.md with the
+# Review scope, the 5-column Findings table, and a pending Verdict.
+#
+# The seeded AR-01 row is the empty state of the table, and the Findings table
+# itself is the insertion anchor every consumer agrees on: add-adversarial-finding.sh
+# appends after its last row, update-adversarial-review.sh rewrites the span from
+# "## Findings" to "## Verdict", and mint-fix-keys.sh reads the same span.
+#
+# Usage:
+#   create-adversarial-review.sh <plan-directory>
+#   create-adversarial-review.sh --help
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $(basename "$0") <plan-directory>" >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-directory>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 1 ] || usage
 
 plan_dir="$1"
 review_file="$plan_dir/adversarial-review.md"
@@ -34,6 +54,5 @@ trap 'rm -f "$temporary_file"' EXIT
     printf '%s\n' '- Rationale: <why no unresolved work remains>'
 } > "$temporary_file"
 mv "$temporary_file" "$review_file"
-trap - EXIT
 
-echo "Created $review_file"
+printf 'Created %s\n' "$review_file"

@@ -1,9 +1,43 @@
 #!/usr/bin/env bash
+# update-plan-content.sh — edit the numbered prose of every plan document, and
+# gate the review approval.
+#
+# Two jobs live here, and the second one is not obvious from the name:
+#
+#   1. Content editor. One flag per (document, granularity) pair rewrites a
+#      titled paragraph, a whole section, a field, a table, or the decomposition
+#      checkbox in plan-description.md, a goal.md, a step file, or
+#      adversarial-review.md.
+#   2. Approval gate. `--review-status <plan> approved` is the only path that
+#      flips a review to approved. It refuses while any finding is still open,
+#      verifies the fix keys through verify-fix-keys.sh, and then destroys the
+#      session secret so the same keys cannot be replayed. See the
+#      "Approval gate" banner below; do not move that logic elsewhere.
+#
+# Usage:
+#   update-plan-content.sh <flag> <plan-directory> [args…]     (see --help)
+#   update-plan-content.sh --help
+#
+# Sections in order:
+#   Usage and flag translation — the outer flag map, which rewrites "$@" into an
+#     internal command plus canonical positionals.
+#   Paragraph argument parsing — the repeated `-p N.N: content` form.
+#   Command dispatch — one arm per internal command, including Approval gate.
+#   Context invalidation — the post-mutation handoff marker.
+#
+# Exit codes: 64 bad invocation, 65 the document is in an unusable state,
+# 66 a required plan file is missing.
+
 set -euo pipefail
+export LC_ALL=C
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage and flag translation
+# ─────────────────────────────────────────────────────────────────────────────
 
 usage() {
     local rc="${1:-64}"
-    cat >&2 <<'USAGE'
+    cat <<'USAGE'
 Usage:
   update-plan-content.sh -dp|--description-paragraph <plan-directory> <N.N> <text>
                                              ONE paragraph; replaces it. Extra -p flags are an error.
@@ -40,16 +74,17 @@ USAGE
     exit "$rc"
 }
 
-help() { usage 0; }
-
 [ "$#" -ge 1 ] || usage
-if [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
-    help
-fi
+case "$1" in
+    -h|--help) usage 0 ;;
+esac
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
-[ -f "$script_dir/plan-context-lib.sh" ] && source "$script_dir/plan-context-lib.sh"
+# Sourced unconditionally: a missing library is a broken install, not an
+# optional feature (CODE-STYLE §7). plan-context-lib.sh is in
+# PACKAGE-MANIFEST.txt and install.sh's skill_files(), so it is always present.
+source "$script_dir/plan-context-lib.sh"
 
 [[ "$command" == -* ]] || usage
 
@@ -69,6 +104,13 @@ Section form requires sequential paragraphs starting at N.1."
     fi
 }
 
+# Flag translation: each arm rebuilds "$@" with `set --` into the one canonical
+# positional order the dispatch below expects and rewrites $command to the
+# internal name, so no dispatch arm has to know a user-facing spelling.
+# ---- quoted: -gp translation ----
+# -gp <plan> <goal> 4.1 text
+# paragraph <plan> goal:<goal> -p 4.1:text
+# ---- end quoted ----
 if [[ "$command" == -* ]]; then
     case "$command" in
         -dp|--description-paragraph)
@@ -187,6 +229,10 @@ if [[ "$command" == -* ]]; then
     esac
 fi
 
+# Three `-p N.N: content` loops exist and are not interchangeable: the outer one
+# walks -p groups, the inner joins bare words into one paragraph, and the
+# `paragraph` dispatch arm's copy additionally rejects a second -p.
+
 parse_paragraph_arguments() {
     local section_number="$1" paragraph_spec paragraph_content paragraph_section paragraph_number
     shift
@@ -233,6 +279,10 @@ render_paragraph_arguments() {
     done
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Command dispatch
+# ─────────────────────────────────────────────────────────────────────────────
+
 case "$command" in
     title)
         [ "$#" -eq 3 ] || usage
@@ -252,13 +302,14 @@ case "$command" in
         file="$(plan_document_path "$plan_dir" "$document_id")"
         [ -f "$file" ] || plan_die "Document not found: $file"
         IFS=$'\t' read -r heading number < <(plan_section_spec "$(plan_document_kind "$document_id")" "$section")
+        # No `trap - EXIT` release: it would discard the library's cleanup
+        # handler too (CODE-STYLE §8).
         body_file="$(mktemp "${TMPDIR:-/tmp}/plan-section.XXXXXX")"
         trap 'rm -f "$body_file"' EXIT
         parse_paragraph_arguments "$number" "$@"
         render_paragraph_arguments > "$body_file"
         plan_replace_section "$file" "$heading" "$body_file"
         rm -f "$body_file"
-        trap - EXIT
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
     paragraph)
@@ -293,13 +344,9 @@ case "$command" in
         if [ "$para_count" -eq 1 ]; then
             plan_replace_paragraph "$file" "$paragraph_id" "$paragraph_content"
         elif [ "$para_count" -eq 0 ]; then
-            # Proactive: if the requested number is the next sequential one in
-            # an existing section, create it and report the result so the agent
-            # can verify it is not a duplicate. Only auto-create when the
-            # section's labels are contiguous 1..max with no trailing unlabeled
-            # content: a sparse or unlabeled section means the requested
-            # paragraph was never authored (e.g. a testing companion whose
-            # paragraphs were not labeled) and must not be silently invented.
+            # Auto-create the next sequential paragraph only when the section's
+            # labels are contiguous 1..max with no trailing unlabeled content:
+            # a sparse section means it was never authored, not that it is next.
             max_num="$(awk -v s="$section_num" '$0 ~ "^§ " s "\\.[0-9]+$" { split($0, a, "."); n = a[2] + 0; if (n > m) m = n } END { print m + 0 }' "$file")"
             label_count="$(grep -cE -- "^§ $section_num\\.[0-9]+$" "$file" || true)"
             trailing="$(awk -v s="$section_num" '
@@ -322,7 +369,6 @@ case "$command" in
                 printf '%s\n' "$paragraph_content" > "$body_file"
                 plan_insert_paragraph "$file" "§ $section_num.$max_num" after "$body_file"
                 rm -f "$body_file"
-                trap - EXIT
                 printf 'update-plan-content: added paragraph § %s.%s (auto-created; verify no duplication)\n' "$section_num" "$para_num" >&2
                 printf 'update-plan-content: section now reads:\n' >&2
                 awk -v s="$section_num" '
@@ -338,7 +384,7 @@ case "$command" in
         fi
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
-append-paragraph)
+    append-paragraph)
         [ "$#" -eq 4 ] || usage
         plan_dir="$1"; document_id="$2"; section="$3"; paragraph_content="$4"
         plan_require_directory "$plan_dir"
@@ -356,7 +402,6 @@ append-paragraph)
         printf '%s\n' "$paragraph_content" > "$body_file"
         plan_insert_paragraph "$file" "§ $number.$max_num" after "$body_file"
         rm -f "$body_file"
-        trap - EXIT
         printf 'update-plan-content: appended paragraph § %s.%s after § %s.%s\n' "$number" "$((max_num + 1))" "$number" "$max_num" >&2
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
@@ -374,7 +419,6 @@ append-paragraph)
         table_content="$(cat "$table_file")"
         plan_replace_paragraph "$file" "§ $paragraph_id" "$table_content"
         rm -f "$table_file"
-        trap - EXIT
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
     insert-after|insert-before)
@@ -393,7 +437,6 @@ append-paragraph)
         printf '%s\n' "$paragraph_content" > "$insert_file"
         plan_insert_paragraph "$file" "§ $paragraph_id" "${command#insert-}" "$insert_file"
         rm -f "$insert_file"
-        trap - EXIT
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
     delete-paragraph)
@@ -427,6 +470,9 @@ append-paragraph)
         plan_git_snapshot "$plan_dir"
         plan_replace_testing_requirement "$goal_file" "$required" "$rationale"
         ;;
+    # The only path that flips a review to approved: it refuses while a finding
+    # is open, re-verifies the fix keys, then destroys the session secret so
+    # minted keys cannot be replayed. A second entry point is a second gate.
     review-status)
         [ "$#" -eq 2 ] || usage
         plan_dir="$1"; requested_status="$2"
@@ -441,6 +487,9 @@ append-paragraph)
                     plan_die "Cannot approve a review with unresolved findings"
                 fi
                 if [ -f "$plan_dir/fix-keys.json" ]; then
+                    # Called WITHOUT --claimed-by, so the self-certification
+                    # check never fires from this gate. Adding the flag changes
+                    # the gate's behaviour for existing plans.
                     if ! verify_output="$("$script_dir/verify-fix-keys.sh" "$plan_dir" 2>&1)"; then
                         plan_die "Cannot approve: fix-keys verification failed: $verify_output"
                     fi
@@ -465,7 +514,6 @@ append-paragraph)
         ' "$description" > "$description_tmp" || plan_die "Plan description must contain exactly one Status field"
         mv "$review_tmp" "$review"
         mv "$description_tmp" "$description"
-        trap - EXIT
         ;;
     decomposition-review)
         [ "$#" -eq 2 ] || usage
@@ -478,12 +526,14 @@ append-paragraph)
         trap 'rm -f "$temporary_file"' EXIT
         awk -v mark="$mark" '/^- \[[ xX]\] / { sub(/^- \[[ xX]\]/, "- [" mark "]") } { print }' "$inventory" > "$temporary_file"
         mv "$temporary_file" "$inventory"
-        trap - EXIT
         ;;
     *) usage ;;
 esac
 
+# The `declare -F` probe stays even though the library is sourced
+# unconditionally: a renamed helper must not turn every content edit into a
+# hard failure.
 if declare -F context_invalidate_after_mutation >/dev/null 2>&1 && [ -n "${plan_dir:-}" ] && [ -d "$plan_dir/context" ]; then
     context_invalidate_after_mutation "$plan_dir" "${document_id:-plan}"
 fi
-echo "Updated $command"
+printf 'Updated %s\n' "$command"

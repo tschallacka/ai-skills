@@ -2,38 +2,42 @@
 # supervision-frame.sh — bounded supervision-frame emitter + grant log.
 #
 # Every subagent under Willie's supervision ends by writing one bounded
-# "supervision frame" (fixed shape, strict byte budget, footer-overwrites the
+# "supervision frame" (fixed shape, strict byte budget, footer-overwriting the
 # previous frame) instead of pushing its raw log. Willie reads only the latest
-# frame and pulls deeper only on exception (see monitor-read.sh).
+# frame and pulls deeper only on exception (see monitor-read.sh). A frame must
+# stay within FRAME_BUDGET bytes (default 2048); `write` refuses an over-budget
+# frame and `check` enforces the same bound for the reader.
 #
-# Commands:
-#   supervision-frame.sh write  <frame-file> \
-#       --subagent NAME --persona ID --status ok|blocked|escalated|out-of-bounds \
-#       [--read-discipline ok|violated] [--wholesale-reads N] \
-#       [--skill-loaded none|NAME] [--needs-escalation none|CASE] \
+# Usage:
+#   supervision-frame.sh write <frame-file> --subagent NAME --persona ID \
+#       --status ok|blocked|escalated|out-of-bounds [--read-discipline ok|violated] \
+#       [--wholesale-reads N] [--skill-loaded none|NAME] [--needs-escalation none|CASE] \
 #       [--grant-requested none|COMMAND] [--verdict TEXT]
-#       # Footer-overwrites: the file holds exactly the latest frame.
-#   supervision-frame.sh grant  <grant-log-file> <subagent> <persona> \
-#       --case TEXT --command TEXT
-#       # Appends one grant line: case + handed command, NEVER reasoning.
-#   supervision-frame.sh show   <frame-file>           # print latest frame
-#   supervision-frame.sh check  <frame-file> <budget>  # boundedness check (exit 64 if over)
-#
-# Byte budget: a frame must stay within the declared size (default 2048 bytes);
-# `write` refuses an over-budget frame and `check` enforces it for the reader.
+#   supervision-frame.sh grant <grant-log-file> <subagent> <persona> \
+#       --case TEXT --command TEXT     # appends case + command, NEVER reasoning
+#   supervision-frame.sh show  <frame-file>           # print the latest frame
+#   supervision-frame.sh check <frame-file> <budget>  # exit 64 if over budget
+#   supervision-frame.sh --help
+
+# NOTE: `usage` below prints lines 1-20 of this file as the help text, so the
+# docblock above MUST stay within the first 20 lines (CODE-STYLE.md section 2).
+# Anything added here goes below this comment, never into the docblock.
 
 set -euo pipefail
+export LC_ALL=C
 
 FRAME_BUDGET="${FRAME_BUDGET:-2048}"
 
 usage() {
-    sed -n '1,22p' "$0" >&2
-    exit 64
-}
-
-help() {
-    sed -n '1,23p' "$0"
-    exit 0
+    local rc="${1:-64}"
+    awk 'NR == 1 { next }
+         /^#/ {
+             sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
+             print; next
+         }
+         { exit }' "$0"
+    exit "$rc"
 }
 
 frame_write() {
@@ -43,25 +47,29 @@ frame_write() {
     local subagent="" persona="" status="" read_discipline=ok wholesale_reads=0 skill_loaded=none needs_escalation=none grant_requested=none verdict=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --subagent) subagent="$2"; shift 2 ;;
-            --persona) persona="$2"; shift 2 ;;
-            --status) status="$2"; shift 2 ;;
-            --read-discipline) read_discipline="$2"; shift 2 ;;
-            --wholesale-reads) wholesale_reads="$2"; shift 2 ;;
-            --skill-loaded) skill_loaded="$2"; shift 2 ;;
-            --needs-escalation) needs_escalation="$2"; shift 2 ;;
-            --grant-requested) grant_requested="$2"; shift 2 ;;
-            --verdict) verdict="$2"; shift 2 ;;
+            --subagent) [ "$#" -ge 2 ] || usage; subagent="$2"; shift 2 ;;
+            --persona) [ "$#" -ge 2 ] || usage; persona="$2"; shift 2 ;;
+            --status) [ "$#" -ge 2 ] || usage; status="$2"; shift 2 ;;
+            --read-discipline) [ "$#" -ge 2 ] || usage; read_discipline="$2"; shift 2 ;;
+            --wholesale-reads) [ "$#" -ge 2 ] || usage; wholesale_reads="$2"; shift 2 ;;
+            --skill-loaded) [ "$#" -ge 2 ] || usage; skill_loaded="$2"; shift 2 ;;
+            --needs-escalation) [ "$#" -ge 2 ] || usage; needs_escalation="$2"; shift 2 ;;
+            --grant-requested) [ "$#" -ge 2 ] || usage; grant_requested="$2"; shift 2 ;;
+            --verdict) [ "$#" -ge 2 ] || usage; verdict="$2"; shift 2 ;;
             *) usage ;;
         esac
     done
-    [ -n "$frame_file" ] && [ -n "$subagent" ] && [ -n "$persona" ] && [ -n "$status" ] || usage
+    if [ -z "$frame_file" ] || [ -z "$subagent" ] || [ -z "$persona" ] || [ -z "$status" ]; then
+        usage
+    fi
     case "$status" in
         ok|blocked|escalated|out-of-bounds) ;;
         *) printf 'supervision-frame: invalid status "%s" (ok|blocked|escalated|out-of-bounds)\n' "$status" >&2; exit 64 ;;
     esac
     local tmp
-    tmp="$(mktemp)"
+    # A named template so a leaked temp is identifiable as this script's.
+    tmp="$(mktemp "${TMPDIR:-/tmp}/supervision-frame.XXXXXX")"
+    # RETURN, not EXIT: clearing it below cannot discard a caller's EXIT handler.
     trap 'rm -f "$tmp"' RETURN
     {
         printf 'subagent: %s\n' "$subagent"
@@ -75,7 +83,8 @@ frame_write() {
         printf 'verdict: %s\n' "$verdict"
     } > "$tmp"
     local size
-    size="$(wc -c < "$tmp")"
+    # PORTABILITY(wc-padding): strip blanks before interpolating the count.
+    size="$(wc -c < "$tmp" | tr -d ' ')"
     if [ "$size" -gt "$FRAME_BUDGET" ]; then
         printf 'supervision-frame: frame %s exceeds byte budget %s (is %s)\n' "$subagent" "$FRAME_BUDGET" "$size" >&2
         return 64
@@ -87,16 +96,19 @@ frame_write() {
 
 frame_grant() {
     # grant <log-file> <subagent> <persona> --case TEXT --command TEXT
+    [ "$#" -ge 3 ] || usage
     local log_file="$1" subagent="$2" persona="$3"; shift 3
     local frame_case="" command=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --case) frame_case="$2"; shift 2 ;;
-            --command) command="$2"; shift 2 ;;
+            --case) [ "$#" -ge 2 ] || usage; frame_case="$2"; shift 2 ;;
+            --command) [ "$#" -ge 2 ] || usage; command="$2"; shift 2 ;;
             *) usage ;;
         esac
     done
-    [ -n "$frame_case" ] && [ -n "$command" ] || usage
+    if [ -z "$frame_case" ] || [ -z "$command" ]; then
+        usage
+    fi
     mkdir -p "$(dirname "$log_file")"
     printf 'grant\t%s\t%s\t%s\t%s\t%s\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$subagent" "$persona" "$frame_case" "$command" >> "$log_file"
@@ -114,7 +126,8 @@ frame_check() {
     local frame_file="$1" budget="$2"
     [ -f "$frame_file" ] || { printf 'supervision-frame: no frame at %s\n' "$frame_file" >&2; return 66; }
     local size
-    size="$(wc -c < "$frame_file")"
+    # PORTABILITY(wc-padding): strip blanks before interpolating the count.
+    size="$(wc -c < "$frame_file" | tr -d ' ')"
     if [ "$size" -gt "$budget" ]; then
         printf 'supervision-frame: frame over budget %s (is %s)\n' "$budget" "$size" >&2
         return 64
@@ -124,7 +137,7 @@ frame_check() {
 
 subcommand="${1:-}"; shift 2>/dev/null || true  # shifts by 1 (fd-2 redirect, intended)
 case "$subcommand" in
-    -h|--help) help ;;
+    -h|--help) usage 0 ;;
     write) frame_write "$@" ;;
     grant) frame_grant "$@" ;;
     show) frame_show "$@" ;;
