@@ -25,7 +25,9 @@ Without nix, install `shellcheck` and `jq` yourself and see
 
 The flake is a **development** dependency only. Nothing it provides is required
 to *use* the skills — those need `bash`, POSIX coreutils, `awk`, `sed`, `grep`,
-`git`, and `jq` for the `planning` skill. See `CODE-STYLE.md` §1 for the
+`git`, plus `jq` for the `planning` skill and `memlimit` for
+`resource-limited-testing` on Apple Silicon macOS (that one is the only memory
+mechanism macOS has; Intel Macs degrade instead, since memlimit is arm64-only). See `CODE-STYLE.md` §1 for the
 dependency budget, which is deliberately tight because these scripts get
 installed onto other people's machines.
 
@@ -74,6 +76,44 @@ That is expected and is not a failure.
 children stayed on your system bash — which is the trap that makes a "we tested
 it" claim worthless.
 
+## Portability gotchas
+
+`PORTABILITY.md` catalogues every portability trap this repository has hit, with
+the symptom, the platform, the replacement, and the sites where each fix lives.
+It is **generated** — edit `portability-rules.json`, or the marker at the site,
+then run:
+
+```bash
+./generate-portability.sh
+```
+
+A workaround at a site carries a tagged marker whose id must exist in the
+registry:
+
+```bash
+# PORTABILITY(<rule-id>): <one line, why this local code is shaped this way>
+```
+
+`PORTABILITY.md` carries a `<!-- generated: … -->` stamp. It is cheap to
+rebuild, so **regenerate rather than reason about it**: `./generate-portability.sh`.
+`--check` compares content while ignoring the stamp, and separately warns when a
+scanned file was committed after the stamp — that warning means the "In the tree"
+lists may be behind, not that anything is broken.
+
+When several people or agents edit at once, each of them invalidates it. That is
+expected and harmless. Never hand-edit it, and never resolve a merge conflict in
+it by hand: take either side and re-run the generator.
+
+`planning/tests/test-portability-contract.sh` enforces all of it: the doc must be
+fresh, every marker id must resolve, the untagged `# PORTABILITY:` form is
+rejected, and **no script may contain a banned construct** unless it is
+allowlisted. That last assertion is the point — a gotcha caught once stays
+caught, so the next person does not rediscover it three files away.
+
+`planning/tests/lib-test.sh` holds the test-side shims (`t_sed_i`, `t_stat_mode`,
+`t_unique_suffix`, `t_copy_tree`). Use them rather than reintroducing `sed -i`
+or `stat -c` in a test.
+
 ## Linting
 
 ```bash
@@ -105,11 +145,37 @@ Then, specific to this repo:
   real inputs before the change and diff it after. Every difference should be
   one you intended and can name. This is how the refactors in this repo were
   verified, and it catches things the suite does not.
-- **A new or renamed file under `planning/` moves in four places** or
+- **`install.sh` is generated — never edit it.** It is assembled by
+  `installer/build.sh` from the ordered parts in `installer/src/NN-<concern>.sh`,
+  with the runtime-dependency tables generated into it between the
+  `# BEGIN/END GENERATED DEPENDENCY BLOCK` markers from `installer/tools.tsv` and
+  each skill's `requires.tsv`. Edit the part (or the table), run
+  `./installer/build.sh`, and commit the artifact along with the source. It stays
+  committed and shipped because the README's first command is `curl … | bash` and
+  it is the npm `bin`, so at runtime it has no siblings to source.
+  `./installer/build.sh --check` (mirroring `./generate-portability.sh --check`),
+  `planning/tests/test-installer-build.sh`, and the `installer-build` CI job all
+  fail on a hand edit.
+- **Ordering inside the parts is load-bearing**, and each part's banner says why:
+  the CLI-mode `case` must stay the first argument consumer, `trap cleanup EXIT`
+  must precede the first `mktemp -d`, the fd-3 block must precede any
+  `ask`/`confirm`, and `show_splash` must run before `download_source`. The
+  numeric prefixes are the build order, with gaps so a part can be inserted
+  without renumbering.
+- **A skill's runtime dependencies live in `<skill>/requires.tsv`**: tool id, a
+  `<uname -s>:<uname -m>` condition, a strength, and the capability lost without
+  it. `hard` means the installer refuses to install *that skill* and exits
+  non-zero; `soft` means it installs and warns. How to verify and how to install
+  a tool belongs in the shared `installer/tools.tsv`, once per tool. Both are
+  line-oriented TSV rather than JSON, deliberately: `jq` is itself declared
+  there, so a format needing `jq` to read it could not be read on the machine
+  that is missing it.
+- **A new or renamed file under a skill directory moves in four places** or
   `planning/tests/test-installer-manifest.sh` fails:
-  `planning/PACKAGE-MANIFEST.txt`, `planning/PACKAGE-MAP.tsv`, `install.sh`'s
-  `skill_files()`, and `package.json`'s `files` (directory level only). The
-  manifest and the map are compared byte-for-byte, so row *order* matters.
+  `planning/PACKAGE-MANIFEST.txt`, `planning/PACKAGE-MAP.tsv`,
+  `installer/src/50-manifest.sh`'s `skill_files()` (then rebuild), and
+  `package.json`'s `files` (directory level only). The manifest and the map are
+  compared byte-for-byte, so row *order* matters.
 - **Every hard rule needs a regression test.** A rule in `CODE-STYLE.md` with no
   test and no CI leg is a suggestion, and suggestions rot.
 - Match the commit style: short, lowercase-prefixed subjects (`planning:`,
@@ -118,8 +184,9 @@ Then, specific to this repo:
 ## CI
 
 `.github/workflows/ci.yml` runs the suite on `ubuntu-latest` and
-`macos-latest`, plus a leg pinned to macOS's system bash 3.2, plus the
-shellcheck gate. The macOS legs are currently `continue-on-error` behind a
+`macos-latest`, plus a leg pinned to macOS's system bash 3.2, the shellcheck
+gate, and the `installer-build` job that rebuilds `install.sh` and fails if the
+committed artifact differs. The macOS legs are currently `continue-on-error` behind a
 checked-in list of remaining blockers; that list is the definition of done for
 making them blocking, and it lives in the workflow so the flag and its reason
 travel together.
