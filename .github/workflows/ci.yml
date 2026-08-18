@@ -2,24 +2,198 @@ name: ci
 
 on:
   push:
-    branches: [nextupdate, main]
+    # master is the default branch (origin/HEAD -> origin/master); nextupdate is
+    # the long-lived integration branch. Pushes to either run the full matrix.
+    branches: [master, nextupdate]
   pull_request:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Proves: the deterministic suite passes, and leaks no temp files, on both
+    # supported operating systems with each one's default bash.
+    name: Test suite passes on ${{ matrix.os }} (default bash)
+    runs-on: ${{ matrix.os }}
+    # The macOS leg is informational until the breakages listed in
+    # macos-known-failures below are fixed. Do not remove this expression
+    # without deleting that list.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Record the bash under test
+        run: bash --version
 
       - name: Run the full deterministic test suite
         run: ./run-tests.sh
 
       - name: Verify no temp files leaked outside the runner's scope
         run: |
-          leftovers="$(find /tmp -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null | wc -l)"
+          # run-tests.sh stages its scratch root under ${TMPDIR:-/tmp}. On the
+          # macOS runner TMPDIR is a per-session /var/folders/... directory and
+          # /tmp is a symlink to /private/tmp, which BSD find refuses to descend
+          # unless -H is given; scan both. -maxdepth, -name and -o behave the
+          # same on GNU and BSD find.
+          scans="${TMPDIR:-/tmp}"
+          [ "$scans" = "/tmp" ] || scans="$scans /tmp"
+          leftovers=0
+          for scan in $scans; do
+            [ -d "$scan" ] || continue
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null)"
+            [ -n "$found" ] || continue
+            printf '%s\n' "$found"
+            leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))
+          done
           echo "leftover temp roots: $leftovers"
           if [ "$leftovers" -ne 0 ]; then
             echo "::error::run-tests.sh left temp files behind"
             exit 1
           fi
+
+  test-bash32:
+    # Proves: the suite runs on the bash 3.2 floor that CODE-STYLE.md section 1
+    # declares. A separate leg is needed because `#!/usr/bin/env bash` on a
+    # macOS runner can resolve to a newer Homebrew bash, which hides every
+    # bash-4-only construct.
+    name: Test suite passes on macOS system bash 3.2 (portability floor)
+    runs-on: macos-latest
+    # Informational for the same reasons as the macOS leg above, plus the
+    # bash-4 constructs that are explicitly deferred.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Put /bin first on PATH so bash resolves to system bash 3.2
+        run: echo "/bin" >> "$GITHUB_PATH"
+
+      - name: Record the bash under test (must be 3.2.x)
+        run: |
+          command -v bash
+          bash --version
+          /bin/bash --version
+
+      - name: Run the full deterministic test suite under /bin/bash
+        run: /bin/bash ./run-tests.sh
+
+      - name: Verify no temp files leaked outside the runner's scope
+        run: |
+          scans="${TMPDIR:-/tmp}"
+          [ "$scans" = "/tmp" ] || scans="$scans /tmp"
+          leftovers=0
+          for scan in $scans; do
+            [ -d "$scan" ] || continue
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null)"
+            [ -n "$found" ] || continue
+            printf '%s\n' "$found"
+            leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))
+          done
+          echo "leftover temp roots: $leftovers"
+          if [ "$leftovers" -ne 0 ]; then
+            echo "::error::run-tests.sh left temp files behind"
+            exit 1
+          fi
+
+  macos-known-failures:
+    # Proves nothing by itself: it is the checked-in list of what must be fixed
+    # before `continue-on-error` is removed from the two macOS legs above. Keep
+    # it in the workflow, not in a doc, so the flag and its reason travel
+    # together.
+    name: List the macOS breakages that keep the macOS legs non-blocking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Outstanding blockers
+        run: |
+          cat <<'BLOCKERS'
+          Remove continue-on-error from `test` (macos-latest) and `test-bash32`
+          only when all of the following are true:
+
+          bash 4 syntax that aborts under /bin/bash 3.2 (CODE-STYLE.md section 1
+          bans all of it; the `declare -A` items are explicitly DEFERRED):
+
+          1. `declare -A` in planning/scripts/validate-plan.sh and its
+             validate-plan-inventory-lib.sh / validate-plan-ui-lib.sh siblings.
+          2. `declare -A` in planning/scripts/plan-content.sh.
+          3. `declare -A` in planning/scripts/plan-env.sh.
+          4. `mapfile` in planning/scripts/cleanup-plans.sh — which also uses
+             GNU-only `find -printf` on the same line.
+          5. `declare -A` and `mapfile` in benchmark/planning/run-benchmark.sh
+             and `mapfile` in benchmark/planning/runtime/codex/agent.sh.
+
+          Plus:
+
+          6. Every remaining GNU-only utility invocation named in CODE-STYLE.md
+             section 1 is replaced or `command -v` guarded: `sed -i`, `stat -c`,
+             `readlink -f`, `find -printf`, `date +%s%N`, `grep -P`, `sed -r`,
+             `timeout`/`nproc`/`realpath`/`tac`.
+          7. resource-limited-testing/scripts/limited-run.sh's Darwin path runs
+             green: it warns that the RAM cap cannot be enforced and falls back
+             to nice/cpulimit, and that warning must not fail a test.
+          8. The full suite passes twice in a row on macos-latest under both
+             /bin/bash 3.2 and the runner's default bash.
+          BLOCKERS
+
+  shellcheck:
+    # Proves: no `error`-severity shellcheck finding exists in any tracked live
+    # shell script, and reports the full finding count so it can be ratcheted.
+    #
+    # shellcheck is preinstalled on the ubuntu-latest image, so it is invoked
+    # directly rather than through ludeeus/action-shellcheck: that keeps the
+    # exact file list (tracked *.sh minus archived benchmark output), the
+    # severity gate, and the informational report under this workflow's control
+    # and adds no third-party action to the supply chain.
+    name: No error-severity shellcheck findings in live shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record the shellcheck version
+        run: |
+          # Preinstalled on the ubuntu-latest image; install it if that ever
+          # changes, so the gate cannot silently stop running.
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+
+      - name: Collect the tracked live shell scripts
+        run: |
+          # benchmark/results/** holds archived output snapshots of past runs,
+          # not live code, so it is excluded.
+          git ls-files '*.sh' | grep -v '^benchmark/results/' > /tmp/sh-files.txt
+          echo "linting $(wc -l < /tmp/sh-files.txt) files"
+
+      - name: Full report (informational — the count to ratchet down)
+        continue-on-error: true
+        run: |
+          xargs shellcheck -s bash -f gcc < /tmp/sh-files.txt > /tmp/shellcheck.txt || true
+          sed -n '1,400p' /tmp/shellcheck.txt
+          printf 'errors:   %s\n' "$(grep -c ': error:' /tmp/shellcheck.txt || true)"
+          printf 'warnings: %s\n' "$(grep -c ': warning:' /tmp/shellcheck.txt || true)"
+          printf 'notes:    %s\n' "$(grep -c ': note:' /tmp/shellcheck.txt || true)"
+          printf 'total:    %s\n' "$(wc -l < /tmp/shellcheck.txt)"
+
+      - name: Fail on error-severity findings
+        run: xargs shellcheck -s bash --severity=error < /tmp/sh-files.txt
+
+  installer-build:
+    # Proves: the committed install.sh is exactly what installer/build.sh
+    # assembles from installer/src/ plus the generated dependency tables, so the
+    # shipped artifact cannot drift from its parts through a hand edit.
+    name: install.sh matches installer/build.sh output
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rebuild and compare
+        run: ./installer/build.sh --check
+
+      - name: Parse every part and the artifact
+        run: bash -n install.sh installer/build.sh installer/src/*.sh
