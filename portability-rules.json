@@ -1,0 +1,194 @@
+{
+  "target": {
+    "shell": "bash 3.2 (stock macOS /bin/bash)",
+    "userland": "GNU or BSD; POSIX utility flags only",
+    "locale": "LC_ALL=C for anything that sorts, compares or byte-counts",
+    "verified": {
+      "bash-3.2": "yes — the full suite runs green under a real 3.2.57 (nix develop; bash32-run-tests)",
+      "bsd-userland": "no — the GNU-vs-BSD flag rules below are verified by reading, not by execution. CI's macos legs are the intended proof and are still continue-on-error."
+    }
+  },
+  "rules": [
+    {
+      "id": "assoc-array",
+      "construct": "declare -A",
+      "detect": "declare[[:space:]]+-[A-Za-z]*A",
+      "breaks": "bash 3.2",
+      "symptom": "declare: -A: invalid option, then the script aborts under set -e",
+      "replacement": "plan_map_set / plan_map_load / plan_map_has / plan_map_keys / plan_map_count / plan_map_clear (plan-map-lib.sh)",
+      "note": "plan_map_get forks at the call site; use plan_map_load in a loop."
+    },
+    {
+      "id": "mapfile",
+      "construct": "mapfile / readarray",
+      "detect": "\\b(mapfile|readarray)\\b",
+      "breaks": "bash 3.2",
+      "symptom": "mapfile: command not found",
+      "replacement": "arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(...)"
+    },
+    {
+      "id": "case-conversion",
+      "construct": "${var,,} / ${var^^}",
+      "detect": "\\$\\{[A-Za-z_][A-Za-z0-9_]*(,,|\\^\\^)\\}",
+      "breaks": "bash 3.2",
+      "symptom": "bad substitution",
+      "replacement": "$(printf '%s' \"$var\" | tr '[:upper:]' '[:lower:]')"
+    },
+    {
+      "id": "empty-array-setu",
+      "construct": "\"${arr[@]}\" on a possibly-empty array",
+      "detect": null,
+      "breaks": "bash before 4.4 under set -u",
+      "symptom": "arr[@]: unbound variable instead of the intended output",
+      "replacement": "${arr[@]+\"${arr[@]}\"} , or guard with [ \"${#arr[@]}\" -gt 0 ]",
+      "note": "No reliable detector: the pattern is only wrong when the array can be empty. Review every new array expansion by hand."
+    },
+    {
+      "id": "read-timeout-integer",
+      "construct": "read -t with a fractional timeout",
+      "detect": "read[^|;]*-t[[:space:]]*[0-9]*\\.",
+      "breaks": "bash 3.2",
+      "symptom": "invalid timeout specification; the read fails instead of polling",
+      "replacement": "an integer timeout (`read -t 1`), and design the loop so one second of granularity is acceptable",
+      "note": "This is why a TUI idle animation on the floor ticks at 1s: sub-second polling, and disambiguating a lone ESC from an escape sequence by timeout, are both unavailable."
+    },
+    {
+      "id": "stat-format",
+      "construct": "stat -c FMT",
+      "detect": "stat[[:space:]]+-c",
+      "breaks": "BSD / macOS",
+      "symptom": "stat: illegal option -- c, empty output, so a mode comparison silently fails",
+      "replacement": "plan_stat_mode / plan_stat_uid (plan-document-lib.sh), or probe once: stat -c works ? -c : -f '%Lp'"
+    },
+    {
+      "id": "sed-inplace",
+      "construct": "sed -i",
+      "detect": "sed[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*-i([[:space:]]|$)",
+      "breaks": "BSD / macOS",
+      "symptom": "BSD sed requires a backup suffix, so it eats the script as the suffix and then fails",
+      "replacement": "sed ... \"$f\" > \"$f.new\" && mv \"$f.new\" \"$f\""
+    },
+    {
+      "id": "readlink-f",
+      "construct": "readlink -f",
+      "detect": "readlink[[:space:]]+-f",
+      "breaks": "BSD; macOS before 12.3",
+      "symptom": "fails, then dirname \"\" yields '.', so script_dir becomes the caller's cwd",
+      "replacement": "a while [ -L \"$p\" ] loop (see monitor-read.sh), or plan_resolve_symlink"
+    },
+    {
+      "id": "find-printf",
+      "construct": "find ... -printf",
+      "detect": "find[^|]*-printf",
+      "breaks": "BSD / macOS",
+      "symptom": "no such option; with 2>/dev/null the loop silently reads nothing and the caller reports success",
+      "replacement": "find ... -print and derive the field in the read loop"
+    },
+    {
+      "id": "sort-z",
+      "construct": "sort -z",
+      "detect": "sort[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-z",
+      "breaks": "BSD / macOS",
+      "symptom": "illegal option; a NUL-delimited pipeline then yields zero records",
+      "replacement": "drop the sort from the NUL pipeline, or sort a newline-safe projection"
+    },
+    {
+      "id": "date-nanoseconds",
+      "construct": "date +%N",
+      "detect": "date[^|;)]*%N",
+      "breaks": "BSD / macOS",
+      "symptom": "emits a literal 'N', so an id keeps its shape while losing all entropy",
+      "replacement": "date +%s plus $RANDOM$RANDOM"
+    },
+    {
+      "id": "ere-word-boundary",
+      "construct": "\\\\b in an ERE",
+      "detect": "grep[^|;]*-[a-zA-Z]*E[^|;]*\\\\\\\\b",
+      "breaks": "BSD / macOS (undefined in POSIX ERE)",
+      "symptom": "matches nothing, so a check passes vacuously — worse with || true",
+      "replacement": "tr -c 'A-Za-z0-9_' '\\n' then grep -x, which emulates a word boundary exactly"
+    },
+    {
+      "id": "sed-ere-flag",
+      "construct": "sed -r",
+      "detect": "sed[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*-r([[:space:]]|$)",
+      "breaks": "BSD / macOS",
+      "symptom": "unknown option",
+      "replacement": "sed -E, which both GNU and BSD accept"
+    },
+    {
+      "id": "cp-dot-source",
+      "construct": "cp -R src/. dst",
+      "detect": "cp[[:space:]]+-[a-zA-Z]*R[a-zA-Z]*[[:space:]]+[^[:space:]]*/\\.[[:space:]]",
+      "breaks": "unspecified in POSIX; BSD has differed",
+      "symptom": "copies the wrong thing, or dotfiles are handled differently",
+      "replacement": "(cd src && tar cf - .) | (cd dst && tar xf -)"
+    },
+    {
+      "id": "echo-flags",
+      "construct": "echo -e / echo -n",
+      "detect": "echo[[:space:]]+-[en]",
+      "breaks": "not portable across shells or /bin/echo builds",
+      "symptom": "prints the flag literally, or fails to interpret escapes",
+      "replacement": "printf"
+    },
+    {
+      "id": "wc-padding",
+      "construct": "wc output interpolated into a message",
+      "detect": null,
+      "breaks": "BSD / macOS",
+      "symptom": "BSD wc pads to a fixed width, so a message reads 'ok:       42 bytes'",
+      "replacement": "pipe through | tr -d ' ' before interpolating",
+      "note": "Arithmetic comparisons are unaffected; only interpolated text shows the padding."
+    },
+    {
+      "id": "locale-sort",
+      "construct": "bare sort on data a user or a test sees",
+      "detect": null,
+      "breaks": "any host with a non-C locale",
+      "symptom": "collation differs per developer, so generated row order is not reproducible",
+      "replacement": "export LC_ALL=C at the top of the script, or LC_ALL=C sort at the call"
+    },
+    {
+      "id": "tty-probe",
+      "construct": "ps -p $$ -o tty= as a tty probe",
+      "detect": "ps[[:space:]]+-p[^|;]*-o[[:space:]]*tty",
+      "breaks": "macOS",
+      "symptom": "Linux prints '?' for no tty, macOS prints '??', so the guard passes and the following /dev/tty open fails with ENXIO",
+      "replacement": "[ -t 0 ], then try ( exec 3</dev/tty ) 2>/dev/null, else exec 3<&-"
+    },
+    {
+      "id": "awk-bracket-escape",
+      "construct": "backslash escape inside an awk bracket expression",
+      "detect": "\\[\\[:space:\\]\\\\\\\\n\\]",
+      "breaks": "undefined in POSIX awk; BSD awk may read it literally",
+      "symptom": "'n' becomes strippable whitespace",
+      "replacement": "[[:space:]] already includes newline; drop the \\n"
+    },
+    {
+      "id": "gnu-only-tools",
+      "construct": "timeout, nproc, free, realpath, tac, base64 -w, head -n -N, xargs -r, getopt, /proc",
+      "detect": "(^|[^A-Za-z0-9_./-])(nproc|tac|realpath|getopt)([^A-Za-z0-9_-]|$)|base64[[:space:]]+-w|head[[:space:]]+-n[[:space:]]*-|xargs[[:space:]]+-r|/proc/",
+      "breaks": "BSD / macOS",
+      "symptom": "command not found, or a silently different result",
+      "replacement": "ask before introducing any of these; timeout has a gtimeout fallback on macOS"
+    },
+    {
+      "id": "bytes-vs-characters",
+      "construct": "mixing ${#str} with head -c / wc -c budgets",
+      "detect": null,
+      "breaks": "any host, whenever the text is not ASCII",
+      "symptom": "truncation mid-UTF-8-sequence, and a wrong truncated/not-truncated verdict",
+      "replacement": "do all budget arithmetic in one unit and say which in a comment",
+      "note": "Plan documents are full of multi-byte glyphs (§ 💤 ⏳ ✅ —), so this is not hypothetical."
+    },
+    {
+      "id": "python3-shipped",
+      "construct": "python3 in shipped code",
+      "detect": "python3",
+      "breaks": "the dependency budget, not a platform",
+      "symptom": "a machine without python3 loses a documented feature",
+      "replacement": "awk for text, jq for JSON. python3 is development-only (benchmark/, unregistered tests)."
+    }
+  ]
+}
