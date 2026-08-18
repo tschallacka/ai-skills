@@ -61,41 +61,45 @@ goal_file="$plan_dir/$goal_name/goal.md"
 if grep -Fqx -- '<add work units with add-work-unit.sh>' "$goal_file"; then
     plan_replace_paragraph "$goal_file" '§ 9.1' "\`$unit_id\` — $intended"
 else
+    # The next § 9.N label is the highest existing label plus one, and the
+    # insertion point is the blank line after the LAST § 9.N paragraph.
+    # Precompute both in one scan: counting up to an earlier insertion point
+    # would always see only § 9.1 and duplicate § 9.2 from the third unit
+    # onward, and inserting above the last paragraph would reverse the
+    # section's order.
+    read -r next_label insert_after < <(awk '
+        /^§ 9\.[0-9]+$/ {
+            n = $2; sub(/.*\./, "", n)
+            if (n + 0 > max) max = n + 0
+            last_label = NR; found = 1
+            next
+        }
+        last_label && NR == last_label + 1 {
+            content_end = NR
+            last_label = 0
+            next
+        }
+        content_end && $0 == "" {
+            insert_after = NR
+            content_end = 0
+        }
+        END {
+            if (!found) exit 1
+            print max + 1, insert_after
+        }
+    ' "$goal_file") || plan_die "Goal has no numbered Owned work units section: $goal_file"
+    [ -n "$insert_after" ] || plan_die "Goal Owned work units section has no paragraph to append after: $goal_file"
     owned_tmp="${goal_file}.tmp.$$"
     trap 'rm -f "$owned_tmp"' EXIT
-    awk -v addition="\`$unit_id\` — $intended" '
-        /^§ 9\.[0-9]+$/ { count++ }
-        /^## Goal-size exception$/ && !inserted {
-            if (count == 0) exit 2
-            print "§ 9." (count + 1)
+    awk -v addition="\`$unit_id\` — $intended" -v label="$next_label" -v after="$insert_after" '
+        NR == after {
+            print
+            print "§ 9." label
             print addition
             print ""
             inserted = 1
-        }
-        /^## Testing requirement$/ && !inserted && !goal_size_seen {
-            # No Goal-size exception section (add-goal omits it by default):
-            # append the owned-unit blurbs after the Testing-requirement table
-            # that follows this heading.
-            print
-            in_testing = 1
             next
         }
-        in_testing && /^\|/ {
-            print
-            if ($0 ~ /\|/) {
-                if (seen_separator) {
-                    print ""
-                    print "§ 9." (count + 1)
-                    print addition
-                    print ""
-                    inserted = 1
-                    in_testing = 0
-                }
-                seen_separator = 1
-            }
-            next
-        }
-        in_testing { print; next }
         { print }
         END {
             if (!inserted) exit 2

@@ -174,6 +174,8 @@ plan_section_spec() {
         plan/affected-areas) printf '%s\t%s\n' '## Affected areas' 6 ;;
         plan/constraints-and-decisions) printf '%s\t%s\n' '## Constraints and decisions' 7 ;;
         plan/risks-and-open-questions) printf '%s\t%s\n' '## Risks and open questions' 8 ;;
+        plan/environment-facts) printf '%s\t%s\n' '## Environment facts' 9 ;;
+        plan/approach-decisions) printf '%s\t%s\n' '## Approach decisions' 10 ;;
         goal/current-state-and-prior-goal-handoffs) printf '%s\t%s\n' '## Current state and prior-goal handoffs' 2 ;;
         goal/outcome-and-definition-of-done) printf '%s\t%s\n' '## Outcome and definition of done' 3 ;;
         goal/why-this-goal-is-needed) printf '%s\t%s\n' '## Why this goal is needed' 4 ;;
@@ -203,7 +205,7 @@ plan_section_spec() {
 plan_unknown_section() {
     local kind="$1" section="$2" valid id close="" best=""
     case "$kind" in
-        plan) valid="current-state desired-outcome approach scope affected-areas constraints-and-decisions risks-and-open-questions" ;;
+        plan) valid="current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts" ;;
         goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
         step) valid="objective instructions acceptance-criteria handoff" ;;
         testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;

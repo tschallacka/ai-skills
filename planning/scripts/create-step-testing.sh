@@ -10,8 +10,9 @@ set -euo pipefail
 #   create-step-testing.sh <goal-directory> <step-name> <verification-instructions> --overwrite
 #
 # The instructions are rendered as a numbered §2.x section under "## Automated
-# tests"; use "\n" to separate paragraphs (multi-paragraph companions are
-# supported and are what reviewers actually proofread).
+# tests"; separate paragraphs with "\n" escapes or real newlines
+# (multi-paragraph companions are supported and are what reviewers actually
+# proofread; every paragraph gets its own § 2.N label).
 
 overwrite=false
 filtered_args=()
@@ -51,20 +52,31 @@ fi
 [[ "$instructions" != *'|'* ]] || plan_die "Verification instructions must not contain a Markdown table separator (|)"
 [[ "$instructions" != *'§'* ]] || plan_die "Verification instructions must not contain the reserved paragraph marker §"
 
-# Multi-paragraph instructions: split on literal "\n" into numbered §2.x blocks.
+# Multi-paragraph instructions: every paragraph becomes its own numbered §2.x
+# block. Paragraphs may be separated by literal "\n" escapes (documented
+# convention) or by real newlines/blank lines. Normalize escapes to real
+# newlines, then split on any newline run, so both spellings produce one label
+# per paragraph — an unlabeled paragraph would silently receive edits aimed at
+# the labeled one. split() with a regex separator (/\\n/ matches literal
+# backslash-n, /\n+/ matches newline runs) keeps mawk and one-true-awk/BSD awk
+# consistent, unlike a multi-char RS which mawk treats as a regex but others
+# match literally.
 body_file="$(mktemp "${TMPDIR:-/tmp}/plan-testing.XXXXXX")"
 trap 'rm -f "$body_file"' EXIT
 printf '%s' "$instructions" | awk '
-    BEGIN { RS = "\\\\n"; ORS = "" }
-    {
-        text = $0
-        sub(/^[[:space:]\n]+/, "", text)
-        sub(/[[:space:]\n]+$/, "", text)
-        if (text == "") next
-        if (count++) printf "\n\n"
-        printf "§ 2.%d\n%s", count, text
+    { text = text $0 "\n" }
+    END {
+        gsub(/\\n/, "\n", text)
+        n = split(text, paras, /\n+/)
+        for (i = 1; i <= n; i++) {
+            para = paras[i]
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", para)
+            if (para == "") continue
+            if (count++) printf "\n\n"
+            printf "§ 2.%d\n%s", count, para
+        }
+        if (count == 0) exit 1
     }
-    END { if (count == 0) exit 1 }
 ' > "$body_file" || plan_die "Verification instructions are empty after splitting"
 
 temporary_file="${testing_file}.tmp.$$"

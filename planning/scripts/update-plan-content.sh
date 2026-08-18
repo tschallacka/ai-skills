@@ -295,9 +295,28 @@ case "$command" in
         elif [ "$para_count" -eq 0 ]; then
             # Proactive: if the requested number is the next sequential one in
             # an existing section, create it and report the result so the agent
-            # can verify it is not a duplicate.
+            # can verify it is not a duplicate. Only auto-create when the
+            # section's labels are contiguous 1..max with no trailing unlabeled
+            # content: a sparse or unlabeled section means the requested
+            # paragraph was never authored (e.g. a testing companion whose
+            # paragraphs were not labeled) and must not be silently invented.
             max_num="$(awk -v s="$section_num" '$0 ~ "^§ " s "\\.[0-9]+$" { split($0, a, "."); n = a[2] + 0; if (n > m) m = n } END { print m + 0 }' "$file")"
-            if [ "$max_num" -ge 1 ] && [ "$para_num" -eq $((max_num + 1)) ]; then
+            label_count="$(grep -cE -- "^§ $section_num\\.[0-9]+$" "$file" || true)"
+            trailing="$(awk -v s="$section_num" '
+                /^§ [0-9]+\.[0-9]+$/ {
+                    sec = $2; sub(/\..*/, "", sec)
+                    if (sec == s) { last = NR; body_seen = 0; blank = 0 }
+                    else { last = 0; blank = 0 }
+                    next
+                }
+                /^## / { next }
+                NF == 0 { if (last) blank = 1; next }
+                last && NR > last {
+                    if (body_seen || blank) { print "unlabeled"; exit }
+                    body_seen = 1
+                }
+            ' "$file")"
+            if [ "$max_num" -ge 1 ] && [ "$label_count" -eq "$max_num" ] && [ -z "$trailing" ] && [ "$para_num" -eq $((max_num + 1)) ]; then
                 body_file="$(mktemp "${TMPDIR:-/tmp}/plan-auto-paragraph.XXXXXX")"
                 trap 'rm -f "$body_file"' EXIT
                 printf '%s\n' "$paragraph_content" > "$body_file"

@@ -44,10 +44,13 @@ trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
     printf '## Affected areas\n\n§ 6.1\n<files, modules, layouts, services, data, and systems>\n\n'
     printf '## Constraints and decisions\n\n§ 7.1\n<permissions, ownership, conventions, and user choices>\n\n'
     printf '## Risks and open questions\n\n§ 8.1\n<items that could affect execution>\n\n'
+    printf '## Environment facts\n\n§ 9.1\n<host or URL to verify on, auth route, and the order in which steps verify against the running application>\n\n'
+    printf '## Approach decisions\n\n§ 10.1\n<mechanism choices as prose: where each change lives and why, and alternatives considered and rejected>\n\n'
     printf '## UI classification\n\n- UI affected: no\n- Rationale: <why>\n\n'
     printf '## Adversarial review\n\n- Artifact: `adversarial-review.md`\n- Status: 💤 pending\n'
 } > "$temporary_file"
 mv "$temporary_file" "$description"
+printf '{}\n' > "$plan_dir/commands.json"
 inventory="$plan_dir/work-unit-inventory.md"
 {
     printf '# Work-unit inventory: %s\n\n' "$(basename "$plan_dir")"

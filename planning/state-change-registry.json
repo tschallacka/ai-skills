@@ -1,0 +1,23 @@
+{
+  "comment": "Exact, finite lists driving the 'the application still serves' check (planning-skill report 17 §1, P0). Detection is LITERAL, case-insensitive substring membership. indicators: phrases that signal a goal changes module state, schema, or configuration — a hit in any of a goal's step files or testing companions marks the goal state-changing. serve_phrases: phrases that prove a verification acceptance condition or testing companion actually exercises the running application. A state-changing goal whose verification units contain none of them gets a WARN. Both lists must stay conservative: an indicator must always imply state change, and a serve phrase must only appear when the app is exercised.",
+  "indicators": [
+    "etc/module.xml",
+    "etc/config.php",
+    "db_schema.xml",
+    "db_schema_whitelist.json",
+    "setup:upgrade",
+    "module:enable",
+    "module:disable",
+    "app:config:import"
+  ],
+  "serve_phrases": [
+    "HTTP 200",
+    "200 OK",
+    "health check",
+    "healthcheck",
+    "still serves",
+    "still serving",
+    "curl",
+    "storefront"
+  ]
+}

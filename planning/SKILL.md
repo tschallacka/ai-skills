@@ -400,13 +400,23 @@ Create `<planname>/plan-description.md`. It must contain:
 - **Constraints and decisions:** permissions, ownership, conventions, and
   user choices
 - **Risks and open questions:** only items that could affect execution
+- **Environment facts:** the host or URL to verify on, the auth route if the
+  application requires one, and the order in which steps verify against the
+  running application. This is what lets verification steps name a reachable
+  endpoint instead of leaving them dangling. Seeded by `create-plan.sh` as
+  § 9.1; the validator requires the section, and the P0 serve check (see
+  § 3.3) relies on it.
+- **Approach decisions:** mechanism choices as prose — where each change
+  lives and why, and alternatives considered and rejected. Seeded by
+  `create-plan.sh` as § 10.1; the validator requires the section.
 
 Use one clear section per topic. Do not duplicate goal-specific implementation
 details here; put them in the owning goal.
 
 The canonical plan description has replaceable `title`, `current-state`,
-`desired-outcome`, `approach`, `scope`, `affected-areas`,
-`constraints-and-decisions`, and `risks-and-open-questions` sections. Replace
+`desired-outcome`, `approach`, `approach-decisions`, `scope`, `affected-areas`,
+`constraints-and-decisions`, `risks-and-open-questions`, and
+`environment-facts` sections. Replace
 their narrative content through flagged `update-plan-content.sh` targets; use
 `--title` for the document title and `--field` for structured values such as
 `UI affected`.
@@ -464,7 +474,9 @@ seems obvious:
    it enables. Do not rely on directory order to imply a dependency.
 6. **Form goal candidates.** Group only adjacent, mutually necessary work
    units that produce one demonstrable outcome. Apply the goal size limit;
-   split candidates at the first stable boundary.
+   split candidates at the first stable boundary. When a late approach change
+   pushes a goal past the cap, prefer splitting the goal at a stable outcome
+   boundary over widening a work unit.
 7. **Assign one step per unit.** Give every unit exactly one owning goal and
    exactly one numbered implementation or verification step. There must be no
    unowned, multiply owned, or bundled units.
@@ -630,8 +642,8 @@ command, plan directory, and supported entry ids/views. Its starting prompt
 must include verbatim:
 
 "Read plan files and artifacts ONLY through the gated reader:
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
 Valid --document IDs: plan, inventory, progress, adversarial-review,
 goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
 --max-records for a large inventory if needed. Plan-read bytes are capped at
@@ -643,7 +655,7 @@ gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
 spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`bash <PLANNING_SKILL_DIR>/scripts/role-context.sh chris` (which injects its
+`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
 stance preamble), and require it to state its persona id in the returned
 findings. The adversary forms its own findings from the bounded-read gate and
 its scoped role docs; it never receives the planning agent's conclusions. A
@@ -795,6 +807,11 @@ use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
 shell-friendly escaped quote is clearer. Use
 `--insert-after` or `--insert-before` with a document ID and paragraph label
 to add one paragraph; later labels in that same section shift automatically.
+The `-p N.N:` forms auto-create only when the section's labels are contiguous
+`1..max` with no trailing unlabeled content — a section with gaps or
+unlabeled paragraphs must be re-authored (e.g. re-run
+`create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
+label) instead of silently appending.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
@@ -891,6 +908,44 @@ Include only the relevant sections:
 A step may require multiple verification methods. Do not mark it complete until
 all listed checks have actually passed.
 
+**The application still serves (P0).** A goal that changes module state,
+schema, or configuration (`etc/module.xml`, `etc/config.php`, `db_schema.xml`
+or equivalent — see `state-change-registry.json`) must carry an acceptance
+condition that exercises the running application, not just the changed
+artifact: for a Magento plan, a plain request returning HTTP 200. The
+validator WARNs when such a goal's verification units contain no request or
+health-check phrase. This is the check that catches "all artifacts verified,
+site is down".
+
+**Command registry (P1).** Every command literal in step instructions or
+testing companions must be registered in the plan's `commands.json` with its
+"when" context, so the purpose travels with the command instead of being lost
+when steps are copied:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/register-command.sh" <plan-directory> cache-flush \
+  'bin/magento cache:flush' 'routine; after a constructor change'
+```
+
+`create-plan.sh` seeds an empty registry; `register-command.sh` adds,
+removes, and lists entries; `validate-plan.sh` WARNs on any unregistered
+command literal (and FAILs under `--complete`). When the validator flags a
+literal, register it with its correct "when" — never delete the literal to
+silence the check.
+
+Detection is language-agnostic: a candidate is a path that resolves to an
+executable non-directory, a path whose last segment sits under a bin-like
+directory (`bin/`, `sbin/`, `.bin/`, `Scripts/` — covering `vendor/bin/`,
+`node_modules/.bin/`, `.venv/bin/`), or a first token in the small universal
+core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
+points — arguments strengthen a candidate but never qualify a span on their
+own. Data/markup extensions (the jq-matched list in
+`never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
+`:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
+without a bin-like segment) never flag. Each registered command's first token
+teaches the detector that tool word, so registering `pytest -q` makes
+`pytest` a word — no per-language list to maintain.
+
 ### 3.3 Validate, then create progress trackers
 
 Run the validator before creating trackers or presenting the plan as ready:
@@ -902,6 +957,15 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # bundled case-count phrase list; sweeps companions too
 ```
+
+Beyond structure, propagation, stale wording, and the placeholder registry,
+the validator checks two more things. The **serve check** WARNs when a goal
+that changes module state, schema, or configuration (per
+`state-change-registry.json`) has no verification acceptance condition
+mentioning a request or health check. The **command registry** WARNs on any
+command literal in a step or testing companion that is not registered in the
+plan's `commands.json` with its "when" context (and FAILs under
+`--complete`); register flagged literals with `register-command.sh`.
 
 `--propagation` encodes the surface rule (§ "Resolving a finding") and runs
 by default. It flags a verification unit that grades a sibling with no

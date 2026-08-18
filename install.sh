@@ -49,6 +49,9 @@ Interactive by default. Options are useful for automation:
   --yes                    Accept replacements; managed version changes omit backups
   --help                   Show this help
 
+Interactive prompts accept a for "yes to all" (auto-accepts every
+remaining confirmation, e.g. replace/backup prompts and permission grants).
+
 Supported skills:
   planning
   project-specificies
@@ -145,9 +148,16 @@ ask() {
 
 confirm() {
     local prompt="$1"
-    ask "$prompt [y/N] "
+    if [ "${YES_ALL:-0}" -eq 1 ]; then
+        return 0
+    fi
+    ask "$prompt [y/N/a] "
     case "$REPLY" in
         y|Y|yes|YES) return 0 ;;
+        a|A|all|ALL)
+            YES_ALL=1
+            return 0
+            ;;
         *) return 1 ;;
     esac
 }
@@ -160,6 +170,101 @@ contains() {
         [ "$item" = "$wanted" ] && return 0
     done
     return 1
+}
+
+# ---------------------------------------------------------------
+# Runtime tool verification
+# ---------------------------------------------------------------
+# Some skills need tools on the target system at runtime (not at install
+# time). When one is missing the skill would be installed broken, so abort
+# with system-specific install commands for the detected platform.
+runtime_requirements() {
+    case "$1" in
+        planning) printf '%s\n' jq ;;
+    esac
+}
+
+runtime_tool_install_hint() {
+    local tool="$1"
+    case "$tool" in
+        jq)
+            case "$(uname -s)" in
+                Darwin)
+                    if command -v brew >/dev/null 2>&1; then
+                        printf '  brew install jq\n'
+                    elif command -v port >/dev/null 2>&1; then
+                        printf '  sudo port install jq\n'
+                    else
+                        printf '  install Homebrew (https://brew.sh) then: brew install jq\n'
+                    fi
+                    ;;
+                Linux)
+                    if command -v apt-get >/dev/null 2>&1; then
+                        printf '  sudo apt-get install -y jq\n'
+                    elif command -v dnf >/dev/null 2>&1; then
+                        printf '  sudo dnf install -y jq\n'
+                    elif command -v pacman >/dev/null 2>&1; then
+                        printf '  sudo pacman -S --noconfirm jq\n'
+                    elif command -v zypper >/dev/null 2>&1; then
+                        printf '  sudo zypper install -y jq\n'
+                    elif command -v apk >/dev/null 2>&1; then
+                        printf '  sudo apk add jq\n'
+                    elif command -v snap >/dev/null 2>&1; then
+                        printf '  sudo snap install jq\n'
+                    else
+                        printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                    fi
+                    ;;
+                MINGW*|MSYS*|CYGWIN*)
+                    if command -v winget >/dev/null 2>&1; then
+                        printf '  winget install jqlang.jq\n'
+                    elif command -v choco >/dev/null 2>&1; then
+                        printf '  choco install jq\n'
+                    elif command -v scoop >/dev/null 2>&1; then
+                        printf '  scoop install jq\n'
+                    else
+                        printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                    fi
+                    ;;
+                *)
+                    printf '  download the static jq binary from https://github.com/jqlang/jq/releases\n'
+                    ;;
+            esac
+            ;;
+        *)
+            printf '  install %s via your system package manager\n' "$tool"
+            ;;
+    esac
+}
+
+verify_runtime_tools() {
+    local skill tool missing=0
+    for skill in "$@"; do
+        while IFS= read -r tool; do
+            [ -n "$tool" ] || continue
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                [ "$missing" -eq 0 ] && {
+                    echo >&2
+                    echo "The selected skills need these tools at runtime; they are missing:" >&2
+                    missing=1
+                }
+                echo "  - $tool (required by $skill)" >&2
+            fi
+        done < <(runtime_requirements "$skill")
+    done
+    [ "$missing" -eq 0 ] && return 0
+    echo >&2
+    echo "Install them first, then re-run this installer:" >&2
+    for skill in "$@"; do
+        while IFS= read -r tool; do
+            [ -n "$tool" ] || continue
+            command -v "$tool" >/dev/null 2>&1 || {
+                echo "  $tool:" >&2
+                runtime_tool_install_hint "$tool" >&2
+            }
+        done < <(runtime_requirements "$skill")
+    done
+    die "missing runtime tools"
 }
 
 agent_target_available() {
@@ -292,7 +397,7 @@ menu_wrap_text() {
                 line="$split"
             fi
         fi
-        printf '\033[%d;1H%*s%s' "$row" "$indent" '' "$line"
+        printf '\033[%d;%dH%*s%s' "$row" "${MENU_COL:-1}" "$indent" '' "$line"
         row=$((row + 1))
         text="${text:${#line}}"
         text="${text# }"
@@ -325,9 +430,10 @@ show_shop_menu() {
         MENU_BOX_WIDTH=$((columns - 36))
         [ "$MENU_BOX_WIDTH" -gt 60 ] && MENU_BOX_WIDTH=60
         [ "$MENU_BOX_WIDTH" -lt 28 ] && MENU_BOX_WIDTH=28
-        MENU_COMPACT=0
-        [ "${LINES:-24}" -lt 20 ] && MENU_COMPACT=1
     fi
+    MENU_COL=${MENU_COL:-1}
+    MENU_COMPACT=0
+    [ "${LINES:-24}" -lt 20 ] && MENU_COMPACT=1
     box_width="$MENU_BOX_WIDTH"
     inner_width=$((box_width - 2))
     title_padding=$((inner_width - ${#title}))
@@ -335,11 +441,11 @@ show_shop_menu() {
     for ((index = 0; index < inner_width; index++)); do
         horizontal+='─'
     done
-    printf '\033[%d;1H\033[1;38;2;255;211;64m╭%s╮\033[0m' "$row" "$horizontal"
-    printf '\033[%d;1H\033[1;38;2;255;211;64m│%*s%s%*s│\033[0m' \
-        "$((row + 1))" "$((title_padding / 2))" '' "$title" \
+    printf '\033[%d;%dH\033[1;38;2;255;211;64m╭%s╮\033[0m' "$row" "$MENU_COL" "$horizontal"
+    printf '\033[%d;%dH\033[1;38;2;255;211;64m│%*s%s%*s│\033[0m' \
+        "$((row + 1))" "$MENU_COL" "$((title_padding / 2))" '' "$title" \
         "$((title_padding - title_padding / 2))" ''
-    printf '\033[%d;1H\033[38;2;255;211;64m╰%s╯\033[0m' "$((row + 2))" "$horizontal"
+    printf '\033[%d;%dH\033[38;2;255;211;64m╰%s╯\033[0m' "$((row + 2))" "$MENU_COL" "$horizontal"
 
     row=$((row + 4))
     for ((index = 0; index < ${#labels[@]}; index++)); do
@@ -638,6 +744,8 @@ references/ui-user-story-validation.md
 references/comment-discipline-contract.md
 telemetry-schema.json
 placeholders.json
+state-change-registry.json
+never-executable-extensions.json
 context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
@@ -697,6 +805,7 @@ scripts/create-plan.sh
 scripts/create-progress.sh
 scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
+scripts/register-command.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
@@ -769,6 +878,7 @@ cli_resolve_source() {
 
 cli_install_skill() {
     contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
+    verify_runtime_tools "$CLI_SKILL"
     case "$CLI_APPROVAL" in yes|no) ;; *) die "--approval must be yes or no" ;; esac
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
@@ -972,7 +1082,7 @@ claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 "$cfg" <<'PY'
+    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 - "$cfg" <<'PY'
 import json, os, sys
 cfg = sys.argv[1]
 plans = os.environ["PLANS"].rstrip("/")
@@ -981,6 +1091,7 @@ tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
 entries = [
     f"Read({plans}/**)", f"Edit({plans}/**)",
     f"Bash({scripts}/**:*)", f"Read({scripts}/**)",
+    f"Bash(bash {scripts}/**:*)", f"Bash(sh {scripts}/**:*)", f"Bash(python3 {scripts}/**:*)",
     f"Read({tmp}/**)", f"Edit({tmp}/**)",
     f"Bash({tmp}/**:*)",
 ]
@@ -1008,34 +1119,63 @@ opencode_permissions() {
     local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2" tmp="$3"
     [ -f "$cfg" ] || { echo "  opencode: no $cfg found; skipped" >&2; return 0; }
     backup_file_timestamp "$cfg"
-    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 "$cfg" <<'PY'
+    PLANS="$plans" SCRIPTS="$scripts" TMPDIR_AGENT="$tmp" python3 - "$cfg" <<'PY'
 import json, os, sys
 cfg = sys.argv[1]
 plans = os.environ["PLANS"].rstrip("/")
 scripts = os.environ["SCRIPTS"].rstrip("/")
 tmp = os.environ["TMPDIR_AGENT"].rstrip("/")
-entries = [
-    f"Read({plans}/**)", f"Edit({plans}/**)",
-    f"Bash({scripts}/**:*)",
-    f"Read({tmp}/**)", f"Edit({tmp}/**)", f"Bash({tmp}/**:*)",
-]
-data = {}
+
+# opencode's permission block is keyed by tool name; each value is either an
+# action string ("ask"/"allow"/"deny") or a {pattern: action} object.
+wanted = {
+    "read": [f"{plans}/**", f"{scripts}/**", f"{tmp}/**"],
+    "edit": [f"{plans}/**", f"{tmp}/**"],
+    "bash": [f"{scripts}/**", f"bash {scripts}/**", f"sh {scripts}/**", f"python3 {scripts}/**", f"{tmp}/**"],
+    "external_directory": [f"{plans}/**", f"{scripts}/**", f"{tmp}/**"],
+}
+
 try:
     data = json.load(open(cfg))
 except Exception:
     data = {}
-perm = data.setdefault("permission", {})
-allow = perm.setdefault("allow", [])
-if not isinstance(allow, list):
-    allow = perm["allow"] = list(allow) if isinstance(allow, (list, tuple)) else []
-added = [e for e in entries if e not in allow]
-allow.extend(added)
+if not isinstance(data, dict):
+    data = {}
+
+perm = data.get("permission")
+if isinstance(perm, str):
+    # a bare action applied to everything; keep it as the fallback pattern
+    perm = {tool: {"*": perm} for tool in wanted}
+elif not isinstance(perm, dict):
+    perm = {}
+
+# a stray Claude-style allow list is not valid here; migrate it out
+legacy = perm.pop("allow", None)
+legacy_note = isinstance(legacy, list) and bool(legacy)
+perm.pop("deny", None)
+perm.pop("ask", None)
+
+added = []
+for tool, patterns in wanted.items():
+    rule = perm.get(tool)
+    if isinstance(rule, str):
+        rule = {"*": rule}  # preserve the old blanket action as the fallback
+    elif not isinstance(rule, dict):
+        rule = {}
+    for pattern in patterns:
+        if rule.get(pattern) != "allow":
+            rule[pattern] = "allow"
+            added.append(f"{tool}: {pattern}")
+    perm[tool] = rule
+
+data["permission"] = perm
 with open(cfg + ".tmp", "w") as f:
     json.dump(data, f, indent=2, ensure_ascii=False); f.write("\n")
 os.replace(cfg + ".tmp", cfg)
+if legacy_note:
+    print("  opencode: removed invalid claude-style permission.allow list")
 if added:
-    print("  opencode: added to permission.allow:"); [print("    - " + x) for x in added]
-    print("  opencode: pattern syntax varies by version; review the entries above.")
+    print("  opencode: allowed in permission:"); [print("    - " + x) for x in added]
 else:
     print("  opencode: permissions already present")
 PY
@@ -1048,7 +1188,7 @@ print_manual_permissions() {
     echo "    - allow $kind to execute the planning helpers under $scripts" >&2
     echo "    - allow $kind read/write/execute under the planning temp dir $tmp" >&2
     echo "    - example (Claude Code settings.json permissions.allow):" >&2
-    echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*)" >&2
+    echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*), Bash(bash $scripts/**:*)" >&2
 }
 
 # Fallback because auto-configuration is not always possible or effective
@@ -1135,6 +1275,7 @@ if [ -z "$SKILL_SELECTION" ] || [ -z "$TARGET_SELECTION" ]; then
     show_splash
 fi
 select_skills
+verify_runtime_tools "${SELECTED_SKILLS[@]}"
 select_targets
 download_source
 

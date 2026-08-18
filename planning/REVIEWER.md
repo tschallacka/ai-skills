@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `25f7f2ec0ec0f83ba4b881e57a9d076493db7f7a24729954353d4097c2e10ab7`
+> Source SHA-256: `25cb77776fb984e16d9d2fc5ea15c588b9cc86e1ddc2a9a5aaca4802d55280bd`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -39,8 +39,8 @@ command, plan directory, and supported entry ids/views. Its starting prompt
 must include verbatim:
 
 "Read plan files and artifacts ONLY through the gated reader:
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
 Valid --document IDs: plan, inventory, progress, adversarial-review,
 goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
 --max-records for a large inventory if needed. Plan-read bytes are capped at
@@ -52,7 +52,7 @@ gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
 spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`bash <PLANNING_SKILL_DIR>/scripts/role-context.sh chris` (which injects its
+`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
 stance preamble), and require it to state its persona id in the returned
 findings. The adversary forms its own findings from the bounded-read gate and
 its scoped role docs; it never receives the planning agent's conclusions. A
@@ -204,6 +204,11 @@ use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
 shell-friendly escaped quote is clearer. Use
 `--insert-after` or `--insert-before` with a document ID and paragraph label
 to add one paragraph; later labels in that same section shift automatically.
+The `-p N.N:` forms auto-create only when the section's labels are contiguous
+`1..max` with no trailing unlabeled content — a section with gaps or
+unlabeled paragraphs must be re-authored (e.g. re-run
+`create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
+label) instead of silently appending.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.

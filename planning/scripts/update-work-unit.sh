@@ -6,26 +6,27 @@ set -euo pipefail
 #
 # Usage:
 #   update-work-unit.sh <plan-directory> <WNN> [<new-primary-scope>] [<new-file>]
-#                       [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>]
-#                       [--description <text>]
+#                       [--scope <text>] [--file <path>] [--type <type>]
+#                       [--depends-on <WNN[,WNN...]|—>] [--description <text>]
 #
 # The inventory row columns are: | ID | Type | File | Primary symbol or file
 # scope | Subscope | Intended change | Depends on | Goal | Step |. The third
 # positional updates *Primary scope* (column 5); the optional fourth updates
-# *File* (column 4). --scope is the flag form of the scope update (equivalent
-# to the third positional, for callers who prefer flags); flags update the
-# remaining columns; nothing else changes, so coverage rows, the goal Owned
-# work units section, and progress trackers are untouched — changing a
-# dependency must never go through remove + re-add (that would drop the unit
-# from its coverage rows and require manual repair).
+# *File* (column 4). An empty positional leaves its column unchanged, so
+# `"" "<path>"` updates File without touching scope. --scope/--file are the
+# flag forms (equivalent to the positionals, for callers who prefer flags);
+# flags update the remaining columns; nothing else changes, so coverage rows,
+# the goal Owned work units section, and progress trackers are untouched —
+# changing a dependency must never go through remove + re-add (that would drop
+# the unit from its coverage rows and require manual repair).
 
 usage() {
-    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")" >&2
     exit 64
 }
 
 help() {
-    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")"
+    printf 'Usage: %s <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]\n' "$(basename "$0")"
     exit 0
 }
 
@@ -36,18 +37,27 @@ esac
 [ "$#" -ge 2 ] || usage
 plan_dir="$1" unit="$2"; shift 2
 new_scope='' new_file='' new_type='' new_depends='' new_description=''
+positional=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --scope) [ "$#" -ge 2 ] || usage; new_scope="$2"; shift 2 ;;
+        --file) [ "$#" -ge 2 ] || usage; new_file="$2"; shift 2 ;;
         --type) [ "$#" -ge 2 ] || usage; new_type="$2"; shift 2 ;;
         --depends-on) [ "$#" -ge 2 ] || usage; new_depends="$2"; shift 2 ;;
         --description) [ "$#" -ge 2 ] || usage; new_description="$2"; shift 2 ;;
         -h|--help) help ;;
         -*) usage ;;
         *)
-            if [ -z "$new_scope" ]; then new_scope="$1"
-            elif [ -z "$new_file" ]; then new_file="$1"
-            else usage; fi
+            # Positional count, not -z: an empty positional means "leave
+            # unchanged" and must not consume the next positional's slot.
+            positional=$((positional + 1))
+            if [ "$positional" -eq 1 ]; then
+                new_scope="$1"
+            elif [ "$positional" -eq 2 ]; then
+                new_file="$1"
+            else
+                usage
+            fi
             shift ;;
     esac
 done
