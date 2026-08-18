@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Shared reconciliation helpers for plan mutations (sourced, not executed).
-# Source plan-document-lib.sh first (provides plan_die, plan_replace_section, ...).
 #
 # These implement the "tools that reconcile references automatically" contract:
 # when a work-unit mutates (add/remove), related artifacts — coverage rows, the
@@ -9,27 +8,25 @@
 
 set -euo pipefail
 
-# Standard flag/arity guard. Accepts optional -h/--help (prints HELP, exit 0).
-# Args: <expected-arg-count> <help-text>
-plan_guard() {
-    local expected="$1" help_text="$2" args=("${@:3}")
-    if [ "${#args[@]}" -eq 1 ] && { [ "${args[0]}" = -h ] || [ "${args[0]}" = --help ]; }; then
-        printf '%s\n' "$help_text"
-        exit 0
-    fi
-    [ "${#args[@]}" -eq "$expected" ] || plan_die "$help_text"
-}
+# A library that depends on another sources it itself rather than trusting the
+# caller's order (CODE-STYLE §7). plan-document-lib.sh guards its own load-time
+# initialisation, so sourcing it here is harmless when the caller already did.
+if [ -z "${PLAN_DOCUMENT_LIB_INITIALISED:-}" ]; then
+    # shellcheck source=planning/scripts/plan-document-lib.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-document-lib.sh"
+fi
 
-# Actionable error: state the problem and what the agent can do.
+# DEPRECATED in favour of plan_die (CODE-STYLE §5). Kept because its `plan: `
+# prefix and exit 64 are the current observable behaviour of the callers that
+# still use it; delete it once they are converted.
 plan_err() {
     printf 'plan: %s\n' "$1" >&2
     exit 64
 }
 
-# Prune a work-unit id from the inventory: drop its W row, remove the id from
-# any coverage row (keeping other ids; deleting a row only when empty), and
-# remove the id from remaining rows' "Depends on" column so no dangling
-# dependency remains.
+# Prune a work-unit id from the inventory: drop its W row, remove it from
+# coverage rows (deleting a row only when it empties), and strip it from every
+# remaining "Depends on" column so no dangling dependency remains.
 plan_prune_work_unit() {
     local inventory="$1" unit="$2" temporary
     [ -f "$inventory" ] || plan_err "work-unit inventory not found: $inventory"
@@ -82,12 +79,9 @@ plan_goal_units() {
     ' "$inventory"
 }
 
-# Re-derive a goal's Owned work units section from the inventory. The goal
-# template interleaves the "## Testing requirement" heading with the
-# owned-work-unit paragraphs, so rebuild the whole region between "## Owned
-# work units" and "## Goal-size exception": owned blocks first, then the
-# testing-requirement heading + table (kept from the current file). This
-# removes any stale/empty/truncated paragraph left by prior string-munging.
+# Re-derive a goal's Owned work units section from the inventory. The template
+# interleaves the "## Testing requirement" heading with the owned paragraphs, so
+# rebuild the whole region up to "## Goal-size exception", not just the blocks.
 plan_rewrite_owned_work_units() {
     local goal_file="$1" inventory="$2" goal="$3" body_file idx id ch region
     local testing_row testing_heading separator
@@ -124,10 +118,9 @@ plan_rewrite_owned_work_units() {
     trap - RETURN
 }
 
-# Rebuild a goal progress tracker from its step files (overwrites). If the
-# tracker does not exist yet and the goal has step files, create it first —
-# goals added after create-plan.sh never had a per-goal tracker otherwise, and
-# without one the validator's completion gate has nothing to read.
+# Rebuild a goal progress tracker from its step files (overwrites). Created when
+# absent: a goal added after the plan was created has no tracker, and the
+# validator's completion gate then has nothing to read.
 plan_rebuild_goal_progress() {
     local script_dir="$1" goal_dir="$2" goal="$3" progress_file
     progress_file="$goal_dir/progress.md"

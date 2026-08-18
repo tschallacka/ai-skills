@@ -29,28 +29,52 @@ plan_ensure_root_permissions() {
     ( : > "$probe" && rm -f "$probe" ) || plan_die "Plan root does not permit file editing: $root"
     [ -d "$helper_dir" ] && [ -r "$helper_dir" ] && [ -x "$helper_dir" ] \
         || plan_die "Planning helper directory is not readable/searchable: $helper_dir"
-    find "$helper_dir" -maxdepth 1 -type f -name '*.sh' -exec test -r {} \; -exec test -x {} \; \
-        || plan_die "One or more planning helpers cannot be read and executed: $helper_dir"
+    # find(1) exits 0 regardless of what -exec returns, so `-exec test -r {} \;`
+    # cannot fail the check; test in the shell. Libraries are sourced, never
+    # executed (CODE-STYLE §3), so only readability is required of them.
+    local helper
+    while IFS= read -r helper; do
+        [ -n "$helper" ] || continue
+        [ -r "$helper" ] \
+            || plan_die "One or more planning helpers cannot be read and executed: $helper_dir"
+        case "$helper" in
+            *-lib.sh) ;;
+            *) [ -x "$helper" ] \
+                || plan_die "One or more planning helpers cannot be read and executed: $helper_dir" ;;
+        esac
+    done < <(find "$helper_dir" -maxdepth 1 -type f -name '*.sh' -print)
     printf '%s\n' "$root"
 }
 
+# The single fatal path (CODE-STYLE §5): message to stderr, exit with $2. The
+# default stays 64 so every single-argument caller keeps its exit status.
 plan_die() {
-    printf '%s\n' "$*" >&2
-    exit 64
+    printf '%s: %s\n' "${0##*/}" "$1" >&2
+    exit "${2:-64}"
 }
 
-# Commit the current plan directory state before a mutation so every overwrite
-# is recoverable. Plan directories are usually gitignored by the host repo
-# (agent scratch space), so create-plan.sh git-initializes them and mutating
-# helpers snapshot the pre-mutation state here. No-op without git or without a
-# git-initialized plan dir; skips silently when there is nothing to commit.
+# Non-fatal accumulators for checkers that report every finding. plan_fail
+# bumps plan_error_count; the caller exits 1 at the end when it is non-zero.
+# Neither ever exits: a sourced function must leave that decision to its caller.
+plan_fail() {
+    plan_error_count=$((plan_error_count + 1))
+    printf 'FAIL: %s\n' "$*" >&2
+}
+
+plan_warn() {
+    printf 'WARN: %s\n' "$*" >&2
+}
+
+# Commit the plan directory before a mutation so every overwrite is
+# recoverable. Plan directories are usually gitignored by the host repo, so they
+# carry their own git. No-op without git or without a git-initialized plan dir.
 plan_git_snapshot() {
     local plan_dir="$1"
     command -v git >/dev/null 2>&1 || return 0
     [ -d "$plan_dir/.git" ] || return 0
-    git -C "$plan_dir" add -A -- . 2>/dev/null || return 0
+    git -C "$plan_dir" add -A -- . >/dev/null 2>&1 || return 0
     git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
-        commit -q -m "snapshot before ${0##*/}" 2>/dev/null || true
+        commit -q -m "snapshot before ${0##*/}" >/dev/null 2>&1 || true
 }
 
 # Scratch directory the planning skill may write temporary capsules and run
@@ -60,10 +84,8 @@ planning_tmpdir() {
     printf '%s\n' "${TMPDIR:-/tmp}/planning-agent"
 }
 
-# Ensure the planning scratch directory exists for this boot. Creating a
-# directory under the (world-writable, sticky) system temp dir needs no extra
-# permission, so this is present, cheap, and idempotent. Failure is ignored:
-# the helpers still work when a nonstandard TMPDIR is unwritable.
+# Ensure the planning scratch directory exists for this boot. Failure is
+# ignored: the helpers still work when a nonstandard TMPDIR is unwritable.
 planning_ensure_tmpdir() {
     local d
     d="$(planning_tmpdir)"
@@ -71,7 +93,18 @@ planning_ensure_tmpdir() {
 }
 
 plan_require_directory() {
-    [ -d "$1" ] || plan_die "Plan directory not found: $1"
+    [ -d "$1" ] || plan_die "Plan directory not found: $1" 66
+}
+
+# Require an input file; refuse to clobber an existing artifact. Same exit-code
+# vocabulary as plan_require_directory: 66 for "missing input", 73 for
+# "already there, not overwriting".
+plan_require_file() {
+    [ -f "$1" ] || plan_die "File not found: $1" 66
+}
+
+plan_refuse_existing() {
+    [ ! -e "$1" ] || plan_die "Refusing to overwrite an existing artifact: $1" 73
 }
 
 plan_require_safe_value() {
@@ -304,9 +337,9 @@ plan_emit_step_testing_reminder() {
     [ "$required" = yes ] || return 0
     companion="${step_file%.md}-testing.md"
     if [ -f "$companion" ]; then
-        printf 'Reminder: testing instructions already exist at %s; review them for accuracy and completeness after updating this step.\n' "$companion"
+        printf 'Reminder: testing instructions already exist at %s; review them for accuracy and completeness after updating this step.\n' "$companion" >&2
     else
-        printf 'Reminder: this goal requires testing; continue with its test/proof step before marking the goal complete.\n'
+        printf 'Reminder: this goal requires testing; continue with its test/proof step before marking the goal complete.\n' >&2
     fi
 }
 
@@ -317,8 +350,10 @@ plan_render_paragraphs() {
         BEGIN { RS=""; ORS="" }
         {
             text = $0
-            sub(/^[[:space:]\n]+/, "", text)
-            sub(/[[:space:]\n]+$/, "", text)
+            # No "\n" inside the bracket expression: a backslash escape there
+            # is undefined in POSIX awk, and [[:space:]] already covers newline.
+            sub(/^[[:space:]]+/, "", text)
+            sub(/[[:space:]]+$/, "", text)
             if (text == "") next
             if (count++) printf "\n\n"
             printf "§ %s.%d\n%s", number, count, text
@@ -501,10 +536,9 @@ plan_insert_paragraph() {
     trap - RETURN
 }
 
-# Delete one numbered paragraph and renumber the following paragraphs in the
-# same section so labels stay sequential. Deleting content by re-emitting the
-# whole section risks a transcription slip that damages paragraphs no finding
-# was about; a targeted delete removes that hazard.
+# Delete one numbered paragraph and renumber the rest of its section so labels
+# stay sequential. Targeted rather than re-emitting the section, which risks a
+# transcription slip damaging paragraphs no finding was about.
 plan_delete_paragraph() {
     local file="$1" paragraph_id="$2" temporary_file
     [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
@@ -591,12 +625,9 @@ plan_replace_title() {
     trap - RETURN
 }
 
-# Derive a single-line row description from a step's Objective paragraph
-# (§ 4.1) — the text after the first "§ N.N" label inside "## Objective".
-# Truncated to 100 chars; falls back to "$2" (the step name) when there is no
-# Objective or no § label, so a generated progress table never carries a
-# literal placeholder (report 15 §2 / report 16). Shared by every goal-level
-# progress-tracker builder.
+# Derive a row description from a step's Objective paragraph: the text after
+# the first "§ N.N" label inside "## Objective", truncated to 100 chars. Falls
+# back to "$2" so a progress table never carries a literal placeholder.
 plan_step_objective() {
     local step_file="$1" fallback="$2"
     local desc
@@ -614,11 +645,9 @@ plan_step_objective() {
     printf '%s\n' "$desc"
 }
 
-# Derive a single-line row description from a goal's "## Outcome and definition
-# of done" section, skipping "§ N.N" labels. Truncated to 100 chars; falls back
-# to "$2" (the goal name) when there is no DoD, so a generated plan-level
-# tracker never carries a literal placeholder. Shared by every plan-level
-# progress-tracker builder.
+# Derive a row description from a goal's "## Outcome and definition of done",
+# skipping "§ N.N" labels and truncating to 100 chars. Falls back to "$2" so a
+# plan-level tracker never carries a literal placeholder.
 plan_goal_definition_of_done() {
     local goal_file="$1" fallback="$2"
     local desc
@@ -635,3 +664,145 @@ plan_goal_definition_of_done() {
     [ -n "$desc" ] || desc="$fallback"
     printf '%s\n' "$desc"
 }
+
+# ── Portable helper vocabulary (CODE-STYLE §1 / §5 / §7 / §8) ────────────────
+# Everything below runs on bash 3.2 with BSD userland. Platform branches are
+# probed once at load time, never per call.
+
+# Refuse to run under a bash older than <major>. NOT called at load time — this
+# library itself is 3.2-clean; a script that genuinely needs bash 4 calls it.
+plan_require_bash() {
+    local want="$1"
+    [ "${BASH_VERSINFO[0]}" -ge "$want" ] || plan_die \
+        "needs bash $want or newer (running ${BASH_VERSION:-unknown}); on macOS: brew install bash" 78
+}
+
+# File mode (octal, e.g. 644) and owner uid. GNU stat and BSD stat share no
+# flag, so probe once and define the function accordingly rather than forking a
+# probe on every call. GNU %a and BSD %Lp both print the low 12 mode bits.
+if stat -c '%a' /dev/null >/dev/null 2>&1; then
+    plan_stat_mode() { stat -c '%a' -- "$1"; }
+    plan_stat_uid() { stat -c '%u' -- "$1"; }
+else
+    plan_stat_mode() { stat -f '%Lp' "$1"; }
+    plan_stat_uid() { stat -f '%u' "$1"; }
+fi
+
+# Resolve a symlink chain without `readlink -f` (GNU; macOS only since 12.3).
+# Relative targets resolve against the link's own directory; a non-symlink is
+# echoed back. The 32-hop cap turns a cycle into a diagnosed failure.
+plan_resolve_symlink() {
+    local path="$1" hops=0 target
+    while [ -L "$path" ]; do
+        hops=$((hops + 1))
+        [ "$hops" -le 32 ] || plan_die "symlink chain exceeds 32 hops (cycle?): $1" 66
+        target="$(readlink "$path")"
+        case "$target" in
+            /*) path="$target" ;;
+            *) path="$(dirname "$path")/$target" ;;
+        esac
+    done
+    printf '%s\n' "$path"
+}
+
+# ── Temp-file bookkeeping (CODE-STYLE §8) ────────────────────────────────────
+# bash keeps exactly one EXIT handler: a script installing its own after
+# sourcing this library replaces plan_cleanup, and `trap - EXIT` clears the slot.
+plan_track_tmp() {
+    plan_tmp_files=(${plan_tmp_files[@]+"${plan_tmp_files[@]}"} "$1")
+}
+
+plan_cleanup() {
+    local f body
+    for f in ${plan_tmp_files[@]+"${plan_tmp_files[@]}"}; do
+        [ -z "$f" ] || rm -f -- "$f"
+    done
+    plan_tmp_files=()
+    # Chain the handler that was installed before we were sourced. `trap -p`
+    # prints `trap -- 'body' EXIT`; the inner eval strips the single quotes and
+    # runs the body exactly once.
+    if [ -n "${plan_prior_exit_trap:-}" ]; then
+        body="${plan_prior_exit_trap#trap -- }"
+        body="${body% EXIT}"
+        plan_prior_exit_trap=""
+        eval "eval $body"
+    fi
+}
+
+# Write stdin to <target> atomically. The temp lives in the target's own
+# directory so the rename cannot cross a filesystem, inherits the target's mode
+# when it exists, and is registered with the cleanup list.
+plan_atomic_write() {
+    local target="$1" dir base tmp mode
+    dir="$(dirname "$target")"
+    base="$(basename "$target")"
+    [ -d "$dir" ] || plan_die "Target directory not found: $dir" 66
+    tmp="$(mktemp "$dir/.$base.XXXXXX")" || plan_die "Cannot create a temp file in: $dir" 73
+    plan_track_tmp "$tmp"
+    cat > "$tmp"
+    if [ -e "$target" ]; then
+        mode="$(plan_stat_mode "$target" 2>/dev/null || true)"
+        [ -z "$mode" ] || chmod "$mode" "$tmp"
+    fi
+    mv -f "$tmp" "$target"
+}
+
+# ── Progress rendering ───────────────────────────────────────────────────────
+# Half-up rounding (+ total / 2) and the 20-column default width are contract:
+# every caller must render byte-identical output.
+plan_progress_percent() {
+    local completed="$1" total="$2"
+    if [ "$total" -gt 0 ]; then
+        printf '%s\n' "$(( (completed * 100 + total / 2) / total ))"
+    else
+        printf '0\n'
+    fi
+}
+
+plan_progress_bar() {
+    local completed="$1" total="$2" width="${3:-20}" percent filled empty
+    percent="$(plan_progress_percent "$completed" "$total")"
+    filled=$(( percent * width / 100 ))
+    empty=$(( width - filled ))
+    printf '%s%s\n' \
+        "$(printf '%*s' "$filled" '' | tr ' ' '#')" \
+        "$(printf '%*s' "$empty" '' | tr ' ' '-')"
+}
+
+# Status glyph: nothing started, something started, everything done. Written as
+# `if` blocks rather than the call sites' `[ … ] && icon=…` chain, which returns
+# non-zero under `set -e` when the test fails.
+plan_progress_icon() {
+    local completed="$1" percent="$2" icon='💤'
+    if [ "$completed" -gt 0 ]; then
+        icon='⏳'
+    fi
+    if [ "$percent" -eq 100 ]; then
+        icon='✅'
+    fi
+    printf '%s\n' "$icon"
+}
+
+# The shared awk prelude defining trim(). Used as `awk "$(plan_awk_trim) …"`.
+# Both ends are anchored: an unanchored `[[:space:]]+$` alternative strips
+# interior whitespace runs and silently mangles table cells.
+plan_awk_trim() {
+    cat <<'AWK'
+function trim(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v }
+AWK
+}
+
+# ── Associative arrays for bash 3.2 ─────────────────────────────────────────
+# shellcheck source=planning/scripts/plan-map-lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
+
+# ── Load-time initialisation ─────────────────────────────────────────────────
+# Guarded: this library is sourced more than once per process, and re-running it
+# would reset plan_error_count and record plan_cleanup as its own "prior" handler.
+if [ -z "${PLAN_DOCUMENT_LIB_INITIALISED:-}" ]; then
+    PLAN_DOCUMENT_LIB_INITIALISED=1
+    plan_error_count=0
+    plan_tmp_files=()
+    plan_prior_exit_trap="$(trap -p EXIT)"
+    trap plan_cleanup EXIT INT TERM
+fi
