@@ -55,6 +55,7 @@ tests/test-planning-context-contract.sh
 tests/test-installer-manifest.sh
 tests/lib-test.sh
 tests/test-plan-env.sh
+tests/test-plan-snapshot.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
 tests/test-plan-context-reviewer.sh
@@ -105,6 +106,7 @@ scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
 scripts/plan-map-lib.sh
+scripts/plan-inventory-lib.sh
 scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
 scripts/mint-fix-keys.sh

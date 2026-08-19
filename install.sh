@@ -18,6 +18,9 @@ set -euo pipefail
 #   4.  Runtime tool verification
 #   5.  Agent target detection
 #   6.  Terminal capability, splash, and menu rendering
+#   6b. Skill picker: state, text metrics, requirement model
+#   6c. Skill picker: the sprite and the frame
+#   6d. Skill picker: input, the terminal, and the seam
 #   7.  Skill and target selection
 #   8.  Source acquisition
 #   9.  Per-skill file manifest
@@ -559,6 +562,7 @@ load_custom_locations() {
 #   COLOR_MODE       set by detect_color_mode, read by fg_sgr
 #   FG_SGR           set by fg_sgr, read by its caller on the next line
 #   COLOR            set by color_for, read by render_art
+#   EYE_ROW          set by eye_row_for, read by render_art and iui_head_line
 #   ART              constant (section 1), read by render_art
 #   MENU_BOX_WIDTH   set by show_splash (or defaulted by show_shop_menu itself)
 #   MENU_COMPACT     set by show_splash, read by show_shop_menu
@@ -649,6 +653,23 @@ color_for() {
     esac
 }
 
+# The pixels of sprite rows 8 and 9 for one eye state, into EYE_ROW. Both rows
+# carry the same pixels in every state, so one row per state is enough for both.
+# Section 6b's iui_head_line() reads this too, so the eye data exists once.
+eye_row_for() {
+    case "$1" in
+        left)
+            EYE_ROW='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
+            ;;
+        right)
+            EYE_ROW='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
+            ;;
+        *)
+            EYE_ROW='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
+            ;;
+    esac
+}
+
 render_art() {
     local offset_x="$1"
     local offset_y="$2"
@@ -656,22 +677,8 @@ render_art() {
     local eye_state="$4"
     local row char x y repeat pixel_width blocks
     local -a pixels
-    local eye_row eye_row_2
 
-    case "$eye_state" in
-        left)
-            eye_row='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            eye_row_2='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            ;;
-        right)
-            eye_row='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
-            eye_row_2='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
-            ;;
-        *)
-            eye_row='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            eye_row_2='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            ;;
-    esac
+    eye_row_for "$eye_state"
 
     pixel_width=$((scale * 2))
     blocks=''
@@ -680,8 +687,7 @@ render_art() {
     done
     for ((y = 0; y < ${#ART[@]}; y++)); do
         row="${ART[$y]}"
-        [ "$y" -eq 8 ] && row="$eye_row"
-        [ "$y" -eq 9 ] && row="$eye_row_2"
+        { [ "$y" -eq 8 ] || [ "$y" -eq 9 ]; } && row="$EYE_ROW"
         IFS=' ' read -r -a pixels <<< "$row"
         for ((repeat = 0; repeat < scale; repeat++)); do
             printf '\033[%d;%dH' "$((offset_y + y * scale + repeat))" "$offset_x"
@@ -869,14 +875,1181 @@ show_splash() {
 }
 
 # ---------------------------------------------------------------
+# 6b. Full-screen skill picker: state, text metrics, requirement model
+# ---------------------------------------------------------------
+# The interactive picker that replaces the numbered menu of section 6 when fd 3
+# is a terminal. Its three parts are split by concern and read in order: this one
+# owns the state and the arithmetic, 6c draws a frame, 6d reads the keyboard and
+# is the seam select_skills() calls.
+#
+# Everything here is prefixed iui_ and shares section 6's primitives rather than
+# repeating them: ART, detect_color_mode, fg_sgr, color_for and eye_row_for are
+# defined there, so the sprite and the palette exist once in this file.
+#
+# Banners in this part, in order:
+#   State
+#   Palette segments
+#   Glyph sets and the plain-text fold
+#   The requirement table — the data seam
+#   The global, per-tool dependency cache
+#   Layout arithmetic
+
+# ─────────────────────────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────────────────────────
+
+# PORTABILITY(assoc-array): the skill table and the dependency cache both want a
+# map; index-parallel arrays plus a linear lookup are the bash 3.2 shape of one.
+IUI_SKILL_NAMES=()
+IUI_SKILL_DESCS=()
+IUI_SKILL_INSTALLED=()
+IUI_SKILL_HAVE=()
+IUI_SKILL_WANT=()
+IUI_SKILL_SEL=()
+
+# The global dependency cache. Keyed by TOOL, never by skill, so reverifying
+# `jq` from one skill's info box refreshes every skill that also needs `jq`.
+IUI_DEP_TOOLS=()
+IUI_DEP_STATES=()
+
+IUI_CURSOR=0
+IUI_SCROLL=0
+IUI_FOCUS=list
+IUI_COLS=80
+IUI_ROWS=24
+IUI_GLYPHS=blocks
+IUI_POSITION=0
+IUI_DONE=0
+IUI_RC=130
+IUI_EYE=front
+IUI_HEAD_ON=0
+IUI_HEAD_SCALE=0
+IUI_HEAD_H=0
+IUI_MESSAGE=()
+IUI_STTY_SAVED=""
+IUI_TERM_ACTIVE=0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Palette segments
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Minecraft block palette. iui_seg() wraps text in a role's colour; in the
+# `none` colour mode every wrap is the identity, which is what keeps the ASCII
+# fallback free of escape bytes.
+iui_seg() {
+    local role="$1" text="$2" rgb='' attr=''
+    [ -n "$COLOR_MODE" ] || detect_color_mode
+    case "$role" in
+        grass) rgb='91;135;49' ;;
+        dirt) rgb='139;90;43' ;;
+        gold) rgb='252;238;75'; attr='1;' ;;
+        redstone) rgb='217;58;43' ;;
+        diamond) rgb='74;237;217' ;;
+        obsidian) rgb='21;12;28' ;;
+        *) rgb='127;127;127' ;;
+    esac
+    if [ "$COLOR_MODE" = "none" ]; then
+        IUI_SEG="$text"
+        return
+    fi
+    fg_sgr "$rgb" "$attr"
+    IUI_SEG="$FG_SGR$text"$'\033'"[0m"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Glyph sets and the plain-text fold
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The glyph vocabulary is closed: these nine are the only non-ASCII bytes a frame
+# may hold, and iui_plain() folds exactly them back to one byte each.
+# ---- quoted: glyph -> ASCII fold ----
+# ▀ =    ▄ =    ▌ |
+# ▛ +    ▜ +    ▙ +    ▟ +
+# ─ -    █ #
+# ---- end quoted ----
+iui_set_glyphs() {
+    IUI_GLYPHS="${1:-blocks}"
+    if [ "$IUI_GLYPHS" = "ascii" ]; then
+        IUI_G_TOP='='; IUI_G_BOT='='; IUI_G_V='|'
+        IUI_G_TL='+'; IUI_G_TR='+'; IUI_G_BL='+'; IUI_G_BR='+'
+        IUI_G_RULE='-'; IUI_G_FILL='#'
+        return
+    fi
+    IUI_G_TOP='▀'; IUI_G_BOT='▄'; IUI_G_V='▌'
+    IUI_G_TL='▛'; IUI_G_TR='▜'; IUI_G_BL='▙'; IUI_G_BR='▟'
+    IUI_G_RULE='─'; IUI_G_FILL='█'
+}
+
+# Strips SGR sequences and folds the glyph set, leaving one ASCII byte per
+# display cell. Pure parameter expansion — no forks, so it is cheap enough to
+# call on every rendered line as a self-check.
+iui_plain() {
+    local s="$1" pre rest
+    while [ "${s#*$'\033'\[}" != "$s" ]; do
+        pre="${s%%$'\033'\[*}"
+        rest="${s#*$'\033'\[}"
+        rest="${rest#*m}"
+        s="$pre$rest"
+    done
+    s="${s//▀/=}"; s="${s//▄/=}"; s="${s//▌/|}"
+    s="${s//▛/+}"; s="${s//▜/+}"; s="${s//▙/+}"; s="${s//▟/+}"
+    s="${s//─/-}"; s="${s//█/#}"
+    IUI_PLAIN="$s"
+}
+
+iui_repeat() {
+    local glyph="$1" count="$2" out='' i
+    for ((i = 0; i < count; i++)); do
+        out="$out$glyph"
+    done
+    IUI_REPEAT="$out"
+}
+
+# PORTABILITY(bytes-vs-characters): the pad/truncate arithmetic is in display
+# cells and the text it measures is ASCII, so ${#t} is both the byte and the
+# cell count. Never hand this a glyph — glyphs are placed by count, not measured.
+iui_pad() {
+    local t="$1" w="$2"
+    [ "$w" -ge 0 ] || w=0
+    if [ "${#t}" -gt "$w" ]; then
+        if [ "$w" -ge 1 ]; then t="${t:0:$((w - 1))}~"; else t=''; fi
+    fi
+    printf -v IUI_PAD '%s%*s' "$t" "$((w - ${#t}))" ''
+}
+
+iui_wrap() {
+    local text="$1" width="$2" line split
+    IUI_WRAP_LINES=()
+    [ "$width" -ge 8 ] || width=8
+    while [ -n "$text" ]; do
+        line="$text"
+        if [ "${#line}" -gt "$width" ]; then
+            line="${text:0:width}"
+            split="${line% *}"
+            [ -n "$split" ] && [ "$split" != "$line" ] && line="$split"
+        fi
+        IUI_WRAP_LINES+=("$line")
+        text="${text:${#line}}"
+        text="${text# }"
+    done
+    [ "${#IUI_WRAP_LINES[@]}" -gt 0 ] || IUI_WRAP_LINES=('')
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The requirement table — the data seam
+# ─────────────────────────────────────────────────────────────────────────────
+
+# One row per (skill, tool) requirement. iui_req_add() is the only ingest point
+# and iui_load_requirements() the only producer, so wiring a generated table in
+# means replacing one function; nothing in the renderer reads a skill list.
+IUI_REQ_SKILL=()
+IUI_REQ_TOOL=()
+IUI_REQ_COND=()
+IUI_REQ_STRENGTH=()
+IUI_REQ_WHY=()
+
+# iui_req_add <skill-index> <tool> <condition> hard|soft <what-is-lost>
+# The condition is `*`, an OS glob, or OS:ARCH — memlimit is Darwin:arm64 only
+# and must not show up as required on an Intel Mac.
+iui_req_add() {
+    IUI_REQ_SKILL+=("$1")
+    IUI_REQ_TOOL+=("$2")
+    IUI_REQ_COND+=("$3")
+    IUI_REQ_STRENGTH+=("$4")
+    IUI_REQ_WHY+=("$5")
+}
+
+iui_req_reset() {
+    IUI_REQ_SKILL=(); IUI_REQ_TOOL=(); IUI_REQ_COND=()
+    IUI_REQ_STRENGTH=(); IUI_REQ_WHY=()
+}
+
+iui_platform() {
+    [ -n "${IUI_UNAME_S:-}" ] || IUI_UNAME_S="$(uname -s)"
+    [ -n "${IUI_UNAME_M:-}" ] || IUI_UNAME_M="$(uname -m)"
+}
+
+iui_cond_applies() {
+    local cond="$1" os arch
+    [ "$cond" = '*' ] && return 0
+    iui_platform
+    os="${cond%%:*}"
+    # Unquoted patterns on purpose: MINGW*/CYGWIN* are globs.
+    # shellcheck disable=SC2254
+    case "$IUI_UNAME_S" in $os) : ;; *) return 1 ;; esac
+    [ "$cond" = "$os" ] && return 0
+    arch="${cond#*:}"
+    # shellcheck disable=SC2254
+    case "$IUI_UNAME_M" in $arch) return 0 ;; esac
+    return 1
+}
+
+iui_req_applies() {
+    [ "${IUI_REQ_SKILL[$1]}" = "$2" ] || return 1
+    iui_cond_applies "${IUI_REQ_COND[$1]}"
+}
+
+# The one producer of the table, from section 4's generated tables and not a
+# skill's requires.tsv: select_skills() runs before download_source(), so under
+# `curl … | bash` no skill directory exists yet. Conditions are applied there.
+iui_load_requirements() {
+    local i skill tool
+    iui_req_reset
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        skill="${IUI_SKILL_NAMES[$i]}"
+        while IFS= read -r tool; do
+            [ -n "$tool" ] || continue
+            iui_req_add "$i" "$tool" '*' \
+                "$(runtime_requirement_strength "$skill" "$tool")" \
+                "$(runtime_requirement_why "$skill" "$tool")"
+        done < <(runtime_requirements "$skill")
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The global, per-tool dependency cache
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Keyed by tool, never by skill: every read goes through iui_dep_state and every
+# write through iui_dep_set, so one record serves every skill needing that tool.
+iui_dep_index() {
+    local wanted="$1" i
+    IUI_DEP_INDEX=-1
+    for ((i = 0; i < ${#IUI_DEP_TOOLS[@]}; i++)); do
+        if [ "${IUI_DEP_TOOLS[$i]}" = "$wanted" ]; then
+            IUI_DEP_INDEX="$i"
+            return
+        fi
+    done
+}
+
+iui_dep_set() {
+    iui_dep_index "$1"
+    if [ "$IUI_DEP_INDEX" -lt 0 ]; then
+        IUI_DEP_TOOLS+=("$1")
+        IUI_DEP_STATES+=("$2")
+        return
+    fi
+    IUI_DEP_STATES[$IUI_DEP_INDEX]="$2"
+}
+
+iui_dep_state() {
+    iui_dep_index "$1"
+    if [ "$IUI_DEP_INDEX" -lt 0 ]; then
+        iui_dep_set "$1" unknown
+        IUI_DEP_STATE=unknown
+        return
+    fi
+    IUI_DEP_STATE="${IUI_DEP_STATES[$IUI_DEP_INDEX]}"
+}
+
+# The generated runtime_tool_verify() from section 4 is the authority, so the
+# picker and verify_runtime_tools() can never disagree about a tool. Overridable
+# so a test can inject a probe result without installing tools.
+iui_dep_probe() {
+    runtime_tool_verify "$1"
+}
+
+iui_dep_verify() {
+    if iui_dep_probe "$1"; then
+        iui_dep_set "$1" ok
+    else
+        iui_dep_set "$1" missing
+    fi
+}
+
+# Reverify every applicable tool of one skill. The writes land in the per-tool
+# cache, so the refresh is global by construction.
+iui_dep_reverify_skill() {
+    local index="$1" i
+    for ((i = 0; i < ${#IUI_REQ_SKILL[@]}; i++)); do
+        iui_req_applies "$i" "$index" || continue
+        iui_dep_verify "${IUI_REQ_TOOL[$i]}"
+    done
+}
+
+# blocked beats degraded: an unmet hard requirement stops the install, an unmet
+# soft one only costs capability. IUI_SKILL_BLOCKER names the first offender.
+iui_skill_state() {
+    local index="$1" i
+    IUI_SKILL_STATE=ok
+    IUI_SKILL_BLOCKER=''
+    for ((i = 0; i < ${#IUI_REQ_SKILL[@]}; i++)); do
+        iui_req_applies "$i" "$index" || continue
+        iui_dep_state "${IUI_REQ_TOOL[$i]}"
+        [ "$IUI_DEP_STATE" = "missing" ] || continue
+        if [ "${IUI_REQ_STRENGTH[$i]}" = "hard" ]; then
+            IUI_SKILL_STATE=blocked
+            IUI_SKILL_BLOCKER="${IUI_REQ_TOOL[$i]}"
+            return
+        fi
+        IUI_SKILL_STATE=degraded
+        [ -n "$IUI_SKILL_BLOCKER" ] || IUI_SKILL_BLOCKER="${IUI_REQ_TOOL[$i]}"
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Layout arithmetic
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Rows: 1 title, 1 top border, IUI_BODY_ROWS body, 1 bottom border, 1 hint.
+# Columns: 1 vertical + IUI_LEFT_W + 1 divider + IUI_RIGHT_W + 1 vertical.
+# IUI_NARROW is the degrade path: one pane at a time, whichever has focus.
+iui_layout() {
+    IUI_BODY_ROWS=$((IUI_ROWS - 4))
+    [ "$IUI_BODY_ROWS" -ge 1 ] || IUI_BODY_ROWS=1
+    IUI_NARROW=0
+    if [ "$IUI_COLS" -lt 56 ]; then
+        IUI_NARROW=1
+        IUI_LEFT_W=$((IUI_COLS - 2))
+        [ "$IUI_LEFT_W" -ge 8 ] || IUI_LEFT_W=8
+        IUI_RIGHT_W="$IUI_LEFT_W"
+        iui_head_geometry
+        return
+    fi
+    IUI_LEFT_W=$((IUI_COLS / 3))
+    [ "$IUI_LEFT_W" -le 34 ] || IUI_LEFT_W=34
+    [ "$IUI_LEFT_W" -ge 22 ] || IUI_LEFT_W=22
+    IUI_RIGHT_W=$((IUI_COLS - IUI_LEFT_W - 3))
+    iui_head_geometry
+}
+
+# The sprite costs scale*32 columns and scale*16 rows, and is dropped rather than
+# shrunk when it does not fit: with no colour it would paint blank, and in the
+# narrow layout or under IUI_HEAD_MIN_TEXT_ROWS it would starve the info text.
+IUI_HEAD_MIN_TEXT_ROWS=6
+iui_head_geometry() {
+    IUI_HEAD_ON=0
+    IUI_HEAD_SCALE=0
+    IUI_HEAD_H=0
+    [ "$IUI_NARROW" -eq 0 ] || return 0
+    [ -n "$COLOR_MODE" ] || detect_color_mode
+    [ "$COLOR_MODE" != "none" ] || return 0
+    local s
+    for s in 1 2 3; do
+        [ $((s * 32)) -le "$IUI_RIGHT_W" ] || break
+        [ $((IUI_BODY_ROWS - s * 16)) -ge "$IUI_HEAD_MIN_TEXT_ROWS" ] || break
+        IUI_HEAD_SCALE="$s"
+    done
+    [ "$IUI_HEAD_SCALE" -ge 1 ] || return 0
+    IUI_HEAD_ON=1
+    IUI_HEAD_H=$((IUI_HEAD_SCALE * 16))
+}
+
+iui_clamp_scroll() {
+    local count="${#IUI_SKILL_NAMES[@]}" rows="$IUI_BODY_ROWS"
+    [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0
+    [ "$IUI_CURSOR" -lt "$count" ] || IUI_CURSOR=$((count - 1))
+    [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0
+    [ "$IUI_SCROLL" -le "$IUI_CURSOR" ] || IUI_SCROLL="$IUI_CURSOR"
+    if [ "$IUI_CURSOR" -ge $((IUI_SCROLL + rows)) ]; then
+        IUI_SCROLL=$((IUI_CURSOR - rows + 1))
+    fi
+    if [ "$count" -le "$rows" ]; then
+        IUI_SCROLL=0
+    elif [ "$IUI_SCROLL" -gt $((count - rows)) ]; then
+        IUI_SCROLL=$((count - rows))
+    fi
+    [ "$IUI_SCROLL" -ge 0 ] || IUI_SCROLL=0
+}
+
+iui_measure() {
+    local columns="${COLUMNS:-80}" lines="${LINES:-24}"
+    if command -v tput >/dev/null 2>&1; then
+        columns="$(tput cols 2>/dev/null || echo "$columns")"
+        lines="$(tput lines 2>/dev/null || echo "$lines")"
+    fi
+    case "$columns" in ''|*[!0-9]*) columns=80 ;; esac
+    case "$lines" in ''|*[!0-9]*) lines=24 ;; esac
+    IUI_COLS="$columns"
+    IUI_ROWS="$lines"
+    [ "$IUI_COLS" -ge 20 ] || IUI_COLS=20
+    [ "$IUI_ROWS" -ge 6 ] || IUI_ROWS=6
+}
+# ---------------------------------------------------------------
+# 6c. Full-screen skill picker: the sprite and the frame
+# ---------------------------------------------------------------
+# Draws one frame of the picker from the state 6b holds. The sprite pixels come
+# from section 6's ART and eye_row_for(), so this part carries the geometry of
+# the head and not a second copy of the head.
+#
+# Banners in this part, in order:
+#   The animated head
+#   Frame rendering
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The animated head
+# ─────────────────────────────────────────────────────────────────────────────
+
+IUI_EYE_CYCLE='front right front left'
+iui_advance_eye() {
+    local first='' seen=0 state next=''
+    for state in $IUI_EYE_CYCLE; do
+        [ -n "$first" ] || first="$state"
+        if [ "$seen" -eq 1 ]; then next="$state"; break; fi
+        [ "$state" = "$IUI_EYE" ] && seen=1
+    done
+    [ -n "$next" ] || next="$first"
+    IUI_EYE="$next"
+}
+
+# One sprite row as a string of exactly $3 display cells: 16 pixels of
+# scale*2 fill glyphs each, then padding out to the pane width.
+iui_head_line() {
+    local art_y="$1" scale="$2" width="$3" eye="$4"
+    local row blocks out='' pad x
+    local -a pixels
+    row="${ART[$art_y]}"
+    if [ "$art_y" -eq 8 ] || [ "$art_y" -eq 9 ]; then
+        eye_row_for "$eye"
+        row="$EYE_ROW"
+    fi
+    iui_repeat "$IUI_G_FILL" $((scale * 2))
+    blocks="$IUI_REPEAT"
+    IFS=' ' read -r -a pixels <<< "$row"
+    printf -v pad '%*s' $((scale * 2)) ''
+    for ((x = 0; x < ${#pixels[@]}; x++)); do
+        color_for "${pixels[$x]}"
+        if [ -n "$COLOR" ]; then
+            fg_sgr "$COLOR"
+            out="$out$FG_SGR$blocks"$'\033'"[0m"
+        else
+            out="$out$pad"
+        fi
+    done
+    printf -v pad '%*s' $((width - scale * 32)) ''
+    IUI_HEAD_LINE="$out$pad"
+}
+
+# The eyes are the only thing that changes without user input, so their redraw
+# is separate from the full frame: two sprite rows, absolutely positioned, and
+# nothing else is touched. That is why iui_head_line() is width-parameterised.
+iui_redraw_eyes() {
+    [ "$IUI_HEAD_ON" -eq 1 ] || return 0
+    [ "$IUI_POSITION" -eq 1 ] || return 0
+    local scale="$IUI_HEAD_SCALE" col=$((IUI_LEFT_W + 3)) art_y r row
+    for art_y in 8 9; do
+        iui_head_line "$art_y" "$scale" $((scale * 32)) "$IUI_EYE"
+        for ((r = 0; r < scale; r++)); do
+            row=$((3 + art_y * scale + r))
+            printf '\033[%d;%dH%s' "$row" "$col" "$IUI_HEAD_LINE"
+        done
+    done
+    printf '\033[%d;1H' "$IUI_ROWS"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Frame rendering
+# ─────────────────────────────────────────────────────────────────────────────
+
+# One renderer serves both modes: IUI_POSITION=1 prefixes an absolute cursor
+# move (interactive), IUI_POSITION=0 emits plain lines (headless, assertable).
+iui_out_line() {
+    if [ "$IUI_POSITION" -eq 1 ]; then
+        printf '\033[%d;1H\033[K%s' "$1" "$2"
+    else
+        printf '%s\n' "$2"
+    fi
+}
+
+# A header segment of exactly $2 cells: one edge glyph, the label, then filler.
+# A focused pane's label is bracketed, so the focus is assertable without colour.
+iui_header_seg() {
+    local label="$1" width="$2" focused="$3" text head
+    if [ "$focused" -eq 1 ]; then text="[$label]"; else text=" $label "; fi
+    [ "${#text}" -le $((width - 2)) ] || text="${text:0:$((width - 2))}"
+    iui_repeat "$IUI_G_TOP" 1
+    iui_seg gold "$text"
+    head="$IUI_REPEAT$IUI_SEG"
+    iui_repeat "$IUI_G_TOP" $((width - 1 - ${#text}))
+    iui_seg dirt "$IUI_REPEAT"
+    IUI_HEADER_SEG="$head$IUI_SEG"
+}
+
+# The row carries the requirement verdict as a word as well as a colour, so the
+# three states stay apart in 8-colour mode and in the ASCII fallback. The tag is
+# dropped below 16 cells, where there is no room for a name beside it.
+iui_list_cell() {
+    local index="$1" width="$2" role box cursor tag='' tag_w=0
+    if [ "${IUI_SKILL_SEL[$index]}" -eq 1 ]; then box="[$IUI_G_FILL]"; else box='[ ]'; fi
+    if [ "$index" -eq "$IUI_CURSOR" ]; then cursor='>'; else cursor=' '; fi
+    role=stone
+    [ "${IUI_SKILL_SEL[$index]}" -eq 1 ] && role=grass
+    [ "$index" -eq "$IUI_CURSOR" ] && role=gold
+    iui_skill_state "$index"
+    if [ "$width" -ge 16 ]; then
+        tag_w=6
+        case "$IUI_SKILL_STATE" in
+            blocked) tag=' block' ;;
+            degraded) tag='  warn' ;;
+            *) tag='    ok' ;;
+        esac
+    fi
+    iui_pad " ${IUI_SKILL_NAMES[$index]}" $((width - 4 - tag_w))
+    iui_seg "$role" "$cursor$box$IUI_PAD"
+    IUI_LIST_CELL="$IUI_SEG"
+    [ "$tag_w" -eq 0 ] && return
+    iui_seg "$(iui_state_role "$IUI_SKILL_STATE")" "$tag"
+    IUI_LIST_CELL="$IUI_LIST_CELL$IUI_SEG"
+}
+
+# Builds the info text into IUI_INFO_TEXT (padded cells), IUI_INFO_ROLE and
+# IUI_INFO_TAG, index-parallel. IUI_INFO_TAG marks the two action lines so a
+# mouse click can be mapped back to an action after the frame is drawn.
+iui_info_lines() {
+    local width="$1" index="$IUI_CURSOR" tool line state up
+    IUI_INFO_TEXT=(); IUI_INFO_ROLE=(); IUI_INFO_TAG=()
+    iui_repeat "$IUI_G_RULE" "$width"
+    IUI_INFO_TEXT+=("$IUI_REPEAT"); IUI_INFO_ROLE+=(dirt); IUI_INFO_TAG+=(rule)
+    iui_info_push gold "${IUI_SKILL_NAMES[$index]}" name "$width"
+    iui_wrap "${IUI_SKILL_DESCS[$index]}" "$width"
+    for line in "${IUI_WRAP_LINES[@]}"; do
+        iui_info_push stone "$line" body "$width"
+    done
+    iui_info_push diamond 'DEPENDENCIES' body "$width"
+    iui_info_requirements "$index" "$width"
+    iui_info_push diamond 'STATUS' body "$width"
+    iui_skill_state "$index"
+    printf -v line '  %-14s %s' 'install' "$(iui_install_verdict)"
+    iui_info_push "$(iui_state_role "$IUI_SKILL_STATE")" "$line" body "$width"
+    printf -v line '  %-14s %s' 'installed' "${IUI_SKILL_INSTALLED[$index]}"
+    iui_info_push stone "$line" body "$width"
+    up="$(iui_uptodate_text "$index")"
+    printf -v line '  %-14s %s' 'up to date' "$up"
+    state=redstone
+    [ "$up" = "yes" ] && state=diamond
+    iui_info_push "$state" "$line" body "$width"
+    iui_info_actions "$width"
+    iui_info_message "$width"
+}
+
+# Tool, strength and state on one line; for an unmet requirement the next line
+# says what is lost, which is the part that matters for a soft one.
+iui_info_requirements() {
+    local index="$1" width="$2" i line role any=0 wrapped
+    for ((i = 0; i < ${#IUI_REQ_SKILL[@]}; i++)); do
+        iui_req_applies "$i" "$index" || continue
+        any=1
+        iui_dep_state "${IUI_REQ_TOOL[$i]}"
+        role=stone
+        [ "$IUI_DEP_STATE" = "ok" ] && role=diamond
+        if [ "$IUI_DEP_STATE" = "missing" ]; then
+            role=gold
+            [ "${IUI_REQ_STRENGTH[$i]}" = "hard" ] && role=redstone
+        fi
+        printf -v line '  %-14s %-5s %s' \
+            "${IUI_REQ_TOOL[$i]}" "${IUI_REQ_STRENGTH[$i]}" "$IUI_DEP_STATE"
+        iui_info_push "$role" "$line" body "$width"
+        [ "$IUI_DEP_STATE" = "missing" ] || continue
+        iui_wrap "${IUI_REQ_WHY[$i]}" $((width - 4))
+        for wrapped in "${IUI_WRAP_LINES[@]}"; do
+            iui_info_push "$role" "    $wrapped" body "$width"
+        done
+    done
+    [ "$any" -eq 1 ] || iui_info_push stone '  (none)' body "$width"
+}
+
+iui_state_role() {
+    case "$1" in
+        blocked) printf 'redstone' ;;
+        degraded) printf 'gold' ;;
+        *) printf 'diamond' ;;
+    esac
+}
+
+iui_install_verdict() {
+    case "$IUI_SKILL_STATE" in
+        blocked) printf 'blocked (%s missing)' "$IUI_SKILL_BLOCKER" ;;
+        degraded) printf 'allowed, degraded (%s missing)' "$IUI_SKILL_BLOCKER" ;;
+        *) printf 'allowed' ;;
+    esac
+}
+
+# The wanted version is SOURCE_VERSION, which download_source() only sets after
+# the selection is made, so during the picker it is legitimately empty.
+iui_uptodate_text() {
+    local index="$1"
+    if [ "${IUI_SKILL_INSTALLED[$index]}" != "yes" ]; then
+        printf 'not installed'
+    elif [ -z "${IUI_SKILL_WANT[$index]}" ]; then
+        printf 'unknown until the source is fetched'
+    elif [ "${IUI_SKILL_HAVE[$index]}" = "${IUI_SKILL_WANT[$index]}" ]; then
+        printf 'yes'
+    else
+        printf 'no (%s -> %s)' "${IUI_SKILL_HAVE[$index]}" "${IUI_SKILL_WANT[$index]}"
+    fi
+}
+
+iui_info_push() {
+    local role="$1" text="$2" tag="$3" width="$4"
+    iui_pad "$text" "$width"
+    IUI_INFO_TEXT+=("$IUI_PAD"); IUI_INFO_ROLE+=("$role"); IUI_INFO_TAG+=("$tag")
+}
+
+# The actions are always listed; they are only *usable* when the info pane has
+# focus, and the leading marker says which state they are in.
+iui_info_actions() {
+    local width="$1" marker role
+    if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi
+    iui_info_push diamond 'ACTIONS' body "$width"
+    iui_info_push "$role" " $marker d  help me install dependencies" act-dep "$width"
+    iui_info_push "$role" " $marker r  reverify dependencies" act-verify "$width"
+}
+
+iui_info_message() {
+    local width="$1" line wrapped
+    [ "${#IUI_MESSAGE[@]}" -gt 0 ] || return 0
+    for line in "${IUI_MESSAGE[@]}"; do
+        iui_wrap "$line" "$width"
+        for wrapped in "${IUI_WRAP_LINES[@]}"; do
+            iui_info_push gold "$wrapped" body "$width"
+        done
+    done
+}
+
+iui_title_bar() {
+    local text
+    printf -v text ' %s  %d/%d selected ' 'TSCHALLACKA SKILL SHOP' \
+        "$(iui_selected_count)" "${#IUI_SKILL_NAMES[@]}"
+    iui_pad "$text" "$IUI_COLS"
+    iui_seg gold "$IUI_PAD"
+    iui_out_line 1 "$IUI_SEG"
+}
+
+iui_hint_bar() {
+    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  i install  q quit' "$IUI_COLS"
+    iui_seg stone "$IUI_PAD"
+    iui_out_line "$IUI_ROWS" "$IUI_SEG"
+}
+
+iui_selected_count() {
+    local i n=0
+    for ((i = 0; i < ${#IUI_SKILL_SEL[@]}; i++)); do
+        [ "${IUI_SKILL_SEL[$i]}" -eq 1 ] && n=$((n + 1))
+    done
+    printf '%d' "$n"
+}
+
+iui_render_frame() {
+    iui_layout
+    iui_clamp_scroll
+    IUI_ACTION_ROW_DEP=0
+    IUI_ACTION_ROW_VERIFY=0
+    [ "$IUI_POSITION" -eq 1 ] && printf '\033[H'
+    iui_title_bar
+    if [ "$IUI_NARROW" -eq 1 ]; then
+        iui_render_narrow
+    else
+        iui_render_wide
+    fi
+    iui_hint_bar
+    [ "$IUI_POSITION" -eq 1 ] && printf '\033[%d;1H' "$IUI_ROWS"
+    return 0
+}
+
+iui_top_border() {
+    local left right tl td tr focus_list=0 focus_info=0
+    [ "$IUI_FOCUS" = "list" ] && focus_list=1
+    [ "$IUI_FOCUS" = "info" ] && focus_info=1
+    iui_header_seg SKILLS "$IUI_LEFT_W" "$focus_list"
+    left="$IUI_HEADER_SEG"
+    iui_header_seg DETAILS "$IUI_RIGHT_W" "$focus_info"
+    right="$IUI_HEADER_SEG"
+    iui_seg dirt "$IUI_G_TL"; tl="$IUI_SEG"
+    iui_seg dirt "$IUI_G_TOP"; td="$IUI_SEG"
+    iui_seg dirt "$IUI_G_TR"; tr="$IUI_SEG"
+    iui_out_line 2 "$tl$left$td$right$tr"
+}
+
+iui_bottom_border() {
+    local bl bm br
+    iui_repeat "$IUI_G_BOT" $((IUI_COLS - 3))
+    iui_seg dirt "$IUI_G_BL"; bl="$IUI_SEG"
+    iui_seg dirt "$IUI_REPEAT$IUI_G_BOT"; bm="$IUI_SEG"
+    iui_seg dirt "$IUI_G_BR"; br="$IUI_SEG"
+    iui_out_line $((IUI_ROWS - 1)) "$bl$bm$br"
+}
+
+# The right cell is the sprite for its first IUI_HEAD_H rows and info text after
+# that, so the head and the text share one row budget and neither can overflow.
+iui_right_cell() {
+    local body="$1" row="$2"
+    if [ "$IUI_HEAD_ON" -eq 1 ] && [ "$body" -lt "$IUI_HEAD_H" ]; then
+        iui_head_line $((body / IUI_HEAD_SCALE)) "$IUI_HEAD_SCALE" "$IUI_RIGHT_W" "$IUI_EYE"
+        IUI_INFO_CELL="$IUI_HEAD_LINE"
+        return
+    fi
+    iui_info_cell $((body - IUI_HEAD_H)) "$row"
+}
+
+iui_render_wide() {
+    local row body index v
+    iui_top_border
+    iui_seg dirt "$IUI_G_V"; v="$IUI_SEG"
+    iui_info_lines "$IUI_RIGHT_W"
+    for ((body = 0; body < IUI_BODY_ROWS; body++)); do
+        row=$((body + 3))
+        index=$((IUI_SCROLL + body))
+        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
+            iui_list_cell "$index" "$IUI_LEFT_W"
+        else
+            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        fi
+        iui_right_cell "$body" "$row"
+        iui_out_line "$row" "$v$IUI_LIST_CELL$v$IUI_INFO_CELL$v"
+    done
+    iui_bottom_border
+}
+
+iui_info_cell() {
+    local i="$1" row="$2"
+    if [ "$i" -lt 0 ] || [ "$i" -ge "${#IUI_INFO_TEXT[@]}" ]; then
+        iui_pad '' "$IUI_RIGHT_W"
+        iui_seg stone "$IUI_PAD"
+        IUI_INFO_CELL="$IUI_SEG"
+        return
+    fi
+    case "${IUI_INFO_TAG[$i]}" in
+        act-dep) IUI_ACTION_ROW_DEP="$row" ;;
+        act-verify) IUI_ACTION_ROW_VERIFY="$row" ;;
+    esac
+    iui_seg "${IUI_INFO_ROLE[$i]}" "${IUI_INFO_TEXT[$i]}"
+    IUI_INFO_CELL="$IUI_SEG"
+}
+
+# Degrade path for a terminal too narrow for two panes: one pane at a time,
+# chosen by focus, in the same row budget, and no sprite. Nothing overflows and
+# nothing is half-drawn — a plain box beats a broken one.
+iui_render_narrow() {
+    local row body index label v
+    label=SKILLS
+    [ "$IUI_FOCUS" = "info" ] && label=DETAILS
+    iui_header_seg "$label" "$IUI_LEFT_W" 1
+    iui_seg dirt "$IUI_G_TL"; local tl="$IUI_SEG"
+    iui_seg dirt "$IUI_G_TR"; local tr="$IUI_SEG"
+    iui_out_line 2 "$tl$IUI_HEADER_SEG$tr"
+    iui_seg dirt "$IUI_G_V"; v="$IUI_SEG"
+    IUI_RIGHT_W="$IUI_LEFT_W"
+    [ "$IUI_FOCUS" = "info" ] && iui_info_lines "$IUI_LEFT_W"
+    for ((body = 0; body < IUI_BODY_ROWS; body++)); do
+        row=$((body + 3))
+        index=$((IUI_SCROLL + body))
+        if [ "$IUI_FOCUS" = "info" ]; then
+            iui_info_cell "$body" "$row"
+            iui_out_line "$row" "$v$IUI_INFO_CELL$v"
+            continue
+        fi
+        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
+            iui_list_cell "$index" "$IUI_LEFT_W"
+        else
+            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        fi
+        iui_out_line "$row" "$v$IUI_LIST_CELL$v"
+    done
+    iui_repeat "$IUI_G_BOT" "$IUI_LEFT_W"
+    iui_seg dirt "$IUI_G_BL$IUI_REPEAT$IUI_G_BR"
+    iui_out_line $((IUI_ROWS - 1)) "$IUI_SEG"
+}
+
+# ---------------------------------------------------------------
+# 6d. Full-screen skill picker: input, the terminal, and the seam
+# ---------------------------------------------------------------
+# Reads fd 3 — which section 3 opened, so this part must stay below it — runs the
+# event loop, and exposes iui_select_skills(), the one function section 7 calls.
+#
+# Banners in this part, in order:
+#   Input — keys and SGR mouse, read from fd 3
+#   Terminal enter/leave
+#   Event loop
+#   The installer seam
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Input — keys and SGR mouse, read from fd 3
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Keys come from fd 3 (open on /dev/tty, so prompts survive `curl … | bash`) and
+# escapes go to stdout. A bare ESC blocks for one more byte; `q` is the quit key.
+iui_read_byte() {
+    IUI_BYTE=''
+    IFS= read -r -n 1 -u 3 IUI_BYTE || return 1
+    [ -n "$IUI_BYTE" ] || IUI_BYTE=$'\n'
+    return 0
+}
+
+# Returns 2 on timeout (an idle animation tick) and 1 on EOF (quit).
+# PORTABILITY(read-timeout-integer): 1s is the finest tick available here, so the
+# eyes blink on whole seconds and ESC cannot be disambiguated by timing.
+iui_read_first_byte() {
+    local rc=0
+    IUI_BYTE=''
+    IFS= read -r -n 1 -t 1 -u 3 IUI_BYTE || rc="$?"
+    [ "$rc" -le 128 ] || return 2
+    [ "$rc" -eq 0 ] || return 1
+    [ -n "$IUI_BYTE" ] || IUI_BYTE=$'\n'
+    return 0
+}
+
+# ---- quoted: SGR mouse report ----
+# \033[<{btn};{col};{row}M   press
+# \033[<{btn};{col};{row}m   release
+# ---- end quoted ----
+# Wheel (btn 64/65) and drag (btn with the 32 bit set) are parsed and then
+# ignored — nothing in this UI should answer a wheel or a drag.
+iui_read_mouse() {
+    local buf='' rest
+    IUI_MOUSE_RELEASE=0
+    while iui_read_byte; do
+        case "$IUI_BYTE" in
+            M) break ;;
+            m) IUI_MOUSE_RELEASE=1; break ;;
+            *) buf="$buf$IUI_BYTE" ;;
+        esac
+        [ "${#buf}" -lt 24 ] || break
+    done
+    IUI_MOUSE_BTN="${buf%%;*}"
+    rest="${buf#*;}"
+    IUI_MOUSE_COL="${rest%%;*}"
+    IUI_MOUSE_ROW="${rest##*;}"
+    case "$IUI_MOUSE_BTN" in ''|*[!0-9]*) IUI_MOUSE_BTN=99 ;; esac
+    case "$IUI_MOUSE_COL" in ''|*[!0-9]*) IUI_MOUSE_COL=0 ;; esac
+    case "$IUI_MOUSE_ROW" in ''|*[!0-9]*) IUI_MOUSE_ROW=0 ;; esac
+}
+
+iui_read_key() {
+    local rc=0
+    iui_read_first_byte || rc="$?"
+    if [ "$rc" -eq 2 ]; then IUI_KEY=TICK; return 0; fi
+    if [ "$rc" -ne 0 ]; then IUI_KEY=EOF; return 0; fi
+    case "$IUI_BYTE" in
+        $'\033') iui_read_escape ;;
+        $'\n'|$'\r') IUI_KEY=ENTER ;;
+        ' ') IUI_KEY=SPACE ;;
+        $'\003') IUI_KEY=q ;;
+        *) IUI_KEY="$IUI_BYTE" ;;
+    esac
+    return 0
+}
+
+iui_read_escape() {
+    iui_read_byte || { IUI_KEY=ESC; return 0; }
+    case "$IUI_BYTE" in
+        '[') : ;;
+        'O') iui_read_byte || { IUI_KEY=ESC; return 0; }; iui_key_from_final; return 0 ;;
+        *) IUI_KEY=ESC; return 0 ;;
+    esac
+    iui_read_byte || { IUI_KEY=ESC; return 0; }
+    case "$IUI_BYTE" in
+        '<') iui_read_mouse; IUI_KEY=MOUSE ;;
+        [0-9]) iui_read_tilde "$IUI_BYTE" ;;
+        *) iui_key_from_final ;;
+    esac
+    return 0
+}
+
+iui_key_from_final() {
+    case "$IUI_BYTE" in
+        A) IUI_KEY=UP ;;
+        B) IUI_KEY=DOWN ;;
+        C) IUI_KEY=RIGHT ;;
+        D) IUI_KEY=LEFT ;;
+        H) IUI_KEY=HOME ;;
+        F) IUI_KEY=END ;;
+        Z) IUI_KEY=SHIFTTAB ;;
+        *) IUI_KEY=UNKNOWN ;;
+    esac
+}
+
+iui_read_tilde() {
+    local digits="$1"
+    while iui_read_byte; do
+        case "$IUI_BYTE" in
+            [0-9]|';') digits="$digits$IUI_BYTE" ;;
+            *) break ;;
+        esac
+        [ "${#digits}" -lt 12 ] || break
+    done
+    case "$digits" in
+        1|7) IUI_KEY=HOME ;;
+        4|8) IUI_KEY=END ;;
+        5) IUI_KEY=PGUP ;;
+        6) IUI_KEY=PGDN ;;
+        *) IUI_KEY=UNKNOWN ;;
+    esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Terminal enter/leave
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Install the trap before the first escape byte is written; iui_term_leave() is
+# idempotent. IUI_NO_STTY=1 skips the stty calls so a test can drive this without
+# owning a tty.
+iui_term_enter() {
+    IUI_STTY_SAVED=""
+    if [ "${IUI_NO_STTY:-0}" -ne 1 ]; then
+        IUI_STTY_SAVED="$(stty -g <&3 2>/dev/null || true)"
+        stty raw -echo <&3 2>/dev/null || true
+    fi
+    IUI_TERM_ACTIVE=1
+    # ---- quoted: enter sequences ----
+    # \033[?1049h  alternate screen
+    # \033[?25l    hide cursor
+    # \033[?1000h  mouse tracking
+    # \033[?1006h  SGR mouse encoding
+    # ---- end quoted ----
+    printf '\033[?1049h\033[?25l\033[?1000h\033[?1006h\033[2J\033[H'
+}
+
+iui_term_leave() {
+    [ "$IUI_TERM_ACTIVE" -eq 1 ] || return 0
+    IUI_TERM_ACTIVE=0
+    # Every enable from iui_term_enter, disabled in reverse order.
+    printf '\033[?1006l\033[?1000l\033[?25h\033[?1049l'
+    if [ -n "$IUI_STTY_SAVED" ] && [ "${IUI_NO_STTY:-0}" -ne 1 ]; then
+        stty "$IUI_STTY_SAVED" <&3 2>/dev/null || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Event loop
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Selecting a blocked skill is refused with the reason rather than allowed and
+# then rejected by the installer. Deselecting is always allowed.
+iui_toggle() {
+    local index="$1"
+    [ "$index" -ge 0 ] && [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ] || return 0
+    if [ "${IUI_SKILL_SEL[$index]}" -eq 1 ]; then
+        IUI_SKILL_SEL[$index]=0
+        return 0
+    fi
+    iui_skill_state "$index"
+    if [ "$IUI_SKILL_STATE" = "blocked" ]; then
+        IUI_MESSAGE=("cannot select ${IUI_SKILL_NAMES[$index]}: $IUI_SKILL_BLOCKER is required and missing")
+        return 0
+    fi
+    IUI_SKILL_SEL[$index]=1
+}
+
+iui_action_dep_hint() {
+    local index="$IUI_CURSOR" i any=0 line
+    IUI_MESSAGE=('HOW TO INSTALL THE MISSING DEPENDENCIES')
+    for ((i = 0; i < ${#IUI_REQ_SKILL[@]}; i++)); do
+        iui_req_applies "$i" "$index" || continue
+        iui_dep_state "${IUI_REQ_TOOL[$i]}"
+        [ "$IUI_DEP_STATE" = "missing" ] || continue
+        any=1
+        IUI_MESSAGE+=("${IUI_REQ_TOOL[$i]} (${IUI_REQ_STRENGTH[$i]}): ${IUI_REQ_WHY[$i]}")
+        # Section 4's generated hint table, so the picker offers the same
+        # instruction verify_runtime_tools() prints on the non-interactive path.
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            IUI_MESSAGE+=("$line")
+        done < <(runtime_tool_install_hint "${IUI_REQ_TOOL[$i]}")
+    done
+    [ "$any" -eq 1 ] || IUI_MESSAGE+=('nothing missing for this skill')
+}
+
+iui_action_reverify() {
+    iui_dep_reverify_skill "$IUI_CURSOR"
+    IUI_MESSAGE=('reverified; the per-tool cache is shared by every skill')
+}
+
+iui_handle_mouse() {
+    [ "$IUI_MOUSE_RELEASE" -eq 0 ] || return 0
+    case "$IUI_MOUSE_BTN" in
+        64|65) return 0 ;;
+    esac
+    [ "$IUI_MOUSE_BTN" -lt 32 ] || return 0
+    local first=3 last=$((IUI_BODY_ROWS + 2)) index
+    [ "$IUI_MOUSE_ROW" -ge "$first" ] && [ "$IUI_MOUSE_ROW" -le "$last" ] || return 0
+    if [ "$IUI_NARROW" -eq 0 ] && [ "$IUI_MOUSE_COL" -gt $((IUI_LEFT_W + 1)) ]; then
+        IUI_FOCUS=info
+        [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_DEP" ] && iui_action_dep_hint
+        [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_VERIFY" ] && iui_action_reverify
+        return 0
+    fi
+    [ "$IUI_FOCUS" = "info" ] && return 0
+    index=$((IUI_SCROLL + IUI_MOUSE_ROW - first))
+    [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ] || return 0
+    IUI_CURSOR="$index"
+    iui_toggle "$index"
+}
+
+iui_handle_key() {
+    local count="${#IUI_SKILL_NAMES[@]}" i
+    case "$1" in
+        UP|k) IUI_CURSOR=$((IUI_CURSOR - 1)) ;;
+        DOWN|j) IUI_CURSOR=$((IUI_CURSOR + 1)) ;;
+        PGUP) IUI_CURSOR=$((IUI_CURSOR - IUI_BODY_ROWS)) ;;
+        PGDN) IUI_CURSOR=$((IUI_CURSOR + IUI_BODY_ROWS)) ;;
+        HOME) IUI_CURSOR=0 ;;
+        END) IUI_CURSOR=$((count - 1)) ;;
+        ENTER|SPACE) iui_toggle "$IUI_CURSOR" ;;
+        $'\t') if [ "$IUI_FOCUS" = "list" ]; then IUI_FOCUS=info; else IUI_FOCUS=list; fi ;;
+        SHIFTTAB) if [ "$IUI_FOCUS" = "info" ]; then IUI_FOCUS=list; else IUI_FOCUS=info; fi ;;
+        a) for ((i = 0; i < count; i++)); do
+               IUI_SKILL_SEL[$i]=0
+               iui_toggle "$i"
+           done ;;
+        n) for ((i = 0; i < count; i++)); do IUI_SKILL_SEL[$i]=0; done ;;
+        d) [ "$IUI_FOCUS" = "info" ] && iui_action_dep_hint ;;
+        r) [ "$IUI_FOCUS" = "info" ] && iui_action_reverify ;;
+        i) IUI_DONE=1; IUI_RC=0 ;;
+        q|ESC|EOF) IUI_DONE=1; IUI_RC=130 ;;
+        MOUSE) iui_handle_mouse ;;
+    esac
+    return 0
+}
+
+# Returns 69 without touching the terminal when fd 3 is not a tty, so the caller
+# can fall back to the plain menu. An idle tick redraws only the two eye rows; a
+# keypress redraws the whole frame. The caller, not this, installs the traps.
+iui_run() {
+    [ -t 3 ] || return 69
+    [ -n "$COLOR_MODE" ] || detect_color_mode
+    iui_set_glyphs "$IUI_GLYPHS"
+    iui_term_enter
+    IUI_POSITION=1
+    IUI_DONE=0
+    IUI_RC=130
+    local need_full=1
+    while [ "$IUI_DONE" -eq 0 ]; do
+        if [ "$need_full" -eq 1 ]; then
+            iui_measure
+            iui_render_frame
+            need_full=0
+        fi
+        iui_read_key
+        if [ "$IUI_KEY" = "TICK" ]; then
+            iui_advance_eye
+            iui_redraw_eyes
+            continue
+        fi
+        iui_handle_key "$IUI_KEY"
+        need_full=1
+    done
+    iui_term_leave
+    IUI_POSITION=0
+    return "$IUI_RC"
+}
+
+iui_selected_names() {
+    local i
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        [ "${IUI_SKILL_SEL[$i]}" -eq 1 ] && printf '%s\n' "${IUI_SKILL_NAMES[$i]}"
+    done
+    return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The installer seam
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The source_version of an already-installed copy of one skill, into IUI_MARKER,
+# or '' when no known root holds it. The target root is chosen after the skills
+# are, so every candidate root is searched and the first marker found wins.
+iui_installed_marker() {
+    local skill="$1" root marker
+    IUI_MARKER=''
+    for root in ${TARGET_SELECTION:+"$TARGET_SELECTION"} "${TARGET_PATHS[@]}"; do
+        marker="$root/$skill/.version"
+        [ -f "$marker" ] || continue
+        IUI_MARKER="$(awk '/^source_version=/ {
+            sub(/^source_version=/, "")
+            print
+            exit
+        }' "$marker")"
+        [ -n "$IUI_MARKER" ] || IUI_MARKER=unknown
+        return 0
+    done
+}
+
+# Section 1's registry into the picker's tables. Everything installable starts
+# selected, which is what the numbered menu's default of "all" does; iui_toggle
+# refuses a blocked skill, so the preselection cannot include one.
+iui_load_installer_skills() {
+    local i
+    IUI_SKILL_NAMES=("${SKILL_NAMES[@]}")
+    IUI_SKILL_DESCS=("${SKILL_DESCRIPTIONS[@]}")
+    IUI_SKILL_INSTALLED=(); IUI_SKILL_HAVE=(); IUI_SKILL_WANT=(); IUI_SKILL_SEL=()
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        iui_installed_marker "${IUI_SKILL_NAMES[$i]}"
+        if [ -n "$IUI_MARKER" ]; then
+            IUI_SKILL_INSTALLED+=(yes)
+        else
+            IUI_SKILL_INSTALLED+=(no)
+        fi
+        IUI_SKILL_HAVE+=("$IUI_MARKER")
+        IUI_SKILL_WANT+=("$SOURCE_VERSION")
+        IUI_SKILL_SEL+=(0)
+    done
+    IUI_DEP_TOOLS=(); IUI_DEP_STATES=()
+    iui_load_requirements
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        iui_dep_reverify_skill "$i"
+        iui_toggle "$i"
+    done
+    IUI_CURSOR=0; IUI_SCROLL=0; IUI_FOCUS=list; IUI_MESSAGE=()
+}
+
+# Runs the picker and leaves the answer in SELECTED_SKILLS. Returns 69 when fd 3
+# is not a tty, which is select_skills()'s signal to draw the numbered menu, and
+# the picker's own code otherwise (130 when the user quit).
+#
+# Two EXIT traps cannot coexist and cleanup() already owns EXIT, so a second one
+# would silently drop the temp-directory removal and the summary. EXIT therefore
+# chains both for the lifetime of the picker and is put back afterwards.
+iui_select_skills() {
+    local rc=0 name
+    iui_load_installer_skills
+    trap 'iui_term_leave; cleanup' EXIT
+    trap 'iui_term_leave; exit 130' INT
+    trap 'iui_term_leave; exit 143' TERM
+    iui_run || rc="$?"
+    trap cleanup EXIT
+    trap - INT
+    trap - TERM
+    [ "$rc" -ne 69 ] || return 69
+    # show_splash() drew on the normal screen and iui_term_leave() just restored
+    # it, so wipe the mascot before the install log starts writing over it.
+    printf '\033[2J\033[H'
+    [ "$rc" -eq 0 ] || return "$rc"
+    SELECTED_SKILLS=()
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        SELECTED_SKILLS+=("$name")
+    done < <(iui_selected_names)
+    return 0
+}
+# ---------------------------------------------------------------
 # 7. Skill and target selection
 # ---------------------------------------------------------------
 # Resolves SKILL_SELECTION/TARGET_SELECTION (from the flags) or asks, and leaves
 # the answers in SELECTED_SKILLS, SELECTED_TARGET_PATHS and SELECTED_TARGET_NAMES.
+# Asking is the picker of sections 6b-6d, with section 6's numbered menu as the
+# fallback whenever it declines with 69.
 select_skills() {
     SELECTED_SKILLS=()
 
     if [ -z "$SKILL_SELECTION" ]; then
+        # The picker of sections 6b-6d first. 69 is its "fd 3 is not a terminal"
+        # answer and the numbered menu below is the fallback, so every non-tty
+        # path behaves exactly as it did before the picker existed.
+        local ui_rc=0
+        iui_select_skills || ui_rc="$?"
+        case "$ui_rc" in
+            0)
+                [ "${#SELECTED_SKILLS[@]}" -gt 0 ] \
+                    || { echo "Nothing selected; nothing was installed." >&2; exit 0; }
+                return
+                ;;
+            69) ;;
+            *)
+                echo "Aborted; nothing was installed." >&2
+                exit "$ui_rc"
+                ;;
+        esac
         show_shop_menu
         printf '\033[%d;1H' "$MENU_PROMPT_ROW"
         ask "Choose 1-6 or enter comma-separated names [6]: "
@@ -1100,6 +2273,7 @@ tests/test-planning-context-contract.sh
 tests/test-installer-manifest.sh
 tests/lib-test.sh
 tests/test-plan-env.sh
+tests/test-plan-snapshot.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
 tests/test-plan-context-reviewer.sh
@@ -1150,6 +2324,7 @@ scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-document-lib.sh
 scripts/plan-map-lib.sh
+scripts/plan-inventory-lib.sh
 scripts/update-plan-content.sh
 scripts/update-adversarial-review.sh
 scripts/mint-fix-keys.sh
