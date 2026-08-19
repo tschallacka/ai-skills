@@ -19,6 +19,7 @@ note_fail() { printf 'comment-format: %s\n' "$1" >&2; fail=1; }
 script_list() {
     ( cd "$repo_root" && find . -name '*.sh' -type f \
         -not -path './benchmark/results/*' -not -path './.git/*' -not -path './.plans/*' \
+        -not -path './.claude/*' \
         -not -name 'test-comment-format.sh' | LC_ALL=C sort )
 }
 

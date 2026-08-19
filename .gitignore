@@ -31,3 +31,6 @@ benchmark/results/*/current/
 /result
 /result-*
 .direnv/
+
+# Agent worktrees live here; they are copies of the tree, not sources.
+.claude/

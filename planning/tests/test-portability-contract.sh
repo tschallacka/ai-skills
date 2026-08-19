@@ -53,6 +53,7 @@ in_allowlist() {
 script_list() {
     ( cd "$repo_root" && find . -name '*.sh' -type f \
         -not -path './benchmark/results/*' -not -path './.git/*' -not -path './.plans/*' \
+        -not -path './.claude/*' \
         | LC_ALL=C sort )
 }
 

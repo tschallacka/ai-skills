@@ -52,7 +52,8 @@ group_done() {
 # untracked working data and would make a result unreproducible. Prune both, and
 # exclude this file from the haystacks so its own examples cannot satisfy a check.
 find "$repo_root" -name .git -prune -o -path "$repo_root/benchmark/results" -prune \
-    -o -path "$repo_root/.plans" -prune -o -type f -print > "$work/tree.txt"
+    -o -path "$repo_root/.plans" -prune -o -path "$repo_root/.claude" -prune \
+    -o -type f -print > "$work/tree.txt"
 grep '\.sh$' "$work/tree.txt" | grep -vF "$self_path" > "$work/scripts.txt"
 grep '\.md$' "$work/tree.txt" > "$work/markdown.txt"
 for d in $docs; do
