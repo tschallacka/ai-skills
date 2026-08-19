@@ -34,9 +34,10 @@ check_cap() {
 check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
     "$( { grep -ho '\.tmp\.\$\$' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
-# Inline inventory-row parsing with hard-coded field indices; plan_inventory_row
-# does not exist yet, so this is the row most in need of a helper.
-check_cap "inline awk -F'|' parsers" 38 \
+# Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
+# now owns the work-unit rows; the remainder are other tables plus the two
+# inventory rewriters, and the floor is 1 (the helper's own parser).
+check_cap "inline awk -F'|' parsers" 29 \
     "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
@@ -89,16 +90,9 @@ if [ -f "$maintainer" ]; then
     done
 fi
 
-# A helper the table calls "not written" must really be absent, or the table is
-# stale in the same way the comments were.
-for helper in plan_inventory_row plan_status_label; do
-    if grep -rq "^[[:space:]]*${helper}()" "$scripts"/*.sh; then
-        note_fail "$helper now exists; MAINTAINER.md section 3 still calls it not written"
-    fi
-done
-
 # A helper the table calls "exists" must really exist.
-for helper in plan_atomic_write plan_track_tmp plan_progress_bar plan_stat_mode; do
+for helper in plan_atomic_write plan_track_tmp plan_progress_bar plan_stat_mode \
+    plan_inventory_row plan_inventory_rows plan_inventory_split plan_status_label; do
     grep -rq "${helper}()" "$scripts"/*.sh \
         || note_fail "$helper is referenced by MAINTAINER.md section 3 but no longer exists"
 done

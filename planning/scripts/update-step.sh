@@ -42,23 +42,11 @@ step_name="$2"
 requested_status="$3"
 progress_file="$goal_dir/progress.md"
 
-# The glyphs are the on-disk contract; they must stay byte-identical.
-case "$requested_status" in
-    incomplete)
-        status='💤 incomplete'
-        ;;
-    in-progress|in_progress)
-        status='⏳ in progress'
-        ;;
-    completed)
-        status='✅ completed'
-        ;;
-    *)
-        printf 'Unknown status: %s\n' "$requested_status" >&2
-        printf 'Use: incomplete, in-progress, or completed\n' >&2
-        exit 64
-        ;;
-esac
+status="$(plan_status_label "$requested_status")" || {
+    printf 'Unknown status: %s\n' "$requested_status" >&2
+    printf 'Use: incomplete, in-progress, or completed\n' >&2
+    exit 64
+}
 
 [ -f "$progress_file" ] || plan_die "Progress file not found: $progress_file" 66
 plan_git_snapshot "$(dirname "$goal_dir")"

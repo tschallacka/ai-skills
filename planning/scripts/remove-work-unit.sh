@@ -80,11 +80,9 @@ inventory="$plan_dir/work-unit-inventory.md"
 
 # Locate the inventory row.
 goal=''; step=''
-if IFS=$'\t' read -r goal step < <(awk -F'|' -v wanted="$unit" '
-    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-        id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-        if (id == wanted) { g=$9; s=$10; gsub(/^[[:space:]]+|[[:space:]]+$/, "", g); gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); print g "\t" s }
-    }' "$inventory"); then :; fi
+if plan_inventory_row "$inventory" "$unit"; then
+    goal="$plan_inventory_goal"; step="$plan_inventory_step"
+fi
 [ -n "$goal" ] && [ -n "$step" ] || plan_err "work unit $unit not found in $inventory — nothing to remove (check the id)"
 
 goal_file="$plan_dir/$goal/goal.md"
@@ -95,14 +93,14 @@ testing_file="$plan_dir/$goal/steps/$step-testing.md"
 
 # Cascade guard: refuse when other units' Depends-on lists reference this unit,
 # unless the caller accepted the cascade explicitly.
-dependents="$(awk -F'|' -v wanted="$unit" '
-    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-        id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-        if (id == wanted) next
-        deps=$8; gsub(/^[[:space:]]+|[[:space:]]+$/, "", deps)
-        n = split(deps, dp, ",")
-        for (i = 1; i <= n; i++) { p = dp[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) { print id; break } }
-    }' "$inventory")"
+dependents=""; newline=$'\n'
+while IFS= read -r row; do
+    plan_inventory_split "$row"
+    [ "$plan_inventory_id" != "$unit" ] || continue
+    case ",${plan_inventory_depends// /}," in
+        *",$unit,"*) dependents="${dependents:+$dependents$newline}$plan_inventory_id" ;;
+    esac
+done < <(plan_inventory_rows "$inventory")
 if [ -n "$dependents" ]; then
     if [ "$confirm_cascade" = false ]; then
         plan_err "refusing to remove $unit: $(printf '%s' "$dependents" | tr '\n' ' ') still list it in Depends-on; rerun with --confirm-cascade to prune those links (and restore them after a re-add with update-work-unit.sh --depends-on)"

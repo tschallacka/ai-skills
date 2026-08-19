@@ -85,7 +85,10 @@ fi
 inventory="$plan_dir/work-unit-inventory.md"
 [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
 
-step_file="$(awk -F'|' -v wanted="$unit" '$0 ~ /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 == wanted) {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $9); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $10); print "'"$plan_dir"'/"$9"/steps/"$10".md"}}' "$inventory")"
+step_file=""
+if plan_inventory_row "$inventory" "$unit"; then
+    step_file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
+fi
 [ -n "$step_file" ] && [ -f "$step_file" ] || plan_die "Work unit not found: $unit"
 
 # One trap covers every temp: installed before the first write and never
@@ -112,15 +115,14 @@ changed=()
 # that grades this one, even with the grader's own surfaces unchanged. The
 # graders go to stderr: stdout carries exactly the one result line.
 if [ -n "$new_file" ] || [ -n "$new_scope" ] || [ -n "$new_depends" ]; then
-    graders="$(awk -F'|' -v wanted="$unit" '
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-            t=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", t)
-            if (t != "verification") next
-            deps=$8; gsub(/^[[:space:]]+|[[:space:]]+$/, "", deps)
-            n = split(deps, dp, ",")
-            for (i = 1; i <= n; i++) { p = dp[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) { print id; break } }
-        }' "$inventory")"
+    graders=""; newline=$'\n'
+    while IFS= read -r row; do
+        plan_inventory_split "$row"
+        [ "$plan_inventory_type" = verification ] || continue
+        case ",${plan_inventory_depends// /}," in
+            *",$unit,"*) graders="${graders:+$graders$newline}$plan_inventory_id" ;;
+        esac
+    done < <(plan_inventory_rows "$inventory")
     if [ -n "$graders" ]; then
         printf 'plan: %s changed behaviour; re-read its grader(s) %s — a grader checks the old behaviour until its own surfaces are updated\n' \
             "$unit" "$(printf '%s' "$graders" | tr '\n' ' ')" >&2

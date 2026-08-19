@@ -12,6 +12,12 @@
 set -euo pipefail
 export LC_ALL=C
 
+# A library that depends on another sources it itself rather than trusting the
+# caller's order (CODE-STYLE §7). plan-inventory-lib.sh defines functions only,
+# so a second source is harmless.
+# shellcheck source=planning/scripts/plan-inventory-lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
+
 context_schema_version=1
 context_generator_version=1
 context_result_schema_version=1
@@ -102,9 +108,9 @@ context_resolve_document() {
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
         unit:W*)
-            local unit="${document_id#unit:}" row goal step
-            row="$(awk -F'|' -v wanted="$unit" 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {if(trim($2)==wanted) print trim($9) "\t" trim($10)}' "$plan_dir/work-unit-inventory.md")"
-            IFS=$'\t' read -r goal step <<< "$row"
+            local unit="${document_id#unit:}" goal step
+            plan_inventory_row "$plan_dir/work-unit-inventory.md" "$unit" || true
+            goal="$plan_inventory_goal"; step="$plan_inventory_step"
             [ -n "${goal:-}" ] && [ -n "${step:-}" ] || context_die "not-found: work unit $unit"
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
@@ -154,11 +160,12 @@ context_build_index() {
             goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
             printf 'step:%s/%s\t%s\tstep\t%s\n' "$goal" "$step" "$file" "$(context_hash_file "$file")"
         done
-        awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {printf "%s\t%s/steps/%s.md\n",trim($2),trim($9),trim($10)}' "$plan_dir/work-unit-inventory.md" |
-            while IFS=$'\t' read -r unit relative; do
-                file="$plan_dir/$relative"
+        plan_inventory_rows "$plan_dir/work-unit-inventory.md" |
+            while IFS= read -r row; do
+                plan_inventory_split "$row"
+                file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
                 [ -f "$file" ] || continue
-                printf 'unit:%s\t%s\tunit\t%s\n' "$unit" "$file" "$(context_hash_file "$file")"
+                printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" "$(context_hash_file "$file")"
             done
         if [ -f "$plan_dir/work-unit-inventory.md" ]; then
             printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"

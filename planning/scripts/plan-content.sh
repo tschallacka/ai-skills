@@ -59,15 +59,6 @@ format_document() {
     esac
 }
 
-collect_units() {
-    awk -F'|' '
-        function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^`|`$/, "", value); return value }
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            print trim($2) "\t" trim($3) "\t" trim($4) "\t" trim($5) "\t" trim($6) "\t" trim($7) "\t" trim($8) "\t" trim($9) "\t" trim($10)
-        }
-    ' "$1/work-unit-inventory.md"
-}
-
 case "$command" in
     get)
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
@@ -87,10 +78,22 @@ case "$command" in
             markdown)
                 printf '# Plan summary: %s\n\n' "$(basename "$plan_dir")"
                 printf '| ID | Type | File | Scope | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|\n'
-                collect_units "$plan_dir" | awk -F'\t' '{ printf "| %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $7, $8, $9 }'
+                while IFS= read -r row; do
+                    plan_inventory_split "$row"
+                    printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+                        "$plan_inventory_id" "$plan_inventory_type" "$plan_inventory_file" \
+                        "$plan_inventory_scope" "$plan_inventory_depends" \
+                        "$plan_inventory_goal" "$plan_inventory_step"
+                done < <(plan_inventory_rows "$inventory")
                 ;;
             text)
-                collect_units "$plan_dir" | awk -F'\t' '{ printf "%s  %s  %s :: %s  <- %s  [%s/%s]\n", $1, $2, $3, $4, $7, $8, $9 }'
+                while IFS= read -r row; do
+                    plan_inventory_split "$row"
+                    printf '%s  %s  %s :: %s  <- %s  [%s/%s]\n' \
+                        "$plan_inventory_id" "$plan_inventory_type" "$plan_inventory_file" \
+                        "$plan_inventory_scope" "$plan_inventory_depends" \
+                        "$plan_inventory_goal" "$plan_inventory_step"
+                done < <(plan_inventory_rows "$inventory")
                 ;;
             json)
                 printf '{"plan":"%s","work_units":[' "$(basename "$plan_dir")"
@@ -99,7 +102,7 @@ case "$command" in
                     [ "$first" = true ] || printf ','
                     first=false
                     printf '{"id":"%s","type":"%s","file":"%s","scope":"%s","depends_on":"%s","goal":"%s","step":"%s"}' "$id" "$type" "$file" "$scope" "$depends" "$goal" "$step"
-                done < <(collect_units "$plan_dir")
+                done < <(plan_inventory_rows "$inventory")
                 printf ']}\n'
                 ;;
             *) plan_die "Unknown format: $format (use markdown, text, or json)" ;;
@@ -120,7 +123,7 @@ case "$command" in
             plan_map_set unit_goal "$id" "$goal"
             plan_map_set unit_step "$id" "$step"
             plan_map_set unit_depends "$id" "$depends"
-        done < <(collect_units "$plan_dir")
+        done < <(plan_inventory_rows "$inventory")
         case "$target" in
             W*) plan_map_has unit_goal "$target" || plan_die "Work unit not found: $target"; plan_map_set selected "$target" 1 ;;
             */*)

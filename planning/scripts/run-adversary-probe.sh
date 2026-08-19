@@ -21,6 +21,8 @@ set -euo pipefail
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-inventory-lib.sh
+source "$script_dir/plan-inventory-lib.sh"
 
 usage() {
     local rc="${1:-64}"
@@ -72,10 +74,7 @@ for goal_dir in "$working"/*/; do
     [ "$id" = context ] && continue
     read_doc "goal:$id"
 done
-# The trim() second alternative needs its `$` anchor: without it the pattern
-# also matches interior whitespace and silently rewrites ids that contain a
-# space. DEDUPE: the shared plan_awk_trim prelude owns this function.
-units="$(awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {print trim($2)}' "$working/work-unit-inventory.md")"
+units="$(plan_inventory_rows "$working/work-unit-inventory.md" | cut -f 1)"
 for unit in $units; do
     if bash "$reader" read --plan-dir "$working" --unit "$unit" >/dev/null 2>&1; then
         printf '  gate serves --unit %s\n' "$unit"
