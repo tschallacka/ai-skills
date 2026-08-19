@@ -34,6 +34,7 @@ planning/tests/test-csv-table-errors.sh	tests/test-csv-table-errors.sh	installer
 planning/tests/test-document-id-parity.sh	tests/test-document-id-parity.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-artifact-comparisons.sh	tests/test-artifact-comparisons.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-installer-backups.sh	tests/test-installer-backups.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-self-hosted-plan.sh	tests/test-self-hosted-plan.sh	installer	review-approved	backup-then-replace	false
 planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 planning/scripts/add-coverage.sh	scripts/add-coverage.sh	installer	review-approved	backup-then-replace	false

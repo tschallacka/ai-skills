@@ -2286,6 +2286,7 @@ tests/test-csv-table-errors.sh
 tests/test-document-id-parity.sh
 tests/test-artifact-comparisons.sh
 tests/test-installer-backups.sh
+tests/test-self-hosted-plan.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
