@@ -109,20 +109,27 @@ assert_eq "$authored" "$(testing_row "$goal")" 'rationale after add-work-unit'
 "$scripts/remove-work-unit.sh" "$plan" W02 >/dev/null 2>&1
 assert_eq "$authored" "$(testing_row "$goal")" 'rationale after remove-work-unit'
 
-# 2. Idempotence: repeated mutations do not drift the row.
-before="$(testing_row "$goal")"
+# 2. Idempotence: consecutive mutations neither drift the row nor duplicate the
+#    section the rewrite rebuilds around it.
 add_unit "$plan" W03 03-step-emit
 add_unit "$plan" W04 04-step-flush
-assert_eq "$before" "$(testing_row "$goal")" 'rationale after repeated mutation'
+assert_eq "$authored" "$(testing_row "$goal")" 'rationale after consecutive add-work-unit calls'
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$scripts/plan-document-lib.sh"
+# shellcheck source=planning/scripts/plan-reconcile-lib.sh
+source "$scripts/plan-reconcile-lib.sh"
+inventory="$plan/work-unit-inventory.md"
+plan_rewrite_owned_work_units "$goal" "$inventory" 01-first-goal
+cp "$goal" "$work/once.md"
+plan_rewrite_owned_work_units "$goal" "$inventory" 01-first-goal
+cmp -s "$work/once.md" "$goal" || note_fail 'a second rewrite changed the goal file'
+headings="$(grep -c '^## Testing requirement' "$goal" || true)"
+assert_eq 1 "$headings" 'testing-requirement heading count after two rewrites'
 
 # 3. No row in the section: the default is written and nothing fails.
 plan="$(make_plan default no-row)"
 goal="$plan/01-first-goal/goal.md"
 add_unit "$plan" W01 01-step-render
-# shellcheck source=planning/scripts/plan-document-lib.sh
-source "$scripts/plan-document-lib.sh"
-# shellcheck source=planning/scripts/plan-reconcile-lib.sh
-source "$scripts/plan-reconcile-lib.sh"
 if plan_rewrite_owned_work_units "$goal" "$plan/work-unit-inventory.md" 01-first-goal; then
     assert_eq '| no | <rationale> |' "$(testing_row "$goal")" 'default row with no row present'
 else

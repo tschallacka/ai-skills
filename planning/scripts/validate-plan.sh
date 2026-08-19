@@ -92,6 +92,7 @@ errors=0
 # placeholders.json
 # state-change-registry.json
 # never-executable-extensions.json
+# goal-tables.json
 # ---- end quoted ----
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_root="$(cd "$script_dir/.." && pwd)"
@@ -109,7 +110,7 @@ trap plan_validate_cleanup EXIT
 # `2>/dev/null`, so the placeholder registry, the serve check and part of
 # command-literal detection would silently stop firing and still exit 0.
 if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads placeholders.json, state-change-registry.json and commands.json); install jq and re-run\n' \
+    printf '%s: jq is required (it reads placeholders.json, state-change-registry.json, goal-tables.json and commands.json); install jq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
