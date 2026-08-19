@@ -3,13 +3,74 @@
 # ---------------------------------------------------------------
 # The interactive counterpart to section 10: compares every managed file against
 # the source, then asks once per destination. A .version marker that differs is a
-# managed upgrade and replaces without backups; anything else backs up first.
+# managed upgrade. Either way a file is backed up unless its recorded digest
+# proves we wrote it and nobody has touched it since.
+# A change detector for the installed content, recorded per file so the next run
+# can tell "we wrote this and nobody touched it" from "the user edited it". The
+# whole-skill version marker cannot make that distinction: before this, a version
+# transition replaced every file without a backup, including edited ones.
+#
+# cksum, not sha256: POSIX-mandated so it needs no probe and adds no dependency,
+# and it gives CRC-32 plus the byte count. The value never leaves the machine
+# that wrote it -- it is compared against the same machine's next install -- so
+# cross-platform agreement does not matter, and this is a change detector, not a
+# security boundary.
+content_digest() {
+    cksum "$1" | awk '{print $1 "-" $2}'
+}
+
+# Written after a successful copy, so a run that dies part-way leaves the old
+# manifest and the next run treats the untouched files as ours (correct) and the
+# half-written ones as modified (a needless backup, never a lost edit).
+record_digests() {
+    local destination="$1" files="$2" relative manifest temporary
+    manifest="$(digest_manifest "$destination")"
+    temporary="$manifest.tmp.$$"
+    : > "$temporary"
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        [ -f "$destination/$relative" ] || continue
+        printf '%s %s\n' "$(content_digest "$destination/$relative")" "$relative" >> "$temporary"
+    done <<RECORD
+$files
+RECORD
+    printf '%s %s\n' "$(content_digest "$destination/.version")" .version >> "$temporary"
+    mv -f "$temporary" "$manifest"
+}
+
+digest_manifest() {
+    printf '%s/.filehashes\n' "$1"
+}
+
+# The digest this skill recorded for one relative path, or nothing.
+recorded_digest() {
+    local destination="$1" relative="$2" manifest
+    manifest="$(digest_manifest "$destination")"
+    [ -f "$manifest" ] || return 0
+    awk -v want="$relative" '$2 == want { print $1; exit }' "$manifest"
+}
+
+# True when the file on disk is byte-for-byte what we last installed, so
+# replacing it destroys nothing.
+unmodified_since_install() {
+    local destination="$1" relative="$2" file="$3" recorded
+    recorded="$(recorded_digest "$destination" "$relative")"
+    [ -n "$recorded" ] || return 1
+    [ "$recorded" = "$(content_digest "$file")" ]
+}
+
+# A dotfile beside the original: visible to `ls -a` and to the message below,
+# skipped by a plain `grep -r` of the installed tree.
 backup_file() {
     local file="$1"
-    local backup="$file.bak"
-    local suffix=1
+    local directory base stamp backup suffix
+    directory="$(dirname "$file")"
+    base="$(basename "$file")"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    backup="$directory/.$base.$stamp.back"
+    suffix=1
     while [ -e "$backup" ] || [ -L "$backup" ]; do
-        backup="$file.bak.$suffix"
+        backup="$directory/.$base.$stamp.$suffix.back"
         suffix=$((suffix + 1))
     done
     cp -p "$file" "$backup"
@@ -59,12 +120,12 @@ EOF
     if [ "$changed" -eq 1 ]; then
         if [ "$YES" -eq 1 ]; then
             if [ "$managed_version_transition" -eq 1 ]; then
-                echo "Version transition detected in $destination; replacing without backups." >&2
+                echo "Version transition detected in $destination; replacing, backing up any edited file." >&2
             else
                 echo "Changes detected in $destination; replacing after backup." >&2
             fi
         elif [ "$managed_version_transition" -eq 1 ]; then
-            if ! confirm "Installed version differs in $destination. Replace it without backups?"; then
+            if ! confirm "Installed version differs in $destination. Replace it? Any file you have edited is backed up first."; then
                 echo "Skipped $destination" >&2
                 summary_add "Skipped:   $destination — replacement declined"
                 return
@@ -85,20 +146,26 @@ EOF
         [ -n "$relative" ] || continue
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
-        if [ -e "$destination_file" ] && ! cmp -s "$source" "$destination_file"; then
-            if [ "$managed_version_transition" -eq 0 ]; then
-                backup_file "$destination_file"
-            fi
+        # Back up unless we can prove the file is ours and untouched. A version
+        # transition no longer suppresses this: the marker says the version
+        # changed, not that the user's edits are expendable.
+        if [ -e "$destination_file" ] && ! cmp -s "$source" "$destination_file" \
+            && ! unmodified_since_install "$destination" "$relative" "$destination_file"; then
+            backup_file "$destination_file"
         fi
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done <<EOF
 $files
 EOF
-    if [ -e "$destination/.version" ] && ! cmp -s <(version_marker_content) "$destination/.version" && [ "$managed_version_transition" -eq 0 ]; then
+    # The marker is ours by definition, so it is only worth keeping when it does
+    # not match any version we wrote.
+    if [ -e "$destination/.version" ] && ! cmp -s <(version_marker_content) "$destination/.version" \
+        && ! unmodified_since_install "$destination" .version "$destination/.version"; then
         backup_file "$destination/.version"
     fi
     version_marker_content > "$destination/.version"
+    record_digests "$destination" "$files"
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }

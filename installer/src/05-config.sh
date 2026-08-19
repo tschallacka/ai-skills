@@ -103,7 +103,7 @@ Interactive by default. Options are useful for automation:
   --all                    Install or update all skills
   --skill <name>           Install or update one skill
   --target <path>          Install into one skill root without prompting
-  --yes                    Accept replacements; managed version changes omit backups
+  --yes                    Accept replacements; an edited file is still backed up  
   --help                   Show this help
 
 Interactive prompts accept a for "yes to all" (auto-accepts every
