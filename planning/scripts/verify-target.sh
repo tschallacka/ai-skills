@@ -11,6 +11,7 @@
 #   4. for a module template, whether any theme overrides it.
 #
 # Usage:
+#   The plan directory may be given positionally or as --plan-dir <path>.
 #   verify-target.sh <plan-directory> <WNN> [--repo <repository-root>]
 #   verify-target.sh --help
 #
@@ -41,11 +42,15 @@ export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory (the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here).
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <WNN> [--repo <repository-root>]
+Usage: ${0##*/} [--plan-dir] <plan-directory> <WNN> [--repo <repository-root>]
        ${0##*/} --help
 USAGE
     exit "$rc"

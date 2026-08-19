@@ -23,6 +23,7 @@
 #   validate-plan.sh [--complete] [--propagation|--no-propagation]
 #                    [--stale <file-of-phrases>|default] <plan-directory>
 #   validate-plan.sh --help
+#   The plan directory may be given positionally or as --plan-dir <path>.
 #
 # Exit codes: 0 clean, 1 findings, 64 bad invocation, 65 the plan is marked
 # obsolete and must not be used, 66 plan directory absent.
@@ -32,7 +33,7 @@ export LC_ALL=C
 
 case "${1:-}" in
     -h|--help)
-        echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] <plan-directory>" >&2
+        echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] [--plan-dir] <plan-directory>" >&2
         exit 0
         ;;
 esac
@@ -41,6 +42,7 @@ complete_mode=false
 propagation_mode=true
 stale_file=""
 stale_only=false
+plan_dir_only=false
 stale_requested=false
 filtered_args=()
 for arg in "$@"; do
@@ -52,6 +54,8 @@ for arg in "$@"; do
             stale_only=true
             stale_requested=true
             ;;
+        --plan-dir) plan_dir_only=true ;;
+        --plan-dir=*) filtered_args+=("${arg#--plan-dir=}") ;;
         --stale=*)
             stale_file="${arg#--stale=}"
             stale_requested=true
@@ -63,6 +67,9 @@ for arg in "$@"; do
             if [ "$stale_only" = true ]; then
                 stale_file="$arg"
                 stale_only=false
+            elif [ "$plan_dir_only" = true ]; then
+                filtered_args+=("$arg")
+                plan_dir_only=false
             else
                 filtered_args+=("$arg")
             fi
@@ -78,7 +85,7 @@ elif [ "$#" -eq 2 ] && [ "$1" = '--complete' ]; then
     complete_mode=true
     plan_dir="$2"
 else
-    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>|default] <plan-directory>" >&2
+    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>|default] [--plan-dir] <plan-directory>" >&2
     exit 64
 fi
 

@@ -8,6 +8,7 @@
 # back to the enclosing "§ N.N" paragraph labels.
 #
 # Usage:
+#   The plan directory may be given positionally or as --plan-dir <path>.
 #   plan-content.sh get|summary|blast-radius|find|diff <plan-directory> [...]
 #   plan-content.sh --help
 #
@@ -43,6 +44,11 @@ fi
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory (the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here).
+# The subcommand was already shifted off above, so the plan directory is $1.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
 json_string_file() {
     awk 'BEGIN { printf "\"" } { gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); if (NR > 1) printf "\\n"; printf "%s", $0 } END { printf "\"" }' "$1"

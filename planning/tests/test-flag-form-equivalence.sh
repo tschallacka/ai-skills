@@ -121,4 +121,34 @@ grep -Fq 'AR-03' "$flag_plan/fix-keys.json" \
     || fail 'fix-keys.json does not carry the gated finding id'
 printf '%s\n' 'flag-form: add-adversarial-finding --status and --work-unit gate correctly'
 
+# --- --plan-dir is a synonym for the positional plan directory ----------------
+# plan-context.sh and run-adversary-probe.sh take the flag, so a reader who
+# learned it there must not have the call refused by the other tools.
+plan_dir_synonym() { # <label> <script> <args-before-dir...> -- <args-after-dir...>
+    local label="$1" script="$2"; shift 2
+    local before=() after=() seen_sep=0 arg
+    for arg in "$@"; do
+        if [ "$arg" = -- ] && [ "$seen_sep" -eq 0 ]; then seen_sep=1; continue; fi
+        if [ "$seen_sep" -eq 0 ]; then before+=("$arg"); else after+=("$arg"); fi
+    done
+    local pos_out flag_out pos_rc=0 flag_rc=0
+    # PORTABILITY(empty-array-setu)
+    pos_out="$("$script_dir/$script" ${before[@]+"${before[@]}"} "$fixture" ${after[@]+"${after[@]}"} 2>&1)" || pos_rc=$?
+    flag_out="$("$script_dir/$script" ${before[@]+"${before[@]}"} --plan-dir "$fixture" ${after[@]+"${after[@]}"} 2>&1)" || flag_rc=$?
+    [ "$pos_rc" -eq "$flag_rc" ] \
+        || fail "$label: positional exited $pos_rc but --plan-dir exited $flag_rc"
+    [ "$pos_out" = "$flag_out" ] \
+        || fail "$label: --plan-dir produced different output from the positional form"
+}
+
+fixture="$(cd "$script_dir/../../benchmark/planning/tests/fixtures/review-lifecycle-plan" && pwd)"
+plan_dir_synonym 'validate-plan'            validate-plan.sh   --
+plan_dir_synonym 'validate-plan --complete' validate-plan.sh   --complete --
+plan_dir_synonym 'verify-fix-keys'          verify-fix-keys.sh --
+plan_dir_synonym 'verify-target'            verify-target.sh   -- W01
+plan_dir_synonym 'plan-content get'         plan-content.sh    get -- plan
+plan_dir_synonym 'plan-content summary'     plan-content.sh    summary --
+plan_dir_synonym 'plan-content find'        plan-content.sh    find -- Findings
+printf '%s\n' 'flag-form: --plan-dir matches the positional plan directory'
+
 printf '%s\n' 'test-flag-form-equivalence: PASS'
