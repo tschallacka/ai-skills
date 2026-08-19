@@ -640,6 +640,15 @@ artifact, decision diamonds carry the actual condition, and anything needing a
 paragraph goes in the prose under it. A diagram that has to be corrected on
 every commit is drawn too low.
 
+### Quote every node label and edge label
+
+`A["User request"]`, `B{"Durable plan requested?"}`, `X -->|"no"| Y`. Unquoted
+text ends the label at the first character mermaid treats as syntax, so a label
+containing `/`, `;`, `(` or `,` is silently truncated — and
+`test-mermaid-accuracy.sh` cannot see the node at all, which quietly disables
+the undefined-node check for that whole block. Quoting is what makes the
+structural check apply rather than merely run.
+
 ### A diagram moves with the code it draws
 
 **After changing a flow a diagram covers, re-read that diagram, correct it in

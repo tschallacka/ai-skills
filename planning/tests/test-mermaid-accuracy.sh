@@ -25,7 +25,10 @@ export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 self_path="$repo_root/planning/tests/test-mermaid-accuracy.sh"
-docs="planning/ARCHITECTURE.md benchmark/planning/ARCHITECTURE.md"
+# Every tracked document holding a mermaid block, so a new diagram cannot be
+# added outside the checked set.
+docs="planning/ARCHITECTURE.md benchmark/planning/ARCHITECTURE.md
+brainstorm/SKILL.md post-implementation-review/SKILL.md"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/mermaid-accuracy.XXXXXX")"
 trap 'rm -rf -- "$work"' EXIT
@@ -228,8 +231,8 @@ done
 
 while IFS="$(printf '\t')" read -r sev doc line msg; do
     case "$sev" in
-        FAIL) note_fail "$(basename "$doc"):$line: $msg" ;;
-        WARN) note_warn "$(basename "$doc"):$line: $msg" ;;
+        FAIL) note_fail "${doc#"$repo_root"/}:$line: $msg" ;;
+        WARN) note_warn "${doc#"$repo_root"/}:$line: $msg" ;;
     esac
 done < <(grep -E '^(FAIL|WARN)	' "$work/findings.txt" || true)
 
@@ -255,7 +258,9 @@ awk -F'\t' '$1 == "TOKEN" { print $4 "\t" $2 ":" $3 }' "$work/findings.txt" \
 scripts_seen=0
 artifacts_seen=0
 while IFS="$(printf '\t')" read -r name where; do
-    where="$(basename "$where")"
+    # Repo-relative path, not basename: brainstorm/SKILL.md and
+    # post-implementation-review/SKILL.md are both in the checked set.
+    where="${where#"$repo_root"/}"
     case "$name" in
         *.sh)
             scripts_seen=$((scripts_seen + 1))
