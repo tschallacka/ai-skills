@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `c2adac5d1c85a24c87ed04bf896f0b78b766e21dc02faa15f37256ab9162c0bf`
+> Source SHA-256: `f1417aa28831812bca3d21cb9475d4917cc919362ee8e9b15996c0c42e9d2fce`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -42,10 +42,15 @@ must include verbatim:
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
 Valid --document IDs: plan, inventory, progress, adversarial-review,
-goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
---max-records for a large inventory if needed. Plan-read bytes are capped at
+goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
+document. inventory and adversarial-review default to the whole-document `full`
+view; every other id defaults to `summary`, and `--view full` is available for
+any of them. A page that withheld records reports next_token — pass it back as
+--token and keep going until no next_token comes back. You have NOT read a
+document until a page returns without one; treat a page you stopped early on as
+an unread document and say so. Plan-read bytes are capped at
 the per-role budget when ROLE_ID is set (the gate lowers --max-bytes to it) —
-do not rely on --max-bytes above that cap. Never load a whole
+do not rely on --max-bytes above that cap; page instead. Never load a whole
 plan file, an entire plan directory, or the `.plans/` tree wholesale. A
 wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
@@ -255,6 +260,15 @@ Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
+**A read returns one page, and the budgets bound the page, not the document.**
+Whenever a page withholds records it reports `next_token`; pass that value back
+as `--token` and repeat until a page comes back without one. The token carries
+the document's hash and view, so a token replayed after the document changed is
+refused (exit 65) rather than resuming into shifted records — re-read from page
+one after such a refusal. Raising `--max-records`/`--max-bytes` enlarges the
+page up to the per-role byte cap; past that cap the only way to see the rest of
+a document is to page.
+
 **All plan reads go through the gated readers** (see
 [`references/plan-read-contract.md`](references/plan-read-contract.md)). Both
 the planning agent and every fresh subagent (adversarial review, reviewer) MUST
@@ -268,11 +282,13 @@ with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash.
 
 The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
-takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
-`--max-bytes`, `--max-records`, and `--read-only`; `check` takes exactly one
-of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly one of
-`--entry` or `--stale`. Defaults are `summary`, `text`, 32768 bytes, and 128
-records. `--all` audits without registering entries. Global IDs, Git history,
+takes exactly one `--document` or `--unit` plus optional `--view`, `--token`,
+`--format`, `--max-bytes`, `--max-records`, and `--read-only`; `check` takes
+exactly one of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly
+one of `--entry` or `--stale`. Defaults are `text`, 32768 bytes, and 128
+records; the default view is `full` for `inventory` and `adversarial-review`
+and `summary` for every other id. `--all` audits without registering entries.
+Global IDs, Git history,
 versions/changelogs, quarantine, events, compaction, and workers remain
 explicitly deferred from this Phase 1 cache.
 

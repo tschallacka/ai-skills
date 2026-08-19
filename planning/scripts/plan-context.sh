@@ -2,16 +2,23 @@
 # plan-context.sh — bounded reader and freshness gate for one plan's documents.
 #
 # Owns the plan-context cache: `init` snapshots every plan document with its
-# hash, `read` returns one document view under byte and record budgets, `check`
-# reports which snapshotted documents drifted, `refresh` re-snapshots, and
-# `checkpoint` records a phase state. Budgets are accounted in BYTES.
+# hash, `read` returns one PAGE of a document view under byte and record
+# budgets, `check` reports which snapshotted documents drifted, `refresh`
+# re-snapshots, and `checkpoint` records a phase state. Budgets are accounted in
+# BYTES and bound each page, not the document.
+#
+# A page that withholds records returns `next_token`; feeding it back through
+# `--token` resumes at the next record. The token carries the document's
+# SHA-256 and the view it was minted for, so a token replayed against changed
+# content is refused (65) instead of resuming into shifted records.
 #
 # Usage:
 #   plan-context.sh init|read|check|refresh|checkpoint --plan-dir DIR [...]
 #   plan-context.sh --help
 #
 # Exit codes: 2 bad invocation, 64 refused by the ROLE_ID reader allow-list,
-# 66 plan directory or document missing.
+# 65 stale --token (document or view no longer matches), 66 plan directory or
+# document missing.
 
 set -euo pipefail
 export LC_ALL=C
@@ -24,7 +31,7 @@ usage() {
     cat <<'EOF'
 Usage:
   plan-context.sh init --plan-dir DIR
-  plan-context.sh read --plan-dir DIR (--document ID | --unit WNN) [--view VIEW] [--format text|json] [--max-bytes N] [--max-records N] [--read-only]
+  plan-context.sh read --plan-dir DIR (--document ID | --unit WNN) [--view VIEW] [--token TOKEN] [--format text|json] [--max-bytes N] [--max-records N] [--read-only]
   plan-context.sh check --plan-dir DIR (--entry ID | --changed | --all) [--format text|json]
   plan-context.sh refresh --plan-dir DIR (--entry ID | --stale) [--format text|json]
   plan-context.sh checkpoint --plan-dir DIR --phase PHASE --state STATE --findings-file FILE --changed-files FILE --source-hash HASH --plan-hash HASH
@@ -37,6 +44,14 @@ Valid --document IDs:
   goal:<goal id>       <goal>/goal.md             (e.g. goal:01-build)
   step:<goal>/<step>   <goal>/steps/<step>.md     (e.g. step:01-build/02-step-verify)
   --unit WNN           the step a work unit maps to in work-unit-inventory.md
+
+Views: full, summary, metadata, ownership, instructions, acceptance, handoff,
+testing, dependencies, changed-documents, validator. Default is `full` for
+inventory and adversarial-review, `summary` otherwise.
+
+Paging: a page that withholds records reports next_token; pass it back as
+--token to resume. A token is refused (65) once the document or view it was
+minted against no longer matches.
 EOF
     exit "$rc"
 }
@@ -56,7 +71,8 @@ plan_hash=""
 document_selector_count=0
 check_selector_count=0
 refresh_selector_count=0
-view=summary
+view=""
+token=""
 format=text
 read_only=0
 max_bytes=32768
@@ -79,6 +95,7 @@ while [ "$#" -gt 0 ]; do
         --all) check_mode=all; check_selector_count=$((check_selector_count + 1)); shift ;;
         --stale) refresh_mode=stale; refresh_selector_count=$((refresh_selector_count + 1)); shift ;;
         --view) [ "$#" -ge 2 ] || usage; view="$2"; shift 2 ;;
+        --token) [ "$#" -ge 2 ] || usage; token="$2"; shift 2 ;;
         --format) [ "$#" -ge 2 ] || usage; format="$2"; shift 2 ;;
         --max-bytes) [ "$#" -ge 2 ] || usage; max_bytes="$2"; shift 2 ;;
         --max-records) [ "$#" -ge 2 ] || usage; max_records="$2"; shift 2 ;;
@@ -152,50 +169,97 @@ context_trim_partial_utf8() {
     done
 }
 
+# PORTABILITY(pattern-substitution-quote): bash 3.2 cannot parse
+# ${var//$'"'/...} and leaks quotes out of a quoted replacement, so the JSON
+# string escape runs through sed and awk instead of parameter expansion.
+context_json_escape_file() {
+    sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$1" |
+        awk -v sep='\\n' 'NR > 1 { printf "%s", sep } { printf "%s", $0 }'
+}
+
 context_read_cleanup() {
     [ -z "$read_full_file" ] || rm -f "$read_full_file"
     [ -z "$read_bounded_file" ] || rm -f "$read_bounded_file" "$read_bounded_file.trimmed"
 }
 
+# One page holds whole records only, so a resume cursor always lands on a record
+# boundary and consecutive pages neither overlap nor skip. The one exception is a
+# single record wider than the whole byte budget: it is emitted clipped, because
+# a page that can fit nothing could never advance and paging would not terminate.
+context_page_records() {
+    local start="$1" maxr="$2" maxb="$3" out="$4" input="$5"
+    awk -v start="$start" -v maxr="$maxr" -v maxb="$maxb" -v out="$out" '
+        NR <= start { next }
+        {
+            size = length($0) + 1
+            if (emitted >= maxr) { more = 1; exit }
+            if (used + size > maxb) {
+                if (emitted > 0) { more = 1; exit }
+                printf "%s", substr($0, 1, maxb) > (out)
+                emitted = 1
+                more = 1
+                exit
+            }
+            print > (out)
+            used += size
+            emitted++
+        }
+        END { printf "%s\t%s\n", emitted + 0, more + 0 }
+    ' "$input"
+}
+
 context_read_command() {
-    local file content bounded count=0 line truncated=0
-    local content_bytes bounded_bytes
+    local file file_hash content bounded start=0 emitted more page token_body token_rest
     [ "$document_selector_count" -eq 1 ] || { printf 'usage: read requires exactly one --document or --unit\n' >&2; exit 2; }
     context_entry_id "$document_id" >/dev/null
+    [ -n "$view" ] || view="$(context_default_view "$document_id")"
     # With a ROLE_ID the gate applies only if that role's allow-list says so,
     # and caps its plan-read budget. No ROLE_ID must keep the identity-free
     # probe/reader path unchanged.
     context_role_gate max_bytes
     file="$(context_resolve_document "$plan_dir" "$document_id")"
     [ -f "$file" ] || { printf 'not-found: %s\n' "$document_id" >&2; exit 66; }
+    file_hash="$(context_hash_file "$file")"
+    if [ -n "$token" ]; then
+        [[ "$token" =~ ^continue:[0-9a-f]{64}:[a-z][a-z-]*:[0-9]+$ ]] || { printf 'usage: malformed --token\n' >&2; exit 2; }
+        # Fail closed: a cursor is only meaningful against the exact bytes and
+        # view it was minted from, so resuming into shifted records is refused.
+        token_body="${token#continue:}"
+        token_rest="${token_body#*:}"
+        [ "${token_body%%:*}" = "$file_hash" ] && [ "${token_rest%:*}" = "$view" ] || {
+            printf 'stale: --token was minted against different content or view\n' >&2
+            exit 65
+        }
+        start="${token_rest##*:}"
+    fi
     content="$(context_view_text "$file" "$view")"
     if [ "$read_only" -eq 0 ]; then
         context_with_lock "$plan_dir" context_register_processed_entry "$plan_dir" "$document_id"
     fi
-    # Budget accounting is in BYTES: derive the truncation flag from wc -c on
-    # both sides, never ${#var}. mktemp plus a trap, so an interrupt cannot
-    # leak the spool or collide with a reused PID.
+    # Budget accounting is in BYTES, and LC_ALL=C makes awk's length() a byte
+    # count. mktemp plus a trap, so an interrupt cannot leak the spool or
+    # collide with a reused PID.
     trap context_read_cleanup EXIT
     read_full_file="$(mktemp "${TMPDIR:-/tmp}/plan-context-read.XXXXXX")"
     read_bounded_file="$(mktemp "${TMPDIR:-/tmp}/plan-context-read.XXXXXX")"
     printf '%s\n' "$content" > "$read_full_file"
-    while IFS= read -r line; do
-        count=$((count + 1))
-        if [ "$count" -le "$max_records" ]; then printf '%s\n' "$line"; else truncated=1; break; fi
-    done < "$read_full_file" | head -c "$max_bytes" > "$read_bounded_file"
+    page="$(context_page_records "$start" "$max_records" "$max_bytes" "$read_bounded_file" "$read_full_file")"
+    emitted="${page%%$'\t'*}"
+    more="${page##*$'\t'}"
     context_trim_partial_utf8 "$read_bounded_file"
-    content_bytes="$(wc -c < "$read_full_file" | tr -d ' ')"
-    bounded_bytes="$(wc -c < "$read_bounded_file" | tr -d ' ')"
-    if [ "$bounded_bytes" -lt "$content_bytes" ]; then truncated=1; fi
-    bounded="$(cat "$read_bounded_file")"
+    if [ "$format" = json ]; then
+        bounded="$(context_json_escape_file "$read_bounded_file")"
+    else
+        bounded="$(cat "$read_bounded_file")"
+    fi
     context_read_cleanup
     if [ "$format" = json ]; then
-        bounded="${bounded//$'\\'/\\\\}"
-        bounded="${bounded//$'"'/\\\"}"
-        bounded="${bounded//$'\n'/\\n}"
-        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","content":"%s","next_token":%s}\n' "$document_id" "$view" "$bounded" "$([ "$truncated" -eq 1 ] && printf '"continue:%s"' "$(context_hash_file "$file")" || printf 'null')"
+        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","content":"%s","next_token":%s}\n' \
+            "$document_id" "$view" "$bounded" \
+            "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')"
     else
         printf '%s\n' "$bounded"
+        [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
     fi
 }
 

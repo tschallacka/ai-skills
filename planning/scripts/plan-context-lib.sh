@@ -125,9 +125,19 @@ context_entry_id() {
     esac
 }
 
+# The two documents a reviewer must audit in full. A truncated inventory or
+# review reads as a complete one, so they page rather than summarize.
+context_default_view() {
+    case "$1" in
+        inventory|adversarial-review) printf 'full\n' ;;
+        *) printf 'summary\n' ;;
+    esac
+}
+
 context_view_text() {
     local file="$1" view="$2"
     case "$view" in
+        full) cat "$file" ;;
         metadata) sed -n '/^## Ownership$/,/^## Objective$/p; /^## Change target$/,/^## Objective$/p' "$file" | sed '$d' ;;
         summary) sed -n '1,12p' "$file" ;;
         instructions) awk '/^## Instructions$/{seen=1; next} seen && /^§ 5\.1$/{getline; print; exit}' "$file" ;;
