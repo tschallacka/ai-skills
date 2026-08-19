@@ -168,7 +168,10 @@ report_age() {
     [ -n "$stamp" ] || { printf '%s: no generation stamp; regenerate\n' "${0##*/}" >&2; return 0; }
     command -v git >/dev/null 2>&1 || return 0
     git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1 || return 0
-    newest="$(git -C "$repo_root" log -1 --format=%cI -- '*.sh' portability-rules.json 2>/dev/null || true)"
+    # UTC, not %cI: git's offset form (…+02:00) compares wrongly against the
+    # stamp's Z form under a string comparison, which warned on fresh output.
+    newest="$(TZ=UTC git -C "$repo_root" log -1 \
+        --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd -- '*.sh' portability-rules.json 2>/dev/null || true)"
     [ -n "$newest" ] || return 0
     if [ "$newest" \> "$stamp" ]; then
         printf '%s: generated %s, but a scanned file was committed at %s; regenerate\n' \
