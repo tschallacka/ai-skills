@@ -1,0 +1,17 @@
+{
+  "reviewer_session_id": "reviewer-b-20260811T180211Z",
+  "mode": "fresh-review",
+  "approved_findings": [
+    {
+      "id": "AR-14",
+      "path": "03-end-to-end-proof/steps/04-step-test-setup-integration.md; 03-end-to-end-proof/steps/05-step-add-adapter-injection-seam.md; 02-authority-and-provenance/steps/06-step-bind-reviewer-session.md; 03-end-to-end-proof/goal.md; work-unit-inventory.md",
+      "location": "W14 instructions and acceptance criteria; W16 instructions and acceptance criteria; W15 instructions and acceptance criteria; Goal 03 §7.1; W10 inventory row",
+      "evidence": "W16 defines REVIEWER_COMMAND, REVIEWER_SESSION_ID, REVIEWER_CAPSULE_ID, REVIEWER_MODE, and REVIEWER_APPROVED_AT plus exact propagation. W14 invokes setup-benchmark.sh with its four arguments, fixed identity values, exact archive paths, and matching IDs. W15 alone owns exact session/capsule/mode/freshness binding. Goal 03 §7.1 and the W10 inventory row both declare W08,W09,W14,W16 dependencies.",
+      "required_correction": "None; AR-14 is resolved.",
+      "disposition": "approved as resolved"
+    }
+  ],
+  "rejected_findings": [],
+  "approved_at": "2026-08-11T18:02:11Z",
+  "overall_plan_approval": true
+}

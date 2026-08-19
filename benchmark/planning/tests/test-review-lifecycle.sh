@@ -398,7 +398,13 @@ integration_root="$fixture_root/integration"
 fake_bin="$integration_root/bin"
 fixture_plan="$integration_root/fixture-plan"
 mkdir -p "$fake_bin" "$fixture_plan"
-cp -R "$root/../../.plans/reviewer-oracle-evidence-hardening/." "$fixture_plan/"
+# A committed fixture, not a transient .plans/ tree: this test used to copy a
+# gitignored plan, so it could only pass on a machine that happened to have one.
+# The fixture holds exactly the artifacts the structural gate requires and that
+# this test does not create for itself.
+fixture_plan_src="$root/tests/fixtures/review-lifecycle-plan"
+[ -d "$fixture_plan_src" ] || { printf 'missing fixture: %s\n' "$fixture_plan_src" >&2; exit 66; }
+( cd "$fixture_plan_src" && tar cf - . ) | ( cd "$fixture_plan" && tar xf - )
 rm -f "$fixture_plan/approval.json"
 cat > "$fixture_plan/plan.md" <<'EOF'
 one initial button

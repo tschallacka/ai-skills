@@ -15,7 +15,11 @@ iterative_approval=""
 fresh_approval=""
 # Frozen archives now live under results/<agent>/<revision-parent>/<run-id>/
 # (current runs nested under current/<latest-tag>/). Walk the whole tree.
-for approval in "$results_root"/*/*/*/current/reviewers/*-B-*/plan/approval.json \
+# The committed fixtures come first: the live results tree keeps its `current/`
+# runs gitignored, so this test could only pass on a machine that still had them.
+# A live archive, when present, is regraded too.
+for approval in "$root/tests/fixtures/frozen-approvals"/*/approval.json \
+               "$results_root"/*/*/*/current/reviewers/*-B-*/plan/approval.json \
                "$results_root"/*/*/*/*/current/reviewers/*-B-*/plan/approval.json; do
     [ -f "$approval" ] || continue
     case "$approval" in
