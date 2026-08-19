@@ -1,0 +1,12 @@
+{
+  "comment": "Exact, finite list of the sections whose markdown table legitimately carries yes/no in its FIRST column, per document kind. Detection matches the section heading LITERALLY. The mutating helpers (plan-reconcile-lib.sh, plan-document-lib.sh) preserve and rewrite the row of the entry whose role is 'testing-requirement' by scanning that section only. No helper emits a yes/no table anywhere else, so one under any other heading arrived by hand: validate-plan FAILS on it (validate-plan-goals-lib.sh), like the other hand-edit-damage gates, and the remedy is to rebuild the section through update-plan-content.sh. Register a new section here when a template starts emitting one; there is exactly one testing-requirement entry per document kind.",
+  "tables": [
+    {
+      "document": "goal.md",
+      "section": "## Testing requirement",
+      "header": "| Test required | Rationale |",
+      "role": "testing-requirement",
+      "emitted_by": "add-goal.sh"
+    }
+  ]
+}
