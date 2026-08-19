@@ -161,6 +161,14 @@ plan_document_path() {
         coverage|inventory)
             printf '%s\n' "$plan_dir/work-unit-inventory.md"
             ;;
+        progress)
+            printf '%s\n' "$plan_dir/progress.md"
+            ;;
+        goal-progress:*)
+            goal="${document_id#goal-progress:}"
+            [ -n "$goal" ] || plan_die "Goal progress IDs use goal-progress:<goal>"
+            printf '%s\n' "$plan_dir/$goal/progress.md"
+            ;;
         stories)
             printf '%s\n' "$plan_dir/ui-user-stories.md"
             ;;
@@ -197,7 +205,7 @@ plan_document_path() {
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         *)
-            plan_die "Unknown document ID: $document_id (use plan, review, goal:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, stories, fixes, fix-keys, or approval)"
+            plan_die "Unknown document ID: $document_id (use plan, review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, fixes, fix-keys, or approval)"
             ;;
     esac
 }
@@ -206,7 +214,8 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         review) printf '%s\n' review ;;
-        coverage|inventory|stories|fixes|fix-keys|fixkeys|approval) printf '%s\n' reference ;;
+        coverage|inventory|stories|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
+        goal-progress:*) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
         step:*)
             # A step id ending in -testing names the step's testing companion,

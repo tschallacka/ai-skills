@@ -113,19 +113,24 @@ context_resolve_document() {
         plan) printf '%s/plan-description.md\n' "$plan_dir" ;;
         inventory) printf '%s/work-unit-inventory.md\n' "$plan_dir" ;;
         progress) printf '%s/progress.md\n' "$plan_dir" ;;
+        goal-progress:*)
+            local goal_id="${document_id#goal-progress:}"
+            [ -n "$goal_id" ] || { context_die "usage: invalid goal-progress entry: $document_id"; return; }
+            printf '%s/%s/progress.md\n' "$plan_dir" "$goal_id"
+            ;;
         adversarial-review) printf '%s/adversarial-review.md\n' "$plan_dir" ;;
         goal:*) printf '%s/%s/goal.md\n' "$plan_dir" "${document_id#goal:}" ;;
         step:*)
             local value goal step
             value="${document_id#step:}"; goal="${value%%/*}"; step="${value#*/}"
-            [ "$goal" != "$value" ] && [ -n "$step" ] || context_die "usage: invalid step entry: $document_id"
+            [ "$goal" != "$value" ] && [ -n "$step" ] || { context_die "usage: invalid step entry: $document_id"; return; }
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
         unit:W*)
             local unit="${document_id#unit:}" goal step
             plan_inventory_row "$plan_dir/work-unit-inventory.md" "$unit" || true
             goal="$plan_inventory_goal"; step="$plan_inventory_step"
-            [ -n "${goal:-}" ] && [ -n "${step:-}" ] || context_die "not-found: work unit $unit"
+            [ -n "${goal:-}" ] && [ -n "${step:-}" ] || { context_die "not-found: work unit $unit"; return; }
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
         *) context_die "usage: unsupported entry id: $document_id" ;;
@@ -134,7 +139,8 @@ context_resolve_document() {
 
 context_entry_id() {
     case "$1" in
-        plan|goal:*|step:*|unit:W*|inventory|progress|adversarial-review) printf '%s\n' "$1" ;;
+        plan|goal:*|goal-progress:*|step:*|unit:W*|inventory|progress|adversarial-review)
+            printf '%s\n' "$1" ;;
         *) context_die "usage: unsupported entry id: $1" ;;
     esac
 }
@@ -238,6 +244,11 @@ context_build_index() {
         printf 'plan\t%s\tplan\t%s\n' "$plan_file" "$(context_hash_file "$plan_file")"
         find "$plan_dir" -type f -name 'goal.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
             printf 'goal:%s\t%s\tgoal\t%s\n' "$(basename "$(dirname "$file")")" "$file" "$(context_hash_file "$file")"
+            goal_progress="$(dirname "$file")/progress.md"
+            [ -f "$goal_progress" ] || continue
+            printf 'goal-progress:%s\t%s\tgoal-progress\t%s\n' \
+                "$(basename "$(dirname "$file")")" "$goal_progress" \
+                "$(context_hash_file "$goal_progress")"
         done
         find "$plan_dir" -type f -path '*/steps/*.md' -not -name '*-testing.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
             goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
