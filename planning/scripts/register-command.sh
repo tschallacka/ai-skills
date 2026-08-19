@@ -10,9 +10,9 @@
 # --list emits TSV (key, command, when) so a caller can parse it (§10).
 #
 # Usage:
-#   register-command.sh <plan-directory> <key> <command> <when>
-#   register-command.sh <plan-directory> --remove <key>
-#   register-command.sh <plan-directory> --list
+#   register-command.sh [--plan-dir] <plan-directory> <key> <command> <when>
+#   register-command.sh [--plan-dir] <plan-directory> --remove <key>
+#   register-command.sh [--plan-dir] <plan-directory> --list
 #   register-command.sh --help
 #
 # Requires jq (declared in install.sh's runtime_requirements()).
@@ -20,17 +20,23 @@
 # Exit codes: 64 bad invocation, 66 no plan directory, 69 jq unavailable.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <key> <command> <when>
-       ${0##*/} <plan-directory> --remove <key>
-       ${0##*/} <plan-directory> --list
+Usage: ${0##*/} [--plan-dir] <plan-directory> <key> <command> <when>
+       ${0##*/} [--plan-dir] <plan-directory> --remove <key>
+       ${0##*/} [--plan-dir] <plan-directory> --list
        ${0##*/} --help
 USAGE
     exit "$rc"

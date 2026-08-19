@@ -9,17 +9,23 @@
 # secret dir.
 #
 # Usage:
-#   mint-fix-keys.sh <plan-directory>
+#   mint-fix-keys.sh [--plan-dir] <plan-directory>
 #   mint-fix-keys.sh --help
 #
 # Exit codes: 65 = a gated findings row has non-conforming ids; 69 = openssl is
 # unavailable (no other tool computes HMAC-SHA256).
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 # The `-gt 0` guard is required: expanding a possibly-empty array is unbound
 # under `set -u` before bash 4.4.
@@ -34,7 +40,7 @@ trap cleanup_tmp EXIT
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory>
+Usage: ${0##*/} [--plan-dir] <plan-directory>
        ${0##*/} --help
 USAGE
     exit "$rc"

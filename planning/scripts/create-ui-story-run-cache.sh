@@ -8,16 +8,24 @@
 # configure-ui-story-cache.sh writes the real sequence; run that next.
 #
 # Usage:
-#   create-ui-story-run-cache.sh <plan-directory> <US-NN>
+#   create-ui-story-run-cache.sh [--plan-dir] <plan-directory> <US-NN>
 #   create-ui-story-run-cache.sh --help
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <US-NN>
+Usage: ${0##*/} [--plan-dir] <plan-directory> <US-NN>
        ${0##*/} --help
 USAGE
     exit "$rc"

@@ -13,18 +13,26 @@
 # keys are re-minted for the plan; without one the cell stays N/A (ungated).
 #
 # Usage:
-#   add-adversarial-finding.sh <plan-directory> <AR-NN> <finding> <resolution>
+#   add-adversarial-finding.sh [--plan-dir] <plan-directory> <AR-NN> <finding> <resolution>
 #       [open|in-progress|resolved] [--status <s>] [--work-unit <WNN>]
 #   add-adversarial-finding.sh --help
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <AR-NN> <finding> <resolution> [open|in-progress|resolved]
-       ${0##*/} <plan-directory> <AR-NN> <finding> <resolution> [--status <status>] [--work-unit <WNN>]
+Usage: ${0##*/} [--plan-dir] <plan-directory> <AR-NN> <finding> <resolution> [open|in-progress|resolved]
+       ${0##*/} [--plan-dir] <plan-directory> <AR-NN> <finding> <resolution> [--status <status>] [--work-unit <WNN>]
        ${0##*/} --help
 
   --status <status>     open (default), in-progress, or resolved.
@@ -56,8 +64,6 @@ plan_dir="$1" finding_id="$2" finding="$3" resolution="$4"
 [ -n "$status" ] || status="${5:-open}"
 [ -n "$work_unit" ] || work_unit=N/A
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
 # ^AR-[0-9]+$ is what mint-fix-keys.sh, verify-fix-keys.sh, validate-plan.sh

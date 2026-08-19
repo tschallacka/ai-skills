@@ -9,16 +9,24 @@
 # the row when no such outcome exists yet.
 #
 # Usage:
-#   add-coverage.sh <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
+#   add-coverage.sh [--plan-dir] <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
 #   add-coverage.sh --help
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
+Usage: ${0##*/} [--plan-dir] <plan-directory> <required-outcome-or-proof> <WNN[,WNN...]> <notes> [--replace]
        ${0##*/} --help
 USAGE
     exit "$rc"
@@ -42,8 +50,6 @@ while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done
 set -- ${positional[@]+"${positional[@]}"}
 [ "$#" -eq 4 ] || usage
 plan_dir="$1"; outcome="$2"; work_units="$3"; notes="$4"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 plan_require_directory "$plan_dir"
 for value_name in outcome work_units notes; do

@@ -10,22 +10,28 @@
 # re-apply them with update-step.sh afterwards.
 #
 # Usage:
-#   rebuild-plan-progress.sh <plan-directory>
+#   rebuild-plan-progress.sh [--plan-dir] <plan-directory>
 #   rebuild-plan-progress.sh --help
 #
 # Exit codes: 64 bad invocation, 66 the plan directory, its progress.md, or any
 # goal directory is missing.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory>
+Usage: ${0##*/} [--plan-dir] <plan-directory>
        ${0##*/} --help
 
 Rebuilds the plan-level progress tracker from the goals' progress files.

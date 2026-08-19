@@ -12,7 +12,7 @@
 #
 # Usage:
 #   The plan directory may be given positionally or as --plan-dir <path>.
-#   verify-target.sh <plan-directory> <WNN> [--repo <repository-root>]
+#   verify-target.sh [--plan-dir] <plan-directory> <WNN> [--repo <repository-root>]
 #   verify-target.sh --help
 #
 # Exit codes: 0 = target present with no static counter-evidence; 1 = target

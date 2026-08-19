@@ -7,16 +7,24 @@
 # by add-ui-story.sh and the bug flow, so recreating them would drop that work.
 #
 # Usage:
-#   create-ui-validation.sh <plan-directory> <browser-target-or-discovery-method>
+#   create-ui-validation.sh [--plan-dir] <plan-directory> <browser-target-or-discovery-method>
 #   create-ui-validation.sh --help
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <browser-target-or-discovery-method>
+Usage: ${0##*/} [--plan-dir] <plan-directory> <browser-target-or-discovery-method>
        ${0##*/} --help
 USAGE
     exit "$rc"
@@ -26,8 +34,6 @@ case "${1:-}" in -h|--help) usage 0 ;; esac
 [ "$#" -eq 2 ] || usage
 
 plan_dir="$1"; browser_target="$2"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 plan_require_directory "$plan_dir"
 plan_require_safe_value 'Browser target' "$browser_target"

@@ -9,7 +9,7 @@
 #
 # Usage:
 #   The plan directory may be given positionally or as --plan-dir <path>.
-#   plan-content.sh get|summary|blast-radius|find|diff <plan-directory> [...]
+#   plan-content.sh get|summary|blast-radius|find|diff [--plan-dir] <plan-directory> [...]
 #   plan-content.sh --help
 #
 # Exit codes: 1 zero or multiple `find` matches, 64 bad invocation, 66 missing
@@ -22,15 +22,15 @@ usage() {
     local rc="${1:-64}"
     cat <<USAGE
 Usage:
-  ${0##*/} get <plan-directory> <document-id> [markdown|text|json|path]
-  ${0##*/} summary <plan-directory> [markdown|text|json]
-  ${0##*/} blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
-  ${0##*/} find <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
+  ${0##*/} get [--plan-dir] <plan-directory> <document-id> [markdown|text|json|path]
+  ${0##*/} summary [--plan-dir] <plan-directory> [markdown|text|json]
+  ${0##*/} blast-radius [--plan-dir] <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
+  ${0##*/} find [--plan-dir] <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
                                     literal search; prints docid<TAB>section<TAB>excerpt per match,
                                     exits 1 on zero or multiple matches; --document scopes to one document
                                     (plan, review, coverage, stories, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
                                     step:-testing id); --full disables excerpt truncation
-  ${0##*/} diff <plan-directory> <git-ref> [--format text|json]
+  ${0##*/} diff [--plan-dir] <plan-directory> <git-ref> [--format text|json]
                                     lists documents changed since git-ref and the
                                     paragraph labels touched in each
 USAGE
@@ -67,7 +67,7 @@ format_document() {
 
 case "$command" in
     get)
-        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
+        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires [--plan-dir] <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
         plan_dir="$1"; document_id="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"

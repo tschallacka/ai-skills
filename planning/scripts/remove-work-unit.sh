@@ -7,7 +7,7 @@
 # -testing companion; and the goal + plan progress trackers.
 #
 # Usage:
-#   remove-work-unit.sh <plan-directory> <WNN> [--confirm-cascade]
+#   remove-work-unit.sh [--plan-dir] <plan-directory> <WNN> [--confirm-cascade]
 #   remove-work-unit.sh --help
 #
 # Note: the progress trackers are *rebuilt* from the step files, which resets
@@ -21,16 +21,22 @@
 # directory is missing.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 source "$script_dir/plan-reconcile-lib.sh"
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> <WNN> [--confirm-cascade]
+Usage: ${0##*/} [--plan-dir] <plan-directory> <WNN> [--confirm-cascade]
        ${0##*/} --help
 
 Removes the inventory row, the id from coverage rows, the goal's Owned work

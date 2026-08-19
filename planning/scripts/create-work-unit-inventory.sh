@@ -8,16 +8,24 @@
 # about until they are replaced by add-coverage.sh / add-work-unit.sh rows.
 #
 # Usage:
-#   create-work-unit-inventory.sh <plan-directory>
+#   create-work-unit-inventory.sh [--plan-dir] <plan-directory>
 #   create-work-unit-inventory.sh --help
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory>
+Usage: ${0##*/} [--plan-dir] <plan-directory>
        ${0##*/} --help
 USAGE
     exit "$rc"

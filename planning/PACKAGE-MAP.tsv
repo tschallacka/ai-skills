@@ -36,6 +36,7 @@ planning/tests/test-document-id-parity.sh	tests/test-document-id-parity.sh	insta
 planning/tests/test-artifact-comparisons.sh	tests/test-artifact-comparisons.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-installer-backups.sh	tests/test-installer-backups.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-self-hosted-plan.sh	tests/test-self-hosted-plan.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-plan-dir-synonym.sh	tests/test-plan-dir-synonym.sh	installer	review-approved	backup-then-replace	false
 planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 brainstorm-limiting-context.md	—	W01-W02-W03-W04-W06-W09	review-approved	preserve-source-only	true

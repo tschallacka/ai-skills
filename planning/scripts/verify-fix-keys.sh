@@ -5,7 +5,7 @@
 #
 # Usage:
 #   The plan directory may be given positionally or as --plan-dir <path>.
-#   verify-fix-keys.sh <plan-directory> [--claimed-by <id>]
+#   verify-fix-keys.sh [--plan-dir] <plan-directory> [--claimed-by <id>]
 #   verify-fix-keys.sh --help
 #
 # A plan without fix-keys.json is ungated and passes without verification.

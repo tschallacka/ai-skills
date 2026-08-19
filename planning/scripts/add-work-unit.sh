@@ -7,10 +7,10 @@
 # in temp files that a single EXIT trap removes.
 #
 # Usage:
-#   add-work-unit.sh <plan-directory> --id <WNN> --type <type> --file <path|N/A> \
+#   add-work-unit.sh [--plan-dir] <plan-directory> --id <WNN> --type <type> --file <path|N/A> \
 #       --scope <scope> --subscope <subscope|N/A> --change <intended change> \
 #       --depends-on <WNN,…|—> --goal <NN-name> --step <NN-step-name>
-#   add-work-unit.sh <plan-directory> <WNN> <type> <file|N/A> <scope> \
+#   add-work-unit.sh [--plan-dir] <plan-directory> <WNN> <type> <file|N/A> <scope> \
 #       <subscope|N/A> <intended-change> <depends-on|—> <goal-name> <step-name>
 #   add-work-unit.sh --help
 #
@@ -19,15 +19,23 @@
 # the call site.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> --id <WNN> --type <type> --file <path|N/A>
+Usage: ${0##*/} [--plan-dir] <plan-directory> --id <WNN> --type <type> --file <path|N/A>
            --scope <scope> --subscope <subscope|N/A> --change <intended change>
            --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>
-       ${0##*/} <plan-directory> <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
+       ${0##*/} [--plan-dir] <plan-directory> <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
        ${0##*/} --help
 
 The positional form is deprecated; it is kept working for existing callers.
@@ -80,8 +88,6 @@ else
     intended="$7"; depends_on="$8"; goal_name="$9"; step_name="${10}"
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 source "$script_dir/plan-reconcile-lib.sh"
 
 plan_require_directory "$plan_dir"

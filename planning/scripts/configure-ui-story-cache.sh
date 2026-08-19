@@ -7,10 +7,10 @@
 # untested: a configured sequence has by definition not been run yet.
 #
 # Usage:
-#   configure-ui-story-cache.sh <plan-directory> --id <US-NN> \
+#   configure-ui-story-cache.sh [--plan-dir] <plan-directory> --id <US-NN> \
 #       --starting-state <text> --input <direct UI input> --target <text> \
 #       --readiness <text> --max-wait <text>
-#   configure-ui-story-cache.sh <plan-directory> <US-NN> <starting-state> \
+#   configure-ui-story-cache.sh [--plan-dir] <plan-directory> <US-NN> <starting-state> \
 #       <direct-ui-input> <target-or-value> <readiness-signal> <maximum-wait>
 #   configure-ui-story-cache.sh --help
 #
@@ -18,15 +18,23 @@
 # existing callers.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> --id <US-NN> --starting-state <text>
+Usage: ${0##*/} [--plan-dir] <plan-directory> --id <US-NN> --starting-state <text>
            --input <direct UI input> --target <text> --readiness <text>
            --max-wait <text>
-       ${0##*/} <plan-directory> <US-NN> <starting-state> <direct-ui-input> <target-or-value> <readiness-signal> <maximum-wait>
+       ${0##*/} [--plan-dir] <plan-directory> <US-NN> <starting-state> <direct-ui-input> <target-or-value> <readiness-signal> <maximum-wait>
        ${0##*/} --help
 
 The positional form is deprecated; it is kept working for existing callers.
@@ -72,8 +80,6 @@ else
     target="$5"; readiness="$6"; maximum_wait="$7"
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 plan_require_directory "$plan_dir"
 [[ "$story_id" =~ ^US-[0-9][0-9]+$ ]] || plan_die "Story ID must use US-01"

@@ -18,7 +18,7 @@
 #      not move that logic elsewhere.
 #
 # Usage:
-#   update-plan-content.sh <flag> <plan-directory> [args…]     (see --help)
+#   update-plan-content.sh <flag> [--plan-dir] <plan-directory> [args…]     (see --help)
 #   update-plan-content.sh --help
 #
 # Sections in order:
@@ -42,35 +42,35 @@ usage() {
     local rc="${1:-64}"
     cat <<'USAGE'
 Usage:
-  update-plan-content.sh -dp|--description-paragraph <plan-directory> <N.N> <text>
+  update-plan-content.sh -dp|--description-paragraph [--plan-dir] <plan-directory> <N.N> <text>
                                              ONE paragraph; replaces it. Extra -p flags are an error.
-  update-plan-content.sh -ds|--description-section <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+  update-plan-content.sh -ds|--description-section [--plan-dir] <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
                                              WHOLE section; paragraphs must be sequential from N.1.
-  update-plan-content.sh -gp|--goal-paragraph <plan-directory> <goal-name> <N.N> <text>
+  update-plan-content.sh -gp|--goal-paragraph [--plan-dir] <plan-directory> <goal-name> <N.N> <text>
                                              ONE paragraph; replaces it. Extra -p flags are an error.
-  update-plan-content.sh -gs|--goal-section <plan-directory> <goal-name> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+  update-plan-content.sh -gs|--goal-section [--plan-dir] <plan-directory> <goal-name> <section-id> -p N.1: <content> [-p N.2: <content> ...]
                                              WHOLE section; paragraphs must be sequential from N.1.
-  update-plan-content.sh -sp|--step-paragraph <plan-directory> <goal>/<step> <N.N> <text>
+  update-plan-content.sh -sp|--step-paragraph [--plan-dir] <plan-directory> <goal>/<step> <N.N> <text>
                                              ONE paragraph; replaces it. Extra -p flags are an error.
-  update-plan-content.sh -ss|--step-section <plan-directory> <goal>/<step> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+  update-plan-content.sh -ss|--step-section [--plan-dir] <plan-directory> <goal>/<step> <section-id> -p N.1: <content> [-p N.2: <content> ...]
                                              WHOLE section; paragraphs must be sequential from N.1.
-  update-plan-content.sh -rp|--review-paragraph <plan-directory> <N.N> <text>
+  update-plan-content.sh -rp|--review-paragraph [--plan-dir] <plan-directory> <N.N> <text>
                                              ONE paragraph; replaces it. Extra -p flags are an error.
-  update-plan-content.sh -rs|--review-section <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
+  update-plan-content.sh -rs|--review-section [--plan-dir] <plan-directory> <section-id> -p N.1: <content> [-p N.2: <content> ...]
                                              WHOLE section; paragraphs must be sequential from N.1.
-  update-plan-content.sh -ap|--append-paragraph <plan-directory> <document-id> <section-id> <text>
+  update-plan-content.sh -ap|--append-paragraph [--plan-dir] <plan-directory> <document-id> <section-id> <text>
                                              Appends one paragraph with the next free number in the section.
-  update-plan-content.sh -tp|--table-paragraph <plan-directory> <document-id> <N.N> <columns> <CSV>
-  update-plan-content.sh -ia|--insert-after <plan-directory> <document-id> <N.N> <text>
-  update-plan-content.sh -ib|--insert-before <plan-directory> <document-id> <N.N> <text>
-  update-plan-content.sh --delete-paragraph <plan-directory> <document-id> <N.N>
+  update-plan-content.sh -tp|--table-paragraph [--plan-dir] <plan-directory> <document-id> <N.N> <columns> <CSV>
+  update-plan-content.sh -ia|--insert-after [--plan-dir] <plan-directory> <document-id> <N.N> <text>
+  update-plan-content.sh -ib|--insert-before [--plan-dir] <plan-directory> <document-id> <N.N> <text>
+  update-plan-content.sh --delete-paragraph [--plan-dir] <plan-directory> <document-id> <N.N>
                                               Deletes ONE paragraph and renumbers the
                                               following paragraphs in the same section.
-  update-plan-content.sh -t|--title <plan-directory> <document-id> <title>
-  update-plan-content.sh -f|--field <plan-directory> <document-id> <field-label> <value>
-  update-plan-content.sh -tr|--testing-requirement <plan-directory> <goal-name> <yes|no> <rationale>
-  update-plan-content.sh -rv|--review-status <plan-directory> <pending|approved>
-  update-plan-content.sh -dr|--decomposition-review <plan-directory> <incomplete|completed>
+  update-plan-content.sh -t|--title [--plan-dir] <plan-directory> <document-id> <title>
+  update-plan-content.sh -f|--field [--plan-dir] <plan-directory> <document-id> <field-label> <value>
+  update-plan-content.sh -tr|--testing-requirement [--plan-dir] <plan-directory> <goal-name> <yes|no> <rationale>
+  update-plan-content.sh -rv|--review-status [--plan-dir] <plan-directory> <pending|approved>
+  update-plan-content.sh -dr|--decomposition-review [--plan-dir] <plan-directory> <incomplete|completed>
 
 Document IDs: plan, review, goal:<goal>, step:<goal>/<step>, or unit:<WNN>.
 USAGE
@@ -84,6 +84,9 @@ esac
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+# The subcommand was shifted off above, so the plan directory is $1 for
+# every form. Accept --plan-dir as a synonym for it.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 # Sourced unconditionally: a missing library is a broken install, not an
 # optional feature (CODE-STYLE §7). plan-context-lib.sh is in
 # PACKAGE-MANIFEST.txt and install.sh's skill_files(), so it is always present.
@@ -102,7 +105,7 @@ reject_swallowed_flags() {
     case "$flag_form" in -ia|-ib) section_form='' ;; *) section_form="${flag_form%p}s" ;; esac
     if [[ "$content" =~ (^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*: ]]; then
         plan_die "Content for $flag_form absorbed flag-shaped text ('-p N.N:' style); $flag_form takes exactly one paragraph and no flags. Use the section form instead:
-  update-plan-content.sh ${section_form:-$flag_form} <plan-directory> ... -p N.1: '...' -p N.2: '...'
+  update-plan-content.sh ${section_form:-$flag_form} [--plan-dir] <plan-directory> ... -p N.1: '...' -p N.2: '...'
 Section form requires sequential paragraphs starting at N.1."
     fi
 }
@@ -178,7 +181,7 @@ if [[ "$command" == -* ]]; then
             command=append-paragraph
             ;;
         -tp|--table-paragraph)
-            [ "$#" -eq 5 ] || { printf 'update-plan-content.sh: --table-paragraph requires exactly <plan-directory> <document-id> <N.N> <columns> <CSV>\n' >&2; exit 64; }
+            [ "$#" -eq 5 ] || { printf 'update-plan-content.sh: --table-paragraph requires exactly [--plan-dir] <plan-directory> <document-id> <N.N> <columns> <CSV>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3" "$4" "$5"
             command=table-paragraph
             ;;
@@ -204,12 +207,12 @@ if [[ "$command" == -* ]]; then
             command=delete-paragraph
             ;;
         -t|--title)
-            [ "$#" -eq 3 ] || { printf 'update-plan-content.sh: --title requires exactly <plan-directory> <document-id> <title>\n' >&2; exit 64; }
+            [ "$#" -eq 3 ] || { printf 'update-plan-content.sh: --title requires exactly [--plan-dir] <plan-directory> <document-id> <title>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3"
             command=title
             ;;
         -f|--field)
-            [ "$#" -eq 4 ] || { printf 'update-plan-content.sh: --field requires exactly <plan-directory> <document-id> <field-label> <value>\n' >&2; exit 64; }
+            [ "$#" -eq 4 ] || { printf 'update-plan-content.sh: --field requires exactly [--plan-dir] <plan-directory> <document-id> <field-label> <value>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3" "$4"
             command=field
             ;;

@@ -10,7 +10,7 @@
 # reviewer and flipped to approved via update-plan-content.sh --review-status.
 #
 # Usage:
-#   update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N]
+#   update-adversarial-review.sh [--plan-dir] <plan-directory> [--file CSV] [--cycle N]
 #   update-adversarial-review.sh --help
 #
 # The Work unit column is mandatory-with-blank-allowed: leave it empty (or N/A)
@@ -28,16 +28,22 @@
 # is missing, 73 --cycle collides with a recorded cycle holding other findings.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 source "$script_dir/plan-reconcile-lib.sh"
 
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} <plan-directory> [--file CSV] [--cycle N]
+Usage: ${0##*/} [--plan-dir] <plan-directory> [--file CSV] [--cycle N]
        ${0##*/} --help
 
 Rewrites the adversarial-review "## Findings" table from CSV rows whose columns
