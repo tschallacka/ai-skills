@@ -70,7 +70,7 @@ done
 plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
 review_file="$plan_dir/adversarial-review.md"
-[ -f "$review_file" ] || plan_err "adversarial-review.md not found: $review_file (run create-adversarial-review.sh first)"
+[ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file (run create-adversarial-review.sh first)" 66
 
 # The trap is installed before the first write and never released with
 # `trap - EXIT`: releasing it discards the library's cleanup handler (§8) and
@@ -85,7 +85,7 @@ trap 'rm -f "$csv_file" "$rendered_file" "$temporary_file"' EXIT
 # the coordinator's context.
 incoming_file="$plan_dir/adversarial-review-incoming.md"
 if [ -n "$csv_source" ]; then
-    [ -f "$csv_source" ] || plan_err "CSV file not found: $csv_source"
+    [ -f "$csv_source" ] || plan_die "CSV file not found: $csv_source" 66
     cp "$csv_source" "$csv_file"
 elif [ -f "$incoming_file" ]; then
     cp "$incoming_file" "$csv_file"
@@ -93,11 +93,11 @@ elif [ -f "$incoming_file" ]; then
     printf 'Consumed reviewer findings from %s\n' "$incoming_file" >&2
 else
     if [ -t 0 ]; then
-        plan_err "no CSV provided. Pipe rows or a heredoc to stdin, pass --file PATH, or let reviewers write adversarial-review-incoming.md (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+        plan_die "no CSV provided. Pipe rows or a heredoc to stdin, pass --file PATH, or let reviewers write adversarial-review-incoming.md (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 64
     fi
     cat > "$csv_file"
 fi
-[ -s "$csv_file" ] || plan_err "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+[ -s "$csv_file" ] || plan_die "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
 
 plan_render_csv_table 5 "$(awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
 

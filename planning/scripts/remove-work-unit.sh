@@ -74,22 +74,22 @@ fi
 
 plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
-[[ "$unit" =~ ^W[0-9][0-9]+$ ]] || plan_err "invalid work-unit id '$unit' — must be WNN (e.g. W01, W02)"
+[[ "$unit" =~ ^W[0-9][0-9]+$ ]] || plan_die "invalid work-unit id '$unit' — must be WNN (e.g. W01, W02)" 64
 inventory="$plan_dir/work-unit-inventory.md"
-[ -f "$inventory" ] || plan_err "work-unit inventory not found: $inventory (the plan appears incomplete)"
+[ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory (the plan appears incomplete)" 66
 
 # Locate the inventory row.
 goal=''; step=''
 if plan_inventory_row "$inventory" "$unit"; then
     goal="$plan_inventory_goal"; step="$plan_inventory_step"
 fi
-[ -n "$goal" ] && [ -n "$step" ] || plan_err "work unit $unit not found in $inventory — nothing to remove (check the id)"
+[ -n "$goal" ] && [ -n "$step" ] || plan_die "work unit $unit not found in $inventory — nothing to remove (check the id)" 66
 
 goal_file="$plan_dir/$goal/goal.md"
 step_file="$plan_dir/$goal/steps/$step.md"
 testing_file="$plan_dir/$goal/steps/$step-testing.md"
-[ -f "$goal_file" ] || plan_err "goal file missing for $unit: $goal_file (goal '$goal' exists in the inventory but not on disk)"
-[ -f "$step_file" ] || plan_err "step file missing for $unit: $step_file (rerun add-work-unit.sh to recreate it, then remove again)"
+[ -f "$goal_file" ] || plan_die "goal file missing for $unit: $goal_file (goal '$goal' exists in the inventory but not on disk)" 65
+[ -f "$step_file" ] || plan_die "step file missing for $unit: $step_file (rerun add-work-unit.sh to recreate it, then remove again)" 65
 
 # Cascade guard: refuse when other units' Depends-on lists reference this unit,
 # unless the caller accepted the cascade explicitly.
@@ -103,7 +103,7 @@ while IFS= read -r row; do
 done < <(plan_inventory_rows "$inventory")
 if [ -n "$dependents" ]; then
     if [ "$confirm_cascade" = false ]; then
-        plan_err "refusing to remove $unit: $(printf '%s' "$dependents" | tr '\n' ' ') still list it in Depends-on; rerun with --confirm-cascade to prune those links (and restore them after a re-add with update-work-unit.sh --depends-on)"
+        plan_die "refusing to remove $unit: $(printf '%s' "$dependents" | tr '\n' ' ') still list it in Depends-on; rerun with --confirm-cascade to prune those links (and restore them after a re-add with update-work-unit.sh --depends-on)" 73
     fi
     printf 'plan: %s depends on %s; Depends-on links will be pruned\n' "$(printf '%s' "$dependents" | tr '\n' ' ')" "$unit" >&2
 fi

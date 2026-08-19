@@ -16,20 +16,13 @@ if [ -z "${PLAN_DOCUMENT_LIB_INITIALISED:-}" ]; then
     source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-document-lib.sh"
 fi
 
-# DEPRECATED in favour of plan_die (CODE-STYLE §5). Kept because its `plan: `
-# prefix and exit 64 are the current observable behaviour of the callers that
-# still use it; delete it once they are converted.
-plan_err() {
-    printf 'plan: %s\n' "$1" >&2
-    exit 64
-}
 
 # Prune a work-unit id from the inventory: drop its W row, remove it from
 # coverage rows (deleting a row only when it empties), and strip it from every
 # remaining "Depends on" column so no dangling dependency remains.
 plan_prune_work_unit() {
     local inventory="$1" unit="$2" temporary
-    [ -f "$inventory" ] || plan_err "work-unit inventory not found: $inventory"
+    [ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory" 66
     temporary="${inventory}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
     if ! awk -F'|' -v wanted="$unit" '
@@ -58,7 +51,7 @@ plan_prune_work_unit() {
         { print }
     ' "$inventory" > "$temporary"; then
         rm -f "$temporary"
-        plan_err "could not prune $unit from $inventory (malformed inventory?)"
+        plan_die "could not prune $unit from $inventory (malformed inventory?)" 65
     fi
     mv "$temporary" "$inventory"
     trap - RETURN
@@ -80,7 +73,7 @@ plan_goal_units() {
 plan_rewrite_owned_work_units() {
     local goal_file="$1" inventory="$2" goal="$3" body_file idx id ch region
     local testing_row testing_heading separator
-    [ -f "$goal_file" ] || plan_err "goal file not found: $goal_file"
+    [ -f "$goal_file" ] || plan_die "goal file not found: $goal_file" 66
     # Preserve the current testing-requirement row (e.g. "| yes | reason |").
     testing_row="$(awk '/^\|[[:space:]]*(yes|no)[[:space:]]*\|/{print; exit}' "$goal_file")"
     [ -n "$testing_row" ] || testing_row='| no | <rationale> |'
