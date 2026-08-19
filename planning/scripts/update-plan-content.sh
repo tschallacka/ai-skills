@@ -483,6 +483,7 @@ case "$command" in
         plan_git_snapshot "$plan_dir"
         review="$plan_dir/adversarial-review.md"; description="$plan_dir/plan-description.md"
         [ -f "$review" ] && [ -f "$description" ] || plan_die "Both plan-description.md and adversarial-review.md are required"
+        invalidate_session=""
         case "$requested_status" in
             pending) review_status='`💤 pending`'; description_status='💤 pending' ;;
             approved)
@@ -500,7 +501,7 @@ case "$command" in
                         --claimed-by "${CLAIMED_BY:-$session_id}" 2>&1)"; then
                         plan_die "Cannot approve: fix-keys verification failed: $verify_output"
                     fi
-                    rm -rf "$(planning_tmpdir)/review-fix-keys/$session_id"
+                    invalidate_session="$session_id"
                 fi
                 review_status='`✅ approved`'; description_status='✅ approved'
                 ;;
@@ -518,6 +519,10 @@ case "$command" in
         ' "$description" > "$description_tmp" || plan_die "Plan description must contain exactly one Status field"
         mv "$review_tmp" "$review"
         mv "$description_tmp" "$description"
+        # Invalidation is irreversible and only the fixer can re-mint, so it is
+        # the branch's last act: a die after it leaves the plan not approved and
+        # un-approvable.
+        [ -z "$invalidate_session" ] || rm -rf "$(planning_tmpdir)/review-fix-keys/$invalidate_session"
         ;;
     decomposition-review)
         [ "$#" -eq 2 ] || usage

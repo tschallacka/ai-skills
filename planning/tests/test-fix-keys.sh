@@ -353,4 +353,32 @@ t_sed_i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 
 [ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-g" ] \
     && fail 'no-unit approval did not invalidate the session secret'
 
+# --- P0-2: an approval that dies on a malformed document must leave the session
+#     secret intact, so the review stays approvable ---
+plan_h="$temporary_root/plan-h"
+seed_gated_plan "$plan_h" test-session-h
+seed_secret_session test-session-h
+"$script_dir/mint-fix-keys.sh" "$plan_h" >/dev/null 2>&1
+write_claims "$plan_h" "AR-01	W05	$(expected_key test-session-h AR-01 W05)" \
+    "AR-03	W07	$(expected_key test-session-h AR-03 W07)"
+t_sed_i '/^- Status:/d' "$plan_h/plan-description.md"
+if CLAIMED_BY=fixer-session-h "$script_dir/update-plan-content.sh" --review-status "$plan_h" approved \
+    >"$temporary_root/approve-nostatus.log" 2>&1; then
+    fail 'approval succeeded with no Status field in plan-description.md'
+fi
+grep -Fq 'Plan description must contain exactly one Status field' "$temporary_root/approve-nostatus.log" \
+    || fail 'approval did not report the malformed plan description'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-h" ] \
+    || fail 'an approval that failed its writes invalidated the session secret'
+printf '# Plan: fixture\n\n- Status: `💤 pending`\n' > "$plan_h/plan-description.md"
+CLAIMED_BY=fixer-session-h "$script_dir/update-plan-content.sh" --review-status "$plan_h" approved \
+    >"$temporary_root/approve-repaired.log" 2>&1 \
+    || fail 'approval on a repaired description failed: the failed attempt was unrecoverable'
+grep -Fqx -- '- Status: `✅ approved`' "$plan_h/adversarial-review.md" \
+    || fail 'the repaired approval did not flip the review status'
+grep -Fqx -- '- Status: ✅ approved' "$plan_h/plan-description.md" \
+    || fail 'the repaired approval did not mirror the status into the description'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-h" ] \
+    && fail 'the repaired approval did not invalidate the session secret'
+
 printf 'test-fix-keys.sh passed.\n'

@@ -53,6 +53,7 @@ USAGE
 
 plan_dir=""
 csv_source=""
+consumed_incoming=0
 cycle_number=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -88,6 +89,7 @@ if [ -n "$csv_source" ]; then
     cp "$csv_source" "$csv_file"
 elif [ -f "$incoming_file" ]; then
     cp "$incoming_file" "$csv_file"
+    consumed_incoming=1
     printf 'Consumed reviewer findings from %s\n' "$incoming_file" >&2
 else
     if [ -t 0 ]; then
@@ -149,7 +151,9 @@ awk -v replacement_file="$rendered_file" '
     { print }
 ' "$review_file" > "$temporary_file"
 mv "$temporary_file" "$review_file"
-rm -f "$incoming_file"
+# A reviewer report only survives the coordinator's context while the file does,
+# so it is removed only when it was the source that got rendered.
+[ "$consumed_incoming" -eq 0 ] || rm -f "$incoming_file"
 # Fix keys are re-minted from the rewritten table; its progress line is this
 # script's diagnostic, not its result, so it goes to stderr (§10).
 "$script_dir/mint-fix-keys.sh" "$plan_dir" >&2
