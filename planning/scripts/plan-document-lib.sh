@@ -95,6 +95,11 @@ plan_snapshot_repo() {
 plan_git_snapshot() {
     local plan_dir="$1" repo
     command -v git >/dev/null 2>&1 || return 0
+    # Resolve before use: the pathspec below runs with git's cwd set to $repo,
+    # so a caller's relative path would be read against the wrong directory and
+    # the add would silently match nothing.
+    plan_dir="$(cd "$plan_dir" 2>/dev/null && pwd -P)" || return 0
+    [ -n "$plan_dir" ] || return 0
     repo="$(plan_snapshot_repo "$plan_dir")" || return 0
     [ -d "$repo/.git" ] || return 0
     git -C "$repo" add -A -- "$plan_dir" >/dev/null 2>&1 || return 0

@@ -100,6 +100,28 @@ mkdir -p "$work/outsideD"
 read -r landed retained <<<"$(probe "$work/outsideD/sub" plan-d)"
 [ "$retained" = 1 ] || note_fail 'layout D: overwritten text was not snapshotted'
 
+# ---- A relative plan path must still snapshot ----
+# The add runs with git's cwd set to the snapshot repository, so a caller's
+# relative path is read against the repository rather than the caller's cwd.
+# Exercised from the project root, where the two differ.
+rel_landed=0
+rel_retained=0
+(
+    cd "$work/projA" || exit 1
+    "$scripts_dir/update-plan-content.sh" -ds .plans/plan-a current-state \
+        -p '2.1: relative first' >/dev/null 2>&1 || true
+    "$scripts_dir/update-plan-content.sh" -ds .plans/plan-a current-state \
+        -p '2.1: relative second' >/dev/null 2>&1 || true
+)
+grep -Fq 'relative second' "$work/projA/.plans/plan-a/plan-description.md" && rel_landed=1
+rel_history="$(git -C "$work/projA/.plans" log -p --all 2>/dev/null || true)"
+case "$rel_history" in
+    *'relative first'*) rel_retained=1 ;;
+esac
+[ "$rel_landed" = 1 ] || note_fail 'relative path: the mutation itself did not land'
+[ "$rel_retained" = 1 ] \
+    || note_fail 'relative path: overwritten text was not snapshotted (pathspec resolved against the repo, not the caller)'
+
 # ---- Regenerating the manifest must not lose the pin ----
 plan_a="$work/projA/.plans/plan-a"
 want="$(pinned_repo "$plan_a")"
