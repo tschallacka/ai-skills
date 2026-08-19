@@ -923,6 +923,20 @@ Include only the relevant sections:
   behavior against the running system, plus expected output.
 - **Automated tests:** required unit or integration tests, their locations,
   commands, and relevant project testing conventions.
+- **Artifact comparisons (optional):** when a proof compares a produced file
+  against a reference, declare it as a table rather than in prose, so the gate
+  can check that the comparison is one the target can actually produce:
+
+  ```
+  update-plan-content.sh -tp <plan> step:<goal>/<step>-testing <N.N> \
+      'Artifact,Comparison' 'pub/media/invoice.pdf,text-layer'
+  ```
+
+  `planning/artifact-comparisons.json` lists the comparisons and the artifacts
+  that cannot be reproduced byte for byte. Asking for `exact` on a PDF, an image
+  or any zip-backed document is refused: those embed a creation timestamp or an
+  encoder version, so the criterion would fail correct work. Say what tolerance
+  the proof allows instead.
 
 A step may require multiple verification methods. Do not mark it complete until
 all listed checks have actually passed.

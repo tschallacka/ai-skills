@@ -18,6 +18,7 @@
 #  11. commands       — unregistered command literals
 #  12. completion     — --complete: progress trackers agree
 #  13. propagation    — the surfaces of a work unit agree
+#  14. comparisons    — a declared artifact comparison is achievable
 #
 # Usage:
 #   validate-plan.sh [--complete] [--propagation|--no-propagation]
@@ -136,6 +137,7 @@ source "$script_dir/validate-plan-goals-lib.sh"
 source "$script_dir/validate-plan-serve-lib.sh"
 source "$script_dir/validate-plan-commands-lib.sh"
 source "$script_dir/validate-plan-propagation-lib.sh"
+source "$script_dir/validate-plan-comparisons-lib.sh"
 
 plan_validate_obsolete || exit "$?"
 plan_validate_existence || exit "$?"
@@ -152,6 +154,7 @@ plan_validate_step_naming
 plan_validate_still_serves
 plan_validate_commands
 plan_validate_completion
+plan_validate_artifact_comparisons
 if [ "$propagation_mode" = true ]; then
     plan_validate_propagation_symbols
     plan_validate_propagation_reach

@@ -313,7 +313,7 @@ plan_unknown_section() {
         plan) valid="current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts" ;;
         goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
         step) valid="objective instructions acceptance-criteria handoff" ;;
-        testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
+        testing) valid="automated-tests artifact-comparisons browser-verification backend-verification manual-verification" ;;
         review) valid="review-scope findings rationale" ;;
         *) valid="" ;;
     esac

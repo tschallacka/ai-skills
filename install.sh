@@ -2243,6 +2243,7 @@ placeholders.json
 state-change-registry.json
 never-executable-extensions.json
 goal-tables.json
+artifact-comparisons.json
 context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
@@ -2283,6 +2284,7 @@ tests/test-plan-context-unit-entry.sh
 tests/test-progress-entry-ids.sh
 tests/test-csv-table-errors.sh
 tests/test-document-id-parity.sh
+tests/test-artifact-comparisons.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
@@ -2355,6 +2357,7 @@ scripts/validate-plan-goals-lib.sh
 scripts/validate-plan-serve-lib.sh
 scripts/validate-plan-commands-lib.sh
 scripts/validate-plan-propagation-lib.sh
+scripts/validate-plan-comparisons-lib.sh
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh

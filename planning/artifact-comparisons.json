@@ -1,0 +1,26 @@
+{
+  "comment": "Which comparisons an acceptance criterion may demand of an artifact, and which artifacts cannot be compared byte-for-byte. A criterion that asks for an identical output the target cannot produce is a gate that fails correct work; this registry makes that decidable instead of guessable from prose. Read by validate-plan-comparisons-lib.sh through skill_root.",
+  "comparisons": {
+    "exact": "byte-for-byte identical. Legal only for an artifact the target reproduces deterministically.",
+    "normalized": "byte comparison after removing the volatile fields the criterion names.",
+    "structural": "parsed structure compared, formatting and key order ignored (JSON, XML, HTML).",
+    "text-layer": "extracted text only, ignoring how it was laid out or encoded.",
+    "page-images": "pages rasterized and compared with a stated tolerance.",
+    "perceptual": "image compared with a stated tolerance rather than by bytes."
+  },
+  "nondeterministic_extensions": {
+    "pdf": "embedded creation timestamp and producer metadata differ per run",
+    "png": "encoder version and ancillary chunks differ per toolchain",
+    "jpg": "encoder version and EXIF differ per toolchain",
+    "jpeg": "encoder version and EXIF differ per toolchain",
+    "gif": "encoder version and metadata differ per toolchain",
+    "webp": "encoder version and metadata differ per toolchain",
+    "zip": "per-entry timestamps differ per run",
+    "docx": "zip container carries per-entry timestamps",
+    "xlsx": "zip container carries per-entry timestamps",
+    "pptx": "zip container carries per-entry timestamps",
+    "odt": "zip container carries per-entry timestamps",
+    "ods": "zip container carries per-entry timestamps",
+    "gz": "embedded modification time differs per run"
+  }
+}
