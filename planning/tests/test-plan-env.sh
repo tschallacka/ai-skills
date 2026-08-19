@@ -18,12 +18,12 @@ PLANS_ROOT="$plans_root" "$repo_dir/planning/scripts/create-plan.sh" "$plan_root
 [ "$(t_stat_mode "$plan_root/.env")" = 600 ]
 "$env_tool" check "$plan_root" "$plans_root" >/dev/null
 
-global_before="$(sha256sum "$plans_root/.env")"
-plan_before="$(sha256sum "$plan_root/.env")"
+global_before="$(t_sha256 "$plans_root/.env")"
+plan_before="$(t_sha256 "$plan_root/.env")"
 printf '%s\n' unrelated > "$plan_root/keep.me"
 PLANS_ROOT="$plans_root" "$env_tool" write-plan "$plan_root" "$plans_root"
-[ "$global_before" = "$(sha256sum "$plans_root/.env")" ]
-[ "$plan_before" = "$(sha256sum "$plan_root/.env")" ]
+[ "$global_before" = "$(t_sha256 "$plans_root/.env")" ]
+[ "$plan_before" = "$(t_sha256 "$plan_root/.env")" ]
 [ -f "$plan_root/keep.me" ]
 
 helper_output="$tmp/helper-output"

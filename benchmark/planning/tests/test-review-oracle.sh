@@ -4,6 +4,8 @@ set -euo pipefail
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=benchmark/planning/lib-portable.sh
+source "$root/lib-portable.sh"
 
 fixture="$tmp/semantic-fixture.json"
 cat > "$fixture" <<'JSON'
@@ -52,7 +54,7 @@ JSON
 "$root/seed-blinded-defects.sh" "$seed_root" "$defective_root" "$private_root" "$tmp/defects.json"
 [ "$(find "$private_root" -type f -perm -004 | wc -l)" -eq 0 ]
 [ ! -e "$defective_root/oracle-key" ]
-[ "$(sha256sum "$defective_root/plan.md" | awk '{print $1}')" = "$(openssl enc -d -aes-256-cbc -pbkdf2 -in "$private_root/defect-map.enc" -pass file:"$private_root/oracle-key" 2>/dev/null | python3 -c 'import json,sys,hashlib; print(json.load(sys.stdin)["defects"][0]["defective_sha256"])')" ]
+[ "$(benchmark_hash_file "$defective_root/plan.md")" = "$(openssl enc -d -aes-256-cbc -pbkdf2 -in "$private_root/defect-map.enc" -pass file:"$private_root/oracle-key" 2>/dev/null | python3 -c 'import json,sys,hashlib; print(json.load(sys.stdin)["defects"][0]["defective_sha256"])')" ]
 
 cat > "$tmp/evidence.json" <<'JSON'
 {"terminal":true,"target_role":"reviewer-b","transcript_sha256":"transcript-sha","findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The plan contradicts itself on one initial button, fourth generated button, and visible white border.","observed_contradiction":"The plan contains all three contradictory requirements.","impact":"The proof would accept the wrong implementation.","evidence":"The observed text contains all three signals.","required_correction":"Correct one initial button, fourth generated button, and visible white border.","independent":true}],"evidence_paths":["/tmp/private/secret-path"]}

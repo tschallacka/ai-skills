@@ -7,6 +7,7 @@
 #   t_stat_mode <file>              octal mode, GNU or BSD stat
 #   t_unique_suffix                 a unique token, no `date +%N`
 #   t_copy_tree <src> <dst>         contents incl. dotfiles, no `cp -R src/.`
+#   t_sha256 <file>                 sha256 hex digest, GNU or BSD or openssl
 #
 # The tests run on the same bash 3.2 + BSD floor as the scripts (CI runs the
 # suite on macos), so they need the same shims. See PORTABILITY.md; the rule ids
@@ -52,3 +53,13 @@ t_copy_tree() {
     mkdir -p "$2"
     ( cd "$1" && tar cf - . ) | ( cd "$2" && tar xf - )
 }
+
+# PORTABILITY(sha256-tool): stock macOS has no sha256sum. Probe once at load, so
+# a test does not compare against the empty output of a failed call.
+if command -v sha256sum >/dev/null 2>&1; then
+    t_sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+    t_sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+    t_sha256() { openssl dgst -sha256 "$1" | awk '{print $NF}'; }
+fi

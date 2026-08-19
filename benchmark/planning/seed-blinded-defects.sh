@@ -6,6 +6,9 @@ if [ "$#" -ne 4 ]; then
     exit 64
 fi
 
+# shellcheck source=benchmark/planning/lib-portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-portable.sh"
+
 source_root="$1"
 defective_root="$2"
 private_root="$3"
@@ -83,7 +86,7 @@ mkdir -p "$private_root/target-snapshot"
 tar -C "$defective_root" -cf - . | tar -C "$private_root/target-snapshot" -xf -
 chmod -R go-rwx "$private_root/target-snapshot"
 printf '{"schema_version":"1.4.2-blinded-oracle","defective_root":"%s","encrypted_map":"%s","map_sha256":"%s"}\n' \
-    "$defective_root" "$private_root/defect-map.enc" "$(sha256sum "$private_root/defect-map.enc" | awk '{print $1}')" > "$private_root/seed-metadata.json"
+    "$defective_root" "$private_root/defect-map.enc" "$(benchmark_hash_file "$private_root/defect-map.enc")" > "$private_root/seed-metadata.json"
 chmod 600 "$private_root/seed-metadata.json"
 rm -f "$temporary_map"
 trap - EXIT

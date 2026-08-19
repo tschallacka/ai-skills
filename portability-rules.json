@@ -223,6 +223,15 @@
       "symptom": "bash: bad substitution: no closing `}' — printed with the expansion truncated at the quote, so the reported text is not what you wrote; or, for a quoted replacement, NO error at all and the quote characters land in the data.",
       "replacement": "hold the quote in a plain variable and expand it UNQUOTED inside the braces — q='\"'; out=\"${v//$q/\\\\$q}\" behaves identically on 3.2.57 and 5.3.9 — or run the substitution through sed/awk when several passes are needed (context_json_escape_file in plan-context.sh does the three-pass JSON string escape that way).",
       "note": "Two defects, one cause: bash 3.2 does not track quoting inside ${ }; bash 4 fixed both. Same family as heredoc-quote-in-command-substitution. (1) PARSE ERROR — an ANSI-C $'…' that yields a QUOTE character ends the scan early. Verified on 3.2.57 vs 5.3.9: with v='a\"b', the line printf '%s' \"${v//$'\"'/X}\" prints aXb on 5.3.9 and dies on 3.2.57 with: bad substitution: no closing `}' in \"${v//\"/X}\". ${v#$'\"'} fails the same way, so it is not specific to //. It is the quote CHARACTER, not $'…' — $'\\n' and $'\\t' are fine on 3.2, and a single quote breaks it too. ${v:-$'\"'} fails on BOTH shells, so that form is a plain bug, not a portability question. (2) SILENT WRONG DATA — a quoted REPLACEMENT is never unquoted on 3.2. Verified: with v='a.b' and dash='-', \"${v//./\"$dash\"}\" is a-b on 5.3.9 and a\"-\"b on 3.2.57. No error, wrong output. A quoted PATTERN is fine on both (\"${v//\".\"/$dash}\" is a-b everywhere), so only the replacement side diverges. The detector covers (1) only; (2) cannot be grepped without false positives — review every ${var//…/…} whose replacement is quoted."
+    },
+    {
+      "id": "sha256-tool",
+      "construct": "sha256sum",
+      "detect": "sha256sum",
+      "breaks": "BSD userland (stock macOS)",
+      "symptom": "sha256sum: command not found, and under set -e the script aborts; without set -e a hash comparison silently compares two empty strings and passes",
+      "replacement": "t_sha256 (planning/tests/lib-test.sh) in a test, benchmark_hash_file (benchmark/planning/lib-portable.sh) in the harness, or context_hash_file / context_hash_stdin in the planning scripts",
+      "note": "macOS ships shasum (Perl) and openssl, not GNU sha256sum. Probe once at load rather than per call, and name all the forms you accept. Four files used it unguarded until this rule was added; the probe-defining files are exempted in test-portability-contract.sh because they must name both forms."
     }
   ]
 }

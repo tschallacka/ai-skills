@@ -42,6 +42,12 @@ in_allowlist() {
         ./planning/scripts/plan-document-lib.sh:stat-format) return 0 ;;
         ./planning/scripts/plan-env.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:stat-format) return 0 ;;
+        ./planning/tests/lib-test.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
+        ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
+        ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
+        ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;
         # Development-only tooling may use python3 (CODE-STYLE.md §1).
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;

@@ -445,7 +445,15 @@ while [ "$#" -gt 0 ]; do
 done
 capsule="${capsule:?reviewer capsule argument missing}"
 printf 'workspace=%s capsule=%s session=%s capsule_id=%s\\n' "$workspace" "$capsule" "$REVIEWER_SESSION_ID" "$REVIEWER_CAPSULE_ID" > "$FAKE_REVIEWER_LOG"
-manifest_hash="$(sha256sum "$capsule/capsule-manifest.json" | awk '{print $1}')"
+# This runs in the generated fixture's own shell, so it cannot use the
+# harness helper; stock macOS has no sha256sum, hence the cascade.
+if command -v sha256sum >/dev/null 2>&1; then
+    manifest_hash="$(sha256sum "$capsule/capsule-manifest.json" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+    manifest_hash="$(shasum -a 256 "$capsule/capsule-manifest.json" | awk '{print $1}')"
+else
+    manifest_hash="$(openssl dgst -sha256 "$capsule/capsule-manifest.json" | awk '{print $NF}')"
+fi
 cat > "$capsule/plan/approval.json" <<JSON
 {"reviewer_session_id":"$REVIEWER_SESSION_ID","capsule_id":"$REVIEWER_CAPSULE_ID","mode":"$REVIEWER_MODE","capsule_manifest_sha256":"$manifest_hash","approved_at":"$REVIEWER_APPROVED_AT","overall_plan_approval":true,"approved_findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The plan contradicts the one initial button, fourth generated button, and visible white border requirements.","observed_contradiction":"The target contains two initial buttons, a third generated button, and a visible black border instead of one initial button, a fourth generated button, and a visible white border.","impact":"The proof can accept the wrong implementation.","evidence":"plan.md § 3.1 contains all three contradictory signals: one initial button, fourth generated button, and visible white border.","required_correction":"Replace two initial buttons with one, replace the third generated button with the fourth, and replace the visible black border with a visible white border.","independent":true}],"rejected_findings":[]}
 JSON
