@@ -33,7 +33,7 @@ data; they must not launch the agent themselves — `launch_agent` in
 | `agent_model_env` | variable | environment variable that overrides the model (e.g. `CODEX_MODEL`). |
 | `agent_default_model` | variable | model string used when `agent_model_env` is unset. |
 | `agent_argv_worker <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV` and `AGENT_CWD` for a worker run: `AGENT_CWD=<workspace>`, capsule/workspace made readable, `<prompt>` content as the message. |
-| `agent_argv_reviewer <workspace> <capsule> <prompt> [binary]` | function | fills `AGENT_ARGV`/`AGENT_CWD` for a Reviewer A/B run. Optional `$4` is the `REVIEWER_COMMAND` test seam: it replaces the driver binary (argv[0]) rather than appending codex flags. For a non-codex driver the seam is documented codex-only; when set it must not leak invalid flags. |
+| `agent_argv_reviewer <workspace> <capsule> <prompt> [binary]` | function | fills `AGENT_ARGV`/`AGENT_CWD` for a Reviewer A/B run. Optional `$4` is the `REVIEWER_COMMAND` test seam: it replaces the driver binary (argv[0]) rather than appending codex flags. The seam is codex-only: under any other driver `case/start-worker.sh` exits 78 rather than passing a driver-shaped argv to it or falling back to the real reviewer. |
 | `agent_argv_analyzer <workspace> <capsule> <prompt>` | function | fills `AGENT_ARGV`/`AGENT_CWD` for the batch analyzer run. |
 | `AGENT_CWD` | variable (set by every `agent_argv_*`) | the directory the agent must run in — always the workspace. `launch_agent` cds there before exec, because not every CLI has a cwd flag (codex `-C`, opencode `--dir`, claude none) and `env -C` is GNU-only. |
 | `agent_session_id <agent-output.jsonl>` | function | prints the session id extracted from the agent's output stream, or empty for an honest degrade. Parse line by line and return 0 on a missing/unparsable stream: the file is JSONL with the agent's stderr merged in, and the harness turns empty output into `SESSION_ID=unavailable` (tainted) rather than aborting the case. |
@@ -74,22 +74,24 @@ Sourcing `lib-agent.sh` resolves `RUNTIME_DIR` from its own location, sources
 - `launch_agent <mode> <timeout> <output|'-'>` — runs `${AGENT_ARGV[@]}`
   (set by a driver argv function first) from `AGENT_CWD` in the background, then
   records `AGENT_PID` and (for `setsid` mode) `AGENT_PGID`.
-  - `mode=setsid` wraps with `setsid --wait` and the given `timeout` (e.g.
-    `45m`); this is used by workers and reviewers. `setsid` **forks** rather
-    than execs when it already leads a process group, so without `--wait` `$!`
-    can be a parent that exits 0 while the agent still runs — `wait_agent`
-    would then record `AGENT_EXIT=0` for an unfinished agent and the harness
-    would read `worker.jsonl` before it was written.
+  - `mode=setsid` wraps with `setsid --wait`; this is used by workers and
+    reviewers. `setsid` **forks** rather than execs when it already leads a
+    process group, so without `--wait` `$!` can be a parent that exits 0 while
+    the agent still runs — `wait_agent` would then record `AGENT_EXIT=0` for an
+    unfinished agent and the harness would read `worker.jsonl` before it was
+    written.
   - `setsid` and `timeout` are Linux/util-linux + GNU tools. Both are guarded:
     a host without `setsid` gets exit 69 with a message, and `gtimeout` (GNU
     coreutils on macOS) is used when `timeout` is absent.
   - `AGENT_PGID` is polled rather than read once, because a not-yet-scheduled
     agent has no observable process group and an empty `AGENT_PGID` silently
     disables the process-group kill and taints the run's process audit.
-  - `mode=background` is a plain background run with **no setsid and no
-    timeout**; it preserves the pre-refactor analyzer semantics exactly. That
-    means the batch analyzer — which gates the batch exit code — is unbounded
-    by construction; see the risk note below.
+  - `mode=background` is a plain background run with **no setsid**, used by the
+    batch analyzer.
+  - The `timeout` argument (e.g. `45m`) applies in **both** modes; an empty
+    string means unbounded. Timeouts and process groups are independent
+    concerns, so a background agent whose exit code gates something is still
+    bounded — the analyzer's default is `ANALYZER_TIMEOUT`, `30m`.
 - `wait_agent` — waits for `AGENT_PID` and stores the exit code in
   `AGENT_EXIT`.
 - `kill_process_tree <pid> <signal>` — recursive child-tree kill.
@@ -177,22 +179,22 @@ Telemetry is always honest: only the active agent's documented store is read,
 and any missing/invalid identity yields `telemetry_status=unavailable:...`
 rather than a fabricated token count.
 
-## Known risk: the analyzer has no timeout
+## The analyzer is bounded, like every other agent
 
-`run-benchmark.sh` launches the batch analyzer with `launch_agent background ""`,
-which by the definition above applies neither `setsid` nor a timeout — and the
-analyzer's exit code is what gates the whole batch's exit code. A hung analyzer
-therefore hangs the batch indefinitely, after every worker and reviewer has
-already been paid for. This is deliberate (it preserves the pre-refactor
-analyzer semantics) and asserted by `tests/test-safeguards.sh`, so changing it
-is a maintainer decision, not a cleanup.
+`run-benchmark.sh` launches the batch analyzer with
+`launch_agent background "${ANALYZER_TIMEOUT:-30m}"`. The analyzer's exit code
+gates the whole batch's exit code, so an unbounded analyzer hung the batch
+indefinitely after every worker and reviewer had already been paid for. It runs
+without `setsid` (it needs no process group of its own) but with a timeout, and
+a timed-out analyzer surfaces as `ANALYZER_EXIT=124`. The three budgets —
+`WORKER_TIMEOUT` (45m), `REVIEWER_TIMEOUT` (20m), `ANALYZER_TIMEOUT` (30m) —
+have the same shape and `tests/test-safeguards.sh` asserts all three.
 
-## Known risk: the `REVIEWER_COMMAND` seam can spend real tokens
+## The `REVIEWER_COMMAND` seam refuses a non-codex driver
 
 `REVIEWER_COMMAND` substitutes argv[0] only, so an override still receives the
-active driver's flags. `setup-benchmark.sh` guards the non-codex case by
-*ignoring the seam and running the real driver*, which means a test that sets
-`REVIEWER_COMMAND` under `BENCHMARK_AGENT=opencode` (or `claude`) silently
-launches a live reviewer and spends real model budget instead of failing. A
-non-codex seam should refuse the run rather than fall through to the real agent;
-that is a maintainer decision because it changes harness behaviour under test.
+active driver's flags: it is a codex-shaped seam and nothing else. Under any
+other `AGENT_DRIVER` the case now **exits 78** instead of ignoring the seam and
+running the real driver, because that fall-through silently launched a live
+reviewer and spent real model budget in a test. Either unset
+`REVIEWER_COMMAND` or run the case under `BENCHMARK_AGENT=codex`.

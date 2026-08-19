@@ -35,6 +35,10 @@
 #
 # Optional host environment, deliberately NOT part of that interface:
 #   TMPDIR, WORKER_TIMEOUT, REVIEWER_TIMEOUT
+#
+# REVIEWER_COMMAND is accepted only under AGENT_DRIVER=codex, whose flags it is
+# shaped for. Set under any other driver the case exits 78 rather than launching
+# the real reviewer, which would spend model budget inside a test.
 
 set -euo pipefail
 
@@ -195,7 +199,9 @@ STATUS="accepted"
 if [ "$CODE" -ne 0 ] || [ "$PLAN_FOUND" -ne 1 ] || [ "$HTML_COUNT" != 0 ] || [ "$VALIDATION" = "fail" ] || [ "$STRUCTURAL_VALIDATION" = "fail" ] || [ "$PROCESS_AUDIT" != "pass" ]; then
     STATUS="tainted"
 fi
-if [ "$SESSION_ID" = "unavailable" ] || [ "$TELEMETRY_STATUS" != "available" ] || ! [[ "${USAGE_RECORDS:-}" =~ ^[1-9][0-9]*$ ]] || ! [[ "${TOTAL_USAGE:-}" =~ ^[1-9][0-9]*$ ]]; then
+# A zero token count is a count, not a missing one: the absent value is spelled
+# `unavailable`, so ^[0-9]+$ here keeps a genuinely reported 0 out of the taint.
+if [ "$SESSION_ID" = "unavailable" ] || [ "$TELEMETRY_STATUS" != "available" ] || ! [[ "${USAGE_RECORDS:-}" =~ ^[1-9][0-9]*$ ]] || ! [[ "${TOTAL_USAGE:-}" =~ ^[0-9]+$ ]]; then
     STATUS="tainted"
 fi
 
@@ -258,6 +264,13 @@ REVIEWER_STATUS="not-run"
 REVIEWER_B_TRANSCRIPT=""
 run_reviewer() {
     local role="$1" session capsule capsule_id review_mode approved_at workspace prompt output code reviewer_started_at reviewer_ended_at capsule_manifest_sha256 approval=""
+    # Refused for either role, before any lifecycle event is recorded:
+    # REVIEWER_COMMAND is a codex-shaped seam, and falling through to the real
+    # driver under another one spends real model budget inside a test.
+    if [ -n "${REVIEWER_COMMAND:-}" ] && [ "$AGENT_DRIVER" != codex ]; then
+        echo "REVIEWER_COMMAND is a codex-only test seam and AGENT_DRIVER=$AGENT_DRIVER; refusing to run the real reviewer in its place (unset REVIEWER_COMMAND, or set BENCHMARK_AGENT=codex)" >&2
+        exit 78
+    fi
     if [ "$role" = B ] && [ -n "${REVIEWER_COMMAND:-}" ]; then
         session="${REVIEWER_SESSION_ID:?REVIEWER_SESSION_ID is required with REVIEWER_COMMAND}"
         capsule_id="${REVIEWER_CAPSULE_ID:?REVIEWER_CAPSULE_ID is required with REVIEWER_COMMAND}"
@@ -347,15 +360,8 @@ PROMPT
         REVIEWER_MODE="$review_mode"
         REVIEWER_APPROVED_AT="$approved_at"
         export REVIEWER_SESSION_ID REVIEWER_CAPSULE_ID REVIEWER_MODE REVIEWER_APPROVED_AT
-        if [ "$AGENT_DRIVER" = codex ]; then
-            agent_argv_reviewer "$workspace" "$capsule" "$prompt" "$REVIEWER_COMMAND"
-        else
-            # REVIEWER_COMMAND is a codex-shaped test seam. Under a non-codex
-            # driver the argv is driver-shaped and would leak invalid flags to
-            # REVIEWER_COMMAND, so ignore it and run the real driver.
-            echo "reviewer seam ignored for AGENT_DRIVER=$AGENT_DRIVER (REVIEWER_COMMAND is codex-only); running the real driver" >&2
-            agent_argv_reviewer "$workspace" "$capsule" "$prompt"
-        fi
+        # The driver was already checked above: only codex reaches the seam.
+        agent_argv_reviewer "$workspace" "$capsule" "$prompt" "$REVIEWER_COMMAND"
     else
         agent_argv_reviewer "$workspace" "$capsule" "$prompt"
     fi

@@ -15,8 +15,9 @@
 # gated are ignored with a warning.
 #
 # Optional --claimed-by <id> names the session that recorded the claims; when it
-# equals the session recorded as minted_by in fix-keys.json, the run warns that
-# a fixer minted and then claimed its own keys (self-certification).
+# equals the session recorded as minted_by in fix-keys.json, the run FAILS: a
+# fixer that minted and then claimed its own keys is self-certifying, which the
+# gate refuses rather than reports. The approval gate always passes the flag.
 
 set -euo pipefail
 export LC_ALL=C
@@ -158,12 +159,16 @@ verify_fix_keys() {
         fi
     done < "$pairs_file"
 
+    # Counted with the key failures and checked before them, so a self-certified
+    # claim set cannot pass on a caller that only reads the exit status.
+    if [ -n "$claimed_by" ] && [ -n "$minted_by" ] && [ "$claimed_by" = "$minted_by" ]; then
+        printf 'self-certification: fix claims for %s were recorded by the same session (%s) that minted the keys\n' \
+            "$plan_dir" "$claimed_by" >&2
+        failures=$((failures + 1))
+    fi
+
     if [ "$failures" -gt 0 ]; then
         plan_die "$(printf 'fix-keys verification failed for %s (%s failure(s), %s warning(s))' "$plan_dir" "$failures" "$warnings")"
-    fi
-    if [ -n "$claimed_by" ] && [ -n "$minted_by" ] && [ "$claimed_by" = "$minted_by" ]; then
-        printf 'WARN: fix claims for %s were recorded by the same session (%s) that minted the keys (self-certification)\n' \
-            "$plan_dir" "$claimed_by" >&2
     fi
     printf 'fix-keys verification passed for %s (%s warning(s))\n' "$plan_dir" "$warnings"
 }

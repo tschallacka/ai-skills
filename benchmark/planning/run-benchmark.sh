@@ -3,6 +3,10 @@
 #
 # Usage:
 #   benchmark/planning/run-benchmark.sh <name> <testing-base-dir> [--parallel|--sequential] [--iterative|--fresh-review] [--revisions tag[,tag...]] [--versions] [tag ...]
+#
+# Agent time budgets, all overridable: WORKER_TIMEOUT (45m), REVIEWER_TIMEOUT
+# (20m), ANALYZER_TIMEOUT (30m). The analyzer's exit code gates the batch, so its
+# bound is what stops a hung analyzer from hanging an already-paid-for run.
 
 set -euo pipefail
 
@@ -457,7 +461,9 @@ set +e
 persona_bootstrap analyzer || exit 64
 persona_bootstrap_prompt "$ANALYZER_CAPSULE/analyzer-prompt.md" analyzer "$REPO_ROOT/planning/roles/VOICES.md" || exit 64
 agent_argv_analyzer "$ANALYZER_WORKSPACE" "$ANALYZER_CAPSULE" "$ANALYZER_CAPSULE/analyzer-prompt.md"
-launch_agent background "" "$ANALYSIS_ROOT/analyzer.jsonl"
+# Bounded like the worker and the reviewer: ANALYZER_CODE gates the batch's exit
+# code, so an unbounded analyzer hangs the batch after every agent has been paid.
+launch_agent background "${ANALYZER_TIMEOUT:-30m}" "$ANALYSIS_ROOT/analyzer.jsonl"
 ANALYZER_PID="$AGENT_PID"
 wait_agent
 ANALYZER_CODE="$AGENT_EXIT"

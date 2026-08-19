@@ -4,6 +4,7 @@
 #
 # This file owns argument parsing and the ORDER of the passes; each pass lives
 # in a sourced validate-plan-*-lib.sh sibling. The order is load-bearing:
+#   0. obsolescence   — an OBSOLETE marker refuses the plan outright (else stop)
 #   1. existence      — the two required documents are present (else stop)
 #   2. plan docs      — headings, UI verdict, review verdict, hand-edit damage
 #   3. placeholders   — registered template tokens (WARN, or FAIL when generated)
@@ -23,7 +24,8 @@
 #                    [--stale <file-of-phrases>|default] <plan-directory>
 #   validate-plan.sh --help
 #
-# Exit codes: 0 clean, 1 findings, 64 bad invocation, 66 plan directory absent.
+# Exit codes: 0 clean, 1 findings, 64 bad invocation, 65 the plan is marked
+# obsolete and must not be used, 66 plan directory absent.
 
 set -euo pipefail
 export LC_ALL=C
@@ -127,6 +129,7 @@ source "$script_dir/validate-plan-serve-lib.sh"
 source "$script_dir/validate-plan-commands-lib.sh"
 source "$script_dir/validate-plan-propagation-lib.sh"
 
+plan_validate_obsolete || exit "$?"
 plan_validate_existence || exit "$?"
 plan_validate_plan_docs
 plan_validate_placeholders

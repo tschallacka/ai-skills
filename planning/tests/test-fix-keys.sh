@@ -123,12 +123,12 @@ key_by3="$(expected_key test-session-by AR-03 W07)"
 write_claims "$plan_by" "AR-01	W05	$key_by1" "AR-03	W07	$key_by3"
 if "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by reviewer-session-1 \
     >"$temporary_root/verify-self.log" 2>&1; then
-    :
-else
-    fail 'verify rejected a valid claim with a same-session warning'
+    fail 'verify accepted a self-certified claim set (minted and claimed by one session)'
 fi
 grep -Fq 'self-certification' "$temporary_root/verify-self.log" \
-    || fail 'verify did not warn about a same-session claim'
+    || fail 'verify did not report the same-session claim as self-certification'
+grep -Fq 'fix-keys verification failed' "$temporary_root/verify-self.log" \
+    || fail 'self-certification did not count towards the verification failure'
 "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by fixer-session-9 \
     >"$temporary_root/verify-distinct.log" 2>&1 \
     || fail 'verify rejected a distinct-session claim'
@@ -269,8 +269,20 @@ grep -Fqx -- '- Status: `💤 pending`' "$plan_d/adversarial-review.md" \
 [ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-d" ] \
     || fail 'refused approval invalidated the session secret'
 write_claims "$plan_d" "AR-01	W05	$key_d1" "AR-03	W07	$(expected_key test-session-d AR-03 W07)"
-"$script_dir/update-plan-content.sh" --review-status "$plan_d" approved >/dev/null 2>&1 \
-    || fail 'approval rejected matching fix key claims'
+# The gate names the claiming session: unnamed defaults to the minting session,
+# which is self-certification and must be refused before the status flips.
+if "$script_dir/update-plan-content.sh" --review-status "$plan_d" approved \
+    >"$temporary_root/approve-selfcert.log" 2>&1; then
+    fail 'approval accepted matching claims recorded by the minting session (self-certification)'
+fi
+grep -Fq 'self-certification' "$temporary_root/approve-selfcert.log" \
+    || fail 'approval did not report self-certification'
+grep -Fqx -- '- Status: `💤 pending`' "$plan_d/adversarial-review.md" \
+    || fail 'refused self-certified approval changed the review status'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-d" ] \
+    || fail 'refused self-certified approval invalidated the session secret'
+CLAIMED_BY=fixer-session-d "$script_dir/update-plan-content.sh" --review-status "$plan_d" approved >/dev/null 2>&1 \
+    || fail 'approval rejected matching fix key claims from a distinct claiming session'
 grep -Fqx -- '- Status: `✅ approved`' "$plan_d/adversarial-review.md" \
     || fail 'review status was not flipped to approved'
 grep -Fqx -- '- Status: ✅ approved' "$plan_d/plan-description.md" \

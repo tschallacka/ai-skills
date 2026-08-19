@@ -10,9 +10,12 @@
 #      adversarial-review.md.
 #   2. Approval gate. `--review-status <plan> approved` is the only path that
 #      flips a review to approved. It refuses while any finding is still open,
-#      verifies the fix keys through verify-fix-keys.sh, and then destroys the
-#      session secret so the same keys cannot be replayed. See the
-#      "Approval gate" banner below; do not move that logic elsewhere.
+#      verifies the fix keys through verify-fix-keys.sh as `${CLAIMED_BY:-<the
+#      minting session>}`, and then destroys the session secret so the same keys
+#      cannot be replayed. Export CLAIMED_BY with the fixer session that wrote
+#      fixes.md: the default is the minting session, which the fix-key gate
+#      refuses as self-certification. See the "Approval gate" banner below; do
+#      not move that logic elsewhere.
 #
 # Usage:
 #   update-plan-content.sh <flag> <plan-directory> [args…]     (see --help)
@@ -487,15 +490,16 @@ case "$command" in
                     plan_die "Cannot approve a review with unresolved findings"
                 fi
                 if [ -f "$plan_dir/fix-keys.json" ]; then
-                    # Called WITHOUT --claimed-by, so the self-certification
-                    # check never fires from this gate. Adding the flag changes
-                    # the gate's behaviour for existing plans.
-                    if ! verify_output="$("$script_dir/verify-fix-keys.sh" "$plan_dir" 2>&1)"; then
-                        plan_die "Cannot approve: fix-keys verification failed: $verify_output"
-                    fi
                     session_id="$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
                         "$plan_dir/fix-keys.json" | head -1)"
                     [ -n "$session_id" ] || plan_die "fix-keys.json has no session_id"
+                    # An unnamed claimant is the minting session, so the default
+                    # is self-certification and the gate refuses it. CLAIMED_BY
+                    # names the fixer session that recorded fixes.md.
+                    if ! verify_output="$("$script_dir/verify-fix-keys.sh" "$plan_dir" \
+                        --claimed-by "${CLAIMED_BY:-$session_id}" 2>&1)"; then
+                        plan_die "Cannot approve: fix-keys verification failed: $verify_output"
+                    fi
                     rm -rf "$(planning_tmpdir)/review-fix-keys/$session_id"
                 fi
                 review_status='`✅ approved`'; description_status='✅ approved'

@@ -21,6 +21,33 @@
 # each file alone and cannot see the assignments.
 set -euo pipefail
 
+# The obsolescence gate runs before the existence gate: a plan built by an older
+# skill version must not be validated, migrated, or resumed, and reporting its
+# findings would invite exactly that. Returns 65 when the marker is present, and
+# never exits — the entry script owns process exit.
+# ---- quoted: the OBSOLETE marker ----
+# obsoleted-at: 2026-08-19
+# obsoleted-because: built by an older planning-skill version
+# replaced-by: 2026-08-19-checkout-rewrite
+# ---- end quoted ----
+plan_validate_obsolete() {
+    local marker="$plan_dir/OBSOLETE" replacement
+    [ -f "$marker" ] || return 0
+    replacement="$(sed -nE 's/^[[:space:]]*replaced-by:[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p' \
+        "$marker" | head -1)"
+    printf '%s: %s is marked obsolete by its OBSOLETE marker: it was built by an older planning-skill version and is never validated, resumed, or migrated.\n' \
+        "${0##*/}" "$plan_dir" >&2
+    if [ -n "$replacement" ]; then
+        printf '%s: the initiative was rebuilt as: %s\n' "${0##*/}" "$replacement" >&2
+    else
+        printf '%s: the marker names no replacement; add a "replaced-by: <plan directory>" line naming the plan that supersedes this one.\n' \
+            "${0##*/}" >&2
+    fi
+    printf '%s: nothing here was deleted — this directory is kept as history. Validate the replacement instead.\n' \
+        "${0##*/}" >&2
+    return 65
+}
+
 # The existence gate runs before every other pass: everything else reads these
 # two files. Returns 66 when the plan directory is absent, 1 when a required
 # document is, and never exits — the entry script owns process exit.

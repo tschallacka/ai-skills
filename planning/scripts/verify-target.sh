@@ -14,9 +14,9 @@
 #   verify-target.sh <plan-directory> <WNN> [--repo <repository-root>]
 #   verify-target.sh --help
 #
-# Exit codes: 0 = target present with no static counter-evidence (or the unit's
-# type has no render surface, in which case NOTHING was checked — see below);
-# 1 = target missing or a layout removes its block; 64 = usage/plan error.
+# Exit codes: 0 = target present with no static counter-evidence; 1 = target
+# missing, a layout removes its block, or the check could not run at all;
+# 64 = usage/plan error.
 #
 # It is advisory: PASS is evidence of existence and of no static layout
 # counter-evidence, not a proof the surface renders in a live browser. Record
@@ -27,16 +27,14 @@
 # read from work-unit-inventory.md; layout scan roots are the repository's
 # view/*/layout and layout directories (Magento-style) plus etc/view.xml.
 #
-# KNOWN GAP (deliberate, reported, not fixed here): the reachability checks (2-4)
-# run only for `markup` and `style` units. A template target recorded as
-# `source`, and every `discovery` unit, exits 0 having run NO reachability check
-# at all, even though SKILL.md:1237 presents this script as the static half of
-# the reachability gate at SKILL.md:227-248. The skip line on stdout says so
-# explicitly so a caller cannot mistake it for a pass.
+# What runs is decided by the TARGET, not the type column: a render-surface file
+# gets checks 1-4 under any type, any other file gets 1 and 4, and a unit naming
+# no target — or a surface with no block name — fails closed, because the check
+# cannot run. No type exits 0 unchecked.
 #
 # Output discipline (CODE-STYLE.md section 10): stdout carries exactly one
-# result line (PASS / SKIP); every per-check OK, WARN and FAIL diagnostic goes
-# to stderr, so `x="$(verify-target.sh …)"` yields the verdict alone.
+# result line (a PASS naming which checks ran); every per-check OK, WARN and FAIL
+# diagnostic goes to stderr, so `x="$(verify-target.sh …)"` yields the verdict.
 
 set -euo pipefail
 export LC_ALL=C
@@ -108,23 +106,29 @@ IFS=$'\t' read -r unit_type unit_file unit_scope unit_subscope < <(awk -F'|' -v 
 note "$unit ($unit_type) file=$unit_file scope=$unit_scope subscope=$unit_subscope"
 note "repository=$repo_root"
 
-# Only template/markup targets have a render surface to verify. Every other type
-# leaves this script with nothing checked — say so on the result line.
-case "$unit_type" in
-    markup|style) ;;
-    *)
-        printf 'verify-target: SKIP %s — type %s has no render surface; NO reachability check ran for this type (checks 2-4 apply to markup|style only)\n' \
-            "$unit" "$unit_type"
-        exit 0
-        ;;
-esac
-
-[ "$unit_file" != "N/A" ] || { note "unit file is N/A; cannot verify a render surface"; exit 1; }
+# A unit that records no target cannot be checked at all, whatever its type, so
+# it fails instead of exiting 0 on a check that never ran.
+if [ "$unit_file" = "N/A" ] || [ -z "$unit_file" ]; then
+    note "unit file is N/A; there is no target to check — record the target file, or do not claim reachability evidence for $unit"
+    printf 'verify-target: FAIL %s — no target file recorded; no reachability check can run\n' "$unit" >&2
+    exit 1
+fi
 
 issues=0
 warnings=0
 fail() { printf 'verify-target: FAIL %s\n' "$*" >&2; issues=$((issues + 1)); }
 warn() { printf 'verify-target: WARN %s\n' "$*" >&2; warnings=$((warnings + 1)); }
+
+# The render surface follows the target file, not the type column: a .phtml
+# recorded as `source` or reached through a `discovery` unit renders exactly as
+# one recorded as `markup`. markup/style are surfaces by declaration.
+render_surface=no
+case "$unit_file" in
+    *.phtml|*.html|*.htm|*.twig|*.tpl|*.blade.php|*.vue|*.svelte|*.jsx|*.tsx|*.xml|*.css|*.less|*.scss|*.sass|*.styl) render_surface=yes ;;
+esac
+case "$unit_type" in
+    markup|style) render_surface=yes ;;
+esac
 
 # 1. Existence and ownership.
 target_path="$repo_root/$unit_file"
@@ -140,20 +144,29 @@ else
     fail "target file does not exist: $target_path"
 fi
 
-# Collect layout XML files (Magento-style view layout + etc/view.xml).
+# 2-3. Remove and re-point, for a render surface only: a target that renders
+# through no block (a .php class, a .md document) has no layout to contradict it,
+# and saying so is a different answer from not having looked.
 layout_files=()
-while IFS= read -r -d '' f; do
-    layout_files+=("$f")
-done < <(find "$repo_root" -type f \( -name '*.xml' -path '*/view/*/layout/*' -o -name 'view.xml' \) -print0 2>/dev/null || true)
+if [ "$render_surface" = yes ]; then
+    while IFS= read -r -d '' f; do
+        layout_files+=("$f")
+    done < <(find "$repo_root" -type f \( -name '*.xml' -path '*/view/*/layout/*' -o -name 'view.xml' \) -print0 2>/dev/null || true)
+fi
 
-# Strip a leading '#'/'.' — markup scopes may name a DOM id/class. Skip the
-# block entirely when no layout file was found: grep with no file operand reads
-# stdin and hangs, and an empty array is unbound under `set -u` before bash 4.4.
+# Strip a leading '#'/'.' — markup scopes may name a DOM id/class. grep with no
+# file operand reads stdin and hangs, and an empty array is unbound under
+# `set -u` before bash 4.4, so both empties are handled before the greps.
 block_name="${unit_scope#\#}"
 block_name="${block_name#.}"
-if [ "${#layout_files[@]}" -eq 0 ]; then
-    note "no layout XML files found; remove/re-point checks did not run"
-elif [ -n "$block_name" ]; then
+case "$block_name" in N/A) block_name="" ;; esac
+if [ "$render_surface" != yes ]; then
+    note "OK $unit_file is not a render surface; checks 2-3 do not apply to it"
+elif [ -z "$block_name" ]; then
+    fail "render surface $unit_file has no block name in the unit's Scope column, so the remove/re-point checks cannot run — record the block the target renders through"
+elif [ "${#layout_files[@]}" -eq 0 ]; then
+    warn "no layout XML files found under $repo_root; the remove/re-point checks could not run for block '$block_name'"
+else
     removed="$(grep -hoE "<referenceBlock[^>]*name=\"${block_name}\"[^>]*remove=\"true\"" ${layout_files[@]+"${layout_files[@]}"} 2>/dev/null || true)"
     if [ -n "$removed" ]; then
         fail "a layout removes block '$block_name' that renders this target: $(printf '%s' "$removed" | head -1)"
@@ -166,8 +179,6 @@ elif [ -n "$block_name" ]; then
     else
         note "OK no layout re-points block '$block_name'"
     fi
-else
-    note "markup unit has no block name in scope; remove/re-point checks did not run"
 fi
 
 # 4. Theme override: a module template may be overridden by a same-named file
@@ -190,5 +201,10 @@ if [ "$issues" -gt 0 ]; then
     printf 'verify-target: %d issue(s) found for %s — record this before planning against the target\n' "$issues" "$unit" >&2
     exit 1
 fi
-printf 'verify-target: PASS (%s warning(s)) — no static counter-evidence for %s target %s\n' \
-    "$warnings" "$unit" "$unit_file"
+if [ "$render_surface" = yes ]; then
+    checks_run='existence, layout remove/re-point, theme override'
+else
+    checks_run='existence, theme override'
+fi
+printf 'verify-target: PASS (%s warning(s)) — no static counter-evidence for %s target %s; checks run: %s\n' \
+    "$warnings" "$unit" "$unit_file" "$checks_run"
