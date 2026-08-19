@@ -18,11 +18,14 @@
 # the finding. Cells must not contain `|`, and input must be LF, not CRLF.
 #
 # The previous Findings table is archived into adversarial-review-history.md
-# under a `## Cycle N` heading (--cycle numbers it; the next free number is used
-# otherwise) so reviewers of later cycles can see what earlier ones found.
+# under a `## Cycle N` heading (--cycle numbers it; otherwise the highest
+# recorded number plus one) so reviewers of later cycles can see what earlier
+# ones found. Archiving the same rows twice is a no-op; a --cycle that names an
+# already-recorded cycle while holding different rows is refused rather than
+# dropping them.
 #
 # Exit codes: 64 bad invocation or unusable CSV, 66 the plan or its review file
-# is missing.
+# is missing, 73 --cycle collides with a recorded cycle holding other findings.
 
 set -euo pipefail
 export LC_ALL=C
@@ -43,12 +46,43 @@ Rows are read from adversarial-review-incoming.md if present, else from --file
 CSV, else from stdin.
 
   --file CSV   read the rows from CSV instead of stdin
-  --cycle N    number the archived history entry N instead of the next free one
+  --cycle N    number the archived history entry N instead of the next one up
 
 This does not set the Verdict to approved. Author the Verdict and run
 \`update-plan-content.sh --review-status <plan> approved\` separately.
 USAGE
     exit "$rc"
+}
+
+# The highest `## Cycle N` recorded, 0 when there is none. It is a maximum and
+# never a count: one explicit --cycle N above the count would otherwise send
+# every later automatic number backwards, into labels already in use.
+highest_cycle_number() {
+    local history="$1" highest
+    [ -f "$history" ] || { printf '0\n'; return 0; }
+    highest="$({ grep -E '^## Cycle [0-9]+$' "$history" || true; } | awk '{ print $3 }' | sort -n | tail -1)"
+    printf '%d\n' "${highest:-0}"
+}
+
+# The rows filed under the last heading — comparing them is what stops the same
+# review being archived twice.
+last_archived_rows() {
+    local history="$1"
+    [ -f "$history" ] || return 0
+    awk '
+        /^## Cycle [0-9]+$/ { rows = ""; next }
+        /^\|/ { rows = rows $0 "\n" }
+        END { printf "%s", rows }
+    ' "$history"
+}
+
+cycle_already_recorded() {
+    local history="$1" wanted="$2"
+    [ -f "$history" ] || return 1
+    awk -v wanted="$wanted" '
+        /^## Cycle [0-9]+$/ && $3 + 0 == wanted + 0 { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$history"
 }
 
 plan_dir=""
@@ -109,15 +143,17 @@ history_rows="$(awk '
     in_findings && /^## Verdict$/ { exit }
     in_findings && /^\|/ { print }
 ' "$review_file")"
-# Record a cycle entry on every rewrite, even with no rows to archive: the
-# marker itself is the history a later reviewer needs. Comparing the last
-# archived row set is what stops the same review being archived twice.
+# Record a cycle entry on every rewrite, even with no rows to archive: the marker
+# itself is the history a later reviewer needs. Comparing the last archived row
+# set stops a double archive; an unarchived set is never dropped for a number.
 if [ -z "$cycle_number" ]; then
-    cycle_number="$(grep -c '^## Cycle ' "$history_file" 2>/dev/null || true)"
-    cycle_number=$((cycle_number + 1))
+    cycle_number=$(($(highest_cycle_number "$history_file") + 1))
 fi
-last_cycle="$(grep -oE '^## Cycle [0-9]+' "$history_file" 2>/dev/null | tail -1 | awk '{print $3}')" || true
-if [ "$last_cycle" != "$cycle_number" ]; then
+if [ -n "$history_rows" ] && [ "$history_rows" = "$(last_archived_rows "$history_file")" ]; then
+    printf 'Findings table is already the last entry in %s; not archiving it twice\n' "$history_file" >&2
+elif cycle_already_recorded "$history_file" "$cycle_number"; then
+    plan_die "Cycle $cycle_number is already recorded in $history_file with other findings; archiving would discard them (choose a free --cycle number)" 73
+else
     {
         printf '\n## Cycle %s\n\n' "$cycle_number"
         if [ -n "$history_rows" ]; then

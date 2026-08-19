@@ -1205,7 +1205,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W88 --type source --description "<new intended change>"   # amend type/description in place
 "$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --file review.csv      # rewrite the Findings table from a CSV file
-"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table into adversarial-review-history.md under Cycle 7
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table under Cycle 7; refused (73) if Cycle 7 already holds other findings
 "$PLANNING_SKILL_DIR/scripts/mint-fix-keys.sh" <plan-directory>                                     # (re)derive per-(finding,work-unit) fix keys into fix-keys.json
 "$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; self-certification fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
