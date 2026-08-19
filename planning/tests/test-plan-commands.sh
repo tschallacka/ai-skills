@@ -368,32 +368,34 @@ grep -Fq '## Cycle 8' "$plan_dir/adversarial-review-history.md"
 # cycle 8 archived the cycle-7 table, which held AR-20.
 grep -Fq '| AR-20 |' "$plan_dir/adversarial-review-history.md"
 grep -Fq '## Cycle 7' "$plan_dir/adversarial-review-history.md"
-# stale sweep: an unmarked paragraph fails, a history-marked one passes. The
-# phrase is unique to the step objective so it cannot collide with the goal's
-# owned-unit roster.
+# stale sweep: an unmarked paragraph is reported, a history-marked one is not.
+# The sweep is advisory -- it warns and never fails the gate -- because on real
+# plans the count phrases found 0 defects in 24 hits. The phrase is unique to the
+# step objective so it cannot collide with the goal's owned-unit roster.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the source retarget.' >/dev/null 2>&1
 printf 'rows must still render after the source retarget\n' > "$temporary_root/stale.txt"
-if "$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-fail.log" 2>&1; then
-    echo '--stale accepted a phrase in an unmarked paragraph.' >&2
+"$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" \
+    >"$temporary_root/stale-fail.log" 2>&1 || true
+grep -Fq "WARN: count 'rows must still render after the source retarget'" \
+    "$temporary_root/stale-fail.log"
+if grep -Eq '^FAIL: (count|stale phrase|wording) ' "$temporary_root/stale-fail.log"; then
+    echo 'the stale sweep failed the gate; it is advisory.' >&2
     exit 1
 fi
-grep -Fq 'stale phrase' "$temporary_root/stale-fail.log"
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the source retarget (previously the rows must still render after the source retarget).' >/dev/null 2>&1
 "$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-pass.log" 2>&1 || true
-if grep -Fq 'stale phrase' "$temporary_root/stale-pass.log"; then
+if grep -Fq "count 'rows must still render" "$temporary_root/stale-pass.log"; then
     echo '--stale flagged a phrase inside a history-marked paragraph.' >&2
     exit 1
 fi
 # --stale default ships a bundled case-count list and sweeps companions.
 printf '# Verification: history\n\n## Automated tests\n\nCheck all four states emit a row.\n' \
     > "$plan_dir/03-wire/steps/01-step-history-testing.md"
-if "$script_dir/validate-plan.sh" --stale default "$plan_dir" >"$temporary_root/stale-default.log" 2>&1; then
-    echo '--stale default missed a case-count phrase in a companion.' >&2
-    exit 1
-fi
-grep -Fq 'stale phrase' "$temporary_root/stale-default.log"
+"$script_dir/validate-plan.sh" --stale default "$plan_dir" \
+    >"$temporary_root/stale-default.log" 2>&1 || true
+grep -Fq "WARN: count 'all four'" "$temporary_root/stale-default.log"
 grep -Fq '01-step-history-testing' "$temporary_root/stale-default.log"
 # propagation: a grader that names a unit it does not depend on fails.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/02-step-verify 4.1 \

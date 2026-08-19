@@ -153,21 +153,31 @@ case "$out" in
     *) note_fail 'the warning does not name the table that checks this exactly' ;;
 esac
 
+# A count warns rather than blocking: on the real plans it found 0 defects in 24
+# hits, every one an accurate count of a fixed set.
 out="$(gate_output 'The grader walks all four states in the recorded order.')"
 case "$out" in
-    *"FAIL: stale phrase 'all four'"*) ;;
-    *) note_fail 'a bare count no longer fails the gate' ;;
+    *"WARN: count 'all four'"*) ;;
+    *) note_fail 'a bare count did not produce a warning' ;;
+esac
+case "$out" in
+    *"FAIL: stale phrase"*|*"FAIL: count "*) note_fail 'the stale sweep still fails the gate' ;;
+esac
+case "$out" in
+    *'enumerate the items'*) ;;
+    *) note_fail 'the count warning does not say what to write instead' ;;
 esac
 
 # A caller-supplied list has no known class, so nothing in it is downgraded.
 printf 'byte-identical\n' > "$temporary_root/supplied-phrases"
 out="$(gate_output 'The adapter output is byte-identical to the evidence.' "$temporary_root/supplied-phrases")"
 case "$out" in
-    *"FAIL: stale phrase 'byte-identical'"*) ;;
-    *) note_fail 'a caller-supplied phrase was not gated' ;;
+    *"WARN: count 'byte-identical'"*) ;;
+    *) note_fail 'a caller-supplied phrase produced no finding' ;;
 esac
-# The FAIL alone proves nothing -- it appears either way. The bundled comparison
-# list being wrongly active shows up as an extra warning beside it.
+# A supplied list replaces the bundled one, so the bundled comparison phrases
+# must not also fire -- which would show up as a second, differently-worded
+# warning for the same phrase.
 case "$out" in
     *"WARN: wording 'byte-identical'"*)
         note_fail 'the bundled comparison list ran for a caller-supplied phrase file' ;;

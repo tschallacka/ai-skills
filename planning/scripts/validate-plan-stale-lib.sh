@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# validate-plan-stale-lib.sh — the --stale sweep: a listed phrase that survives
-# in a paragraph carrying no history marker is a half-landed fix.
+# validate-plan-stale-lib.sh — the --stale sweep: a listed phrase surviving in a
+# paragraph that records no history marker may be a half-landed fix.
+#
+# Advisory throughout: every finding is a WARN. Measured against a labelled
+# corpus the count phrases found 0 defects in 24 real hits -- every one was an
+# accurate count of a fixed set, usually enumerated in the same sentence -- and
+# the identical-output phrases were 50% precise. Neither can separate a defect
+# from correct writing, because the deciding fact (did the list grow? is the
+# artifact deterministic?) is not in the phrase. A gate that reports style as
+# defect gets dismissed wholesale, which is what happened to all 13 findings on
+# one real plan. So this reports, and the checks that can be exact do the gating:
+# validate-plan-comparisons-lib.sh for declared comparisons, and the
+# paragraph-level marker rule below for a genuinely half-landed fix.
 #
 # Sourced by validate-plan.sh; never executed. Requires
 # validate-plan-common-lib.sh and the `plan_docs` list from
@@ -90,8 +101,8 @@ plan_validate_stale() {
                 fail "--stale file not found: $stale_file"
             fi
             stale_phrases_file="$stale_file"
-            # A caller-supplied list has no known class, so every phrase in it
-            # stays a gate.
+            # A caller-supplied list replaces the bundled one, so the bundled
+            # comparison phrases must not also run alongside it.
             stale_comparison_active=false
         else
             stale_comparison_active=true
@@ -108,7 +119,7 @@ plan_validate_stale() {
                 [ -f "$doc" ] || continue
                 hits="$(stale_scan_doc "$doc" "$phrase")"
                 if [ -n "$hits" ]; then
-                    fail "stale phrase '$phrase' appears in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ')"
+                    warn "count '$phrase' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- a count drifts the moment a case is added, so enumerate the items or name the section that lists them"
                 fi
             done
         done < "$stale_phrases_file"
