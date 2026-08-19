@@ -8,6 +8,7 @@ planning/telemetry-schema.json	telemetry-schema.json	W52	review-approved	backup-
 planning/placeholders.json	placeholders.json	installer	review-approved	backup-then-replace	false
 planning/state-change-registry.json	state-change-registry.json	installer	review-approved	backup-then-replace	false
 planning/never-executable-extensions.json	never-executable-extensions.json	installer	review-approved	backup-then-replace	false
+planning/goal-tables.json	goal-tables.json	installer	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context.md	context/brainstorm-limiting-context.md	W01-W02-W03-W04-W06-W09	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context-contract.json	context/brainstorm-limiting-context-contract.json	W05	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context-benchmark.json	context/brainstorm-limiting-context-benchmark.json	W07	review-approved	backup-then-replace	false
@@ -26,6 +27,7 @@ planning/tests/test-plan-snapshot.sh	tests/test-plan-snapshot.sh	W69-W71-W79-W77
 planning/tests/test-plan-integrity-and-monitor.sh	tests/test-plan-integrity-and-monitor.sh	W66	review-approved	backup-then-replace	false
 planning/tests/test-reviewer-projection.sh	tests/test-reviewer-projection.sh	W73	review-approved	backup-then-replace	false
 planning/tests/test-plan-context-reviewer.sh	tests/test-plan-context-reviewer.sh	W20	review-approved	backup-then-replace	false
+planning/tests/test-plan-context-paging.sh	tests/test-plan-context-paging.sh	installer	review-approved	backup-then-replace	false
 planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 brainstorm-limiting-context.md	—	W01-W02-W03-W04-W06-W09	review-approved	preserve-source-only	true
@@ -97,9 +99,11 @@ planning/tests/test-persona-drift.sh	tests/test-persona-drift.sh	installer	revie
 planning/tests/test-progress-bar-shape.sh	tests/test-progress-bar-shape.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-stale-sweep.sh	tests/test-stale-sweep.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-adversarial-review-sources.sh	tests/test-adversarial-review-sources.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-adversarial-review-cycles.sh	tests/test-adversarial-review-cycles.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-coverage-gaps.sh	tests/test-coverage-gaps.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-flag-coverage.sh	tests/test-flag-coverage.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-goal-testing-row.sh	tests/test-goal-testing-row.sh	installer	review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/progress.md	tests/fixtures/progress-shape/progress.md	installer	review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/goal.md	tests/fixtures/progress-shape/01-goal-a/goal.md	installer	review-approved	backup-then-replace	false
 planning/tests/fixtures/progress-shape/01-goal-a/progress.md	tests/fixtures/progress-shape/01-goal-a/progress.md	installer	review-approved	backup-then-replace	false

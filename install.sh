@@ -2242,6 +2242,7 @@ telemetry-schema.json
 placeholders.json
 state-change-registry.json
 never-executable-extensions.json
+goal-tables.json
 context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
@@ -2277,15 +2278,18 @@ tests/test-plan-snapshot.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
 tests/test-plan-context-reviewer.sh
+tests/test-plan-context-paging.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
 tests/test-progress-bar-shape.sh
 tests/test-stale-sweep.sh
 tests/test-adversarial-review-sources.sh
+tests/test-adversarial-review-cycles.sh
 tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh
+tests/test-goal-testing-row.sh
 PACKAGE-MANIFEST.txt
 requires.tsv
 ROLES.md
