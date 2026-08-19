@@ -163,19 +163,21 @@ emit() {
 # Warn when a scanned file was committed after the recorded generation time.
 # git, not mtime: a fresh clone rewrites every mtime and would look stale.
 report_age() {
-    local stamp newest
+    local stamp doc_at src_at
     stamp="$(sed -n 's/^<!-- generated: \(.*\) -->$/\1/p' "$output" | head -1)"
     [ -n "$stamp" ] || { printf '%s: no generation stamp; regenerate\n' "${0##*/}" >&2; return 0; }
     command -v git >/dev/null 2>&1 || return 0
     git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1 || return 0
-    # UTC, not %cI: git's offset form (…+02:00) compares wrongly against the
-    # stamp's Z form under a string comparison, which warned on fresh output.
-    newest="$(TZ=UTC git -C "$repo_root" log -1 \
-        --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd -- '*.sh' portability-rules.json 2>/dev/null || true)"
-    [ -n "$newest" ] || return 0
-    if [ "$newest" \> "$stamp" ]; then
-        printf '%s: generated %s, but a scanned file was committed at %s; regenerate\n' \
-            "${0##*/}" "$stamp" "$newest" >&2
+    # Commit ordering in epoch seconds, not the stamp against a commit time: the
+    # stamp is written before the commit that carries it, so any commit touching
+    # a scanned file would otherwise always look newer. Equal means the same
+    # commit, which is fresh.
+    doc_at="$(git -C "$repo_root" log -1 --format=%ct -- PORTABILITY.md 2>/dev/null || true)"
+    src_at="$(git -C "$repo_root" log -1 --format=%ct -- '*.sh' portability-rules.json 2>/dev/null || true)"
+    [ -n "$doc_at" ] && [ -n "$src_at" ] || return 0
+    if [ "$src_at" -gt "$doc_at" ]; then
+        printf '%s: a scanned file was committed after PORTABILITY.md (stamp %s); regenerate\n' \
+            "${0##*/}" "$stamp" >&2
     fi
 }
 
