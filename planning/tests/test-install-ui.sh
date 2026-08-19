@@ -18,6 +18,8 @@
 #   7. The ASCII fallback has no escape or non-ASCII byte, and drops the sprite.
 #   8. Only the two eye rows change between two eye states.
 #   9. The restoration sequences are emitted on INT, TERM and a plain exit.
+#   10. The installer seam: a blocked skill is never preselected, fd 3 without a
+#      tty declines with 69, and install.sh's own EXIT trap survives the picker.
 set -euo pipefail
 export LC_ALL=C
 
@@ -92,18 +94,25 @@ iui_clamp_scroll
     && [ "$IUI_CURSOR" -lt $((IUI_SCROLL + IUI_BODY_ROWS)) ] \
     || note_fail 'the cursor scrolled out of the visible window'
 frame="$(bash "$ui" --render --width 80 --height 8 --cursor 5 --color none --glyphs ascii)"
-printf '%s\n' "$frame" | grep -q '>\[ \] install-ui' \
-    || note_fail 'the cursor row is not visible after scrolling'
-printf '%s\n' "$frame" | grep -q '\] planning' \
-    && note_fail 'the list did not scroll: row 0 is still drawn'
+case "$frame" in
+    *'>[ ] install-ui'*) ;;
+    *) note_fail 'the cursor row is not visible after scrolling' ;;
+esac
+case "$frame" in
+    *'] planning'*) note_fail 'the list did not scroll: row 0 is still drawn' ;;
+esac
 [ "$fail" -eq 0 ] && note_pass 'the list scrolls and keeps the cursor visible'
 
 # ── 3. Checkbox and the three ways to toggle ─────────────────────────────────
 frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii)"
-printf '%s\n' "$frame" | grep -q '>\[#\] planning' \
-    || note_fail 'a selected skill must render a filled checkbox'
-printf '%s\n' "$frame" | grep -q ' \[ \] project-spec' \
-    || note_fail 'an unselected skill must render an empty checkbox'
+case "$frame" in
+    *'>[#] planning'*) ;;
+    *) note_fail 'a selected skill must render a filled checkbox' ;;
+esac
+case "$frame" in
+    *' [ ] project-spec'*) ;;
+    *) note_fail 'an unselected skill must render an empty checkbox' ;;
+esac
 note_pass 'the checkbox reflects selection'
 
 iui_load_demo
@@ -152,14 +161,22 @@ note_pass 'the fd-3 escape and SGR-mouse parsers decode a synthetic stream'
 # ── 4. Focus ─────────────────────────────────────────────────────────────────
 list_frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus list)"
 info_frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus info)"
-printf '%s\n' "$list_frame" | grep -q '\[SKILLS\]' \
-    || note_fail 'the focused list pane must be marked [SKILLS]'
-printf '%s\n' "$list_frame" | grep -q ' DETAILS ' \
-    || note_fail 'the unfocused info pane must not be bracketed'
-printf '%s\n' "$info_frame" | grep -q '\[DETAILS\]' \
-    || note_fail 'the focused info pane must be marked [DETAILS]'
-printf '%s\n' "$info_frame" | grep -q ' SKILLS ' \
-    || note_fail 'the unfocused list pane must not be bracketed'
+case "$list_frame" in
+    *'[SKILLS]'*) ;;
+    *) note_fail 'the focused list pane must be marked [SKILLS]' ;;
+esac
+case "$list_frame" in
+    *' DETAILS '*) ;;
+    *) note_fail 'the unfocused info pane must not be bracketed' ;;
+esac
+case "$info_frame" in
+    *'[DETAILS]'*) ;;
+    *) note_fail 'the focused info pane must be marked [DETAILS]' ;;
+esac
+case "$info_frame" in
+    *' SKILLS '*) ;;
+    *) note_fail 'the unfocused list pane must not be bracketed' ;;
+esac
 IUI_FOCUS=list
 iui_handle_key $'\t'
 [ "$IUI_FOCUS" = "info" ] || note_fail 'Tab did not move focus to the info pane'
@@ -170,12 +187,18 @@ iui_handle_key SHIFTTAB
 note_pass 'Tab moves focus and the focused pane is marked differently'
 
 # ── 5. The actions are usable only under focus ───────────────────────────────
-printf '%s\n' "$info_frame" | grep -q '> d  help me install dependencies' \
-    || note_fail 'a focused info pane must mark its actions usable'
-printf '%s\n' "$info_frame" | grep -q '> r  reverify dependencies' \
-    || note_fail 'the reverify action is missing from the focused info pane'
-printf '%s\n' "$list_frame" | grep -q '\- d  help me install dependencies' \
-    || note_fail 'an unfocused info pane must still list its actions, marked unusable'
+case "$info_frame" in
+    *'> d  help me install dependencies'*) ;;
+    *) note_fail 'a focused info pane must mark its actions usable' ;;
+esac
+case "$info_frame" in
+    *'> r  reverify dependencies'*) ;;
+    *) note_fail 'the reverify action is missing from the focused info pane' ;;
+esac
+case "$list_frame" in
+    *'- d  help me install dependencies'*) ;;
+    *) note_fail 'an unfocused info pane must still list its actions, marked unusable' ;;
+esac
 note_pass 'the info actions become usable only when the pane has focus'
 
 # ── 6. The dependency cache is global, keyed per tool ────────────────────────
@@ -265,16 +288,23 @@ COLOR_MODE=none
 iui_set_glyphs ascii
 IUI_CURSOR=4
 frame="$(iui_render_frame)"
-printf '%s\n' "$frame" | grep -q 'install *blocked (jq missing)' \
+# PORTABILITY(pipefail-grep-q): the padding is variable, so these three stay
+# regexes and are matched in-process rather than through a pipe.
+blocked_re='install *blocked \(jq missing\)'
+[[ "$frame" =~ $blocked_re ]] \
     || note_fail 'the info pane must spell out the blocking tool'
-printf '%s\n' "$frame" | grep -q 'jq  *hard  *missing' \
+tool_row_re='jq  *hard  *missing'
+[[ "$frame" =~ $tool_row_re ]] \
     || note_fail 'the info pane must show the tool, its strength and its state'
 IUI_CURSOR=2
 frame="$(iui_render_frame)"
-printf '%s\n' "$frame" | grep -q 'install *allowed, degraded (memlimit' \
+degraded_re='install *allowed, degraded \(memlimit'
+[[ "$frame" =~ $degraded_re ]] \
     || note_fail 'a degraded skill must still read as installable'
-printf '%s\n' "$frame" | grep -q 'memory cap not enforced' \
-    || note_fail 'a soft requirement must say what capability is lost'
+case "$frame" in
+    *'memory cap not enforced'*) ;;
+    *) note_fail 'a soft requirement must say what capability is lost' ;;
+esac
 note_pass 'all three requirement states are distinguishable with and without colour'
 
 # A condition carries architecture as well as OS, so memlimit is not required on
@@ -297,8 +327,9 @@ case "$mono" in
     *$'\033'*) note_fail 'the none colour mode emitted an escape sequence' ;;
 esac
 has_non_ascii "$mono" && note_fail 'the ASCII fallback emitted a non-ASCII byte'
-printf '%s\n' "$mono" | grep -q '################################' \
-    && note_fail 'the sprite must be dropped in the none colour mode, not drawn blank'
+case "$mono" in
+    *'################################'*) note_fail 'the sprite must be dropped in the none colour mode, not drawn blank' ;;
+esac
 COLOR_MODE=none
 IUI_COLS=200
 IUI_ROWS=60
@@ -373,6 +404,52 @@ rc=0
 ( exec 3<&-; . "$ui"; iui_run ) >/dev/null 2>&1 || rc="$?"
 [ "$rc" -eq 69 ] || note_fail "iui_run without a tty on fd 3 returned $rc, want 69"
 note_pass 'iui_run declines with 69 when fd 3 is not a tty'
+
+# ── 10. The installer seam ───────────────────────────────────────────────────
+# iui_select_skills() is the one function install.sh's select_skills() calls, so
+# it is driven the way the installer drives it: the generated verify table
+# stubbed to fail for jq, fd 3 closed, and cleanup() standing in for the
+# installer's own EXIT trap.
+seam_probe() {
+    ( set -euo pipefail
+      # shellcheck source=/dev/null
+      . "$ui"
+      runtime_tool_verify() { [ "$1" != jq ]; }
+      SOURCE_VERSION=""
+      TARGET_SELECTION=""
+      SELECTED_SKILLS=()
+      cleanup() { printf 'cleanup-ran\n'; }
+      trap cleanup EXIT
+      iui_load_installer_skills
+      printf 'planning-sel=%s other-sel=%s\n' "${IUI_SKILL_SEL[0]}" "${IUI_SKILL_SEL[1]}"
+      seam_rc=0
+      exec 3<&-
+      iui_select_skills || seam_rc="$?"
+      printf 'rc=%s\n' "$seam_rc"
+      # `trap -p` reports nothing from a subshell on bash 3.2, so the trap is
+      # proved by its effect: were the chained handler still installed, exiting
+      # here would run iui_term_leave as well as cleanup.
+      IUI_TERM_ACTIVE=1
+      iui_term_leave() { printf 'term-leave-ran\n'; } )
+}
+
+seam="$(seam_probe 2>&1 || true)"
+case "$seam" in
+    *'planning-sel=0 other-sel=1'*) : ;;
+    *) note_fail 'the default selection must skip a skill whose hard requirement is missing' ;;
+esac
+case "$seam" in
+    *'rc=69'*) : ;;
+    *) note_fail 'iui_select_skills must return 69 so select_skills falls back to the numbered menu' ;;
+esac
+case "$seam" in
+    *'cleanup-ran'*) : ;;
+    *) note_fail "install.sh's cleanup() no longer runs on exit after the picker" ;;
+esac
+case "$seam" in
+    *'term-leave-ran'*) note_fail "the picker left its own EXIT trap installed over cleanup" ;;
+esac
+note_pass 'the installer seam declines without a tty and leaves cleanup() installed'
 
 [ "$fail" -eq 0 ] || exit 1
 printf 'install-ui: all assertions passed\n'

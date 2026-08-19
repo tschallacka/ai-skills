@@ -94,7 +94,9 @@ while IFS= read -r file; do
     case "$help_out" in
         '#!'*) note_fail "$file --help prints its shebang" ;;
     esac
-    if printf '%s\n' "$help_out" | grep -q '^[[:space:]]*# '; then
+    # PORTABILITY(pipefail-grep-q): the anchor is per line, so grep stays — with
+    # -c, which drains the pipe instead of closing it on the first match.
+    if printf '%s\n' "$help_out" | grep -c '^[[:space:]]*# ' >/dev/null; then
         note_fail "$file --help prints raw '# ' comment lines; strip them"
     fi
 done < <(script_list)

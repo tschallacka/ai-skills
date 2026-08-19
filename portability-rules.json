@@ -189,6 +189,23 @@
       "breaks": "the dependency budget, not a platform",
       "symptom": "a machine without python3 loses a documented feature",
       "replacement": "awk for text, jq for JSON. python3 is development-only (benchmark/, unregistered tests)."
+    },
+    {
+      "id": "pipefail-grep-q",
+      "construct": "cmd | grep -q   (under set -o pipefail)",
+      "breaks": "every shell, whenever pipefail is set",
+      "symptom": "the pipeline reports 141 (SIGPIPE) even though grep matched, so `... && found=1` never runs and an `if` silently takes the wrong branch. A check reports 'not found' for something that is there, and a test passes without asserting.",
+      "replacement": "capture first, then match the string: out=\"$(cmd || true)\"; case \"$out\" in *needle*) ... ;; esac",
+      "note": "grep -q exits on the first match and closes the pipe, so the writer dies of SIGPIPE. The sibling trap is grep -c / grep -v / grep -o exiting 1 when nothing matches, which aborts the script under set -e before any assertion runs; wrap those as { grep -c ... || true; }. The failure is timing-dependent — a writer that finishes before grep -q exits never sees SIGPIPE — which is why it survives in small cases and lies in large ones. A whole-input reader is safe, so `| grep -c PATTERN >/dev/null` is the escape hatch when the pattern must stay a line-scoped regex.",
+      "detect": "(^|[^|])\\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q|-q[A-Za-z]*)"
+    },
+    {
+      "id": "local-self-reference",
+      "construct": "local a=\"$1\" b=\"$a/x\"   (under set -u)",
+      "breaks": "every bash, whenever set -u is on",
+      "symptom": "a: unbound variable, reported at the declaration itself",
+      "replacement": "split the declaration: local a=\"$1\"; local b=\"$a/x\"",
+      "note": "local declares every name in the statement before evaluating any right-hand side, so the earlier name is already local-and-unset while the later value is expanded."
     }
   ]
 }

@@ -115,7 +115,10 @@ plan_validate_propagation_symbols() {
             # email/items/price/row.phtml) is a template id, not a class method.
             if [[ "$token" =~ ^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*:: ]]; then
                 # Confirm the full source line carries a path after ::(a slash).
-                if printf '%s' "$edit_lines" | grep -qE "${token%%::*}[A-Za-z0-9_]*::[^ (]*/"; then
+                # PORTABILITY(pipefail-grep-q): grep -c drains the pipe, and the
+                # match must stay line-scoped, which a bash =~ would not be.
+                if printf '%s' "$edit_lines" \
+                    | grep -cE "${token%%::*}[A-Za-z0-9_]*::[^ (]*/" >/dev/null; then
                     continue
                 fi
             fi
@@ -245,9 +248,10 @@ plan_validate_propagation_companion() {
                { [ "$named_type" = test ] || [ "$named_type" = verification ]; }; then
                 continue
             fi
-            if ! printf '%s ' "$deps" | grep -Fq "$named"; then
-                warn "$id companion references $named, which $id neither owns nor depends on; update the companion or add the dependency edge"
-            fi
+            case "$deps" in
+                *"$named"*) ;;
+                *) warn "$id companion references $named, which $id neither owns nor depends on; update the companion or add the dependency edge" ;;
+            esac
         done
     done
 }
@@ -271,7 +275,9 @@ plan_validate_propagation_leaves() {
             dependent=false
             for candidate in ${unit_ids[@]+"${unit_ids[@]}"}; do
                 plan_map_load unit_depends "$candidate" || plan_map_value=""
-                printf '%s' "$plan_map_value" | grep -Fq "$id" && { dependent=true; break; }
+                case "$plan_map_value" in
+                    *"$id"*) dependent=true; break ;;
+                esac
             done
             if [ "$dependent" = false ]; then
                 warn "$id is a graph leaf in a goal that owns a verification unit; nothing depends on it, so nothing verifies its output"

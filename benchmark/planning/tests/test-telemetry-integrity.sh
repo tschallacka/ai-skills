@@ -24,8 +24,11 @@ required = set(schema["required"])
 assert {"protocol_id", "taint_causes", "provenance", "phase_records"} <= required
 PY
 test -x "$root/validate-telemetry.sh"
-if "$root/telemetry.sh" 'bad id with spaces' | grep -Fq 'telemetry_status=available'; then
-    echo 'invalid telemetry identity was accepted' >&2
-    exit 1
-fi
+bad_id_out="$("$root/telemetry.sh" 'bad id with spaces' || true)"
+case "$bad_id_out" in
+    *telemetry_status=available*)
+        echo 'invalid telemetry identity was accepted' >&2
+        exit 1
+        ;;
+esac
 printf 'Telemetry integrity contract tests passed.\n'

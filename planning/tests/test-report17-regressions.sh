@@ -93,7 +93,11 @@ fi
 # Register both literals; WARNs clear; a variant with extra args is covered.
 "$script_dir/register-command.sh" "$plan_b" cache-flush 'bin/magento cache:flush' 'routine; after a constructor change' >/dev/null
 "$script_dir/register-command.sh" "$plan_b" upgrade 'bin/magento setup:upgrade' 'module/schema/config change; usually enough' >/dev/null
-"$script_dir/register-command.sh" "$plan_b" --list | grep -Fq 'cache-flush' || fail 'register-command.sh --list missing entry'
+registered_list="$("$script_dir/register-command.sh" "$plan_b" --list)"
+case "$registered_list" in
+    *cache-flush*) ;;
+    *) fail 'register-command.sh --list missing entry' ;;
+esac
 grep -Fq 'upgrade' "$plan_b/commands.json" || fail 'commands.json missing registered entry'
 "$script_dir/update-plan-content.sh" -sp "$plan_b" 01-enable-module/01-step-x-testing 2.1 \
     'Run `bin/magento cache:flush --page-cache` and verify HTTP 200' >/dev/null

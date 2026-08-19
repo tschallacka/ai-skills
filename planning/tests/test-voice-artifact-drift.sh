@@ -27,11 +27,15 @@ registry="$(bash "$reader" --list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
 present="$(awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|/ { rid=trim($2); gsub(/^`|`$/,"",rid); if (rid ~ /^[a-z]+$/) print rid }' "$voices")"
 [ -n "$present" ] || { echo "voice artifact has no keyed rows" >&2; exit 1; }
 
+present_list=" $(printf '%s' "$present" | tr '\n' ' ') "
 for id in $registry; do
-    echo "$present" | grep -qx "$id" || {
-        echo "voice drift: registered persona $id has no voice in $voices" >&2
-        exit 1
-    }
+    case "$present_list" in
+        *" $id "*) ;;
+        *)
+            echo "voice drift: registered persona $id has no voice in $voices" >&2
+            exit 1
+            ;;
+    esac
 done
 
 # Every voice key must be a registered persona (no orphan keys).
@@ -59,10 +63,13 @@ awk -F'|' '
 # Every persona payload includes its voice via role-context (injection proof).
 for id in $registry; do
     payload="$(ROLE_ID="$id" bash "$reader" "$id" -p1 2>/dev/null || true)"
-    echo "$payload" | grep -q "# Voice ($id):" || {
-        echo "voice drift: role-context does not inject voice for $id" >&2
-        exit 1
-    }
+    case "$payload" in
+        *"# Voice ($id):"*) ;;
+        *)
+            echo "voice drift: role-context does not inject voice for $id" >&2
+            exit 1
+            ;;
+    esac
 done
 
 echo 'voice-artifact drift: PASS'

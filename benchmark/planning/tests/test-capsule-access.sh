@@ -62,12 +62,17 @@ assert_capsule_granted() {
     out="$(emit_argv "$role" "$workspace" "$capsule")"
     cwd="$(printf '%s\n' "$out" | sed -n '1p')"
     [ "$cwd" = "$workspace" ] || { echo "$role: AGENT_CWD is '$cwd', want $workspace" >&2; exit 1; }
-    printf '%s\n' "$out" | grep -Fq "$capsule" || { echo "$role argv does not reference the capsule $capsule" >&2; exit 1; }
-    printf '%s\n' "$out" | grep -Fq "$workspace" || { echo "$role argv does not reference the workspace $workspace" >&2; exit 1; }
-    if printf '%s\n' "$out" | grep -Fq 'SRC_ROOT'; then
-        echo "$role argv references SRC_ROOT" >&2
-        exit 1
-    fi
+    case "$out" in
+        *"$capsule"*) ;;
+        *) echo "$role argv does not reference the capsule $capsule" >&2; exit 1 ;;
+    esac
+    case "$out" in
+        *"$workspace"*) ;;
+        *) echo "$role argv does not reference the workspace $workspace" >&2; exit 1 ;;
+    esac
+    case "$out" in
+        *SRC_ROOT*) echo "$role argv references SRC_ROOT" >&2; exit 1 ;;
+    esac
     printf '%s\n' "$out"
 }
 
@@ -78,15 +83,24 @@ analyzer_argv="$(assert_capsule_granted analyzer "$tmp/ws" "$tmp/cap")"
 # The reviewer must be able to reach the plan it reviews. Either the capsule
 # root is granted as a directory (codex/claude --add-dir) or the plan's files
 # are granted individually (opencode -f attachments).
-if ! printf '%s\n' "$reviewer_argv" | grep -Fqx -- "$tmp/rev-cap" &&
-   ! printf '%s\n' "$reviewer_argv" | grep -Fq -- "$tmp/rev-cap/plan/plan.md"; then
+grants_capsule_root=false
+while IFS= read -r argv_word; do
+    if [ "$argv_word" = "$tmp/rev-cap" ]; then grants_capsule_root=true; break; fi
+done <<ARGV
+$reviewer_argv
+ARGV
+grants_plan_file=false
+case "$reviewer_argv" in
+    *"$tmp/rev-cap/plan/plan.md"*) grants_plan_file=true ;;
+esac
+if [ "$grants_capsule_root" = false ] && [ "$grants_plan_file" = false ]; then
     echo 'reviewer argv grants neither the capsule root nor the reviewed plan' >&2
     exit 1
 fi
 
 # Codex flag spellings, asserted only for codex.
 if [ "$agent" = codex ]; then
-    [ "$(printf '%s\n' "$worker_argv" | grep -c -- '--add-dir')" -ge 2 ] ||
+    [ "$(printf '%s\n' "$worker_argv" | { grep -c -- '--add-dir' || true; })" -ge 2 ] ||
         { echo 'codex worker argv does not grant capsule+workspace via --add-dir' >&2; exit 1; }
     grep -Fq -- '--add-dir' "$codex_driver"
     if ! printf '%s\n' "$worker_argv" | awk -v want="$tmp/ws" '$0=="-C"{getline; if ($0==want) found=1} END{exit !found}'; then

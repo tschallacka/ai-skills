@@ -36,23 +36,39 @@ labels="$(grep -E '^§ 9\.' "$plan_units/00-g/goal.md")"
 [ "$(printf '%s\n' "$labels" | sort | uniq -d | wc -l)" -eq 0 ] || fail 'duplicate § 9.N labels'
 [ "$(printf '%s\n' "$labels" | tr '\n' ' ')" = '§ 9.1 § 9.2 § 9.3 § 9.4 ' ] \
     || fail "labels not ascending 9.1..9.4: $(printf '%s\n' "$labels" | tr '\n' ' ')"
-if "$script_dir/validate-plan.sh" "$plan_units" 2>&1 | grep -Fq 'duplicate paragraph label'; then
-    fail 'validator still reports duplicate § 9 labels'
-fi
+label_report="$("$script_dir/validate-plan.sh" "$plan_units" 2>&1 || true)"
+case "$label_report" in
+    *'duplicate paragraph label'*) fail 'validator still reports duplicate § 9 labels' ;;
+esac
 
 # ---- §3: empty positional scope + --file flag ----
 "$script_dir/update-work-unit.sh" "$plan_units" W01 '' 'app/code/X/Moved.php' >/dev/null
 row="$(grep '^| W01 |' "$plan_units/work-unit-inventory.md")"
-printf '%s\n' "$row" | grep -Fq 'app/code/X/Moved.php' || fail 'empty-scope positional did not update File'
-printf '%s\n' "$row" | grep -Fq '`A::run()`' || fail 'empty-scope positional shifted the file into Primary scope'
+case "$row" in
+    *'app/code/X/Moved.php'*) ;;
+    *) fail 'empty-scope positional did not update File' ;;
+esac
+case "$row" in
+    *'`A::run()`'*) ;;
+    *) fail 'empty-scope positional shifted the file into Primary scope' ;;
+esac
 "$script_dir/update-work-unit.sh" "$plan_units" W02 --file 'app/code/X/MovedTest.php' >/dev/null
 row="$(grep '^| W02 |' "$plan_units/work-unit-inventory.md")"
-printf '%s\n' "$row" | grep -Fq 'app/code/X/MovedTest.php' || fail '--file flag did not update File'
+case "$row" in
+    *'app/code/X/MovedTest.php'*) ;;
+    *) fail '--file flag did not update File' ;;
+esac
 # The classic positional pair still works.
 "$script_dir/update-work-unit.sh" "$plan_units" W02 'newscope' 'app/code/X/Third.php' >/dev/null
 row="$(grep '^| W02 |' "$plan_units/work-unit-inventory.md")"
-printf '%s\n' "$row" | grep -Fq 'newscope' || fail 'first positional no longer updates scope'
-printf '%s\n' "$row" | grep -Fq 'app/code/X/Third.php' || fail 'second positional no longer updates File'
+case "$row" in
+    *'newscope'*) ;;
+    *) fail 'first positional no longer updates scope' ;;
+esac
+case "$row" in
+    *'app/code/X/Third.php'*) ;;
+    *) fail 'second positional no longer updates File' ;;
+esac
 
 # ---- §4: every companion paragraph is labeled ----
 plan_comp="$temporary_root/companion"

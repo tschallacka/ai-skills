@@ -82,7 +82,8 @@ structural_gate_report() {
     structural_require_directory_with_files() {
         local label="$1"
         local directory="$2"
-        if [ -d "$plan_dir/$directory" ] && find "$plan_dir/$directory" -type f -print -quit 2>/dev/null | grep -q .; then
+        if [ -d "$plan_dir/$directory" ] \
+            && [ -n "$(find "$plan_dir/$directory" -type f -print -quit 2>/dev/null || true)" ]; then
             echo "PASS: $label ($plan_dir/$directory)"
         else
             echo "FAIL: $label ($plan_dir/$directory)"
@@ -98,14 +99,14 @@ structural_gate_report() {
         structural_require_any_pattern "goal" 'goal.md'
         structural_require_any_pattern "work-unit inventory" '*work-unit*' '*atomic-work-unit*'
         structural_require_any_pattern "UI user story" '*ui*user*stor*' '*ui*stor*'
-        if find "$plan_dir" -type f -iname '*run*cache*' -print -quit 2>/dev/null | grep -q .; then
+        if [ -n "$(find "$plan_dir" -type f -iname '*run*cache*' -print -quit 2>/dev/null || true)" ]; then
             echo "PASS: UI story run/cache (matching run/cache artifact)"
         else
             structural_require_directory_with_files "UI story run/cache" 'ui-story-runs'
         fi
         structural_require_pattern "adversarial review" '*adversarial*review*'
         structural_require_any_pattern "bug register" '*bug*' '*bugs*'
-        if find "$plan_dir" -type f -iname '*context*snap*' -print -quit 2>/dev/null | grep -q .; then
+        if [ -n "$(find "$plan_dir" -type f -iname '*context*snap*' -print -quit 2>/dev/null || true)" ]; then
             echo "PASS: context snapshot (matching context snapshot artifact)"
         else
             structural_require_directory_with_files "context snapshot" 'context/snapshots'

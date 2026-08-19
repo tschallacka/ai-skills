@@ -8,6 +8,18 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-command-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 plan_dir="$temporary_root/status-sync"
 
+# PORTABILITY(pipefail-grep-q): these assertions read a script's stdout, so the
+# reader drains the pipe instead of closing it on the first match.
+assert_stdout_contains() {
+    local needle="$1" text
+    text="$(cat)"
+    case "$text" in
+        *"$needle"*) return 0 ;;
+    esac
+    printf 'assertion failed: stdout does not contain %s\n' "$needle" >&2
+    exit 1
+}
+
 if "$script_dir/update-plan-content.sh" paragraph "$plan_dir" plan -p 2.1: 'Legacy form' >/dev/null 2>&1; then
     echo 'The removed positional update form unexpectedly passed.' >&2
     exit 1
@@ -150,15 +162,15 @@ grep -Fqx 'FAIL: Adversarial review is not approved' "$temporary_root/complete-p
 grep -Fqx -- '- Status: `✅ approved`' "$plan_dir/adversarial-review.md"
 grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"
 
-"$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | grep -Fq '"id":"unit:W01"'
+"$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | assert_stdout_contains '"id":"unit:W01"'
 # plan-content.sh get is deterministic: <plan> <document-id> [format].
-"$script_dir/plan-content.sh" get "$plan_dir" plan json | grep -Fq '"id":"plan"'
-"$script_dir/plan-content.sh" get "$plan_dir" plan | grep -Fq '# Plan: '
+"$script_dir/plan-content.sh" get "$plan_dir" plan json | assert_stdout_contains '"id":"plan"'
+"$script_dir/plan-content.sh" get "$plan_dir" plan | assert_stdout_contains '# Plan: '
 if "$script_dir/plan-content.sh" get "$plan_dir" json >/dev/null 2>&1; then
     echo 'plan-content get without an explicit document-id unexpectedly passed.' >&2
     exit 1
 fi
-"$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | grep -Fq '"downstream":["W02"]'
+"$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | assert_stdout_contains '"downstream":["W02"]'
 "$script_dir/validate-plan.sh" "$plan_dir"
 
 missing_companion="$plan_dir/01-sync/steps/02-step-validate-status-testing.md"
@@ -331,8 +343,8 @@ printf '# Verification: verify\n\n## Automated tests\n\nRun the verifier.\n' \
 "$script_dir/add-coverage.sh" "$plan_dir" 'Order history renders.' W10 'covers render' >/dev/null 2>&1
 "$script_dir/add-coverage.sh" "$plan_dir" 'Order history is verified.' W11 'grader' >/dev/null 2>&1
 # coverage and stories are readable document ids for get.
-"$script_dir/plan-content.sh" get "$plan_dir" coverage | grep -Fq '## Definition-of-done coverage'
-"$script_dir/plan-content.sh" get "$plan_dir" stories | grep -Fq 'UI user stories'
+"$script_dir/plan-content.sh" get "$plan_dir" coverage | assert_stdout_contains '## Definition-of-done coverage'
+"$script_dir/plan-content.sh" get "$plan_dir" stories | assert_stdout_contains 'UI user stories'
 # find --in coverage scopes to the Definition-of-done coverage rows.
 "$script_dir/plan-content.sh" find "$plan_dir" 'Order history renders.' --in coverage >/dev/null
 # add-coverage --replace collapses duplicate coverage rows for the same outcome.
@@ -422,10 +434,10 @@ grep -Fq 'Only criterion.' "$plan_dir/03-wire/steps/01-step-history.md"
 printf 'AR-01\tW10\tkey\n' > "$plan_dir/fixes.md"
 printf '{"session_id":"s1","keys":{}}\n' > "$plan_dir/fix-keys.json"
 printf '{"status":"pending"}\n' > "$plan_dir/approval.json"
-"$script_dir/plan-content.sh" get "$plan_dir" fixes | grep -Fq 'AR-01'
-"$script_dir/plan-content.sh" get "$plan_dir" fix-keys | grep -Fq 'session_id'
-"$script_dir/plan-content.sh" get "$plan_dir" approval | grep -Fq 'pending'
-"$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | grep -Fq 'unit:'
+"$script_dir/plan-content.sh" get "$plan_dir" fixes | assert_stdout_contains 'AR-01'
+"$script_dir/plan-content.sh" get "$plan_dir" fix-keys | assert_stdout_contains 'session_id'
+"$script_dir/plan-content.sh" get "$plan_dir" approval | assert_stdout_contains 'pending'
+"$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | assert_stdout_contains 'unit:'
 # report 12: roster↔inventory set check — a goal §9.x roster that omits an
 # inventory-assigned unit is a propagation fail.
 git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
@@ -519,10 +531,13 @@ if ! grep -Fq 'still contains a registered placeholder' "$temporary_root/fresh-c
 fi
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
-printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {
-    echo 'retargeting did not list the grading verification unit.' >&2
-    exit 1
-}
+case "$retarget_output" in
+    *'re-read its grader(s) W11'*) ;;
+    *)
+        echo 'retargeting did not list the grading verification unit.' >&2
+        exit 1
+        ;;
+esac
 # verify-target: a markup unit whose block is removed by a layout fails.
 fake_repo="$temporary_root/fakerepo"
 mkdir -p "$fake_repo/app/code/Fake/Module/view/frontend/layout" \
@@ -566,7 +581,7 @@ grep -Fq '§ 4.1' "$diff_output"
 "$script_dir/create-step-testing.sh" "$plan_dir/03-wire" 01-step-history \
     'Verify the rows still render.\nRecord the observed result.' --overwrite >/dev/null 2>&1
 "$script_dir/plan-content.sh" find "$plan_dir" 'Verify the rows still render' --in testing \
-    | grep -Fq 'step:03-wire/01-step-history-testing'
+    | assert_stdout_contains 'step:03-wire/01-step-history-testing'
 # --delete-paragraph removes one paragraph and renumbers the rest of the section.
 "$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history instructions \
     -p 5.1: 'Instruction one.' -p 5.2: 'Instruction two.' -p 5.3: 'Instruction three.' >/dev/null 2>&1

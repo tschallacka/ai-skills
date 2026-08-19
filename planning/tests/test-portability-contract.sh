@@ -101,9 +101,12 @@ while IFS= read -r rule_id; do
     [ "$detect" != null ] || continue
     while IFS= read -r file; do
         in_allowlist "$file" "$rule_id" && continue
-        # Strip full-line comments and trailing comments, then match.
-        if sed 's/[[:space:]]*#.*$//' "$repo_root/$file" | grep -Eq -- "$detect"; then
-            hit="$(sed 's/[[:space:]]*#.*$//' "$repo_root/$file" | grep -nEm1 -- "$detect")"
+        # Strip full-line comments and trailing comments, then match. No -q and
+        # no -m1: either would close the pipe on the first match and report the
+        # writer's SIGPIPE (141) instead of the finding.
+        hits="$(sed 's/[[:space:]]*#.*$//' "$repo_root/$file" | grep -nE -- "$detect" || true)"
+        if [ -n "$hits" ]; then
+            hit="${hits%%$'\n'*}"
             note_fail "$file uses banned construct '$rule_id' at line ${hit%%:*} — see PORTABILITY.md"
         fi
     done < <(script_list)

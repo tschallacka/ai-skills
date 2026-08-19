@@ -50,7 +50,9 @@ for script in "$scripts"/*.sh; do
             for flag in $flags; do
                 case " $HELP_FLAGS " in *" $flag "*) continue ;; esac
                 checked=$((checked + 1))
-                if ! printf '%s' "$helpout" | grep -qw -- "$flag"; then
+                # PORTABILITY(pipefail-grep-q): -w has no case equivalent, so grep
+                # stays — with -c, which drains the pipe.
+                if ! printf '%s' "$helpout" | grep -cw -- "$flag" >/dev/null; then
                     echo "CRITICAL: $name --help does not document accepted flag '$flag'" >&2
                     critical=$((critical + 1))
                 fi

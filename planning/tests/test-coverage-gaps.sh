@@ -226,14 +226,17 @@ chk "$rc_page" 0 "role-context --page/--page-size accepted"
 full_payload="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer 2>/dev/null || true)"
 page1="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 1 --page-size 500 2>/dev/null || true)"
 page2="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 2 --page-size 500 2>/dev/null || true)"
-if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && printf '%s' "$page1" | grep -q 'more:'; then
+page1_continues=false
+case "$page1" in *'more:'*) page1_continues=true ;; esac
+if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && [ "$page1_continues" = true ]; then
     pass=$((pass+1)); echo "PASS: role-context --page paginates (p1 != p2, more: present)"
 else
     fail=$((fail+1)); echo "FAIL: role-context --page does not paginate"
 fi
 # --paths lists the role's doc paths (maintainer-only).
 paths_out="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
-if printf '%s' "$paths_out" | grep -q 'ROLES.md'; then
+case "$paths_out" in *'ROLES.md'*) paths_listed=true ;; *) paths_listed=false ;; esac
+if [ "$paths_listed" = true ]; then
     pass=$((pass+1)); echo "PASS: role-context --paths lists doc paths"
 else
     fail=$((fail+1)); echo "FAIL: role-context --paths"
@@ -254,7 +257,11 @@ full_plan="$tmp/full"
 "$scripts/add-goal.sh" "$full_plan" 01-g 'G' 'O' >/dev/null
 "$scripts/add-work-unit.sh" "$full_plan" W01 source a.php 'A::x' N/A "$(printf 'long%.0s' $(seq 1 60))" '—' 01-g 01-step-a >/dev/null
 full_out="$("$scripts/plan-content.sh" find "$full_plan" 'longlong' --in units --full 2>/dev/null || true)"
-if [ "$(printf '%s' "$full_out" | grep -c '\.\.\.')" -eq 0 ] && printf '%s' "$full_out" | grep -q 'longlong'; then
+truncated=false
+case "$full_out" in *'...'*) truncated=true ;; esac
+excerpt_present=false
+case "$full_out" in *'longlong'*) excerpt_present=true ;; esac
+if [ "$truncated" = false ] && [ "$excerpt_present" = true ]; then
     pass=$((pass+1)); echo "PASS: find --full shows untruncated excerpt"
 else
     fail=$((fail+1)); echo "FAIL: find --full truncation"

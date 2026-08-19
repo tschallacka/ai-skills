@@ -56,12 +56,13 @@ agent_available() {
 # _agent_setsid_supports_wait(): 0 when the installed setsid accepts --wait.
 # Probed once and cached; util-linux has it, other implementations may not.
 _agent_setsid_supports_wait() {
+    local probe
     if [ -z "${_AGENT_SETSID_WAIT:-}" ]; then
-        if setsid --help 2>&1 | grep -q -- '--wait'; then
-            _AGENT_SETSID_WAIT=yes
-        else
-            _AGENT_SETSID_WAIT=no
-        fi
+        probe="$(setsid --help 2>&1 || true)"
+        _AGENT_SETSID_WAIT=no
+        case "$probe" in
+            *--wait*) _AGENT_SETSID_WAIT=yes ;;
+        esac
     fi
     [ "$_AGENT_SETSID_WAIT" = yes ]
 }
@@ -87,10 +88,13 @@ _agent_capture_pgid() {
 # ---- quoted: launch_agent arguments ----
 # launch_agent <mode> <timeout|''> <output|'-'>
 #   mode=setsid      setsid --wait + timeout, records the process group
-#   mode=background  plain background run, no setsid and no timeout
-#   timeout          e.g. '45m'; ignored for mode=background
+#   mode=background  plain background run, no process group of its own
+#   timeout          e.g. '45m'; bounds the agent in BOTH modes, '' for unbounded
 #   output           path for stdout+stderr, or '-' to inherit
 # ---- end quoted ----
+# The timeout is orthogonal to the process group: an unbounded background agent
+# whose exit code gates a batch hangs that batch forever, so every caller that
+# waits on a model passes one.
 launch_agent() {
     local mode="$1" timeout_spec="$2" output="$3"
     local -a cmd=()
@@ -118,17 +122,17 @@ launch_agent() {
         else
             printf 'lib-agent: setsid has no --wait; AGENT_EXIT may report the setsid parent rather than the agent\n' >&2
         fi
-        if [ -n "$timeout_spec" ]; then
-            if command -v timeout >/dev/null 2>&1; then
-                timeout_bin="timeout"
-            elif command -v gtimeout >/dev/null 2>&1; then
-                timeout_bin="gtimeout"
-            else
-                printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
-                return 69
-            fi
-            cmd+=("$timeout_bin" "$timeout_spec")
+    fi
+    if [ -n "$timeout_spec" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout_bin="timeout"
+        elif command -v gtimeout >/dev/null 2>&1; then
+            timeout_bin="gtimeout"
+        else
+            printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
+            return 69
         fi
+        cmd+=("$timeout_bin" "$timeout_spec")
     fi
     cmd+=("${AGENT_ARGV[@]}")
 

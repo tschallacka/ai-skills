@@ -63,8 +63,11 @@ chk "$rc_nodesc" 64 "no-ROLE_ID refused"
 ROLE_ID=maintainer bash "$monitor_sh" show "$in" >/dev/null 2>&1; chk $? 0 "maintainer allowed"
 
 # 6. Pull-on-exception signal.
-ROLE_ID=maintainer bash "$monitor_sh" verify "$in" 2>/dev/null | grep -q 'PULL-ON-EXCEPTION' \
-    && echo "PASS: escalated frame signals pull-on-exception" || { echo "FAIL: pull-on-exception"; fail=$((fail+1)); }
+verify_out="$(ROLE_ID=maintainer bash "$monitor_sh" verify "$in" 2>/dev/null || true)"
+case "$verify_out" in
+    *PULL-ON-EXCEPTION*) echo "PASS: escalated frame signals pull-on-exception" ;;
+    *) echo "FAIL: pull-on-exception"; fail=$((fail+1)) ;;
+esac
 
 echo
 echo "supervision-frame: $pass passed, $fail failed"

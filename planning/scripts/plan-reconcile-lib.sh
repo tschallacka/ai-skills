@@ -66,17 +66,12 @@ plan_prune_work_unit() {
 
 # Collect one goal's remaining work-unit rows as "id<TAB>intended-change".
 plan_goal_units() {
-    local inventory="$1" goal="$2"
-    awk -F'|' -v goal="$goal" '
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            g = $9; gsub(/^[[:space:]]+|[[:space:]]+$/, "", g)
-            if (g != goal) next
-            id = $2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-            ch = $7; gsub(/^[[:space:]]+|[[:space:]]+$/, "", ch)
-            gsub(/\t/, " ", ch)
-            printf "%s\t%s\n", id, ch
-        }
-    ' "$inventory"
+    local inventory="$1" goal="$2" row
+    while IFS= read -r row; do
+        plan_inventory_split "$row"
+        [ "$plan_inventory_goal" = "$goal" ] || continue
+        printf '%s\t%s\n' "$plan_inventory_id" "$plan_inventory_change"
+    done < <(plan_inventory_rows "$inventory")
 }
 
 # Re-derive a goal's Owned work units section from the inventory. The template
@@ -128,7 +123,8 @@ plan_rebuild_goal_progress() {
         rm -f "$progress_file"
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2
-    elif find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' -print -quit 2>/dev/null | grep -q .; then
+    elif [ -n "$(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' \
+        ! -name '*-testing.md' -print -quit 2>/dev/null || true)" ]; then
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             printf 'plan: could not create goal progress for %s\n' "$goal" >&2
     fi

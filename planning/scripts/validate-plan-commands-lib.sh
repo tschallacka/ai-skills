@@ -85,8 +85,12 @@ command_shaped() {  # rules 1-3 for a single token
     for word in $core_words; do
         [ "$token" = "$word" ] && return 0
     done
-    if [ -n "$registered_words" ] && printf '%s\n' "$registered_words" | grep -Fxq -- "$token"; then
-        return 0
+    if [ -n "$registered_words" ]; then
+        while IFS= read -r word; do
+            if [ "$word" = "$token" ]; then return 0; fi
+        done <<REGISTERED
+$registered_words
+REGISTERED
     fi
     is_executable "$token" && return 0
     bin_under "$token" && return 0

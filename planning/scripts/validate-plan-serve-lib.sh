@@ -70,9 +70,14 @@ $(awk '
     in_sec { print }
 ' "${step_file%.md}-testing.md")"
             fi
+            # PORTABILITY(case-conversion)
+            acceptance_lc="$(printf '%s' "$acceptance" | tr '[:upper:]' '[:lower:]')"
             for phr in ${serve_phrases[@]+"${serve_phrases[@]}"}; do
                 [ -n "$phr" ] || continue
-                if printf '%s' "$acceptance" | grep -Fiq -- "$phr"; then served=true; break 2; fi
+                phr_lc="$(printf '%s' "$phr" | tr '[:upper:]' '[:lower:]')"
+                case "$acceptance_lc" in
+                    *"$phr_lc"*) served=true; break 2 ;;
+                esac
             done
         done
         if [ "$served" = false ]; then

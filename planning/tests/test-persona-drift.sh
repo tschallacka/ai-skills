@@ -36,8 +36,12 @@ registry_ids="$(printf '%s\n' "$registry_ids" | sed 's/[[:space:]]*$//')"
 
 # 2. Every registered persona must have a voice keyed by its id.
 voices_ids="$(awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v} /^\|/ { rid=trim($2); gsub(/^`|`$/,"",rid); if (rid ~ /^[a-z]+$/) print rid }' "$voices")"
+voices_list=" $(printf '%s' "$voices_ids" | tr '\n' ' ') "
 for id in $registry_ids; do
-    echo "$voices_ids" | grep -qx "$id" || note_fail "registered persona $id has no voice in roles/VOICES.md"
+    case "$voices_list" in
+        *" $id "*) ;;
+        *) note_fail "registered persona $id has no voice in roles/VOICES.md" ;;
+    esac
 done
 for id in $voices_ids; do
     case " $registry_ids " in
