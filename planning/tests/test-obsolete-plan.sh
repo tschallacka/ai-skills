@@ -7,6 +7,10 @@
 # naming the replacement — instead of reporting a wall of findings about a plan
 # nobody should be using, and it must never remove anything.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
@@ -17,9 +21,8 @@ fixture_plan="$repo_root/benchmark/planning/tests/fixtures/review-lifecycle-plan
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-obsolete-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-failures=0
 pass() { printf 'PASS: %s\n' "$1"; }
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
+fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 # run_validate <plan> <log> [flag…] — prints the exit code, never aborts.
 run_validate() {
@@ -126,8 +129,8 @@ for phrase in 'OBSOLETE' 'replaced-by:' 'Nothing is deleted'; do
     fi
 done
 
-if [ "$failures" -ne 0 ]; then
-    printf 'test-obsolete-plan: %d failure(s).\n' "$failures" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-obsolete-plan: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-obsolete-plan.sh passed.\n'

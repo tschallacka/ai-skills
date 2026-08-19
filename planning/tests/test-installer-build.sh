@@ -10,6 +10,10 @@
 #   3. Every part parses on its own.
 #   4. The generated dependency block reached the artifact.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,8 +21,7 @@ builder="$repo_dir/installer/build.sh"
 artifact="$repo_dir/install.sh"
 src_dir="$repo_dir/installer/src"
 
-fail=0
-note_fail() { printf 'installer-build: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'installer-build: %s\n' "$1" >&2; t_record "$1"; }
 
 [ -x "$builder" ] || { note_fail "missing or non-executable $builder"; exit 1; }
 [ -d "$src_dir" ] || { note_fail "missing $src_dir"; exit 1; }
@@ -53,14 +56,14 @@ test_check_mode_detects_edit() {
 
 test_parts_parse_and_cover() {
     local part parts=0 before
-    before="$fail"
+    before="$(t_failures)"
     for part in "$src_dir"/[0-9][0-9]-*.sh; do
         [ -f "$part" ] || { note_fail "no parts in $src_dir"; return; }
         parts=$((parts + 1))
         bash -n "$part" 2>/dev/null || note_fail "part does not parse in isolation: ${part##*/}"
     done
     [ "$parts" -ge 2 ] || note_fail "expected the installer to be split into parts, found $parts"
-    if [ "$before" -eq "$fail" ]; then
+    if [ "$before" -eq "$(t_failures)" ]; then
         printf 'test_parts_parse_and_cover: PASS (%s parts)\n' "$parts"
     else
         printf '%s\n' 'test_parts_parse_and_cover: FAIL'
@@ -86,4 +89,4 @@ test_check_mode_detects_edit
 test_parts_parse_and_cover
 test_dependency_block_generated
 
-exit "$fail"
+exit "$(t_failures)"

@@ -16,13 +16,16 @@
 # CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, jq only. No python3.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scripts="$root/planning/scripts"
 
-fail=0
-note_fail() { printf 'goal-testing-row: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'goal-testing-row: %s\n' "$1" >&2; t_record "$1"; }
 
 assert_eq() {
     local expected="$1" actual="$2" what="$3"
@@ -139,7 +142,7 @@ fi
 # 4/5. The validation pass: the decoy table is reported, the plain goal is not.
 if ! command -v jq >/dev/null 2>&1; then
     printf 'goal-testing-row: UNCONFIGURED (jq) — validation assertions skipped\n'
-    [ "$fail" -eq 0 ] || exit 1
+    [ "$(t_failures)" -eq 0 ] || exit 1
     printf 'goal-testing-row: PASS\n'
     exit 0
 fi
@@ -172,5 +175,5 @@ mkdir -p "$copy"
 report="$("$copy/scripts/validate-plan.sh" "$plan" 2>&1 || true)"
 assert_contains "$report" 'goal-tables.json registry is missing' 'absent registry is reported'
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf 'goal-testing-row: PASS\n'

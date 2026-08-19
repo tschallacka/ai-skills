@@ -9,6 +9,10 @@
 # goal tracker had to break the read discipline SKILL.md prohibits, or skip it.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,8 +21,7 @@ scripts_dir="$repo_root/planning/scripts"
 work="$(mktemp -d "${TMPDIR:-/tmp}/progress-ids.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 plan="$work/plan"
 cp -R "$repo_root/benchmark/planning/tests/fixtures/review-lifecycle-plan" "$plan"
@@ -83,8 +86,8 @@ before="$(cat "$plan/$goal/progress.md")"
 [ "$before" = "$(cat "$plan/$goal/progress.md")" ] \
     || note_fail 'a refused write still modified the goal tracker'
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-progress-entry-ids: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-progress-entry-ids: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-progress-entry-ids: PASS\n'

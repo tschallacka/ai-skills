@@ -19,14 +19,17 @@
 # voice check lives in planning/tests/test-voice-artifact-drift.sh.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 registry="$root/scripts/role-context.sh"
 voices="$root/roles/VOICES.md"
 manifest="$root/PACKAGE-MANIFEST.txt"
 
-fail=0
-note_fail() { echo "persona drift: $1" >&2; fail=1; }
+note_fail() { echo "persona drift: $1" >&2; t_record "$1"; }
 
 # 1. Registry ids — derive from role-context.sh --list (identity-free) so
 #    adding a persona to ROLES=() is auto-checked rather than hand-mirrored.
@@ -80,7 +83,7 @@ for rel in scripts/role-context.sh scripts/monitor-read.sh scripts/supervision-f
     grep -q "planning/$rel	" "$manifest" || note_fail "persona artifact not shipped: planning/$rel"
 done
 
-if [ "$fail" -eq 0 ]; then
+if [ "$(t_failures)" -eq 0 ]; then
     echo 'persona drift: PASS'
 else
     echo 'persona drift: FAIL' >&2

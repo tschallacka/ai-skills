@@ -9,6 +9,10 @@
 # Root-level install.sh is tested from here for the same reason
 # test-installer-manifest.sh is: run-tests.sh only discovers planning/tests.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,8 +20,7 @@ wrapper="$repo_dir/resource-limited-testing/scripts/limited-run.sh"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/limited-run-contract.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'limited-run: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'limited-run: %s\n' "$1" >&2; t_record "$1"; }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stub PATH: uname reports whatever $STUB_UNAME_S says, and the limiters record
@@ -243,5 +246,5 @@ arm_requires="$(requires_for_arch arm64)"
 [ "$arm_requires" = memlimit ] \
     || note_fail "Apple Silicon macOS should require memlimit, got '$arm_requires'"
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-limited-run-contract: PASS'

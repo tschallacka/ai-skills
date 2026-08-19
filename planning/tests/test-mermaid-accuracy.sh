@@ -21,6 +21,10 @@
 # Not checkable, hence CODE-STYLE.md §11's rule for the author: whether an arrow
 # is the real control flow, a diamond the true condition, a stage order the code.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,16 +37,15 @@ brainstorm/SKILL.md post-implementation-review/SKILL.md"
 work="$(mktemp -d "${TMPDIR:-/tmp}/mermaid-accuracy.XXXXXX")"
 trap 'rm -rf -- "$work"' EXIT
 
-fail=0
 group=0
-note_fail() { printf 'mermaid-accuracy: FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'mermaid-accuracy: FAIL: %s\n' "$1" >&2; t_record "$1"; }
 note_warn() { printf 'mermaid-accuracy: WARN: %s\n' "$1" >&2; }
 # A group reports PASS only when it added no finding of its own, so one broken
 # check cannot hide behind another group's PASS line.
-group_start() { group="$fail"; }
+group_start() { group="$(t_failures)"; }
 group_done() {
     local label="$1"
-    if [ "$fail" -eq "$group" ]; then
+    if [ "$(t_failures)" -eq "$group" ]; then
         printf 'test-mermaid-accuracy: %s: PASS\n' "$label"
     else
         printf 'test-mermaid-accuracy: %s: FAIL (%d finding(s))\n' "$label" "$((fail - group))"
@@ -336,5 +339,5 @@ else
     printf '%s\n' 'test-mermaid-accuracy: UNCONFIGURED (mmdc) — the structural checks ran, mermaid syntax itself is unverified; `nix develop` provides mmdc, and the mermaid-render CI job always runs it' >&2
 fi
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-mermaid-accuracy: PASS'

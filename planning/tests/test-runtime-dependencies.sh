@@ -12,6 +12,10 @@
 # no explanation. A gate that quietly stops enforcing is worse than one that
 # refuses to run, so the entry points check up front and exit 69.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,8 +23,7 @@ scripts="$root/scripts"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-runtime-deps.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'runtime-deps: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'runtime-deps: %s\n' "$1" >&2; t_record "$1"; }
 
 # A PATH that is complete except for jq. Mirroring the whole PATH would be slow,
 # so mirror the tools the scripts actually reach before and around the guard.
@@ -100,5 +103,5 @@ while IFS= read -r script; do
         || note_fail "$name calls jq but neither guards it nor is covered by a guarded entry point"
 done < <(grep -lE '(^|[^A-Za-z0-9_])jq ' "$scripts"/*.sh 2>/dev/null || true)
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-runtime-dependencies: PASS'

@@ -21,13 +21,16 @@
 #   10. The installer seam: a blocked skill is never preselected, fd 3 without a
 #      tty declines with 69, and install.sh's own EXIT trap survives the picker.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ui="$repo_root/install-ui.sh"
 
-fail=0
-note_fail() { printf 'install-ui: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'install-ui: %s\n' "$1" >&2; t_record "$1"; }
 note_pass() { printf 'PASS %s\n' "$1"; }
 
 [ -f "$ui" ] || { note_fail "missing $ui"; exit 1; }
@@ -101,7 +104,7 @@ esac
 case "$frame" in
     *'] planning'*) note_fail 'the list did not scroll: row 0 is still drawn' ;;
 esac
-[ "$fail" -eq 0 ] && note_pass 'the list scrolls and keeps the cursor visible'
+[ "$(t_failures)" -eq 0 ] && note_pass 'the list scrolls and keeps the cursor visible'
 
 # ── 3. Checkbox and the three ways to toggle ─────────────────────────────────
 frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii)"
@@ -451,5 +454,5 @@ case "$seam" in
 esac
 note_pass 'the installer seam declines without a tty and leaves cleanup() installed'
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf 'install-ui: all assertions passed\n'

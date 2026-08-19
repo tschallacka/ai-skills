@@ -9,6 +9,10 @@
 # layout the suite exercised.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,10 +20,9 @@ scripts_dir="$(cd "$tests_dir/../scripts" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/plan-snapshot-test.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-fail=0
 note_fail() {
     printf 'FAIL: %s\n' "$1" >&2
-    fail=$((fail + 1))
+    t_record "$1"
 }
 
 git_here() {
@@ -136,8 +139,8 @@ rc=0
 "$scripts_dir/plan-env.sh" write-plan "$plan_a" "$work/projA/.plans" "$work/projC" >/dev/null 2>&1 || rc=$?
 [ "$rc" = 64 ] || note_fail "an out-of-tree snapshot repo was accepted (exit $rc, want 64)"
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-plan-snapshot: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-plan-snapshot: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-plan-snapshot: PASS\n'

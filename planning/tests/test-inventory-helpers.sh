@@ -11,6 +11,10 @@
 # Usage: test-inventory-helpers.sh
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
@@ -20,8 +24,7 @@ source "$scripts/plan-document-lib.sh"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-inventory-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'inventory-helpers: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'inventory-helpers: %s\n' "$1" >&2; t_record "$1"; }
 
 assert_eq() {
     local label="$1" want="$2" got="$3"
@@ -106,5 +109,5 @@ assert_eq 'label completed' '✅ completed' "$(plan_status_label completed)"
 expect_exit 1 'unknown status word' plan_status_label bogus
 assert_eq 'unknown status word prints nothing' '' "$(plan_status_label bogus || true)"
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-inventory-helpers: PASS'

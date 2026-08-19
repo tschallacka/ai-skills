@@ -9,14 +9,17 @@
 # rather than discarded when its number is taken.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-review-cycles-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'adversarial-review-cycles: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'adversarial-review-cycles: %s\n' "$1" >&2; t_record "$1"; }
 
 # The heading numbers in file order, space-separated. An absent history and one
 # with no headings are both legitimate answers, so grep is allowed to exit
@@ -147,5 +150,5 @@ history_empty="$plan_empty/adversarial-review-history.md"
 assert_headings "$history_empty" '1' 'the no-rows run'
 assert_count 1 '_No row-level findings were recorded for this cycle._' "$history_empty" 'the no-rows run'
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf 'test-adversarial-review-cycles.sh passed.\n'

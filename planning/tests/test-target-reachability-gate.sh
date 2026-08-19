@@ -7,15 +7,18 @@
 # of the reachability gate. These assertions pin the replacement rule — the
 # target file decides what runs, and a check that cannot run fails.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-target-gate-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-failures=0
 pass() { printf 'PASS: %s\n' "$1"; }
-fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
+fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 # assert_exit <expected> <label> <log> -- <command…>
 assert_exit() {
@@ -116,8 +119,8 @@ for unit in W01 W02 W03 W04 W05; do
 done
 pass 'no unit reports the old SKIP verdict'
 
-if [ "$failures" -ne 0 ]; then
-    printf 'test-target-reachability-gate: %d failure(s).\n' "$failures" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-target-reachability-gate: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-target-reachability-gate.sh passed.\n'

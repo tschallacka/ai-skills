@@ -14,14 +14,17 @@
 # Assertion 4 is the one that saves the next agent from rediscovering a trap in
 # an unrelated file.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 rules="$repo_root/portability-rules.json"
 generator="$repo_root/generate-portability.sh"
 
-fail=0
-note_fail() { printf 'portability: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'portability: %s\n' "$1" >&2; t_record "$1"; }
 
 command -v jq >/dev/null 2>&1 || {
     printf 'portability: UNCONFIGURED (jq)\n' >&2
@@ -119,5 +122,5 @@ while IFS= read -r rule_id; do
     done < <(script_list)
 done < <(jq -r '.rules[].id' "$rules")
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-portability-contract: PASS'

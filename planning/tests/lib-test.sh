@@ -19,11 +19,18 @@
 #                                   new test. Findings go to a FILE, not a
 #                                   variable, so a t_fail inside a $( ) is not
 #                                   swallowed by the subshell.
+#   t_record <message>              record a finding silently, for a test that
+#                                   prints its own message and prefix.
+#   t_failures                      the recorded count, for a test that prints
+#                                   its own epilogue.
 #
 # The tests run on the same bash 3.2 + BSD floor as the scripts (CI runs the
 # suite on macos), so they need the same shims. See PORTABILITY.md; the rule ids
 # in the markers below index into it.
-set -euo pipefail
+# No `set` here: this file is sourced, so changing the caller's shell options
+# changes the test's semantics. test-plan-context-paging.sh deliberately runs
+# without errexit because it invokes commands that exit non-zero on purpose,
+# and inheriting -e from a library aborted it mid-run.
 
 # PORTABILITY(sed-inplace): BSD sed requires a suffix argument for -i, so it
 # consumes the script as the suffix and then fails.
@@ -97,9 +104,22 @@ t_begin() {
     export T_FINDINGS
 }
 
+# Record a finding without printing one. A test that already prints its own
+# message -- most do, with a per-test prefix that identifies which test spoke --
+# keeps that message and calls this instead of incrementing a local counter,
+# which is what a subshell discards.
+t_record() {
+    printf '%s\n' "${1:-finding}" >> "${T_FINDINGS:?t_begin was not called}"
+}
+
+# How many findings have been recorded, for a test that prints its own epilogue.
+t_failures() {
+    { grep -c . "${T_FINDINGS:?t_begin was not called}" || true; }
+}
+
 t_fail() {
     printf 'FAIL: %s\n' "$*" >&2
-    printf '%s\n' "$*" >> "${T_FINDINGS:?t_begin was not called}"
+    t_record "$*"
 }
 
 t_assert_eq() { # <label> <actual> <expected>

@@ -10,6 +10,10 @@
 # and reported its follow-on failure instead of the refusal.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,8 +23,7 @@ fixture="$repo_root/benchmark/planning/tests/fixtures/review-lifecycle-plan"
 work="$(mktemp -d "${TMPDIR:-/tmp}/plan-context-unit.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 plan="$work/plan"
 cp -R "$fixture" "$plan"
@@ -104,8 +107,8 @@ plain="$(bash -c '
     || note_fail 'a single-input entry hash diverged from the plain file hash'
 [ -n "$step_before" ] || note_fail 'step entry hash was empty'
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-plan-context-unit-entry: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-plan-context-unit-entry: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-plan-context-unit-entry: PASS\n'

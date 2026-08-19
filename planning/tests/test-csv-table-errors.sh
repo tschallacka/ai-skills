@@ -8,6 +8,10 @@
 # the wrong number of columns, which sends the reader looking in the wrong place.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,8 +19,7 @@ scripts_dir="$(cd "$tests_dir/../scripts" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/csv-errors.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 # plan_die exits, so each case runs in a subshell.
 render() { # <columns> <csv>
@@ -74,8 +77,8 @@ case "$out" in
     *) note_fail "a valid CSV did not render its row — got: $out" ;;
 esac
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-csv-table-errors: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-csv-table-errors: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-csv-table-errors: PASS\n'

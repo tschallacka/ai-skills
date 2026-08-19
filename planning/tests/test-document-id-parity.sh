@@ -10,6 +10,10 @@
 # prohibits using for plan content.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,8 +22,7 @@ fixture="$(cd "$tests_dir/../../benchmark/planning/tests/fixtures/review-lifecyc
 work="$(mktemp -d "${TMPDIR:-/tmp}/doc-id-parity.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 plan="$work/plan"
 cp -R "$fixture" "$plan"
@@ -113,8 +116,8 @@ rc=0
 "$scripts_dir/plan-content.sh" get "$plan" no-such-id >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 64 ] || note_fail "an unknown document id exited $rc, want 64"
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-document-id-parity: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-document-id-parity: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-document-id-parity: PASS\n'

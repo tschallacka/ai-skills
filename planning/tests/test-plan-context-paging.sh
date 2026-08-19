@@ -20,6 +20,10 @@
 #     32768-byte cap still applies with ROLE_ID set.
 
 set -uo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -30,8 +34,7 @@ role_cap=32768
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/plan-context-paging.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 note_pass() { printf 'PASS: %s\n' "$1"; }
 assert_eq() {
     if [ "$2" = "$3" ]; then note_pass "$1"
@@ -246,5 +249,5 @@ case "$(token_of "$capped")" in
     *) note_fail 'a page cut short by the per-role cap reports a next_token' ;;
 esac
 
-[ "$fail" -eq 0 ] || { printf 'plan-context paging contract: FAILED\n' >&2; exit 1; }
+[ "$(t_failures)" -eq 0 ] || { printf 'plan-context paging contract: FAILED\n' >&2; exit 1; }
 printf 'plan-context paging contract: PASS\n'

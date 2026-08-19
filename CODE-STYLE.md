@@ -683,6 +683,11 @@ Same skeleton, same portability rules. Beyond that:
   counter variable, because a helper called inside a `$( )` runs in a subshell
   where an incremented counter is discarded — that made one test's exit-code
   assertions inert until a mutation exposed it.
+- A test that prints its own message and prefix — most do, and the prefix says
+  which test spoke — keeps that message and calls `t_record` instead of
+  incrementing a local counter, reading `t_failures` in its epilogue. A counter
+  incremented inside a `$( )` is discarded with the subshell, so the epilogue
+  reads zero and reports PASS over a real finding.
 - A test written as bare `[ … ]` under `set -e` calls `t_trap_assertions` once,
   which installs an `ERR` trap reporting the line and the failing expression
   verbatim. It aborts at the first failure, which is the price of not rewriting

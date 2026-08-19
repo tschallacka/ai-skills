@@ -10,11 +10,14 @@
 # deleted for it. The exemption only works if the fence is well-formed, so this
 # checks the fence rather than trusting it.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-fail=0
-note_fail() { printf 'comment-format: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'comment-format: %s\n' "$1" >&2; t_record "$1"; }
 
 script_list() {
     ( cd "$repo_root" && find . -name '*.sh' -type f \
@@ -110,5 +113,5 @@ while IFS= read -r file; do
     note_fail "$file serves help from a fixed line window; print the whole leading comment block instead"
 done < <(script_list)
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-comment-format: PASS'

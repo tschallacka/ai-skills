@@ -12,13 +12,16 @@
 # On a genuine migration the count drops: lower the cap in the same commit and
 # update the table. Never raise a cap to make this pass.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scripts="$root/scripts"
 
-fail=0
-note_fail() { printf 'duplication-ratchet: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'duplication-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
 # Cap, label, and the counting command. Keep in step with MAINTAINER.md §3.
 check_cap() {
@@ -97,5 +100,5 @@ for helper in plan_atomic_write plan_track_tmp plan_progress_bar plan_stat_mode 
         || note_fail "$helper is referenced by MAINTAINER.md section 3 but no longer exists"
 done
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-duplication-ratchet: PASS'

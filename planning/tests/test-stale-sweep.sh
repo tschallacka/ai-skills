@@ -16,14 +16,17 @@
 # This exercises stale_scan_doc directly (the unit that was repaired);
 # test-plan-commands.sh covers the validate-plan.sh --stale path end to end.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=planning/scripts/validate-plan-stale-lib.sh
 source "$repo_root/planning/scripts/validate-plan-stale-lib.sh"
 
-fail=0
-note_fail() { printf 'stale-sweep: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'stale-sweep: %s\n' "$1" >&2; t_record "$1"; }
 
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/stale-sweep.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
@@ -185,5 +188,5 @@ esac
 cp "$sev_pristine" "$sev_doc"
 
 echo
-echo "stale-sweep: $([ "$fail" -eq 0 ] && echo PASS || echo FAIL)"
-[ "$fail" -eq 0 ]
+echo "stale-sweep: $([ "$(t_failures)" -eq 0 ] && echo PASS || echo FAIL)"
+[ "$(t_failures)" -eq 0 ]

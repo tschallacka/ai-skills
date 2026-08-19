@@ -7,14 +7,17 @@
 # stdin run must leave it untouched for the run that will consume it.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-review-sources-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'adversarial-review-sources: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'adversarial-review-sources: %s\n' "$1" >&2; t_record "$1"; }
 
 incoming_csv='ID,Missing or over-broad item,Required plan change,Status,Work unit
 AR-20,from incoming,change it,✅ resolved,N/A
@@ -72,5 +75,5 @@ printf '%s' "$other_csv" | "$script_dir/update-adversarial-review.sh" "$plan_std
 grep -Fq '| AR-30 |' "$plan_stdin/adversarial-review.md" \
     || note_fail 'stdin rows did not reach the findings table'
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf 'test-adversarial-review-sources.sh passed.\n'

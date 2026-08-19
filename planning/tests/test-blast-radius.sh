@@ -7,6 +7,10 @@
 # and is not in PACKAGE-MANIFEST.txt, so neither is its test.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,8 +27,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 # Sets RUN_OUT rather than printing it: called in a command substitution, every
 # note_fail inside would land in a subshell and be silently discarded.
@@ -109,8 +112,8 @@ case "$out" in
     *) note_fail 'the drift note did not say what to do about it' ;;
 esac
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-blast-radius: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-blast-radius: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-blast-radius: PASS\n'

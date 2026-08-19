@@ -4,6 +4,10 @@
 # followed by a regeneration.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -13,8 +17,7 @@ planning_dir="$repo_dir/planning"
 # shellcheck source=planning/tests/lib-test.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 
-fail=0
-note_fail() { printf 'FAIL: %s\n' "$1" >&2; fail=$((fail + 1)); }
+note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
 expected_hash="$(t_sha256 "$source_file")"
 actual_hash="$(grep -o 'Source SHA-256: `[^`]*`' "$reviewer_file" | sed 's/.*: `//; s/`.*//')"
@@ -34,8 +37,8 @@ else
     note_fail 'generate-reviewer.sh could not produce a projection'
 fi
 
-if [ "$fail" -ne 0 ]; then
-    printf 'test-reviewer-projection: %d failure(s).\n' "$fail" >&2
+if [ "$(t_failures)" -ne 0 ]; then
+    printf 'test-reviewer-projection: %d failure(s).\n' "$(t_failures)" >&2
     exit 1
 fi
 printf 'test-reviewer-projection: PASS\n'

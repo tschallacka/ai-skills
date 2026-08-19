@@ -9,6 +9,10 @@
 # executable on the real PATH except jq, so the shipped runtime_tool_verify() is
 # what decides, not a paraphrase of it.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,8 +20,7 @@ installer="$repo_dir/install.sh"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/installer-deps.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail=0
-note_fail() { printf 'installer-deps: %s\n' "$1" >&2; fail=1; }
+note_fail() { printf 'installer-deps: %s\n' "$1" >&2; t_record "$1"; }
 
 # A PATH without jq. Symlinking rather than copying keeps it cheap, and the
 # per-directory glob keeps it to what this machine actually has.
@@ -126,5 +129,5 @@ case "$RUN_OUT" in
     *) note_fail "the summary did not say how to install jq: $RUN_OUT" ;;
 esac
 
-[ "$fail" -eq 0 ] || exit 1
+[ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-installer-dependencies: PASS'

@@ -175,6 +175,22 @@ assert_eq 'stat mode 600' "$(plan_stat_mode "$mode_probe")" '600'
     || fail 'plan_stat_uid did not report the current user as the owner'
 
 # ── plan_fail / plan_warn / plan_die ─────────────────────────────────────────
+# ---- the shared reporter survives a subshell -------------------------------
+# This is the property the 26 converted tests are here for. A local counter
+# incremented inside a command substitution is discarded with the subshell, so
+# the epilogue reads zero and reports PASS over a real finding.
+subshell_probe="$(
+    set -euo pipefail
+    source "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
+    t_begin
+    note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
+    raise() { note_fail 'raised inside a command substitution'; printf 'value\n'; }
+    captured="$(raise 2>/dev/null)"
+    printf '%s' "$(t_failures)"
+    rm -f "$T_FINDINGS"
+)"
+assert_eq 't_record survives a command substitution' "$subshell_probe" '1'
+
 assert_eq 'error counter starts at zero' "$plan_error_count" '0'
 plan_fail 'a recorded finding' 2>/dev/null
 plan_fail 'a second finding' 2>/dev/null
