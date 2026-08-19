@@ -682,7 +682,29 @@ Same skeleton, same portability rules. Beyond that:
   `planning/MAINTAINER-STYLE-CONTRACT.md` has a regression assertion. That is
   what keeps them true.
 
-Tests that make live model calls belong in `benchmark/`, not in the suite.
+**A zero-match `grep` is not evidence.** It is indistinguishable from a wrong
+pattern, so an assertion built on one passes whether the code is right or the
+pattern is broken. Before believing a `0`, confirm the pattern matches something
+it should — a positive control on a line you know is there. Two checks in this
+repo were wrong for exactly this reason: one guard pattern matched nothing, so
+its test passed unconditionally, and one merge check reported a data-loss fix
+missing when it was present.
+
+Three mechanisms cause it, and all three arise from the same situation —
+grepping shell source for literal shell syntax, which is dense in characters
+special to the shell, the regex engine, or both:
+
+- **`$` is not reliably literal in a BRE.** `grep -c 'cd "$dir"'` returns 0 on a
+  line containing exactly that; `grep -cF` returns 1. Use `grep -F` for a
+  literal fragment, which is what most checks want, or escape as `\$`.
+- **Double quotes hand the pattern to the shell first.** `grep "$0"` searches for
+  the script's name, not the two characters. Single-quote every pattern.
+- **`^` assumes column 1.** A function defined inside a conditional is indented,
+  so `^name()` misses it.
+
+This one is a review item, not a gate: a double-quoted pattern containing `$` is
+sometimes exactly right (`grep "$unit"`), so a detector would cry wolf. It is
+enforced by reading the check, and by the positive control above.
 
 ---
 
