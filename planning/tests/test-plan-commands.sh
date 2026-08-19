@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-command-test.XXXXXX")"

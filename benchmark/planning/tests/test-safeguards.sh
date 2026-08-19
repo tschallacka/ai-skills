@@ -6,6 +6,12 @@
 # setup-benchmark.sh *and* the extracted benchmark/planning/case/*.sh, so the
 # harness-wide assertions search both (harness_grep) rather than one file.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../planning/tests" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 runner="$repo_dir/benchmark/planning/run-benchmark.sh"

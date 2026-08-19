@@ -9,6 +9,12 @@
 # against an isolated temp runtime replica (never the live repo).
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../planning/tests" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime="$root/runtime"

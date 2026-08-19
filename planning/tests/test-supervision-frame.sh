@@ -12,6 +12,12 @@
 #     pull-on-exception.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 frame_sh="$root/scripts/supervision-frame.sh"

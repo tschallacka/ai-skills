@@ -9,6 +9,17 @@
 #   t_copy_tree <src> <dst>         contents incl. dotfiles, no `cp -R src/.`
 #   t_sha256 <file>                 sha256 hex digest, GNU or BSD or openssl
 #
+# Assertion support. Two modes, and they are mutually exclusive by design:
+#
+#   t_trap_assertions               report the failing expression and abort.
+#                                   For a test written as bare `[ ... ]` under
+#                                   set -e, which otherwise exits 1 in silence.
+#   t_begin / t_fail / t_assert_eq / t_assert_contains / t_expect_exit / t_end
+#                                   report every finding, then exit once. For a
+#                                   new test. Findings go to a FILE, not a
+#                                   variable, so a t_fail inside a $( ) is not
+#                                   swallowed by the subshell.
+#
 # The tests run on the same bash 3.2 + BSD floor as the scripts (CI runs the
 # suite on macos), so they need the same shims. See PORTABILITY.md; the rule ids
 # in the markers below index into it.
@@ -63,3 +74,60 @@ elif command -v shasum >/dev/null 2>&1; then
 else
     t_sha256() { openssl dgst -sha256 "$1" | awk '{print $NF}'; }
 fi
+
+# An ERR trap turns every bare assertion into a reported one, naming the line and
+# the expression verbatim. set -E is required or the trap is not inherited into
+# functions. This mode aborts at the first failure, which is the price of not
+# rewriting the assertions.
+t_assertion_failed() {
+    printf '%s:%s: assertion failed: %s\n' "${0##*/}" "$1" "$2" >&2
+}
+
+t_trap_assertions() {
+    set -E
+    trap 't_assertion_failed "$LINENO" "$BASH_COMMAND"' ERR
+}
+
+# Findings live in a file because a helper called inside a command substitution
+# runs in a subshell, where an incremented counter is discarded. That is not
+# hypothetical: it made a test's exit-code assertions inert until a mutation
+# exposed it.
+t_begin() {
+    T_FINDINGS="$(mktemp "${TMPDIR:-/tmp}/t-findings.XXXXXX")"
+    export T_FINDINGS
+}
+
+t_fail() {
+    printf 'FAIL: %s\n' "$*" >&2
+    printf '%s\n' "$*" >> "${T_FINDINGS:?t_begin was not called}"
+}
+
+t_assert_eq() { # <label> <actual> <expected>
+    [ "$2" = "$3" ] || t_fail "$1: expected '$3', got '$2'"
+}
+
+t_assert_contains() { # <label> <needle> <haystack>
+    case "$3" in
+        *"$2"*) ;;
+        *) t_fail "$1: output did not contain '$2'" ;;
+    esac
+}
+
+t_expect_exit() { # <want-rc> <label> <command...>
+    local want="$1" label="$2"
+    shift 2
+    local rc=0
+    "$@" >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq "$want" ] || t_fail "$label: exited $rc, want $want"
+}
+
+t_end() {
+    local count
+    count="$({ grep -c . "${T_FINDINGS:?t_begin was not called}" || true; })"
+    rm -f "$T_FINDINGS"
+    if [ "${count:-0}" -ne 0 ]; then
+        printf '%s: %s failure(s).\n' "${0##*/}" "$count" >&2
+        exit 1
+    fi
+    printf '%s: PASS\n' "${0##*/}"
+}

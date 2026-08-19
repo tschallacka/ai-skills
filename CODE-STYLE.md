@@ -666,12 +666,21 @@ Same skeleton, same portability rules. Beyond that:
 - Self-contained: build the fixture in a `mktemp -d` under `$TMPDIR`, clean it
   in a `trap … EXIT`. A test that depends on a gitignored `.plans/` tree is a
   test that fails for the next contributor.
-- Assert with file-local functions over a `fail` counter, as
-  `test-progress-bar-shape.sh` does: report every finding, then exit non-zero
-  once at the end. Do not stop at the first failure. `planning/tests/lib-test.sh`
-  carries portability shims only (`t_sed_i`, `t_sed_insert_before`,
-  `t_stat_mode`, `t_unique_suffix`, `t_copy_tree`) — it is not an assertion
-  library.
+- **A failing test must say what failed.** Exiting 1 in silence makes a red
+  suite useless: the reader knows something broke and nothing else.
+- New tests report every finding, then exit non-zero once, using the helpers in
+  `planning/tests/lib-test.sh`: `t_begin`, `t_fail`, `t_assert_eq`,
+  `t_assert_contains`, `t_expect_exit`, `t_end`. Findings go to a file, not a
+  counter variable, because a helper called inside a `$( )` runs in a subshell
+  where an incremented counter is discarded — that made one test's exit-code
+  assertions inert until a mutation exposed it.
+- A test written as bare `[ … ]` under `set -e` calls `t_trap_assertions` once,
+  which installs an `ERR` trap reporting the line and the failing expression
+  verbatim. It aborts at the first failure, which is the price of not rewriting
+  the assertions; prefer the reporting helpers for anything new.
+- `lib-test.sh` also carries the portability shims (`t_sed_i`,
+  `t_sed_insert_before`, `t_stat_mode`, `t_sha256`, `t_unique_suffix`,
+  `t_copy_tree`).
 - Exit 0 for pass, non-zero for fail. A test that cannot run because an optional
   fixture is absent prints `UNCONFIGURED (<VAR>)` and exits 0 — never a silent
   skip and never a hard failure.
