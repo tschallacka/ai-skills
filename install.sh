@@ -2281,6 +2281,7 @@ tests/test-plan-context-reviewer.sh
 tests/test-plan-context-paging.sh
 tests/test-plan-context-unit-entry.sh
 tests/test-progress-entry-ids.sh
+tests/test-csv-table-errors.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh

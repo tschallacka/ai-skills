@@ -30,6 +30,7 @@ planning/tests/test-plan-context-reviewer.sh	tests/test-plan-context-reviewer.sh
 planning/tests/test-plan-context-paging.sh	tests/test-plan-context-paging.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-plan-context-unit-entry.sh	tests/test-plan-context-unit-entry.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-progress-entry-ids.sh	tests/test-progress-entry-ids.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-csv-table-errors.sh	tests/test-csv-table-errors.sh	installer	review-approved	backup-then-replace	false
 planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 brainstorm-limiting-context.md	—	W01-W02-W03-W04-W06-W09	review-approved	preserve-source-only	true
