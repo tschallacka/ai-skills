@@ -3,10 +3,29 @@
 # ---------------------------------------------------------------
 # Resolves SKILL_SELECTION/TARGET_SELECTION (from the flags) or asks, and leaves
 # the answers in SELECTED_SKILLS, SELECTED_TARGET_PATHS and SELECTED_TARGET_NAMES.
+# Asking is the picker of sections 6b-6d, with section 6's numbered menu as the
+# fallback whenever it declines with 69.
 select_skills() {
     SELECTED_SKILLS=()
 
     if [ -z "$SKILL_SELECTION" ]; then
+        # The picker of sections 6b-6d first. 69 is its "fd 3 is not a terminal"
+        # answer and the numbered menu below is the fallback, so every non-tty
+        # path behaves exactly as it did before the picker existed.
+        local ui_rc=0
+        iui_select_skills || ui_rc="$?"
+        case "$ui_rc" in
+            0)
+                [ "${#SELECTED_SKILLS[@]}" -gt 0 ] \
+                    || { echo "Nothing selected; nothing was installed." >&2; exit 0; }
+                return
+                ;;
+            69) ;;
+            *)
+                echo "Aborted; nothing was installed." >&2
+                exit "$ui_rc"
+                ;;
+        esac
         show_shop_menu
         printf '\033[%d;1H' "$MENU_PROMPT_ROW"
         ask "Choose 1-6 or enter comma-separated names [6]: "

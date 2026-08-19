@@ -15,6 +15,9 @@ set -euo pipefail
 #   4.  Runtime tool verification
 #   5.  Agent target detection
 #   6.  Terminal capability, splash, and menu rendering
+#   6b. Skill picker: state, text metrics, requirement model
+#   6c. Skill picker: the sprite and the frame
+#   6d. Skill picker: input, the terminal, and the seam
 #   7.  Skill and target selection
 #   8.  Source acquisition
 #   9.  Per-skill file manifest

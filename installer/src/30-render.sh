@@ -9,6 +9,7 @@
 #   COLOR_MODE       set by detect_color_mode, read by fg_sgr
 #   FG_SGR           set by fg_sgr, read by its caller on the next line
 #   COLOR            set by color_for, read by render_art
+#   EYE_ROW          set by eye_row_for, read by render_art and iui_head_line
 #   ART              constant (section 1), read by render_art
 #   MENU_BOX_WIDTH   set by show_splash (or defaulted by show_shop_menu itself)
 #   MENU_COMPACT     set by show_splash, read by show_shop_menu
@@ -99,6 +100,23 @@ color_for() {
     esac
 }
 
+# The pixels of sprite rows 8 and 9 for one eye state, into EYE_ROW. Both rows
+# carry the same pixels in every state, so one row per state is enough for both.
+# Section 6b's iui_head_line() reads this too, so the eye data exists once.
+eye_row_for() {
+    case "$1" in
+        left)
+            EYE_ROW='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
+            ;;
+        right)
+            EYE_ROW='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
+            ;;
+        *)
+            EYE_ROW='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
+            ;;
+    esac
+}
+
 render_art() {
     local offset_x="$1"
     local offset_y="$2"
@@ -106,22 +124,8 @@ render_art() {
     local eye_state="$4"
     local row char x y repeat pixel_width blocks
     local -a pixels
-    local eye_row eye_row_2
 
-    case "$eye_state" in
-        left)
-            eye_row='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            eye_row_2='c27f18 c27f18 009c00 009c00 fbfbfb fbfbfb c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            ;;
-        right)
-            eye_row='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
-            eye_row_2='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 fbfbfb fbfbfb 009c00 009c00 d68601 d68601'
-            ;;
-        *)
-            eye_row='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            eye_row_2='c27f18 c27f18 fbfbfb fbfbfb 009c00 009c00 c27417 c27417 df8200 df8200 009c00 009c00 fbfbfb fbfbfb d68601 d68601'
-            ;;
-    esac
+    eye_row_for "$eye_state"
 
     pixel_width=$((scale * 2))
     blocks=''
@@ -130,8 +134,7 @@ render_art() {
     done
     for ((y = 0; y < ${#ART[@]}; y++)); do
         row="${ART[$y]}"
-        [ "$y" -eq 8 ] && row="$eye_row"
-        [ "$y" -eq 9 ] && row="$eye_row_2"
+        { [ "$y" -eq 8 ] || [ "$y" -eq 9 ]; } && row="$EYE_ROW"
         IFS=' ' read -r -a pixels <<< "$row"
         for ((repeat = 0; repeat < scale; repeat++)); do
             printf '\033[%d;%dH' "$((offset_y + y * scale + repeat))" "$offset_x"
