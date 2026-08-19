@@ -121,6 +121,7 @@ context_resolve_document() {
         adversarial-review) printf '%s/adversarial-review.md\n' "$plan_dir" ;;
         coverage) printf '%s/work-unit-inventory.md\n' "$plan_dir" ;;
         stories) printf '%s/ui-user-stories.md\n' "$plan_dir" ;;
+        bugs) printf '%s/bugs.md\n' "$plan_dir" ;;
         fixes) printf '%s/fixes.md\n' "$plan_dir" ;;
         fix-keys) printf '%s/fix-keys.json\n' "$plan_dir" ;;
         approval) printf '%s/approval.json\n' "$plan_dir" ;;
@@ -146,7 +147,7 @@ context_entry_id() {
     case "$1" in
         plan|goal:*|goal-progress:*|step:*|unit:W*|inventory|progress|adversarial-review)
             printf '%s\n' "$1" ;;
-        coverage|stories|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
+        coverage|stories|bugs|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
         *) context_die "usage: unsupported entry id: $1" ;;
     esac
 }
@@ -155,7 +156,7 @@ context_entry_id() {
 # review reads as a complete one, so they page rather than summarize.
 context_default_view() {
     case "$1" in
-        inventory|adversarial-review|coverage|stories|fixes|fix-keys|approval)
+        inventory|adversarial-review|coverage|stories|bugs|fixes|fix-keys|approval)
             printf 'full\n' ;;
         *) printf 'summary\n' ;;
     esac
@@ -269,7 +270,7 @@ context_build_index() {
                 printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
                     "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
             done
-        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md \
+        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md \
                         fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
             extra_file="$plan_dir/${extra_id#*:}"
             [ -f "$extra_file" ] || continue

@@ -43,6 +43,7 @@ Valid --document IDs:
   adversarial-review   adversarial-review.md
   coverage             work-unit-inventory.md     (the coverage table)
   stories              ui-user-stories.md
+  bugs                 bugs.md
   fixes                fixes.md
   fix-keys             fix-keys.json
   approval             approval.json
@@ -54,7 +55,8 @@ Valid --document IDs:
 Views: full, summary, metadata, ownership, instructions, acceptance, handoff,
 testing, dependencies, changed-documents, inventory-row, validator. Default is
 `full` for whole documents that are not narrative (inventory, coverage,
-adversarial-review, stories, fixes, fix-keys, approval) and `summary` otherwise.
+adversarial-review, stories, bugs, fixes, fix-keys, approval) and `summary`
+otherwise.
 
 Paging: a page that withholds records reports next_token; pass it back as
 --token to resume. A token is refused (65) once the document or view it was

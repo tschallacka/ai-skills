@@ -206,6 +206,9 @@ plan_document_path() {
         stories)
             printf '%s\n' "$plan_dir/ui-user-stories.md"
             ;;
+        bugs)
+            printf '%s\n' "$plan_dir/bugs.md"
+            ;;
         fixes)
             printf '%s\n' "$plan_dir/fixes.md"
             ;;
@@ -239,7 +242,7 @@ plan_document_path() {
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         *)
-            plan_die "Unknown document ID: $document_id (use plan, adversarial-review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, fixes, fix-keys, or approval)"
+            plan_die "Unknown document ID: $document_id (use plan, adversarial-review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, bugs, fixes, fix-keys, or approval)"
             ;;
     esac
 }
@@ -248,7 +251,7 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         adversarial-review) printf '%s\n' review ;;
-        coverage|inventory|stories|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
+        coverage|inventory|stories|bugs|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
         goal-progress:*) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
         step:*)

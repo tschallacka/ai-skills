@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `d4d725faaa4221d01bb65f1537abe2a97e1dc27d62245a552ab8a7dbf8e631b0`
+> Source SHA-256: `2dc8f9d760627f32ed71b87c8d6ff1e8d0e435b8375f49d90557e7d47cf39984`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -42,10 +42,11 @@ must include verbatim:
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
 Valid --document IDs: plan, inventory, coverage, progress,
-goal-progress:<goal>, adversarial-review, stories, fixes, fix-keys, approval,
+goal-progress:<goal>, adversarial-review, stories, bugs, fixes, fix-keys,
+approval,
 goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
 document. The documents that are not narrative — inventory, coverage,
-adversarial-review, stories, fixes, fix-keys, approval — default to the
+adversarial-review, stories, bugs, fixes, fix-keys, approval — default to the
 whole-document `full` view; every other id defaults to `summary`, and
 `--view full` is available for
 any of them. A page that withheld records reports next_token — pass it back as

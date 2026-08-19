@@ -293,7 +293,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         plan_replace_title "$file" "$title"
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
@@ -303,7 +303,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         IFS=$'\t' read -r heading number < <(plan_section_spec "$(plan_document_kind "$document_id")" "$section")
         # No `trap - EXIT` release: it would discard the library's cleanup
         # handler too (CODE-STYLE §8).
@@ -321,7 +321,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         [ "$1" = '-p' ] || plan_die "Paragraph replacement requires -p N.N: content"
         shift
         [ "$#" -gt 0 ] || plan_die "Missing paragraph after -p"
@@ -393,7 +393,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         IFS=$'\t' read -r heading number < <(plan_section_spec "$(plan_document_kind "$document_id")" "$section")
         [[ "$paragraph_content" != *$'\n'* && "$paragraph_content" != *$'\r'* ]] || plan_die "Paragraph content must be one line"
         [[ "$paragraph_content" != *'§'* ]] || plan_die "Paragraph content must not contain the reserved paragraph marker §"
@@ -414,7 +414,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
         table_file="$(mktemp "${TMPDIR:-/tmp}/plan-table-paragraph.XXXXXX")"
         trap 'rm -f "$table_file"' EXIT
@@ -430,7 +430,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
         [[ "$paragraph_content" != *$'\n'* && "$paragraph_content" != *$'\r'* ]] || plan_die "Inserted paragraph must be one line"
         [[ "$paragraph_content" != *'§'* ]] || plan_die "Paragraph content must not contain the reserved paragraph marker §"
@@ -448,7 +448,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         [[ "$paragraph_id" =~ ^[0-9]+\.[0-9]+$ ]] || plan_die "Paragraph must use N.N"
         plan_delete_paragraph "$file" "§ $paragraph_id"
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
@@ -459,7 +459,7 @@ case "$command" in
         plan_require_directory "$plan_dir"
         plan_git_snapshot "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         plan_replace_field "$file" "$label" "$value"
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;

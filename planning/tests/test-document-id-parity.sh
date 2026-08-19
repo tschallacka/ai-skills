@@ -27,11 +27,12 @@ cp -R "$fixture" "$plan"
 # rejected id -- the distinction that made this gap hard to see.
 printf '# UI user stories\n' > "$plan/ui-user-stories.md"
 printf '# Fixes\n' > "$plan/fixes.md"
+printf '# Bugs\n' > "$plan/bugs.md"
 printf '{"minted_by":"probe"}\n' > "$plan/fix-keys.json"
 printf '{"overall_plan_approval":true}\n' > "$plan/approval.json"
 
 goal=01-lossless-finding-contract
-canonical="plan inventory coverage progress adversarial-review stories fixes fix-keys approval
+canonical="plan inventory coverage progress adversarial-review stories bugs fixes fix-keys approval
 goal:$goal goal-progress:$goal step:$goal/01-step-preserve-finding-envelope"
 
 rejected() { # <output> -> 0 when the id was refused rather than the file missing
@@ -72,6 +73,7 @@ check_serves() { # <id> <needle>
     esac
 }
 check_serves stories '# UI user stories'
+check_serves bugs '# Bugs'
 check_serves fixes '# Fixes'
 check_serves fix-keys 'minted_by'
 check_serves approval 'overall_plan_approval'
@@ -99,6 +101,17 @@ if [ -n "$index" ]; then
 else
     note_fail 'context init wrote no index'
 fi
+
+# A missing document and an unknown id are different faults, and a caller must
+# be able to tell them apart (CODE-STYLE §5): 66 is "the input is not there",
+# 64 is "you asked for something that does not exist".
+rm -f "$plan/bugs.md"
+rc=0
+"$scripts_dir/plan-content.sh" get "$plan" bugs >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 66 ] || note_fail "a missing document exited $rc, want 66"
+rc=0
+"$scripts_dir/plan-content.sh" get "$plan" no-such-id >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || note_fail "an unknown document id exited $rc, want 64"
 
 if [ "$fail" -ne 0 ]; then
     printf 'test-document-id-parity: %d failure(s).\n' "$fail" >&2

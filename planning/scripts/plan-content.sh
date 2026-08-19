@@ -71,7 +71,7 @@ case "$command" in
         plan_dir="$1"; document_id="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         format_document "$format" "$document_id" "$file"
         ;;
     summary)
