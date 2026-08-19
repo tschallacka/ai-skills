@@ -640,6 +640,21 @@ artifact, decision diamonds carry the actual condition, and anything needing a
 paragraph goes in the prose under it. A diagram that has to be corrected on
 every commit is drawn too low.
 
+### A diagram moves with the code it draws
+
+**After changing a flow a diagram covers, re-read that diagram, correct it in
+the same change, and say in the report that you did.** Nothing enforces this:
+whether an arrow is the real control flow, whether a diamond carries the true
+condition, and whether a stage order matches the code are not mechanically
+checkable, so a diagram rots exactly the way the `file:line` citations did.
+
+`planning/tests/test-mermaid-accuracy.sh` covers only the mechanical half —
+every block parses, and every script, artifact, node id and function a diagram
+names exists. It also renders each block with `mmdc` when the dev flake provides
+it, and the `mermaid-render` CI job always does. **Rendering proves syntax, not
+accuracy**: a diagram can render perfectly and still describe a flow the code
+does not have.
+
 ---
 
 ## 12. Test scripts
@@ -651,15 +666,18 @@ Same skeleton, same portability rules. Beyond that:
 - Self-contained: build the fixture in a `mktemp -d` under `$TMPDIR`, clean it
   in a `trap … EXIT`. A test that depends on a gitignored `.plans/` tree is a
   test that fails for the next contributor.
-- Assert through the shared helpers in `planning/tests/lib-test.sh`
-  (`t_assert`, `t_assert_eq`, `t_assert_grep`, `t_expect_exit`), which own the
-  `PASS`/`FAIL` line format and the failure counter. Do not hand-roll `if … then
-  echo FAIL; fail=1; fi`.
+- Assert with file-local functions over a `fail` counter, as
+  `test-progress-bar-shape.sh` does: report every finding, then exit non-zero
+  once at the end. Do not stop at the first failure. `planning/tests/lib-test.sh`
+  carries portability shims only (`t_sed_i`, `t_sed_insert_before`,
+  `t_stat_mode`, `t_unique_suffix`, `t_copy_tree`) — it is not an assertion
+  library.
 - Exit 0 for pass, non-zero for fail. A test that cannot run because an optional
   fixture is absent prints `UNCONFIGURED (<VAR>)` and exits 0 — never a silent
   skip and never a hard failure.
-- `! cmd` skips `errexit`. Use `t_expect_exit <code> cmd …` when asserting a
-  failure, so a crash is not mistaken for the expected refusal.
+- `! cmd` skips `errexit`. When asserting a failure, capture the status and
+  compare it (`rc=0; cmd || rc=$?`), so a crash is not mistaken for the expected
+  refusal. Run a subject that may call `exit` in a subshell.
 - Every hard rule in this file and in
   `planning/MAINTAINER-STYLE-CONTRACT.md` has a regression assertion. That is
   what keeps them true.

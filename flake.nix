@@ -106,12 +106,18 @@
               pkgs.shellcheck
               pkgs.jq
               pkgs.git
+              # Renders the architecture diagrams. Development-only: the test
+              # suite must still run without nix, so the render check reports
+              # UNCONFIGURED when mmdc is absent rather than failing.
+              pkgs.nodejs
+              pkgs.mermaid-cli
             ];
             shellHook = ''
               echo "ai-skills dev shell"
               echo "  bash32           $(${bash32}/bin/bash32 --version | head -1 | cut -d' ' -f4)  (CODE-STYLE.md §1 floor)"
               echo "  bash32-run-tests run ./run-tests.sh entirely under bash 3.2"
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
+              echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
               echo
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"

@@ -33,7 +33,7 @@ flowchart TD
     D1 -->|no| STOP["Do not load the skill"]
     D1 -->|yes| BOUND["Establish plan boundary, writes nothing"]
     BOUND --> D2{"UI, template or user-facing flow in scope?"}
-    D2 -->|yes| UIA["create-ui-validation.sh, add-ui-story.sh, configure-ui-story-cache.sh write ui-validation.md, ui-user-stories.md, bugs.md"]
+    D2 -->|yes| UIA["create-ui-validation.sh, add-ui-story.sh, configure-ui-story-cache.sh write the plan-description.md UI validation section, ui-user-stories.md, bugs.md, and the ui-story-runs cache"]
     D2 -->|no| ROOT
     UIA --> ROOT
     ROOT["plan-root.sh resolve"] --> D3{"Which root wins?"}
@@ -51,7 +51,7 @@ flowchart TD
     COV --> EDIT["update-plan-content.sh writes the named document only"]
     EDIT --> COMP["create-step-testing.sh writes the -testing.md companion"]
     COMP --> REG["register-command.sh writes commands.json"]
-    REG --> REACH["verify-target.sh, advisory, writes nothing"]
+    REG --> REACH["verify-target.sh, advisory, writes nothing, fails closed when it cannot check"]
     REACH --> G1{"Six decomposition checks pass?"}
     G1 -->|no| UNIT
     G1 -->|yes| DREV["update-plan-content.sh --decomposition-review completed"]
@@ -359,6 +359,7 @@ stateDiagram-v2
     ClaimsRecorded --> Approved : --review-status approved, no open row, verify-fix-keys.sh passes
     Ungated --> Approved : --review-status approved, no open row, no verification required
     Gated --> ApprovalRefused : unclaimed pair, forged key, or missing fixes.md
+    ClaimsRecorded --> ApprovalRefused : claiming session is the minting session
     ClaimsRecorded --> ApprovalRefused : session secret already destroyed, stale keys
     ApprovalRefused --> Gated : status untouched, re-mint or re-claim
     Approved --> SecretInvalidated : approval gate removes the session secret dir
@@ -380,8 +381,11 @@ stateDiagram-v2
 
 Three of the four gate conditions live in one command. `--review-status
 approved` refuses while any `AR-` row is `open` or `in progress`
-(`update-plan-content.sh:440`), runs `verify-fix-keys.sh` when `fix-keys.json`
-exists (`:443-446`), and then deletes the session secret directory (`:450`) —
+(`update-plan-content.sh:440`), runs
+`verify-fix-keys.sh --claimed-by "${CLAIMED_BY:-<the fix-keys session>}"` when
+`fix-keys.json` exists (so an approval that does not name a claiming session
+distinct from `minted_by` is refused as self-certification), and then deletes the
+session secret directory,
 which is what makes a replayed `fix-keys.json` unusable, since
 `verify-fix-keys.sh:126` dies on the missing secret. It also requires exactly
 one `- Status:` line in each of the two files (`:458-465`), so both statuses
@@ -568,7 +572,26 @@ and a 600 file (`mint-fix-keys.sh:79-96`). Only the derived keys plus
 ## 6. Known contradictions and dead ends
 
 Recorded as observed. No fixes are proposed here; this document describes the
-tree as it is.
+tree as it is. The numbers are stable ids, so a fixed row is removed and its
+number is not reused — rows 5 (the approval gate never passed `--claimed-by`)
+and 10 (reachability ran for `markup|style` only) are gone because both were
+fixed, not because they were renumbered:
+
+- **Row 5, fixed.** The approval gate now calls
+  `verify-fix-keys.sh --claimed-by "${CLAIMED_BY:-<the fix-keys session>}"`, and
+  self-certification is counted with the key failures instead of printed as a
+  warning after the failure check. An approval that does not name a distinct
+  claiming session is refused.
+- **Row 10, fixed.** `verify-target.sh` decides what to check from the target
+  file rather than the type column: a render-surface file gets checks 1-4 under
+  any type, any other file still gets existence and theme-override, and a unit
+  with no target — or a render surface with no block name to look for — exits 1
+  because the check cannot run. No type exits 0 unchecked, and the `SKIP`
+  verdict is gone.
+
+The two benchmark-side risks recorded in `benchmark/planning/runtime/README.md`
+(the unbounded analyzer and the `REVIEWER_COMMAND` fall-through) were fixed in
+the same change; that file records the new behaviour.
 
 | # | Where | Reality | Consequence |
 |---|---|---|---|
@@ -576,12 +599,10 @@ tree as it is.
 | 2 | `add-adversarial-finding.sh:30` vs `create-adversarial-review.sh:31` | The insertion anchor is the literal `No additional substantive finding remains.`; the seeded stub says `No finding recorded yet.` Verified live: the script dies with `Review has no finding insertion boundary` on any freshly created review. | `add-adversarial-finding.sh`, and therefore `plan-mutate.sh add-finding`, is unusable. All findings must go through `update-adversarial-review.sh`. |
 | 3 | `add-adversarial-finding.sh:14` vs `mint-fix-keys.sh:152`, `verify-fix-keys.sh:108`, `validate-plan.sh:440`, `SKILL.md:352` | The finding writer requires `^AR-[0-9][0-9]+$`, two or more digits; every other consumer uses `^AR-[0-9]+$`. | `AR-1` is mintable and verifiable but cannot be written by the finding helper. Two id grammars for one id. |
 | 4 | `add-adversarial-finding.sh:29` | The row template hardcodes `N/A` in the Work-unit column and the script never re-mints. | A finding added this way can never be gated, and the fix-key gate is not refreshed. |
-| 5 | `update-plan-content.sh:444` vs `SKILL.md:912-917` | The approval gate calls `verify-fix-keys.sh "$plan_dir"` without `--claimed-by`. | The self-certification check that §3.1 exists to enforce never fires automatically. A fixer that minted its own keys approves silently. |
 | 6 | `run-adversary-probe.sh:116` vs `SKILL.md:882-887` | The probe's spawn prompt tells the reviewer to write findings and a verdict to `$WORKING/adversarial-review.md` directly. | Contradicts the one-writable-file rule, bypasses `update-adversarial-review.sh`, and so bypasses history archival and key minting. |
 | 7 | `plan-context-lib.sh:97-102` vs `SKILL.md:1272-1277` | The gate serves only `plan`, `inventory`, `progress`, `adversarial-review`, `goal:<g>`, `step:<g>/<s>`, `unit:WNN`. `coverage`, `stories`, `fixes`, `fix-keys` and `approval` are `plan-content.sh` ids only. | Reviewers instructed to sweep the coverage table and `ui-user-stories.md` cannot reach them through the gate. `.plans/gated-review-fix-keys/adversarial-review.md` §1.1 records exactly this limitation and a disclosed direct disk read. |
 | 8 | `MAINTAINER.md:14-15` | The artifact map lists `PLANNING.md` and `EXECUTION.md` as phase docs. Neither file exists under `planning/`; their content is inside `SKILL.md`. | The authoritative artifact map describes a structure the tree does not have. |
 | 9 | `validate-plan.sh:22-38` vs `SKILL.md:1176` | Bare `--stale` consumes the next positional as the phrase file, so `validate-plan.sh --stale <plan-dir>` reads the plan directory as a phrase file and fails `--stale file not found`. `--stale default <plan-dir>` and `--stale=<file>` work. | The stale sweep is order-sensitive in a way the documented form does not signal. |
-| 10 | `verify-target.sh:114-121` vs `SKILL.md:227-248` | Reachability checks run only for `markup` and `style` units; every other type exits zero with `has no render surface`. | A template target recorded as `source` or reached through a `discovery` unit passes the static half of the reachability gate without any check running. |
 | 11 | `role-context.sh:145-160` | `can_access` restricts reads to the caller's own role, with the reviewer family mutually readable and the maintainer able to read all. | Documented nowhere in `SKILL.md` or `ROLES.md`. A maintainer changing the persona matrix will not know this cross-role gate exists. |
 | 12 | `plan-context-lib.sh:88`, `:139`, `run-adversary-probe.sh:79` | The copy-pasted awk `trim` uses `gsub(/^[[:space:]]+\|[[:space:]]+/, ...)` — the second alternative has no `$` anchor, so internal whitespace is stripped too. `verify-target.sh:97-106` and `add-work-unit.sh:34` use the correct anchored form. | Unit and goal ids containing a space resolve differently depending on which script reads the inventory. |
 | 13 | `plan-context-lib.sh` index paths, observed in `.plans/reviewer-oracle-evidence-hardening/context/snapshots/5/index.tsv` | `init` stores whatever `--plan-dir` string it was given; the shipped snapshots hold relative `.plans/...` paths. | `check --all` silently compares nothing useful when run from another working directory. Staleness, not an error. |

@@ -197,3 +197,57 @@ jobs:
 
       - name: Parse every part and the artifact
         run: bash -n install.sh installer/build.sh installer/src/*.sh
+
+  mermaid-render:
+    # Proves: every fenced mermaid block in the repo's markdown is SYNTACTICALLY
+    # valid — mermaid-cli parses and renders it. It proves nothing about
+    # accuracy: a diagram can render perfectly and still describe a flow the code
+    # does not have. planning/tests/test-mermaid-accuracy.sh owns the existence
+    # checks (script, artifact, node id, function) and runs mmdc too when the dev
+    # flake provides it; this job is the leg that cannot be skipped, and it lives
+    # here rather than only in the suite because the suite may not assume node
+    # (CODE-STYLE.md section 1).
+    name: Every mermaid diagram renders (syntax only, proves nothing about accuracy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record the node under test
+        run: node --version
+
+      - name: Extract every fenced mermaid block
+        run: |
+          # benchmark/results/** is archived output, not live documentation.
+          mkdir -p /tmp/mermaid
+          for doc in $(git ls-files '*.md' | grep -v '^benchmark/results/'); do
+            tag="$(printf '%s' "$doc" | tr '/' '-')"
+            awk -v out=/tmp/mermaid -v tag="$tag" '
+              !inb && /^```mermaid[[:space:]]*$/ { inb = 1; f = sprintf("%s/%s@%d.mmd", out, tag, NR); next }
+              inb && /^```/ { inb = 0; next }
+              inb { print > f }
+            ' "$doc"
+          done
+          blocks="$(find /tmp/mermaid -name '*.mmd' | wc -l)"
+          find /tmp/mermaid -name '*.mmd' | sort
+          echo "mermaid blocks: $blocks"
+          if [ "$blocks" -eq 0 ]; then
+            echo "::error::no mermaid block found — the extractor or the docs changed shape"
+            exit 1
+          fi
+
+      - name: Render each block with mermaid-cli
+        run: |
+          # Pinned to the version the dev flake ships, so a local run and CI
+          # agree on the parser. --no-sandbox: chromium has no user namespace on
+          # the runner.
+          printf '%s\n' '{ "args": ["--no-sandbox", "--disable-dev-shm-usage"] }' > /tmp/puppeteer.json
+          rc=0
+          for f in /tmp/mermaid/*.mmd; do
+            if ! npx -y @mermaid-js/mermaid-cli@11.16.0 -q \
+                -p /tmp/puppeteer.json -i "$f" -o "$f.svg"; then
+              echo "::error::mermaid rejected $(basename "$f" .mmd | tr '@' ':')"
+              rc=1
+            fi
+          done
+          exit "$rc"
