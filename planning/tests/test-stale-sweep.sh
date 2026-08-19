@@ -123,6 +123,57 @@ Nothing to see here.
 MD
 assert_passes 'preamble before any heading' "$doc" 'all four'
 
+# ---- severity: a count blocks, an identical-output wording only warns --------
+# Class B is 50% precise as a gate (an identical PDF is a defect,
+# `byte-for-byte` in a JSON file is correct), so it points at the Artifact
+# comparisons table, which checks the same thing exactly.
+scripts_dir="$repo_root/planning/scripts"
+sev_plan="$temporary_root/severity-plan"
+cp -R "$repo_root/benchmark/planning/tests/fixtures/review-lifecycle-plan" "$sev_plan"
+sev_doc="$(find "$sev_plan" -type f -name '*-testing.md' | LC_ALL=C sort | head -1)"
+sev_pristine="$temporary_root/severity.pristine"
+cp "$sev_doc" "$sev_pristine"
+
+gate_output() { # <paragraph text> [--stale argument]
+    cp "$sev_pristine" "$sev_doc"
+    printf '\n## Automated tests\n\n%s\n' "$1" >> "$sev_doc"
+    { "$scripts_dir/validate-plan.sh" --stale "${2:-default}" "$sev_plan" 2>&1 || true; }
+}
+
+out="$(gate_output 'The adapter output is byte-identical to the recorded evidence.')"
+case "$out" in
+    *"WARN: wording 'byte-identical'"*) ;;
+    *) note_fail 'an identical-output wording did not produce a warning' ;;
+esac
+case "$out" in
+    *"FAIL: stale phrase 'byte-identical'"*) note_fail 'an identical-output wording still fails the gate' ;;
+esac
+case "$out" in
+    *'Artifact comparisons'*) ;;
+    *) note_fail 'the warning does not name the table that checks this exactly' ;;
+esac
+
+out="$(gate_output 'The grader walks all four states in the recorded order.')"
+case "$out" in
+    *"FAIL: stale phrase 'all four'"*) ;;
+    *) note_fail 'a bare count no longer fails the gate' ;;
+esac
+
+# A caller-supplied list has no known class, so nothing in it is downgraded.
+printf 'byte-identical\n' > "$temporary_root/supplied-phrases"
+out="$(gate_output 'The adapter output is byte-identical to the evidence.' "$temporary_root/supplied-phrases")"
+case "$out" in
+    *"FAIL: stale phrase 'byte-identical'"*) ;;
+    *) note_fail 'a caller-supplied phrase was not gated' ;;
+esac
+# The FAIL alone proves nothing -- it appears either way. The bundled comparison
+# list being wrongly active shows up as an extra warning beside it.
+case "$out" in
+    *"WARN: wording 'byte-identical'"*)
+        note_fail 'the bundled comparison list ran for a caller-supplied phrase file' ;;
+esac
+cp "$sev_pristine" "$sev_doc"
+
 echo
 echo "stale-sweep: $([ "$fail" -eq 0 ] && echo PASS || echo FAIL)"
 [ "$fail" -eq 0 ]

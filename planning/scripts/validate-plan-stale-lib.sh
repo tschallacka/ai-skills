@@ -25,9 +25,15 @@ stale_default_phrases=(
     'the six states'
     'all states'
     'four per-state'
-    # Class B (report 12): a criterion demanding an identical/byte-identical
-    # output the target cannot produce (embedded metadata, live dates) is a
-    # gate that fails correct work. Flag the wording so it is revisited.
+)
+
+# Wording that asks for an identical output. Measured against a labelled corpus
+# this is 50% precise as a gate -- an identical PDF is a real defect, while
+# `byte-for-byte in oracle-terminal-evidence.json` is correct -- because the
+# discriminating fact is the artifact and prose does not carry it. So it WARNS
+# and points at the table that does: validate-plan-comparisons-lib.sh checks a
+# declared comparison exactly.
+stale_comparison_phrases=(
     'byte-identical'
     'byte-for-byte'
     'pixel-identical'
@@ -84,7 +90,11 @@ plan_validate_stale() {
                 fail "--stale file not found: $stale_file"
             fi
             stale_phrases_file="$stale_file"
+            # A caller-supplied list has no known class, so every phrase in it
+            # stays a gate.
+            stale_comparison_active=false
         else
+            stale_comparison_active=true
             stale_phrases_file="$(mktemp "${TMPDIR:-/tmp}/plan-stale-default.XXXXXX")"
             # Register with the entry script's single accumulating cleanup
             # rather than an EXIT trap here: `trap - EXIT` to "release" it
@@ -102,6 +112,16 @@ plan_validate_stale() {
                 fi
             done
         done < "$stale_phrases_file"
+        [ "$stale_comparison_active" = true ] || return 0
+        local comparison
+        for comparison in ${stale_comparison_phrases[@]+"${stale_comparison_phrases[@]}"}; do
+            for doc in "${stale_docs[@]}"; do
+                [ -f "$doc" ] || continue
+                hits="$(stale_scan_doc "$doc" "$comparison")"
+                [ -n "$hits" ] || continue
+                warn "wording '$comparison' in an unmarked paragraph: $(printf '%s' "$hits" | tr '\n' ' ') -- if this is an acceptance criterion, declare it in the step's '## Artifact comparisons' table (update-plan-content.sh -tp) so the comparison is checked instead of guessed"
+            done
+        done
         if [ -z "$stale_file" ] || [ "$stale_file" = "default" ]; then
             rm -f "$stale_phrases_file"
         fi
