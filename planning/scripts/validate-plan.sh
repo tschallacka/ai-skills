@@ -8,7 +8,7 @@
 #   1. existence      — the two required documents are present (else stop)
 #   2. plan docs      — headings, UI verdict, review verdict, hand-edit damage
 #   3. placeholders   — registered template tokens (WARN, or FAIL when generated)
-#   4. stale          — --stale phrase sweep
+#   4. stale          — --stale phrase sweep, advisory: WARN only, never gates
 #   5. inventory      — parse the work-unit table and build the data model
 #   6. dependencies   — cycles and unknown edges
 #   7. proof coverage — KNOWN DEAD, see validate-plan-inventory-lib.sh

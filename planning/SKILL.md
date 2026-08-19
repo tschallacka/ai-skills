@@ -987,12 +987,22 @@ Run the validator before creating trackers or presenting the plan as ready:
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # surface-consistency checks (on by default); --no-propagation disables it
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # bundled case-count phrase list; sweeps companions too
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # advisory: WARN on a listed phrase in an unmarked paragraph
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # advisory: bundled wording list; sweeps companions too
 ```
 
-Beyond structure, propagation, stale wording, and the placeholder registry,
-the validator checks two more things. The **serve check** WARNs when a goal
+`--stale` is a **wording review aid, not a gate.** Every finding is a WARN and it
+never changes the exit status, so a plan is not blocked by it and its output does
+not need clearing before the plan is ready. Read the warnings and judge each one:
+measured on real plans the count phrases were right 0 times in 24 hits, because a
+count that has drifted reads exactly like one that cannot. What *is* gated is the
+part that can be decided: an acceptance criterion declaring a comparison in the
+step's `## Artifact comparisons` table is checked against
+`planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
+fails.
+
+Beyond structure, propagation, the advisory wording sweep, and the placeholder
+registry, the validator checks two more things. The **serve check** WARNs when a goal
 that changes module state, schema, or configuration (per
 `state-change-registry.json`) has no verification acceptance condition
 mentioning a request or health check. The **command registry** WARNs on any
