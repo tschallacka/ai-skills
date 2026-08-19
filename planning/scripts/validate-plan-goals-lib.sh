@@ -4,10 +4,11 @@
 # count is inside the allowed band with an exception section when it is one,
 # its testing requirement agrees with the test/verification units it owns, and
 # every step file names its own goal, work unit, type, file, scope and subscope
-# exactly as the inventory row does.
+# exactly as the inventory row does. A yes/no first-column table under a
+# heading goal-tables.json does not register is hand-edit damage and fails.
 #
 # Sourced by validate-plan.sh; never executed. Requires
-# validate-plan-common-lib.sh and the inventory data model.
+# validate-plan-common-lib.sh, jq, and the inventory data model.
 #
 # validate_goal_testing_requirement is the only writer of
 # goal_testing_required, which is why the proof-coverage pass in
@@ -17,6 +18,49 @@
 # The entry script and its sibling libs publish these globals; shellcheck lints
 # each file alone and cannot see the assignments.
 set -euo pipefail
+
+goal_tables_registry="$skill_root/goal-tables.json"
+goal_registered_sections=''
+goal_registered_list=''
+goal_tables_loaded=false
+
+# Registry membership decides which sections may carry a yes/no first column.
+# The mutating helpers scan the testing-requirement section literally, so an
+# unregistered table can only have arrived by hand and the document is suspect.
+load_goal_table_registry() {
+    [ "$goal_tables_loaded" = false ] || return 0
+    goal_tables_loaded=true
+    if [ ! -f "$goal_tables_registry" ]; then
+        fail "goal-tables.json registry is missing at $goal_tables_registry"
+        return 0
+    fi
+    goal_registered_sections="$(jq -r '.tables[] | select(.document == "goal.md") | .section' \
+        "$goal_tables_registry" 2>/dev/null)"
+    if [ -z "$goal_registered_sections" ]; then
+        fail "goal-tables.json registers no goal.md section with a yes/no first column"
+        return 0
+    fi
+    goal_registered_list="$(printf '%s' "$goal_registered_sections" | tr '\n' ',' | sed -e 's/,$//' -e 's/,/, /g')"
+}
+
+validate_goal_yes_no_tables() {
+    local goal_file="$1" section newline
+    newline=$'\n'
+    while IFS= read -r section; do
+        [ -n "$section" ] || continue
+        case "$newline$goal_registered_sections$newline" in
+            *"$newline$section$newline"*) ;;
+            *) fail "$goal_file has a hand-written yes/no table under '$section'; only ${goal_registered_list:-none} may carry one. Rebuild that section through update-plan-content.sh -gs (or -gp for the one paragraph, -tr for the testing requirement), never by hand" ;;
+        esac
+    done < <(awk '
+        /^```/ { in_fence = !in_fence; next }
+        in_fence { next }
+        /^## / { section = $0; next }
+        /^\|[[:space:]]*(yes|no)[[:space:]]*\|/ {
+            if (section != "" && !reported[section]++) print section
+        }
+    ' "$goal_file")
+}
 
 validate_goal_testing_requirement() {
     local goal_name="$1" goal_file="$2" row required rationale
@@ -49,6 +93,7 @@ validate_goal_testing_requirement() {
 }
 
 plan_validate_goals() {
+    load_goal_table_registry
     for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
         [ -d "$goal_dir" ] || continue
         goal_name="$(basename "$goal_dir")"
@@ -70,6 +115,7 @@ plan_validate_goals() {
             require_heading "$goal_file" "$heading"
         done
         validate_goal_testing_requirement "$goal_name" "$goal_file"
+        validate_goal_yes_no_tables "$goal_file"
         if grep -Fq '<required only when this goal has one permitted work unit>' "$goal_file"; then
             fail "$goal_name has an unfilled goal-size placeholder; fill the reason or remove the section"
         fi

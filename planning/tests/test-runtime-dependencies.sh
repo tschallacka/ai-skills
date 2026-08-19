@@ -91,7 +91,7 @@ fi
 # Every shipped script that calls jq must either guard it itself or be reachable
 # only through an entry point that does. The pass libraries are sourced by
 # validate-plan.sh, which guards; a NEW jq caller outside that set needs its own.
-guarded_by_entry_point='validate-plan-commands-lib.sh validate-plan-placeholders-lib.sh validate-plan-serve-lib.sh'
+guarded_by_entry_point='validate-plan-commands-lib.sh validate-plan-goals-lib.sh validate-plan-placeholders-lib.sh validate-plan-serve-lib.sh'
 while IFS= read -r script; do
     [ -n "$script" ] || continue
     name="$(basename "$script")"

@@ -75,7 +75,7 @@ plan_rewrite_owned_work_units() {
     local testing_row testing_heading separator
     [ -f "$goal_file" ] || plan_die "goal file not found: $goal_file" 66
     # Preserve the current testing-requirement row (e.g. "| yes | reason |").
-    testing_row="$(awk '/^\|[[:space:]]*(yes|no)[[:space:]]*\|/{print; exit}' "$goal_file")"
+    testing_row="$(plan_testing_requirement_row "$goal_file")"
     [ -n "$testing_row" ] || testing_row='| no | <rationale> |'
     testing_heading='## Testing requirement'
     separator='|---|---|'
