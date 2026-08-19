@@ -110,31 +110,31 @@ jobs:
         run: |
           cat <<'BLOCKERS'
           Remove continue-on-error from `test` (macos-latest) and `test-bash32`
-          only when all of the following are true:
+          only when all of the following are true.
 
-          bash 4 syntax that aborts under /bin/bash 3.2 (CODE-STYLE.md section 1
-          bans all of it; the `declare -A` items are explicitly DEFERRED):
+          CLEARED — verified mechanically, and each is now enforced by a test so
+          it cannot come back:
 
-          1. `declare -A` in planning/scripts/validate-plan.sh and its
-             validate-plan-inventory-lib.sh / validate-plan-ui-lib.sh siblings.
-          2. `declare -A` in planning/scripts/plan-content.sh.
-          3. `declare -A` in planning/scripts/plan-env.sh.
-          4. `mapfile` in planning/scripts/cleanup-plans.sh — which also uses
-             GNU-only `find -printf` on the same line.
-          5. `declare -A` and `mapfile` in benchmark/planning/run-benchmark.sh
-             and `mapfile` in benchmark/planning/runtime/codex/agent.sh.
+          1-3. `declare -A` is gone from planning/scripts. The maps are
+               plan_map_* (plan-map-lib.sh); plan-env.sh uses a string set.
+          4.   cleanup-plans.sh no longer uses `mapfile` or `find -printf`.
+          5.   run-benchmark.sh and runtime/codex/agent.sh no longer use
+               `declare -A` or `mapfile`.
+          6.   The GNU-only utilities named in CODE-STYLE.md section 1 are
+               replaced or guarded. planning/tests/test-portability-contract.sh
+               fails on a new one, so this stays cleared.
+          7.   limited-run.sh's Darwin path degrades honestly and is arch-aware:
+               memlimit is arm64-only, so an Intel Mac is not asked for it.
+               planning/tests/test-limited-run-contract.sh covers both.
 
-          Plus:
+          OUTSTANDING — the only remaining blocker:
 
-          6. Every remaining GNU-only utility invocation named in CODE-STYLE.md
-             section 1 is replaced or `command -v` guarded: `sed -i`, `stat -c`,
-             `readlink -f`, `find -printf`, `date +%s%N`, `grep -P`, `sed -r`,
-             `timeout`/`nproc`/`realpath`/`tac`.
-          7. resource-limited-testing/scripts/limited-run.sh's Darwin path runs
-             green: it warns that the RAM cap cannot be enforced and falls back
-             to nice/cpulimit, and that warning must not fail a test.
-          8. The full suite passes twice in a row on macos-latest under both
-             /bin/bash 3.2 and the runner's default bash.
+          8.   The full suite passes twice in a row on macos-latest under both
+               /bin/bash 3.2 and the runner's default bash. This cannot be
+               verified anywhere but a macOS runner: a real bash 3.2 proves the
+               shell floor (the suite is green on 3.2.57 via the flake), but BSD
+               userland is still verified by reading, not by execution. Push the
+               branch, read these two legs, then remove the flag.
           BLOCKERS
 
   shellcheck:
