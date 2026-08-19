@@ -150,11 +150,27 @@ report="$("$scripts/validate-plan.sh" "$plan" 2>&1 || true)"
 assert_contains "$report" "$marker" 'unregistered table is reported'
 assert_contains "$report" '## Dependencies and handoffs' 'finding names the offending section'
 assert_contains "$report" 'update-plan-content.sh' 'finding names the rebuild helper'
+# A hand-edited plan artifact is damage, not advice: the finding must be a FAIL,
+# so it counts toward the gate's error total rather than scrolling past.
+severity="$(printf '%s\n' "$report" | { grep -- "$marker" || true; } | head -1)"
+case "$severity" in
+    FAIL:*) ;;
+    *) note_fail "unregistered table must be reported as a FAIL, got: $severity" ;;
+esac
 
 plan="$(make_plan clean plain)"
 add_unit "$plan" W01 01-step-render
 report="$("$scripts/validate-plan.sh" "$plan" 2>&1 || true)"
 assert_not_contains "$report" "$marker" 'registered table only is not reported'
+
+# 6. A skill tree without the registry must say so, not silently stop checking:
+#    a hand-copied skill directory is exactly how a registry goes missing.
+copy="$work/skill-without-registry"
+mkdir -p "$copy"
+( cd "$root/planning" && tar cf - scripts placeholders.json state-change-registry.json \
+    never-executable-extensions.json ) | ( cd "$copy" && tar xf - )
+report="$("$copy/scripts/validate-plan.sh" "$plan" 2>&1 || true)"
+assert_contains "$report" 'goal-tables.json registry is missing' 'absent registry is reported'
 
 [ "$fail" -eq 0 ] || exit 1
 printf 'goal-testing-row: PASS\n'
