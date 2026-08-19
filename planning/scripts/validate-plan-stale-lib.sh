@@ -38,65 +38,16 @@ stale_default_phrases=(
 #     ONLY: "legacy" alone may be part of the phrase and would mask the match.
 stale_markers='an earlier version|previously|superseded by|supersedes|no longer|was removed|historically|now replaced by'
 
-# The awk prelude behind the sweep: the marker test is case-insensitive because
-# SKILL.md's documented correction note starts a sentence, and a count already
-# discharged by an enumeration in the same paragraph is the target form, not a hit.
-stale_awk_predicates() {
-    cat <<'AWK'
-function stale_count(p) {
-    if (index(p, "eleven")) { return 11 }
-    if (index(p, "twelve")) { return 12 }
-    if (index(p, "three")) { return 3 }
-    if (index(p, "seven")) { return 7 }
-    if (index(p, "eight")) { return 8 }
-    if (index(p, "four")) { return 4 }
-    if (index(p, "five")) { return 5 }
-    if (index(p, "nine")) { return 9 }
-    if (index(p, "six")) { return 6 }
-    if (index(p, "ten")) { return 10 }
-    if (index(p, "two")) { return 2 }
-    if (match(p, /[0-9]+/)) { return substr(p, RSTART, RLENGTH) + 0 }
-    return 0
-}
-# A bare comma run is ordinary prose; an enumeration announces itself first.
-function stale_introduced(head) {
-    return (index(head, ":") || index(head, "\342\200\224") ||
-        index(head, "\342\200\223") || index(head, " - "))
-}
-function stale_enumerated(text, phrase, n,   tail, head, copy, seen, tok, ids, seps, at) {
-    if (n < 2) { return 0 }
-    at = index(text, phrase)
-    if (at == 0) { return 0 }
-    tail = substr(text, at + length(phrase))
-    copy = tail
-    ids = 0
-    while (match(copy, /W[0-9][0-9]/)) {
-        tok = substr(copy, RSTART, RLENGTH)
-        if (!(tok in seen)) { seen[tok] = 1; ids++ }
-        copy = substr(copy, RSTART + RLENGTH)
-    }
-    if (ids >= n) { return 1 }
-    at = match(tail, /[,;]/)
-    if (at == 0) { return 0 }
-    if (!stale_introduced(substr(tail, 1, at))) { return 0 }
-    copy = tail
-    seps = gsub(/[,;]/, "x", copy)
-    return (seps >= n - 1)
-}
-AWK
-}
-
 # Buffering is per PARAGRAPH, never per section: a marker in one paragraph must
 # not exempt an unfixed sibling under the same heading, which is the half-landed
 # fix this sweep exists to find. The report names the paragraph, not the section.
 stale_scan_doc() {
     local file="$1" phrase="$2"
-    awk -v phrase="$phrase" -v markers="$stale_markers" "$(stale_awk_predicates)"'
+    awk -v phrase="$phrase" -v markers="$stale_markers" '
         function flush() {
             if (label != "" && flat != "") {
                 paragraph++
-                if (index(content, phrase) > 0 && tolower(flat) !~ markers &&
-                        !stale_enumerated(flat, phrase, stale_count(phrase))) {
+                if (index(content, phrase) > 0 && tolower(flat) !~ markers) {
                     printf "%s: %s [paragraph %d] %s\n", FILENAME, label, paragraph,
                         (length(flat) > 120 ? substr(flat, 1, 117) "..." : flat)
                 }
