@@ -24,6 +24,20 @@ context_result_schema_version=1
 
 context_die() { printf '%s\n' "$*" >&2; return 64; }
 
+# Same tool probe as context_hash_file, over stdin: a composite entry hash is
+# taken over its inputs' hashes, which never touch disk.
+context_hash_stdin() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 | awk '{print $NF}'
+    else
+        context_die "No SHA-256 command available (sha256sum, shasum, or openssl)"
+    fi
+}
+
 context_hash_file() {
     local file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -134,9 +148,64 @@ context_default_view() {
     esac
 }
 
+# Every input an entry serves, one path per line. All but a work unit resolve to
+# a single file; a unit is served from its step file AND its inventory row, so
+# both must be hashed and both must mark the entry changed.
+context_entry_inputs() {
+    local plan_dir="$1" entry="$2" file
+    file="$(context_resolve_document "$plan_dir" "$entry")" || return "$?"
+    printf '%s\n' "$file"
+    case "$entry" in
+        unit:*) printf '%s\n' "$plan_dir/work-unit-inventory.md" ;;
+    esac
+}
+
+# Identity of everything an entry serves. A single-input entry keeps the plain
+# file hash so existing entries and tokens are untouched; a multi-input entry
+# hashes the ordered per-input hashes, so editing any input invalidates it.
+context_hash_entry() {
+    local plan_dir="$1" entry="$2" inputs count file
+    inputs="$(context_entry_inputs "$plan_dir" "$entry")" || return "$?"
+    count="$(printf '%s\n' "$inputs" | grep -c . || true)"
+    if [ "$count" -le 1 ]; then
+        context_hash_file "$inputs"
+        return 0
+    fi
+    {
+        while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            [ -f "$file" ] && context_hash_file "$file" || printf 'absent\n'
+        done <<INPUTS
+$inputs
+INPUTS
+    } | context_hash_stdin
+}
+
+# The work-unit inventory row as a labelled block. `Depends on` is spelled the
+# way the dependencies view greps for it, so a unit can no longer answer that
+# view with silence.
+context_unit_row_text() {
+    local plan_dir="$1" unit="$2"
+    plan_inventory_row "$plan_dir/work-unit-inventory.md" "$unit" || return 1
+    printf '## Inventory row\n'
+    printf -- '- ID: %s\n' "$plan_inventory_id"
+    printf -- '- Type: %s\n' "$plan_inventory_type"
+    printf -- '- File: %s\n' "$plan_inventory_file"
+    printf -- '- Scope: %s\n' "$plan_inventory_scope"
+    printf -- '- Subscope: %s\n' "$plan_inventory_subscope"
+    printf -- '- Intended change: %s\n' "$plan_inventory_change"
+    printf -- '- Depends on: %s\n' "$plan_inventory_depends"
+    printf -- '- Goal: %s\n' "$plan_inventory_goal"
+    printf -- '- Step: %s\n' "$plan_inventory_step"
+}
+
 context_view_text() {
-    local file="$1" view="$2"
+    local file="$1" view="$2" row_text="${3:-}"
     case "$view" in
+        inventory-row)
+            [ -n "$row_text" ] || { context_die "usage: inventory-row view applies only to a work unit"; return; }
+            printf '%s\n' "$row_text"
+            ;;
         full) cat "$file" ;;
         metadata) sed -n '/^## Ownership$/,/^## Objective$/p; /^## Change target$/,/^## Objective$/p' "$file" | sed '$d' ;;
         summary) sed -n '1,12p' "$file" ;;
@@ -145,10 +214,14 @@ context_view_text() {
         handoff) awk '/^## Handoff$/{seen=1; next} seen && /^§ 7\.1$/{getline; print; exit}' "$file" ;;
         testing)
             local companion="${file%.md}-testing.md"
-            [ -f "$companion" ] || context_die "usage: testing view unavailable for $file"
+            [ -f "$companion" ] || { context_die "usage: testing view unavailable for $file"; return; }
             awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
             ;;
-        dependencies) awk 'tolower($0) ~ /depends on/ {print}' "$file" ;;
+        dependencies)
+            awk 'tolower($0) ~ /depends on/ {print}' "$file"
+            [ -z "$row_text" ] || printf '%s\n' "$row_text" |
+                awk 'tolower($0) ~ /depends on/ {print}'
+            ;;
         ownership) sed -n '/^## Ownership$/,/^## Change target$/p' "$file" | sed '$d' ;;
         changed-documents) sed -n '1,80p' "$file" | grep -E '^(#|§ |[-*] )' | head -20 ;;
         validator) sed -n '/^## Acceptance criteria$/,/^## Handoff$/p' "$file" | head -30 ;;
@@ -175,7 +248,8 @@ context_build_index() {
                 plan_inventory_split "$row"
                 file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
                 [ -f "$file" ] || continue
-                printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" "$(context_hash_file "$file")"
+                printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
+                    "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
             done
         if [ -f "$plan_dir/work-unit-inventory.md" ]; then
             printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"
@@ -231,9 +305,8 @@ context_load_manifest() {
 }
 
 context_register_processed_entry() {
-    local plan_dir="$1" entry="$2" file hash state temporary
-    file="$(context_resolve_document "$plan_dir" "$entry")"
-    hash="$(context_hash_file "$file")"
+    local plan_dir="$1" entry="$2" hash state temporary
+    hash="$(context_hash_entry "$plan_dir" "$entry")"
     state="$(context_processed_file "$plan_dir")"
     mkdir -p "$(dirname "$state")"
     temporary="${state}.tmp.$$"

@@ -2279,6 +2279,7 @@ tests/test-plan-integrity-and-monitor.sh
 tests/test-reviewer-projection.sh
 tests/test-plan-context-reviewer.sh
 tests/test-plan-context-paging.sh
+tests/test-plan-context-unit-entry.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh

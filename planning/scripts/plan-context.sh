@@ -219,7 +219,13 @@ context_read_command() {
     context_role_gate max_bytes
     file="$(context_resolve_document "$plan_dir" "$document_id")"
     [ -f "$file" ] || { printf 'not-found: %s\n' "$document_id" >&2; exit 66; }
-    file_hash="$(context_hash_file "$file")"
+    # Hash every input the entry serves, not just the primary file, so a token
+    # cannot survive an edit to the inventory row a work unit is read with.
+    file_hash="$(context_hash_entry "$plan_dir" "$document_id")"
+    row_text=""
+    case "$document_id" in
+        unit:*) row_text="$(context_unit_row_text "$plan_dir" "${document_id#unit:}" || true)" ;;
+    esac
     if [ -n "$token" ]; then
         [[ "$token" =~ ^continue:[0-9a-f]{64}:[a-z][a-z-]*:[0-9]+$ ]] || { printf 'usage: malformed --token\n' >&2; exit 2; }
         # Fail closed: a cursor is only meaningful against the exact bytes and
@@ -232,7 +238,13 @@ context_read_command() {
         }
         start="${token_rest##*:}"
     fi
-    content="$(context_view_text "$file" "$view")"
+    # 64 is context_die: the view deliberately refuses because it cannot apply
+    # here, and that must be a clean exit rather than a set -e abort with no
+    # structured output. Any other non-zero is a view that ran and matched
+    # nothing (changed-documents greps), which stays empty-and-ok.
+    view_status=0
+    content="$(context_view_text "$file" "$view" "$row_text")" || view_status=$?
+    [ "$view_status" -ne 64 ] || exit 64
     if [ "$read_only" -eq 0 ]; then
         context_with_lock "$plan_dir" context_register_processed_entry "$plan_dir" "$document_id"
     fi
