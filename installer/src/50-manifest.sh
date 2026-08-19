@@ -63,6 +63,7 @@ tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
 tests/test-progress-bar-shape.sh
+tests/test-stale-sweep.sh
 tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh

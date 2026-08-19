@@ -93,6 +93,7 @@ planning/tests/test-voice-artifact-drift.sh	tests/test-voice-artifact-drift.sh	i
 planning/tests/test-supervision-frame.sh	tests/test-supervision-frame.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-persona-drift.sh	tests/test-persona-drift.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-progress-bar-shape.sh	tests/test-progress-bar-shape.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-stale-sweep.sh	tests/test-stale-sweep.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-coverage-gaps.sh	tests/test-coverage-gaps.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-flag-coverage.sh	tests/test-flag-coverage.sh	installer	review-approved	backup-then-replace	false
