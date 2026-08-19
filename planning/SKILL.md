@@ -319,14 +319,18 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 the flagged `update-plan-content.sh` commands for narrative edits; the helpers
 enforce paragraph numbering, spacing, sequencing, and safe content.
 
-`create-plan.sh` git-initializes the plan directory, and every mutating helper
-commits the pre-mutation state first — `git -C <planname> log` recovers an
-overwritten paragraph. When the plans root is git-excluded from its enclosing
-work tree (a project's `/.plans` in `.gitignore`) or sits outside any repo,
-`create-plan.sh` initializes one repo at the plans root itself so the whole
-plans tree is versioned and cross-plan diffs work; `cleanup-plans.sh` clears
-that root history when the last plan is removed, and the next `create-plan.sh`
-re-initializes it. Read plan documents only through `plan-content.sh`;
+`create-plan.sh` git-initializes a repository for the plan and records which one
+in the plan's `.env` as `PLAN_SNAPSHOT_REPO`. Every mutating helper commits the
+pre-mutation state into that repository first, so `git -C <the recorded repo>
+log` recovers an overwritten paragraph. When the plans root is git-excluded from
+its enclosing work tree (a project's `/.plans` in `.gitignore`) or sits outside
+any repo, that repository is the plans root itself, so the whole plans tree is
+versioned and cross-plan diffs work; `cleanup-plans.sh` clears that root history
+when the last plan is removed, and the next `create-plan.sh` re-initializes it.
+A plan tracked inside a repository you own is the one layout with no
+per-mutation snapshots: `PLAN_SNAPSHOT_REPO` is empty there, because a commit
+per helper call does not belong in your project's history. Gitignore the plans
+root to get the undo back. Read plan documents only through `plan-content.sh`;
 its `find` subcommand locates a literal string across plan documents and
 prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
 hits). Use it before a paragraph-level edit to confirm the target is unique:
@@ -834,9 +838,10 @@ land them.
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
-the session recorded as `minted_by`, and a warning is a review finding, not a
-pass. If a fixer must mint its own keys to record a finding the reviewer
+`verify-fix-keys.sh --claimed-by <session>` FAILS when the claiming session is
+the session recorded as `minted_by`, and the approval gate always passes a
+claiming session, so a self-certified fix set cannot be approved. If a fixer
+must mint its own keys to record a finding the reviewer
 missed, surface it as an open finding for a fresh review rather than resolving
 it on its own authority.
 
@@ -857,13 +862,16 @@ must match `^AR-[0-9]+$` and work-unit IDs `^W[0-9]+$`: minting warns per
 non-conforming gated row and fails the run if any gated row could not be
 minted, so a typo cannot silently disable the whole gate. `fix-keys.json`
 records `minted_by` (the session that minted; override with `MINTED_BY`), and
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
+`verify-fix-keys.sh --claimed-by <session>` fails when the claiming session is
 the minting session (self-certification).
 
 The fixer records which key each fix used in `fixes.md` as tab-separated claim
 lines (`finding_id \t work_unit \t key`, one per gated pair). The approval gate
-runs `verify-fix-keys.sh` before `--review-status approved` flips the verdict:
-every gated pair must be claimed with a matching key, then the session secret
+runs `verify-fix-keys.sh --claimed-by "${CLAIMED_BY:-<the minting session>}"`
+before `--review-status approved` flips the verdict: every gated pair must be
+claimed with a matching key by a session that is not the minting one, so export
+`CLAIMED_BY=<fixer session>` at approval — the default is the minting session
+and the gate refuses it as self-certification. Then the session secret
 dir is removed (invalidation) so a stale `fix-keys.json` fails closed on
 re-approval. Plans without `fix-keys.json` (ungated) and plans whose findings
 all carry no work unit approve without verification.
@@ -1162,7 +1170,7 @@ from step numbering" note is the sanctioned pattern. Reviewers must not reject
 ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"            # append a coverage row
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01,W02 "<notes>" --replace  # amend (collapses duplicate rows for the same outcome)
-"$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override
+"$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override; a unit with no target, or a render surface with no block name, fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
@@ -1181,7 +1189,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --file review.csv      # rewrite the Findings table from a CSV file
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table into adversarial-review-history.md under Cycle 7
 "$PLANNING_SKILL_DIR/scripts/mint-fix-keys.sh" <plan-directory>                                     # (re)derive per-(finding,work-unit) fix keys into fix-keys.json
-"$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; warn on self-certification
+"$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; self-certification fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status <plan-directory> approved
@@ -1302,3 +1310,47 @@ planning --target TARGET --approval yes`. Before that boundary, use
 approval and destination collisions fail before copy or backup; preserve the
 target, record the failure, resolve the collision or approval decision, and
 resume the same manifest rather than installing a partial package.
+
+### 4.7 A plan from an older skill version is obsolete, not migrated
+
+This skill does no backwards compatibility, and a plan directory is one of its
+interfaces. A plan built by an older version of the skill is therefore not
+resumed, not repaired, and not migrated: it is marked obsolete, and the
+initiative is rebuilt as a new plan in a new plan directory with the current
+tools.
+
+**Detect it from the plan's own `.env`.** `plan-env.sh write-plan` records
+`PLAN_ENV_SCHEMA_VERSION`, and that is the version signal — nothing else in the
+plan carries one. A plan directory is from an older skill version when its
+`.env` is missing, when its `PLAN_ENV_SCHEMA_VERSION` differs from the value
+the installed `plan-env.sh` writes, or when
+`plan-env.sh check <plan-directory>` refuses it with a schema or manifest error
+(exit 65). Run that check before reading anything else in a plan
+you did not create in this session.
+
+**Mark it with a file, not with prose.** Write `<plan-directory>/OBSOLETE`:
+
+```
+obsoleted-at: <YYYY-MM-DD>
+obsoleted-because: built by an older planning-skill version
+replaced-by: <new plan directory name>
+```
+
+`replaced-by:` is mandatory and names the plan that supersedes this one. The
+marker is a separate file rather than a key in `.env` or a status line in
+`plan-description.md`, because neither of those can carry it: `.env` is a closed
+manifest whose key allow-list rejects an unknown key and whose schema check
+demands the current version, and the `- Status:` field is already owned by the
+review-status gate, which permits only `💤 pending` and `✅ approved`. A file is
+also visible in a directory listing, which is where somebody about to resume the
+wrong plan is looking.
+
+**`validate-plan.sh` refuses an obsolete plan** before its first pass: exit 65,
+naming the replacement, instead of a wall of findings about a plan nobody should
+be using. Fix the marker, not the plan, if that refusal is unexpected.
+
+**Nothing is deleted, ever.** The obsolete plan directory stays exactly as it
+is — its description, inventory, goals, steps, progress trackers, adversarial
+review and handoffs are the record of what was decided and why, and the rebuild
+reads them as input. Do not remove it, do not empty it, and do not edit its
+documents to make it look current.

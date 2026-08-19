@@ -10,7 +10,7 @@
 #
 # Usage:
 #   plan-env.sh write-global <plans-root> <planning-root>
-#   plan-env.sh write-plan <plan-root> [plans-root]
+#   plan-env.sh write-plan <plan-root> [plans-root] [snapshot-repo]
 #   plan-env.sh check <plan-root> [plans-root]
 #   plan-env.sh path global|plan <plan-root> [plans-root]
 #   plan-env.sh print <plan-root> [plans-root]
@@ -31,7 +31,7 @@ usage() {
     local rc="${1:-64}"
     cat <<USAGE
 Usage: ${0##*/} write-global <plans-root> <planning-root>
-       ${0##*/} write-plan <plan-root> [plans-root]
+       ${0##*/} write-plan <plan-root> [plans-root] [snapshot-repo]
        ${0##*/} check <plan-root> [plans-root]
        ${0##*/} path global|plan <plan-root> [plans-root]
        ${0##*/} print <plan-root> [plans-root]
@@ -141,12 +141,26 @@ load_manifest() {
     set +a
 }
 
+# Print the PLAN_SNAPSHOT_REPO already recorded in a plan manifest, or nothing.
+# plan-env.sh sources no library on purpose, so this does not reuse
+# plan_snapshot_repo from plan-document-lib.sh.
+read_pinned_snapshot_repo() {
+    local file="$1" assignment repo
+    [ -f "$file" ] || return 0
+    assignment="$(grep '^PLAN_SNAPSHOT_REPO=' "$file" 2>/dev/null)" || return 0
+    case "$assignment" in
+        *'$'*|*'`'*|*';'*|*'|'*|*'&'*|*'<'*|*'>'*) return 0 ;;
+    esac
+    eval "repo=${assignment#PLAN_SNAPSHOT_REPO=}" 2>/dev/null || return 0
+    printf '%s' "$repo"
+}
+
 write_global() {
     local plans_root planning_root
     plans_root=$(absolute_path "$1")
     planning_root=$(absolute_path "$2")
     write_manifest "$(global_env_path "$plans_root")" \
-        PLAN_ENV_SCHEMA_VERSION 1 \
+        PLAN_ENV_SCHEMA_VERSION 2 \
         PLANS_ROOT "$plans_root" \
         PLANNING_SKILL_ROOT "$planning_root" \
         PLANNING_SCRIPTS_ROOT "$planning_root/scripts" \
@@ -154,14 +168,32 @@ write_global() {
 }
 
 write_plan() {
-    local plan_root plans_root planning_root global_file
+    local plan_root plans_root planning_root global_file snapshot_repo
     plan_root=$(absolute_path "$1")
     plans_root=$(absolute_path "${2:-${PLANS_ROOT:-$HOME/.plans}}")
     planning_root=$(cd "$(dirname "$0")/.." && pwd -P)
     global_file=$(global_env_path "$plans_root")
+    # The repository that owns this plan's pre-mutation snapshots, decided once
+    # by create-plan.sh and pinned here so a later .gitignore change cannot move
+    # it silently. Empty means "do not auto-commit": the plan is versioned in a
+    # repository the user owns, and plan snapshots do not belong in that history.
+    snapshot_repo="${3:-}"
+    # Regenerating a manifest must not lose the pin: with no explicit argument,
+    # carry forward whatever the existing manifest recorded.
+    if [ -z "$snapshot_repo" ]; then
+        snapshot_repo=$(read_pinned_snapshot_repo "$(plan_env_path "$plan_root")")
+    fi
+    if [ -n "$snapshot_repo" ]; then
+        snapshot_repo=$(absolute_path "$snapshot_repo")
+        case "$snapshot_repo" in
+            "$plans_root"|"$plan_root") ;;
+            *) die "snapshot repo must be the plans root or the plan root: $snapshot_repo" 64 ;;
+        esac
+    fi
     write_global "$plans_root" "$planning_root"
     write_manifest "$(plan_env_path "$plan_root")" \
-        PLAN_ENV_SCHEMA_VERSION 1 \
+        PLAN_ENV_SCHEMA_VERSION 2 \
+        PLAN_SNAPSHOT_REPO "$snapshot_repo" \
         PLANS_ROOT "$plans_root" \
         PLAN_ROOT "$plan_root" \
         PLAN_NAME "$(basename "$plan_root")" \
@@ -183,7 +215,7 @@ check_manifests() {
     manifest_check "$(global_env_path "$plans_root")" \
         'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLANNING_SKILL_ROOT PLANNING_SCRIPTS_ROOT PLANNING_TESTS_ROOT'
     manifest_check "$(plan_env_path "$plan_root")" \
-        'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
+        'PLAN_ENV_SCHEMA_VERSION PLAN_SNAPSHOT_REPO PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
     local global_root plan_manifest_root global_schema plan_schema
     local global_skill_root global_scripts_root global_tests_root
     load_manifest "$(global_env_path "$plans_root")"
@@ -194,8 +226,8 @@ check_manifests() {
     global_tests_root=$PLANNING_TESTS_ROOT
     load_manifest "$(plan_env_path "$plan_root")"
     plan_schema=$PLAN_ENV_SCHEMA_VERSION
-    [ "$global_schema" = 1 ] || die "unsupported global manifest schema: $global_schema" 65
-    [ "$plan_schema" = 1 ] || die "unsupported plan manifest schema: $plan_schema" 65
+    [ "$global_schema" = 2 ] || die "unsupported global manifest schema: $global_schema" 65
+    [ "$plan_schema" = 2 ] || die "unsupported plan manifest schema: $plan_schema" 65
     plan_manifest_root=$PLAN_ROOT
     [ "$global_root" = "$plans_root" ] || die "global manifest root mismatch" 65
     [ "$plan_manifest_root" = "$plan_root" ] || die "plan manifest root mismatch" 65
@@ -212,6 +244,10 @@ check_manifests() {
     [ "$PLAN_VALIDATION_FILE" = "$plan_root/validation-report.md" ] || die "validation path mismatch" 65
     [ "$PLAN_CONTEXT_ROOT" = "$plan_root/context" ] || die "context root mismatch" 65
     [ "$PLAN_STEPS_ROOT" = "$plan_root/steps" ] || die "steps root mismatch" 65
+    case "$PLAN_SNAPSHOT_REPO" in
+        ''|"$plans_root"|"$plan_root") ;;
+        *) die "snapshot repo mismatch" 65 ;;
+    esac
 }
 
 case "${1:-}" in
@@ -221,8 +257,8 @@ case "${1:-}" in
         write_global "$2" "$3"
         ;;
     write-plan)
-        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
-        write_plan "$2" "${3:-}"
+        [ "$#" -ge 2 ] && [ "$#" -le 4 ] || usage
+        write_plan "$2" "${3:-}" "${4:-}"
         ;;
     check)
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage

@@ -94,13 +94,19 @@ inventory="$plan_dir/work-unit-inventory.md"
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$inventory"
 plan_root=$(cd "$plan_dir" && pwd -P)
-"$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
-"$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
+plans_root_path=$(cd "$plans_root" && pwd -P)
+
+# Which repository owns this plan's history, and which owns its pre-mutation
+# snapshots. Both are decided here, before the manifests are written, because
+# PLAN_SNAPSHOT_REPO pins the answer for the life of the plan.
+git_available=false
+git_repo=""
+snapshot_repo=""
 if command -v git >/dev/null 2>&1; then
+    git_available=true
     # A git-excluded plans root, or one outside any repo, gets its own repo at
     # the root so cross-plan diffs work; a plan inside an already-versioned
     # tree commits into that tree instead.
-    git_repo=""
     if top="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)"; then
         if git -C "$top" check-ignore -q "$plan_dir" 2>/dev/null; then
             git_repo="$plans_root"
@@ -110,6 +116,21 @@ if command -v git >/dev/null 2>&1; then
     elif [[ "$plan_arg" != */* ]]; then
         git_repo="$plans_root"
     fi
+    # A repository at the plans root or at the plan itself is ours to commit
+    # into on every mutation. The enclosing work tree of a tracked plan is the
+    # user's, so it takes the initial commit and nothing after it.
+    if [ -n "$git_repo" ]; then
+        case "$(cd "$git_repo" 2>/dev/null && pwd -P)" in
+            "$plans_root_path") snapshot_repo="$plans_root_path" ;;
+        esac
+    else
+        snapshot_repo="$plan_root"
+    fi
+fi
+
+"$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
+"$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root" "$snapshot_repo"
+if [ "$git_available" = true ]; then
     if [ -n "$git_repo" ]; then
         mkdir -p "$git_repo"
         git init -q "$git_repo" 2>/dev/null || true

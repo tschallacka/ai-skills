@@ -65,15 +65,40 @@ plan_warn() {
     printf 'WARN: %s\n' "$*" >&2
 }
 
-# Commit the plan directory before a mutation so every overwrite is
-# recoverable. Plan directories are usually gitignored by the host repo, so they
-# carry their own git. No-op without git or without a git-initialized plan dir.
+# The repository that owns this plan's snapshots, as create-plan.sh pinned it in
+# PLAN_SNAPSHOT_REPO. Returns 1 when there is none, which is the honest answer
+# for a plan versioned in a repository the user owns: plan snapshots do not
+# belong in that history. The value is read, not re-derived, so a .gitignore
+# change after creation cannot move the target silently.
+plan_snapshot_repo() {
+    local env_file="$1/.env" assignment repo
+    [ -f "$env_file" ] || return 1
+    assignment="$(grep '^PLAN_SNAPSHOT_REPO=' "$env_file" 2>/dev/null)" || return 1
+    # Same character rule plan-env.sh manifest_check enforces on values: a
+    # manifest carrying any of these is already invalid, so refuse it here too
+    # rather than eval the line.
+    case "$assignment" in
+        *'$'*|*'`'*|*';'*|*'|'*|*'&'*|*'<'*|*'>'*) return 1 ;;
+    esac
+    # eval is the inverse of the printf %q that wrote the value, and is what
+    # keeps a plans root containing a space working.
+    eval "repo=${assignment#PLAN_SNAPSHOT_REPO=}" 2>/dev/null || return 1
+    [ -n "$repo" ] || return 1
+    printf '%s\n' "$repo"
+}
+
+# Commit the plan before a mutation so every overwrite is recoverable. The
+# snapshot lands in the repository PLAN_SNAPSHOT_REPO names, which is usually
+# the plans root rather than the plan directory, and the add is scoped to this
+# plan so a shared plans-root repo does not sweep up its siblings. No-op without
+# git, without a pinned repository, or when that repository is not initialized.
 plan_git_snapshot() {
-    local plan_dir="$1"
+    local plan_dir="$1" repo
     command -v git >/dev/null 2>&1 || return 0
-    [ -d "$plan_dir/.git" ] || return 0
-    git -C "$plan_dir" add -A -- . >/dev/null 2>&1 || return 0
-    git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
+    repo="$(plan_snapshot_repo "$plan_dir")" || return 0
+    [ -d "$repo/.git" ] || return 0
+    git -C "$repo" add -A -- "$plan_dir" >/dev/null 2>&1 || return 0
+    git -C "$repo" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
         commit -q -m "snapshot before ${0##*/}" >/dev/null 2>&1 || true
 }
 
@@ -159,14 +184,10 @@ plan_document_path() {
             ;;
         unit:W*)
             unit="${document_id#unit:}"
-            IFS=$'\t' read -r goal step < <(
-                awk -F'|' -v wanted="$unit" '
-                    function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); return value }
-                    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ && trim($2) == wanted {
-                        print trim($9) "\t" trim($10)
-                    }
-                ' "$plan_dir/work-unit-inventory.md"
-            )
+            if plan_inventory_row "$plan_dir/work-unit-inventory.md" "$unit"; then
+                goal="$plan_inventory_goal"
+                step="$plan_inventory_step"
+            fi
             [ -n "${goal:-}" ] && [ -n "${step:-}" ] || plan_die "Work unit not found: $unit"
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
@@ -783,6 +804,18 @@ plan_progress_icon() {
     printf '%s\n' "$icon"
 }
 
+# The label a progress table's Completion status cell carries, from the status
+# word its command was given. Non-zero on an unknown word, so the caller keeps
+# owning the usage message. The glyphs are the on-disk contract.
+plan_status_label() {
+    case "$1" in
+        incomplete) printf '%s\n' '💤 incomplete' ;;
+        in-progress|in_progress) printf '%s\n' '⏳ in progress' ;;
+        completed) printf '%s\n' '✅ completed' ;;
+        *) return 1 ;;
+    esac
+}
+
 # The shared awk prelude defining trim(). Used as `awk "$(plan_awk_trim) …"`.
 # Both ends are anchored: an unanchored `[[:space:]]+$` alternative strips
 # interior whitespace runs and silently mangles table cells.
@@ -795,6 +828,10 @@ AWK
 # ── Associative arrays for bash 3.2 ─────────────────────────────────────────
 # shellcheck source=planning/scripts/plan-map-lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
+
+# ── Work-unit inventory rows ─────────────────────────────────────────────────
+# shellcheck source=planning/scripts/plan-inventory-lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
 
 # ── Load-time initialisation ─────────────────────────────────────────────────
 # Guarded: this library is sourced more than once per process, and re-running it

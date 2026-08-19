@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `25cb77776fb984e16d9d2fc5ea15c588b9cc86e1ddc2a9a5aaca4802d55280bd`
+> Source SHA-256: `c2adac5d1c85a24c87ed04bf896f0b78b766e21dc02faa15f37256ab9162c0bf`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -231,9 +231,10 @@ land them.
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
-the session recorded as `minted_by`, and a warning is a review finding, not a
-pass. If a fixer must mint its own keys to record a finding the reviewer
+`verify-fix-keys.sh --claimed-by <session>` FAILS when the claiming session is
+the session recorded as `minted_by`, and the approval gate always passes a
+claiming session, so a self-certified fix set cannot be approved. If a fixer
+must mint its own keys to record a finding the reviewer
 missed, surface it as an open finding for a fresh review rather than resolving
 it on its own authority.
 
