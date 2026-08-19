@@ -3,7 +3,7 @@
 ## Current state and prior-goal handoffs
 
 § 2.1
-<confirmed facts and prerequisite handoffs>
+plan_hoist_plan_dir already existed and was proven on four argument shapes; twenty helpers still took the plan directory positionally.
 
 ## Outcome and definition of done
 
@@ -13,27 +13,27 @@ All 20 remaining helpers accept --plan-dir as a synonym for the positional plan 
 ## Why this goal is needed
 
 § 4.1
-<how this goal contributes to the initiative>
+A reader learns --plan-dir from the bounded reader, which is their primary tool, then has the call refused by every other helper. This goal removes that asymmetry.
 
 ## Scope
 
 § 5.1
-<included and explicitly excluded behavior>
+Included: the twenty positional helpers and update-plan-content subcommands. Excluded: cleanup-plans.sh, which takes a plans root, and the two helpers that already consume the flag natively.
 
 ## Affected files, systems, data, and interfaces
 
 § 6.1
-<concrete affected areas>
+planning/scripts/*.sh argument parsing, their usage text, and planning/tests/test-flag-form-equivalence.sh plus the new test-plan-dir-synonym.sh.
 
 ## Dependencies and handoffs
 
 § 7.1
-<prerequisites and precise downstream handoffs>
+Depends on plan_hoist_plan_dir in plan-document-lib.sh. Hands off a proven flag surface that the self-hosted plan fixture then exercises.
 
 ## Implementation approach, risks, and edge cases
 
 § 8.1
-<approach, risks, and edge cases>
+The hoist must sit after script_dir is defined or the function is undefined at call time. A differential test that only compares output will pass for two equally broken paths, so each case also asserts the invocation had an effect.
 
 ## Owned work units
 

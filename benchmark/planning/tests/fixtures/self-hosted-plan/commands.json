@@ -1,1 +1,22 @@
-{}
+{
+  "hoister-lib": {
+    "cmd": "planning/scripts/plan-document-lib.sh",
+    "when": "sourced by every helper; the hoist must follow it"
+  },
+  "hoist-sample": {
+    "cmd": "planning/scripts/add-goal.sh",
+    "when": "a representative positional helper, mutated to prove the differential test"
+  },
+  "hoist-subcmd": {
+    "cmd": "planning/scripts/update-plan-content.sh",
+    "when": "the one helper whose subcommand precedes the plan directory"
+  },
+  "flag-form": {
+    "cmd": "planning/tests/test-flag-form-equivalence.sh",
+    "when": "run to confirm the existing flag-form contract still holds"
+  },
+  "reporter-sample": {
+    "cmd": "planning/tests/test-progress-bar-shape.sh",
+    "when": "a representative converted test, used for the mutation spot-check"
+  }
+}

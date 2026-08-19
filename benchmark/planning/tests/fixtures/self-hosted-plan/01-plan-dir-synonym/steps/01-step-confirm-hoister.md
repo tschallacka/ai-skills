@@ -20,17 +20,17 @@ No change; the hoister already exists and is the seam the other units use.
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Exercise plan_hoist_plan_dir on four shapes: the flag at position 1, at position 2, the = form, and absent.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+Each shape prints the argument list with the value in the requested slot, including a path containing a space.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The other units may treat the hoister as a working seam.
 
 ## Atomicity check
 

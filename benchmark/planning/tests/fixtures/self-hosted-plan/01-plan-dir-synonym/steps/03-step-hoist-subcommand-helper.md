@@ -20,17 +20,17 @@ Hoist at position 1 after command="$1"; shift, so every subcommand sees the plan
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Insert the hoist after update-plan-content.sh shifts its subcommand off, so the plan directory is position 1 for every form.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+The -dp, -ap and -f subcommands rewrite identical documents either way.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The differential unit can cover the subcommand shape as well as the plain one.
 
 ## Atomicity check
 

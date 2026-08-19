@@ -31,7 +31,7 @@ planning/scripts/*.sh for the flag; planning/tests/*.sh and benchmark/planning/t
 No new dependency. bash 3.2 remains the floor, so no declare -A, no mapfile, and printf %q must round-trip. Behaviour must not change on the passing path: a captured baseline of all 59 test outputs and exit statuses is the acceptance evidence.
 
 § 7.2
-The captured baseline of all 59 test outputs and exit statuses is the acceptance evidence: any difference beyond mktemp paths is a regression.
+- Rationale: No user-facing surface changes: the work touches helper argument parsing and test reporting only.
 
 ## Risks and open questions
 
@@ -51,9 +51,3 @@ Delegation over rewriting: pointing 33 reporters at one implementation touches f
 ## UI classification
 
 - UI affected: no
-- Rationale: No user-facing surface changes: the work touches helper argument parsing and test reporting only.
-
-## Adversarial review
-
-- Artifact: `adversarial-review.md`
-- Status: ✅ approved

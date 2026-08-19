@@ -20,17 +20,17 @@ No change; the shared reporter already exists and is the seam the conversion tar
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Add t_record and t_failures to lib-test.sh, recording findings in a file rather than a counter.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+A finding raised inside a command substitution is still counted afterwards.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The conversion unit has a seam that preserves each test message.
 
 ## Atomicity check
 

@@ -3,7 +3,7 @@
 ## Current state and prior-goal handoffs
 
 § 2.1
-<confirmed facts and prerequisite handoffs>
+Thirty-three test files each defined their own reporter over a local counter; twenty-six of them are counter-style and lose a finding raised inside a command substitution.
 
 ## Outcome and definition of done
 
@@ -13,27 +13,27 @@ The 33 tests that already report findings use the shared t_fail/t_end implementa
 ## Why this goal is needed
 
 § 4.1
-<how this goal contributes to the initiative>
+A suite that can report PASS over a real finding is worse than no suite, because it is trusted.
 
 ## Scope
 
 § 5.1
-<included and explicitly excluded behavior>
+Included: the twenty-six counter-style reporters. Excluded: the seven that report and exit on the first failure, where continuing would run against broken state.
 
 ## Affected files, systems, data, and interfaces
 
 § 6.1
-<concrete affected areas>
+planning/tests/lib-test.sh as the shared seam, the twenty-six converted tests, and CODE-STYLE section 12 for the convention.
 
 ## Dependencies and handoffs
 
 § 7.1
-<prerequisites and precise downstream handoffs>
+Depends on t_record and t_failures in lib-test.sh. Hands off a suite whose findings survive a subshell.
 
 ## Implementation approach, risks, and edge cases
 
 § 8.1
-<approach, risks, and edge cases>
+Each converted test keeps its own message and prefix, so no output changes on the passing path. Risk: a sourced library that changes shell options alters test semantics, which is how errexit leaked into a test that deliberately runs without it.
 
 ## Owned work units
 

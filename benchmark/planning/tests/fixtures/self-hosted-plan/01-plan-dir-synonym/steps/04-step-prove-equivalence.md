@@ -20,17 +20,17 @@ One case per converted helper: positional and --plan-dir produce identical trees
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Add one differential case per converted helper, each asserting the invocation had an effect as well as matching output.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+test-plan-dir-synonym.sh passes, and revoking a hoist or hoisting to the wrong slot fails it.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+Goal 02 can proceed against a suite that proves this surface.
 
 ## Atomicity check
 

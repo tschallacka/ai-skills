@@ -20,17 +20,17 @@ A planted failure in a converted test still names its finding and still exits no
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Plant a finding after the reporter definition in a sample of converted tests, and revert t_record to a counter.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+Each planted finding is reported and exits non-zero; reverting the seam fails the permanent assertion.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The goal is complete and the property is guarded.
 
 ## Atomicity check
 

@@ -20,17 +20,17 @@ Every test stdout, stderr and exit status is byte-identical to the captured base
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Re-capture every test stdout, stderr and exit status and compare against the baseline with mktemp paths normalised.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+No test differs on the passing path.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The mutation unit can assume the passing path is unchanged.
 
 ## Atomicity check
 

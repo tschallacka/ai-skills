@@ -28,6 +28,11 @@ plan="$work/plan"
 cp -R "$fixture" "$plan"
 
 t_expect_exit 0 'the self-hosted plan validates' "$scripts_dir/validate-plan.sh" "$plan"
+# The fixture is the plan as the skill left it after execution, so the
+# completion gate must accept it too: trackers at 100%, every placeholder
+# filled, every command literal registered, and the review approved.
+t_expect_exit 0 'it satisfies the completion gate' \
+    "$scripts_dir/validate-plan.sh" --complete "$plan"
 t_expect_exit 0 'it validates with propagation' \
     "$scripts_dir/validate-plan.sh" --propagation "$plan"
 t_expect_exit 0 'it validates via the --plan-dir synonym' \
@@ -54,5 +59,8 @@ units="$({ grep -c '^| W' "$plan/work-unit-inventory.md" || true; })"
 t_assert_eq 'every authored work unit is present' "$units" 8
 companions="$(find "$plan" -name '*-testing.md' | { grep -c . || true; })"
 t_assert_eq 'every step has its testing companion' "$companions" 8
+progress="$({ grep -o '`100%' "$plan/progress.md" || true; } | { grep -c . || true; })"
+t_assert_eq 'the plan tracker reports completion' "$progress" 1
+t_assert_contains 'the review is approved' 'approved' "$(cat "$plan/adversarial-review.md")"
 
 t_end

@@ -20,17 +20,17 @@ Point the local reporter at t_fail and replace the counter epilogue with t_end, 
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Point each counter-style reporter at t_record and read t_failures in its epilogue, leaving messages and call sites untouched.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+Twenty-six tests share the implementation and every message is unchanged.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The baseline comparison can attribute any difference to this change alone.
 
 ## Atomicity check
 

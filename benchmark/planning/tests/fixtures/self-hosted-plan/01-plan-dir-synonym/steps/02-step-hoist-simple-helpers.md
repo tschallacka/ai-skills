@@ -20,17 +20,17 @@ Source plan-document-lib.sh above first use of $1, then hoist --plan-dir to posi
 ## Instructions
 
 § 5.1
-<direct action on this one target>
+Insert the hoist after script_dir is defined and the library is sourced, in each of the twenty positional helpers.
 
 ## Acceptance criteria
 
 § 6.1
-<observable result for this target>
+Every helper accepts --plan-dir and none reports an undefined function at load.
 
 ## Handoff
 
 § 7.1
-<what the next named work unit can rely on>
+The differential unit can compare both argument forms for real invocations.
 
 ## Atomicity check
 
