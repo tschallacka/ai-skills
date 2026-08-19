@@ -31,7 +31,7 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/stale-sweep.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
 # write_doc <name> <<'MD' ... MD  -- a fixture document, body on stdin, path in
-# $doc. bash 3.2 cannot parse a multi-line heredoc inside `$( )`, so this sets a
+# $doc. bash 3.2 mis-parses a quote character in a heredoc body inside `$( )`
 # global instead of printing the path.
 write_doc() {
     doc="$temporary_root/$1.md"
