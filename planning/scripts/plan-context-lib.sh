@@ -119,6 +119,11 @@ context_resolve_document() {
             printf '%s/%s/progress.md\n' "$plan_dir" "$goal_id"
             ;;
         adversarial-review) printf '%s/adversarial-review.md\n' "$plan_dir" ;;
+        coverage) printf '%s/work-unit-inventory.md\n' "$plan_dir" ;;
+        stories) printf '%s/ui-user-stories.md\n' "$plan_dir" ;;
+        fixes) printf '%s/fixes.md\n' "$plan_dir" ;;
+        fix-keys) printf '%s/fix-keys.json\n' "$plan_dir" ;;
+        approval) printf '%s/approval.json\n' "$plan_dir" ;;
         goal:*) printf '%s/%s/goal.md\n' "$plan_dir" "${document_id#goal:}" ;;
         step:*)
             local value goal step
@@ -141,6 +146,7 @@ context_entry_id() {
     case "$1" in
         plan|goal:*|goal-progress:*|step:*|unit:W*|inventory|progress|adversarial-review)
             printf '%s\n' "$1" ;;
+        coverage|stories|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
         *) context_die "usage: unsupported entry id: $1" ;;
     esac
 }
@@ -149,7 +155,8 @@ context_entry_id() {
 # review reads as a complete one, so they page rather than summarize.
 context_default_view() {
     case "$1" in
-        inventory|adversarial-review) printf 'full\n' ;;
+        inventory|adversarial-review|coverage|stories|fixes|fix-keys|approval)
+            printf 'full\n' ;;
         *) printf 'summary\n' ;;
     esac
 }
@@ -262,6 +269,13 @@ context_build_index() {
                 printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
                     "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
             done
+        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md \
+                        fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
+            extra_file="$plan_dir/${extra_id#*:}"
+            [ -f "$extra_file" ] || continue
+            printf '%s\t%s\t%s\t%s\n' "${extra_id%%:*}" "$extra_file" "${extra_id%%:*}" \
+                "$(context_hash_file "$extra_file")"
+        done
         if [ -f "$plan_dir/work-unit-inventory.md" ]; then
             printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"
         fi

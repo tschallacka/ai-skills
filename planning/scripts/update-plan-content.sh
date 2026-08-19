@@ -163,13 +163,13 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
             reject_swallowed_flags "$paragraph_content" "$command"
-            set -- "$plan_dir" review -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
+            set -- "$plan_dir" adversarial-review -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
             command=paragraph
             ;;
         -rs|--review-section)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; section="$2"; shift 2
-            set -- "$plan_dir" review "$section" "$@"
+            set -- "$plan_dir" adversarial-review "$section" "$@"
             command=section
             ;;
         -ap|--append-paragraph)

@@ -650,10 +650,13 @@ must include verbatim:
 "Read plan files and artifacts ONLY through the gated reader:
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
-Valid --document IDs: plan, inventory, progress, adversarial-review,
+Valid --document IDs: plan, inventory, coverage, progress,
+goal-progress:<goal>, adversarial-review, stories, fixes, fix-keys, approval,
 goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
-document. inventory and adversarial-review default to the whole-document `full`
-view; every other id defaults to `summary`, and `--view full` is available for
+document. The documents that are not narrative — inventory, coverage,
+adversarial-review, stories, fixes, fix-keys, approval — default to the
+whole-document `full` view; every other id defaults to `summary`, and
+`--view full` is available for
 any of them. A page that withheld records reports next_token — pass it back as
 --token and keep going until no next_token comes back. You have NOT read a
 document until a page returns without one; treat a page you stopped early on as

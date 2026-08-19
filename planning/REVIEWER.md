@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `d5a35bbd251c4efb954d0014005a747f28275fb774f36639592f2f48c165d7a7`
+> Source SHA-256: `d4d725faaa4221d01bb65f1537abe2a97e1dc27d62245a552ab8a7dbf8e631b0`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -41,10 +41,13 @@ must include verbatim:
 "Read plan files and artifacts ONLY through the gated reader:
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
   "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
-Valid --document IDs: plan, inventory, progress, adversarial-review,
+Valid --document IDs: plan, inventory, coverage, progress,
+goal-progress:<goal>, adversarial-review, stories, fixes, fix-keys, approval,
 goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
-document. inventory and adversarial-review default to the whole-document `full`
-view; every other id defaults to `summary`, and `--view full` is available for
+document. The documents that are not narrative — inventory, coverage,
+adversarial-review, stories, fixes, fix-keys, approval — default to the
+whole-document `full` view; every other id defaults to `summary`, and
+`--view full` is available for
 any of them. A page that withheld records reports next_token — pass it back as
 --token and keep going until no next_token comes back. You have NOT read a
 document until a page returns without one; treat a page you stopped early on as

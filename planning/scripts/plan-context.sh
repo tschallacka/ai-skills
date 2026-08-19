@@ -41,13 +41,20 @@ Valid --document IDs:
   inventory            work-unit-inventory.md
   progress             progress.md
   adversarial-review   adversarial-review.md
+  coverage             work-unit-inventory.md     (the coverage table)
+  stories              ui-user-stories.md
+  fixes                fixes.md
+  fix-keys             fix-keys.json
+  approval             approval.json
+  goal-progress:<goal> <goal>/progress.md         (e.g. goal-progress:01-build)
   goal:<goal id>       <goal>/goal.md             (e.g. goal:01-build)
   step:<goal>/<step>   <goal>/steps/<step>.md     (e.g. step:01-build/02-step-verify)
   --unit WNN           the step a work unit maps to in work-unit-inventory.md
 
 Views: full, summary, metadata, ownership, instructions, acceptance, handoff,
-testing, dependencies, changed-documents, validator. Default is `full` for
-inventory and adversarial-review, `summary` otherwise.
+testing, dependencies, changed-documents, inventory-row, validator. Default is
+`full` for whole documents that are not narrative (inventory, coverage,
+adversarial-review, stories, fixes, fix-keys, approval) and `summary` otherwise.
 
 Paging: a page that withholds records reports next_token; pass it back as
 --token to resume. A token is refused (65) once the document or view it was
