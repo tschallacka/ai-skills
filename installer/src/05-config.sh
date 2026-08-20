@@ -34,7 +34,7 @@ RUNTIME_BLOCKED_SKILLS=""
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -42,6 +42,7 @@ SKILL_DESCRIPTIONS=(
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with jq.'
+    'Defects with their reproduction, mechanism and verification, in JSON.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

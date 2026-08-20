@@ -73,7 +73,7 @@ RUNTIME_BLOCKED_SKILLS=""
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -81,6 +81,7 @@ SKILL_DESCRIPTIONS=(
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with jq.'
+    'Defects with their reproduction, mechanism and verification, in JSON.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -317,6 +318,9 @@ runtime_requirements() {
     case "$1" in
         brainstorm)
             ;;
+        bug-report)
+            case "$platform" in *:*) printf '%s\n' jq ;; esac
+            ;;
         planning)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
             case "$platform" in *:*) printf '%s\n' openssl ;; esac
@@ -338,6 +342,7 @@ runtime_requirement_strength() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
+        bug-report:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
@@ -349,6 +354,7 @@ runtime_requirement_why() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
+        bug-report:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a jq call, and a register that cannot be read is worse than none' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
@@ -2431,6 +2437,9 @@ EOF
             printf '%s\n' SKILL.md requires.tsv
             ;;
         todo)
+            printf '%s\n' SKILL.md requires.tsv
+            ;;
+        bug-report)
             printf '%s\n' SKILL.md requires.tsv
             ;;
         post-implementation-review)

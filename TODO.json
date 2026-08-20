@@ -1,13 +1,13 @@
 {
-  "comment": "Queued work for the ai-skills repository. Read with jq; see todo/SKILL.md.",
-  "items": [
+  "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Defects with a reproduction belong in BUGS.json (bug-report/SKILL.md).",
+  "tasks": [
     {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "partly",
       "parent": null,
       "detail": "18 tests defined their own exiting reporter, so one broken thing hid the rest, and a counter incremented inside a command substitution is lost with the subshell. The conversions are done; the count was measured by brace-matching each reporter body, not by an awk range.",
-      "evidence": "T1a-T1e closed. Measured before: two injected failures reported 1 of 2.",
+      "note": "T1a-T1e closed. Measured before: two injected failures reported 1 of 2.",
       "blocked_on": null,
       "refs": [
         "planning/tests/lib-test.sh"
@@ -19,7 +19,7 @@
       "status": "open",
       "parent": null,
       "detail": "A shell script that turns a plan's Markdown into one self-contained HTML file suitable for publishing through the artifact skill, so a reviewer can read a whole plan \u2014 description, inventory, goals, steps, findings, progress \u2014 in a browser instead of opening twenty files. Contract 15 says the documents exist to be human-followable; this is the logical next step for the reviewer who is not sitting in the repo. Constraints it must respect: no new runtime dependency (jq is the ceiling, so no pandoc/node), bash 3.2 and BSD userland, self-contained output with no external assets (the artifact CSP blocks them), and it must read plan content through the sanctioned readers rather than parsing files directly. Dev-only, so it does not need a manifest row.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -29,7 +29,7 @@
       "status": "done",
       "parent": "T1",
       "detail": "DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. `test-report17-regressions.sh` (24 call sites), `test-report18-regressions.sh` (17) and `test-report20-regressions.sh` (6) each define a `fail()` that exits, so one broken thing hides every finding after it. They share one shape, which makes them the batch to learn on. `lib-test.sh` already provides `t_begin`, `t_record`, `t_failures`, `t_fail`, `t_assert_eq`, `t_assert_contains`, `t_expect_exit`, `t_end`, and `t_trap_assertions` for bare `[ \u2026 ]` under `set -e`. The three `fail()` bodies are **byte-identical** (`cksum 1563312193`), so this is copy-paste of a function the library owns, and `t_fail` prints the same `FAIL: %s` to stderr \u2014 the swap is mechanical. Measured cost of leaving it: two injected failures in `test-report20-regressions.sh` reported **1 of 2**. No preconditions to preserve either; the only `exit` in each file is inside `fail()`. **Settle T1e first** \u2014 it decides whether byte-identical stdout can be the acceptance criterion.",
-      "evidence": "DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. `test-report17-regressions.sh` (24 call sites), `test-report18-regressions.sh` (17) and `test-report20-regressions.sh` (6) each define a `fail()` that exits, so one broken thing hides every finding after it. They share one shape, which makes them the batch to learn on. `lib-test.sh` already provides `t_begin`, `t_record`, `t_failures`, `t_fail`, `t_assert_eq`, `t_assert_contains`, `t_expect_exit`, `t_end`, and `t_trap_assertions` for bare `[ \u2026 ]` under `set -e`.",
+      "note": "DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. DONE \u2014 b1ba471; 2 of 2 findings reported where it was 1 of 2. `test-report17-regressions.sh` (24 call sites), `test-report18-regressions.sh` (17) and `test-report20-regressions.sh` (6) each define a `fail()` that exits, so one broken thing hides every finding after it. They share one shape, which makes them the batch to learn on. `lib-test.sh` already provides `t_begin`, `t_record`, `t_failures`, `t_fail`, `t_assert_eq`, `t_assert_contains`, `t_expect_exit`, `t_end`, and `t_trap_assertions` for bare `[ \u2026 ]` under `set -e`.",
       "blocked_on": null,
       "refs": []
     },
@@ -39,7 +39,7 @@
       "status": "done",
       "parent": "T1",
       "detail": "DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. 8 call sites each. Separate from T1a because they are not the same shape: `test-portable-helpers` pins byte-level output of the progress glyphs and the stat probe, so a conversion that changes when it stops can change what it compares. `test-portable-helpers` also now carries the `$0`/`BASH_SOURCE` and slash-less-`source` hygiene gates, which loop over files and must keep reporting every offender rather than the first.",
-      "evidence": "DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. 8 call sites each. Separate from T1a because they are not the same shape: `test-portable-helpers` pins byte-level output of the progress glyphs and the stat probe, so a conversion that changes when it stops can change what it compares. `test-portable-helpers` also now carries the `$0`/`BASH_SOURCE` and slash-less-`source` hygiene gates, which loop over files and must keep reporting every offender rather than the first.",
+      "note": "DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. DONE \u2014 094ac89; also fixed a success line that printed before the hygiene gates ran. 8 call sites each. Separate from T1a because they are not the same shape: `test-portable-helpers` pins byte-level output of the progress glyphs and the stat probe, so a conversion that changes when it stops can change what it compares. `test-portable-helpers` also now carries the `$0`/`BASH_SOURCE` and slash-less-`source` hygiene gates, which loop over files and must keep reporting every offender rather than the first.",
       "blocked_on": null,
       "refs": []
     },
@@ -49,7 +49,7 @@
       "status": "done",
       "parent": "T1",
       "detail": "DONE \u2014 8b41943; a broken mint now surfaces 4 findings where the old reporter stopped at 1. 93 call sites \u2014 more than the other five together \u2014 and it is the only test of the fix-key gate: minting, forged and stale keys, self-certification, and the warning count. A silent conversion error here costs the most, so it gets its own change with nothing else in it.",
-      "evidence": "DONE \u2014 8b41943; a broken mint now surfaces 4 findings where the old reporter stopped at 1. 93 call sites \u2014 more than the other five together \u2014 and it is the only test of the fix-key gate: minting, forged and stale keys, self-certification, and the warning count. A silent conversion error here costs the most, so it gets its own change with nothing else in it.",
+      "note": "DONE \u2014 8b41943; a broken mint now surfaces 4 findings where the old reporter stopped at 1. 93 call sites \u2014 more than the other five together \u2014 and it is the only test of the fix-key gate: minting, forged and stale keys, self-certification, and the warning count. A silent conversion error here costs the most, so it gets its own change with nothing else in it.",
       "blocked_on": null,
       "refs": []
     },
@@ -59,7 +59,7 @@
       "status": "done",
       "parent": "T1",
       "detail": "DONE \u2014 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows \u2014 hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map \u2014 and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range \u2014 see CODE-STYLE.md \u00a712.",
-      "evidence": "DONE \u2014 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows \u2014 hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map \u2014 and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range \u2014 see CODE-STYLE.md \u00a712.",
+      "note": "DONE \u2014 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows \u2014 hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map \u2014 and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range \u2014 see CODE-STYLE.md \u00a712.",
       "blocked_on": null,
       "refs": []
     },
@@ -69,7 +69,7 @@
       "status": "decided",
       "parent": "T1",
       "detail": "DECIDED \u2014 t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached \u2014 that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { \u2026; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "evidence": "DECIDED \u2014 t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "note": "DECIDED \u2014 t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
       "blocked_on": null,
       "refs": []
     },
@@ -79,7 +79,7 @@
       "status": "open",
       "parent": null,
       "detail": "A model on the older skill hit the same class five cycles running: a fix lands in one surface and not the others that mention the unit. Correction to how this was first recorded here. `SKILL.md` **does** document the sweep: \"Resolving a finding\" enumerates seven surfaces and calls out the coverage table and one more as worth sweeping too, and says a finding is not closed until every surface agrees. The rule is there. What is missing is the mechanism. Nothing in that passage names `plan-content.sh find <WNN> --in all`, which performs the whole sweep in one call: verified for W05 on the self-hosted fixture, five surfaces including the coverage row. So an agent reads nine surfaces to check by hand and does it by hand, which is how the coverage row gets missed twice. Two things to fix. Name the command in the \"Resolving a finding\" passage, next to the list it automates. And `plan-content.sh blast-radius <WNN>` has the name an agent reaches for first and answers a different question: downstream *units* by dependency, not *documents* mentioning the unit. It returns something plausible, so the agent stops there. Either rename it, or have it name the sweep in its own output. The same report describes a stale-wording guard grown to 20 phrases that caught two drifted surfaces by itself. That is a registry with a gate, which is this repo's pattern; worth asking whether the phrase list belongs here as data rather than in each agent's habits.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -89,7 +89,7 @@
       "status": "open",
       "parent": null,
       "detail": "From the memo-key defect: a step told an implementer to reuse a predicate \"whose result is already memoized\", the predicate keys on an absolute path, and the callers hold relative ones. Every call was a miss, so the instruction cost the extra read it existed to prevent. The general rule fits an existing one rather than needing its own. SKILL.md line 73 already says to make every step self-contained and not to require the agent to infer details from unrelated files. A claimed property is the same failure in a smaller space: the instruction is self-contained in appearance only. So extend that bullet. A cache needs its key. Idempotence needs what makes a repeat safe. Ordering needs the sort key. Validation needs what was validated. Partly gateable, with care. The claim words are a short list (memoized, cached, already computed, idempotent, sorted, validated, normalised) and a step instruction using one without a qualifying clause nearby is detectable, which is the shape of the stale-wording guard in T13. The risk is crying wolf: \"already validated by the caller\" is a complete claim. Build the phrase list as data and make it a warning first, then decide whether it earns a failure.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -99,7 +99,7 @@
       "status": "open",
       "parent": null,
       "detail": "From the same report: W24 creates a module-level memo for a shebang predicate and exports no invalidator, while W36 in `src/sync/watcher.ts` has to drop a stale entry when a file gains or loses its shebang, so W36 can only succeed by editing `src/extraction/shebang.ts`, which is W24's file and which its own atomicity check forbids. **The fourth instance of that shape** in one plan, after the classifyShellCommand seams, the synthesis call site, and the attribution rule. That breaks the one-unit-one-target rule after decomposition, and `validate-plan.sh` does not see it. Two units naming the same file is mechanically detectable and may already be covered; a unit whose acceptance criteria require a change in another unit's file is not, and the honest first step is to find out which of the two this is. The fix that worked is a decomposition rule worth writing down: **one module over one piece of state owns every export that state needs**, so W24 took both the predicate and its invalidator, W36 depends on it, and the companion asserts that invalidation forces a re-read. That last assertion is what proves the watcher never reaches into the module. If the rule were in the atomization guidance, the shape would be caught at decomposition rather than in cycle 12. Related and not mechanically checkable: the same report found an instruction telling an implementer to reuse a predicate \"whose result is already memoized\", where the predicate keys on an absolute path and the callers hold relative ones. A differently spelled key is a memo miss, so the instruction cost the extra read it existed to prevent. An instruction that depends on a cache has to name the key. That belongs in the adversarial-review prompt, not in a gate. Also worth encouraging: that report deleted two units whose acceptance criteria were unreachable by construction and recorded the blocking mechanism as a non-goal. A weaker true claim beats a stronger false one.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -109,7 +109,7 @@
       "status": "blocked",
       "parent": null,
       "detail": "Two different uses, and only one is hard. For plain SHA-256 it is the third fallback after `sha256sum` and `shasum` (`plan-context-lib.sh`, `generate-reviewer.sh`), which is the `sha256-tool` portability rule and needs nothing. For HMAC-SHA256 it is required: `mint-fix-keys.sh` and `verify-fix-keys.sh` derive a fix key as `HMAC-SHA256(secret, \"<session>|<finding>|<unit>\")`, and no coreutils tool does keyed HMAC. Both guard it and exit 69 with a named message, and the tool list in `test-runtime-dependencies.sh` includes it. So the fix-key gate has a dependency the rest of the skill does not, and the recommendation here was wrong at first. Two facts settle it. The secret lives at `$TMPDIR/planning-agent/review-fix-keys/<session>/secret`, mode 600, and the reviewer and fixer run as the **same Unix user**. The fixer can read it. The gate never resisted a determined agent; it prevents accidental self-certification and makes a deliberate bypass an explicit act. That is worth having and it is a speed bump, not a security boundary. Once the threat is accident rather than attack, HMAC's advantage over `digest(secret || message)` disappears. HMAC exists to stop length extension by someone who cannot see the key, and here they can. Since this was written, two things reduced the urgency without settling it. openssl is now a declared **soft** requirement of planning (`requires.tsv` plus hints in `installer/tools.tsv`), so a host without it is warned at install time with a per-platform install command instead of discovering the gap when mint-fix-keys.sh exits 69 mid-review. And `test-sha256-fallbacks.sh` now proves the three hash branches agree, so the alternative below has a tested mechanism under it rather than an assumed one. **Preferred fix: derive the key with the SHA-256 fallback chain that already exists** (`sha256sum`, then `shasum`, then openssl) over `secret || message`. Three lines, no ipad/xpad construction, and openssl becomes one of three ways to satisfy the requirement instead of mandatory, matching every other hash in the repo. Note that `openssl rand -hex 32` already falls back to `/dev/urandom | od`, so key generation is not the problem; the HMAC call is the only place openssl is required rather than preferred. Not `cksum`, which is right for the installer's change detection and wrong here: CRC32 collisions are cheap to produce deliberately, and a fixer hand-editing `fixes.md` is the case this gate exists for. Changing the derivation invalidates keys minted by the old scheme, so it needs the same before/after proof as any migration plus a note that an in-flight review must re-mint. Smaller and separate: `test-fix-keys.sh` calls openssl with no guard, so on a host without it the run fails confusingly instead of reporting UNCONFIGURED the way `test-add-fix-claim.sh` does.",
-      "evidence": null,
+      "note": null,
       "blocked_on": "the maintainer",
       "refs": []
     },
@@ -119,7 +119,7 @@
       "status": "blocked",
       "parent": null,
       "detail": "`add-coverage.sh` offers add and `--replace`; the only path that drops a row is a side effect of `remove-work-unit.sh` emptying it (`plan-reconcile-lib.sh:46`, \"row dropped\"). So an obsolete row whose work units still exist has no sanctioned removal, and the only remaining option is the hand edit `SKILL.md:1295` forbids. Same shape as `fixes.md` having five readers and no writer, which `add-fix-claim.sh` closed. Found by a model on the older skill, which hit it while deleting units and added a `--remove` mode to `add-coverage.sh`. **Prefer a separate `remove-coverage.sh`**: this repo already spells removal that way with `remove-work-unit.sh` and `remove-plan.sh`, and a script named `add-` that deletes rows reads wrong at every call site. Whichever way, it owes the drop notice contract 9a now requires, naming each row it removes. Worth checking at the same time whether any other artifact is add-only. The question to ask of each writer is not \"can I create this\" but \"can I undo it without hand-editing\".",
-      "evidence": null,
+      "note": null,
       "blocked_on": "the maintainer",
       "refs": []
     },
@@ -129,7 +129,7 @@
       "status": "open",
       "parent": null,
       "detail": "A registered placeholder is a WARN under plain validation and a FAIL only under `--complete` (`validate-plan-placeholders-lib.sh`, three paths: fail for one no author will fill, fail under complete, warn otherwise). The pattern is deliberate and documented in `validate-plan-common-lib.sh:10`. The cost showed up in a real run: \"Plan validation passed: 36 work units\" while all 36 steps still had `<direct action on this one target>` as their Instructions, 138 placeholders in total. SKILL.md \u00a73.3 frames plain validation as the gate for presenting a plan as ready, and Instructions plus Acceptance criteria are exactly what an executor and a reviewer consume. The question is not whether to promote every placeholder to a failure, which would break the create-then-fill flow the WARN exists for. It is whether the summary line may say \"passed\" while a placeholder sits in a field nothing can act on. Options: keep the WARN but make the summary state the count and refuse the word \"passed\"; or promote placeholders in Instructions and Acceptance criteria only, since those two are the executor's contract, and leave narrative fields as warnings. A test would assert that a plan with a placeholder in Instructions cannot produce a summary a reader would take as ready.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -139,7 +139,7 @@
       "status": "open",
       "parent": null,
       "detail": "`validate-plan-ui-lib.sh:18` builds `prohibited_pattern` from `evaluate(`, `devTools`, `inject`, `localStorage`, `sessionStorage` and friends, and line 38 greps it against the entire run cache, unconditionally rather than only under `--complete`. The intent is right: a UI story must be driven by a real interaction, not by console or state manipulation. The effect is that the word `localStorage` anywhere in the file fails, including in a Starting state or evidence field where naming browser storage is the honest description of what the page does. A reporter hit this and had to reword truthful evidence to pass, which is the worst outcome for a gate: it bought compliance by making the artifact less accurate. Fix by scoping the check to the fields that describe the input rather than the whole file, which means the rule needs to know the cache's sections -- the same section-shape knowledge `document-sections.json` already holds for other documents. A test would assert that a prohibited word in an input field still fails and that the same word in a starting-state or evidence field does not.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -149,7 +149,7 @@
       "status": "partly",
       "parent": null,
       "detail": "PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. The T4 split put 48 functions in their own files and `test-plan-libs-build.sh` asserts each one is *sourceable* alone. That is not a test of the function. Measured: 24 of the 48 are named in some test file, 24 are named nowhere. Naming is a weak proxy in both directions -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment -- so the real figure needs mutation sampling, one function at a time, which is the first task here. Why it is worth doing now rather than before: a unit test can source one function and stub its callees, which was impossible while all 47 lived in one file. The dependency is visible too -- sourcing `plan_progress_bar.sh` alone and calling it reports `plan_progress_percent: command not found`, which names exactly what to stub. Order: the ones with no naming test and no obvious entry-point path first (`plan_document_kind`, `plan_section_spec`, `plan_unknown_section`, `plan_render_paragraphs`, `plan_decode_escaped_newlines`, `plan_require_safe_value`), since those are where a defect has nowhere to surface. Do not add a per-function test that merely re-asserts what an integration test already proves; the point is the functions nothing covers.",
-      "evidence": "PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. The T4 split put 48 functions in their own files and `test-plan-libs-build.sh` asserts each one is *sourceable* alone. That is not a test of the function. Measured: 24 of the 48 are named in some test file, 24 are named nowhere. Naming is a weak proxy in both directions -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment -- so the real figure needs mutation sampling, one function at a time, which is the first task here.",
+      "note": "PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. PARTLY DONE \u2014 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. The T4 split put 48 functions in their own files and `test-plan-libs-build.sh` asserts each one is *sourceable* alone. That is not a test of the function. Measured: 24 of the 48 are named in some test file, 24 are named nowhere. Naming is a weak proxy in both directions -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment -- so the real figure needs mutation sampling, one function at a time, which is the first task here.",
       "blocked_on": null,
       "refs": []
     },
@@ -159,7 +159,7 @@
       "status": "open",
       "parent": null,
       "detail": "From a worker report on another tree: a working-directory rebase rule bought exactly one relation out of ten, and produced roughly thirty findings across five review cycles -- the confinement set, a CDPATH predicate wrong three times, a stack-form table wrong twice in opposite directions, physical mode, stickiness, a base parameter and its unknown state. The replacement is the conservative rule that yields no edge where resolution is not obvious, costing the one measured relation. The reusable move is to measure the coverage a rule buys before deciding it is worth its failure rate. This repo has candidates: the `--stale` gate policies, the placeholder WARN/FAIL split in T18, the run-cache prohibited-word grep in T19, and the `plan_refuse_field_section` shape detection. For each: how many real defects has it caught, how many false positives has it produced, and what breaks if it is replaced with the conservative version. Precedent here is the Class A ban, approved and then withdrawn on evidence -- 24 hits, zero defects, several rewrites that made documents worse.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -169,7 +169,7 @@
       "status": "open",
       "parent": null,
       "detail": "Found by unit-testing the function alone. It rewrites the title with `sub(/:.*/, \": \" replacement)`, so the heading must read `# Kind: title`. Given `# NoColonHeading` it changes nothing, returns 0, and reports success. Every creator writes the `# Kind: title` form, so this is only reachable on a heading that has already been damaged -- but a rename that silently does nothing is the shape of defect the drop-notice contract exists to prevent. Either refuse a heading it cannot rewrite, or say what it did. Current behaviour is pinned in `test-lib-document.sh` so a change is deliberate.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -179,7 +179,7 @@
       "status": "partly",
       "parent": null,
       "detail": "PARTLY DONE \u2014 the state is now impossible to create (f711f30) and blocks plan creation and validation loudly (10954ed). What remains is the repair path for a plan already holding one. Steps only append, and a plan that ends up with a gap or an out-of-order sequence has no helper to fix it -- the only route is the hand edit `SKILL.md:1295` forbids. A worker hit this after creating two steps numbered 04 in one goal, with no 01 or 03, and worked around it by recording an ordering note naming the real dependency edges. The duplicate-number half is fixed: `add-work-unit.sh` now refuses a step number already used in that goal, naming the file holding it. What remains is the repair path for a plan already in that state, and the answer is not obviously a renumbering helper: renaming a step file moves a path that the inventory row, the goal roster, the testing companion and any progress tracker all reference, so a rename is a five-surface edit. Options, worst last: leave it, and treat the ordering note as the sanctioned workaround since dependency edges are the real order anyway; add `renumber-step.sh` that moves one step and updates every surface, with the seven-surface sweep as its checklist; or allow gaps explicitly in the documentation so nobody feels obliged to fix them. Worth deciding rather than drifting, because the workaround the worker chose -- an ordering note -- is sound and may simply be the answer.",
-      "evidence": "PARTLY DONE \u2014 the state is now impossible to create (f711f30) and blocks plan creation and validation loudly (10954ed). What remains is the repair path for a plan already holding one. Steps only append, and a plan that ends up with a gap or an out-of-order sequence has no helper to fix it -- the only route is the hand edit `SKILL.md:1295` forbids. A worker hit this after creating two steps numbered 04 in one goal, with no 01 or 03, and worked around it by recording an ordering note naming the real dependency edges.",
+      "note": "PARTLY DONE \u2014 the state is now impossible to create (f711f30) and blocks plan creation and validation loudly (10954ed). What remains is the repair path for a plan already holding one. Steps only append, and a plan that ends up with a gap or an out-of-order sequence has no helper to fix it -- the only route is the hand edit `SKILL.md:1295` forbids. A worker hit this after creating two steps numbered 04 in one goal, with no 01 or 03, and worked around it by recording an ordering note naming the real dependency edges.",
       "blocked_on": null,
       "refs": []
     },
@@ -189,7 +189,7 @@
       "status": "done",
       "parent": null,
       "detail": "DONE \u2014 c38db36 took flag checks from 95 to 122; 86f5702 covered four scripts with no differential case at all. 24 scripts accept `--plan-dir` through `plan_hoist_plan_dir`, which rewrites the argument list, so the flag never appears as a literal in the script's own parser. The coverage test scans for literals, so those flags are unchecked: it cannot tell a hoisted flag from a missing one, and would not notice a script that stopped accepting `--plan-dir`. Either teach the test to recognise the hoist call as declaring the flag, or have the hoister expose the flags it grants in a way the scan can read. `test-plan-dir-synonym.sh` covers the behaviour, so this is a coverage gap in the gate, not in the feature.",
-      "evidence": "DONE \u2014 c38db36 took flag checks from 95 to 122; 86f5702 covered four scripts with no differential case at all. 24 scripts accept `--plan-dir` through `plan_hoist_plan_dir`, which rewrites the argument list, so the flag never appears as a literal in the script's own parser. The coverage test scans for literals, so those flags are unchecked: it cannot tell a hoisted flag from a missing one, and would not notice a script that stopped accepting `--plan-dir`. Either teach the test to recognise the hoist call as declaring the flag, or have the hoister expose the flags it grants in a way the scan can read. `test-plan-dir-synonym.sh` covers the behaviour, so this is a coverage gap in the gate, not in the feature.",
+      "note": "DONE \u2014 c38db36 took flag checks from 95 to 122; 86f5702 covered four scripts with no differential case at all. 24 scripts accept `--plan-dir` through `plan_hoist_plan_dir`, which rewrites the argument list, so the flag never appears as a literal in the script's own parser. The coverage test scans for literals, so those flags are unchecked: it cannot tell a hoisted flag from a missing one, and would not notice a script that stopped accepting `--plan-dir`. Either teach the test to recognise the hoist call as declaring the flag, or have the hoister expose the flags it grants in a way the scan can read. `test-plan-dir-synonym.sh` covers the behaviour, so this is a coverage gap in the gate, not in the feature.",
       "blocked_on": null,
       "refs": []
     },
@@ -199,7 +199,7 @@
       "status": "done",
       "parent": null,
       "detail": "DONE \u2014 removed. Only `test-inventory-helpers.sh` calls it. A helper exercised solely by its own test is either dead code or a migration that stopped halfway \u2014 decide which. If the ten inventory readers should be using it, migrate them and the duplication ratchet count drops; if the single-cell form has no use, delete it and the test with it. Shipping it as-is means the manifest carries a symbol nothing in the product calls.",
-      "evidence": "DONE \u2014 removed. Only `test-inventory-helpers.sh` calls it. A helper exercised solely by its own test is either dead code or a migration that stopped halfway \u2014 decide which. If the ten inventory readers should be using it, migrate them and the duplication ratchet count drops; if the single-cell form has no use, delete it and the test with it. Shipping it as-is means the manifest carries a symbol nothing in the product calls.",
+      "note": "DONE \u2014 removed. Only `test-inventory-helpers.sh` calls it. A helper exercised solely by its own test is either dead code or a migration that stopped halfway \u2014 decide which. If the ten inventory readers should be using it, migrate them and the duplication ratchet count drops; if the single-cell form has no use, delete it and the test with it. Shipping it as-is means the manifest carries a symbol nothing in the product calls.",
       "blocked_on": null,
       "refs": []
     },
@@ -209,7 +209,7 @@
       "status": "done",
       "parent": null,
       "detail": "DONE \u2014 a284423; four libraries at 285/474/201/99 lines, compiled from one function per file. CODE-STYLE.md \u00a7202 sets the library cap at 500 lines, \"split by concern\". This file is more than twice that, and tonight's work added to it \u2014 `plan_review_gated_pairs`, `plan_missing_section_message`, `plan_register_temp_file`. The concerns are already visible in the file: document/section writing, atomic writes and temp tracking, progress arithmetic, the stat probe, the review Findings parse. Splitting it is a structural change with 40+ sourcing scripts, so it needs the same before/after output proof as any migration, and the split must not change what a `source` of the current path provides.",
-      "evidence": "DONE \u2014 a284423; four libraries at 285/474/201/99 lines, compiled from one function per file. CODE-STYLE.md \u00a7202 sets the library cap at 500 lines, \"split by concern\". This file is more than twice that, and tonight's work added to it \u2014 `plan_review_gated_pairs`, `plan_missing_section_message`, `plan_register_temp_file`. The concerns are already visible in the file: document/section writing, atomic writes and temp tracking, progress arithmetic, the stat probe, the review Findings parse. Splitting it is a structural change with 40+ sourcing scripts, so it needs the same before/after output proof as any migration, and the split must not change what a `source` of the current path provides.",
+      "note": "DONE \u2014 a284423; four libraries at 285/474/201/99 lines, compiled from one function per file. CODE-STYLE.md \u00a7202 sets the library cap at 500 lines, \"split by concern\". This file is more than twice that, and tonight's work added to it \u2014 `plan_review_gated_pairs`, `plan_missing_section_message`, `plan_register_temp_file`. The concerns are already visible in the file: document/section writing, atomic writes and temp tracking, progress arithmetic, the stat probe, the review Findings parse. Splitting it is a structural change with 40+ sourcing scripts, so it needs the same before/after output proof as any migration, and the split must not change what a `source` of the current path provides.",
       "blocked_on": null,
       "refs": []
     },
@@ -219,7 +219,7 @@
       "status": "open",
       "parent": null,
       "detail": "Line 68 prints the seed bar literally and line 78 greps for `**Progress:** \\`100%`. MAINTAINER.md section 3 records `plan_progress_bar` as the canonical helper, and this is the remaining site. It is a different shape from the migrated ones: it derives the glyph from a goal's own progress file rather than from a requested status word, and it hard-codes width 20 instead of a variable, and omits the `total > 0` guard (safe only because it exits 66 earlier on a zero-goal plan). The glyphs are an on-disk contract \u2014 `test-progress-bar-shape.sh` pins them byte for byte, so any migration must be byte-identical.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -229,7 +229,7 @@
       "status": "open",
       "parent": null,
       "detail": "282 lines that source no library on purpose, so `read_pinned_snapshot_repo` re-implements `plan_snapshot_repo`, and the `stat(1)` GNU/BSD probe exists here as well as in `plan-document-lib.sh`. The no-library rule is why the manifest gate can verify a skill root before any library is trusted, so this is not a simple migration: either accept the duplication and pin both copies with a test that fails when they diverge, or extract a leaf library with no dependencies that both can source. Decide which, because right now the duplication is real and unpinned.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -239,7 +239,7 @@
       "status": "blocked",
       "parent": null,
       "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
-      "evidence": null,
+      "note": null,
       "blocked_on": "the maintainer",
       "refs": []
     },
@@ -249,7 +249,7 @@
       "status": "open",
       "parent": null,
       "detail": "Validate the shape of an adversarial-review CSV without committing it, so a reviewer learns about a malformed row before it lands in the table. Was P1-5, downgraded to P2 because `update-adversarial-review.sh` refuses a malformed row anyway \u2014 the gap is that it refuses at write time, when the reviewer has already left.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -259,7 +259,7 @@
       "status": "open",
       "parent": null,
       "detail": "`blast-radius.sh` reads `coupling.tsv` to warn when one side of a coupled pair changes without the other. Some couplings still live only in MAINTAINER.md's prose artifact map, where nothing can read them \u2014 tonight's `plan_review_gated_pairs` is exactly such a pair (three scripts must agree on one parser). Each row moved turns a convention into a warning.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -269,7 +269,7 @@
       "status": "open",
       "parent": null,
       "detail": "Nine tests use the fixed path `$TMPDIR/planning-agent`, so a second concurrent run of the suite -- or one foreground test alongside a background verification -- collides over the session secret directory and fails tests that are otherwise green. It cost a full verification run tonight: 49 of 70 failed on bash 3.2 for that reason alone, and the same commit was clean when re-run with nothing else running. Either give each run its own root (a per-run `TMPDIR` prefix) or state in `run-tests.sh` that concurrent runs are unsupported, so a red result is never mistaken for a regression again.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -279,7 +279,7 @@
       "status": "open",
       "parent": null,
       "detail": "The worktree-based runner that verified every commit tonight \u2014 snapshot the working tree into a linked worktree in `TMPDIR`, run `./run-tests.sh` and `bash32-run-tests`, sweep its own leftovers, and report a leg that produced no summary as a finding \u2014 exists only under this session's scratch directory. It is the tool that caught the machine-specific `PORTABILITY.md` pollution. If it should outlive the session it needs a home in the repo, and then a decision about whether it is dev-only or belongs in the manifest.",
-      "evidence": null,
+      "note": null,
       "blocked_on": null,
       "refs": []
     },
@@ -289,7 +289,7 @@
       "status": "blocked",
       "parent": null,
       "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
-      "evidence": null,
+      "note": null,
       "blocked_on": "the maintainer",
       "refs": []
     }
