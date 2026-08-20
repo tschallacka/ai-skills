@@ -75,5 +75,30 @@ printf '%s' "$other_csv" | "$script_dir/update-adversarial-review.sh" "$plan_std
 grep -Fq '| AR-30 |' "$plan_stdin/adversarial-review.md" \
     || note_fail 'stdin rows did not reach the findings table'
 
+# ---- the previous table is archived, and the notice says where -------------
+# A rewrite replaces the whole Findings table. That content is a person's review
+# work, so the run has to name where it went and the claim has to be true --
+# a notice pointing at an archive that did not receive the rows is worse than
+# silence. CODE-CONTRACTS.md contract 9a.
+rc=0
+archive_log="$temporary_root/archive-notice.log"
+printf 'AR-31,A later gap.,Do the later thing.,%s,W01\n' '✅ resolved' \
+    | "$script_dir/update-adversarial-review.sh" "$plan_stdin" \
+    >"$archive_log" 2>&1 || rc=$?
+[ "$rc" -eq 0 ] || note_fail "the second rewrite failed (rc=$rc)"
+history_file="$plan_stdin/adversarial-review-history.md"
+grep -Fq 'Archived previous Findings table' "$archive_log" \
+    || note_fail 'the rewrite did not say the previous table was archived'
+grep -Fq "$history_file" "$archive_log" \
+    || note_fail 'the archive notice did not name the file it wrote to'
+if [ -f "$history_file" ]; then
+    grep -Fq '| AR-30 |' "$history_file" \
+        || note_fail 'the archive does not hold the rows the notice claimed it archived'
+else
+    note_fail "the notice named an archive that does not exist: $history_file"
+fi
+grep -Fq '| AR-30 |' "$plan_stdin/adversarial-review.md" \
+    && note_fail 'the replaced row is still in the live findings table'
+
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf 'test-adversarial-review-sources.sh passed.\n'

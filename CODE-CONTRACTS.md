@@ -212,6 +212,8 @@ as a fact after the removal, not a count and not a prediction.
 | `plan-reconcile-lib.sh` | a coverage row that empties | `row dropped`, per row |
 | `remove-work-unit.sh --confirm-cascade` | Depends-on edges | one line per pruned edge, plus the restore remedy |
 | `add-coverage.sh --replace` | rows sharing the outcome | one line per dropped row, naming its work units |
+| `update-work-unit.sh` | the previous value of each field it sets | `replaced WNN <field>: <previous> -> <new>`, one line per field, silent when the value did not change |
+| `update-adversarial-review.sh` | the previous Findings table | names the history file it archived to, and the rows are there |
 
 **Cost:** `--confirm-cascade` pruned dependency edges with only `--help`
 mentioning it; the reviewer who reported it said a notice would have caught the
@@ -222,10 +224,14 @@ work vanished with nothing naming them.
 State it as a fact after the change, not before: a notice printed ahead of the
 mutation is a promise that a later failure turns into a lie.
 
-**Enforced** by `test-plan-commands.sh` for the cascade and the coverage
-collapse. The remaining mutating helpers are not swept yet: `update-work-unit.sh`
-names the fields it changed but not their previous values, and
-`update-adversarial-review.sh` archives a finding set rather than dropping it.
+A notice must also be **true**: one that points at an archive which did not
+receive the content is worse than silence, because it stops the reader looking.
+So the test asserts the destination holds the rows, not merely that the line was
+printed.
+
+**Enforced** by `test-plan-commands.sh` (cascade, coverage collapse, replaced
+field values) and `test-adversarial-review-sources.sh` (the archive notice and
+its truth). All five are mutation-tested.
 
 ## 10. A new file under `planning/` ships only if it is registered
 

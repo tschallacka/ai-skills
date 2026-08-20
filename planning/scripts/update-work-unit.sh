@@ -97,6 +97,16 @@ if plan_inventory_row "$inventory" "$unit"; then
 fi
 [ -n "$step_file" ] && [ -f "$step_file" ] || plan_die "Work unit not found: $unit"
 
+# The values about to be overwritten. Reporting only which fields changed named
+# the loss without describing it: a reader could not tell that `source` became
+# `docs`, and nothing anywhere held the value it replaced. See CODE-CONTRACTS.md
+# contract 9a.
+previous_type="$plan_inventory_type"
+previous_file="$plan_inventory_file"
+previous_scope="$plan_inventory_scope"
+previous_depends="$plan_inventory_depends"
+previous_change="$plan_inventory_change"
+
 # One trap covers every temp: installed before the first write and never
 # released with `trap - EXIT`, which would discard the library's handler (§8).
 inventory_tmp="${inventory}.tmp.$$"; step_tmp="${step_file}.tmp.$$"
@@ -116,6 +126,21 @@ changed=()
 [ -n "$new_type" ] && changed+=("type")
 [ -n "$new_depends" ] && changed+=("depends-on")
 [ -n "$new_description" ] && changed+=("description")
+
+# One line per replaced value, after the write, so a person can put back what
+# this call overwrote. An unchanged field says nothing.
+report_replaced() { # <field> <previous> <new>
+    [ -n "$3" ] || return 0
+    # A field re-set to the value it already held loses nothing, and saying so
+    # would train the reader to skip these lines.
+    [ "$2" != "$3" ] || return 0
+    printf 'replaced %s %s: %s -> %s\n' "$unit" "$1" "${2:-(empty)}" "$3" >&2
+}
+report_replaced scope "$previous_scope" "$new_scope"
+report_replaced file "$previous_file" "$new_file"
+report_replaced type "$previous_type" "$new_type"
+report_replaced depends-on "$previous_depends" "$new_depends"
+report_replaced description "$previous_change" "$new_description"
 
 # Changing file, scope or dependency edges can invalidate the verification unit
 # that grades this one, even with the grader's own surfaces unchanged. The

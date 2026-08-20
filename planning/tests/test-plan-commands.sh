@@ -322,6 +322,28 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# An overwritten inventory field is content a person wrote, so the value being
+# replaced is named -- "type,depends-on" said which fields changed but left no
+# trace of what they held. CODE-CONTRACTS.md contract 9a.
+# `config`, not `docs`: an earlier step already set this unit to docs, so that
+# would have been a no-op and the case would have proved nothing.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 --type config \
+    >/dev/null 2>"$temporary_root/unit-replace.log"
+grep -Fq 'replaced W03 type:' "$temporary_root/unit-replace.log" \
+    || { echo 'update-work-unit did not report the value it replaced.' >&2
+         cat "$temporary_root/unit-replace.log" >&2; exit 1; }
+grep -Eq 'replaced W03 type: [^ ]+ -> config' "$temporary_root/unit-replace.log" \
+    || { echo 'the notice did not name both the previous and the new value.' >&2
+         cat "$temporary_root/unit-replace.log" >&2; exit 1; }
+# Re-setting a field to the value it already holds loses nothing, and saying so
+# would train the reader to skip these lines.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 --type config \
+    >/dev/null 2>"$temporary_root/unit-noop.log"
+if grep -Fq 'replaced W03 type:' "$temporary_root/unit-noop.log"; then
+    echo 'a no-op field change was reported as a replacement.' >&2
+    exit 1
+fi
+
 # --replace collapses every row carrying the same outcome, so it discards rows a
 # person wrote. Reporting only "Replaced coverage for WNN" loses which ones --
 # the same class as the cascade notice below.
