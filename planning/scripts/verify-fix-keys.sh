@@ -167,7 +167,7 @@ verify_fix_keys() {
     # Counted with the key failures and checked before them, so a self-certified
     # claim set cannot pass on a caller that only reads the exit status.
     if [ -n "$claimed_by" ] && [ -n "$minted_by" ] && [ "$claimed_by" = "$minted_by" ]; then
-        printf 'self-certification: fix claims for %s were recorded by the same session (%s) that minted the keys\n' \
+        printf 'self-certification: fix claims for %s were recorded by the same session (%s) that minted the keys -- let the reviewer write adversarial-review-incoming.md so the findings arrive from its own session, or have a fresh reviewer re-review and re-mint; a reviewer told to be strictly read-only cannot mint, and the coordinator minting on its behalf is self-certification by construction\n' \
             "$plan_dir" "$claimed_by" >&2
         failures=$((failures + 1))
     fi

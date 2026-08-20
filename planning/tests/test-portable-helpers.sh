@@ -240,3 +240,36 @@ assert_eq 'plan_require_bash hints at Homebrew' \
     "$( ( plan_require_bash 99 ) 2>&1 >/dev/null | grep -c 'brew install bash' )" '1'
 
 printf 'Portable helper regression test passed.\n'
+
+# ---- a sourced library derives its own directory from BASH_SOURCE -----------
+# $0 is set at shell initialisation and does not change when a file is sourced,
+# so `dirname "$0"` inside a sourced helper names the ENTRY script's directory,
+# not the helper's. ${BASH_SOURCE[0]} is correct in both cases: when a file is
+# executed rather than sourced it equals $0 anyway.
+#
+# The repo follows this by convention -- libraries use BASH_SOURCE, and the
+# `dirname "$0"` sites are all scripts that are only ever executed. This keeps
+# it true. Raised by a worker researching bash call graphs; no violation here at
+# the time it was written.
+sourced_zero_violations=0
+for candidate in "$script_dir"/*.sh "$script_dir"/../tests/*.sh; do
+    [ -f "$candidate" ] || continue
+    grep -q 'dirname "\$0"' "$candidate" 2>/dev/null || continue
+    base="$(basename "$candidate")"
+    # Sourced anywhere in the repo?
+    if grep -rqE "(source|^[[:space:]]*\.)[[:space:]]+[^[:space:]]*$base" \
+        "$script_dir"/../.. --include='*.sh' 2>/dev/null; then
+        printf 'FAIL: %s uses dirname "$0" and is sourced elsewhere; use ${BASH_SOURCE[0]}\n' \
+            "$base" >&2
+        sourced_zero_violations=$((sourced_zero_violations + 1))
+    fi
+done
+[ "$sourced_zero_violations" -eq 0 ] \
+    || fail "$sourced_zero_violations sourced file(s) derive a directory from \$0"
+
+# A slash-less `source common.sh` searches PATH, not the file's directory, so it
+# silently picks up a stranger's file or nothing at all.
+if grep -rnE '^[[:space:]]*(source|\.)[[:space:]]+[A-Za-z0-9_-]+\.sh([[:space:]]|$)' \
+    "$script_dir" "$script_dir/../tests" 2>/dev/null | grep -v ':#'; then
+    fail 'a source without a slash searches PATH; give it a directory'
+fi

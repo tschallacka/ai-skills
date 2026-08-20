@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `dce2babed00cc9d63008d6f0cf27f0065d0663728c1b6d7f728ed5c218f9a696`
+> Source SHA-256: `b5d988c0c7fd4ae84fbf269768ac9f068da2e8ad5928ce5738694207dd9eb8f5`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -237,8 +237,14 @@ keys. When recording which key a fix used, write one claim line per
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
 
-**Reviewers may write `adversarial-review-incoming.md`** (the one plan file a
-reviewer may write, so findings survive the coordinator's context).
+**Reviewers must be allowed to write `adversarial-review-incoming.md`** (the one
+plan file a reviewer may write, so findings survive the coordinator's context).
+Instructing a reviewer subagent to be *strictly* read-only breaks the fix-key
+gate rather than tightening it: the reviewer cannot publish its findings, so the
+coordinator mints the keys from the reviewer's returned prose, and minting and
+claiming then happen in one session -- self-certification by construction, which
+`verify-fix-keys.sh` refuses. Read-only everywhere else, this one file
+excepted.
 `update-adversarial-review.sh` consumes it as its findings source and removes
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
