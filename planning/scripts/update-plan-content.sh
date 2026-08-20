@@ -84,6 +84,16 @@ esac
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+
+# `-p 2.1: text` captures everything after the colon, so the conventional space
+# after it became a leading space in the written paragraph -- in every document,
+# for every writer. A document is read by people, so the stray indent is a real
+# defect and not only a cosmetic one.
+trim_leading_space() {
+    local text="$1"
+    printf '%s' "${text#"${text%%[![:space:]]*}"}"
+}
+
 # The subcommand was shifted off above, so the plan directory is $1 for
 # every form. Accept --plan-dir as a synonym for it.
 eval "set -- $(plan_hoist_plan_dir 1 "$@")"
@@ -254,7 +264,7 @@ parse_paragraph_arguments() {
         [[ "$paragraph_spec" =~ ^([0-9]+)\.([0-9]+):(.*)$ ]] || plan_die "Paragraph must use N.N: content, for example 2.1: First paragraph"
         paragraph_section="${BASH_REMATCH[1]}"
         paragraph_number="${BASH_REMATCH[2]}"
-        paragraph_content="${BASH_REMATCH[3]}"
+        paragraph_content="$(trim_leading_space "${BASH_REMATCH[3]}")"
         [ "$paragraph_section" = "$section_number" ] || plan_die "Paragraph $paragraph_section.$paragraph_number belongs to section $paragraph_section, expected section $section_number"
         [ "$paragraph_number" -eq "$paragraph_index" ] || plan_die "Paragraphs must be sequential, starting at $section_number.1"
         if [ -z "$paragraph_content" ]; then
@@ -331,7 +341,7 @@ case "$command" in
         paragraph_spec="$1"; shift
         [[ "$paragraph_spec" =~ ^([0-9]+)\.([0-9]+):(.*)$ ]] || plan_die "Paragraph must use N.N: content, for example 2.1: First paragraph"
         paragraph_id="§ ${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-        paragraph_content="${BASH_REMATCH[3]}"
+        paragraph_content="$(trim_leading_space "${BASH_REMATCH[3]}")"
         if [ -z "$paragraph_content" ]; then
             [ "$#" -gt 0 ] && [ "$1" != '-p' ] || plan_die "Missing content for paragraph ${paragraph_id#§ }"
             paragraph_content="$1"; shift

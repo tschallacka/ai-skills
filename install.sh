@@ -2779,19 +2779,11 @@ ensure_plan_root_after_install() {
 # ---------------------------------------------------------------
 # Grants the user-chosen agents read/write on the plans root and execution
 # access to the copied planning shell scripts. Every config file that is
-# modified is first backed up as <file>.bak.<timestamp>. Additions are
-# idempotent: entries already present are never duplicated.
-backup_file_timestamp() {
-    local file="$1" stamp backup n=1
-    stamp="$(date +%Y%m%dT%H%M%S)"
-    backup="${file}.bak.${stamp}"
-    while [ -e "$backup" ]; do
-        backup="${file}.bak.${stamp}.${n}"
-        n=$((n + 1))
-    done
-    cp -p "$file" "$backup"
-    echo "  Backup: $backup" >&2
-}
+# modified is first backed up by backup_file from section 60 -- one scheme for
+# the whole installer, rather than a second one spelled <file>.bak.<timestamp>
+# here. That also means a config file inside a git work tree is replaced without
+# a copy, because git is already its recovery path. Additions are idempotent:
+# entries already present are never duplicated.
 
 # Index lookup against the registry in section 1; anything not in it is custom.
 agent_kind_for_root() {
@@ -2820,8 +2812,8 @@ strip_trailing_slashes() {
 # jq in runtime_requirements() — so verify_runtime_tools has already refused to
 # get this far without jq. jq is therefore guaranteed, and the command -v check
 # below only turns a hypothetical `set -e` abort into a clear message plus manual
-# instructions. It has to precede backup_file_timestamp, or a failure here leaves
-# an orphaned .bak.<timestamp> behind. python3 is deliberately not used anywhere:
+# instructions. It has to precede backup_file, or a failure here leaves
+# an orphaned backup behind. python3 is deliberately not used anywhere:
 # jq is the only runtime dependency this installer is allowed to add.
 claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
@@ -2835,7 +2827,7 @@ claude_permissions() {
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    backup_file_timestamp "$cfg"
+    backup_file "$cfg"
 
     # An unparseable or non-object settings.json is rebuilt from {} rather than
     # edited. `objectify` is the same defensive read at every level.
@@ -2894,7 +2886,7 @@ opencode_permissions() {
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    backup_file_timestamp "$cfg"
+    backup_file "$cfg"
 
     doc="$(jq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
@@ -3013,8 +3005,11 @@ entries that:
   - allow executing Bash for the planning helper scripts (Read/Edit/Write plus
     Bash rules scoped to those scripts)
 Add only entries that are not already present. If you modify a config file,
-first copy it to <file>.bak.<timestamp> before editing, then tell me the exact
-path and the entries you changed. Do not change any other permissions and do
+first copy it to .<basename>.<UTC timestamp>.back beside it before editing --
+the same scheme the installer uses -- then tell me the exact path and the
+entries you changed. If the file is inside a git working tree, commit or stash
+instead: git is its recovery path and a stray backup file only clutters the
+tree. Do not change any other permissions and do
 not grant broad or all-tools access.
 --- END AGENT PROMPT (copy from here) ---
 PROMPT
