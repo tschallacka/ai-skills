@@ -324,15 +324,19 @@ plan_validate_propagation_roster() {
                 }
             }
         ' "$goal_file")"
-        # Add backticked blurb ids (the per-unit paragraphs) across the whole
-        # owned-work-units region.
+        # Add the id that heads each per-unit paragraph. Only the leading
+        # backticked id: stripping every backtick and harvesting the whole line
+        # also collected ids the description legitimately cross-references ("as
+        # `W05` does"), and the roster check then failed the goal for a unit it
+        # never claimed to own. The em-dash exclusion noted below applies to the
+        # leading-run pass above, not to this one.
         blurb_ids="$(awk '
             /^## Owned work units$/ { in_section = 1; next }
             /^## Goal-size exception$/ { in_section = 0 }
-            in_section && /`W[0-9][0-9]+`/ {
-                line = $0; gsub(/`/, "", line)
-                n = split(line, toks, /[ `,]+/)
-                for (i = 1; i <= n; i++) if (toks[i] ~ /^W[0-9][0-9]+$/) print toks[i]
+            in_section && /^`W[0-9][0-9]+`/ {
+                after_tick = substr($0, 2)
+                id = substr(after_tick, 1, index(after_tick, "`") - 1)
+                if (id ~ /^W[0-9][0-9]+$/) print id
             }
         ' "$goal_file")"
         roster_ids="$(printf '%s\n%s\n' "$roster_ids" "$blurb_ids" | grep -E '^W[0-9][0-9]+$' | sort -u | tr '\n' ' ')"

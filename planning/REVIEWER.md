@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `1b9b55dc4960573f2835859e55d8dff2df3f545730737fe4301fb26b8af31fbf`
+> Source SHA-256: `dce2babed00cc9d63008d6f0cf27f0065d0663728c1b6d7f728ed5c218f9a696`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -218,6 +218,13 @@ The `-p N.N:` forms auto-create only when the section's labels are contiguous
 unlabeled paragraphs must be re-authored (e.g. re-run
 `create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
 label) instead of silently appending.
+
+A section number is fixed per section name, not by position: automated tests
+are `§ 2.x`, browser `§ 3.x`, backend `§ 4.x`, manual `§ 5.x`, whichever of
+them a companion carries. A section form can only rewrite a section the
+companion already has, so supply the section when you create it — `-ss` cannot
+add one, and re-creating with `--overwrite` only helps if you pass the
+section flag as well.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.

@@ -828,6 +828,13 @@ unlabeled paragraphs must be re-authored (e.g. re-run
 `create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
 label) instead of silently appending.
 
+A section number is fixed per section name, not by position: automated tests
+are `§ 2.x`, browser `§ 3.x`, backend `§ 4.x`, manual `§ 5.x`, whichever of
+them a companion carries. A section form can only rewrite a section the
+companion already has, so supply the section when you create it — `-ss` cannot
+add one, and re-creating with `--overwrite` only helps if you pass the
+section flag as well.
+
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
 
@@ -1244,6 +1251,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>"
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --overwrite   # replace a companion; input is validated before any file is touched
+"$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --browser "<instructions>" --backend "<instructions>" --manual "<instructions>"   # the other verification sections; each is optional, and a companion can only be given a section at creation
  "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> <goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> <goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
 ```
