@@ -140,13 +140,22 @@ scan_with="$(mktemp "${TMPDIR:-/tmp}/portability-scan.XXXXXX")"
 probe_dir="$repo_root/.claude/worktrees/probe-portability-scan/planning/scripts"
 PORTABILITY_OUTPUT="$scan_without" "$repo_root/generate-portability.sh" >/dev/null 2>&1
 mkdir -p "$probe_dir"
-printf '#!/usr/bin/env bash\ndeclare -A m\n' > "$probe_dir/probe-lib.sh"
+# The marker, not the construct: "In the tree" lists marker sightings, so a probe
+# carrying only `declare -A` is invisible to the scan and the comparison below
+# would pass whether the prune existed or not.
+#
+# The marker word is assembled at runtime. Spelled out here, this file would
+# itself hold a marker, and the scan would harvest it and publish a sighting
+# against this test -- which it did, until the scan named this file.
+marker_word="PORTABILITY"
+printf '#!/usr/bin/env bash\n# %s(assoc-array): a foreign checkout must not be listed.\ndeclare -A probe_map\n' \
+    "$marker_word" > "$probe_dir/probe-lib.sh"
 PORTABILITY_OUTPUT="$scan_with" "$repo_root/generate-portability.sh" >/dev/null 2>&1
 if diff <(grep -v '^<!-- generated: ' "$scan_without") \
         <(grep -v '^<!-- generated: ' "$scan_with") >/dev/null 2>&1; then :; else
     note_fail 'a checkout under .claude/ changed the catalogue; the scanner must prune it'
 fi
-if grep -Fq 'probe-lib' "$scan_with"; then
+if grep -Fq 'probe-portability-scan' "$scan_with"; then
     note_fail 'the catalogue names a file from a foreign checkout'
 fi
 rm -f "$scan_without" "$scan_with"
