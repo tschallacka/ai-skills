@@ -40,7 +40,17 @@ planning_ensure_tmpdir
 case "$plan_arg" in
     */*)
         plan_dir="$plan_arg"
-        plans_root="${PLANS_ROOT:-$HOME/.plans}"
+        # The directory that holds this plan, not the global default. Everything
+        # downstream reads plans_root as "this plan and its siblings": the
+        # duplicate-step scan, the git and snapshot repository decisions, and the
+        # .env manifest write-global places *inside* it. Naming ~/.plans for a
+        # plan created elsewhere pointed all of that at the wrong directory, and
+        # at one that need not exist -- a fresh machine, or a user who declined
+        # the installer's offer to create it, got a raw `cd` error with no remedy.
+        #
+        # For the common call, a path inside the plans root, this is the same
+        # answer as before.
+        plans_root="$(dirname "$plan_arg")"
         ;;
     *)
         resolved_root="$("$script_dir/plan-root.sh" resolve "${PROJECT_DIR:-$PWD}")"
@@ -131,7 +141,19 @@ inventory="$plan_dir/work-unit-inventory.md"
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$inventory"
 plan_root=$(cd "$plan_dir" && pwd -P)
-plans_root_path=$(cd "$plans_root" && pwd -P)
+# The plans root may not exist, and creating it here would be wrong: a plan given
+# as an explicit path sets plans_root to the global default, which this run has no
+# business bringing into being. So canonicalise it only if it is there, and
+# otherwise carry the path as given -- the comparisons below simply will not
+# match, which is the right answer for a root that holds nothing.
+#
+# `cd` into it unconditionally is what failed on a machine with no ~/.plans yet,
+# with a raw shell error and no remedy. A fresh install is exactly that machine.
+if [ -d "$plans_root" ]; then
+    plans_root_path=$(cd "$plans_root" && pwd -P)
+else
+    plans_root_path="$plans_root"
+fi
 
 # Which repository owns this plan's history, and which owns its pre-mutation
 # snapshots. Both are decided here, before the manifests are written, because

@@ -24,6 +24,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # blast-radius.sh resolves a merge base against master and reads the
+          # commits touching a path, and test-blast-radius.sh asks for the parent
+          # of the newest commit touching planning/SKILL.md. The default depth-1
+          # checkout has neither, so all three of its history assertions failed
+          # here while passing locally -- reproduced with `git clone --depth 1`.
+          fetch-depth: 0
 
       - name: Record the bash under test
         run: bash --version
@@ -67,6 +74,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Same reason as the leg above: the suite includes history-dependent
+          # assertions that a shallow checkout cannot satisfy.
+          fetch-depth: 0
 
       - name: Put /bin first on PATH so bash resolves to system bash 3.2
         run: echo "/bin" >> "$GITHUB_PATH"

@@ -30,6 +30,17 @@ trap cleanup EXIT
 
 note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
+# Every assertion below needs real history: blast-radius resolves a merge base
+# against master, and the drift case asks for the parent of the newest commit
+# touching planning/SKILL.md. A depth-1 checkout has neither, which surfaced as
+# three unrelated-looking failures in CI while the test passed locally. Say it
+# once, plainly, rather than leaving the next reader to work it out.
+if [ "$(git -C "$repo_root" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+    note_fail 'this test needs full history; the checkout is shallow (use fetch-depth: 0)'
+    printf 'test-blast-radius: %d failure(s).\n' "$(t_failures)" >&2
+    exit 1
+fi
+
 # Sets RUN_OUT rather than printing it: called in a command substitution, every
 # note_fail inside would land in a subshell and be silently discarded.
 RUN_OUT=""
