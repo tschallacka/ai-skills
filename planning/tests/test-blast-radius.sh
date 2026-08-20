@@ -30,6 +30,15 @@ trap cleanup EXIT
 
 note_fail() { printf 'FAIL: %s\n' "$1" >&2; t_record "$1"; }
 
+# For an assertion about blast-radius's output: print what it actually said. A
+# bare "the warning was not counted" sent a CI failure through two rounds of
+# guessing, because the output it disagreed with was never shown.
+note_fail_out() { # <message> <output>
+    note_fail "$1"
+    printf '  what blast-radius printed:\n' >&2
+    printf '%s\n' "$2" | sed 's/^/    /' >&2
+}
+
 # Every assertion below needs real history: blast-radius resolves a merge base
 # against master, and the drift case asks for the parent of the newest commit
 # touching planning/SKILL.md. A depth-1 checkout has neither, which surfaced as
@@ -101,11 +110,11 @@ run 0 'unregistered test' "$probe_test"
 out="$RUN_OUT"
 case "$out" in
     *'no PACKAGE-MANIFEST row'*) ;;
-    *) note_fail 'a new unregistered test produced no warning' ;;
+    *) note_fail_out 'a new unregistered test produced no warning' "$out" ;;
 esac
 case "$out" in
     *'1 warning(s)'*) ;;
-    *) note_fail 'the warning was not counted' ;;
+    *) note_fail_out 'the warning was not counted' "$out" ;;
 esac
 rm -f "$probe_test"
 
@@ -117,11 +126,11 @@ run 0 'drift' --base "$drift_base" planning/SKILL.md
 out="$RUN_OUT"
 case "$out" in
     *'planning/SKILL.md changed in '*) ;;
-    *) note_fail 'drift against an explicit base was not reported' ;;
+    *) note_fail_out 'drift against an explicit base was not reported' "$out" ;;
 esac
 case "$out" in
     *'verify those commits survive'*) ;;
-    *) note_fail 'the drift note did not say what to do about it' ;;
+    *) note_fail_out 'the drift note did not say what to do about it' "$out" ;;
 esac
 
 if [ "$(t_failures)" -ne 0 ]; then
