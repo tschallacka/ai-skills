@@ -75,6 +75,35 @@ printf '%s' "$other_csv" | "$script_dir/update-adversarial-review.sh" "$plan_std
 grep -Fq '| AR-30 |' "$plan_stdin/adversarial-review.md" \
     || note_fail 'stdin rows did not reach the findings table'
 
+# ---- every finding stays a finding, and the header stays a header ----------
+# plan_render_csv_table emits the |---| delimiter after row 1, which is right for
+# --table-paragraph where row 1 IS the header. This caller passes findings, so
+# without a prepended header the first finding of every cycle became the header:
+# the table lost its column names and AR-nn was presented as one. Every test here
+# passed while that was true, which is why this case exists.
+header_probe="$temporary_root/plan-header"
+mkdir -p "$header_probe"
+"$script_dir/create-adversarial-review.sh" "$header_probe" >/dev/null
+printf 'AR-41,First gap.,Do the first thing.,%s,W01\nAR-42,Second gap.,Do the second thing.,%s,W02\n' \
+    '✅ resolved' '✅ resolved' \
+    | "$script_dir/update-adversarial-review.sh" "$header_probe" >/dev/null 2>&1 \
+    || note_fail 'the rewrite failed on two findings'
+findings_table="$header_probe/adversarial-review.md"
+grep -Fqx '| ID | Missing or over-broad item | Required plan change | Status | Work unit |' "$findings_table" \
+    || note_fail 'the rewritten Findings table lost its column header'
+for recorded in AR-41 AR-42; do
+    grep -Fq "| $recorded |" "$findings_table" \
+        || note_fail "$recorded is not in the rewritten Findings table"
+done
+# The delimiter must follow the header, not the first finding.
+awk '/^\| ID \|/ { getline next_line; if (next_line !~ /^\|---\|/) exit 1 }' "$findings_table" \
+    || note_fail 'the table delimiter does not follow the header row'
+# And the gate that reads this table must see both pairs, not one.
+# The helper lives in the library the scripts source, not in this test's shell.
+pairs="$("$BASH" -c "source '$script_dir/plan-document-lib.sh'; plan_review_gated_pairs '$findings_table'" | grep -c . || true)"
+[ "$pairs" -eq 2 ] \
+    || note_fail "the fix-key gate sees $pairs gated pair(s) in a two-finding table"
+
 # ---- the previous table is archived, and the notice says where -------------
 # A rewrite replaces the whole Findings table. That content is a person's review
 # work, so the run has to name where it went and the claim has to be true --

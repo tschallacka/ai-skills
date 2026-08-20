@@ -139,7 +139,14 @@ else
 fi
 [ -s "$csv_file" ] || plan_die "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
 
-plan_render_csv_table 5 "$(awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
+# The header row is prepended here, not left to the renderer. plan_render_csv_table
+# emits the |---| delimiter after row 1, which is correct for --table-paragraph
+# where the caller's first row IS the header. Passing findings straight in made
+# the first finding of every cycle the header: the table lost its column names
+# and AR-nn was presented as one. create-adversarial-review.sh writes this same
+# header, so the two must stay identical.
+findings_header='ID,Missing or over-broad item,Required plan change,Status,Work unit'
+plan_render_csv_table 5 "$(printf '%s\\n' "$findings_header"; awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
 
 # Archive the prior Findings rows (if any) into adversarial-review-history.md
 # so reviewers of later cycles can see what earlier ones found.
