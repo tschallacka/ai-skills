@@ -182,4 +182,22 @@ else
     t_fail "the fixture companion is missing: $companion"
 fi
 
+
+# ---- every accepted section id is documented in SKILL.md --------------------
+# A goal's ids are not the plan description's and are not derivable from the
+# headings, so an agent that reads only the plan-description list guesses
+# `approach` for a goal and fails. SKILL.md carried the plan list and not the
+# goal list, which is precisely the asymmetry that produced the wrong guess. A
+# documented list that drifts is worse than none.
+skill_doc="$repo_root/planning/SKILL.md"
+for kind in plan goal; do
+    list="$(sed -n "s/^        $kind) valid=\"\([^\"]*\)\".*/\1/p" \
+        "$scripts_dir/plan-document-lib.sh")"
+    [ -n "$list" ] || t_fail "could not read the $kind section allow-list"
+    for section in $list; do
+        grep -Fq "\`$section\`" "$skill_doc" \
+            || t_fail "$kind accepts '$section' but SKILL.md never names it; an agent has to fail once to discover it"
+    done
+done
+
 t_end

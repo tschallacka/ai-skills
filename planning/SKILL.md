@@ -427,6 +427,17 @@ their narrative content through flagged `update-plan-content.sh` targets; use
 `--title` for the document title and `--field` for structured values such as
 `UI affected`.
 
+**A goal document's ids are not the plan description's, and neither set is
+derivable from the headings.** `-gs`/`--goal-section` accepts
+`current-state-and-prior-goal-handoffs`, `outcome-and-definition-of-done`,
+`why-this-goal-is-needed`, `scope`, `affected-areas`,
+`dependencies-and-handoffs`, `implementation-approach-risks-and-edge-cases`,
+`owned-work-units`, and `goal-size-exception`. Only `scope` and
+`affected-areas` are spelled the same in both documents; a goal's approach
+section is `implementation-approach-risks-and-edge-cases`, not `approach`.
+Guessing wrong is safe — the refusal lists every valid id for that document
+kind — but the lists are here so a first attempt need not fail to find them.
+
 ### 2.2 Reason about the work-unit inventory before choosing goals
 
 `create-plan.sh` already creates an empty `work-unit-inventory.md`. This section
