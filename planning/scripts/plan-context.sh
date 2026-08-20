@@ -186,9 +186,29 @@ context_trim_partial_utf8() {
 # PORTABILITY(pattern-substitution-quote): bash 3.2 cannot parse
 # ${var//$'"'/...} and leaks quotes out of a quoted replacement, so the JSON
 # string escape runs through sed and awk instead of parameter expansion.
+# JSON forbids every character in U+0000-U+001F inside a string, so a tab or a
+# CR in a document made the whole payload unparseable -- `jq` reports "control
+# characters ... must be escaped" and reads nothing. Reachable through the
+# sanctioned writer: update-plan-content.sh -dp keeps a tab in the paragraph
+# text verbatim. Documents with no control characters take the fast path and are
+# copied through untouched.
 context_json_escape_file() {
     sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$1" |
-        awk -v sep='\\n' 'NR > 1 { printf "%s", sep } { printf "%s", $0 }'
+        awk -v sep='\\n' '
+            BEGIN { for (code = 1; code < 32; code++) ordinal[sprintf("%c", code)] = code }
+            function escape_controls(line,    out, i, char) {
+                out = ""
+                for (i = 1; i <= length(line); i++) {
+                    char = substr(line, i, 1)
+                    if (char == "\t") out = out "\\t"
+                    else if (char == "\r") out = out "\\r"
+                    else if (char in ordinal) out = out sprintf("\\u%04x", ordinal[char])
+                    else out = out char
+                }
+                return out
+            }
+            NR > 1 { printf "%s", sep }
+            { printf "%s", ($0 ~ /[[:cntrl:]]/) ? escape_controls($0) : $0 }'
 }
 
 context_read_cleanup() {
