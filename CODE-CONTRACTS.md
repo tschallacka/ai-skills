@@ -43,6 +43,17 @@ nothing tells you.
 
 **Enforced** by `test-document-sections.sh` against `planning/document-sections.json`.
 
+`planning/document-sections.json` records each section's **heading** as well as
+its shape, so a shape claim is checked against the document itself. Deriving the
+heading by scraping the library's case statement resolved 29 of 36 sections —
+the regex pinned eight spaces of indentation and ids of `[a-z-]+` — and the
+seven it missed included every destructive one. The test still passed, because a
+scrape that finds less simply verifies less.
+
+**Enforced** by `test-document-sections.sh`: the allow-list may hold only
+narrative sections, every registered shape must match the document, and the
+library's section-form labels must each yield a pair agreeing with the registry.
+
 ## 2. An irreversible step is the last statement of its branch
 
 Anything that cannot be undone — deleting a secret, removing a consumed input,

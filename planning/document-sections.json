@@ -1,7 +1,7 @@
 {
-  "comment": "Every generated document section, its shape, and therefore its only legal writer. See CODE-CONTRACTS.md contract 1. A section-form flag (-ds/-gs/-ss/-rs) rewrites a whole section, which is correct for `narrative` and destructive for anything else: it removes sibling `- Label:` fields or a table. Shapes are derived from what the creation scripts emit; test-document-sections.sh asserts plan_mutable_sections allows only narrative sections.",
+  "comment": "Every generated document section, its shape, and therefore its only legal writer. See CODE-CONTRACTS.md contract 1. A section-form flag (-ds/-gs/-ss/-rs) rewrites a whole section, which is correct for `narrative` and destructive for anything else: it removes sibling `- Label:` fields or a table. The heading is recorded here so a shape claim can be checked against the document itself; deriving it by scraping the library's case statement verified only the sections that scrape happened to match, and silently skipped every destructive one. test-document-sections.sh asserts plan_mutable_sections allows only narrative sections.",
   "shapes": {
-    "narrative": "numbered § N.M paragraphs; the section forms may rewrite it wholesale",
+    "narrative": "numbered \u00a7 N.M paragraphs; the section forms may rewrite it wholesale",
     "fields": "- Label: value lines; only -f|--field may write it, one label per call",
     "hybrid": "a paragraph label whose body is field lines; a section rewrite silently drops fields, so treat it as fields",
     "table": "a Markdown table; only its dedicated helper may write it",
@@ -9,35 +9,158 @@
   },
   "documents": {
     "plan": {
-      "current-state": "narrative", "desired-outcome": "narrative",
-      "approach": "narrative", "scope": "narrative",
-      "affected-areas": "narrative", "constraints-and-decisions": "narrative",
-      "risks-and-open-questions": "narrative", "environment-facts": "narrative",
-      "approach-decisions": "narrative",
-      "ui-classification": "fields", "adversarial-review": "fields"
+      "current-state": {
+        "shape": "narrative",
+        "heading": "## Current state"
+      },
+      "desired-outcome": {
+        "shape": "narrative",
+        "heading": "## Desired outcome"
+      },
+      "approach": {
+        "shape": "narrative",
+        "heading": "## Approach"
+      },
+      "scope": {
+        "shape": "narrative",
+        "heading": "## Scope"
+      },
+      "affected-areas": {
+        "shape": "narrative",
+        "heading": "## Affected areas"
+      },
+      "constraints-and-decisions": {
+        "shape": "narrative",
+        "heading": "## Constraints and decisions"
+      },
+      "risks-and-open-questions": {
+        "shape": "narrative",
+        "heading": "## Risks and open questions"
+      },
+      "environment-facts": {
+        "shape": "narrative",
+        "heading": "## Environment facts"
+      },
+      "approach-decisions": {
+        "shape": "narrative",
+        "heading": "## Approach decisions"
+      },
+      "ui-classification": {
+        "shape": "fields",
+        "heading": "## UI classification"
+      },
+      "adversarial-review": {
+        "shape": "fields",
+        "heading": "## Adversarial review"
+      }
     },
     "goal": {
-      "current-state-and-prior-goal-handoffs": "narrative",
-      "outcome-and-definition-of-done": "narrative",
-      "why-this-goal-is-needed": "narrative", "scope": "narrative",
-      "affected-areas": "narrative", "dependencies-and-handoffs": "narrative",
-      "implementation-approach-risks-and-edge-cases": "narrative",
-      "owned-work-units": "narrative", "goal-size-exception": "empty",
-      "testing-requirement": "table"
+      "current-state-and-prior-goal-handoffs": {
+        "shape": "narrative",
+        "heading": "## Current state and prior-goal handoffs"
+      },
+      "outcome-and-definition-of-done": {
+        "shape": "narrative",
+        "heading": "## Outcome and definition of done"
+      },
+      "why-this-goal-is-needed": {
+        "shape": "narrative",
+        "heading": "## Why this goal is needed"
+      },
+      "scope": {
+        "shape": "narrative",
+        "heading": "## Scope"
+      },
+      "affected-areas": {
+        "shape": "narrative",
+        "heading": "## Affected files, systems, data, and interfaces"
+      },
+      "dependencies-and-handoffs": {
+        "shape": "narrative",
+        "heading": "## Dependencies and handoffs"
+      },
+      "implementation-approach-risks-and-edge-cases": {
+        "shape": "narrative",
+        "heading": "## Implementation approach, risks, and edge cases"
+      },
+      "owned-work-units": {
+        "shape": "narrative",
+        "heading": "## Owned work units"
+      },
+      "goal-size-exception": {
+        "shape": "empty",
+        "heading": "## Goal-size exception"
+      },
+      "testing-requirement": {
+        "shape": "table",
+        "heading": "## Testing requirement"
+      }
     },
     "step": {
-      "ownership": "fields", "change-target": "fields",
-      "objective": "narrative", "instructions": "narrative",
-      "acceptance-criteria": "narrative", "handoff": "narrative",
-      "atomicity-check": "empty"
+      "ownership": {
+        "shape": "fields",
+        "heading": "## Ownership"
+      },
+      "change-target": {
+        "shape": "fields",
+        "heading": "## Change target"
+      },
+      "objective": {
+        "shape": "narrative",
+        "heading": "## Objective"
+      },
+      "instructions": {
+        "shape": "narrative",
+        "heading": "## Instructions"
+      },
+      "acceptance-criteria": {
+        "shape": "narrative",
+        "heading": "## Acceptance criteria"
+      },
+      "handoff": {
+        "shape": "narrative",
+        "heading": "## Handoff"
+      },
+      "atomicity-check": {
+        "shape": "empty",
+        "heading": "## Atomicity check"
+      }
     },
     "testing": {
-      "automated-tests": "narrative", "browser-verification": "narrative",
-      "backend-verification": "narrative", "manual-verification": "narrative",
-      "artifact-comparisons": "table"
+      "automated-tests": {
+        "shape": "narrative",
+        "heading": "## Automated tests"
+      },
+      "browser-verification": {
+        "shape": "narrative",
+        "heading": "## Browser verification"
+      },
+      "backend-verification": {
+        "shape": "narrative",
+        "heading": "## Backend verification"
+      },
+      "manual-verification": {
+        "shape": "narrative",
+        "heading": "## Manual verification"
+      },
+      "artifact-comparisons": {
+        "shape": "table",
+        "heading": "## Artifact comparisons"
+      }
     },
     "review": {
-      "review-scope": "hybrid", "findings": "table", "rationale": "fields"
+      "review-scope": {
+        "shape": "hybrid",
+        "heading": "## Review scope"
+      },
+      "findings": {
+        "shape": "table",
+        "heading": "## Findings"
+      },
+      "rationale": {
+        "shape": "fields",
+        "heading": "## Verdict"
+      }
     }
   }
 }

@@ -32,7 +32,7 @@ for kind in plan goal step testing review; do
         "$scripts_dir/plan-document-lib.sh")"
     for section in $list; do
         shape="$(jq -r --arg k "$kind" --arg s "$section" \
-            '.documents[$k][$s] // "UNREGISTERED"' "$registry")"
+            '.documents[$k][$s].shape // "UNREGISTERED"' "$registry")"
         case "$shape" in
             narrative|empty) ;;
             UNREGISTERED)
@@ -44,10 +44,11 @@ for kind in plan goal step testing review; do
 done
 
 # ---- the registry matches what the documents actually contain ---------------
-# plan_section_heading is the authoritative <kind>/<id> -> heading mapping and
-# therefore the set of section-form targets. Deriving an id from a heading does
-# not work: goal/affected-areas is "## Affected files, systems, data, and
-# interfaces", and review/rationale is "## Verdict".
+# The heading comes from the registry, not from scraping the library's case
+# statement. The scrape pinned eight spaces of indentation and ids of [a-z-]+
+# only, so it resolved 29 of 36 sections and silently skipped every destructive
+# one -- the shapes whose flattening caused the data loss this contract exists
+# to prevent went unverified.
 fixture="$repo_root/benchmark/planning/tests/fixtures/self-hosted-plan"
 declare_file() { # <kind> -> the document to inspect for that kind
     case "$1" in
@@ -75,29 +76,61 @@ observed_shape() { # <file> <heading>
         }' "$1"
 }
 
-mapping="$(grep -oE "^        [a-z]+/[a-z-]+\) printf '%s\\\\t%s\\\\n' '## [^']*'" \
-    "$scripts_dir/plan-document-lib.sh" |
-    sed "s/^ *//; s/) printf '%s\\\\t%s\\\\n' '/\t/; s/'$//")"
-[ -n "$mapping" ] || t_fail 'could not read the section-id to heading mapping'
+checked=0
+while IFS="$(printf '\t')" read -r key shape heading; do
+    [ -n "${key:-}" ] || continue
+    kind="${key%%/*}"
+    file="$(declare_file "$kind")"
+    [ -f "$file" ] || continue
+    # An optional section the template does not emit has no shape to compare.
+    grep -Fqx "$heading" "$file" || continue
+    seen="$(observed_shape "$file" "$heading")"
+    if [ "$seen" = "$shape" ]; then
+        checked=$((checked + 1))
+    else
+        t_fail "$key is $seen in the document but document-sections.json records $shape"
+    fi
+done <<REGISTRY
+$(jq -r '.documents | to_entries[] | .key as $k | .value | to_entries[]
+         | "\($k)/\(.key)\t\(.value.shape)\t\(.value.heading)"' "$registry")
+REGISTRY
+[ "$checked" -ge 30 ] \
+    || t_fail "only $checked section shape(s) were verified against a document; the registry or the fixture stopped covering them"
+
+# ---- the library's section-form targets agree with the registry -------------
+# Two independent reads of the same case statement: the id labels, and the
+# id-plus-heading pairs. A reformat that breaks the pair regex still shows up in
+# the label count, so a mapping that quietly shrinks fails here instead of
+# reducing coverage in silence.
+lib="$scripts_dir/plan-document-lib.sh"
+# The id labels, counted without reference to how the heading is emitted.
+labels="$(grep -cE "^[[:space:]]*[a-z]+/[a-z0-9-]+\)" "$lib" || true)"
+# The id-and-heading pairs, split on quotes rather than matched against a
+# printf format: pinning the format is what let the previous read resolve 29 of
+# 36 sections while still reporting success.
+pairs="$(awk -F"'" '
+    /^[[:space:]]*[a-z]+\/[a-z0-9-]+\)/ {
+        split($0, parts, ")"); id = parts[1]
+        gsub(/^[[:space:]]+/, "", id)
+        heading = ""
+        for (i = 2; i <= NF; i++) if (heading == "" && substr($i, 1, 3) == "## ") heading = $i
+        if (heading != "") print id "\t" heading
+    }' "$lib")"
+pair_count="$(printf '%s\n' "$pairs" | grep -c . || true)"
+t_assert_eq 'every section-form label yields an id-and-heading pair' "$pair_count" "$labels"
+
 while IFS="$(printf '\t')" read -r key heading; do
     [ -n "${key:-}" ] || continue
     kind="${key%%/*}"; section="${key#*/}"
-    file="$(declare_file "$kind")"
-    [ -f "$file" ] || continue
     recorded="$(jq -r --arg k "$kind" --arg s "$section" \
-        '.documents[$k][$s] // "UNREGISTERED"' "$registry")"
-    if [ "$recorded" = UNREGISTERED ]; then
-        t_fail "$key is a section-form target with no entry in document-sections.json"
-        continue
-    fi
-    # A heading the template does not emit yet (the optional verification
-    # sections) has no shape to compare against.
-    grep -Fqx "$heading" "$file" || continue
-    seen="$(observed_shape "$file" "$heading")"
-    [ "$seen" = "$recorded" ] \
-        || t_fail "$key is $seen in the document but document-sections.json records $recorded"
+        '.documents[$k][$s].heading // "UNREGISTERED"' "$registry")"
+    case "$recorded" in
+        UNREGISTERED) t_fail "$key is a section-form target with no entry in document-sections.json" ;;
+        "$heading") ;;
+        *) t_fail "$key heading is '$heading' in the library but '$recorded' in the registry" ;;
+    esac
 done <<MAPPING
-$mapping
+$pairs
 MAPPING
 
 # ---- behaviour: a field section keeps its siblings --------------------------
