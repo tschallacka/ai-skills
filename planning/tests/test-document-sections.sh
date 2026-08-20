@@ -46,9 +46,9 @@ done
 # ---- the registry matches what the documents actually contain ---------------
 # The heading comes from the registry, not from scraping the library's case
 # statement. The scrape pinned eight spaces of indentation and ids of [a-z-]+
-# only, so it resolved 29 of 36 sections and silently skipped every destructive
-# one -- the shapes whose flattening caused the data loss this contract exists
-# to prevent went unverified.
+# only, so it resolved 29 of 36 sections. Six of the nine field, table and
+# hybrid shapes went unverified: a scrape that matches less verifies less, and
+# still reports success.
 fixture="$repo_root/benchmark/planning/tests/fixtures/self-hosted-plan"
 declare_file() { # <kind> -> the document to inspect for that kind
     case "$1" in

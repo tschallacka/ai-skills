@@ -46,9 +46,9 @@ nothing tells you.
 `planning/document-sections.json` records each section's **heading** as well as
 its shape, so a shape claim is checked against the document itself. Deriving the
 heading by scraping the library's case statement resolved 29 of 36 sections —
-the regex pinned eight spaces of indentation and ids of `[a-z-]+` — and the
-seven it missed included every destructive one. The test still passed, because a
-scrape that finds less simply verifies less.
+the regex pinned eight spaces of indentation and ids of `[a-z-]+` — leaving six
+of the nine field, table and hybrid shapes unverified. The test still passed,
+because a scrape that finds less simply verifies less.
 
 **Enforced** by `test-document-sections.sh`: the allow-list may hold only
 narrative sections, every registered shape must match the document, and the
