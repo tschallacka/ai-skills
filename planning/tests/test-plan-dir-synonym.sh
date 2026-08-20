@@ -205,17 +205,21 @@ exempt_from_pairs() { # <script>
 # taken by field number: a quoted precondition such as 'rm -f progress.md'
 # contains spaces, so $4 is "-f" and three covered scripts read as uncovered.
 named_subjects="$(
-    grep '^check_pair ' "${BASH_SOURCE[0]}" \
-        | grep -oE '[a-z0-9-]+\.sh' | head -n -0
+    grep '^check_pair ' "${BASH_SOURCE[0]}" | grep -oE '[a-z0-9-]+\.sh'
     grep -E '^(readonly_pair|readonly_sub_pair|review_pair) ' "${BASH_SOURCE[0]}" | grep -oE '[a-z0-9-]+\.sh'
     grep -q '^review_pair ' "${BASH_SOURCE[0]}" && printf 'update-adversarial-review.sh\n'
     grep -q '^upc_pair ' "${BASH_SOURCE[0]}" && printf 'update-plan-content.sh\n'
 )"
+newline='
+'
+newline_wrapped_subjects="$newline$named_subjects$newline"
 while IFS= read -r hoisting; do
     [ -n "$hoisting" ] || continue
     exempt_from_pairs "$hoisting" && continue
-    printf '%s\n' "$named_subjects" | grep -Fqx "$hoisting" \
-        || t_fail "$hoisting accepts --plan-dir through the hoister but has no case here; add one or exempt it with a reason"
+    case "$newline_wrapped_subjects" in
+        *"$newline$hoisting$newline"*) ;;
+        *) t_fail "$hoisting accepts --plan-dir through the hoister but has no case here; add one or exempt it with a reason" ;;
+    esac
 done <<HOISTING
 $(grep -l 'plan_hoist_plan_dir' "$scripts"/*.sh | while IFS= read -r found; do basename "$found"; done)
 HOISTING
