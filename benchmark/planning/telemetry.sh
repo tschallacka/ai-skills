@@ -44,7 +44,7 @@ source_agent_lib() {
     # lib-agent.sh fails closed by exiting, which sourced here would end this
     # script mid-file and leave telemetry.txt empty. Probe it in a child shell,
     # relay the diagnostic, and degrade to the documented keys instead.
-    if ! probe_err="$(bash -c 'source "$1" >/dev/null' _ "$lib" 2>&1)"; then
+    if ! probe_err="$("$BASH" -c 'source "$1" >/dev/null' _ "$lib" 2>&1)"; then
         [ -z "$probe_err" ] || printf '%s\n' "$probe_err" >&2
         printf 'thread_id=%s\n' "$THREAD_ID"
         printf 'usage_records=unavailable\n'

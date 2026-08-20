@@ -80,7 +80,7 @@ esac
 
 # ---- the entry hash covers every input --------------------------------------
 hash_entry() {
-    bash -c '
+    "$BASH" -c '
         set -euo pipefail
         source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
         source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"
@@ -97,7 +97,7 @@ after="$(hash_entry _ unit:W01)"
 
 # A single-input entry must keep the plain file hash, so existing entries and
 # any outstanding token are untouched by the composite.
-plain="$(bash -c '
+plain="$("$BASH" -c '
     set -euo pipefail
     source "$1/plan-map-lib.sh"; source "$1/plan-document-lib.sh"
     source "$1/plan-inventory-lib.sh"; source "$1/plan-context-lib.sh"

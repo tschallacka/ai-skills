@@ -202,20 +202,20 @@ expect_grep <(printf '%s' "$vt2_out") 'theme override' 'verify-target flags them
 frame_sh="$scripts/supervision-frame.sh"
 monitor_sh="$scripts/monitor-read.sh"
 mkdir -p "$tmp/frames"
-bash "$frame_sh" write "$tmp/frames/a" --subagent a --persona chris --status ok --verdict clean >/dev/null
-status_out="$(ROLE_ID=maintainer bash "$monitor_sh" status "$tmp/frames/a" 2>/dev/null)"
+"$BASH" "$frame_sh" write "$tmp/frames/a" --subagent a --persona chris --status ok --verdict clean >/dev/null
+status_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" status "$tmp/frames/a" 2>/dev/null)"
 expect_grep <(printf '%s' "$status_out") 'status=ok' 'monitor-read status'
-summary_out="$(ROLE_ID=maintainer bash "$monitor_sh" summary "$tmp/frames" 2>/dev/null)"
+summary_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" summary "$tmp/frames" 2>/dev/null)"
 expect_grep <(printf '%s' "$summary_out") 'a:' 'monitor-read summary'
 printf 'grant\treviewer\tneeds path\tcommand\n' > "$tmp/grants.log"
-grants_out="$(ROLE_ID=maintainer bash "$monitor_sh" grants "$tmp/grants.log" --last 5 2>/dev/null)"
+grants_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" grants "$tmp/grants.log" --last 5 2>/dev/null)"
 expect_grep <(printf '%s' "$grants_out") 'grant' 'monitor-read grants'
 
 # ---- flag coverage: role-context --page / --page-size, supervision-frame
 #      optional write flags, plan-content --full ----
 # role-context accepts -p/--page and --page-size (paged role-doc reads).
 rc_page=0
-if ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 1 --page-size 2048 >/dev/null 2>&1; then
+if ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 1 --page-size 2048 >/dev/null 2>&1; then
     rc_page=0
 else
     rc_page=$?
@@ -223,9 +223,9 @@ fi
 chk "$rc_page" 0 "role-context --page/--page-size accepted"
 # --page actually pages: with a tiny page budget, page 1 is smaller than the
 # full payload and shows a "more" continuation, page 2 differs from page 1.
-full_payload="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer 2>/dev/null || true)"
-page1="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 1 --page-size 500 2>/dev/null || true)"
-page2="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 2 --page-size 500 2>/dev/null || true)"
+full_payload="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer 2>/dev/null || true)"
+page1="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 1 --page-size 500 2>/dev/null || true)"
+page2="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 2 --page-size 500 2>/dev/null || true)"
 page1_continues=false
 case "$page1" in *'more:'*) page1_continues=true ;; esac
 if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && [ "$page1_continues" = true ]; then
@@ -234,7 +234,7 @@ else
     fail=$((fail+1)); echo "FAIL: role-context --page does not paginate"
 fi
 # --paths lists the role's doc paths (maintainer-only).
-paths_out="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
+paths_out="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
 case "$paths_out" in *'ROLES.md'*) paths_listed=true ;; *) paths_listed=false ;; esac
 if [ "$paths_listed" = true ]; then
     pass=$((pass+1)); echo "PASS: role-context --paths lists doc paths"
@@ -242,7 +242,7 @@ else
     fail=$((fail+1)); echo "FAIL: role-context --paths"
 fi
 rc_nonmain=0
-if ROLE_ID=chris bash "$scripts/role-context.sh" --paths chris >/dev/null 2>&1; then rc_nonmain=0; else rc_nonmain=$?; fi
+if ROLE_ID=chris "$BASH" "$scripts/role-context.sh" --paths chris >/dev/null 2>&1; then rc_nonmain=0; else rc_nonmain=$?; fi
 chk "$rc_nonmain" 64 "role-context --paths non-maintainer refused"
 # supervision-frame write accepts the escalation/read/wholesale flags.
 "$scripts/supervision-frame.sh" write "$tmp/fullframe" \

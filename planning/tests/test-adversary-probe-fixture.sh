@@ -53,10 +53,10 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/adversary-probe-fixture.XXXXXX")"
 trap 'rm -rf -- "$tmp"' EXIT
 t_copy_tree "$fixture" "$tmp/plan"
 reader="$root/scripts/plan-context.sh"
-bash "$reader" init --plan-dir "$tmp/plan" >/dev/null
+"$BASH" "$reader" init --plan-dir "$tmp/plan" >/dev/null
 
 for doc in plan inventory progress adversarial-review; do
-    bash "$reader" read --plan-dir "$tmp/plan" --document "$doc" >/dev/null 2>&1 || {
+    "$BASH" "$reader" read --plan-dir "$tmp/plan" --document "$doc" >/dev/null 2>&1 || {
         echo "fixture not compliant: reader does not serve --document $doc (current spec changed)" >&2
         exit 1
     }
@@ -66,7 +66,7 @@ for goal_dir in "$tmp/plan"/*/; do
     id="$(basename "$goal_dir")"
     [ "$id" = context ] && continue
     [ -f "$goal_dir/goal.md" ] || { echo "fixture missing goal.md for $id" >&2; exit 1; }
-    bash "$reader" read --plan-dir "$tmp/plan" --document "goal:$id" >/dev/null 2>&1 || {
+    "$BASH" "$reader" read --plan-dir "$tmp/plan" --document "goal:$id" >/dev/null 2>&1 || {
         echo "fixture not compliant: reader does not serve goal:$id" >&2; exit 1
     }
 done
@@ -76,7 +76,7 @@ done
 units="$(awk -F'|' 'function trim(v){gsub(/^[[:space:]]+|[[:space:]]+/,"",v); return v} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {print trim($2)}' "$tmp/plan/work-unit-inventory.md")"
 [ -n "$units" ] || { echo "fixture inventory has no WNN rows" >&2; exit 1; }
 for unit in $units; do
-    bash "$reader" read --plan-dir "$tmp/plan" --unit "$unit" >/dev/null 2>&1 || {
+    "$BASH" "$reader" read --plan-dir "$tmp/plan" --unit "$unit" >/dev/null 2>&1 || {
         echo "fixture not compliant: unit $unit does not resolve (inventory Goal/Step columns wrong for the current reader)" >&2
         exit 1
     }

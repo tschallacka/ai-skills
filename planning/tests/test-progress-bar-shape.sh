@@ -158,7 +158,7 @@ done < <(find "$plans_root" -type f -name 'progress.md' -not -path '*/context/*'
 # mismatch-detection branch is exercised (not just the positive shape path).
 negative_fixture="$root/planning/tests/fixtures/progress-shape-bad"
 if [ -z "${PROGRESS_SHAPE_NEG_DONE:-}" ] && [ -d "$negative_fixture" ]; then
-    bad_out="$(PROGRESS_SHAPE_NEG_DONE=1 PLANS_ROOT="$negative_fixture" bash "$0" 2>&1 || true)"
+    bad_out="$(PROGRESS_SHAPE_NEG_DONE=1 PLANS_ROOT="$negative_fixture" "$BASH" "$0" 2>&1 || true)"
     case "$bad_out" in
         *FAIL*) ;;
         *) note_fail "negative fixture $negative_fixture did not FAIL (mismatch path broken)" ;;

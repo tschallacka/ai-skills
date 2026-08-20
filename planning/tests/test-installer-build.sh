@@ -27,7 +27,7 @@ note_fail() { printf 'installer-build: %s\n' "$1" >&2; t_record "$1"; }
 [ -d "$src_dir" ] || { note_fail "missing $src_dir"; exit 1; }
 
 test_check_mode_clean() {
-    if bash "$builder" --check >/dev/null; then
+    if "$BASH" "$builder" --check >/dev/null; then
         printf '%s\n' 'test_check_mode_clean: PASS'
     else
         note_fail 'install.sh does not match installer/build.sh output'
@@ -43,7 +43,7 @@ test_check_mode_detects_edit() {
     cp "$artifact" "$saved"
     printf '# hand edit\n' >> "$artifact"
     status=0
-    bash "$builder" --check >/dev/null 2>&1 || status=$?
+    "$BASH" "$builder" --check >/dev/null 2>&1 || status=$?
     cp "$saved" "$artifact"
     rm -f "$saved"
     if [ "$status" -eq 1 ]; then

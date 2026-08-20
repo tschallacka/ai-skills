@@ -84,7 +84,7 @@ out="$({ "$scripts_dir/validate-plan.sh" "$plan" 2>&1 || true; } | { grep -E 'ca
 # section-form target: `-ss ... artifact-comparisons` would rewrite it as
 # paragraphs and discard every row. It is authored with -tp, and the guard in
 # plan_replace_section refuses the destructive form.
-kind_list="$(bash -c '
+kind_list="$("$BASH" -c '
     plan_error_count=0
     source "$1/plan-map-lib.sh"; source "$1/plan-inventory-lib.sh"
     source "$1/plan-document-lib.sh"

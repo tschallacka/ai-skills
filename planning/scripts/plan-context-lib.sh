@@ -411,7 +411,7 @@ context_roles_file="${PLANNING_ROLE_CONTEXT:-$(cd "$(dirname "${BASH_SOURCE[0]}"
 context_resolve_role_id() {
     local token="$1" resolved=""
     if [ -f "$context_roles_file" ]; then
-        resolved="$(bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "$2"' _ "$context_roles_file" "$token" 2>/dev/null || true)"
+        resolved="$("$BASH" -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "$2"' _ "$context_roles_file" "$token" 2>/dev/null || true)"
     fi
     [ -n "$resolved" ] && printf '%s\n' "$resolved" || printf 'UNKNOWN\n'
 }

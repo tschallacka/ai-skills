@@ -58,7 +58,7 @@ set -euo pipefail
 plan_inventory_rows "$2/work-unit-inventory.md"
 PROBE
 rc=0
-message="$(bash "$probe" "$scripts_dir" "$plan" 2>&1)" || rc=$?
+message="$("$BASH" "$probe" "$scripts_dir" "$plan" 2>&1)" || rc=$?
 t_assert_eq 'a missing inventory is refused with 66' "$rc" 66
 case "$message" in
     *'work-unit inventory not found'*) ;;

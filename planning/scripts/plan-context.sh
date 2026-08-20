@@ -126,7 +126,12 @@ done
 
 context_init_command() {
     local result
-    result="$(context_with_lock "$plan_dir" bash -c '
+    # "$BASH", not `bash`: a PATH lookup can hand this worker a different bash
+    # than the one running the script, and then the body's set -e semantics are
+    # not the caller's. That is how `init` on a plan with no work-unit inventory
+    # came to exit 2 under one shell and 0 under another, publishing a snapshot
+    # in only one of them.
+    result="$(context_with_lock "$plan_dir" "$BASH" -c '
         set -euo pipefail
         plan_dir="$1"; source "$2"
         generation="$(context_allocate_generation "$plan_dir")"

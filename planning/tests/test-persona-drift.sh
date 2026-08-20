@@ -33,7 +33,7 @@ note_fail() { echo "persona drift: $1" >&2; t_record "$1"; }
 
 # 1. Registry ids — derive from role-context.sh --list (identity-free) so
 #    adding a persona to ROLES=() is auto-checked rather than hand-mirrored.
-registry_ids="$(bash "$registry" --list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+registry_ids="$("$BASH" "$registry" --list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
 [ -n "$registry_ids" ] || { echo "persona drift: could not read registry from $registry --list" >&2; exit 1; }
 registry_ids="$(printf '%s\n' "$registry_ids" | sed 's/[[:space:]]*$//')"
 
@@ -57,7 +57,7 @@ done
 #    Pull the authoritative per-role scope list from role-context.sh.
 scope_errors=0
 for id in $registry_ids; do
-    docs="$(ROLE_ID=maintainer bash "$registry" --paths "$id" 2>/dev/null || true)"
+    docs="$(ROLE_ID=maintainer "$BASH" "$registry" --paths "$id" 2>/dev/null || true)"
     [ -n "$docs" ] || continue
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue

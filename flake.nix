@@ -98,11 +98,26 @@
             cd "$repo"
             PATH="${bash32}/bin/bash32-bin:$PATH" exec ${bash32}/bin/bash32 ./run-tests.sh "$@"
           '';
+
+          # One script on the floor, with the same PATH injection the suite gets.
+          # `bash32 some-script.sh` is not the same test: a #!/usr/bin/env bash
+          # child still resolves to whatever bash PATH offers, so half the run
+          # can be 5.3. That divergence is what hid the plan-context.sh init
+          # defect -- it only reproduced under the forced PATH.
+          runOne32 = pkgs.writeShellScriptBin "bash32-run" ''
+            set -euo pipefail
+            if [ "$#" -eq 0 ]; then
+              echo "usage: bash32-run <script> [args...]" >&2
+              exit 64
+            fi
+            PATH="${bash32}/bin/bash32-bin:$PATH" exec ${bash32}/bin/bash32 "$@"
+          '';
         in {
           default = pkgs.mkShell {
             packages = [
               bash32
               runOn32
+              runOne32
               pkgs.shellcheck
               pkgs.jq
               pkgs.git
@@ -116,6 +131,7 @@
               echo "ai-skills dev shell"
               echo "  bash32           $(${bash32}/bin/bash32 --version | head -1 | cut -d' ' -f4)  (CODE-STYLE.md §1 floor)"
               echo "  bash32-run-tests run ./run-tests.sh entirely under bash 3.2"
+              echo "  bash32-run       run one script under bash 3.2, children included"
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
               echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
               echo

@@ -93,7 +93,7 @@ while IFS= read -r file; do
         *-lib.sh|*/tests/*|./run-tests.sh) continue ;;
     esac
     grep -q -- '--help' "$repo_root/$file" || continue
-    help_out="$( cd "$repo_root" && bash "$file" --help 2>/dev/null )" || continue
+    help_out="$( cd "$repo_root" && "$BASH" "$file" --help 2>/dev/null )" || continue
     [ -n "$help_out" ] || continue
     case "$help_out" in
         '#!'*) note_fail "$file --help prints its shebang" ;;

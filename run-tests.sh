@@ -100,7 +100,7 @@ run_one() {
     fi
 
     total=$((total + 1))
-    if "$wrapper" "$mem" "$cpu" -- bash "$t" >"$test_output" 2>&1; then
+    if "$wrapper" "$mem" "$cpu" -- "$BASH" "$t" >"$test_output" 2>&1; then
         passed=$((passed + 1))
         printf '  %-52s PASS\n' "$label"
         if [ "$verbose" = true ]; then

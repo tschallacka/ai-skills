@@ -29,7 +29,7 @@ grep -Fq 'CAPSULE_BASE="${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}
 grep -Fq 'CAPSULE_ROOT="$CAPSULE_BASE/$RUN_ID/$REVISION/worker"' "$setup"
 grep -Fq 'worker-manifest.json' "$setup"
 
-agent="$(BENCHMARK_AGENT="${BENCHMARK_AGENT:-}" bash -c '
+agent="$(BENCHMARK_AGENT="${BENCHMARK_AGENT:-}" "$BASH" -c '
     set -euo pipefail
     source "$1/agent-env.sh"
     resolve_active_agent "$1"
@@ -54,7 +54,7 @@ printf 'plan\n' > "$tmp/rev-cap/plan/plan.md"
 # emit_argv <role> <workspace> <capsule>: prints AGENT_CWD then one argv element
 # per line.
 emit_argv() {
-    bash -c '
+    "$BASH" -c '
         set -euo pipefail
         source "$1/lib-agent.sh"
         "agent_argv_$2" "$3" "$4" "$5"

@@ -31,7 +31,7 @@ test_manifest_emission() {
 
     # --print-skill-files cats PACKAGE-MANIFEST.txt, so emitted-vs-manifest is a
     # tautology; the real contract is manifest == the map's installable rows.
-    bash "$repo_dir/install.sh" --print-skill-files planning --format=tsv >"$emitted"
+    "$BASH" "$repo_dir/install.sh" --print-skill-files planning --format=tsv >"$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
     cmp -s "$manifest_file" "$map_installable"
     # Derive the expected manifest row count from the map (it must equal the
@@ -43,7 +43,7 @@ test_manifest_emission() {
         [ -n "$source" ] || continue
         [ "$source_only" = false ] || { printf 'source-only row in manifest: %s\n' "$source" >&2; return 1; }
         [ -n "$owner" ] && [ -n "$gate" ] && [ -n "$collision" ]
-        resolved=$(abs_path "$(bash "$repo_dir/install.sh" --resolve-source planning "$destination")")
+        resolved=$(abs_path "$("$BASH" "$repo_dir/install.sh" --resolve-source planning "$destination")")
         [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
             return 1

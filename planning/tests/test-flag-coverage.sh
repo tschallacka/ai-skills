@@ -39,7 +39,7 @@ for script in "$scripts"/*.sh; do
     # CRITICAL 1: --help must be present and functional (exit 0, non-empty).
     if [ "$is_lib" -eq 0 ]; then
         set +e
-        helpout="$(bash "$script" --help 2>&1)"
+        helpout="$("$BASH" "$script" --help 2>&1)"
         rc=$?
         set -e
         if [ "$rc" -ne 0 ] || [ -z "$helpout" ]; then

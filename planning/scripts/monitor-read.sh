@@ -64,7 +64,7 @@ require_maintainer() {
     # shared persona resolver is what makes both the canonical id and the
     # canonical name acceptable here; unknown or unset identities are refused.
     local resolved
-    resolved="$(ROLE_ID="${ROLE_ID:-}" bash -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "${ROLE_ID:-UNSET}"' _ "$script_dir/role-context.sh" 2>/dev/null || true)"
+    resolved="$(ROLE_ID="${ROLE_ID:-}" "$BASH" -c 'set -euo pipefail; [ -f "$1" ] && source "$1"; resolve_id "${ROLE_ID:-UNSET}"' _ "$script_dir/role-context.sh" 2>/dev/null || true)"
     if [ "$resolved" != maintainer ]; then
         printf 'monitor-read: FAIL-CLOSED identity: only the maintainer (Willie) may read supervision frames; got ROLE_ID="%s"\n' "${ROLE_ID:-}" >&2
         exit 64
@@ -76,7 +76,7 @@ monitor_show() {
     require_maintainer
     local frame_file="$1"
     [ -f "$frame_file" ] || { printf 'monitor-read: no frame at %s\n' "$frame_file" >&2; return 66; }
-    bash "$script_dir/supervision-frame.sh" check "$frame_file" "$FRAME_BUDGET" >/dev/null || {
+    "$BASH" "$script_dir/supervision-frame.sh" check "$frame_file" "$FRAME_BUDGET" >/dev/null || {
         printf 'monitor-read: frame %s over budget; refusing to load\n' "$frame_file" >&2; return 64
     }
     cat "$frame_file"

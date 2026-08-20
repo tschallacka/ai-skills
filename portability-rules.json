@@ -4,8 +4,8 @@
     "userland": "GNU or BSD; POSIX utility flags only",
     "locale": "LC_ALL=C for anything that sorts, compares or byte-counts",
     "verified": {
-      "bash-3.2": "yes — the full suite runs green under a real 3.2.57 (nix develop; bash32-run-tests)",
-      "bsd-userland": "no — the GNU-vs-BSD flag rules below are verified by reading, not by execution. CI's macos legs are the intended proof and are still continue-on-error."
+      "bash-3.2": "yes \u2014 the full suite runs green under a real 3.2.57 (nix develop; bash32-run-tests)",
+      "bsd-userland": "no \u2014 the GNU-vs-BSD flag rules below are verified by reading, not by execution. CI's macos legs are the intended proof and are still continue-on-error."
     }
   },
   "rules": [
@@ -105,7 +105,7 @@
       "construct": "\\\\b in an ERE",
       "detect": "grep[^|;]*-[a-zA-Z]*E[^|;]*\\\\\\\\b",
       "breaks": "BSD / macOS (undefined in POSIX ERE)",
-      "symptom": "matches nothing, so a check passes vacuously — worse with || true",
+      "symptom": "matches nothing, so a check passes vacuously \u2014 worse with || true",
       "replacement": "tr -c 'A-Za-z0-9_' '\\n' then grep -x, which emulates a word boundary exactly"
     },
     {
@@ -180,7 +180,7 @@
       "breaks": "any host, whenever the text is not ASCII",
       "symptom": "truncation mid-UTF-8-sequence, and a wrong truncated/not-truncated verdict",
       "replacement": "do all budget arithmetic in one unit and say which in a comment",
-      "note": "Plan documents are full of multi-byte glyphs (§ 💤 ⏳ ✅ —), so this is not hypothetical."
+      "note": "Plan documents are full of multi-byte glyphs (\u00a7 \ud83d\udca4 \u23f3 \u2705 \u2014), so this is not hypothetical."
     },
     {
       "id": "python3-shipped",
@@ -196,7 +196,7 @@
       "breaks": "every shell, whenever pipefail is set",
       "symptom": "the pipeline reports 141 (SIGPIPE) even though grep matched, so `... && found=1` never runs and an `if` silently takes the wrong branch. A check reports 'not found' for something that is there, and a test passes without asserting.",
       "replacement": "capture first, then match the string: out=\"$(cmd || true)\"; case \"$out\" in *needle*) ... ;; esac",
-      "note": "grep -q exits on the first match and closes the pipe, so the writer dies of SIGPIPE. The sibling trap is grep -c / grep -v / grep -o exiting 1 when nothing matches, which aborts the script under set -e before any assertion runs; wrap those as { grep -c ... || true; }. The failure is timing-dependent — a writer that finishes before grep -q exits never sees SIGPIPE — which is why it survives in small cases and lies in large ones. A whole-input reader is safe, so `| grep -c PATTERN >/dev/null` is the escape hatch when the pattern must stay a line-scoped regex.",
+      "note": "grep -q exits on the first match and closes the pipe, so the writer dies of SIGPIPE. The sibling trap is grep -c / grep -v / grep -o exiting 1 when nothing matches, which aborts the script under set -e before any assertion runs; wrap those as { grep -c ... || true; }. The failure is timing-dependent \u2014 a writer that finishes before grep -q exits never sees SIGPIPE \u2014 which is why it survives in small cases and lies in large ones. A whole-input reader is safe, so `| grep -c PATTERN >/dev/null` is the escape hatch when the pattern must stay a line-scoped regex.",
       "detect": "(^|[^|])\\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q|-q[A-Za-z]*)"
     },
     {
@@ -209,7 +209,7 @@
     },
     {
       "id": "heredoc-quote-in-command-substitution",
-      "construct": "x=\"$(cmd <<'EOF' … an apostrophe in the body … EOF\n)\"",
+      "construct": "x=\"$(cmd <<'EOF' \u2026 an apostrophe in the body \u2026 EOF\n)\"",
       "breaks": "bash 3.2",
       "symptom": "unexpected EOF while looking for matching `'', or syntax error near unexpected token `)', reported at a line that is NOT the offending one -- the scanner opens a quote in the here-document body and only fails when it runs out of file, so the line number misdirects.",
       "replacement": "keep the here-document out of the command substitution: have the helper write a file or set a global, and read that. Backticks also work, but the global is clearer.",
@@ -217,12 +217,12 @@
     },
     {
       "id": "pattern-substitution-quote",
-      "construct": "a quote character inside ${...} — ${var//$'\"'/…}, or a quoted replacement ${var//pat/\"$repl\"}",
+      "construct": "a quote character inside ${...} \u2014 ${var//$'\"'/\u2026}, or a quoted replacement ${var//pat/\"$repl\"}",
       "detect": "\\$\\{[^{}]*\\$'\\\\?[\"']'",
       "breaks": "bash 3.2",
-      "symptom": "bash: bad substitution: no closing `}' — printed with the expansion truncated at the quote, so the reported text is not what you wrote; or, for a quoted replacement, NO error at all and the quote characters land in the data.",
-      "replacement": "hold the quote in a plain variable and expand it UNQUOTED inside the braces — q='\"'; out=\"${v//$q/\\\\$q}\" behaves identically on 3.2.57 and 5.3.9 — or run the substitution through sed/awk when several passes are needed (context_json_escape_file in plan-context.sh does the three-pass JSON string escape that way).",
-      "note": "Two defects, one cause: bash 3.2 does not track quoting inside ${ }; bash 4 fixed both. Same family as heredoc-quote-in-command-substitution. (1) PARSE ERROR — an ANSI-C $'…' that yields a QUOTE character ends the scan early. Verified on 3.2.57 vs 5.3.9: with v='a\"b', the line printf '%s' \"${v//$'\"'/X}\" prints aXb on 5.3.9 and dies on 3.2.57 with: bad substitution: no closing `}' in \"${v//\"/X}\". ${v#$'\"'} fails the same way, so it is not specific to //. It is the quote CHARACTER, not $'…' — $'\\n' and $'\\t' are fine on 3.2, and a single quote breaks it too. ${v:-$'\"'} fails on BOTH shells, so that form is a plain bug, not a portability question. (2) SILENT WRONG DATA — a quoted REPLACEMENT is never unquoted on 3.2. Verified: with v='a.b' and dash='-', \"${v//./\"$dash\"}\" is a-b on 5.3.9 and a\"-\"b on 3.2.57. No error, wrong output. A quoted PATTERN is fine on both (\"${v//\".\"/$dash}\" is a-b everywhere), so only the replacement side diverges. The detector covers (1) only; (2) cannot be grepped without false positives — review every ${var//…/…} whose replacement is quoted."
+      "symptom": "bash: bad substitution: no closing `}' \u2014 printed with the expansion truncated at the quote, so the reported text is not what you wrote; or, for a quoted replacement, NO error at all and the quote characters land in the data.",
+      "replacement": "hold the quote in a plain variable and expand it UNQUOTED inside the braces \u2014 q='\"'; out=\"${v//$q/\\\\$q}\" behaves identically on 3.2.57 and 5.3.9 \u2014 or run the substitution through sed/awk when several passes are needed (context_json_escape_file in plan-context.sh does the three-pass JSON string escape that way).",
+      "note": "Two defects, one cause: bash 3.2 does not track quoting inside ${ }; bash 4 fixed both. Same family as heredoc-quote-in-command-substitution. (1) PARSE ERROR \u2014 an ANSI-C $'\u2026' that yields a QUOTE character ends the scan early. Verified on 3.2.57 vs 5.3.9: with v='a\"b', the line printf '%s' \"${v//$'\"'/X}\" prints aXb on 5.3.9 and dies on 3.2.57 with: bad substitution: no closing `}' in \"${v//\"/X}\". ${v#$'\"'} fails the same way, so it is not specific to //. It is the quote CHARACTER, not $'\u2026' \u2014 $'\\n' and $'\\t' are fine on 3.2, and a single quote breaks it too. ${v:-$'\"'} fails on BOTH shells, so that form is a plain bug, not a portability question. (2) SILENT WRONG DATA \u2014 a quoted REPLACEMENT is never unquoted on 3.2. Verified: with v='a.b' and dash='-', \"${v//./\"$dash\"}\" is a-b on 5.3.9 and a\"-\"b on 3.2.57. No error, wrong output. A quoted PATTERN is fine on both (\"${v//\".\"/$dash}\" is a-b everywhere), so only the replacement side diverges. The detector covers (1) only; (2) cannot be grepped without false positives \u2014 review every ${var//\u2026/\u2026} whose replacement is quoted."
     },
     {
       "id": "sha256-tool",
@@ -232,6 +232,15 @@
       "symptom": "sha256sum: command not found, and under set -e the script aborts; without set -e a hash comparison silently compares two empty strings and passes",
       "replacement": "t_sha256 (planning/tests/lib-test.sh) in a test, benchmark_hash_file (benchmark/planning/lib-portable.sh) in the harness, or context_hash_file / context_hash_stdin in the planning scripts",
       "note": "macOS ships shasum (Perl) and openssl, not GNU sha256sum. Probe once at load rather than per call, and name all the forms you accept. Four files used it unguarded until this rule was added; the probe-defining files are exempted in test-portability-contract.sh because they must name both forms."
+    },
+    {
+      "id": "bash-by-path-lookup",
+      "construct": "bash -c / bash <script>",
+      "detect": "(^|[^-[:alnum:]_./\"$])bash[[:space:]]+(-c|\")",
+      "breaks": "any host where PATH's bash is not the running interpreter",
+      "symptom": "the child shell is a different bash than the parent, so set -e and pipefail semantics differ between the two halves of one script",
+      "replacement": "\"$BASH\" -c ... / \"$BASH\" <script> \u2014 the interpreter already running this script",
+      "note": "PATH injection (bash32-bin) is still required for #!/usr/bin/env bash shebangs, which $BASH cannot redirect."
     }
   ]
 }

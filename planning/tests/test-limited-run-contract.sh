@@ -69,7 +69,7 @@ run_wrapper() {
     set +e
     STUB_LOG="$temporary_root/log" STUB_UNAME_S="$os" \
         STUB_UNAME_M="${STUB_ARCH:-arm64}" PATH="$bin:$PATH" \
-        bash "$wrapper" "$@" >"$temporary_root/out" 2>"$temporary_root/err"
+        "$BASH" "$wrapper" "$@" >"$temporary_root/out" 2>"$temporary_root/err"
     RUN_RC=$?
     set -e
     RUN_LOG="$(cat "$temporary_root/log")"
@@ -162,7 +162,7 @@ run_installer() {
     set +e
     STUB_LOG="$temporary_root/log" STUB_UNAME_S=Darwin \
         STUB_UNAME_M="${STUB_ARCH:-arm64}" PATH="$bin:$PATH" \
-        AI_SKILLS_NO_SPLASH=1 bash "$repo_dir/install.sh" "$@" \
+        AI_SKILLS_NO_SPLASH=1 "$BASH" "$repo_dir/install.sh" "$@" \
         >"$temporary_root/iout" 2>"$temporary_root/ierr" </dev/null
     RUN_RC=$?
     set -e
@@ -235,7 +235,7 @@ awk '/^runtime_requirements\(\)/,/^}/' "$repo_dir/install.sh" >"$requirements_fn
 
 requires_for_arch() {
     STUB_UNAME_S=Darwin STUB_UNAME_M="$1" PATH="$stub_bin:$PATH" \
-        bash -c '. "$1"; runtime_requirements resource-limited-testing' _ "$requirements_fn"
+        "$BASH" -c '. "$1"; runtime_requirements resource-limited-testing' _ "$requirements_fn"
 }
 
 intel_requires="$(requires_for_arch x86_64)"

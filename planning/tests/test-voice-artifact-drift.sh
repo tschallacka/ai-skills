@@ -20,7 +20,7 @@ reader="$root/scripts/role-context.sh"
 
 # Canonical registry ids — derive from role-context.sh --list (identity-free)
 # so adding a persona to ROLES=() is auto-checked rather than hand-mirrored.
-registry="$(bash "$reader" --list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+registry="$("$BASH" "$reader" --list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
 [ -n "$registry" ] || { echo "voice drift: could not read registry from $reader --list" >&2; exit 1; }
 
 # IDs present in VOICES.md (table rows `| \`id\` | text |`).
@@ -62,7 +62,7 @@ awk -F'|' '
 
 # Every persona payload includes its voice via role-context (injection proof).
 for id in $registry; do
-    payload="$(ROLE_ID="$id" bash "$reader" "$id" -p1 2>/dev/null || true)"
+    payload="$(ROLE_ID="$id" "$BASH" "$reader" "$id" -p1 2>/dev/null || true)"
     case "$payload" in
         *"# Voice ($id):"*) ;;
         *)

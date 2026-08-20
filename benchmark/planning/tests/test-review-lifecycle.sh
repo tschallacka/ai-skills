@@ -498,7 +498,7 @@ if ! PATH="$fake_bin:$PATH" timeout 60s env \
     SEMANTIC_THRESHOLD=1.0 \
     INDEPENDENT_THRESHOLD=1.0 \
     BLINDED_ORACLE_SPEC="$integration_root/seeded-defects.json" \
-    bash "$root/setup-benchmark.sh" current "$integration_root/testing" "adapter-test-$$" "$run_id" \
+    "$BASH" "$root/setup-benchmark.sh" current "$integration_root/testing" "adapter-test-$$" "$run_id" \
     > "$integration_root/setup-output.txt" 2>&1; then
     cat "$integration_root/setup-output.txt" >&2
     exit 1
@@ -507,7 +507,7 @@ if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
     nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$fake_bin:$PATH" timeout 60s bash "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$fake_bin:$PATH" timeout 60s "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
     cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1

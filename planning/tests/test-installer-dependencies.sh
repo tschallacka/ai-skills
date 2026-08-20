@@ -48,7 +48,7 @@ fi
 run_without_jq() {
     local out="$temporary_root/out" err="$temporary_root/err"
     set +e
-    PATH="$jqless_bin" AI_SKILLS_NO_SPLASH=1 bash "$installer" "$@" \
+    PATH="$jqless_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" "$@" \
         >"$out" 2>"$err" </dev/null
     RUN_RC=$?
     set -e

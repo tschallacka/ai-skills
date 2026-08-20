@@ -118,13 +118,13 @@ assert_eq 'atomic write missing directory' "$missing_rc" '66'
 # runs in a child bash, not a `( … )` subshell: bash resets inherited traps in a
 # subshell, so the load-time EXIT trap only fires for a real process exit.
 tracked_probe="$temporary_root/tracked-probe"
-bash -c '
+"$BASH" -c '
     set -euo pipefail
     source "$1/plan-document-lib.sh"
     tmp="$(mktemp "$2/raw.XXXXXX")"
     plan_track_tmp "$tmp"
     printf "%s\n" "$tmp" > "$3"
-' bash "$script_dir" "$temporary_root" "$tracked_probe"
+' "$BASH" "$script_dir" "$temporary_root" "$tracked_probe"
 tracked="$(cat "$tracked_probe")"
 [ ! -e "$tracked" ] || fail "plan_cleanup did not remove a tracked temp: $tracked"
 

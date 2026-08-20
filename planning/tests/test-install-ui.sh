@@ -46,7 +46,7 @@ check_widths() {
     local label="$1" width="$2" height="$3"
     shift 3
     local out line n=0 bad=0
-    out="$(bash "$ui" --render --width "$width" --height "$height" "$@")"
+    out="$("$BASH" "$ui" --render --width "$width" --height "$height" "$@")"
     while IFS= read -r line; do
         n=$((n + 1))
         iui_plain "$line"
@@ -96,7 +96,7 @@ iui_clamp_scroll
 [ "$IUI_CURSOR" -ge "$IUI_SCROLL" ] \
     && [ "$IUI_CURSOR" -lt $((IUI_SCROLL + IUI_BODY_ROWS)) ] \
     || note_fail 'the cursor scrolled out of the visible window'
-frame="$(bash "$ui" --render --width 80 --height 8 --cursor 5 --color none --glyphs ascii)"
+frame="$("$BASH" "$ui" --render --width 80 --height 8 --cursor 5 --color none --glyphs ascii)"
 case "$frame" in
     *'>[ ] install-ui'*) ;;
     *) note_fail 'the cursor row is not visible after scrolling' ;;
@@ -107,7 +107,7 @@ esac
 [ "$(t_failures)" -eq 0 ] && note_pass 'the list scrolls and keeps the cursor visible'
 
 # ── 3. Checkbox and the three ways to toggle ─────────────────────────────────
-frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii)"
+frame="$("$BASH" "$ui" --render --width 80 --height 24 --color none --glyphs ascii)"
 case "$frame" in
     *'>[#] planning'*) ;;
     *) note_fail 'a selected skill must render a filled checkbox' ;;
@@ -162,8 +162,8 @@ exec 3<&-
 note_pass 'the fd-3 escape and SGR-mouse parsers decode a synthetic stream'
 
 # ── 4. Focus ─────────────────────────────────────────────────────────────────
-list_frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus list)"
-info_frame="$(bash "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus info)"
+list_frame="$("$BASH" "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus list)"
+info_frame="$("$BASH" "$ui" --render --width 80 --height 24 --color none --glyphs ascii --focus info)"
 case "$list_frame" in
     *'[SKILLS]'*) ;;
     *) note_fail 'the focused list pane must be marked [SKILLS]' ;;
@@ -325,7 +325,7 @@ IUI_UNAME_M=''
 note_pass 'a requirement condition matches on OS and architecture'
 
 # ── 7. ASCII fallback ────────────────────────────────────────────────────────
-mono="$(bash "$ui" --render --width 80 --height 40 --color none --glyphs ascii)"
+mono="$("$BASH" "$ui" --render --width 80 --height 40 --color none --glyphs ascii)"
 case "$mono" in
     *$'\033'*) note_fail 'the none colour mode emitted an escape sequence' ;;
 esac
@@ -349,8 +349,8 @@ iui_layout
 note_pass 'the ASCII/no-colour fallback is clean and drops the sprite'
 
 # ── 8. Only the eye rows animate ─────────────────────────────────────────────
-bash "$ui" --render --width 100 --height 40 --color truecolor --eye front > "$scratch/front"
-bash "$ui" --render --width 100 --height 40 --color truecolor --eye left > "$scratch/left"
+"$BASH" "$ui" --render --width 100 --height 40 --color truecolor --eye front > "$scratch/front"
+"$BASH" "$ui" --render --width 100 --height 40 --color truecolor --eye left > "$scratch/left"
 # awk rather than diff: `diff` exits 1 on a difference, which set -e treats as
 # a test crash, and its line-format long options are not portable.
 changed="$(awk 'NR==FNR { a[FNR]=$0; next } a[FNR] != $0 { printf "%d ", FNR }' \
@@ -360,7 +360,7 @@ changed="$(awk 'NR==FNR { a[FNR]=$0; next } a[FNR] != $0 { printf "%d ", FNR }' 
 note_pass 'an eye-state change touches only the two sprite eye rows'
 
 # ── 9. Terminal restoration on abort ─────────────────────────────────────────
-restored="$(IUI_NO_STTY=1 bash -c '
+restored="$(IUI_NO_STTY=1 "$BASH" -c '
     set -euo pipefail
     . "'"$ui"'"
     iui_install_traps
@@ -386,7 +386,7 @@ for signal in EXIT TERM; do
         EXIT) abort='exit 1' ;;
         *) abort='kill -TERM $$' ;;
     esac
-    restored="$(IUI_NO_STTY=1 bash -c '
+    restored="$(IUI_NO_STTY=1 "$BASH" -c '
         set -euo pipefail
         . "'"$ui"'"
         iui_install_traps

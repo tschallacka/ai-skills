@@ -51,12 +51,12 @@ mkdir -p "$working"
 rm -f "$working/FIXTURE-VERSION" "$working/README.md"
 
 reader="$script_dir/plan-context.sh"
-bash "$reader" init --plan-dir "$working" >/dev/null
+"$BASH" "$reader" init --plan-dir "$working" >/dev/null
 
 fail=0
 read_doc() {
     local id="$1"
-    if bash "$reader" read --plan-dir "$working" --document "$id" >/dev/null 2>&1; then
+    if "$BASH" "$reader" read --plan-dir "$working" --document "$id" >/dev/null 2>&1; then
         printf '  gate serves --document %s\n' "$id"
     else
         printf '  FAIL: gate does not serve --document %s\n' "$id" >&2
@@ -76,7 +76,7 @@ for goal_dir in "$working"/*/; do
 done
 units="$(plan_inventory_rows "$working/work-unit-inventory.md" | cut -f 1)"
 for unit in $units; do
-    if bash "$reader" read --plan-dir "$working" --unit "$unit" >/dev/null 2>&1; then
+    if "$BASH" "$reader" read --plan-dir "$working" --unit "$unit" >/dev/null 2>&1; then
         printf '  gate serves --unit %s\n' "$unit"
     else
         printf '  FAIL: gate does not serve --unit %s\n' "$unit" >&2
