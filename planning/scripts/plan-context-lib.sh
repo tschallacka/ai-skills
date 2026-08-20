@@ -20,7 +20,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
 
 context_schema_version=1
 context_generator_version=1
-context_result_schema_version=1
+# 2 adds the read result's "excerpt" object, which is null unless the view
+# withheld content without minting a resume token (the summary view).
+context_result_schema_version=2
 
 context_die() { printf '%s\n' "$*" >&2; return 64; }
 

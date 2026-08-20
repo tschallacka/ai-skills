@@ -32,7 +32,15 @@ total="$(wc -l < "$document" | tr -d ' ')"
 [ "$total" -gt 12 ] || t_fail "the fixture plan is too short to be truncated ($total lines)"
 
 # ---- the default view announces the elision ---------------------------------
-default_out="$("$scripts_dir/plan-context.sh" read --plan-dir "$plan" --document plan 2>&1)"
+# rc is captured rather than left to set -e: when the reader itself aborts, an
+# unguarded $(...) ends this test with no output at all, which says nothing about
+# what broke. A crashed reader is a finding, not a reason to go quiet.
+read_rc=0
+default_out="$("$scripts_dir/plan-context.sh" read --plan-dir "$plan" --document plan 2>&1)" || read_rc=$?
+if [ "$read_rc" -ne 0 ]; then
+    printf 'the reader exited %s on a default read:\n%s\n' "$read_rc" "$default_out" >&2
+    t_fail 'the reader failed instead of returning an excerpt'
+fi
 case "$default_out" in
     *'excerpt=summary'*) ;;
     *) t_fail 'the default view elided the document without saying so' ;;
@@ -67,5 +75,35 @@ short_out="$("$scripts_dir/plan-context.sh" read --plan-dir "$short_plan" --docu
 case "$short_out" in
     *'excerpt=summary'*) t_fail 'a document shorter than the excerpt was reported as truncated' ;;
 esac
+
+
+# ---- the json format carries the same fact ---------------------------------
+# next_token is legitimately null for a fixed head slice, so a consumer reading
+# only that field sees a complete document. The excerpt object is how json says
+# what the text format says in its excerpt= line.
+if command -v jq >/dev/null 2>&1; then
+    json_rc=0
+    payload="$("$scripts_dir/plan-context.sh" read --plan-dir "$plan" --document plan --format json 2>&1)" || json_rc=$?
+    if [ "$json_rc" -ne 0 ]; then
+        printf 'the reader exited %s on a json read:\n%s\n' "$json_rc" "$payload" >&2
+        t_fail 'the reader failed instead of returning a json payload'
+    fi
+    printf '%s' "$payload" | jq . >/dev/null 2>&1 \
+        || t_fail 'the json summary payload is not parseable'
+    t_assert_eq 'json reports the excerpt as incomplete' \
+        "$(printf '%s' "$payload" | jq -r '.excerpt.complete')" 'false'
+    t_assert_eq 'json reports the document length' \
+        "$(printf '%s' "$payload" | jq -r '.excerpt.document_lines')" "$total"
+    shown_json="$(printf '%s' "$payload" | jq -r '.excerpt.shown_lines')"
+    [ "$shown_json" -gt 1 ] \
+        || t_fail "json counted the escaped one-line string instead of the lines it holds ($shown_json)"
+    [ "$shown_json" -lt "$total" ] \
+        || t_fail 'json claimed the excerpt was as long as the document'
+    t_assert_eq 'json names the remedy' \
+        "$(printf '%s' "$payload" | jq -r '.excerpt.read_all_with')" '--view full'
+    full_payload="$("$scripts_dir/plan-context.sh" read --plan-dir "$plan" --document plan --view full --format json 2>/dev/null)"
+    t_assert_eq 'the full view reports no excerpt' \
+        "$(printf '%s' "$full_payload" | jq -r '.excerpt')" 'null'
+fi
 
 t_end

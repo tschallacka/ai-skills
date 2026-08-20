@@ -297,6 +297,12 @@ context_read_command() {
     emitted="${page%%$'\t'*}"
     more="${page##*$'\t'}"
     context_trim_partial_utf8 "$read_bounded_file"
+    # Counted from the spool, not from "$bounded": in json format that variable
+    # is already the escaped one-line string, so wc -l reports 1 however many
+    # lines it holds.
+    local shown_lines document_lines
+    shown_lines="$(wc -l < "$read_bounded_file" | tr -d ' ')"
+    document_lines="$(wc -l < "$file" | tr -d ' ')"
     if [ "$format" = json ]; then
         bounded="$(context_json_escape_file "$read_bounded_file")"
     else
@@ -304,9 +310,21 @@ context_read_command() {
     fi
     context_read_cleanup
     if [ "$format" = json ]; then
-        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","content":"%s","next_token":%s}\n' \
+        # `excerpt` carries what the text format says in its excerpt= line: the
+        # summary view is a fixed head slice applied before paging, so it can
+        # withhold most of a document while next_token is legitimately null. A
+        # consumer reading only next_token would treat that as a complete
+        # document. Not a resume token, because a fixed slice cannot be resumed;
+        # the remedy is --view full.
+        local excerpt_json=null
+        if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
+            excerpt_json="$(printf '{"shown_lines":%s,"document_lines":%s,"complete":false,"read_all_with":"--view full"}' \
+                "$shown_lines" "$document_lines")"
+        fi
+        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","content":"%s","next_token":%s,"excerpt":%s}\n' \
             "$document_id" "$view" "$bounded" \
-            "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')"
+            "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')" \
+            "$excerpt_json"
     else
         printf '%s\n' "$bounded"
         [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
@@ -316,14 +334,9 @@ context_read_command() {
         # document is fully read -- therefore concludes it has read a plan when
         # it has seen the first few lines. Reviewers are steered to this view by
         # default, so the excerpt has to say what it is.
-        if [ "$view" = summary ] && [ "$more" -eq 0 ]; then
-            local shown total
-            shown="$(printf '%s\n' "$bounded" | wc -l | tr -d ' ')"
-            total="$(wc -l < "$file" | tr -d ' ')"
-            if [ "$shown" -lt "$total" ]; then
-                printf 'excerpt=summary shows %s of %s line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.\n' \
-                    "$shown" "$total"
-            fi
+        if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
+            printf 'excerpt=summary shows %s of %s line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.\n' \
+                "$shown_lines" "$document_lines"
         fi
     fi
 }
