@@ -489,7 +489,13 @@ connection.execute("insert into threads values ('fake-worker-session', 100)")
 connection.commit()
 connection.close()
 PY
-if ! PATH="$fake_bin:$PATH" timeout 60s env \
+# No wall clock. Everything below it is a shell script in this fixture that
+# writes a file and exits, so a 60s cap could only fire on a defect -- and then it
+# would report a timeout instead of the defect. It also made this the only test in
+# the suite whose result depended on machine speed, and the only one that could
+# not run on macOS at all, where `timeout` does not exist. A hang here is a hang
+# to see, the same as in the other 79 tests, none of which are capped.
+if ! PATH="$fake_bin:$PATH" env \
     REVIEWER_COMMAND="$fake_bin/fake-reviewer" \
     REVIEWER_SESSION_ID="${run_id}-current-B-fixed" \
     REVIEWER_CAPSULE_ID="capsule-001" \
@@ -507,7 +513,7 @@ if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
     nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$fake_bin:$PATH" timeout 60s "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$fake_bin:$PATH" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
     cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1

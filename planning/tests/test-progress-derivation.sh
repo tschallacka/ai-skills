@@ -80,7 +80,10 @@ check_no_placeholder 'create-plan-progress does not emit a placeholder' "$plan_r
 check 'rebuild-plan-progress derives from goal Outcome/DoD' "$plan_root/progress.md" 'The goal-level DoD derivation text\.'
 check_no_placeholder 'rebuild-plan-progress does not emit a placeholder' "$plan_root/progress.md"
 # A goal with no DoD falls back to its goal name, never a placeholder.
-check 'rebuild-plan-progress falls back to goal name for a bare goal' "$plan_root/progress.md" '| 02-goal | 02-goal |'
+# Pipes escaped: check() greps with -E, and a leading bare | is an empty
+# alternation branch. GNU grep tolerates it, BSD grep refuses outright with
+# "empty (sub)expression" and the pattern never matches. PORTABILITY(ere-empty-branch).
+check 'rebuild-plan-progress falls back to goal name for a bare goal' "$plan_root/progress.md" '\| 02-goal \| 02-goal \|'
 
 [ "$FAILED" -eq 0 ] || exit 1
 printf 'Progress derivation regression test passed.\n'

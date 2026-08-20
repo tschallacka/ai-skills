@@ -72,7 +72,7 @@
     {
       "id": "B5",
       "title": "BSD grep rejects an empty subexpression, so the progress fallback pattern never matches on macOS",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -84,17 +84,17 @@
         "planning/tests/test-progress-derivation.sh",
         "planning/scripts/rebuild-plan-progress.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The pattern is passed to check(), which greps with -E, so its pipes are escaped: a leading bare | is an empty alternation branch. One offender in the repo; the other helpers that take a pipe-leading pattern grep with a BRE, where | is literal, and are unaffected.",
+      "verification": "test-progress-derivation passes, and the escaped pattern still matches the row. The unescaped form is rejected here too by ugrep (error at position 4), so the fix is strictly more portable, not merely macOS-specific.",
       "found_by": "the macOS leg of CI",
       "notes": "Candidate for a gated portability rule: an empty branch is textually detectable, unlike the general BRE-alternation case.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-20T17:17:13Z"
+      "updated_at": "2026-08-20T17:27:05Z"
     },
     {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -105,12 +105,12 @@
       "surfaces": [
         "benchmark/planning/tests/test-review-lifecycle.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Both `timeout 60s` wrappers removed rather than given a gtimeout fallback. What they wrapped is a shell script in the fixture that writes a file and exits, so the cap could only fire on a defect and would then report a timeout instead of the defect.",
+      "verification": "The test passes and takes 5 seconds against a 60s cap per call. It was the only test in an 80-test suite with a wall clock, and the only reason this file could not run on macOS.",
       "found_by": "the macOS leg of CI",
-      "notes": "The cheapest of the four: the construct is already catalogued and the replacement is written down. Check why the gate did not flag it.",
+      "notes": "Asked directly: why a timeout at all. lib-agent.sh does bound a real agent and handles timeout/gtimeout properly with an explicit refusal — that one is a genuine need, these two were a hedge. A `sleep 1` remains in the codex-worker fake, with a stated reason: the runner must capture a live process group. That is a real synchronisation point and wants a handshake rather than a sleep; recorded as T29.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-20T17:17:13Z"
+      "updated_at": "2026-08-20T17:27:05Z"
     },
     {
       "id": "B1",
