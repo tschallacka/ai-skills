@@ -48,7 +48,7 @@ group_done() {
     if [ "$(t_failures)" -eq "$group" ]; then
         printf 'test-mermaid-accuracy: %s: PASS\n' "$label"
     else
-        printf 'test-mermaid-accuracy: %s: FAIL (%d finding(s))\n' "$label" "$((fail - group))"
+        printf 'test-mermaid-accuracy: %s: FAIL (%d finding(s))\n' "$label" "$(( $(t_failures) - group ))"
     fi
 }
 

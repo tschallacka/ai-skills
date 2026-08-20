@@ -42,7 +42,10 @@ in_allowlist() {
     case "$1:$2" in
         ./planning/scripts/plan-map-lib.sh:assoc-array) return 0 ;;
         # The probe that chooses between the GNU and BSD forms must name both.
-        ./planning/scripts/plan-document-lib.sh:stat-format) return 0 ;;
+        # The probe that chooses between the GNU and BSD forms must name both.
+        # It lives in one function file and is compiled into plan-core-lib.sh.
+        ./planning/scripts/lib/core/plan_stat_probe.sh:stat-format) return 0 ;;
+        ./planning/scripts/plan-core-lib.sh:stat-format) return 0 ;;
         ./planning/scripts/plan-env.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:sha256-tool) return 0 ;;

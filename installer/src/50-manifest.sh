@@ -124,6 +124,9 @@ scripts/monitor-read.sh
 scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
+scripts/plan-core-lib.sh
+scripts/plan-progress-lib.sh
+scripts/plan-table-lib.sh
 scripts/plan-document-lib.sh
 scripts/plan-map-lib.sh
 scripts/plan-inventory-lib.sh

@@ -184,11 +184,24 @@ recorded by `supervision-frame.sh grant` carry case and handed command only.
 ```mermaid
 flowchart LR
     subgraph LIB["Layer A — libraries, sourced only"]
-        PDL["plan-document-lib.sh"]
+        subgraph COMPILED["compiled, one function per file, by build-plan-libs.sh"]
+            PDL["plan-document-lib.sh, the facade: sections and paragraphs"]
+            PCORE["plan-core-lib.sh: failure, guards, temp files, plan root"]
+            PTABLE["plan-table-lib.sh: CSV and Markdown tables"]
+            PPROG["plan-progress-lib.sh: progress arithmetic and glyphs"]
+        end
         PRL["plan-reconcile-lib.sh"]
         PCL["plan-context-lib.sh"]
+        PMAP["plan-map-lib.sh"]
+        PINV["plan-inventory-lib.sh"]
         RCLIB["role-context.sh, sourcing guard exposes the registry"]
     end
+
+    PDL -->|sources| PCORE
+    PDL -->|sources| PTABLE
+    PDL -->|sources| PPROG
+    PDL -->|sources| PMAP
+    PDL -->|sources| PINV
 
     subgraph ENTRY["Layer B — entry points, agent invoked"]
         CREATE["create-plan.sh"]

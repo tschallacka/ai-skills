@@ -71,6 +71,9 @@ planning/scripts/role-context.sh	scripts/role-context.sh	installer	review-approv
 planning/scripts/update-work-unit.sh	scripts/update-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/remove-work-unit.sh	scripts/remove-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	review-approved	backup-then-replace	false
+planning/scripts/plan-core-lib.sh	scripts/plan-core-lib.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/plan-progress-lib.sh	scripts/plan-progress-lib.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/plan-table-lib.sh	scripts/plan-table-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-document-lib.sh	scripts/plan-document-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-map-lib.sh	scripts/plan-map-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-inventory-lib.sh	scripts/plan-inventory-lib.sh	installer	review-approved	backup-then-replace	false

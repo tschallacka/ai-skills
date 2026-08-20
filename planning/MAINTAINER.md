@@ -134,6 +134,24 @@ the maintainer must behave going forward.
 - Validate before creating progress trackers; a plan is not ready until the
   review is approved and validation passes.
 
+### 2.8 The compiled libraries
+
+`plan-core-lib.sh`, `plan-document-lib.sh`, `plan-table-lib.sh` and
+`plan-progress-lib.sh` are compiled by `build-plan-libs.sh` from
+`scripts/lib/<group>/*.sh`, one function per file. Do not edit the compiled
+files; edit the function file and re-run the build. `--check` reports a stale
+library, and `test-plan-libs-build.sh` runs it.
+
+- `plan-document-lib.sh` remains the façade. Its `99-facade.sh` sources the other
+  three plus `plan-map-lib.sh` and `plan-inventory-lib.sh`, so the 40-plus
+  scripts that source that one path keep getting all 66 symbols. Verified as a
+  symbol-set comparison, not by inspection.
+- Each compiled library begins with a `PLAN_<GROUP>_LIB_LOADED` guard, because
+  the façade sources its siblings and a script may source both. Without it a
+  second source would re-run `00-state.sh` and drop the registered temp files.
+- Group membership is the directory. Moving a function between groups is a `git
+  mv` plus a build, and the symbol set must not change.
+
 ### 2.8a Fix-key derivation
 
 - `mint-fix-keys.sh` parses the five-column Findings table

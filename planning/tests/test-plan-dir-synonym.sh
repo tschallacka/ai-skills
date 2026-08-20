@@ -191,8 +191,9 @@ review_pair update-adversarial-review 'AR-77,A differential finding.,Do the thin
 # reason, not left silently uncovered.
 exempt_from_pairs() { # <script>
     case "$1" in
-        # Defines plan_hoist_plan_dir; it is the mechanism, not a caller of it.
-        plan-document-lib.sh) return 0 ;;
+        # A library defines the hoister or is compiled from the file that does;
+        # it is the mechanism, not a caller with an argument list of its own.
+        *-lib.sh) return 0 ;;
     esac
     return 1
 }

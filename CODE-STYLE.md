@@ -200,6 +200,26 @@ text. That is nearly all of them, so just put it everywhere.
 |---|---|---|
 | Executable script | 400 lines | extract a `*-lib.sh` sibling |
 | Library | 500 lines | split by concern |
+
+**A library function lives in its own file, and the library is compiled.**
+`planning/scripts/lib/<group>/<function>.sh` holds one function, its comment, and
+nothing else. `planning/scripts/build-plan-libs.sh` concatenates each group into
+the `plan-*-lib.sh` that ships, so the runtime cost stays one file per library --
+sourcing 47 files measured 2.6x the cost of one, paid on every helper
+invocation -- while the maintained form is one function per file.
+
+Adding a function means creating one file in the right group directory and
+running the build. The directory is the registration; there is no list to
+update. Group state goes in `00-*.sh`, which sorts first, and anything that must
+run after every definition goes in `99-*.sh`, which sorts last.
+
+Each file carries its own shebang so a test can source it alone, and the compiler
+strips the shebang and the `set` line so the output declares them once. Sourcing
+one function file must succeed on its own; calling the function may still need
+its siblings, which is the dependency made visible rather than hidden.
+
+The compiled libraries are generated artifacts under CODE-CONTRACTS.md contract
+7: never hand-edited, and `test-plan-libs-build.sh` fails when one is stale.
 | Function | 40 lines | extract a helper |
 | Inline `awk` program | 15 lines | move to a lib function or a `.awk` file |
 | Unbroken block with no comment or function boundary | 60 lines | add a section banner and a diagram |
