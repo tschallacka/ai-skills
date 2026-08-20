@@ -122,5 +122,21 @@ while IFS= read -r rule_id; do
     done < <(script_list)
 done < <(jq -r '.rules[].id' "$rules")
 
+# 5. A foreign checkout under the repo does not reach the catalogue. An agent
+# worktree checks the repo out under .claude/, and the scanner walks the
+# filesystem by design, so without a prune every finding is listed once per
+# worktree under a path that exists on one machine -- which made the committed
+# catalogue read as fresh here and stale in every clone.
+probe_dir="$repo_root/.claude/worktrees/probe-portability-scan/planning/scripts"
+mkdir -p "$probe_dir"
+printf '#!/usr/bin/env bash\ndeclare -A m\n' > "$probe_dir/probe-lib.sh"
+if "$repo_root/generate-portability.sh" --check >/dev/null 2>&1; then :; else
+    note_fail 'a checkout under .claude/ changed the catalogue; the scanner must prune it'
+fi
+if "$repo_root/generate-portability.sh" --check 2>/dev/null | grep -c 'probe-lib' >/dev/null 2>&1; then
+    note_fail 'the catalogue names a file from a foreign checkout'
+fi
+rm -rf "$repo_root/.claude/worktrees/probe-portability-scan"
+
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-portability-contract: PASS'
