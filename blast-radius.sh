@@ -142,6 +142,15 @@ while IFS= read -r path; do
 done < "$changed_file"
 
 # ---- 3. base drift ----------------------------------------------------------
+# A fresh clone, and a CI checkout, have origin/master but no local master, so
+# naming the branch alone resolves nothing and drift goes unchecked -- which read
+# as a second warning and failed the count assertion on CI while passing locally,
+# where master exists. Fall back to the remote-tracking ref before giving up.
+if ! git rev-parse --verify --quiet "$base" >/dev/null 2>&1 \
+    && git rev-parse --verify --quiet "origin/$base" >/dev/null 2>&1; then
+    base="origin/$base"
+fi
+
 if merge_base="$(git merge-base HEAD "$base" 2>/dev/null)"; then
     drifted=0
     while IFS= read -r path; do

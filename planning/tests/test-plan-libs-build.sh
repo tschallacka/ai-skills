@@ -136,7 +136,7 @@ t_assert_eq 'the prod target says which target built it' \
 # second one further down, saying a compiled artifact is a maintainer's file.
 for compiled in "$prod_core" "$dev_core"; do
     t_assert_eq "${compiled##*/}: exactly one marker" \
-        "$(grep -c '^# MODE: \|^# PACKAGE: ' "$compiled")" '1'
+        "$(grep -cE '^# (MODE|PACKAGE): ' "$compiled")" '1'
     t_assert_eq "${compiled##*/}: it is MODE: PROD, in the banner" \
         "$(sed -n '1,5p' "$compiled" | grep -c '^# MODE: PROD$')" '1'
 done

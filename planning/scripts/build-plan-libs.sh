@@ -146,8 +146,12 @@ emit_library() { # <group>
         # Strip the standalone shebang, any `set` line, and the file's own MODE
         # and PACKAGE markers: the header above owns them, and a marker copied
         # into a generated file would claim the compiled library is a source.
+        # One expression per literal. `\(DEV\|PROD\)` is GNU sed only: BSD sed
+        # does not take `\|` as alternation in a BRE, so on macOS it matched
+        # nothing and every source marker was copied into the compiled library.
         sed -e '1{/^#!/d;}' -e '/^set -euo pipefail$/d' \
-            -e '/^# MODE: \(DEV\|PROD\)$/d' -e '/^# PACKAGE: \(DEV\|PROD\)$/d' "$member" \
+            -e '/^# MODE: DEV$/d' -e '/^# MODE: PROD$/d' \
+            -e '/^# PACKAGE: DEV$/d' -e '/^# PACKAGE: PROD$/d' "$member" \
             | awk 'NF || printed { print; printed = 1 }'
         first=0
     done

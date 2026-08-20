@@ -126,8 +126,11 @@ t_assert_eq 'hoist refuses a flag with no value' \
 # ── plan_decode_escaped_newlines: the literal two characters ────────────────
 # It prints with %s and no trailing newline, so the decoded value holds one
 # newline between the two words rather than terminating a second line.
+# Trailing whitespace trimmed: BSD od pads the line where GNU od does not, so
+# the untrimmed comparison passed here and failed on the macOS leg over a value
+# that differed only by a final space. PORTABILITY(od-padding).
 t_assert_eq 'decode turns backslash-n into a line break' \
-    "$(unit plan_decode_escaped_newlines.sh -- 'plan_decode_escaped_newlines "a\\nb" | od -An -c | tr -s " "')" \
+    "$(unit plan_decode_escaped_newlines.sh -- 'plan_decode_escaped_newlines "a\\nb" | od -An -c | tr -s " " | sed "s/[[:space:]]*\$//"')" \
     ' a \n b'
 t_assert_eq 'decode leaves text without escapes alone' \
     "$(unit plan_decode_escaped_newlines.sh -- 'plan_decode_escaped_newlines "plain"')" \

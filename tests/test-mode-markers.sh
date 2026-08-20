@@ -170,7 +170,7 @@ t_assert_eq 'and its content is compiled into the end-user library' \
 t_assert_eq 'install.sh is what a user runs, so it goes to the end user' \
     "$(marker_of "$repo_root/install.sh" MODE)" 'PROD'
 t_assert_eq 'and no source marker leaked into it' \
-    "$(grep -c '^# MODE: \|^# PACKAGE: ' "$repo_root/install.sh")" '1'
+    "$(grep -cE '^# (MODE|PACKAGE): ' "$repo_root/install.sh")" '1'
 t_assert_eq 'an installer part is a maintainer file' \
     "$(marker_of "$repo_root/installer/src/50-manifest.sh" MODE)" 'DEV'
 t_assert_eq 'whose content is compiled into install.sh' \

@@ -241,6 +241,24 @@
       "symptom": "the child shell is a different bash than the parent, so set -e and pipefail semantics differ between the two halves of one script",
       "replacement": "\"$BASH\" -c ... / \"$BASH\" <script> \u2014 the interpreter already running this script",
       "note": "PATH injection (bash32-bin) is still required for #!/usr/bin/env bash shebangs, which $BASH cannot redirect."
+    },
+    {
+      "id": "bre-alternation",
+      "construct": "\\| as alternation in a basic regular expression, e.g. sed '/\\(DEV\\|PROD\\)/d'",
+      "detect": "\\\\\\([^)]*\\\\\\|",
+      "breaks": "BSD / macOS",
+      "symptom": "the pattern matches nothing, silently, so a filter or a strip does no work at all",
+      "replacement": "one expression per literal (sed -e ... -e ...), or grep -E where | is portable. Note that \\| inside an -E pattern is a literal pipe and is correct -- this catches the escaped-group form, which is BRE-only by construction; the unparenthesised form has no textual signal and the macOS CI leg is the backstop.",
+      "note": "Found by the macOS leg: build-plan-libs.sh stripped its MODE and PACKAGE markers with \\(DEV\\|PROD\\), which GNU sed accepts and BSD sed does not, so every source marker was copied into the compiled libraries on macOS and nowhere else."
+    },
+    {
+      "id": "od-padding",
+      "construct": "comparing `od` output literally, e.g. od -An -c | tr -s ' '",
+      "detect": null,
+      "breaks": "BSD / macOS",
+      "symptom": "the value differs only by trailing whitespace, so an equality assertion fails with two strings that look identical in the report",
+      "replacement": "trim the end before comparing: `| sed 's/[[:space:]]*$//'`. Not gated: a pattern cannot tell a byte dump being compared from one being converted, so this is a documented caution and the macOS CI leg is the backstop. Do not widen the comparison to a substring match -- the point of a byte dump is that every byte is checked.",
+      "note": "Found by the macOS leg: test-lib-core.sh asserted ' a \\n b' and BSD od produced ' a \\n b ', which reads as a mysterious failure because the report shows the two values with no visible difference."
     }
   ]
 }

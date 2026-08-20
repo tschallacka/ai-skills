@@ -9,38 +9,38 @@
       "status": "partly",
       "parent": null,
       "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
-      "note": "Pushed 2026-08-20: branch refactor/portability-and-installer is on origin at 1b7829f, 120 commits ahead of master, tracking set. The macOS legs are still unread -- nothing in this repo has been exercised on a real BSD userland, only under the bash 3.2 build.",
+      "note": "Branch pushed and PR #2 opened, which is what runs CI. The macOS legs have now been read for the first time: seven failures, three fixed here (a GNU-only sed alternation that leaked every marker into the compiled libraries on macOS, BSD od padding, and no local master ref) and four recorded as B3-B6. Removing continue-on-error waits on those four.",
       "blocked_on": "the maintainer",
       "refs": [],
       "priority": "urgent",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T16:26:44Z"
+      "updated_at": "2026-08-20T17:17:38Z"
     },
     {
       "id": "T10",
       "title": "The suite is not safe to run twice at once",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "Nine tests use the fixed path `$TMPDIR/planning-agent`, so a second concurrent run of the suite -- or one foreground test alongside a background verification -- collides over the session secret directory and fails tests that are otherwise green. It cost a full verification run tonight: 49 of 70 failed on bash 3.2 for that reason alone, and the same commit was clean when re-run with nothing else running. Either give each run its own root (a per-run `TMPDIR` prefix) or state in `run-tests.sh` that concurrent runs are unsupported, so a red result is never mistaken for a regression again.",
-      "note": null,
+      "note": "b00481a gives every test its own TMPDIR at source time; 1044857 shortened it to /tmp/t.XXXXX after the deeper path broke chromium in test-mermaid-accuracy (75 chars fails, 62 passes). Not swept by run-tests.sh: a run cannot tell its own leftovers from a concurrent run live directories. The original 49-of-70 collision was never reproduced, so the class is closed rather than the specific cause explained.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-20T17:17:38Z"
     },
     {
       "id": "T11",
       "title": "The verification harness lives only in a scratchpad",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "The worktree-based runner that verified every commit tonight — snapshot the working tree into a linked worktree in `TMPDIR`, run `./run-tests.sh` and `bash32-run-tests`, sweep its own leftovers, and report a leg that produced no summary as a finding — exists only under this session's scratch directory. It is the tool that caught the machine-specific `PORTABILITY.md` pollution. If it should outlive the session it needs a home in the repo, and then a decision about whether it is dev-only or belongs in the manifest.",
-      "note": null,
+      "note": "53bbf62: verify-both-shells.sh lives in the repo, MODE: DEV, registered in MAINTAINER.md and the marker gate scope. It now prints each failing test own output, which diagnosed the mermaid failure on its first run -- the old version had deleted that log.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-20T17:17:38Z"
     },
     {
       "id": "T12",
