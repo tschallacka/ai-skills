@@ -73,13 +73,14 @@ RUNTIME_BLOCKED_SKILLS=""
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
     'Caps CPU and memory for demanding tool runs.'
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
+    'A nested queue of work in one JSON file, read with jq.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -327,6 +328,9 @@ runtime_requirements() {
         resource-limited-testing)
             case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
             ;;
+        todo)
+            case "$platform" in *:*) printf '%s\n' jq ;; esac
+            ;;
     esac
 }
 
@@ -337,6 +341,7 @@ runtime_requirement_strength() {
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
+        todo:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
     esac
 }
 
@@ -347,6 +352,7 @@ runtime_requirement_why() {
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
+        todo:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a jq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
     esac
 }
 
@@ -2422,6 +2428,9 @@ EOF
             done
             ;;
         brainstorm)
+            printf '%s\n' SKILL.md requires.tsv
+            ;;
+        todo)
             printf '%s\n' SKILL.md requires.tsv
             ;;
         post-implementation-review)

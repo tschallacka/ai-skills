@@ -173,6 +173,9 @@ EOF
         brainstorm)
             printf '%s\n' SKILL.md requires.tsv
             ;;
+        todo)
+            printf '%s\n' SKILL.md requires.tsv
+            ;;
         post-implementation-review)
             printf '%s\n' SKILL.md requires.tsv
             ;;

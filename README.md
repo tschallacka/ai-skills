@@ -9,6 +9,7 @@ compatible agent tools.
 | Skill | Purpose | Documentation |
 |---|---|---|
 | Planning | Creates durable plans with goals, steps, verification, progress tracking, and handoffs. | [planning/SKILL.md](planning/SKILL.md) |
+| Todo | A queue of work that outlives the conversation, in one JSON file read with jq: items nest under items, every closed item carries its evidence, and the read recipes print user-ready output so nothing is reformatted by hand. | [todo/SKILL.md](todo/SKILL.md) |
 | Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [brainstorm/SKILL.md](brainstorm/SKILL.md) |
 | Post-implementation review | After-the-fact review of built code with proposed fixes, backed by implementer analysis, an independent solutions agent, and a critical-feedback agent. | [post-implementation-review/SKILL.md](post-implementation-review/SKILL.md) |
 | Project-specific deviations | Records confirmed project behavior and environment quirks that future agents should not rediscover. | [project-specificies/SKILL.md](project-specificies/SKILL.md) |
