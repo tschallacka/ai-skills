@@ -5,8 +5,19 @@
 # the two are diffed by planning/tests/test-installer-manifest.sh, which extracts
 # this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
 # not derive it from the manifest — the duplication IS the cross-check.
+# package_version is the released version from package.json, read with sed rather
+# than jq: jq is a declared runtime dependency of some skills but the installer
+# must run before any of them is installed. A register written by a skill records
+# this value, so a reader can compare it against the installed skill and see that
+# an upgrade happened.
 version_marker_content() {
+    local package_version=''
+    if [ -f "$SOURCE_ROOT/package.json" ]; then
+        package_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$SOURCE_ROOT/package.json" | head -1)"
+    fi
     printf 'format=ai-skills-version-1\n'
+    printf 'package_version=%s\n' "${package_version:-unknown}"
     printf 'source_version=%s\n' "$SOURCE_VERSION"
     printf 'source_ref=%s\n' "$REPO_REF"
 }

@@ -20,6 +20,8 @@ impression.
 
 ```json
 {
+  "skill": "bug-report",
+  "skill_version": "1.4.2",
   "comment": "Defects found in <subject>, with reproduction and verification.",
   "bugs": [
     {
@@ -64,6 +66,38 @@ impression.
 | `verification` | how the fix was proven, including the mutation that fails without it |
 | `found_by` | who or what found it: a test, a reviewer, a user report |
 | `notes` | anything a future reader needs, especially why it went unnoticed |
+
+The two header fields sit outside the list, because they describe the file rather
+than any row:
+
+| field | meaning |
+|---|---|
+| `skill` | which skill's schema this file follows |
+| `skill_version` | the `package.json` version of the skill that last wrote it |
+
+`skill_version` is how an upgrade becomes visible. An installed skill carries its
+version in `.version` beside `SKILL.md`, so the two can be compared, and a file
+written by an older skill can be recognised before its schema is assumed:
+
+```sh
+skill_dir="$(dirname "$(command -v true)")"   # replace with the installed skill's directory
+installed="$(sed -n 's/^package_version=//p' "$skill_dir/.version" 2>/dev/null)"
+recorded="$(jq -r '.skill_version // "unrecorded"' BUGS.json)"
+if [ -z "$installed" ]; then
+    printf 'cannot read the installed version; leaving %s alone\n' BUGS.json
+elif [ "$installed" = "$recorded" ]; then
+    printf '%s was written by the installed skill (%s)\n' BUGS.json "$installed"
+else
+    printf '%s was written by %s, the installed skill is %s: re-read the schema before writing\n' \
+        BUGS.json "$recorded" "$installed"
+fi
+```
+
+Stamp it on every write, next to `updated_at`:
+
+```sh
+jq --arg v "$installed" '.skill_version = $v' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
+```
 
 `reproduce`, `observed`, `expected`, `severity` and `priority` are required from
 the moment an entry exists. `mechanism`, `fix` and `verification` fill in as it progresses.
@@ -240,6 +274,8 @@ behaviour will be reported again.
 
 ```sh
 findings="$(jq -r '
+  (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
+  (if (.skill // "") == "" then "the file does not name its schema" else empty end),
   ([.bugs[].id]) as $ids
   | if ([.bugs[].id] | length) != ([.bugs[].id] | unique | length) then "duplicate ids" else empty end,
     (.bugs[] | select(.parent != null and (.parent | IN($ids[]) | not))

@@ -1,4 +1,6 @@
 {
+  "skill": "todo",
+  "skill_version": "1.4.2",
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
