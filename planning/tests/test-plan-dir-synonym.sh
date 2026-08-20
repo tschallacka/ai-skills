@@ -122,4 +122,102 @@ upc_pair -dp -dp 2.1 'a rewritten paragraph'
 upc_pair -ap -ap plan current-state 'an appended paragraph'
 upc_pair -f -f plan 'UI affected' yes
 
+# Scripts that read a plan and write nothing. A tree diff proves nothing there,
+# so the differential is exit status plus stdout. Without this they were exempt on
+# a claim that turned out to be false: no test in the suite invoked any of them
+# with --plan-dir at all.
+readonly_pair() { # <label> <script> <args...>
+    local label="$1" script="$2"
+    shift 2
+    reset_copies -
+    local arc=0 brc=0 aout bout
+    aout="$("$scripts/$script" "$work/a/plan" "$@" 2>/dev/null)" || arc=$?
+    bout="$("$scripts/$script" --plan-dir "$work/b/plan" "$@" 2>/dev/null)" || brc=$?
+    # Both forms succeeding is the assertion that a differential cannot make.
+    # Breaking the hoist breaks both forms the same way -- each exits 64 with a
+    # usage message -- so parity alone reports nothing. These inputs return 0 on
+    # the fixture, so a lost --plan-dir shows up here.
+    t_assert_eq "$label: positional succeeds" "$arc" 0
+    t_assert_eq "$label: --plan-dir succeeds" "$brc" 0
+    t_assert_eq "$label: --plan-dir agrees on stdout" \
+        "$(printf '%s' "$bout" | sed "s|$work/b|<plan>|g")" \
+        "$(printf '%s' "$aout" | sed "s|$work/a|<plan>|g")"
+}
+
+# plan-content takes its subcommand before the plan directory, so the plan
+# directory is not argument 1 and the plain form above cannot drive it.
+readonly_sub_pair() { # <label> <script> <subcommand> <args...>
+    local label="$1" script="$2" subcommand="$3"
+    shift 3
+    reset_copies -
+    local arc=0 brc=0 aout bout
+    aout="$("$scripts/$script" "$subcommand" "$work/a/plan" "$@" 2>/dev/null)" || arc=$?
+    bout="$("$scripts/$script" "$subcommand" --plan-dir "$work/b/plan" "$@" 2>/dev/null)" || brc=$?
+    t_assert_eq "$label: positional succeeds" "$arc" 0
+    t_assert_eq "$label: --plan-dir succeeds" "$brc" 0
+    t_assert_eq "$label: --plan-dir agrees on stdout" \
+        "$(printf '%s' "$bout" | sed "s|$work/b|<plan>|g")" \
+        "$(printf '%s' "$aout" | sed "s|$work/a|<plan>|g")"
+}
+
+# update-adversarial-review reads its rows from stdin, which check_pair cannot
+# drive, so it gets its own case rather than an exemption.
+review_pair() { # <label> <csv>
+    local label="$1" csv="$2"
+    reset_copies -
+    local arc=0 brc=0
+    printf '%s\n' "$csv" | "$scripts/update-adversarial-review.sh" "$work/a/plan" >/dev/null 2>&1 || arc=$?
+    printf '%s\n' "$csv" | "$scripts/update-adversarial-review.sh" --plan-dir "$work/b/plan" >/dev/null 2>&1 || brc=$?
+    t_assert_eq "$label: positional succeeds" "$arc" 0
+    t_assert_eq "$label: --plan-dir agrees on status" "$brc" "$arc"
+    t_assert_eq "$label: --plan-dir produces the same tree" \
+        "$(normalise "$work/b/plan")" "$(normalise "$work/a/plan")"
+}
+
+# The four scripts the enumeration gate below found uncovered.
+readonly_sub_pair plan-content plan-content.sh get plan text
+readonly_pair verify-target verify-target.sh W01
+readonly_pair verify-fix-keys verify-fix-keys.sh
+review_pair update-adversarial-review 'AR-77,A differential finding.,Do the thing.,✅ resolved,W01'
+
+# ---- every hoisting script has a differential case ------------------------
+# The subjects above are named by hand, so a script that starts accepting
+# --plan-dir is covered only when someone remembers to add it here. Four already
+# were not: plan-content.sh, update-adversarial-review.sh, verify-fix-keys.sh and
+# verify-target.sh. The flag-coverage test could not see the gap either, because
+# a hoisted flag has no case label in the script that accepts it.
+#
+# Anything genuinely not differentiable belongs in the exemption list with its
+# reason, not left silently uncovered.
+exempt_from_pairs() { # <script>
+    case "$1" in
+        # Defines plan_hoist_plan_dir; it is the mechanism, not a caller of it.
+        plan-document-lib.sh) return 0 ;;
+    esac
+    return 1
+}
+
+# Subjects come from the invocations, not from any mention of the name. Grepping
+# the whole file counted the four scripts listed in the comment above as covered,
+# so this gate passed on its own prose -- the failure mode CODE-STYLE.md section
+# 12 describes, in the check written to prevent a different one.
+# The script is the first *.sh token on a check_pair line, matched rather than
+# taken by field number: a quoted precondition such as 'rm -f progress.md'
+# contains spaces, so $4 is "-f" and three covered scripts read as uncovered.
+named_subjects="$(
+    grep '^check_pair ' "${BASH_SOURCE[0]}" \
+        | grep -oE '[a-z0-9-]+\.sh' | head -n -0
+    grep -E '^(readonly_pair|readonly_sub_pair|review_pair) ' "${BASH_SOURCE[0]}" | grep -oE '[a-z0-9-]+\.sh'
+    grep -q '^review_pair ' "${BASH_SOURCE[0]}" && printf 'update-adversarial-review.sh\n'
+    grep -q '^upc_pair ' "${BASH_SOURCE[0]}" && printf 'update-plan-content.sh\n'
+)"
+while IFS= read -r hoisting; do
+    [ -n "$hoisting" ] || continue
+    exempt_from_pairs "$hoisting" && continue
+    printf '%s\n' "$named_subjects" | grep -Fqx "$hoisting" \
+        || t_fail "$hoisting accepts --plan-dir through the hoister but has no case here; add one or exempt it with a reason"
+done <<HOISTING
+$(grep -l 'plan_hoist_plan_dir' "$scripts"/*.sh | while IFS= read -r found; do basename "$found"; done)
+HOISTING
+
 t_end
