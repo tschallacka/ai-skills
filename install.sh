@@ -318,6 +318,7 @@ runtime_requirements() {
             ;;
         planning)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
+            case "$platform" in *:*) printf '%s\n' openssl ;; esac
             ;;
         post-implementation-review)
             ;;
@@ -334,6 +335,7 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
     esac
 }
@@ -343,6 +345,7 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
+        planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
     esac
 }
@@ -351,6 +354,7 @@ runtime_tool_verify() {
     case "$1" in
         jq) command -v jq >/dev/null 2>&1 ;;
         memlimit) command -v memlimit >/dev/null 2>&1 ;;
+        openssl) command -v openssl >/dev/null 2>&1 ;;
         *) command -v "$1" >/dev/null 2>&1 ;;
     esac
 }
@@ -413,6 +417,35 @@ runtime_tool_install_hint() {
                         printf '%s\n' '  or: cargo install --git https://github.com/pingiun/memlimit memlimit'
                     fi
                     printf '%s\n' '  (memlimit is MIT-licensed, by Jelle Besseling; Apple Silicon only)'
+                    ;;
+            esac
+            ;;
+        openssl)
+            case "$platform" in
+                Darwin:*)
+                    printf '%s\n' '  macOS ships /usr/bin/openssl (LibreSSL); if it is missing: brew install openssl'
+                    ;;
+                Linux:*)
+                    if command -v apt-get >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apt-get install -y openssl'
+                    elif command -v dnf >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo dnf install -y openssl'
+                    elif command -v pacman >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo pacman -S --noconfirm openssl'
+                    elif command -v zypper >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo zypper install -y openssl'
+                    elif command -v apk >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apk add openssl'
+                    else
+                        printf '%s\n' '  install the openssl package for your distribution'
+                    fi
+                    ;;
+                MINGW*:*|MSYS*:*|CYGWIN*:*)
+                    if command -v winget >/dev/null 2>&1; then
+                        printf '%s\n' '  winget install ShiningLight.OpenSSL.Light'
+                    elif command -v choco >/dev/null 2>&1; then
+                        printf '%s\n' '  choco install openssl'
+                    fi
                     ;;
             esac
             ;;

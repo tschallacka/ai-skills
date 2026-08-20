@@ -31,6 +31,7 @@
 kind	tool	condition	group	probe	text
 verify	jq	*:*	1	-	command -v jq
 verify	memlimit	*:*	1	-	command -v memlimit
+verify	openssl	*:*	1	-	command -v openssl
 verify	*	*:*	1	-	command -v "$1"
 hint	jq	Darwin:*	1	brew	  brew install jq
 hint	jq	Darwin:*	1	port	  sudo port install jq
@@ -52,3 +53,12 @@ hint	memlimit	*:*	2	brew	  or: brew tap pingiun/memlimit https://github.com/ping
 hint	memlimit	*:*	2	cargo	  or: cargo install --git https://github.com/pingiun/memlimit memlimit
 hint	memlimit	*:*	3	-	  (memlimit is MIT-licensed, by Jelle Besseling; Apple Silicon only)
 default	*	*:*	1	-	  install %s via your system package manager
+hint	openssl	Darwin:*	1	-	  macOS ships /usr/bin/openssl (LibreSSL); if it is missing: brew install openssl
+hint	openssl	Linux:*	1	apt-get	  sudo apt-get install -y openssl
+hint	openssl	Linux:*	1	dnf	  sudo dnf install -y openssl
+hint	openssl	Linux:*	1	pacman	  sudo pacman -S --noconfirm openssl
+hint	openssl	Linux:*	1	zypper	  sudo zypper install -y openssl
+hint	openssl	Linux:*	1	apk	  sudo apk add openssl
+hint	openssl	Linux:*	1	-	  install the openssl package for your distribution
+hint	openssl	MINGW*:*|MSYS*:*|CYGWIN*:*	1	winget	  winget install ShiningLight.OpenSSL.Light
+hint	openssl	MINGW*:*|MSYS*:*|CYGWIN*:*	1	choco	  choco install openssl

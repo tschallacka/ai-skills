@@ -19,3 +19,4 @@
 # missing it. awk and sed parse this.
 tool	condition	strength	why
 jq	*:*	hard	reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it
+openssl	*:*	soft	derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69
