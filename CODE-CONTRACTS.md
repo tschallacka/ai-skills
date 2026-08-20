@@ -137,10 +137,25 @@ finding names the rebuild helper).
 Regenerate `PORTABILITY.md` **last** in any batch touching `*.sh`: its staleness
 signal is commit ordering.
 
+A generator's inputs must be **tracked sources only**. When it walks the
+filesystem, prune everything that is not the repo's own source — `.git`,
+`.plans`, `.claude`, `benchmark/results` — because a freshness gate that
+regenerates and diffs turns any local-only input into a permanent false
+`stale` for everybody else.
+
 **Cost:** two worktree merges conflicted *only* in generated files. Merging them
 is meaningless — the resolution is to regenerate.
 
-**Enforced** by the three tests above.
+**Cost:** `PORTABILITY.md` was committed with `.claude/worktrees/agent-*/`
+paths, so every finding appeared once per agent worktree. The freshness gate
+diffs regenerated content against the committed file, so the catalogue read as
+fresh on the machine that generated it and stale in every clone —
+`test-portability-contract` passed for one person and failed for everyone else.
+Verifying in a clean clone is what surfaced it; the working tree cannot.
+
+**Enforced** by the three tests above — but only when they run somewhere that
+does not carry the local state. Run the suite in a clean clone before trusting a
+generated artifact's freshness check.
 
 ## 8. A finite set that needs judgement becomes a registry plus a gate
 
