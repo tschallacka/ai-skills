@@ -730,6 +730,48 @@ This one is a review item, not a gate: a double-quoted pattern containing `$` is
 sometimes exactly right (`grep "$unit"`), so a detector would cry wolf. It is
 enforced by reading the check, and by the positive control above.
 
+**The rule is about probes, not about `grep`.** Anything whose *negative* result
+you are about to believe needs a positive control first — a run where it visibly
+succeeds. These all failed silently in one session, each read as confirmation:
+
+- a `grep` for `env VAR=x bash` whose pattern could not match the shape it
+  described, reported as "clean";
+- a mutation that produced **no change to the file**, whose passing test was read
+  as the fix being verified — assert the file differs before trusting the result;
+- a test probe that planted `declare -A` to prove a scanner pruned foreign
+  checkouts, when the scanner lists `# PORTABILITY(...)` markers and not
+  constructs, so nothing was detectable either way;
+- a mutation applied to the *wrong one* of two call sites, leaving the test green
+  and the conclusion wrong.
+
+**Do not parse shell structure with a pattern.** An `awk` range
+`/^fail\(\)/,/^}/` runs past a one-line `fail() { …; }` into the next function
+and reports *its* `exit`: that is how a count of 6 fail-fast test reporters was
+recorded as 18. A function body needs brace matching — or better, ask the
+question behaviourally. "Does this reporter hide later findings?" is answered by
+breaking one assertion and counting what comes out, and no parse can be wrong
+about it.
+
+**A comment naming a banned pattern counts as a use of it.** Every gate here
+scans source, so explaining a rule in the words the gate greps for trips the
+gate: a comment saying a helper replaced a hand-rolled `.tmp.$$` kept the
+duplication count at its old value, and a test that spelled out a
+`# PORTABILITY(...)` marker was published in the catalogue as a real sighting.
+Describe the pattern without spelling it.
+
+These four are review items like the one above, not gates: a detector for "you
+believed a negative result" would have to know what you intended. What *is*
+enforced is the consequence — the duplication ratchet, the portability contract
+and the manifest test all fail when a scan-based rule is broken, which is how
+each of the failures listed here was eventually caught.
+
+**Prefer a registry to a scan.** `portability-rules.json`,
+`planning/document-sections.json`, `coupling.tsv` and `planning/PACKAGE-MAP.tsv`
+exist because scraping prose or source for structure resolved 29 of 36 sections
+and reported success. If a check needs to know something about the code, record
+it as data and read it with `jq` or `cut`; scan only for what a registry cannot
+hold.
+
 ---
 
 ## 13. Checklist before committing
