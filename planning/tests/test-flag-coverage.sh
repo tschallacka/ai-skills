@@ -34,6 +34,13 @@ for script in "$scripts"/*.sh; do
     is_lib=0
     case "$name" in *-lib.sh) is_lib=1 ;; esac
     flags="$(extract_flags "$script")"
+    # A hoisted flag has no case label in the script that accepts it: the labels
+    # for --plan-dir live in plan_hoist_plan_dir, inside plan-document-lib.sh. So
+    # a scan for labels reported --plan-dir on none of the 24 scripts that take
+    # it, and neither check below applied to it.
+    if grep -q 'plan_hoist_plan_dir' "$script" && [ "$is_lib" -eq 0 ]; then
+        flags="$(printf '%s\n--plan-dir\n' "$flags" | grep -E '^--?[a-zA-Z]' | sort -u)"
+    fi
     [ -n "$flags" ] || [ "$is_lib" -eq 1 ] || continue
 
     # CRITICAL 1: --help must be present and functional (exit 0, non-empty).
