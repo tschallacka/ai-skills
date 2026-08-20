@@ -102,16 +102,7 @@ verify_fix_keys() {
     claims_file="$(mktemp "${TMPDIR:-/tmp}/verify-fix-keys-claims.XXXXXX")"
     tmp_files+=("$pairs_file" "$claims_file")
 
-    awk -F'|' '
-        /^## Findings$/ { in_findings = 1; next }
-        in_findings && /^## Verdict$/ { exit }
-        in_findings && /^\|/ {
-            fid = $2; wu = $6
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
-            if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) print fid "\t" wu
-        }
-    ' "$review_file" > "$pairs_file"
+    plan_review_gated_pairs "$review_file" > "$pairs_file"
 
     if [ ! -s "$pairs_file" ]; then
         printf 'no gated (finding, work unit) pairs in %s: no fix verification required\n' "$plan_dir"

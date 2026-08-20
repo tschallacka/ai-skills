@@ -172,16 +172,7 @@ mint_fix_keys() {
         plan_die "mint-fix-keys: $skipped_rows gated row(s) could not be minted; fix the finding/work-unit ids so the fix-key gate is not silently disabled"
     fi
 
-    awk -F'|' '
-        /^## Findings$/ { in_findings = 1; next }
-        in_findings && /^## Verdict$/ { exit }
-        in_findings && /^\|/ {
-            fid = $2; wu = $6
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
-            if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) print fid "\t" wu
-        }
-    ' "$review_file" > "$pairs_file"
+    plan_review_gated_pairs "$review_file" > "$pairs_file"
 
     while IFS=$'\t' read -r fid wu; do
         [ -n "$fid" ] || continue

@@ -83,17 +83,8 @@ keys_file="$plan_dir/fix-keys.json"
 # them instead would let this writer accept a pair the verifier does not gate.
 review_file="$plan_dir/adversarial-review.md"
 [ -f "$review_file" ] || plan_die "no adversarial-review.md in $plan_dir -- there are no findings to claim a fix for" 66
-if ! awk -F'|' -v want_f="$finding" -v want_w="$work_unit" '
-        /^## Findings$/ { in_findings = 1; next }
-        in_findings && /^## Verdict$/ { exit }
-        in_findings && /^\|/ {
-            fid = $2; wu = $6
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
-            if (fid == want_f && wu == want_w) found = 1
-        }
-        END { exit !found }
-    ' "$review_file"; then
+if ! plan_review_gated_pairs "$review_file" \
+        | grep -Fx "$(printf '%s\t%s' "$finding" "$work_unit")" >/dev/null; then
     plan_die "$finding/$work_unit is not a gated pair in the review's Findings table -- claim a pair the reviewer recorded, or add the finding and re-mint" 65
 fi
 
@@ -116,12 +107,16 @@ if [ -f "$claims_file" ] && awk -F'\t' -v f="$finding" -v w="$work_unit" \
     plan_die "$finding/$work_unit is already claimed with a different key in fixes.md -- remove that line, or re-mint the pair" 73
 fi
 
-temporary_file="$claims_file.tmp.$$"
-plan_register_temp_file "$temporary_file"
-trap 'rm -f "$temporary_file"' RETURN EXIT
-[ ! -f "$claims_file" ] || cat "$claims_file" > "$temporary_file"
-printf '%s\n' "$claim" >> "$temporary_file"
-mv "$temporary_file" "$claims_file"
+# plan_atomic_write, not a hand-rolled per-PID temp file beside the target:
+# MAINTAINER.md section 3 names it as the canonical helper, and
+# test-duplication-ratchet.sh fails when the hand-rolled count grows -- which it
+# did when this script first added one. The literal is left unspelled here on
+# purpose: the ratchet counts occurrences in the source, so a comment quoting the
+# pattern is counted as another use of it.
+{
+    [ ! -f "$claims_file" ] || cat "$claims_file"
+    printf '%s\n' "$claim"
+} | plan_atomic_write "$claims_file"
 
 printf 'Recorded fix claim %s/%s in %s\n' "$finding" "$work_unit" "${claims_file##*/}"
 printf '%s: verify with verify-fix-keys.sh --claimed-by <this session>, from a session that did not mint the keys\n' \

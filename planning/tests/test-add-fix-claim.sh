@@ -94,7 +94,11 @@ t_assert_eq 'and does not append a second line' \
 # ---- a different key for a claimed pair is refused -------------------------
 # Two lines for one pair would let verify pass on whichever it read first.
 other_key="$(expected_key other-session AR-01 W05)"
-printf '%s' "$other_key" | grep -Eq '^[0-9a-f]{64}$' || t_fail 'the probe key is malformed'
+# No `grep -q` in a pipeline: a match closes the pipe and the writer's SIGPIPE
+# (141) is what pipefail reports. See PORTABILITY.md, pipefail-grep-q.
+case "$other_key" in
+    *[!0-9a-f]* | '') t_fail 'the probe key is malformed' ;;
+esac
 rc=0
 "$scripts_dir/add-fix-claim.sh" "$plan" --finding AR-01 --work-unit W05 --key "$other_key" \
     >/dev/null 2>&1 || rc=$?

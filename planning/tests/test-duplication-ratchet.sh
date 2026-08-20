@@ -40,7 +40,7 @@ check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
 # now owns the work-unit rows; the remainder are other tables plus the two
 # inventory rewriters, and the floor is 1 (the helper's own parser).
-check_cap "inline awk -F'|' parsers" 29 \
+check_cap "inline awk -F'|' parsers" 28 \
     "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
