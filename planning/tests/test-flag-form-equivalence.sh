@@ -16,10 +16,16 @@ set -euo pipefail
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-flag-form.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail() { printf 'flag-form: %s\n' "$1" >&2; exit 1; }
+# The shared reporter, so a finding no longer stops the run. The prefix changes
+# from "flag-form:" to the library's "FAIL:", which is the point: a private
+# prefix meant a search for FAIL across the suite silently skipped this file.
+fail() { t_fail "$*"; }
 
 # Build one plan. $2 selects the argument style, so the two runs differ in
 # nothing else.
@@ -151,4 +157,4 @@ plan_dir_synonym 'plan-content summary'     plan-content.sh    summary --
 plan_dir_synonym 'plan-content find'        plan-content.sh    find -- Findings
 printf '%s\n' 'flag-form: --plan-dir matches the positional plan directory'
 
-printf '%s\n' 'test-flag-form-equivalence: PASS'
+t_end

@@ -10,6 +10,9 @@ set -euo pipefail
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-portable-test.XXXXXX")"
 # Installed before the library is sourced on purpose: the library chains the
 # EXIT handler it finds, so this also proves plan_cleanup does not eat it.
@@ -18,10 +21,9 @@ trap 'rm -rf "$temporary_root"' EXIT
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"
 
-fail() {
-    printf 'FAIL: %s\n' "$1" >&2
-    exit 1
-}
+# The shared reporter. Its own copy exited on the first finding, in the one file
+# whose subject is that library.
+fail() { t_fail "$*"; }
 
 assert_eq() {
     [ "$2" = "$3" ] || fail "$1: expected [$3], got [$2]"
@@ -239,7 +241,7 @@ assert_eq 'plan_require_bash exit code' "$bash_rc" '78'
 assert_eq 'plan_require_bash hints at Homebrew' \
     "$( ( plan_require_bash 99 ) 2>&1 >/dev/null | grep -c 'brew install bash' )" '1'
 
-printf 'Portable helper regression test passed.\n'
+
 
 # ---- a sourced library derives its own directory from BASH_SOURCE -----------
 # $0 is set at shell initialisation and does not change when a file is sourced,
@@ -273,3 +275,5 @@ if grep -rnE '^[[:space:]]*(source|\.)[[:space:]]+[A-Za-z0-9_-]+\.sh([[:space:]]
     "$script_dir" "$script_dir/../tests" 2>/dev/null | grep -v ':#'; then
     fail 'a source without a slash searches PATH; give it a directory'
 fi
+
+t_end
