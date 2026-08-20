@@ -50,7 +50,7 @@ jobs:
           leftovers=0
           for scan in $scans; do
             [ -d "$scan" ] || continue
-            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null)"
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' -o -name 't.?????' \) 2>/dev/null)"
             [ -n "$found" ] || continue
             printf '%s\n' "$found"
             leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))
@@ -98,7 +98,7 @@ jobs:
           leftovers=0
           for scan in $scans; do
             [ -d "$scan" ] || continue
-            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null)"
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' -o -name 't.?????' \) 2>/dev/null)"
             [ -n "$found" ] || continue
             printf '%s\n' "$found"
             leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))

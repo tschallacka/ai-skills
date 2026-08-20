@@ -37,6 +37,11 @@ export TMPDIR="$run_scratch"
 export PLANNING_AGENT_TMPDIR="$run_scratch/planning-agent"
 cleanup() {
     rm -rf -- "$run_scratch"
+    # Each test takes a short root directly under /tmp -- lib-test.sh explains why
+    # it cannot nest under this scratch -- and removes it on exit. Deliberately
+    # not swept here: this run cannot tell its own leftovers from a concurrent
+    # run's live directories, and deleting another run's scratch is worse than
+    # leaving one behind. The CI leak scan reports them instead.
     rm -rf -- "$repo_root/benchmark/results"/*/.staging
 }
 trap cleanup EXIT

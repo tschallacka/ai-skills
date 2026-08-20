@@ -42,7 +42,21 @@
 # so a test writing outside its own root is still caught. That is now the thing
 # worth catching: what a test writes inside its own root is scoped by definition.
 if [ -z "${T_TMPDIR:-}" ]; then
-    T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t-$(basename "${BASH_SOURCE[1]:-test}" .sh).XXXXXX")"
+    # Directly under /tmp, and short. A unix socket path is capped near 104 bytes
+    # and chromium (via mmdc) appends about 50 for its profile and singleton
+    # socket, so the room a test may use is small. Nesting inside nix develop's
+    # TMPDIR *and* run-tests.sh's own scratch reached 75 characters and crossed
+    # the limit: test-mermaid-accuracy failed with "Socket path too long" on the
+    # bash 3.2 leg only. Measured -- 75 failed, 62 passed -- so this stays far
+    # under rather than close to it: /tmp/t.XXXXX is 12 characters.
+    #
+    # The `t.` prefix is kept so a leaked root is still attributable; the CI leak
+    # scan looks for it.
+    if [ -d /tmp ] && [ -w /tmp ]; then
+        T_TMPDIR="$(mktemp -d /tmp/t.XXXXX)"
+    else
+        T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")"
+    fi
     export T_TMPDIR
     export TMPDIR="$T_TMPDIR"
     # Removed on any exit, including a failure: a test that leaves its root

@@ -93,7 +93,7 @@ report() {
     grep -E 'Total ran|^Failed:' "$log"
     grep -qE '^Failed:' "$log" || return 0
     status=1
-    printf '--- %s: what each failing test said ---\n' "$label"
+    printf '%s\n' "--- $label: what each failing test said ---"
     # run-tests.sh prints a failing test's whole output, indented, after its
     # FAIL line. Take each such block up to the next test's result line.
     awk '
