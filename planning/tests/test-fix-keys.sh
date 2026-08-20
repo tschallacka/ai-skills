@@ -12,11 +12,14 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-fix-keys-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
 export TMPDIR="${TMPDIR:-/tmp}"
+t_begin
 
-fail() {
-    echo "test-fix-keys.sh: $*" >&2
-    exit 1
-}
+# The shared reporter. Its own copy exited on the first finding, so one broken
+# thing hid the other 92 assertions -- and this is the only test of the fix-key
+# gate: minting, forged and stale keys, self-certification, the warning count.
+# The prefix changes from "test-fix-keys.sh:" to the library's "FAIL:"; nothing
+# outside this file read the old one, and run-tests.sh keys on the exit code.
+fail() { t_fail "$*"; }
 
 FIXED_SECRET='00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 
@@ -405,4 +408,4 @@ grep -Fqx -- '- Status: ✅ approved' "$plan_h/plan-description.md" \
 [ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-h" ] \
     && fail 'the repaired approval did not invalidate the session secret'
 
-printf 'test-fix-keys.sh passed.\n'
+t_end
