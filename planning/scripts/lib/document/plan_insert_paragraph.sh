@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_insert_paragraph() {
     local file="$1" paragraph_id="$2" mode="$3" body_file="$4" temporary_file
     [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Write stdin to <target> atomically. The temp lives in the target's own
 # directory so the rename cannot cross a filesystem, inherits the target's mode
 # when it exists, and is registered with the cleanup list.

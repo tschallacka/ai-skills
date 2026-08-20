@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # generate-reviewer.sh — project the marked SKILL.md sections into REVIEWER.md.
 #
 # Copies each `<!-- REVIEWER_SECTION:START <name> -->` … `:END` block out of the
@@ -78,7 +77,6 @@ trap 'rm -f "$temp_output" "$temp_section"' EXIT
     # comments rather than '# MODE:', which would render as a heading and give
     # the file a second top-level one.
     printf '<!-- MODE: PROD -->\n'
-    printf '<!-- PACKAGE: PROD -->\n'
     printf '# Reviewer contract\n\n'
     printf '> Generated from `%s` by `scripts/generate-reviewer.sh`.\n' \
         "${source_file#"$skill_dir"/}"

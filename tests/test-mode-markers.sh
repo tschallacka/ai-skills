@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
-# test-mode-markers.sh — every file declares what it is and where it ships.
+# test-mode-markers.sh — every file states its purpose, so it cannot be conflated.
 #
-# Two markers, two questions, and they are not the same question:
+# MODE answers who receives the file:
 #
-#   MODE: PROD      the skill executes or reads this at run time
-#   MODE: DEV       it exists for whoever maintains the skill
-#   PACKAGE: PROD   an ordinary install delivers it
-#   PACKAGE: DEV    only a dev install does
+#   MODE: PROD   exclusive -- this file goes to the end user. If a release needs
+#                it, it has to say PROD.
+#   MODE: DEV    only a maintainer needs it. The dev side is inclusive: it has
+#                every PROD file as well, so DEV means "and this too".
 #
-# The pairs that look contradictory are the informative ones. A function file
-# under scripts/lib/ is MODE: PROD (it is runtime code) and PACKAGE: DEV (the
-# file never ships; the library compiled from it does). A test is MODE: DEV and
-# PACKAGE: DEV. install.sh is PROD in both.
+# PACKAGE is for compilers, and appears only on what a compiler consumes:
 #
-# The gate: PACKAGE must agree with skill_files(). The marker is the declaration
-# in the file, skill_files() is the list the installer reads, and neither is
-# derived from the other -- so a disagreement means one of them is wrong, which is
-# the same cross-check PACKAGE-MANIFEST.txt gets.
+#   PACKAGE: PROD  compile this into the end-user artifact, which is packaged
+#                  because that artifact is MODE: PROD
+#   PACKAGE: DEV   compile it only into the dev build, which carries the dev and
+#                  prod inputs together
+#
+# So a function file under scripts/lib/ is MODE: DEV and PACKAGE: PROD: the file
+# is a maintainer's, and its content reaches the end user inside the compiled
+# library. The library itself is MODE: PROD with no PACKAGE -- that axis belongs
+# to inputs, and a compiled library is an output.
+#
+# The gate: MODE must agree with skill_files(). The marker is the declaration in
+# the file, skill_files() is the list the installer reads, and neither is derived
+# from the other -- so a disagreement means one of them is wrong, which is the
+# same cross-check PACKAGE-MANIFEST.txt gets.
 #
 # Markdown carries the marker as an HTML comment: '# MODE: PROD' would render as
 # a heading, and a second top-level heading is exactly what the document rules
@@ -69,9 +75,19 @@ exempt() { # <path> → prints the reason, or nothing
 }
 
 marker_of() { # <path> <MODE|PACKAGE> → DEV, PROD, or nothing
+    # Only the header is read: a heredoc further down mentions these strings.
     sed -n '1,25p' "$1" \
         | sed -n -e "s/^# $2: \\([A-Z]*\\)\$/\\1/p" -e "s/^<!-- $2: \\([A-Z]*\\) -->\$/\\1/p" \
         | head -1
+}
+
+# PACKAGE belongs to what a compiler reads, and nothing else.
+compiler_input() { # <path>
+    case "$1" in
+        planning/scripts/lib/*/*.sh) return 0 ;;
+        installer/src/[0-9][0-9]-*.sh) return 0 ;;
+    esac
+    return 1
 }
 
 in_scope="$(cd "$repo_root" && git ls-files \
@@ -79,19 +95,31 @@ in_scope="$(cd "$repo_root" && git ls-files \
     post-implementation-review todo bug-report installer tests \
     run-tests.sh blast-radius.sh generate-portability.sh install.sh install-ui.sh)"
 
-missing='' bad_mode='' bad_package='' disagree='' checked=0
+missing='' bad_mode='' bad_package='' stray_package='' input_mode='' disagree='' checked=0
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     [ -z "$(exempt "$path")" ] || continue
     checked=$((checked + 1))
     mode="$(marker_of "$repo_root/$path" MODE)"
     package="$(marker_of "$repo_root/$path" PACKAGE)"
-    if [ -z "$mode" ] || [ -z "$package" ]; then
+    if [ -z "$mode" ]; then
         missing="$missing $path"
         continue
     fi
     case "$mode" in DEV|PROD) ;; *) bad_mode="$bad_mode $path=$mode" ;; esac
-    case "$package" in DEV|PROD) ;; *) bad_package="$bad_package $path=$package" ;; esac
+
+    if compiler_input "$path"; then
+        case "$package" in
+            DEV|PROD) ;;
+            '') missing="$missing $path(no-PACKAGE)" ;;
+            *) bad_package="$bad_package $path=$package" ;;
+        esac
+        # The file a compiler reads is a maintainer's file; what the end user
+        # gets is the artifact compiled from it.
+        [ "$mode" = DEV ] || input_mode="$input_mode $path"
+    elif [ -n "$package" ]; then
+        stray_package="$stray_package $path"
+    fi
 
     # Only files inside a skill directory are subject to skill_files(); the
     # installer sources and the repo-level suite are not delivered by it at all.
@@ -99,9 +127,9 @@ while IFS= read -r path; do
         planning/* | project-specificies/* | resource-limited-testing/* | brainstorm/* \
             | post-implementation-review/* | todo/* | bug-report/*)
             if grep -qx "$path" "$work/listed"; then
-                [ "$package" = PROD ] || disagree="$disagree $path(marked-DEV-but-listed)"
+                [ "$mode" = PROD ] || disagree="$disagree $path(marked-DEV-but-shipped)"
             else
-                [ "$package" = DEV ] || disagree="$disagree $path(marked-PROD-but-unlisted)"
+                [ "$mode" = DEV ] || disagree="$disagree $path(marked-PROD-but-not-shipped)"
             fi
             ;;
     esac
@@ -112,34 +140,42 @@ EOF
 # A positive control: an empty scope would satisfy every check above.
 t_assert_eq 'the marker scope is not empty' \
     "$([ "$checked" -gt 200 ] && printf 'over 200')" 'over 200'
-t_assert_eq 'every file in scope declares both markers' "${missing# }" ''
+t_assert_eq 'every file in scope declares its MODE' "${missing# }" ''
 t_assert_eq 'every MODE marker is DEV or PROD' "${bad_mode# }" ''
 t_assert_eq 'every PACKAGE marker is DEV or PROD' "${bad_package# }" ''
-t_assert_eq 'PACKAGE agrees with the installer file list' "${disagree# }" ''
+t_assert_eq 'PACKAGE appears only on what a compiler reads' "${stray_package# }" ''
+t_assert_eq 'a compiler input is a maintainer file' "${input_mode# }" ''
+t_assert_eq 'MODE agrees with the installer file list' "${disagree# }" ''
 
 # ── the markers say the things that make them worth having ──────────────────
-# A compiled library is a runtime artifact even though its sources are not
-# shipped, and the generator has to say so or the next rebuild drops it.
+# A compiled library is what the end user receives, and it is an output, so it
+# carries MODE and no PACKAGE. Its generator has to emit that or the next rebuild
+# drops it.
 for lib in plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh; do
-    t_assert_eq "$lib is declared a runtime artifact" \
+    t_assert_eq "$lib goes to the end user" \
         "$(marker_of "$repo_root/planning/scripts/$lib" MODE)" 'PROD'
-    t_assert_eq "$lib is declared shipped" \
-        "$(marker_of "$repo_root/planning/scripts/$lib" PACKAGE)" 'PROD'
+    t_assert_eq "$lib is an output, so it declares no PACKAGE" \
+        "$(marker_of "$repo_root/planning/scripts/$lib" PACKAGE)" ''
 done
-# Its sources are the opposite case: runtime code that never ships as a file.
-t_assert_eq 'a function file is runtime code' \
-    "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" MODE)" 'PROD'
-t_assert_eq 'a function file does not ship as a file' \
-    "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" PACKAGE)" 'DEV'
+# Its sources are the other case: a maintainer's files whose content is compiled
+# into that library.
+t_assert_eq 'a function file is a maintainer file' \
+    "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" MODE)" 'DEV'
+t_assert_eq 'and its content is compiled into the end-user library' \
+    "$(marker_of "$repo_root/planning/scripts/lib/core/plan_die.sh" PACKAGE)" 'PROD'
 # install.sh is assembled from MODE: DEV parts and must not inherit their marker.
-t_assert_eq 'install.sh is what a user runs, so it is PROD' \
+t_assert_eq 'install.sh is what a user runs, so it goes to the end user' \
     "$(marker_of "$repo_root/install.sh" MODE)" 'PROD'
 t_assert_eq 'and no source marker leaked into it' \
-    "$(grep -c '^# MODE: \|^# PACKAGE: ' "$repo_root/install.sh")" '2'
+    "$(grep -c '^# MODE: \|^# PACKAGE: ' "$repo_root/install.sh")" '1'
 t_assert_eq 'an installer part is a maintainer file' \
     "$(marker_of "$repo_root/installer/src/50-manifest.sh" MODE)" 'DEV'
-t_assert_eq 'the compiler is a maintainer file' \
+t_assert_eq 'whose content is compiled into install.sh' \
+    "$(marker_of "$repo_root/installer/src/50-manifest.sh" PACKAGE)" 'PROD'
+t_assert_eq 'the compiler itself is a maintainer file' \
     "$(marker_of "$repo_root/planning/scripts/build-plan-libs.sh" MODE)" 'DEV'
+t_assert_eq 'and it is nothing else compiles, so it declares no PACKAGE' \
+    "$(marker_of "$repo_root/planning/scripts/build-plan-libs.sh" PACKAGE)" ''
 
 # ── the exemptions are exemptions, not a blanket ────────────────────────────
 t_assert_eq 'an ordinary script is not exempt' "$(exempt planning/scripts/plan-root.sh)" ''

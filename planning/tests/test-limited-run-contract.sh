@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-limited-run-contract — resource-limited-testing's wrapper contract, and
 # the installer gate that keeps its macOS memory cap from being absent.
 #

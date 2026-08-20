@@ -1,5 +1,5 @@
 # MODE: DEV
-# PACKAGE: DEV
+# PACKAGE: PROD
 # ---------------------------------------------------------------
 # 6c. Full-screen skill picker: the sprite and the frame
 # ---------------------------------------------------------------

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # plan-content-diff-lib — the `plan-content.sh diff` subcommand.
 #
 # Sourced by plan-content.sh, never executed. Extracted so plan-content.sh

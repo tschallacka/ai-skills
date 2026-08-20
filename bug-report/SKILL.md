@@ -3,7 +3,6 @@ name: bug-report
 description: Use when a defect is found that will not be fixed in the same breath, so it is recorded with its reproduction, the measurement that proves it real, its mechanism, and later its fix and verification, in one JSON file read with jq. Do not use for work that is merely queued (use the todo skill), for a design preference, or for a defect being fixed immediately in the current change.
 ---
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 
 # Bug report
 

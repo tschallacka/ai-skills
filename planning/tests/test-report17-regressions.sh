@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # Regression tests for planning-skill report 17:
 #   - tool defect B: multi-paragraph testing companions label every paragraph
 #     (create-step-testing.sh split is portable across awk variants)

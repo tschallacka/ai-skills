@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # build-plan-libs.sh — compile planning/scripts/lib/<group>/*.sh into the four
 # shipped libraries.
 #
@@ -93,12 +92,19 @@ group_output() {
     esac
 }
 
-# A function file the prod library does without. MODE, not PACKAGE: every file
-# here is PACKAGE: DEV because none of them ships as a file -- the compiled
-# library does -- so PACKAGE cannot distinguish them. MODE describes the code,
-# and a dev-only helper is MODE: DEV while ordinary runtime functions are PROD.
+# A function file the prod library does without. PACKAGE is the compiler's axis:
+# PACKAGE: PROD means "compile me into the end-user library", PACKAGE: DEV means
+# "only into the dev build, which carries dev and prod inputs together". Every
+# file here is MODE: DEV, because the file itself is a maintainer's -- what the
+# end user receives is the compiled library.
+#
+# No `| grep -q`: with pipefail a grep that exits on its first match makes sed
+# fail with SIGPIPE, which PORTABILITY.md bans as 'pipefail-grep-q'.
 member_is_dev_only() { # <path>
-    sed -n '1,15p' "$1" | grep -q '^# MODE: DEV$'
+    case "$(sed -n '1,15p' "$1")" in
+        *'# PACKAGE: DEV'*) return 0 ;;
+    esac
+    return 1
 }
 
 # Emitted once per library rather than once per source file.
@@ -112,10 +118,9 @@ emit_library() { # <group>
     purpose="${spec#*	}"
 
     printf '#!/usr/bin/env bash\n'
-    # The compiled library is a runtime artifact and it ships in both packages.
-    # Source markers are stripped below; this one describes the output.
+    # The end user receives this file, so MODE: PROD. No PACKAGE: that axis is
+    # for what a compiler consumes, and this is what a compiler produced.
     printf '# MODE: PROD\n'
-    printf '# PACKAGE: PROD\n'
     printf '# GENERATED FILE — do not edit. Compiled from scripts/lib/%s/*.sh by:\n' "$group"
     printf '#   planning/scripts/build-plan-libs.sh\n'
     printf '# Edit the function file in that directory, then re-run the build.\n'

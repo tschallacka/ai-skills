@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # create-work-unit-inventory.sh — seed a plan's work-unit-inventory.md with the
 # coverage table, the work-unit table, and the decomposition-review checklist.
 #

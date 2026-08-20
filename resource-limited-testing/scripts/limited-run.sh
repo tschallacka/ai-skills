@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # Run a command with a memory limit and, where supported, a CPU quota.
 # Linux uses a transient systemd --user cgroup scope. macOS uses memlimit, a
 # best-effort preventive cap, and degrades to nice/cpulimit without it.

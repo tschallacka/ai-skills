@@ -3,7 +3,6 @@ name: project-specificies
 description: Use when project-specific behavior, conventions, or environment quirks could affect implementation, debugging, testing, or tooling. Load the matching deviations note when relevant and record newly confirmed deviations. Do not use for general documentation, changelogs, or behavior that follows the project's normal defaults.
 ---
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 
 # Project-specific deviations
 

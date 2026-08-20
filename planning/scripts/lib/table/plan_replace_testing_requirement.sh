@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_replace_testing_requirement() {
     local file="$1" required="$2" rationale="$3" replacement temporary_file
     case "$required" in

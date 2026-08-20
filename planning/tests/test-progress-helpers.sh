@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"

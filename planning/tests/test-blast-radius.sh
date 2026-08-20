@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-blast-radius.sh — the integration-safety report tells the truth about a
 # change set: a stale generated artifact fails, a new runtime registry that would
 # not ship fails, and a consistent tree is quiet.

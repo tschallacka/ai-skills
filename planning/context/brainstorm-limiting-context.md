@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # Brainstorm: limiting duplicated planning context
 
 ## One authority model

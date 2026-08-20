@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_default_root() {
     if [ -n "${PLANS_ROOT:-}" ]; then
         printf '%s\n' "${PLANS_ROOT%/}"

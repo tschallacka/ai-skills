@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # test-reviewer-projection.sh — REVIEWER.md is a projection of SKILL.md, and it
 # pins the whole-file SHA-256 of its source, so any SKILL.md edit must be
 # followed by a regeneration.

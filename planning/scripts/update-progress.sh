@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # update-progress.sh — recompute a goal's progress bar from its own step rows.
 #
 # Reads the goal's progress.md step table (canonical 4 data columns: Goalname |

@@ -1,5 +1,4 @@
 # MODE: DEV
-# PACKAGE: DEV
 # Planning test files and fixtures that no install delivers.
 #
 # The split between the planning tests that ship and the ones that do not is

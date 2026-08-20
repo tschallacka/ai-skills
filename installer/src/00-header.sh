@@ -1,5 +1,5 @@
 # MODE: DEV
-# PACKAGE: DEV
+# PACKAGE: PROD
 set -euo pipefail
 
 # Interactive installer for the skills in this repository.

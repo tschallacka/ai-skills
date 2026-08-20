@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # Flag-coverage test — CRITICAL contract:
 #   1. Every script must accept --help and exit 0 with non-empty help output.
 #   2. That help output must mention every flag the script's parser accepts

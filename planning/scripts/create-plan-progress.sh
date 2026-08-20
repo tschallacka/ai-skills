@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # create-plan-progress.sh — generate a plan's top-level progress.md: one row per
 # goal directory holding a goal.md, each carrying that goal's definition of done.
 #

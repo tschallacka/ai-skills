@@ -1,5 +1,4 @@
 <!-- MODE: DEV -->
-<!-- PACKAGE: DEV -->
 # Planning skill — architecture (flows)
 
 **Audience: skill maintainers and developers only.** This file records how the

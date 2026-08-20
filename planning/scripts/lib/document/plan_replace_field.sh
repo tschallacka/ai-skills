@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_replace_field() {
     local file="$1" label="$2" value="$3" temporary_file
     plan_require_safe_value "$label" "$value"

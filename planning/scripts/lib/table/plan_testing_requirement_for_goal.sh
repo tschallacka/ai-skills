@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_testing_requirement_for_goal() {
     local goal_file="$1"
     awk -F'|' '

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-inner-shell-consistency.sh — a script's own subshells must be the
 # interpreter running it, not whatever `bash` PATH happens to offer.
 # See PORTABILITY.md, rule `bash-by-path-lookup`.

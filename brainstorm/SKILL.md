@@ -3,7 +3,6 @@ name: brainstorm
 description: Use when the user asks to build, make, add, redesign, or implement something that is under-specified and could branch in different directions, to run a brief recorded pre-planning back-and-forth that settles what to build before committing to a plan or an implementation. Do not use for small, trivial, or fully-specified changes, or when the user explicitly wants an immediate plan or implementation without discussion.
 ---
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 
 # Brainstorm
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Derive a row description from a goal's "## Outcome and definition of done",
 # skipping "§ N.N" labels and truncating to 100 chars. Falls back to "$2" so a
 # plan-level tracker never carries a literal placeholder.

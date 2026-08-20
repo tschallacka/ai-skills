@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # update-step.sh — set one step's completion status in its goal's tracker.
 #
 # Rewrites the step's row in <goal-directory>/progress.md (canonical 4 data

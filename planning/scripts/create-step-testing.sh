@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # create-step-testing.sh — create or (with --overwrite) replace a step's
 # testing companion. Input is validated BEFORE any filesystem change, so a
 # rejected call never leaves the plan with the old companion already deleted.

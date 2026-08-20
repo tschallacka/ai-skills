@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # PACKAGE: DEV
 # File mode (octal, e.g. 644) and owner uid. GNU stat and BSD stat share no
 # flag, so probe once and define the function accordingly rather than forking a

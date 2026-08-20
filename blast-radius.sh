@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # blast-radius.sh — report what a change set touches beyond the files it edits.
 #
 # This is an integration-safety report, not a correctness check. It catches the

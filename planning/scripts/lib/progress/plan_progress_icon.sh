@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Status glyph: nothing started, something started, everything done. Written as
 # `if` blocks rather than the call sites' `[ … ] && icon=…` chain, which returns
 # non-zero under `set -e` when the test fails.

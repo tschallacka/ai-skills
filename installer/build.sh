@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # build — assemble install.sh from the ordered parts in installer/src/.
 #
 # install.sh is a build artifact. It stays committed and shipped because the
@@ -44,12 +43,12 @@ tab="$(printf '\t')"
 # shebang, and a part file must not claim to be the artifact.
 emit_banner() {
     printf '#!/usr/bin/env bash\n'
-    # install.sh is the one thing an end user runs, so it is PROD in both axes.
-    # The parts it is assembled from are MODE: DEV; their markers are stripped
-    # below, because a marker copied out of a source would say the artifact is a
-    # maintainer file.
+    # install.sh is the one thing an end user runs: MODE: PROD. The parts it is
+    # assembled from are MODE: DEV with PACKAGE: PROD -- a maintainer's files
+    # whose content is compiled into this one. Their markers are stripped below,
+    # because a marker copied out of a source would misdescribe the artifact, and
+    # PACKAGE has no meaning on an output.
     printf '# MODE: PROD\n'
-    printf '# PACKAGE: PROD\n'
     printf '# GENERATED FILE — do not edit. Assembled from installer/src/*.sh by:\n'
     printf '#   installer/build.sh\n'
 }

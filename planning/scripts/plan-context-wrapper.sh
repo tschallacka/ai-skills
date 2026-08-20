@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # plan-context-wrapper.sh — source a per-worker variables file, then exec
 # plan-context.sh with the remaining arguments.
 #

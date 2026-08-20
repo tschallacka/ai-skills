@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # Plan read contract
 
 Use this contract whenever the planning skill handles, reads, or inspects plan

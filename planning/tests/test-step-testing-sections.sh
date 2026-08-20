@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-step-testing-sections.sh — a testing companion can carry every
 # verification section the section forms advertise.
 #

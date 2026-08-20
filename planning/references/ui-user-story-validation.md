@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # UI user-story validation
 
 Use this reference whenever a planning initiative creates, changes, repairs,

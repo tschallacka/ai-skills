@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Derive a row description from a step's Objective paragraph: the text after
 # the first "§ N.N" label inside "## Objective", truncated to 100 chars. Falls
 # back to "$2" so a progress table never carries a literal placeholder.

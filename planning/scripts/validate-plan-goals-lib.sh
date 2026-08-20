@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # validate-plan-goals-lib.sh — the goal and step files: every goal.md carries
 # the mandated headings and exactly one testing-requirement row, its work-unit
 # count is inside the allowed band with an exception section when it is one,

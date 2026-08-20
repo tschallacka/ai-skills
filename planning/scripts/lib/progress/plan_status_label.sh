@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # The label a progress table's Completion status cell carries, from the status
 # word its command was given. Non-zero on an unknown word, so the caller keeps
 # owning the usage message. The glyphs are the on-disk contract.

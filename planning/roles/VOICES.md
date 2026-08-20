@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # Voices — per-role stance (identity preamble)
 
 Each persona carries a documented voice: an explicit anti-pattern for that

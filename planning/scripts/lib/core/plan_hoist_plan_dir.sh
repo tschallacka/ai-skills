@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Accept --plan-dir <path> wherever the plan directory is positional, because
 # plan-context.sh and run-adversary-probe.sh take the flag and a reader who
 # learned it there should not have a call refused elsewhere. Prints the argument

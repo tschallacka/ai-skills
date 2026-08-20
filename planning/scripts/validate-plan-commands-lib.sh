@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # validate-plan-commands-lib.sh — the command-literal detector: every command
 # literal in a step file or testing companion must be registered in the plan's
 # commands.json, so the "when" context travels with the command.

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # configure-ui-story-cache.sh — fill a UI story's browser run cache with the one
 # buffered interaction the story will actually perform, plus its readiness wait.
 #

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # Deterministic, repeatable test runner for the whole repo.
 #
 # Runs every test under tests/, planning/tests/ and benchmark/planning/tests/ in a

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # GENERATED FILE — do not edit. Compiled from scripts/lib/progress/*.sh by:
 #   planning/scripts/build-plan-libs.sh
 # Edit the function file in that directory, then re-run the build.

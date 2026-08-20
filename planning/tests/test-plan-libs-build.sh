@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-plan-libs-build.sh — the four compiled libraries match their sources.
 #
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
@@ -131,14 +130,15 @@ t_assert_eq 'the prod target carries no provenance' \
     "$(grep -c '^# from scripts/lib/' "$prod_core" || true)" '0'
 t_assert_eq 'the prod target says which target built it' \
     "$(grep -c '^# Target: prod$' "$prod_core")" '1'
-# The compiled library declares itself in its banner -- MODE: PROD, PACKAGE:
-# PROD -- and carries nothing else. A source file's marker passing through would
-# be a second pair further down, and would say a compiled artifact is a source.
+# The compiled library declares itself in its banner: MODE: PROD, because the end
+# user receives it, and no PACKAGE, because that axis is for what a compiler reads
+# and this is what one produced. A source file's marker passing through would be a
+# second one further down, saying a compiled artifact is a maintainer's file.
 for compiled in "$prod_core" "$dev_core"; do
-    t_assert_eq "${compiled##*/}: exactly the banner's two markers" \
-        "$(grep -c '^# MODE: \|^# PACKAGE: ' "$compiled")" '2'
-    t_assert_eq "${compiled##*/}: both of them in the banner" \
-        "$(sed -n '1,5p' "$compiled" | grep -c '^# MODE: PROD$\|^# PACKAGE: PROD$')" '2'
+    t_assert_eq "${compiled##*/}: exactly one marker" \
+        "$(grep -c '^# MODE: \|^# PACKAGE: ' "$compiled")" '1'
+    t_assert_eq "${compiled##*/}: it is MODE: PROD, in the banner" \
+        "$(sed -n '1,5p' "$compiled" | grep -c '^# MODE: PROD$')" '1'
 done
 # The prod build is what --check compares against, so a dev build in the tree
 # has to read as stale -- that is the only thing stopping it being committed.

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # test-artifact-comparisons.sh — a declared artifact comparison must be one the
 # target can actually produce.
 #

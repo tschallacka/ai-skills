@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # plan-map-lib — associative arrays for bash 3.2.
 #
 # `declare -A` is bash 4, so it aborts on stock macOS (CODE-STYLE.md §1). These

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # Regression test for the portable helper vocabulary in plan-document-lib.sh:
 # the bash-3.2 map emulation, POSIX symlink resolution, atomic writes, the
 # progress-bar arithmetic, and the stat(1) wrapper. Every assertion here pins a

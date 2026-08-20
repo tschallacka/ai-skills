@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # verify-fix-keys.sh — check every claim in fixes.md against the derived fix
 # keys in fix-keys.json. Run by the approval gate before a gated review is
 # marked approved; also runnable standalone.

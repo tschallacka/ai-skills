@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-context-id-suggestions.sh — an unsupported entry id must say what to use
 # instead. See CODE-CONTRACTS.md contract 6.
 #

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # create-progress.sh — generate a goal's progress.md: one row per implementation
 # step, in step-name order, each carrying the step's own Objective text.
 #

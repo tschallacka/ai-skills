@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_replace_title() {
     local file="$1" title="$2" temporary_file
     plan_require_safe_value title "$title"

@@ -3,7 +3,6 @@ name: planning
 description: Use when the user requests a durable plan or a multi-step initiative genuinely needs resumable files, ordered goals and steps, verification instructions, progress trackers, or handoff notes. Do not use for small, self-contained changes or temporary in-chat checklists.
 ---
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 
 # Planning
 

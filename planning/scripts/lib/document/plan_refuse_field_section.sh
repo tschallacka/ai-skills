@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # A section holding `- Label:` lines is field-shaped whatever the allow-list says,
 # and rewriting it removes labels another mechanism may own -- `- Status:` in
 # `## Verdict` belongs to the review-status gate. Refuse rather than destroy.

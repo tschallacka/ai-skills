@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_document_path() {
     local plan_dir="$1" document_id="$2" unit goal step
     case "$document_id" in

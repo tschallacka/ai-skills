@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Commit the plan before a mutation so every overwrite is recoverable. The
 # snapshot lands in the repository PLAN_SNAPSHOT_REPO names, which is usually
 # the plans root rather than the plan directory, and the add is scoped to this

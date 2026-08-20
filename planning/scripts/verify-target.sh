@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # verify-target.sh — statically check that a work unit's target surface renders.
 #
 # The plan gate requires evidence that a template/block/layout target actually

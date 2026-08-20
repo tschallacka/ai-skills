@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # run-adversary-probe.sh — reusable adversarial-review probe.
 #
 # Materializes the versioned adversary-probe fixture (planning/tests/fixtures/

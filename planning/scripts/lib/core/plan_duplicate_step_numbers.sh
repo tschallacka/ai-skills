@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Every duplicated step number in a plan, as `<goal> <number> <file> <file>...`,
 # one line per collision. Empty output means the plan is clean.
 #

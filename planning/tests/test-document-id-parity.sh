@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # test-document-id-parity.sh — plan-content.sh and plan-context.sh accept the
 # same document ids, and the id names the document.
 #

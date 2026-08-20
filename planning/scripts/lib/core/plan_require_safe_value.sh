@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 plan_require_safe_value() {
     local label="$1" value="$2"
     [ -n "$value" ] || plan_die "$label must not be empty"

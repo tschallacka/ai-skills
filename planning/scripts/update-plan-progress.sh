@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # update-plan-progress.sh — set one goal's status row in the plan-level tracker
 # and recompute the plan's overall bar.
 #

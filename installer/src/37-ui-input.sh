@@ -1,5 +1,5 @@
 # MODE: DEV
-# PACKAGE: DEV
+# PACKAGE: PROD
 # ---------------------------------------------------------------
 # 6d. Full-screen skill picker: input, the terminal, and the seam
 # ---------------------------------------------------------------

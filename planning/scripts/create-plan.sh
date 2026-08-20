@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # create-plan.sh — create a plan directory with its plan-description.md,
 # work-unit-inventory.md, commands.json, env files, and initial git commit.
 #

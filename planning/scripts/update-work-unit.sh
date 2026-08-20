@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # update-work-unit.sh — amend a work-unit inventory row and its matching step
 # file in place.
 #

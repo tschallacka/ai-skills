@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # validate-plan-common-lib.sh — the finding vocabulary every other
 # validate-plan pass calls into: FAIL/WARN reporting, cell trimming, heading
 # assertions, and single-field extraction.

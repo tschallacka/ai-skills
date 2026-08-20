@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # Comment discipline contract
 
 Use this contract whenever produced code—implementation files, tests, config,

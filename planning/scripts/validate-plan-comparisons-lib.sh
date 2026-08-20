@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # validate-plan-comparisons-lib.sh — an acceptance criterion may not demand an
 # identical output the target cannot produce.
 #

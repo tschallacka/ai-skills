@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # Print the required heading and its paragraph-number prefix for a mutable
 # narrative section. Structured sections are intentionally excluded.
 plan_section_spec() {

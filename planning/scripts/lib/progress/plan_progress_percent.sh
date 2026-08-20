@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # ── Progress rendering ───────────────────────────────────────────────────────
 # Half-up rounding (+ total / 2) and the 20-column default width are contract:
 # every caller must render byte-identical output.

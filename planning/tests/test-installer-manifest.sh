@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # test-installer-manifest — the planning ship manifest, the package map, and
 # install.sh's install set must describe the same file list.
 #

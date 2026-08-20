@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # add-coverage.sh — add (or with --replace, replace) one row in a plan's
 # "## Definition-of-done coverage" table, linking a required outcome or proof to
 # the work units that deliver it.

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # Coverage-gap tests (report: adversarial test-coverage audit).
 #
 # Covers behavior that the other suite misses:

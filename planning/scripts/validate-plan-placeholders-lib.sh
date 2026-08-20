@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # validate-plan-placeholders-lib.sh — the template-placeholder sweep: registry
 # membership decides what is a placeholder, and the registered surface
 # (authored | generated) decides whether the finding is a WARN or a FAIL.

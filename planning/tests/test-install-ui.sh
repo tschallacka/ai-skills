@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-install-ui — the installer's full-screen picker stays inside the terminal
 # and keeps its contract when nobody is watching it.
 #

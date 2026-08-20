@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
-# PACKAGE: PROD
+# MODE: PROD
 # test-lib-document.sh — the document functions, each sourced on its own.
 #
 # The unit layer, deliberately overlapping the integration tests that reach these

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # remove-plan.sh — remove a plan directory and reconcile the plans-root git
 # history.
 #

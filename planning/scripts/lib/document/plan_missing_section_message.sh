@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # A section form can only rewrite a section the document already holds, so the
 # refusal has to say which sections it does hold. Without that, a valid section
 # id that this particular file never received reads as a broken helper: a

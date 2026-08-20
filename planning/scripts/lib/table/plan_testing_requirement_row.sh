@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # The whole row, for a caller that rewrites the region around it. Scoped to the
 # section on purpose: a yes/no table elsewhere in the goal is a different table.
 plan_testing_requirement_row() {

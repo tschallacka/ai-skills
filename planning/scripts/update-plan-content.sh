@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # update-plan-content.sh — edit the numbered prose of every plan document, and
 # gate the review approval.
 #

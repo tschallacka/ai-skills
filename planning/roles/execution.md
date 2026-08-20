@@ -1,5 +1,4 @@
 <!-- MODE: PROD -->
-<!-- PACKAGE: PROD -->
 # Roles — execution phase
 
 Roles active while an approved plan is being implemented. Coordinator

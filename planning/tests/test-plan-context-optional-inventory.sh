@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-plan-context-optional-inventory.sh — `init` on a plan that has no
 # work-unit inventory yet must succeed, and must do so identically on every
 # shell. See CODE-CONTRACTS.md contract 12.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# MODE: PROD
-# PACKAGE: DEV
+# MODE: DEV
+# PACKAGE: PROD
 # The (finding, work unit) pairs the fix-key gate covers, as `AR-NN<TAB>WNN`.
 # One parser for the review's five-column Findings table, because three scripts
 # had their own copy of it: mint-fix-keys.sh derives a key per pair,

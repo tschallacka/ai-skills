@@ -3,7 +3,6 @@ name: nuxtpolymarket-deviations
 description: Project-specific Nuxtpolymarket behavior to load before running tests or making framework-default assumptions.
 ---
 <!-- MODE: DEV -->
-<!-- PACKAGE: DEV -->
 
 # Test environment
 

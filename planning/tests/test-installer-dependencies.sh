@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# PACKAGE: DEV
 # test-installer-dependencies — the per-skill dependency model: a hard
 # requirement blocks one skill and nothing else, the summary says so, and the
 # replay command it prints actually works.

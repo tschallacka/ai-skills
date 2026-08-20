@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # install-ui — standalone entry point for install.sh's full-screen skill picker.
 #
 # The picker itself is not here: it is installer/src/35-ui-model.sh,

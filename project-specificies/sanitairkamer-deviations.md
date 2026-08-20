@@ -3,7 +3,6 @@ name: sanitairkamer-deviations
 description: Project-specific ways this Magento 2 store (sanitairkamer) deviates from a stock Magento install - theme layout, custom checkout wiring, EAV attribute gaps, Amasty ExtraFee quirks, and test-environment specifics. Load before writing tests or debugging anything checkout/EAV/CSS-related on this project, to avoid re-discovering the same things every session.
 ---
 <!-- MODE: DEV -->
-<!-- PACKAGE: DEV -->
 
 # Sanitairkamer project-specific deviations from default Magento
 
