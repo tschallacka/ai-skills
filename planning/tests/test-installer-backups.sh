@@ -77,4 +77,20 @@ t_assert_eq 'an edit in the same run is still backed up' "$(backups_for 'REVIEWE
 grep -Fq 'CONTENT FROM AN OLDER VERSION' "$installed/ROLES.md" \
     && t_fail 'the older content was not replaced'
 
+# ---- inside a git work tree, history is the recovery path -------------------
+# A .back file there is clutter: the user already has git. The install must still
+# SAY what it replaced, so an uncommitted edit is lost visibly rather than
+# silently (CODE-CONTRACTS.md contract 9).
+git_target="$work/git-root"
+mkdir -p "$git_target"
+git init -q "$git_target"
+( cd "$repo_root" && ./install.sh --skill "$skill" --target "$git_target" --yes ) \
+    >/dev/null 2>&1 || true
+[ -f "$git_target/$skill/SKILL.md" ] || t_fail 'the install did not populate the git-tracked target'
+printf '\n<!-- an edit inside a work tree -->\n' >> "$git_target/$skill/SKILL.md"
+out="$( ( cd "$repo_root" && ./install.sh --skill "$skill" --target "$git_target" --yes ) 2>&1 || true )"
+t_assert_eq 'no backup file is written inside a git work tree' \
+    "$(find "$git_target" -name '.*.back' 2>/dev/null | { grep -c . || true; })" 0
+t_assert_contains 'the replacement is reported instead' 'recoverable with git' "$out"
+
 t_end

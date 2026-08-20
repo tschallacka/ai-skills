@@ -1,0 +1,43 @@
+{
+  "comment": "Every generated document section, its shape, and therefore its only legal writer. See CODE-CONTRACTS.md contract 1. A section-form flag (-ds/-gs/-ss/-rs) rewrites a whole section, which is correct for `narrative` and destructive for anything else: it removes sibling `- Label:` fields or a table. Shapes are derived from what the creation scripts emit; test-document-sections.sh asserts plan_mutable_sections allows only narrative sections.",
+  "shapes": {
+    "narrative": "numbered § N.M paragraphs; the section forms may rewrite it wholesale",
+    "fields": "- Label: value lines; only -f|--field may write it, one label per call",
+    "hybrid": "a paragraph label whose body is field lines; a section rewrite silently drops fields, so treat it as fields",
+    "table": "a Markdown table; only its dedicated helper may write it",
+    "empty": "no body in the template; becomes narrative once written"
+  },
+  "documents": {
+    "plan": {
+      "current-state": "narrative", "desired-outcome": "narrative",
+      "approach": "narrative", "scope": "narrative",
+      "affected-areas": "narrative", "constraints-and-decisions": "narrative",
+      "risks-and-open-questions": "narrative", "environment-facts": "narrative",
+      "approach-decisions": "narrative",
+      "ui-classification": "fields", "adversarial-review": "fields"
+    },
+    "goal": {
+      "current-state-and-prior-goal-handoffs": "narrative",
+      "outcome-and-definition-of-done": "narrative",
+      "why-this-goal-is-needed": "narrative", "scope": "narrative",
+      "affected-areas": "narrative", "dependencies-and-handoffs": "narrative",
+      "implementation-approach-risks-and-edge-cases": "narrative",
+      "owned-work-units": "narrative", "goal-size-exception": "empty",
+      "testing-requirement": "table"
+    },
+    "step": {
+      "ownership": "fields", "change-target": "fields",
+      "objective": "narrative", "instructions": "narrative",
+      "acceptance-criteria": "narrative", "handoff": "narrative",
+      "atomicity-check": "empty"
+    },
+    "testing": {
+      "automated-tests": "narrative", "browser-verification": "narrative",
+      "backend-verification": "narrative", "manual-verification": "narrative",
+      "artifact-comparisons": "table"
+    },
+    "review": {
+      "review-scope": "hybrid", "findings": "table", "rationale": "fields"
+    }
+  }
+}

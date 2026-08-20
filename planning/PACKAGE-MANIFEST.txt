@@ -9,6 +9,7 @@ planning/state-change-registry.json	state-change-registry.json	installer	review-
 planning/never-executable-extensions.json	never-executable-extensions.json	installer	review-approved	backup-then-replace	false
 planning/goal-tables.json	goal-tables.json	installer	review-approved	backup-then-replace	false
 planning/artifact-comparisons.json	artifact-comparisons.json	installer	review-approved	backup-then-replace	false
+planning/document-sections.json	document-sections.json	installer	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context.md	context/brainstorm-limiting-context.md	W01-W02-W03-W04-W06-W09	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context-contract.json	context/brainstorm-limiting-context-contract.json	W05	review-approved	backup-then-replace	false
 planning/context/brainstorm-limiting-context-benchmark.json	context/brainstorm-limiting-context-benchmark.json	W07	review-approved	backup-then-replace	false
@@ -36,6 +37,7 @@ planning/tests/test-artifact-comparisons.sh	tests/test-artifact-comparisons.sh	i
 planning/tests/test-installer-backups.sh	tests/test-installer-backups.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-self-hosted-plan.sh	tests/test-self-hosted-plan.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-plan-dir-synonym.sh	tests/test-plan-dir-synonym.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-document-sections.sh	tests/test-document-sections.sh	installer	review-approved	backup-then-replace	false
 planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 planning/scripts/add-coverage.sh	scripts/add-coverage.sh	installer	review-approved	backup-then-replace	false

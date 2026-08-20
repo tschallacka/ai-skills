@@ -2244,6 +2244,7 @@ state-change-registry.json
 never-executable-extensions.json
 goal-tables.json
 artifact-comparisons.json
+document-sections.json
 context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
@@ -2288,6 +2289,7 @@ tests/test-artifact-comparisons.sh
 tests/test-installer-backups.sh
 tests/test-self-hosted-plan.sh
 tests/test-plan-dir-synonym.sh
+tests/test-document-sections.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh
@@ -2513,12 +2515,25 @@ unmodified_since_install() {
     [ "$recorded" = "$(content_digest "$file")" ]
 }
 
+# A backup only earns its clutter where nothing else can recover the file. Inside
+# a git work tree the user already has history, so we say what happened and let
+# git be the recovery path; outside one, the .back file IS the only path.
+recoverable_from_git() {
+    local directory="$1"
+    command -v git >/dev/null 2>&1 || return 1
+    git -C "$directory" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 # A dotfile beside the original: visible to `ls -a` and to the message below,
 # skipped by a plain `grep -r` of the installed tree.
 backup_file() {
     local file="$1"
     local directory base stamp backup suffix
     directory="$(dirname "$file")"
+    if recoverable_from_git "$directory"; then
+        echo "  Replaced (recoverable with git): $file" >&2
+        return 0
+    fi
     base="$(basename "$file")"
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     backup="$directory/.$base.$stamp.back"

@@ -80,17 +80,19 @@ cp "$pristine" "$companion"
 out="$({ "$scripts_dir/validate-plan.sh" "$plan" 2>&1 || true; } | { grep -E 'cannot be compared|artifact-comparisons' || true; })"
 [ -z "$out" ] || t_fail "a companion with no comparisons section produced a finding — $out"
 
-# The section is a legal companion surface, or the helper cannot author it.
-kind="$(bash -c '
+# The section is a table, so per CODE-CONTRACTS.md contract 1 it must NOT be a
+# section-form target: `-ss ... artifact-comparisons` would rewrite it as
+# paragraphs and discard every row. It is authored with -tp, and the guard in
+# plan_replace_section refuses the destructive form.
+kind_list="$(bash -c '
     plan_error_count=0
     source "$1/plan-map-lib.sh"; source "$1/plan-inventory-lib.sh"
     source "$1/plan-document-lib.sh"
-    plan_mutable_sections_for_kind testing 2>/dev/null || true
+    sed -n "s/^        testing) valid=\"\([^\"]*\)\".*/\1/p" "$1/plan-document-lib.sh"
 ' _ "$scripts_dir" 2>/dev/null || true)"
-case "$kind" in
-    *artifact-comparisons*) ;;
-    *) grep -q 'artifact-comparisons' "$scripts_dir/plan-document-lib.sh" \
-        || t_fail 'artifact-comparisons is not an allowed testing-companion section' ;;
+case "$kind_list" in
+    *artifact-comparisons*)
+        t_fail 'artifact-comparisons is a table but is listed as a mutable narrative section' ;;
 esac
 
 t_end

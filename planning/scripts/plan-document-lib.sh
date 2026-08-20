@@ -313,8 +313,12 @@ plan_unknown_section() {
         plan) valid="current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts" ;;
         goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
         step) valid="objective instructions acceptance-criteria handoff" ;;
-        testing) valid="automated-tests artifact-comparisons browser-verification backend-verification manual-verification" ;;
-        review) valid="review-scope findings rationale" ;;
+        testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
+        # A review has no narrative section: Review scope and Verdict hold
+        # fields (-f writes them, one label at a time) and Findings is a table
+        # (update-adversarial-review.sh writes it). A section rewrite here
+        # dropped `- Status:` and left the plan unapprovable.
+        review) valid="" ;;
         *) valid="" ;;
     esac
     for id in $valid; do
@@ -445,8 +449,38 @@ plan_render_paragraphs() {
     '
 }
 
+# A section holding `- Label:` lines is field-shaped whatever the allow-list says,
+# and rewriting it removes labels another mechanism may own -- `- Status:` in
+# `## Verdict` belongs to the review-status gate. Refuse rather than destroy.
+plan_refuse_field_section() {
+    local file="$1" heading="$2" shape
+    [ -f "$file" ] || return 0
+    # A section whose body carries `- Label:` lines is field-shaped, and one
+    # whose body OPENS with a table row is table-shaped. A narrative section may
+    # still contain a table paragraph, which is why the discriminator is the
+    # first body line rather than the presence of a pipe anywhere.
+    shape="$(awk -v want="$heading" '
+        $0 == want { inside = 1; next }
+        inside && /^## / { exit }
+        inside && /^[[:space:]]*$/ { next }
+        inside && /^- [A-Z][^:]*:/ { fields++ }
+        inside && first == "" { first = ($0 ~ /^\|/) ? "table" : "other" }
+        END {
+            if (fields > 0) print "fields"
+            else if (first == "table") print "table"
+            else print "narrative"
+        }' "$file")"
+    case "$shape" in
+        fields)
+            plan_die "Section '$heading' holds fields (- Label: value); rewriting it would remove them, and a field there may belong to another gate. Write one field at a time with --field." 65 ;;
+        table)
+            plan_die "Section '$heading' is a table; rewriting it as paragraphs would discard every row. Use the helper that owns that table." 65 ;;
+    esac
+}
+
 plan_replace_section() {
     local file="$1" heading="$2" body_file="$3" temporary_file
+    plan_refuse_field_section "$file" "$heading"
     temporary_file="${file}.tmp.$$"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v heading="$heading" -v replacement="$body_file" '

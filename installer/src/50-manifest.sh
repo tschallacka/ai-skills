@@ -26,6 +26,7 @@ state-change-registry.json
 never-executable-extensions.json
 goal-tables.json
 artifact-comparisons.json
+document-sections.json
 context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
@@ -70,6 +71,7 @@ tests/test-artifact-comparisons.sh
 tests/test-installer-backups.sh
 tests/test-self-hosted-plan.sh
 tests/test-plan-dir-synonym.sh
+tests/test-document-sections.sh
 tests/test-voice-artifact-drift.sh
 tests/test-supervision-frame.sh
 tests/test-persona-drift.sh

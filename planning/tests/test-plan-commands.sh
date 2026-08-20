@@ -158,10 +158,15 @@ if "$script_dir/validate-plan.sh" --complete "$plan_dir" >"$temporary_root/compl
     exit 1
 fi
 grep -Fqx 'FAIL: Adversarial review is not approved' "$temporary_root/complete-pending.log"
-"$script_dir/update-plan-content.sh" --review-section "$plan_dir" findings \
-    -p 2.1: 'No unresolved findings remain after review.'
-"$script_dir/update-plan-content.sh" -rp "$plan_dir" 2.1 \
-    'No unresolved findings remain after the independent review.'
+# The findings table is written by its own helper, never by a section form:
+# `--review-section findings` rewrites the section as paragraphs and discards
+# every row, which plan_replace_section now refuses (CODE-CONTRACTS.md
+# contract 1).
+printf '%s\n' 'AR-01,No unresolved findings remain after review.,N/A,resolved,N/A' \
+    > "$temporary_root/resolved-findings.csv"
+"$script_dir/update-adversarial-review.sh" "$plan_dir" \
+    --file "$temporary_root/resolved-findings.csv"
+grep -Fq 'No unresolved findings remain after review.' "$plan_dir/adversarial-review.md"
 "$script_dir/update-plan-content.sh" --review-status "$plan_dir" approved
 grep -Fqx -- '- Status: `✅ approved`' "$plan_dir/adversarial-review.md"
 grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"

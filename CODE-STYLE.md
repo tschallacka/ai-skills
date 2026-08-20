@@ -3,7 +3,8 @@
 The contract every shell file in this repository conforms to. `DEVELOPMENT.md`
 covers the release workflow, `AGENTS.md` covers how to operate in the repo, and
 `planning/MAINTAINER-STYLE-CONTRACT.md` covers the *content* of generated plan
-documents. This file covers the *code*.
+documents, and `CODE-CONTRACTS.md` covers how a script must behave toward what
+other scripts and other runs depend on. This file covers the *code*.
 
 Two audiences read these scripts: a developer on an unknown machine, and a
 maintainer AI agent that has to locate one behaviour in a tree of ~90 scripts.

@@ -18,7 +18,8 @@ looks stale or a test says so, run `./generate-portability.sh` — never hand-ed
 it, and never hand-resolve a conflict in it. Concurrent edits invalidate it
 routinely; regenerating is the fix.
 
-Read `CODE-STYLE.md` before writing or editing any shell here, and
+Read `CODE-STYLE.md` before writing or editing any shell here, `CODE-CONTRACTS.md`
+for what a script owes the documents, artifacts and users it touches, and
 `PORTABILITY.md` for the catalogue of traps this repo has already hit — it is
 generated from `portability-rules.json`, so it is the one place a gotcha is
 recorded rather than rediscovered in an unrelated file. It is the
