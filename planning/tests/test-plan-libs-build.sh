@@ -10,6 +10,12 @@
 # is sourceable on its own, every library stays under the 500-line cap
 # CODE-STYLE.md sets, and a function added to a group directory reaches the
 # library with no other edit.
+#
+# The two targets are pinned here too. Everything that separates them -- the
+# provenance lines and the dev-only functions -- is exercised on a copy of the
+# scripts directory, so a target that stopped stripping cannot be masked by the
+# committed prod artifacts and a failed run cannot leave a planted function file
+# in the real lib tree.
 
 set -euo pipefail
 export LC_ALL=C
@@ -81,5 +87,69 @@ fi
 symbol_count="$("$BASH" -c "source '$scripts_dir/plan-document-lib.sh'; declare -F | wc -l" 2>/dev/null | tr -d ' ')"
 [ "${symbol_count:-0}" -ge 60 ] \
     || t_fail "sourcing the façade defined only ${symbol_count:-0} functions; it carried 66 before the split"
+
+# ---- the two build targets differ in exactly the ways they are meant to -----
+# On a copy, because these cases plant a function file: doing that in the real
+# tree would change the committed libraries if the test were interrupted.
+copy="$work/tree"
+mkdir -p "$copy"
+cp -R "$scripts_dir" "$copy/scripts"
+copied_builder="$copy/scripts/build-plan-libs.sh"
+
+cat > "$copy/scripts/lib/core/plan_probe_dev_only.sh" <<'PROBE'
+#!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
+plan_probe_dev_only() { printf 'dev only\n'; }
+PROBE
+
+# The two targets write the same path, so the dev build is copied aside before
+# the prod build overwrites it -- comparing them otherwise compares prod to prod,
+# which is how a target that stopped stripping markers read as passing here.
+"$copied_builder" --target dev >/dev/null 2>&1
+dev_core="$work/dev-core-lib.sh"
+cp "$copy/scripts/plan-core-lib.sh" "$dev_core"
+t_assert_eq 'the dev target keeps a function file marked PACKAGE: DEV' \
+    "$(grep -c '^plan_probe_dev_only()' "$dev_core")" '1'
+t_assert_eq 'the dev target says which target built it' \
+    "$(grep -c '^# Target: dev$' "$dev_core")" '1'
+# One provenance line per source file, so a grep hit in the compiled library
+# names the file to edit rather than a line number in a generated file.
+t_assert_eq 'the dev target carries provenance for every source file' \
+    "$(grep -c '^# from scripts/lib/core/' "$dev_core")" \
+    "$(ls "$copy/scripts/lib/core"/*.sh | wc -l | tr -d ' ')"
+
+"$copied_builder" --target prod >/dev/null 2>&1
+prod_core="$copy/scripts/plan-core-lib.sh"
+t_assert_eq 'the prod target drops the dev-only function' \
+    "$(grep -c '^plan_probe_dev_only()' "$prod_core" || true)" '0'
+t_assert_eq 'the prod target carries no provenance' \
+    "$(grep -c '^# from scripts/lib/' "$prod_core" || true)" '0'
+t_assert_eq 'the prod target says which target built it' \
+    "$(grep -c '^# Target: prod$' "$prod_core")" '1'
+# The markers are a property of the source file, not of the artifact compiled
+# from it: a compiled library claiming '# MODE: DEV' would be read as a source.
+t_assert_eq 'no MODE or PACKAGE marker reaches a compiled library' \
+    "$(grep -c '^# MODE: \|^# PACKAGE: ' "$prod_core" "$dev_core" 2>/dev/null | grep -v ':0$' | wc -l | tr -d ' ')" '0'
+# The prod build is what --check compares against, so a dev build in the tree
+# has to read as stale -- that is the only thing stopping it being committed.
+"$copied_builder" --target dev >/dev/null 2>&1
+rc=0
+"$copied_builder" --check >/dev/null 2>&1 || rc=$?
+t_assert_eq 'a dev build in the tree is reported as stale' "$rc" '1'
+# --check is about what is committed, and what is committed is a prod build. So
+# it has to ignore an explicit --target dev rather than validate against it.
+rc=0
+"$copied_builder" --check --target dev >/dev/null 2>&1 || rc=$?
+t_assert_eq '--check compares against prod even when asked for dev' "$rc" '1'
+"$copied_builder" --target prod >/dev/null 2>&1
+rc=0
+"$copied_builder" --check --target dev >/dev/null 2>&1 || rc=$?
+t_assert_eq '--check passes on a prod tree even when asked for dev' "$rc" '0'
+
+t_assert_eq 'an unknown target is refused' \
+    "$("$copied_builder" --target sideways >/dev/null 2>&1; printf '%s' "$?")" '64'
+t_assert_eq 'a --target with no value is refused' \
+    "$("$copied_builder" --target >/dev/null 2>&1; printf '%s' "$?")" '64'
 
 t_end

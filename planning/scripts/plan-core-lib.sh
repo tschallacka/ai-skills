@@ -2,6 +2,7 @@
 # GENERATED FILE — do not edit. Compiled from scripts/lib/core/*.sh by:
 #   planning/scripts/build-plan-libs.sh
 # Edit the function file in that directory, then re-run the build.
+# Target: prod
 #
 # failure, guards, temp files, atomic writes, plan root, snapshots
 

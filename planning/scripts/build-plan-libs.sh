@@ -10,9 +10,21 @@
 # uses for install.sh.
 #
 # Usage:
-#   build-plan-libs.sh            # write the libraries
-#   build-plan-libs.sh --check    # exit 1 if a committed library is stale
+#   build-plan-libs.sh                  # write the libraries (prod target)
+#   build-plan-libs.sh --target dev     # write them with the dev-only aids
+#   build-plan-libs.sh --check          # exit 1 if a committed library is stale
 #   build-plan-libs.sh --help
+#
+# Two targets, one concatenation. The prod target is what ships and what is
+# committed: no provenance, and any function file marked `# PACKAGE: DEV` left
+# out. The dev target adds a provenance line before each function so a stack
+# trace or a grep hit in the compiled file names the source file to edit, and it
+# includes the dev-only functions.
+#
+# The dev target writes to the same paths on purpose -- it is the same library,
+# built for a maintainer's machine. --check always compares against a PROD build,
+# so a dev build left in the tree reads as stale and cannot be committed by
+# accident. That is the guard; there is no second committed copy to keep fresh.
 #
 # Adding a function: create planning/scripts/lib/<group>/<name>.sh and run this.
 # Nothing else. The group directory is the registration, so there is no list to
@@ -31,22 +43,41 @@ lib_root="$script_dir/lib"
 
 usage() {
     cat <<USAGE
-Usage: ${0##*/} [--check]
+Usage: ${0##*/} [--target dev|prod]
+       ${0##*/} --check
        ${0##*/} --help
 
-  --check   compare the committed libraries against a fresh build and exit 1
-            on any difference, naming the group that drifted
+  --target  prod (default) is what ships: no provenance comments, and function
+            files marked '# PACKAGE: DEV' are left out. dev keeps both.
+  --check   compare the committed libraries against a fresh PROD build and exit
+            1 on any difference, naming the group that drifted. A dev build in
+            the tree is a difference, which is what stops it being committed.
 USAGE
     exit "${1:-64}"
 }
 
 check_only=false
-case "${1:-}" in
-    --check) check_only=true ;;
-    -h|--help) usage 0 ;;
-    '') ;;
-    *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; usage ;;
+target=prod
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --check) check_only=true ;;
+        --target)
+            [ "$#" -ge 2 ] || { printf '%s: --target needs a value\n' "${0##*/}" >&2; usage; }
+            target="$2"
+            shift
+            ;;
+        --target=*) target="${1#--target=}" ;;
+        -h|--help) usage 0 ;;
+        *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; usage ;;
+    esac
+    shift
+done
+case "$target" in
+    dev|prod) ;;
+    *) printf '%s: --target must be dev or prod, not %s\n' "${0##*/}" "$target" >&2; usage ;;
 esac
+# --check is about what is committed, and what is committed is the prod build.
+[ "$check_only" = false ] || target=prod
 
 # The group's own name, its output file, and the one-line purpose that goes in
 # the generated header. Adding a group means one row here and one directory.
@@ -58,6 +89,12 @@ group_output() {
         progress) printf 'plan-progress-lib.sh\tprogress arithmetic and the status glyphs\n' ;;
         *) return 1 ;;
     esac
+}
+
+# A function file the prod library does without: the same PACKAGE marker the rest
+# of the tree uses, read from the file's own header rather than a list here.
+member_is_dev_only() { # <path>
+    sed -n '1,15p' "$1" | grep -q '^# PACKAGE: DEV$'
 }
 
 # Emitted once per library rather than once per source file.
@@ -74,6 +111,7 @@ emit_library() { # <group>
     printf '# GENERATED FILE — do not edit. Compiled from scripts/lib/%s/*.sh by:\n' "$group"
     printf '#   planning/scripts/build-plan-libs.sh\n'
     printf '# Edit the function file in that directory, then re-run the build.\n'
+    printf '# Target: %s\n' "$target"
     printf '#\n'
     printf '# %s\n' "$purpose"
     printf '\n'
@@ -87,10 +125,16 @@ emit_library() { # <group>
 
     for member in "$lib_root/$group"/*.sh; do
         [ -f "$member" ] || continue
+        if [ "$target" = prod ] && member_is_dev_only "$member"; then
+            continue
+        fi
         printf '\n'
-        # Strip the standalone shebang and any `set` line: the header above owns
-        # them. sed rather than tail -n +2, because a file may carry both.
-        sed -e '1{/^#!/d;}' -e '/^set -euo pipefail$/d' "$member" \
+        [ "$target" = dev ] && printf '# from scripts/lib/%s/%s\n' "$group" "${member##*/}"
+        # Strip the standalone shebang, any `set` line, and the file's own MODE
+        # and PACKAGE markers: the header above owns them, and a marker copied
+        # into a generated file would claim the compiled library is a source.
+        sed -e '1{/^#!/d;}' -e '/^set -euo pipefail$/d' \
+            -e '/^# MODE: \(DEV\|PROD\)$/d' -e '/^# PACKAGE: \(DEV\|PROD\)$/d' "$member" \
             | awk 'NF || printed { print; printed = 1 }'
         first=0
     done
@@ -103,18 +147,18 @@ emit_library() { # <group>
 status=0
 for group in core document table progress; do
     spec="$(group_output "$group")"
-    target="$script_dir/${spec%%	*}"
+    output_path="$script_dir/${spec%%	*}"
     rendered="$(mktemp "${TMPDIR:-/tmp}/plan-lib.XXXXXX")"
     emit_library "$group" > "$rendered"
     if [ "$check_only" = true ]; then
-        if ! cmp -s "$rendered" "$target"; then
-            printf '%s: %s is stale; run %s\n' "${0##*/}" "${target##*/}" "${0##*/}" >&2
+        if ! cmp -s "$rendered" "$output_path"; then
+            printf '%s: %s is stale; run %s\n' "${0##*/}" "${output_path##*/}" "${0##*/}" >&2
             status=1
         fi
     else
-        cat "$rendered" > "$target"
-        printf 'Wrote %s (%s lines from %s files)\n' "${target##*/}" \
-            "$(grep -c . "$target")" "$(ls "$lib_root/$group" | wc -l | tr -d ' ')"
+        cat "$rendered" > "$output_path"
+        printf 'Wrote %s for %s (%s lines from %s files)\n' "${output_path##*/}" "$target" \
+            "$(grep -c . "$output_path")" "$(ls "$lib_root/$group" | wc -l | tr -d ' ')"
     fi
     rm -f "$rendered"
 done
