@@ -157,4 +157,29 @@ t_assert_eq 'the field form writes a field' "$rc" 0
 t_assert_eq 'and leaves Status alone' \
     "$({ grep -c '^- Status:' "$plan/adversarial-review.md" || true; })" 1
 
+
+# ---- a section absent from this document names what the document has ---------
+# A valid section id that a particular file never received used to report only
+# "not found exactly once". A reviewer read that as a broken helper and inferred
+# `create-step-testing.sh --overwrite` as the fix, which cannot work: that
+# creator emits "## Automated tests" and nothing else.
+companion="$plan/01-plan-dir-synonym/steps/01-step-confirm-hoister-testing.md"
+if [ -f "$companion" ]; then
+    rc=0
+    absent_message="$("$scripts_dir/update-plan-content.sh" -ss "$plan" \
+        '01-plan-dir-synonym/01-step-confirm-hoister-testing' browser-verification \
+        -p '3.1: a browser check.' 2>&1)" || rc=$?
+    [ "$rc" -ne 0 ] || t_fail 'a section form added a section the companion never had'
+    case "$absent_message" in
+        *'## Automated tests'*) ;;
+        *) t_fail "the refusal did not name the sections the companion has: $absent_message" ;;
+    esac
+    case "$absent_message" in
+        *create-step-testing.sh*) ;;
+        *) t_fail "the refusal did not name the creator that owns the companion's sections: $absent_message" ;;
+    esac
+else
+    t_fail "the fixture companion is missing: $companion"
+fi
+
 t_end
