@@ -322,6 +322,44 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# A plan already holding a duplicate blocks plan creation in that root, loudly.
+# The state is only repairable by a rename the calling agent has to make, and a
+# broken plan left behind while new work starts elsewhere is how it survives.
+blocked_root="$temporary_root/blocked-root"
+rm -rf "$blocked_root"; mkdir -p "$blocked_root"
+cp -R "$plan_dir" "$blocked_root/already-broken"
+broken_step="$(ls "$blocked_root/already-broken/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+cp "$blocked_root/already-broken/02-research/steps/$broken_step" \
+   "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+rc=0
+blocked_out="$(PLANS_ROOT="$blocked_root" "$script_dir/create-plan.sh" \
+    "$blocked_root/a-new-plan" 'A new plan' 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'create-plan proceeded while a plan in the root held a duplicate step number.' >&2; exit 1; }
+[ ! -d "$blocked_root/a-new-plan" ] || { echo 'create-plan left a directory behind after refusing.' >&2; exit 1; }
+for expected in 'REFUSING TO CREATE A PLAN' 'already-broken' '02-research' 'step-collision.md' 'five surfaces'; do
+    case "$blocked_out" in
+        *"$expected"*) ;;
+        *) printf 'the refusal did not mention %s:\n%s\n' "$expected" "$blocked_out" >&2; exit 1 ;;
+    esac
+done
+# And a clean root still creates, so the block is not unconditional.
+rm -rf "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+PLANS_ROOT="$blocked_root" "$script_dir/create-plan.sh" "$blocked_root/a-new-plan" 'A new plan' >/dev/null 2>&1 \
+    || { echo 'create-plan refused although the root is clean.' >&2; exit 1; }
+
+# And the validator reports it as a failure, not a warning.
+val_rc=0
+val_out="$("$script_dir/validate-plan.sh" "$blocked_root/already-broken" 2>&1)" || val_rc=$?
+cp "$blocked_root/already-broken/02-research/steps/$broken_step" \
+   "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+val_rc=0
+val_out="$("$script_dir/validate-plan.sh" "$blocked_root/already-broken" 2>&1)" || val_rc=$?
+[ "$val_rc" -ne 0 ] || { echo 'validate-plan passed a plan with two steps sharing a number.' >&2; exit 1; }
+case "$val_out" in
+    *'two steps numbered'*) ;;
+    *) printf 'validate-plan did not name the duplicate:\n%s\n' "$val_out" >&2; exit 1 ;;
+esac
+
 # A step number must be unique within its goal. Two steps numbered 04 leave
 # their order undefined -- steps are read in number order and nothing breaks the
 # tie -- and with no renumbering helper the only fix is the hand edit the skill

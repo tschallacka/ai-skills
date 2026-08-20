@@ -155,4 +155,21 @@ t_assert_eq 'tmpdir falls back to /tmp' \
     "$(unit planning_tmpdir.sh -- 'unset TMPDIR; planning_tmpdir')" \
     '/tmp/planning-agent'
 
+# ── plan_duplicate_step_numbers: collisions only, never gaps ────────────────
+mkdir -p "$work/plan/01-goal/steps"
+printf 'x\n' > "$work/plan/01-goal/steps/01-step-one.md"
+printf 'x\n' > "$work/plan/01-goal/steps/04-step-four.md"
+t_assert_eq 'a gap is not a collision' \
+    "$(unit plan_duplicate_step_numbers.sh -- "plan_duplicate_step_numbers '$work/plan'" | grep -c . || true)" '0'
+printf 'x\n' > "$work/plan/01-goal/steps/04-step-also-four.md"
+collision="$(unit plan_duplicate_step_numbers.sh -- "plan_duplicate_step_numbers '$work/plan'")"
+t_assert_contains 'the goal is named' '01-goal' "$collision"
+t_assert_contains 'the number is named' '04' "$collision"
+t_assert_contains 'both colliding files are named' '04-step-also-four.md' "$collision"
+t_assert_contains 'including the second' '04-step-four.md' "$collision"
+# A companion shares its step's number by design and must not read as a clash.
+printf 'x\n' > "$work/plan/01-goal/steps/01-step-one-testing.md"
+t_assert_eq 'a testing companion is not a collision' \
+    "$(unit plan_duplicate_step_numbers.sh -- "plan_duplicate_step_numbers '$work/plan'" | grep -c '01-goal 01' || true)" '0'
+
 t_end

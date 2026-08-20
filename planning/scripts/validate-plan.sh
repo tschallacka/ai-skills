@@ -127,6 +127,9 @@ fi
 # this gate has to run.
 # shellcheck source=planning/scripts/plan-map-lib.sh
 source "$script_dir/plan-map-lib.sh"
+# For plan_duplicate_step_numbers. The core library carries no load-time
+# initialisation and no trap, so sourcing it here adds definitions only.
+source "$script_dir/plan-core-lib.sh"
 source "$script_dir/validate-plan-common-lib.sh"
 source "$script_dir/validate-plan-docs-lib.sh"
 source "$script_dir/validate-plan-placeholders-lib.sh"
@@ -142,6 +145,7 @@ source "$script_dir/validate-plan-comparisons-lib.sh"
 plan_validate_obsolete || exit "$?"
 plan_validate_existence || exit "$?"
 plan_validate_plan_docs
+plan_validate_step_numbers "$plan_dir"
 plan_validate_placeholders
 plan_validate_stale
 plan_validate_inventory

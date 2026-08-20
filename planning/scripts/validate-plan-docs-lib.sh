@@ -68,6 +68,23 @@ plan_validate_existence() {
     return 0
 }
 
+# Two steps sharing a number in one goal: their order is undefined, and there is
+# no renumbering helper, so this is a hard failure rather than a warning.
+# add-work-unit.sh refuses to create the state; this finds a plan that already
+# holds it, created before that guard or edited outside the helpers.
+plan_validate_step_numbers() {
+    local plan_dir="$1" collision goal number files
+    while IFS= read -r collision; do
+        [ -n "$collision" ] || continue
+        goal="${collision%% *}"
+        number="$(printf '%s' "$collision" | awk '{print $2}')"
+        files="$(printf '%s' "$collision" | cut -d' ' -f3-)"
+        fail "$goal has two steps numbered $number ($files); their order is undefined. Rename one to a free number and sweep the five surfaces that name a step: the step file, its testing companion, the inventory row, the goal blurb, and any progress tracker"
+    done <<COLLISIONS
+$(plan_duplicate_step_numbers "$plan_dir")
+COLLISIONS
+}
+
 plan_validate_plan_docs() {
     for heading in \
         '## Current state' \

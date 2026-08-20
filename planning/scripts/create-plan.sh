@@ -55,6 +55,42 @@ if [ -e "$plan_dir" ]; then
 fi
 plan_require_safe_value title "$title"
 
+# ---- refuse while any plan under this root holds a duplicate step number ----
+# Two steps numbered alike in one goal have no defined order, and there is no
+# renumbering helper, so the repair is a rename the calling agent has to make.
+# Blocking creation is deliberate and it is loud: a broken plan left behind while
+# new work starts elsewhere is how the state survives, and the agent that can fix
+# it is the one standing here.
+duplicate_report=""
+for existing_plan in "$plans_root"/*/; do
+    [ -d "$existing_plan" ] || continue
+    while IFS= read -r collision; do
+        [ -n "$collision" ] || continue
+        duplicate_report="$duplicate_report$(printf '\n  %s: goal %s' "$(basename "${existing_plan%/}")" "$collision")"
+    done <<COLLISIONS
+$(plan_duplicate_step_numbers "${existing_plan%/}")
+COLLISIONS
+done
+if [ -n "$duplicate_report" ]; then
+    {
+        printf '\n'
+        printf '%s\n' '================================================================'
+        printf '%s\n' 'REFUSING TO CREATE A PLAN: a plan under this root has two steps'
+        printf '%s\n' 'sharing one number, so their execution order is undefined.'
+        printf '%s\n' '================================================================'
+        printf 'Plans root: %s\n' "$plans_root"
+        printf 'Collisions (goal, number, then the colliding files):%s\n' "$duplicate_report"
+        printf '\n'
+        printf '%s\n' 'Rename one of each pair to a free number, then create this plan.'
+        printf '%s\n' 'A step rename touches five surfaces: the step file, its testing'
+        printf '%s\n' 'companion, the inventory row File cell, the goal owned-unit blurb,'
+        printf '%s\n' 'and any progress tracker naming the step. Sweep all five.'
+        printf '%s\n' 'plan-content.sh find <plan> <step-name> --in all lists them.'
+        printf '\n'
+    } >&2
+    exit 73
+fi
+
 mkdir -p "$plan_dir"
 description="$plan_dir/plan-description.md"
 # The trap unwinds a partial creation (it also removes the new plan directory),

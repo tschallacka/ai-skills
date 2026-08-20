@@ -60,16 +60,16 @@ printf '<?php class Thing {}\n' > "$repo/app/code/Fake/Module/Model/Thing.php"
     app/code/Fake/Module/view/frontend/templates/history.phtml '#order_history' N/A \
     'edit the template' '—' 01-goal 01-step-template >/dev/null
 "$script_dir/add-work-unit.sh" "$plan" W02 verification N/A 'reachability evidence' N/A \
-    'record the render route' '—' 01-goal 01-step-discovery >/dev/null
+    'record the render route' '—' 01-goal 02-step-discovery >/dev/null
 "$script_dir/add-work-unit.sh" "$plan" W03 source \
     app/code/Fake/Module/Model/Thing.php 'Thing::run()' N/A \
-    'edit the class' '—' 01-goal 01-step-class >/dev/null
+    'edit the class' '—' 01-goal 03-step-class >/dev/null
 "$script_dir/add-work-unit.sh" "$plan" W04 source \
     app/code/Fake/Module/view/frontend/templates/history.phtml N/A N/A \
-    'edit the template blind' '—' 01-goal 01-step-blind >/dev/null
+    'edit the template blind' '—' 01-goal 04-step-blind >/dev/null
 "$script_dir/add-work-unit.sh" "$plan" W05 discovery \
     app/code/Fake/Module/view/frontend/templates/history.phtml '#order_history' N/A \
-    'record which route renders the template' '—' 01-goal 01-step-route >/dev/null
+    'record which route renders the template' '—' 01-goal 05-step-route >/dev/null
 
 log="$temporary_root/w01.log"
 assert_exit 0 'a source-typed template passes when nothing contradicts it' "$log" -- \
