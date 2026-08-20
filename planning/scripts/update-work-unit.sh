@@ -119,6 +119,37 @@ if [ -n "$new_description" ]; then
     plan_replace_paragraph "$step_file" '§ 4.1' "$new_description"
     awk -F'|' -v wanted="$unit" -v desc="$new_description" 'BEGIN{OFS="|"} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id); if(id==wanted){$7=" " desc " "}} {print}' "$inventory" > "$inventory_tmp"
     mv "$inventory_tmp" "$inventory"
+
+    # The goal's owned-unit blurb is surface 5 of the seven SKILL.md lists under
+    # "Resolving a finding", and it was the one this helper skipped: the row and
+    # the step objective moved while the blurb kept instructing the old
+    # behaviour. A goal that never wrote a blurb for this unit is reported
+    # rather than silently skipped, because a missing blurb is itself a finding.
+    goal_file="$plan_dir/$plan_inventory_goal/goal.md"
+    if [ -f "$goal_file" ]; then
+        goal_tmp="${goal_file}.tmp.$$"
+        goal_status=0
+        plan_register_temp_file "$goal_tmp"
+        awk -v wanted="$unit" -v desc="$new_description" '
+            $0 ~ "^`" wanted "`" {
+                printf "`%s` — %s\n", wanted, desc
+                touched = 1
+                next
+            }
+            { print }
+            END { exit (touched ? 0 : 9) }
+        # `|| goal_status=$?`, not a bare call: under set -e the awk exit that
+        # signals "no blurb here" would abort the script with a raw 9, after the
+        # inventory row had already been rewritten.
+        ' "$goal_file" > "$goal_tmp" || goal_status=$?
+        if [ "$goal_status" -eq 0 ]; then
+            mv "$goal_tmp" "$goal_file"
+        else
+            rm -f "$goal_tmp"
+            printf '%s: %s has no `%s` blurb under "## Owned work units"; the description was not synced there\n' \
+                "${0##*/}" "${goal_file##*/}" "$unit" >&2
+        fi
+    fi
 fi
 changed=()
 [ -n "$new_scope" ] && changed+=("scope")

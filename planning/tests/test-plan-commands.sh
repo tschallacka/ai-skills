@@ -322,6 +322,39 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# --description has to reach all four surfaces. It synced the inventory row and
+# the step objective but not the goal blurb, which SKILL.md lists as surface 5 of
+# seven under "Resolving a finding" -- so a goal kept instructing the old
+# behaviour after the decision changed.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 \
+    --description 'Description synced across every surface.' >/dev/null 2>&1
+for surface in "$plan_dir/work-unit-inventory.md" "$plan_dir/02-research/goal.md"; do
+    grep -Fq 'Description synced across every surface.' "$surface" \
+        || { printf 'update-work-unit --description did not reach %s\n' "${surface#$plan_dir/}" >&2; exit 1; }
+done
+grep -rlFq 'Description synced across every surface.' "$plan_dir/02-research/steps/" >/dev/null 2>&1 \
+    || { echo 'update-work-unit --description did not reach the step objective.' >&2; exit 1; }
+
+# A goal with no blurb for the unit is reported, and the run still succeeds: the
+# awk exit that signals it used to abort under set -e with a raw 9, after the
+# inventory row had already been written.
+#
+# On a copy, not the shared fixture: deleting a blurb here changed the roster a
+# later assertion in this file depends on, which is the hidden coupling between
+# assertions that a fail-fast reporter hides.
+blurb_probe="$temporary_root/plan-no-blurb"
+rm -rf "$blurb_probe"
+cp -R "$plan_dir" "$blurb_probe"
+grep -v '^`W03`' "$blurb_probe/02-research/goal.md" > "$blurb_probe/02-research/goal.new"
+mv "$blurb_probe/02-research/goal.new" "$blurb_probe/02-research/goal.md"
+no_blurb="$temporary_root/no-blurb.log"
+rc=0
+"$script_dir/update-work-unit.sh" "$blurb_probe" W03 --description 'Second description.' \
+    >/dev/null 2>"$no_blurb" || rc=$?
+[ "$rc" -eq 0 ] || { printf 'a missing goal blurb aborted the run (rc=%s)\n' "$rc" >&2; cat "$no_blurb" >&2; exit 1; }
+grep -Fq 'has no `W03` blurb' "$no_blurb" \
+    || { echo 'a missing goal blurb was skipped without a word.' >&2; cat "$no_blurb" >&2; exit 1; }
+
 # An overwritten inventory field is content a person wrote, so the value being
 # replaced is named -- "type,depends-on" said which fields changed but left no
 # trace of what they held. CODE-CONTRACTS.md contract 9a.
