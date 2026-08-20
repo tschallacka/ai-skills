@@ -310,6 +310,21 @@ context_read_command() {
     else
         printf '%s\n' "$bounded"
         [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
+        # The summary view is a fixed excerpt of the head of the file, so it
+        # truncates BEFORE paging and the page reports no withheld records. A
+        # reader following the documented rule -- no next_token means the
+        # document is fully read -- therefore concludes it has read a plan when
+        # it has seen the first few lines. Reviewers are steered to this view by
+        # default, so the excerpt has to say what it is.
+        if [ "$view" = summary ] && [ "$more" -eq 0 ]; then
+            local shown total
+            shown="$(printf '%s\n' "$bounded" | wc -l | tr -d ' ')"
+            total="$(wc -l < "$file" | tr -d ' ')"
+            if [ "$shown" -lt "$total" ]; then
+                printf 'excerpt=summary shows %s of %s line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.\n' \
+                    "$shown" "$total"
+            fi
+        fi
     fi
 }
 

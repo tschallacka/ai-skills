@@ -2,7 +2,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `97bc0ff8b9affc1de07e9d59054fe40a79ca7c0a575c63b165a69f17fa766540`
+> Source SHA-256: `fcd37c0db05fe9c07c0693aeff9b807ddd4c9fdf8c1917f525a4e9288080a99f`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -52,7 +52,12 @@ whole-document `full` view; every other id defaults to `summary`, and
 any of them. A page that withheld records reports next_token — pass it back as
 --token and keep going until no next_token comes back. You have NOT read a
 document until a page returns without one; treat a page you stopped early on as
-an unread document and say so. Plan-read bytes are capped at
+an unread document and say so. **The `summary` view is an excerpt of the head of
+the file, not a condensation of it, and it truncates before paging — so it
+returns no next_token however much it left out, and prints an `excerpt=` line
+saying so. No next_token from `summary` does NOT mean you have read the
+document. Reviewing a plan, judging a finding, or approving anything requires
+`--view full` paged to exhaustion.** Plan-read bytes are capped at
 the per-role budget when ROLE_ID is set (the gate lowers --max-bytes to it) —
 do not rely on --max-bytes above that cap; page instead. Never load a whole
 plan file, an entire plan directory, or the `.plans/` tree wholesale. A

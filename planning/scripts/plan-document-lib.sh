@@ -48,8 +48,24 @@ plan_ensure_root_permissions() {
 
 # The single fatal path (CODE-STYLE §5): message to stderr, exit with $2. The
 # default stays 64 so every single-argument caller keeps its exit status.
+# Temp files registered here are removed when plan_die exits. The writer
+# functions guard their temp file with `trap ... RETURN`, and a RETURN trap does
+# not fire on exit -- so every validation failure after the temp file was created
+# left a "<file>.tmp.<pid>" beside the target, inside the plan tree, where it got
+# committed as review debris. An EXIT trap inside those functions is not an
+# option: the top-level scripts set their own and it would clobber them.
+#
+# Empty-array expansion is unbound under set -u on bash 3.2, hence the
+# ${array[@]+...} guard rather than a bare "${array[@]}".
+PLAN_DIE_TEMP_FILES=()
+
+plan_register_temp_file() {
+    PLAN_DIE_TEMP_FILES+=("$1")
+}
+
 plan_die() {
     printf '%s: %s\n' "${0##*/}" "$1" >&2
+    rm -f ${PLAN_DIE_TEMP_FILES[@]+"${PLAN_DIE_TEMP_FILES[@]}"}
     exit "${2:-64}"
 }
 
@@ -351,6 +367,7 @@ plan_replace_testing_requirement() {
     plan_require_safe_value rationale "$rationale"
     replacement="| $required | $rationale |"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v replacement="$replacement" '
         $0 == "## Testing requirement" {
@@ -503,6 +520,7 @@ plan_replace_section() {
     local file="$1" heading="$2" body_file="$3" temporary_file
     plan_refuse_field_section "$file" "$heading"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v heading="$heading" -v replacement="$body_file" '
         BEGIN {
@@ -533,6 +551,7 @@ plan_replace_paragraph() {
     [[ "$content" != *$'\n\n'* ]] || plan_die "A paragraph replacement must contain exactly one paragraph; use section for multiple paragraphs"
     [ -n "$content" ] || plan_die "Paragraph content must not be empty"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v wanted="$paragraph_id" -v replacement="$content" '
         $0 == wanted {
@@ -634,6 +653,7 @@ plan_insert_paragraph() {
     [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
     case "$mode" in before|after) ;; *) plan_die "Paragraph insertion mode must be before or after" ;; esac
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v wanted="$paragraph_id" -v mode="$mode" -v body_file="$body_file" '
         function output(line) {
@@ -699,6 +719,7 @@ plan_delete_paragraph() {
     local file="$1" paragraph_id="$2" temporary_file
     [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v wanted="$paragraph_id" '
         BEGIN {
@@ -747,6 +768,7 @@ plan_replace_field() {
     local file="$1" label="$2" value="$3" temporary_file
     plan_require_safe_value "$label" "$value"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v label="$label" -v replacement="$value" '
         $0 ~ "^- " label ":" {
@@ -766,6 +788,7 @@ plan_replace_title() {
     plan_require_safe_value title "$title"
     [[ "$title" != *$'\n'* ]] || plan_die "Title must be one line"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v replacement="$title" '
         /^# / {
