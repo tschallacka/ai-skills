@@ -6,15 +6,15 @@
     {
       "id": "T7",
       "title": "Push the branch and read the two macOS legs",
-      "status": "blocked",
+      "status": "partly",
       "parent": null,
       "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
-      "note": null,
+      "note": "Pushed 2026-08-20: branch refactor/portability-and-installer is on origin at 1b7829f, 120 commits ahead of master, tracking set. The macOS legs are still unread -- nothing in this repo has been exercised on a real BSD userland, only under the bash 3.2 build.",
       "blocked_on": "the maintainer",
       "refs": [],
       "priority": "urgent",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-20T16:26:44Z"
     },
     {
       "id": "T10",
@@ -45,15 +45,15 @@
     {
       "id": "T12",
       "title": "This register is gitignored",
-      "status": "blocked",
+      "status": "obsolete",
       "parent": null,
       "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
-      "note": null,
-      "blocked_on": "the maintainer",
+      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
+      "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-20T16:32:43Z"
     },
     {
       "id": "T18",
@@ -86,22 +86,22 @@
       "title": "The function files have no unit tests, only the ability to have them",
       "status": "partly",
       "parent": null,
-      "detail": "PARTLY DONE — 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. PARTLY DONE — 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. The T4 split put 48 functions in their own files and `test-plan-libs-build.sh` asserts each one is *sourceable* alone. That is not a test of the function. Measured: 24 of the 48 are named in some test file, 24 are named nowhere. Naming is a weak proxy in both directions -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment -- so the real figure needs mutation sampling, one function at a time, which is the first task here. Why it is worth doing now rather than before: a unit test can source one function and stub its callees, which was impossible while all 47 lived in one file. The dependency is visible too -- sourcing `plan_progress_bar.sh` alone and calling it reports `plan_progress_percent: command not found`, which names exactly what to stub. Order: the ones with no naming test and no obvious entry-point path first (`plan_document_kind`, `plan_section_spec`, `plan_unknown_section`, `plan_render_paragraphs`, `plan_decode_escaped_newlines`, `plan_require_safe_value`), since those are where a defect has nowhere to surface. Do not add a per-function test that merely re-asserts what an integration test already proves; the point is the functions nothing covers.",
-      "note": "PARTLY DONE — 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. PARTLY DONE — 418e37d added four unit files and about 90 assertions across all four groups. What remains is the mutation sampling that says which functions are still uncovered. The T4 split put 48 functions in their own files and `test-plan-libs-build.sh` asserts each one is *sourceable* alone. That is not a test of the function. Measured: 24 of the 48 are named in some test file, 24 are named nowhere. Naming is a weak proxy in both directions -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment -- so the real figure needs mutation sampling, one function at a time, which is the first task here.",
+      "detail": "The T4 split put 48 functions in their own files and test-plan-libs-build.sh asserts each one is sourceable alone. That is not a test of the function. What remains is the mutation sampling that says which functions are genuinely uncovered: 24 of the 48 are named in some test file and 24 are named nowhere, but naming is a weak proxy both ways -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment. Sample one function at a time. Start with the ones that have no naming test and no obvious entry-point path (plan_document_kind, plan_section_spec, plan_unknown_section, plan_render_paragraphs, plan_decode_escaped_newlines, plan_require_safe_value), since a defect there has nowhere to surface. Do not add a per-function test that only re-asserts what an integration test already proves.",
+      "note": "Partly done: 418e37d added four unit files and about 90 assertions across all four groups, and several of the functions listed above are now covered. Only the mutation sampling is left. (This entry previously held the same paragraph three times, from repeated appends.)",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-20T16:32:43Z"
     },
     {
       "id": "T25",
       "title": "Decide which of the 42 unshipped planning files belong in an install",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "skill_files() ships 35 planning tests and not the other 35, plus 7 fixtures. The split is historical: both halves compute the repo root the same way and both reach outside the skill directory, so no property sorts them. Until it is decided, installer/unshipped-planning-files.txt parks them and the manifest test keeps the list from growing by accident.",
-      "note": "Found by tests/test-skill-files-manifest.sh the moment it was written. My first attempt to classify them automatically -- a test that reaches outside planning/ cannot run from an install -- was unsound: 23 of the 35 shipped tests match it too.",
+      "note": "Decided by the MODE rule rather than by guesswork: a test is a maintainer file, so all 70 tests and their fixtures moved to the dev arm of skill_files() and are marked MODE: DEV. 4ac69f3. installer/unshipped-planning-files.txt is retired -- the two arms now account for every tracked file.",
       "blocked_on": "a maintainer decision on what an installed planning skill should be able to test",
       "refs": [
         "installer/unshipped-planning-files.txt",
@@ -109,7 +109,7 @@
         "planning/MAINTAINER.md"
       ],
       "created_at": "2026-08-20T15:31:12Z",
-      "updated_at": "2026-08-20T15:31:12Z"
+      "updated_at": "2026-08-20T16:26:44Z"
     },
     {
       "id": "T1",
