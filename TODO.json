@@ -378,6 +378,23 @@
       "updated_at": "2026-08-20T17:31:18Z"
     },
     {
+      "id": "T31",
+      "title": "Measure inside the two most expensive tests before deciding they are inherently slow",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "test-artifact-comparisons is 19.7s and test-plan-commands 18.0s, the top two of a 164s suite. Both drive real script invocations, which is the point of them, so the cost may be inherent -- but that has not been measured, only assumed. Time the invocations inside each and separate the work the test exists to do from setup repeated per case: a fixture built once and copied is cheaper than one built per assertion. Decide per test, and record which are inherent so nobody re-opens this.",
+      "note": "Baseline recorded 2026-08-20: 164s sequential for 80 tests. Sleeps are 3.0s across 13 sites and mermaid rendering 389ms, so neither is worth touching. See T30 for the one case with an already-proven win.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-artifact-comparisons.sh",
+        "planning/tests/test-plan-commands.sh",
+        "run-tests.sh"
+      ],
+      "created_at": "2026-08-20T17:32:40Z",
+      "updated_at": "2026-08-20T17:32:40Z"
+    },
+    {
       "id": "T4",
       "title": "`plan-document-lib.sh` is 1028 lines against a 500 cap",
       "status": "done",
