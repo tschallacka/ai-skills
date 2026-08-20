@@ -362,6 +362,22 @@
       "updated_at": "2026-08-20T14:53:12Z"
     },
     {
+      "id": "T30",
+      "title": "test-portability-contract spawns 5658 greps; invert the loop and it is one per rule",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Measured at 15.6s of a 164s suite, third most expensive test. It loops files-outside, rules-inside: 23 gated rules x 246 scanned files. The nesting is only that way because each file is comment-stripped with sed before grepping, so many files cannot be passed to one grep. Strip once into a temp copy per file (246 seds), then run one grep per rule over all the copies at once (23 greps): about 269 spawns instead of 5658, and attribution per rule is preserved because the rule is still the outer loop.",
+      "note": "Found by timing every test after a wrong hypothesis (sleeps, 3.0s in total across 13 sites) and a second wrong one of mine (chromium via mmdc, which is 389ms). The cost is fork/exec volume, not waiting.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-portability-contract.sh",
+        "portability-rules.json"
+      ],
+      "created_at": "2026-08-20T17:31:18Z",
+      "updated_at": "2026-08-20T17:31:18Z"
+    },
+    {
       "id": "T4",
       "title": "`plan-document-lib.sh` is 1028 lines against a 500 cap",
       "status": "done",
