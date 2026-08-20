@@ -2287,6 +2287,7 @@ tests/test-csv-table-errors.sh
 tests/test-document-id-parity.sh
 tests/test-artifact-comparisons.sh
 tests/test-installer-backups.sh
+tests/test-sha256-fallbacks.sh
 tests/test-self-hosted-plan.sh
 tests/test-plan-dir-synonym.sh
 tests/test-document-sections.sh
