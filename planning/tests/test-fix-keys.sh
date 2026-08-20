@@ -132,6 +132,30 @@ grep -Fq 'fix-keys verification failed' "$temporary_root/verify-self.log" \
 "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by fixer-session-9 \
     >"$temporary_root/verify-distinct.log" 2>&1 \
     || fail 'verify rejected a distinct-session claim'
+
+# --- a warning has to reach the summary count. A worker found the older build
+# emitting the self-certification warning after "$warnings" was read, so the
+# summary said "0 warning(s)" and a caller keying on that line read a
+# self-certified run as clean. Self-certification is a failure here, not a
+# warning, but the summary count itself was asserted nowhere. ---
+plan_warn="$temporary_root/plan-warn"
+seed_gated_plan "$plan_warn" test-session-warn
+seed_secret_session test-session-warn
+MINTED_BY=reviewer-session-2 "$script_dir/mint-fix-keys.sh" "$plan_warn" >/dev/null 2>&1 \
+    || fail 'mint rejected a valid gated plan for the warning-count case'
+key_warn1="$(expected_key test-session-warn AR-01 W05)"
+key_warn3="$(expected_key test-session-warn AR-03 W07)"
+# One claim for a pair fix-keys.json does not gate: reported, not fatal.
+write_claims "$plan_warn" "AR-01	W05	$key_warn1" "AR-03	W07	$key_warn3" \
+    "AR-99	W42	deadbeef"
+"$script_dir/verify-fix-keys.sh" "$plan_warn" --claimed-by fixer-session-7 \
+    >"$temporary_root/verify-warn.log" 2>&1 \
+    || fail 'verify failed on a claim for a pair that is merely not gated'
+grep -Fq 'ignoring claim for pair AR-99/W42' "$temporary_root/verify-warn.log" \
+    || fail 'verify did not report the ungated claim'
+grep -Fq '1 warning(s)' "$temporary_root/verify-warn.log" \
+    || fail 'the summary did not count the warning it just reported'
+
 grep -Fq 'self-certification' "$temporary_root/verify-distinct.log" \
     && fail 'verify warned about a distinct-session claim'
 "$script_dir/verify-fix-keys.sh" "$plan_by" >"$temporary_root/verify-noclaimant.log" 2>&1 \
