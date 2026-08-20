@@ -10,7 +10,6 @@
 #   plan_inventory_rows  <inventory>              # fixed TSV, one line per row
 #   plan_inventory_split <tsv-line>               # fill the channel from a line
 #   plan_inventory_row   <inventory> <id>         # fill the channel, 1 if absent
-#   plan_inventory_field <inventory> <id> <name>  # one cell on stdout
 #
 # ---- quoted: the fixed TSV field order ----
 # id  type  file  scope  subscope  change  depends  goal  step
@@ -100,15 +99,4 @@ plan_inventory_row() {
         return 1
     fi
     plan_inventory_split "$row"
-}
-
-# One named cell on stdout; 1 when the id has no row.
-plan_inventory_field() {
-    local name
-    case "$3" in
-        id|type|file|scope|subscope|change|depends|goal|step) name="plan_inventory_$3" ;;
-        *) plan_inventory_die "Unknown inventory field: $3" 70 ;;
-    esac
-    plan_inventory_row "$1" "$2" || return 1
-    printf '%s\n' "${!name}"
 }

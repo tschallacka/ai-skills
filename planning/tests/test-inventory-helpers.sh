@@ -94,13 +94,6 @@ assert_eq 'absent id clears the id cell' '' "$plan_inventory_id"
 assert_eq 'absent id clears the goal cell' '' "$plan_inventory_goal"
 assert_eq 'absent id clears the step cell' '' "$plan_inventory_step"
 
-# ── plan_inventory_field: one named cell, and a rejected field name ──────────
-assert_eq 'field goal' 02-second "$(plan_inventory_field "$inventory" W03 goal)"
-assert_eq 'field type' verification "$(plan_inventory_field "$inventory" W03 type)"
-assert_eq 'field scope' 'A::run()' "$(plan_inventory_field "$inventory" W01 scope)"
-expect_exit 1 'field of an absent id' plan_inventory_field "$inventory" W99 goal
-expect_exit 70 'unknown field name' plan_inventory_field "$inventory" W01 nosuchfield
-
 # ── plan_status_label: the glyphs are the on-disk contract ──────────────────
 assert_eq 'label incomplete' '💤 incomplete' "$(plan_status_label incomplete)"
 assert_eq 'label in-progress' '⏳ in progress' "$(plan_status_label in-progress)"
