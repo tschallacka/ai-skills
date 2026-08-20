@@ -46,8 +46,11 @@ plan_validate_inventory() {
         if [ "$type" = verification ] && [ "$file" != N/A ]; then
             fail "$id is verification and must use File 'N/A'"
         fi
-        if [ "$type" != verification ] && [ "$file" = N/A ]; then
-            fail "$id is not verification and must name one file"
+        # Mirrors add-work-unit.sh: discovery may use N/A because its target is
+        # not yet knowable. Kept in the same shape as the writer's rule so the
+        # two cannot drift into disagreeing about what a valid row is.
+        if [ "$type" != verification ] && [ "$type" != discovery ] && [ "$file" = N/A ]; then
+            fail "$id is neither verification nor discovery and must name one file"
         fi
         if [[ "$file" == *'*'* || "$file" == */ ]]; then
             fail "$id must name one concrete file, not a glob or directory: $file"

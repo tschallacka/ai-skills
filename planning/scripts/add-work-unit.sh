@@ -106,8 +106,13 @@ for value_name in unit_file scope subscope intended depends_on; do
 done
 if [ "$unit_type" = verification ]; then
     [ "$unit_file" = N/A ] || plan_die "Verification work units must use file N/A"
-else
-    [ "$unit_file" != N/A ] || plan_die "Only verification work units may use file N/A"
+elif [ "$unit_type" != discovery ]; then
+    # discovery may use either. A bounded discovery unit exists precisely because
+    # the exact file or symbol is not yet knowable (SKILL.md 2.2), and TBD is
+    # forbidden in a step, so demanding a concrete file here forced the author to
+    # invent one. Naming a file stays allowed: discovery often knows the file and
+    # not the symbol.
+    [ "$unit_file" != N/A ] || plan_die "Only verification and discovery work units may use file N/A"
 fi
 [[ "$unit_file" != *'*'* && "$unit_file" != */ ]] || plan_die "File must be one concrete file, not a glob or directory"
 
