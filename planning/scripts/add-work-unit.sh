@@ -130,6 +130,23 @@ if [ -e "$step_file" ]; then
     printf '%s: %s\n' "${0##*/}" "Step already exists: $step_file" >&2
     exit 73
 fi
+# The number, not just the name. Two steps numbered 04 in one goal leave their
+# order undefined -- steps are read in number order and nothing breaks the tie --
+# and there is no renumbering helper, so the only fix is a hand edit the skill
+# forbids. Refuse at creation, naming the step already holding the number.
+step_number="${step_name%%-*}"
+existing_with_number=""
+for candidate in "$plan_dir/$goal_name/steps/$step_number-step-"*.md; do
+    [ -e "$candidate" ] || continue
+    case "${candidate##*/}" in *-testing.md) continue ;; esac
+    existing_with_number="${candidate##*/}"
+    break
+done
+if [ -n "$existing_with_number" ]; then
+    printf '%s: step number %s is already used by %s in %s; pick the next free number\n' \
+        "${0##*/}" "$step_number" "$existing_with_number" "$goal_name" >&2
+    exit 73
+fi
 
 # One trap for all three staging files, installed before any of them exists and
 # never released: re-trapping for the goal edit used to replace this handler and

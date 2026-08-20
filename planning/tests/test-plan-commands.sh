@@ -322,6 +322,35 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# A step number must be unique within its goal. Two steps numbered 04 leave
+# their order undefined -- steps are read in number order and nothing breaks the
+# tie -- and with no renumbering helper the only fix is the hand edit the skill
+# forbids. Reported by a worker who ended up with two 04s and no 01 or 03.
+dup_probe="$temporary_root/plan-dup-step"
+rm -rf "$dup_probe"
+cp -R "$plan_dir" "$dup_probe"
+existing_step="$(ls "$dup_probe/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+[ -n "$existing_step" ] || { echo 'the probe goal has no step to collide with.' >&2; exit 1; }
+dup_number="${existing_step%%-*}"
+rc=0
+dup_out="$("$script_dir/add-work-unit.sh" "$dup_probe" --id W91 --type source \
+    --file probe/dup.sh --scope sym --subscope N/A --change 'A duplicate number.' \
+    --depends-on '—' --goal 02-research --step "$dup_number-step-duplicate-number" 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'add-work-unit accepted a second step with an existing number.' >&2; exit 1; }
+case "$dup_out" in
+    *"$existing_step"*) ;;
+    *) printf 'the refusal did not name the step already holding the number:\n%s\n' "$dup_out" >&2; exit 1 ;;
+esac
+if [ -e "$dup_probe/02-research/steps/$dup_number-step-duplicate-number.md" ]; then
+    echo 'the refused step file was created anyway.' >&2; exit 1
+fi
+# A free number in the same goal still works, so the guard is not simply
+# refusing everything.
+"$script_dir/add-work-unit.sh" "$dup_probe" --id W92 --type source \
+    --file probe/free.sh --scope sym --subscope N/A --change 'A free number.' \
+    --depends-on '—' --goal 02-research --step "89-step-free-number" >/dev/null 2>&1 \
+    || { echo 'add-work-unit refused a step with an unused number.' >&2; exit 1; }
+
 # --description has to reach all four surfaces. It synced the inventory row and
 # the step objective but not the goal blurb, which SKILL.md lists as surface 5 of
 # seven under "Resolving a finding" -- so a goal kept instructing the old
