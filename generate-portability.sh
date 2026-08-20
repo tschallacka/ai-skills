@@ -37,9 +37,15 @@ command -v jq >/dev/null 2>&1 || {
 # Every shell script on disk except the archived benchmark output. Deliberately
 # not `git ls-files`: a new script is untracked while it is being written, and a
 # catalogue that silently skips it is worse than no catalogue.
+#
+# .claude is pruned because agent worktrees check the repo out underneath it. A
+# copy's scripts are the same scripts, so every finding would be listed once per
+# worktree, under a path that exists on one machine -- and the freshness check
+# would then read the committed catalogue as stale in every clone but that one.
 script_list() {
     ( cd "$repo_root" && find . -name '*.sh' -type f \
         -not -path './benchmark/results/*' -not -path './.git/*' -not -path './.plans/*' \
+        -not -path './.claude/*' \
         -not -name 'generate-portability.sh' \
         | sed 's|^\./||' | LC_ALL=C sort )
 }
