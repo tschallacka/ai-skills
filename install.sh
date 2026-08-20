@@ -2448,10 +2448,10 @@ EOF
             printf '%s\n' SKILL.md requires.tsv
             ;;
         todo)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
             ;;
         bug-report)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md requires.tsv

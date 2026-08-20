@@ -99,6 +99,32 @@ Stamp it on every write, next to `updated_at`:
 jq --arg v "$installed" '.skill_version = $v' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
 
+### Upgrading a file an older skill wrote
+
+**There is no backwards compatibility.** A reader does not accept an older shape;
+the agent holding the file brings it up to the installed version, or rewrites it.
+
+Every version ships its own `schema.<version>.json` beside `SKILL.md`. It states
+the required and optional fields, the enums, the invariants, and — under
+`upgrade_from` — the recipe that turns each named predecessor into it. So when the
+recorded version differs from the installed one:
+
+```sh
+jq -r '"required: \(.item.required | join(", "))",
+       "enums:    \(.item.fields.status.enum | join("/"))",
+       "upgrades from: \(.upgrade_from | keys | join(", ") | if . == "" then "nothing" else . end)"' \
+   "$skill_dir/schema.$installed.json"
+jq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
+   "$skill_dir/schema.$installed.json"
+```
+
+If `upgrade_from` names the recorded version, run its steps: they are written to be
+run, not read. If it does not — or no `schema.<recorded>.json` exists to diff
+against — rewrite the file from the current schema rather than guessing at the
+difference. A register is cheap to rebuild from its own contents and expensive to
+half-migrate. Either way the last step is the same: stamp the installed version, so
+the next reader sees a current file rather than repeating this.
+
 Only `id`, `title`, `status` and `priority` are required. A task with no priority
 cannot be placed in the queue, which is the queue's only job.
 

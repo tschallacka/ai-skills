@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deterministic, repeatable test runner for the whole repo.
 #
-# Runs every test under planning/tests/ and benchmark/planning/tests/ in a
+# Runs every test under tests/, planning/tests/ and benchmark/planning/tests/ in a
 # fixed sorted order, each under the resource-limited wrapper, and reports a
 # stable summary. The order and per-test result are the same on every run on
 # the same host, so CI or a maintainer sees identical output.
@@ -65,6 +65,7 @@ discover() {
 }
 
 suites=(
+    tests
     planning/tests
     benchmark/planning/tests
 )
