@@ -42,6 +42,7 @@ planning/PACKAGE-MANIFEST.txt	PACKAGE-MANIFEST.txt	W20	review-approved	backup-th
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 planning/scripts/add-coverage.sh	scripts/add-coverage.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-adversarial-finding.sh	scripts/add-adversarial-finding.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/add-fix-claim.sh	scripts/add-fix-claim.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-goal.sh	scripts/add-goal.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-ui-story.sh	scripts/add-ui-story.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-work-unit.sh	scripts/add-work-unit.sh	installer	review-approved	backup-then-replace	false
@@ -110,6 +111,7 @@ planning/tests/test-progress-bar-shape.sh	tests/test-progress-bar-shape.sh	insta
 planning/tests/test-stale-sweep.sh	tests/test-stale-sweep.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-adversarial-review-sources.sh	tests/test-adversarial-review-sources.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-adversarial-review-cycles.sh	tests/test-adversarial-review-cycles.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-add-fix-claim.sh	tests/test-add-fix-claim.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-coverage-gaps.sh	tests/test-coverage-gaps.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-flag-coverage.sh	tests/test-flag-coverage.sh	installer	review-approved	backup-then-replace	false

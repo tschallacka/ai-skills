@@ -905,8 +905,12 @@ records `minted_by` (the session that minted; override with `MINTED_BY`), and
 `verify-fix-keys.sh --claimed-by <session>` fails when the claiming session is
 the minting session (self-certification).
 
-The fixer records which key each fix used in `fixes.md` as tab-separated claim
-lines (`finding_id \t work_unit \t key`, one per gated pair). The approval gate
+The fixer records which key each fix used with `add-fix-claim.sh <plan>
+--finding AR-NN --work-unit WNN --key <hex>`, one call per gated pair. It writes
+the tab-separated claim line (`finding_id \t work_unit \t key`) into `fixes.md`,
+refuses a pair the review does not gate and a key that is not in
+`fix-keys.json`, and never derives a key — that needs the minting session's
+secret, and a fixer that could read it could mint its own. The approval gate
 runs `verify-fix-keys.sh --claimed-by "${CLAIMED_BY:-<the minting session>}"`
 before `--review-status approved` flips the verdict: every gated pair must be
 claimed with a matching key by a session that is not the minting one, so export
@@ -1264,6 +1268,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --file review.csv      # rewrite the Findings table from a CSV file
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table under Cycle 7; refused (73) if Cycle 7 already holds other findings
 "$PLANNING_SKILL_DIR/scripts/mint-fix-keys.sh" <plan-directory>                                     # (re)derive per-(finding,work-unit) fix keys into fix-keys.json
+"$PLANNING_SKILL_DIR/scripts/add-fix-claim.sh" <plan-directory> --finding <AR-NN> --work-unit <WNN> --key <hex>   # record one fix-key claim in fixes.md
 "$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; self-certification fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed

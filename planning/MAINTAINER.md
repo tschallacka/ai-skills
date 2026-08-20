@@ -145,6 +145,13 @@ the maintainer must behave going forward.
   requirement for both minting and verification, refused with exit 69.
 - `ensure_session_secret` is the production creation path for the session
   secret; tests seed the secret directory themselves.
+- `add-fix-claim.sh` is the only writer of `fixes.md`, which had five readers
+  and none. It gates on the same Findings table `mint-fix-keys.sh` and
+  `verify-fix-keys.sh` read, so a claim it accepts is a claim the verifier
+  gates; reading `fix-keys.json` for the pair list instead would let the three
+  disagree. It checks the key by membership in `fix-keys.json`, never by
+  derivation: derivation needs the session secret, and a fixer able to read that
+  secret could mint its own keys.
 
 ### 2.9 Per-role reader composition
 - `role-context.sh` (persona scope) and `plan-context.sh` (bounded plan content)

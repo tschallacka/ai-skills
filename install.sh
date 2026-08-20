@@ -2297,6 +2297,7 @@ tests/test-progress-bar-shape.sh
 tests/test-stale-sweep.sh
 tests/test-adversarial-review-sources.sh
 tests/test-adversarial-review-cycles.sh
+tests/test-add-fix-claim.sh
 tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh
@@ -2311,6 +2312,7 @@ roles/cleanup.md
 roles/VOICES.md
 scripts/add-coverage.sh
 scripts/add-adversarial-finding.sh
+scripts/add-fix-claim.sh
 scripts/add-goal.sh
 scripts/add-ui-story.sh
 scripts/add-work-unit.sh
