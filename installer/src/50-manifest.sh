@@ -10,14 +10,18 @@
 # must run before any of them is installed. A register written by a skill records
 # this value, so a reader can compare it against the installed skill and see that
 # an upgrade happened.
-version_marker_content() {
-    local package_version=''
+package_version() {
+    local version=''
     if [ -f "$SOURCE_ROOT/package.json" ]; then
-        package_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
             "$SOURCE_ROOT/package.json" | head -1)"
     fi
+    printf '%s' "${version:-unknown}"
+}
+
+version_marker_content() {
     printf 'format=ai-skills-version-1\n'
-    printf 'package_version=%s\n' "${package_version:-unknown}"
+    printf 'package_version=%s\n' "$(package_version)"
     printf 'source_version=%s\n' "$SOURCE_VERSION"
     printf 'source_ref=%s\n' "$REPO_REF"
 }
@@ -184,11 +188,8 @@ EOF
         brainstorm)
             printf '%s\n' SKILL.md requires.tsv
             ;;
-        todo)
-            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
-            ;;
-        bug-report)
-            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
+        todo | bug-report)
+            printf '%s\n' SKILL.md requires.tsv "schema.$(package_version).json"
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md requires.tsv

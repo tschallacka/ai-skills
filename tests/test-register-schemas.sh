@@ -46,8 +46,18 @@ for skill in todo bug-report; do
 
     # The installer has to hand the schema over, or the agent that needs it never
     # sees one. skill_files() is the single list the manifest is built from.
-    t_assert_eq "$skill: the installer ships the schema file" \
-        "$(grep -c "schema\.$package_version\.json" "$repo_root/installer/src/50-manifest.sh")" '2'
+    # The manifest derives the schema filename from package.json, so grepping the
+    # generated installer for a literal proves nothing. Install the skill and look
+    # at what arrived -- the only thing the agent reading the schema depends on.
+    installed="$work/installed-$skill"
+    "$BASH" "$repo_root/install.sh" --skill "$skill" --target "$installed" --yes >/dev/null 2>&1 \
+        || t_fail "$skill: the installer refused to install it"
+    [ -f "$installed/$skill/schema.$package_version.json" ] \
+        || t_fail "$skill: installing it did not deliver schema.$package_version.json (got: $(ls "$installed/$skill" | tr '\n' ' '))"
+    t_assert_eq "$skill: the delivered schema matches the source" \
+        "$(cmp -s "$schema" "$installed/$skill/schema.$package_version.json" && printf same)" 'same'
+    t_assert_eq "$skill: the install records the version the schema is named for" \
+        "$(sed -n 's/^package_version=//p' "$installed/$skill/.version")" "$package_version"
 
     example="$work/$skill-example.json"
     skill_example "$skill" > "$example"
