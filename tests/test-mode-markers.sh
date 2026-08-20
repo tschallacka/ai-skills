@@ -56,8 +56,10 @@ for skill in "${SKILL_NAMES[@]}"; do
     skill_files "$skill" | sed "s|^|$skill/|" >> "$work/listed"
 done
 sort -o "$work/listed" "$work/listed"
+# A positive control on the comparison set itself: an empty list would make the
+# MODE cross-check below pass for every file in the repository.
 t_assert_eq 'the installer lists files to compare against' \
-    "$([ "$(grep -c . "$work/listed")" -gt 100 ] && printf many)" 'many'
+    "$([ "$(grep -c . "$work/listed")" -gt 50 ] && printf many)" 'many'
 
 # A file that cannot carry a comment, or must not: its bytes are the test input,
 # or the format has no comment syntax. These are declared by skill_files() alone.

@@ -36,3 +36,4 @@ benchmark/results/*/current/
 
 # Agent worktrees live here; they are copies of the tree, not sources.
 .claude/
+dist/

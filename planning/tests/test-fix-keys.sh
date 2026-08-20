@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"

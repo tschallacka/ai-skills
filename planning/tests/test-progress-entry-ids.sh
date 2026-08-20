@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-progress-entry-ids.sh — both readers serve the plan tracker and a goal's
 # tracker, under the same ids.
 #

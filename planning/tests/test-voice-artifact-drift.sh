@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # Voice-artifact drift test.
 #
 # Asserts the per-role voice document (planning/roles/VOICES.md) stays aligned

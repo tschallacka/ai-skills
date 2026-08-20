@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-adversarial-review-sources.sh — the three-way CSV source selection in
 # update-adversarial-review.sh, and which source it is allowed to consume.
 #

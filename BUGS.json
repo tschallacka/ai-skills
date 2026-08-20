@@ -6,9 +6,9 @@
     {
       "id": "B1",
       "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
+      "status": "not-a-defect",
+      "severity": "cosmetic",
+      "priority": "low",
       "parent": null,
       "reproduce": "bash install.sh --skill todo --skill bug-report --target /tmp/two --yes; ls /tmp/two",
       "observed": "Selected skills: bug-report — and only bug-report is installed. Reversing the two flags installs only todo. No warning either way.",
@@ -20,11 +20,11 @@
         "installer/src/05-config.sh"
       ],
       "fix": null,
-      "verification": null,
+      "verification": "README.md:133-135 documents it: \"--skill takes one selection... Repeating the flag does not accumulate; the last one wins\", and --skill todo,bug-report installs both. Verified: Selected skills: todo bug-report, both directories written. The behaviour matches its documentation, so it is not a defect.",
       "found_by": "installing the two register skills for the user in one command",
-      "notes": "The help text says --skill <name>, singular, so a reader could call this by design. It is still a defect: SELECTED_SKILLS is an array and 40-selection.sh already de-duplicates into it, so accumulating costs nothing and the singular form was never enforced with a refusal.",
+      "notes": "Recorded from the install itself without reading the flag documentation first. The residual objection -- that silently discarding a supplied argument is worse than refusing it -- is a design preference, not a defect, and belongs in TODO.json.",
       "created_at": "2026-08-20T15:44:50Z",
-      "updated_at": "2026-08-20T15:44:50Z"
+      "updated_at": "2026-08-20T16:03:14Z"
     }
   ]
 }

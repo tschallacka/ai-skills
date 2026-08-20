@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-lib-table.sh — the table functions, each sourced on its own.
 #
 # The unit layer. The CSV renderer has six distinct refusals and one of them --

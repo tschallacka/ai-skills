@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-csv-table-errors.sh — plan_render_csv_table says which CSV problem it
 # found, and where.
 #

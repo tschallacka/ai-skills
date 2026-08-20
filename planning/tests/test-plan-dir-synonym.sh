@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-plan-dir-synonym.sh — every helper that takes a plan directory accepts
 # --plan-dir, and the two forms do the same thing.
 #

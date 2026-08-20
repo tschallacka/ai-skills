@@ -59,33 +59,17 @@ unshipped_reason() { # <skill> <path> → prints the reason, or nothing
         project-specificies/*-deviations.md)
             printf 'an example of the format, specific to this repo\n' ;;
         *)
-            # Everything else has to be named in the ratchet file, which is where
-            # a decision that has not been made yet is parked.
-            grep -qx "$2" "$ratchet" 2>/dev/null \
-                && printf 'listed in %s pending a ship-or-not decision\n' "${ratchet##*/}" ;;
+            # Nothing else is exempt. Every file in a skill directory is in the
+            # prod arm of skill_files() or its dev arm, so one in neither is a
+            # packaging omission, not a decision still to be made.
+            : ;;
     esac
 }
-
-# The ratchet may only shrink: an entry leaves it by being registered for
-# shipping. Comments and blanks are not entries.
-ratchet="$repo_root/installer/unshipped-planning-files.txt"
-[ -f "$ratchet" ] || t_fail "the unshipped register is missing: $ratchet"
-ratchet_entries="$(grep -v '^#' "$ratchet" | grep -c . || true)"
-t_assert_eq 'the unshipped register still holds entries' \
-    "$([ "$ratchet_entries" -gt 0 ] && printf nonempty)" 'nonempty'
-# A stale entry is as bad as a missing one: it says a decision is pending about a
-# file that no longer exists, and it would mask a real omission if the name came
-# back for something else.
-stale=''
-while IFS= read -r entry; do
-    [ -n "$entry" ] || continue
-    [ -e "$repo_root/planning/$entry" ] || stale="$stale $entry"
-done < <(grep -v '^#' "$ratchet" | grep .)
-t_assert_eq 'every entry in the unshipped register still exists' "${stale# }" ''
 
 total_listed=0
 for skill in "${SKILL_NAMES[@]}"; do
     skill_files "$skill" | sort > "$work/listed"
+    skill_files "$skill" dev | sort > "$work/listed_dev"
     ( cd "$repo_root/$skill" && git ls-files | sort ) > "$work/tracked"
 
     listed_count="$(grep -c . < "$work/listed" || true)"
@@ -106,23 +90,27 @@ for skill in "${SKILL_NAMES[@]}"; do
         [ -e "$repo_root/$skill/$path" ] || absent="$absent $path"
     done < "$work/listed"
     t_assert_eq "$skill: every file skill_files() promises exists on disk" "${absent# }" ''
-
-    # Anything tracked but unlisted must have a reason, and the reason is printed
-    # with the failure so the next reader knows which of the two to fix.
+    # The dev arm is inclusive, so between them the two arms must account for
+    # every tracked file. A file in neither is one no install can deliver.
     unexplained=''
     while IFS= read -r path; do
         [ -n "$path" ] || continue
+        grep -qx "$path" "$work/listed_dev" && continue
         [ -n "$(unshipped_reason "$skill" "$path")" ] || unexplained="$unexplained $path"
     done < <(comm -13 "$work/listed" "$work/tracked")
-    t_assert_eq "$skill: every tracked file either ships or has a stated reason not to" \
+    t_assert_eq "$skill: the two arms account for every tracked file" \
         "${unexplained# }" ''
+    # And dev has to be a superset, or calling it inclusive is not true.
+    t_assert_eq "$skill: the dev arm contains the whole prod arm" \
+        "$(comm -23 "$work/listed" "$work/listed_dev" | tr '\n' ' ')" ''
 done
 
 # The counts are a second control: a case arm that stopped matching would drop a
 # skill's whole list, and each per-skill check above would still pass vacuously
 # were it not for the guard, so pin the total the manifest is expected to carry.
 t_assert_eq 'the manifest lists the expected number of files in total' \
-    "$([ "$total_listed" -ge 150 ] && printf 'at least 150')" 'at least 150'
+    "$([ "$total_listed" -ge 90 ] && printf 'at least 90')" 'at least 90'
+
 
 # ── the exemptions are exemptions, not a blanket ────────────────────────────
 # A rule that matched everything would make the check above meaningless.

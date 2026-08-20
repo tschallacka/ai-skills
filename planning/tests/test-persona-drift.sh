@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # Persona drift guard.
 #
 # Asserts the persona system stays in sync across three sources of truth:

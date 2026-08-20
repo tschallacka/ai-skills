@@ -37,7 +37,7 @@ cli_install_skill() {
             collision=1
             [ -L "$destination_file" ] && unsafe_collision=1
         fi
-    done < <(skill_files "$CLI_SKILL")
+    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
     if [ -e "$TARGET_SELECTION/$CLI_SKILL/.version" ] || [ -L "$TARGET_SELECTION/$CLI_SKILL/.version" ]; then
         printf 'Collision: %s\n' "$TARGET_SELECTION/$CLI_SKILL/.version" >&2
         collision=1
@@ -56,7 +56,7 @@ cli_install_skill() {
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
-    done < <(skill_files "$CLI_SKILL")
+    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }

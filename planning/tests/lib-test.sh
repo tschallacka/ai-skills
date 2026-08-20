@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # lib-test — portability shims for the test suites.
 #
 # Usage: sourced by a test, never executed.

@@ -36,6 +36,8 @@ RUNTIME_BLOCKED_SKILLS=""
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
+PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
+
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
@@ -106,6 +108,8 @@ Usage: install.sh [options]
 Interactive by default. Options are useful for automation:
   --all                    Install or update all skills
   --skill <name>           Install or update one skill
+  --package prod|dev       prod (default) installs what an end user needs;
+                           dev adds the files only a maintainer does
   --target <path>          Install into one skill root without prompting
   --yes                    Accept replacements; an edited file is still backed up  
   --help                   Show this help

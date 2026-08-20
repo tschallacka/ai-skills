@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-self-hosted-plan.sh — a plan authored entirely through this skill's own
 # helpers still validates.
 #

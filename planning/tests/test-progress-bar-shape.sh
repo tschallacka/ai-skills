@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # Progress-bar shape contract test.
 #
 # Every Markdown file that renders a progress bar under the plans root must be

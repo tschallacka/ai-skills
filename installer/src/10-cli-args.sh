@@ -60,6 +60,21 @@ while [ "$#" -gt 0 ]; do
             SKILL_SELECTION="$2"
             shift 2
             ;;
+        --package)
+            [ "$#" -ge 2 ] || die "--package needs prod or dev"
+            case "$2" in
+                prod|dev) PACKAGE_SELECTION="$2" ;;
+                *) die "--package must be prod or dev, not $2" ;;
+            esac
+            shift 2
+            ;;
+        --package=*)
+            case "${1#--package=}" in
+                prod|dev) PACKAGE_SELECTION="${1#--package=}" ;;
+                *) die "--package must be prod or dev, not ${1#--package=}" ;;
+            esac
+            shift
+            ;;
         --target)
             [ "$#" -ge 2 ] || die "--target needs a directory"
             TARGET_SELECTION="$2"

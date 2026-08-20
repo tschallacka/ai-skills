@@ -102,7 +102,7 @@ install_skill() {
     local managed_version_transition=0
     local files
 
-    files="$(skill_files "$skill")"
+    files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$skill" "$relative")"

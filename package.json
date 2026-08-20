@@ -18,6 +18,7 @@
   },
   "files": [
     "install.sh",
+    "install-ui.sh",
     "planning",
     "project-specificies",
     "resource-limited-testing",
@@ -26,7 +27,14 @@
     "bug-report",
     "post-implementation-review",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!planning/tests/**",
+    "!planning/scripts/lib/**",
+    "!planning/scripts/build-plan-libs.sh",
+    "!planning/ARCHITECTURE.md",
+    "!planning/MAINTAINER.md",
+    "!planning/PACKAGE-MAP.tsv",
+    "!project-specificies/*-deviations.md"
   ],
   "engines": {
     "node": ">=14"

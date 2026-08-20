@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # Supervision-frame test.
 #
 # Asserts the bounded supervision-frame emitter (planning/scripts/

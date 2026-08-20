@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-sha256-fallbacks.sh — every branch of the SHA-256 tool chain agrees.
 #
 # `context_hash_stdin` and `context_hash_file` try sha256sum, then shasum, then

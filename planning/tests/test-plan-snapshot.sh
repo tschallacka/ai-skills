@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: PROD
+# MODE: DEV
 # test-plan-snapshot.sh — the pre-mutation git snapshot fires in every layout
 # whose repository the skill owns, and stays out of the user's own repository.
 #
