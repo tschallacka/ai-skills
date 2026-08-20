@@ -322,6 +322,22 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# --replace collapses every row carrying the same outcome, so it discards rows a
+# person wrote. Reporting only "Replaced coverage for WNN" loses which ones --
+# the same class as the cascade notice below.
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W01 'first' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W02 'second' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W03 'third' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W01 'collapsed' --replace \
+    >/dev/null 2>"$temporary_root/coverage-collapse.log"
+for dropped in W02 W03; do
+    grep -Fq "dropped duplicate coverage row" "$temporary_root/coverage-collapse.log" \
+        || { echo 'add-coverage --replace collapsed rows without reporting them.' >&2; exit 1; }
+    grep -Fq "work units $dropped" "$temporary_root/coverage-collapse.log" \
+        || { printf 'the collapse notice did not name the dropped row for %s:\n' "$dropped" >&2
+             cat "$temporary_root/coverage-collapse.log" >&2; exit 1; }
+done
+
 # P2-2: removal refuses to cascade dependency pruning without --confirm-cascade.
 if "$script_dir/remove-work-unit.sh" "$plan_dir" W01 >"$temporary_root/cascade-refused.log" 2>&1; then
     echo 'Removal with dependents unexpectedly passed without --confirm-cascade.' >&2

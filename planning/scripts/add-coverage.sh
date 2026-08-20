@@ -76,8 +76,12 @@ if [ "$replace_mode" = true ]; then
         }
         /^\|/ && cell($2) == wanted {
             # Collapse every row with this outcome into one replacement at the
-            # position of the first match; drop later duplicates.
+            # position of the first match; drop later duplicates. Each dropped
+            # row is named on stderr: it carried work units a person chose, and
+            # collapsing three rows into one while reporting only "Replaced"
+            # loses that silently.
             if (!found) { print row; found = 1 }
+            else { printf "dropped duplicate coverage row for outcome %s: work units %s\n", wanted, cell($3) > "/dev/stderr" }
             next
         }
         { print }

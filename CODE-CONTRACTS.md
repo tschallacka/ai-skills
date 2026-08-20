@@ -202,6 +202,31 @@ names the file it replaced so the loss is visible rather than silent.
 silently; an edit outside a work tree is preserved; an edit inside one is
 reported, not backed up).
 
+## 9a. A helper that discards content names what it discarded
+
+An operation that removes something a person wrote reports each item on stderr,
+as a fact after the removal, not a count and not a prediction.
+
+| helper | what it discards | what it says |
+|---|---|---|
+| `plan-reconcile-lib.sh` | a coverage row that empties | `row dropped`, per row |
+| `remove-work-unit.sh --confirm-cascade` | Depends-on edges | one line per pruned edge, plus the restore remedy |
+| `add-coverage.sh --replace` | rows sharing the outcome | one line per dropped row, naming its work units |
+
+**Cost:** `--confirm-cascade` pruned dependency edges with only `--help`
+mentioning it; the reviewer who reported it said a notice would have caught the
+finding at the moment it was created. `add-coverage.sh --replace` collapsed three
+rows into one and reported `Replaced coverage for W04`, so two rows of a person's
+work vanished with nothing naming them.
+
+State it as a fact after the change, not before: a notice printed ahead of the
+mutation is a promise that a later failure turns into a lie.
+
+**Enforced** by `test-plan-commands.sh` for the cascade and the coverage
+collapse. The remaining mutating helpers are not swept yet: `update-work-unit.sh`
+names the fields it changed but not their previous values, and
+`update-adversarial-review.sh` archives a finding set rather than dropping it.
+
 ## 10. A new file under `planning/` ships only if it is registered
 
 Three rows plus a rebuild: `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
