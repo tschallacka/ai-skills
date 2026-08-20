@@ -27,6 +27,7 @@ impression.
       "title": "The first finding of every review cycle becomes the table header",
       "status": "fixed",
       "severity": "blocking",
+      "priority": "urgent",
       "parent": null,
       "reproduce": "printf 'AR-41,First,Do it,resolved,W01\\nAR-42,Second,Do it,resolved,W02\\n' | update-adversarial-review.sh <plan>",
       "observed": "AR-41 rendered as the header row with |---| beneath it; AR-42 the only data row.",
@@ -36,7 +37,9 @@ impression.
       "fix": "ea29673 — the caller prepends the header row; the library contract is unchanged.",
       "verification": "Two findings in, both present as data rows, header restored. Mutation-tested by removing the prepend.",
       "found_by": "reviewer subagent, cycle 12",
-      "notes": "Five related tests passed while this was broken: none asserted the header exists."
+      "notes": "Five related tests passed while this was broken: none asserted the header exists.",
+      "created_at": "2026-08-20T07:41:03Z",
+      "updated_at": "2026-08-20T08:02:55Z"
     }
   ]
 }
@@ -47,7 +50,10 @@ impression.
 | `id` | short stable handle, referenced from commits and conversations |
 | `title` | the defect in one line, stated as what goes wrong |
 | `status` | `reported`, `confirmed`, `fixed`, `not-a-defect`, `wont-fix`, `obsolete` |
-| `severity` | `blocking`, `major`, `minor`, `cosmetic` |
+| `severity` | `blocking`, `major`, `minor`, `cosmetic`. How bad it is when it happens |
+| `priority` | `urgent`, `high`, `normal`, `low`, `someday`. When it gets fixed, which is a separate judgement: a cosmetic defect on the page every user sees can outrank a blocking one behind a flag nobody has enabled |
+| `created_at` | when it was first recorded, ISO 8601 UTC |
+| `updated_at` | when anything on it last changed. Set it on every write, or the field lies |
 | `parent` | a defect this is a facet of, or `null`. Sub-entries let one root cause carry several observed failures |
 | `reproduce` | the command or steps. Runnable, not described |
 | `observed` | what actually happened, quoted from the output |
@@ -59,15 +65,16 @@ impression.
 | `found_by` | who or what found it: a test, a reviewer, a user report |
 | `notes` | anything a future reader needs, especially why it went unnoticed |
 
-`reproduce`, `observed` and `expected` are required from the moment an entry
-exists. `mechanism`, `fix` and `verification` fill in as it progresses.
+`reproduce`, `observed`, `expected`, `severity` and `priority` are required from
+the moment an entry exists. `mechanism`, `fix` and `verification` fill in as it progresses.
 
 ## Recording one
 
 ```sh
-jq '.bugs += [{
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg now "$now" '.bugs += [{
       "id": "B12", "title": "A colonless heading silently ignores a rename",
-      "status": "confirmed", "severity": "minor", "parent": null,
+      "status": "confirmed", "severity": "minor", "priority": "normal", "parent": null,
       "reproduce": "printf \\"# NoColon\\\\n\\" > d.md; plan_replace_title d.md New; head -1 d.md",
       "observed": "# NoColon, and exit 0.",
       "expected": "Either the heading is rewritten, or the call refuses.",
@@ -75,12 +82,14 @@ jq '.bugs += [{
       "surfaces": ["planning/scripts/lib/document/plan_replace_title.sh"],
       "fix": null, "verification": null,
       "found_by": "unit test written against the function alone",
-      "notes": null
+      "notes": null,
+      "created_at": $now, "updated_at": $now
     }]' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
 ```
 
 Write to a temp file and rename. `jq ... BUGS.json > BUGS.json` truncates the
-file before `jq` reads it.
+file before `jq` reads it. `date -u +%Y-%m-%dT%H:%M:%SZ` is the one spelling that
+works on both GNU and BSD date.
 
 ## Closing one
 
@@ -88,11 +97,18 @@ A fix and its verification land together. A `fixed` entry with no `verification`
 is a claim that the defect is gone.
 
 ```sh
-jq '(.bugs[] | select(.id == "B12") | .status) = "fixed"
-  | (.bugs[] | select(.id == "B12") | .fix) = "a1b2c3d — refuses a heading it cannot rewrite"
-  | (.bugs[] | select(.id == "B12") | .verification) = "Reproduction now exits 65; mutation removing the guard fails the test"' \
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg id B12 --arg now "$now" '
+    (.bugs[] | select(.id == $id) | .status) = "fixed"
+  | (.bugs[] | select(.id == $id) | .fix) = "a1b2c3d — refuses a heading it cannot rewrite"
+  | (.bugs[] | select(.id == $id) | .verification) = "Reproduction now exits 65; mutation removing the guard fails the test"
+  | (.bugs[] | select(.id == $id) | .updated_at) = $now' \
   BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
 ```
+
+**Every write sets `updated_at`**, including a priority change. A timestamp
+maintained only sometimes is worse than none: a reader cannot tell a quiet entry
+from a stale field.
 
 **`not-a-defect` is a real outcome, and worth as much as a fix.** Set it with the
 reasoning in `verification`, so the next person who trips over the same behaviour
@@ -108,28 +124,35 @@ The register, worst first, grouped by status:
 jq -r '
   def glyph: {reported:"💤", confirmed:"⛔", fixed:"✅",
               "not-a-defect":"✔️", "wont-fix":"🚫", obsolete:"🚫"}[.status] // "❔";
-  def rank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity] // 4;
+  def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
   def render($parent; $depth):
-    ([.bugs[] | select(.parent == $parent)] | sort_by(rank))[] as $bug
+    ([.bugs[] | select(.parent == $parent)] | sort_by(prank, srank, .id))[] as $bug
     | ("  " * $depth) + ($bug | glyph) + " " + $bug.id
-      + "  [" + ($bug.severity // "?") + "]  " + $bug.title,
+      + "  [" + ($bug.priority // "?") + "/" + ($bug.severity // "?") + "]  " + $bug.title,
       render($bug.id; $depth + 1);
   render(null; 0)' BUGS.json
 ```
 
 ```
-⛔ B12  [blocking]  A colonless heading silently ignores a rename
-  ✅ B12a  [minor]  The same shape in the goal writer
-✅ B7   [blocking]  The first finding of every review cycle becomes the table header
-✔️ B3   [minor]  --in review uses a retired vocabulary
+✅ B7    [urgent/blocking]  The first finding of every review cycle becomes the table header
+⛔ B12   [high/minor]       A colonless heading silently ignores a rename
+  ✅ B12a  [normal/minor]     The same shape in the goal writer
+✔️ B3    [someday/minor]    --in review uses a retired vocabulary
 ```
+
+Priority first, then severity, then id. The pairing is deliberate: a reader needs
+both to judge an entry, and seeing them together is what stops a blocking defect
+nobody can reach outranking a cosmetic one on every screen.
 
 What is open and confirmed, which is the work queue:
 
 ```sh
-jq -r '[.bugs[] | select(.status == "reported" or .status == "confirmed")]
-       | sort_by({blocking:0, major:1, minor:2, cosmetic:3}[.severity] // 4)[]
-       | "\(.severity | ascii_upcase)\t\(.id)\t\(.title)"' BUGS.json \
+jq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
+  [.bugs[] | select(.status == "reported" or .status == "confirmed")]
+  | sort_by(prank, srank, .id)[]
+  | "\(.priority)\t\(.severity)\t\(.id)\t\(.title)"' BUGS.json \
   | column -t -s "$(printf '\t')"
 ```
 
@@ -173,8 +196,24 @@ A severity roll-up of what is still open:
 
 ```sh
 jq -r '[.bugs[] | select(.status == "reported" or .status == "confirmed")]
-       | group_by(.severity)[] | "\(.[0].severity): \(length)  \(map(.id) | join(" "))"' BUGS.json
+       | group_by(.priority)[] | "\(.[0].priority): \(length)  \(map(.id) | join(" "))"' BUGS.json
 ```
+
+## Keeping the file in priority order
+
+The renders sort, so the file's order never changes an answer. Sorting the file
+itself is for the human reading a diff: a new urgent entry appearing at the top is
+visible, and appended at the bottom it is not.
+
+```sh
+jq 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+    def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
+    .bugs |= sort_by(prank, srank, .id)' \
+  BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
+```
+
+Run it after adding entries. It is a pure reordering: nothing but the sequence of
+the array changes, so a diff shows only movement.
 
 ## Rules that keep it honest
 
@@ -209,6 +248,10 @@ findings="$(jq -r '
              | "\(.id) has an unknown status: \(.status)"),
     (.bugs[] | select(.severity | IN("blocking","major","minor","cosmetic") | not)
              | "\(.id) has an unknown severity: \(.severity)"),
+    (.bugs[] | select(.priority | IN("urgent","high","normal","low","someday") | not)
+             | "\(.id) has an unknown priority: \(.priority)"),
+    (.bugs[] | select(.created_at == null or .updated_at == null)
+             | "\(.id) is missing a timestamp"),
     (.bugs[] | select(.reproduce == null or .reproduce == "") | "\(.id) has no reproduction"),
     (.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
              | "\(.id) is fixed with no verification")

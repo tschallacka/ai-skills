@@ -25,21 +25,27 @@ characters a reader treats as syntax. Query it, never scrape it.
       "id": "T1",
       "title": "Split the oversized library",
       "status": "partly",
+      "priority": "high",
       "parent": null,
       "detail": "One file holds 47 functions against a 500-line cap. Split by concern, not by line count.",
       "note": "Two of four groups done.",
       "blocked_on": null,
-      "refs": ["planning/scripts/plan-document-lib.sh"]
+      "refs": ["planning/scripts/plan-document-lib.sh"],
+      "created_at": "2026-08-19T21:04:11Z",
+      "updated_at": "2026-08-20T09:12:40Z"
     },
     {
       "id": "T1a",
       "title": "Extract the progress group",
       "status": "done",
+      "priority": "normal",
       "parent": "T1",
       "detail": "Six functions: percent, bar, icon, status label, objective, reminder.",
       "note": "a284423",
       "blocked_on": null,
-      "refs": []
+      "refs": [],
+      "created_at": "2026-08-19T21:04:11Z",
+      "updated_at": "2026-08-20T08:31:02Z"
     }
   ]
 }
@@ -55,8 +61,16 @@ characters a reader treats as syntax. Query it, never scrape it.
 | `note` | where it got to: a commit, a decision, a measurement, a reason for dropping it |
 | `blocked_on` | who or what must move first. Set it and set `status` to `blocked` |
 | `refs` | files or documents whoever picks it up will need |
+| `priority` | `urgent`, `high`, `normal`, `low`, `someday`. What order the work happens in, which is not the same as how big it is |
+| `created_at` | when it was first recorded, ISO 8601 UTC |
+| `updated_at` | when anything on it last changed. Set it on every write, or the field lies |
 
-Only `id`, `title` and `status` are required.
+Only `id`, `title`, `status` and `priority` are required. A task with no priority
+cannot be placed in the queue, which is the queue's only job.
+
+**Priority is not size and not severity.** It answers "what next", so it is
+allowed to change without the task changing. `someday` is honest and useful: it
+says recorded, not forgotten, and not now.
 
 **Flat list, `parent` pointer.** Not nested arrays: appending a sub-task is one
 object at the end of the list, with no walk to find its place and no rewrite of a
@@ -67,24 +81,34 @@ parent. The tree is reconstructed on read, which is `jq`'s job.
 Order carries no meaning, so append and stop thinking about it.
 
 ```sh
-jq '.tasks += [{
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg now "$now" '.tasks += [{
       "id": "T9", "title": "Move the artifact map into the coupling registry",
-      "status": "open", "parent": null,
+      "status": "open", "priority": "normal", "parent": null,
       "detail": "Some couplings live only in prose, where nothing can read them.",
-      "note": null, "blocked_on": null, "refs": ["MAINTAINER.md"]
+      "note": null, "blocked_on": null, "refs": ["MAINTAINER.md"],
+      "created_at": $now, "updated_at": $now
     }]' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
+
+`date -u +%Y-%m-%dT%H:%M:%SZ` is the one spelling that works on both GNU and BSD
+date. `date -Iseconds` is GNU-only and `date -j` is BSD-only.
 
 A sub-task is the same call with `parent` set:
 
 ```sh
-jq '.tasks += [{
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg now "$now" '.tasks += [{
       "id": "T9a", "title": "Move the four generated-artifact rows",
-      "status": "open", "parent": "T9",
+      "status": "open", "priority": "high", "parent": "T9",
       "detail": "The generated files and their builders, which change together.",
-      "note": null, "blocked_on": null, "refs": []
+      "note": null, "blocked_on": null, "refs": [],
+      "created_at": $now, "updated_at": $now
     }]' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
+
+A sub-task carries its own priority. A high-priority sub-task under a low-priority
+parent is normal: it is how "one part of this matters now" gets recorded.
 
 **Write to a temp file and rename.** `jq ... TODO.json > TODO.json` truncates the
 file before `jq` reads it, and the queue is gone.
@@ -94,8 +118,23 @@ file before `jq` reads it, and the queue is gone.
 Set the status and say where it got to, in one call.
 
 ```sh
-jq '(.tasks[] | select(.id == "T9a") | .status) = "done"
-  | (.tasks[] | select(.id == "T9a") | .note) = "a1b2c3d, four rows moved"' \
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg id T9a --arg now "$now" '
+  (.tasks[] | select(.id == $id) | .status) = "done"
+  | (.tasks[] | select(.id == $id) | .note) = "a1b2c3d, four rows moved"
+  | (.tasks[] | select(.id == $id) | .updated_at) = $now' \
+  TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
+```
+
+**Every write sets `updated_at`.** A timestamp that is only sometimes maintained
+is worse than none, because a reader cannot tell a quiet task from a stale field.
+Changing a priority counts as a write:
+
+```sh
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq --arg id T9 --arg now "$now" '
+  (.tasks[] | select(.id == $id) | .priority) = "urgent"
+  | (.tasks[] | select(.id == $id) | .updated_at) = $now' \
   TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
 
@@ -123,21 +162,27 @@ The whole queue as an indented tree:
 jq -r '
   def glyph: {open:"💤", partly:"⏳", blocked:"⛔", decided:"📌",
               done:"✅", dropped:"✔️", obsolete:"🚫"}[.status] // "❔";
+  def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def render($parent; $depth):
-    (.tasks[] | select(.parent == $parent)) as $task
-    | ("  " * $depth) + ($task | glyph) + " " + $task.id + "  " + $task.title,
+    ([.tasks[] | select(.parent == $parent)] | sort_by(rank, .id))[] as $task
+    | ("  " * $depth) + ($task | glyph) + " " + $task.id
+      + "  [" + ($task.priority // "?") + "]  " + $task.title,
       render($task.id; $depth + 1);
   render(null; 0)' TODO.json
 ```
 
 ```
-⏳ T1  Split the oversized library
-  ✅ T1a  Extract the progress group
-  💤 T1b  Extract the table group
-⛔ T7  Push the branch and read the macOS legs
-📌 T8  Keep the current gate rather than promoting it
-🚫 T9  Move the artifact map into the coupling registry
+⛔ T7  [urgent]   Push the branch and read the macOS legs
+⏳ T1  [high]     Split the oversized library
+  💤 T1b  [high]     Extract the table group
+  ✅ T1a  [normal]   Extract the progress group
+📌 T8  [normal]   Keep the current gate rather than promoting it
+🚫 T9  [someday]  Move the artifact map into the coupling registry
 ```
+
+Sorted by priority at every level, siblings included, then by id so the order is
+stable between runs. A high-priority sub-task rises above its siblings without
+moving out from under its parent.
 
 | glyph | status | means |
 |---|---|---|
@@ -153,8 +198,11 @@ jq -r '
 What is live, one line each:
 
 ```sh
-jq -r '.tasks[] | select(.status == "open" or .status == "partly" or .status == "blocked")
-       | "\(.id)\t\(.status)\t\(.title)"' TODO.json | column -t -s "$(printf '\t')"
+jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  [.tasks[] | select(.status == "open" or .status == "partly" or .status == "blocked")]
+  | sort_by(rank, .id)[]
+  | "\(.priority)\t\(.id)\t\(.status)\t\(.title)"' TODO.json \
+  | column -t -s "$(printf '\t')"
 ```
 
 Where things stand, for "what is left":
@@ -167,13 +215,22 @@ jq -r '.tasks | group_by(.status)[]
 Ready to start — open, with nothing open beneath it:
 
 ```sh
-jq -r '.tasks as $all | $all[] | . as $task
-  | select(.status == "open")
-  | select([$all[] | select(.parent == $task.id and .status != "done")] | length == 0)
-  | "\(.id)  \(.title)"' TODO.json
+jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  .tasks as $all
+  | [ $all[] | . as $task
+      | select(.status == "open")
+      | select([$all[] | select(.parent == $task.id and .status != "done")] | length == 0) ]
+  | sort_by(rank, .id)[]
+  | "\(.priority)\t\(.id)\t\(.title)"' TODO.json | column -t -s "$(printf '\t')"
 ```
 
-`. as $task` is load-bearing. Inside the inner `select`, `.id` is the inner
+Sorted by priority, so the first line is what to pick up.
+
+Two details that are load-bearing. `. as $task`, because inside the inner
+`select` a bare `.id` is the inner task's id, so `.parent == .id` is never true
+and the filter passes everything. And `.priority // ""` inside the rank map,
+because `{...}[null]` is a jq error rather than a miss: one row without a
+priority would otherwise kill the whole render. Inside the inner `select`, `.id` is the inner
 task's id, so `.parent == .id` compares each task's parent to its own id, is
 never true, and the filter silently passes everything.
 
@@ -197,6 +254,20 @@ jq -r '.tasks[] | select(.status == "blocked")
        | "\(.id)  \(.title)\n    waiting on: \(.blocked_on // "unrecorded")"' TODO.json
 ```
 
+## Keeping the file in priority order
+
+The renders sort, so the file's order never changes an answer. Sorting the file
+itself is for the human reading a diff: a new urgent task appearing at the top is
+visible, appended at the bottom it is not.
+
+```sh
+jq 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+    .tasks |= sort_by(rank, .id)' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
+```
+
+Run it after adding tasks. A pure reordering: only the sequence of the array
+changes, so a diff shows movement and nothing else.
+
 ## Rules that keep it usable
 
 **Re-read before reporting status.** The file is the state. A summary in the
@@ -211,6 +282,10 @@ choice gets relitigated.
 
 **Name who is blocking, not that it is blocked.** `blocked_on: "the maintainer"`
 or `blocked_on: "the macOS CI run"` is actionable; `blocked` alone is not.
+
+**Priority is a judgement you are allowed to revise.** Re-prioritising is a
+write like any other: set the new value and stamp `updated_at`. A queue whose
+priorities never move is a queue nobody is reading.
 
 **Do not delete a task.** Close it as `done`, `dropped` or `obsolete` with a
 reason. A deleted task takes its reasoning with it.
