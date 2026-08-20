@@ -15,13 +15,17 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
+# A finding no longer stops the run: this file used a byte-identical copy of
+# the library's reporter that exited on the first one, so a broken subject
+# reported one failure and hid the rest.
+fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-report17-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail() {
-    echo "FAIL: $*" >&2
-    exit 1
-}
 
 # ---- defect B: every paragraph of a multi-paragraph companion is labeled ----
 goal="$temporary_root/pb-goal"
@@ -138,4 +142,4 @@ if grep -q 'unregistered command literal' "$log"; then
     fail "false-positive command literal: $(grep 'unregistered' "$log")"
 fi
 
-echo 'report 17 regressions: PASS'
+t_end

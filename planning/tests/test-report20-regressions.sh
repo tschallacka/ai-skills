@@ -20,13 +20,17 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
+# A finding no longer stops the run: this file used a byte-identical copy of
+# the library's reporter that exited on the first one, so a broken subject
+# reported one failure and hid the rest.
+fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-report20-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail() {
-    echo "FAIL: $*" >&2
-    exit 1
-}
 
 # A checkout-shaped tree: the plan lives under .plans/, vendor/ next to it,
 # so relative paths resolve exactly as they do when validating a real plan.
@@ -113,4 +117,4 @@ grep -Fq "unregistered command literal 'sudo apt install -y php-cli'" "$temporar
 grep -Fq "unregistered command literal 'pytest --forked'" "$temporary_root/v3.log" \
     || fail 'unregistered variant of a registered tool not WARNed'
 
-echo 'report 20/21 regressions: PASS'
+t_end

@@ -12,13 +12,17 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
+# A finding no longer stops the run: this file used a byte-identical copy of
+# the library's reporter that exited on the first one, so a broken subject
+# reported one failure and hid the rest.
+fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-report18-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-fail() {
-    echo "FAIL: $*" >&2
-    exit 1
-}
 
 # ---- §2: four helper-built units get 9.1, 9.2, 9.3, 9.4 ----
 plan_units="$temporary_root/units"
@@ -113,4 +117,4 @@ if "$script_dir/update-plan-content.sh" -sp "$plan_next" 00-g/01-step-s-testing 
     fail 'far-out paragraph on a companion was silently created'
 fi
 
-echo 'report 18 regressions: PASS'
+t_end
