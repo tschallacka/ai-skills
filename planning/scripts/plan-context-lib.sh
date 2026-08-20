@@ -139,8 +139,33 @@ context_resolve_document() {
             [ -n "${goal:-}" ] && [ -n "${step:-}" ] || { context_die "not-found: work unit $unit"; return; }
             printf '%s/%s/steps/%s.md\n' "$plan_dir" "$goal" "$step"
             ;;
-        *) context_die "usage: unsupported entry id: $document_id" ;;
+        *) context_unsupported_id "$document_id" ;;
     esac
+}
+
+# An unsupported id is a dead end unless the message says what to use instead.
+# A reviewer asked for `progress:<goal>` -- the real id is `goal-progress:<goal>`
+# -- and read "unsupported entry id" as meaning per-goal progress trackers could
+# not be served at all, so they went unreviewed. The near miss is worth naming:
+# `goal-progress` ends with the prefix that was tried.
+context_unsupported_id() {
+    local given="$1" prefix rest kind suggestion=""
+    case "$given" in
+        *:*)
+            prefix="${given%%:*}"; rest="${given#*:}"
+            for kind in goal goal-progress step unit; do
+                [ "$kind" != "$prefix" ] || continue
+                case "$kind" in
+                    *"$prefix"|"$prefix"*) suggestion="$kind:$rest"; break ;;
+                esac
+            done
+            ;;
+    esac
+    if [ -n "$suggestion" ]; then
+        context_die "usage: unsupported entry id: $given -- did you mean $suggestion? Run plan-context.sh with no arguments for the full id list."
+        return
+    fi
+    context_die "usage: unsupported entry id: $given -- valid ids are plan, inventory, progress, adversarial-review, coverage, stories, bugs, fixes, fix-keys, approval, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:WNN"
 }
 
 context_entry_id() {
@@ -148,7 +173,7 @@ context_entry_id() {
         plan|goal:*|goal-progress:*|step:*|unit:W*|inventory|progress|adversarial-review)
             printf '%s\n' "$1" ;;
         coverage|stories|bugs|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
-        *) context_die "usage: unsupported entry id: $1" ;;
+        *) context_unsupported_id "$1" ;;
     esac
 }
 
