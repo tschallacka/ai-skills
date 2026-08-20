@@ -40,7 +40,7 @@ esac
 isolated_path() { # <tool>...
     local bin="$work/bin.$1" tool resolved
     rm -rf "$bin"; mkdir -p "$bin"
-    for tool in bash sh awk sed grep cat env printf dirname basename mktemp rm ls "$@"; do
+    for tool in sh awk sed grep cat env printf dirname basename mktemp rm ls "$@"; do
         resolved="$(command -v "$tool" 2>/dev/null)" || continue
         ln -sf "$resolved" "$bin/$tool"
     done
@@ -51,9 +51,9 @@ hash_with() { # <function> <tool> [argument]
     local function_name="$1" tool="$2" argument="${3:-}" bin
     bin="$(isolated_path "$tool")"
     if [ "$function_name" = context_hash_stdin ]; then
-        env -i PATH="$bin" bash -c "source '$lib'; context_hash_stdin" < "$payload" 2>&1
+        env -i PATH="$bin" "$BASH" -c "source '$lib'; context_hash_stdin" < "$payload" 2>&1
     else
-        env -i PATH="$bin" bash -c "source '$lib'; context_hash_file '$argument'" 2>&1
+        env -i PATH="$bin" "$BASH" -c "source '$lib'; context_hash_file '$argument'" 2>&1
     fi
 }
 
@@ -77,7 +77,7 @@ done
 # ---- and with none of the three, it refuses by name ------------------------
 bin_none="$(isolated_path true)"
 rc=0
-refusal="$(env -i PATH="$bin_none" bash -c "source '$lib'; context_hash_stdin" < "$payload" 2>&1)" || rc=$?
+refusal="$(env -i PATH="$bin_none" "$BASH" -c "source '$lib'; context_hash_stdin" < "$payload" 2>&1)" || rc=$?
 [ "$rc" -ne 0 ] || t_fail 'the chain returned success with no hash tool available'
 case "$refusal" in
     *'No SHA-256 command available'*) ;;

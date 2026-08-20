@@ -46,6 +46,8 @@ in_allowlist() {
         ./planning/scripts/plan-env.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:sha256-tool) return 0 ;;
+        # This test forces each branch of the chain, so it has to name all three.
+        ./planning/tests/test-sha256-fallbacks.sh:sha256-tool) return 0 ;;
         ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
         ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
