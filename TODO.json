@@ -95,6 +95,23 @@
       "updated_at": "2026-08-20T14:53:12Z"
     },
     {
+      "id": "T25",
+      "title": "Decide which of the 42 unshipped planning files belong in an install",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "skill_files() ships 35 planning tests and not the other 35, plus 7 fixtures. The split is historical: both halves compute the repo root the same way and both reach outside the skill directory, so no property sorts them. Until it is decided, installer/unshipped-planning-files.txt parks them and the manifest test keeps the list from growing by accident.",
+      "note": "Found by tests/test-skill-files-manifest.sh the moment it was written. My first attempt to classify them automatically -- a test that reaches outside planning/ cannot run from an install -- was unsound: 23 of the 35 shipped tests match it too.",
+      "blocked_on": "a maintainer decision on what an installed planning skill should be able to test",
+      "refs": [
+        "installer/unshipped-planning-files.txt",
+        "tests/test-skill-files-manifest.sh",
+        "planning/MAINTAINER.md"
+      ],
+      "created_at": "2026-08-20T15:31:12Z",
+      "updated_at": "2026-08-20T15:31:12Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "partly",

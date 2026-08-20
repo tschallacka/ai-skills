@@ -16,3 +16,7 @@ planning/scripts/plan-map-lib.sh	warn	the hex key encoding must keep AR-01 disti
 benchmark/planning/case/start-worker.sh	warn	a byte-identical copy is placed in each generated case	
 CODE-STYLE.md	warn	rules here are asserted by the suite; a new rule needs an assertion or an explicit note that it is a review item	
 planning/MAINTAINER.md	warn	the artifact map must still describe the tree	
+installer/src/50-manifest.sh	fail	the file list must name files that exist and cover every shipped file	bash tests/test-skill-files-manifest.sh
+installer/unshipped-planning-files.txt	fail	a planning file outside the installer list must be parked here deliberately	bash tests/test-skill-files-manifest.sh
+todo/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh
+bug-report/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh

@@ -12,7 +12,9 @@
     "ai-skills-install": "install.sh"
   },
   "scripts": {
-    "install-skills": "./install.sh"
+    "install-skills": "./install.sh",
+    "prepack": "tests/test-skill-files-manifest.sh && tests/test-register-schemas.sh",
+    "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [
     "install.sh",
