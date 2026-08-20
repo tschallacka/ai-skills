@@ -3022,7 +3022,7 @@ planning_permission_step() {
     if confirm "Create $plans as the global plans directory?"; then
         mkdir -p "$plans" && echo "  Created $plans" >&2
     fi
-    if confirm "Grant the selected agents read/write on $plans and $agent_tmp, and allow them to execute the planning shell scripts? (Each edited config is backed up as .bak.timestamp)"; then
+    if confirm "Grant the selected agents read/write on $plans and $agent_tmp, and allow them to execute the planning shell scripts? (Each edited config is backed up beside itself, unless git already tracks it)"; then
         for root in "${SELECTED_TARGET_PATHS[@]}"; do
             kind="$(agent_kind_for_root "$root")"
             scripts="${root%/}/planning/scripts"
