@@ -262,14 +262,20 @@ context_build_index() {
             goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
             printf 'step:%s/%s\t%s\tstep\t%s\n' "$goal" "$step" "$file" "$(context_hash_file "$file")"
         done
-        plan_inventory_rows "$plan_dir/work-unit-inventory.md" |
-            while IFS= read -r row; do
-                plan_inventory_split "$row"
-                file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
-                [ -f "$file" ] || continue
-                printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
-                    "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
-            done
+        # Optional, like every other document below: a plan gets its inventory
+        # after its description, and a snapshot of the early state is valid.
+        # An `if` rather than `[ -f ... ] &&`: a failing AND-list is only safe
+        # while it is not the last statement of its body.
+        if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+            plan_inventory_rows "$plan_dir/work-unit-inventory.md" |
+                while IFS= read -r row; do
+                    plan_inventory_split "$row"
+                    file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
+                    [ -f "$file" ] || continue
+                    printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
+                        "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
+                done
+        fi
         for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md \
                         fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
             extra_file="$plan_dir/${extra_id#*:}"

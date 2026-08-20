@@ -65,7 +65,13 @@ function cell(v) {
 
 # The one awk invocation that knows the inventory's field numbers. An empty
 # <id> emits every row.
+# A missing inventory is refused here rather than left to awk. Bare awk writes
+# its own message and exits 2, and whether that aborted the caller depended on
+# the bash running it: `plan-context.sh init` on a plan with no inventory exited
+# 2 under bash 5.3 and 0 under bash 3.2, publishing a snapshot either way.
 plan_inventory_scan() {
+    [ -f "$1" ] || plan_inventory_die \
+        "work-unit inventory not found: $1 -- create it with create-work-unit-inventory.sh, or skip the read when the plan has no inventory yet" 66
     awk -F'|' -v wanted="$2" "$plan_inventory_awk_program" "$1"
 }
 
