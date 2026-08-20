@@ -127,9 +127,9 @@ if [ -n "$new_description" ]; then
     # rather than silently skipped, because a missing blurb is itself a finding.
     goal_file="$plan_dir/$plan_inventory_goal/goal.md"
     if [ -f "$goal_file" ]; then
-        goal_tmp="${goal_file}.tmp.$$"
         goal_status=0
-        plan_register_temp_file "$goal_tmp"
+        goal_rendered="$(mktemp "${TMPDIR:-/tmp}/goal-blurb.XXXXXX")"
+        plan_register_temp_file "$goal_rendered"
         awk -v wanted="$unit" -v desc="$new_description" '
             $0 ~ "^`" wanted "`" {
                 printf "`%s` — %s\n", wanted, desc
@@ -141,11 +141,12 @@ if [ -n "$new_description" ]; then
         # `|| goal_status=$?`, not a bare call: under set -e the awk exit that
         # signals "no blurb here" would abort the script with a raw 9, after the
         # inventory row had already been rewritten.
-        ' "$goal_file" > "$goal_tmp" || goal_status=$?
+        ' "$goal_file" > "$goal_rendered" || goal_status=$?
         if [ "$goal_status" -eq 0 ]; then
-            mv "$goal_tmp" "$goal_file"
+            plan_atomic_write "$goal_file" < "$goal_rendered"
+            rm -f "$goal_rendered"
         else
-            rm -f "$goal_tmp"
+            rm -f "$goal_rendered"
             printf '%s: %s has no `%s` blurb under "## Owned work units"; the description was not synced there\n' \
                 "${0##*/}" "${goal_file##*/}" "$unit" >&2
         fi

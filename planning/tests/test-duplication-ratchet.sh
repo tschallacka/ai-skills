@@ -37,6 +37,20 @@ check_cap() {
 check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
     "$( { grep -ho '\.tmp\.\$\$' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
+# Tests that do not source lib-test.sh, and so cannot record a finding that
+# survives a command substitution. Six of them kept a byte-identical copy of the
+# library's reporter that exited on the first finding; that count is now zero,
+# but "a reporter whose body exits" needs brace matching to count and
+# CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. The
+# library-source count is the countable precondition for accumulation, so it is
+# what this caps.
+#
+# Counted with grep -L over planning/tests, not the scripts directory the other
+# rows use. `fail() { t_fail "$*"; }` shims are deliberate and must not count:
+# 32 tests have one, and they are how the call sites stayed unchanged.
+check_cap 'tests not sourcing lib-test.sh' 7 \
+    "$( { grep -L 'lib-test\.sh' "$root"/tests/test-*.sh || true; } | wc -l | tr -d ' ')"
+
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
 # now owns the work-unit rows; the remainder are other tables plus the two
 # inventory rewriters, and the floor is 1 (the helper's own parser).
