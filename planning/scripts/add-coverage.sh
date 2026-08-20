@@ -96,8 +96,18 @@ else
     ' "$inventory" > "$temporary_file" || plan_die "Inventory has no Work units section"
 fi
 mv "$temporary_file" "$inventory"
+record_id="$(awk -v wanted="$outcome" '
+    BEGIN { FS = "|" }
+    function cell(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v }
+    /^## Work units$/ { exit }
+    /^\|/ && $2 !~ /Required outcome/ && $2 !~ /^-+$/ {
+        row++
+        if (cell($2) == wanted && found == 0) found = row
+    }
+    END { if (found > 0) printf "coverage:%02d\n", found; else exit 1 }
+' "$inventory")" || plan_die "Coverage row was written but could not be located"
 if [ "$replace_mode" = true ]; then
-    printf 'Replaced coverage for %s\n' "$work_units"
+    printf 'Replaced coverage for %s (%s)\n' "$work_units" "$record_id"
 else
-    printf 'Added coverage for %s\n' "$work_units"
+    printf 'Added coverage for %s (%s)\n' "$work_units" "$record_id"
 fi

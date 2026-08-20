@@ -95,6 +95,7 @@ check_pair create-work-unit-inventory 'rm -f work-unit-inventory.md' create-work
 check_pair create-ui-validation - create-ui-validation.sh 'http://localhost:8080'
 check_pair add-ui-story "$ui_ready" add-ui-story.sh --id US-01 --persona 'a returning user' \
     --actions 'open the dashboard' --interaction 'click the refresh control' --expected 'it renders' --work-units W01
+check_pair add-ui-story-links "$story_ready" add-ui-story-links.sh US-01 W02
 check_pair configure-ui-story-cache "$story_ready" configure-ui-story-cache.sh --id US-01 \
     --starting-state 'logged out' --input 'click sign in' --target 'the dashboard' \
     --readiness 'the header appears' --max-wait '10s'

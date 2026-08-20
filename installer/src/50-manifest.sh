@@ -75,6 +75,7 @@ scripts/add-adversarial-finding.sh
 scripts/add-fix-claim.sh
 scripts/add-goal.sh
 scripts/add-ui-story.sh
+scripts/add-ui-story-links.sh
 scripts/add-work-unit.sh
 scripts/configure-ui-story-cache.sh
 scripts/create-adversarial-review.sh
@@ -232,6 +233,7 @@ tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
 tests/test-context-summary-excerpt.sh
 tests/test-coverage-gaps.sh
+tests/test-create-plan-explicit-root.sh
 tests/test-csv-table-errors.sh
 tests/test-die-temp-file-cleanup.sh
 tests/test-discovery-unit-target.sh
@@ -258,6 +260,7 @@ tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
+tests/test-plan-context-arguments.sh
 tests/test-plan-context-deferred-boundary.sh
 tests/test-plan-context-optional-inventory.sh
 tests/test-plan-context-paging.sh
@@ -288,6 +291,7 @@ tests/test-sha256-fallbacks.sh
 tests/test-stale-sweep.sh
 tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
+tests/test-target-path-validation.sh
 tests/test-target-reachability-gate.sh
 tests/test-voice-artifact-drift.sh
 EOF
@@ -322,4 +326,3 @@ source_file() {
     local relative="$2"
     printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$relative"
 }
-

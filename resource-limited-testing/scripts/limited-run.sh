@@ -48,7 +48,8 @@ case "$(uname -s)" in
     Linux)
         if command -v systemd-run >/dev/null 2>&1 \
             && command -v systemctl >/dev/null 2>&1 \
-            && systemctl --user show-environment >/dev/null 2>&1; then
+            && systemctl --user show-environment >/dev/null 2>&1 \
+            && systemd-run --user --scope --quiet true >/dev/null 2>&1; then
             exec systemd-run --user --scope --quiet \
                 -p MemoryMax="$mem" \
                 -p MemorySwapMax=0 \
@@ -99,8 +100,21 @@ if ! memory_kb="$(memory_kib "$mem")"; then
 fi
 
 if ! ulimit -v "$memory_kb"; then
-    echo "Could not apply a virtual-memory limit on $(uname -s)" >&2
-    exit 69
+    current_limit="$(ulimit -v)"
+    case "$current_limit" in
+        ''|unlimited|*[!0-9]*)
+            echo "Could not apply a virtual-memory limit on $(uname -s)" >&2
+            exit 69
+            ;;
+        *)
+            if [ "$current_limit" -le "$memory_kb" ]; then
+                echo "Warning: keeping existing virtual-memory limit (${current_limit} KiB), which is no higher than requested $mem." >&2
+            else
+                echo "Could not apply a virtual-memory limit on $(uname -s)" >&2
+                exit 69
+            fi
+            ;;
+    esac
 fi
 
 exec "$@"

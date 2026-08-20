@@ -33,15 +33,32 @@ verbose=false
 # benchmark/results/<agent>/.staging/ — all three are covered below.
 run_scratch="$(mktemp -d "${TMPDIR:-/tmp}/ai-skills-tests.XXXXXX")"
 test_output="$run_scratch/test-output.txt"
+AI_SKILLS_TEST_RUN_ID="run-tests.$$.$(date -u +%s)"
+export AI_SKILLS_TEST_RUN_ID
 export TMPDIR="$run_scratch"
 export PLANNING_AGENT_TMPDIR="$run_scratch/planning-agent"
+cleanup_marked_test_roots() {
+    local scan candidate marker marker_value
+    for scan in /tmp "${TMPDIR:-}"; do
+        [ -n "$scan" ] || continue
+        [ -d "$scan" ] || continue
+        while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            marker="$candidate/.ai-skills-test-run-id"
+            [ -f "$marker" ] || continue
+            marker_value="$(sed -n '1p' "$marker")"
+            [ "$marker_value" = "$AI_SKILLS_TEST_RUN_ID" ] || continue
+            rm -rf -- "$candidate"
+        done < <(find -H "$scan" -maxdepth 1 -type d -name 't.?????' -print 2>/dev/null)
+    done
+}
 cleanup() {
+    cleanup_marked_test_roots
     rm -rf -- "$run_scratch"
-    # Each test takes a short root directly under /tmp -- lib-test.sh explains why
-    # it cannot nest under this scratch -- and removes it on exit. Deliberately
-    # not swept here: this run cannot tell its own leftovers from a concurrent
-    # run's live directories, and deleting another run's scratch is worse than
-    # leaving one behind. The CI leak scan reports them instead.
+    # Each test takes a short root directly under /tmp -- lib-test.sh explains
+    # why it cannot nest under this scratch. The run-id marker lets this cleanup
+    # remove only roots from this suite run, even if a test overwrote lib-test's
+    # EXIT trap after sourcing it.
     rm -rf -- "$repo_root/benchmark/results"/*/.staging
 }
 trap cleanup EXIT

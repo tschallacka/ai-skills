@@ -29,7 +29,7 @@ Usage:
   ${0##*/} find [--plan-dir] <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
                                     literal search; prints docid<TAB>section<TAB>excerpt per match,
                                     exits 1 on zero or multiple matches; --document scopes to one document
-                                    (plan, review, coverage, stories, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
+                                    (plan, review, coverage, stories, planning-bugs, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
                                     step:-testing id); --full disables excerpt truncation
   ${0##*/} diff [--plan-dir] <plan-directory> <git-ref> [--format text|json]
                                     lists documents changed since git-ref and the

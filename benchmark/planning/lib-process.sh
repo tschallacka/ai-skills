@@ -7,9 +7,10 @@
 #
 #   1. process_pattern           the audited process families, one ERE
 #   2. process_audit_probe       is `ps`+`setsid` present? record it before the run
-#   3. process_kill_tree         recursive TERM/KILL of one pid's descendants
-#   4. process_cleanup_on_signal INT/TERM handler; exits 130
-#   5. process_audit             post-run verdict: pass | fail | unavailable
+#   3. process registry helpers  fallback roots when setsid is unavailable
+#   4. process_kill_tree         recursive TERM/KILL of one pid's descendants
+#   5. process_cleanup_on_signal INT/TERM handler; exits 130
+#   6. process_audit             post-run verdict: pass | fail | unavailable
 #
 # `process_cleanup_on_signal` is a trap handler, so it necessarily reads the
 # caller's live state rather than arguments: the case runner owns
@@ -40,6 +41,46 @@ process_audit_probe() {
     else
         echo "unavailable:ps-and-setsid-required" > "$state_file"
     fi
+}
+
+process_registry_init() {
+    local registry="$1"
+    mkdir -p "$(dirname "$registry")"
+    : > "$registry"
+}
+
+process_registry_append() {
+    local registry="$1" role="$2" pid="$3" output="$4"
+    shift 4
+    local preview started_at
+    started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    preview="$*"
+    preview="$(printf '%s' "$preview" | tr '\t\n' '  ')"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$pid" "$$" "$started_at" "$output" "$preview" >> "$registry"
+}
+
+process_prepare_no_detach_shims() {
+    local shim_dir="$1" name
+    mkdir -p "$shim_dir"
+    for name in nohup setsid open; do
+        cat > "$shim_dir/$name" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "benchmark: detached subprocess launch is not allowed under registry isolation: ${0##*/}" >&2
+printf '%s\n' "Use a foreground command so the runner can clean up and audit descendants." >&2
+exit 78
+SHIM
+        chmod +x "$shim_dir/$name"
+    done
+}
+
+process_descendants() {
+    local pid="$1" child
+    [ "$pid" -gt 0 ] 2>/dev/null || return 0
+    while read -r child; do
+        [ -n "$child" ] || continue
+        printf '%s\n' "$child"
+        process_descendants "$child"
+    done < <(ps -eo pid=,ppid= 2>/dev/null | awk -v parent="$pid" '$2 == parent { print $1 }')
 }
 
 process_kill_tree() {
@@ -78,9 +119,30 @@ process_cleanup_on_signal() {
 # Prints pass | fail | unavailable on stdout; writes process-after.txt and, when
 # the audit ran, process-new.txt beside it.
 process_audit() {
-    local state_file="$1" group_id="$2" case_root="$3"
+    local state_file="$1" group_id="$2" case_root="$3" isolation_mode="${4:-setsid}" registry="${5:-}"
     local verdict="unavailable"
-    if [ "$(cat "$state_file")" = "available" ] && [ -n "$group_id" ]; then
+    if [ "$isolation_mode" = registry ] && [ -n "$registry" ] && [ -f "$registry" ]; then
+        : > "$case_root/process-after.txt"
+        while IFS="$(printf '\t')" read -r role pid ppid started output preview; do
+            [ -n "${pid:-}" ] || continue
+            {
+                ps -p "$pid" -o pid=,ppid=,comm=,args= 2>/dev/null || true
+                while read -r child; do
+                    [ -n "$child" ] || continue
+                    ps -p "$child" -o pid=,ppid=,comm=,args= 2>/dev/null || true
+                done <<DESCENDANTS
+$(process_descendants "$pid")
+DESCENDANTS
+            } | awk -v role="$role" 'NF { print role "\t" $0 }' >> "$case_root/process-after.txt"
+        done < "$registry"
+        awk -v pattern="$(process_pattern)" 'tolower($0) ~ pattern' "$case_root/process-after.txt" |
+            sort > "$case_root/process-new.txt" || true
+        if [ -s "$case_root/process-new.txt" ]; then
+            verdict="fail"
+        else
+            verdict="pass"
+        fi
+    elif [ "$(cat "$state_file")" = "available" ] && [ -n "$group_id" ]; then
         ps -eo pid=,ppid=,pgid=,comm=,args= |
             awk -v group="$group_id" -v pattern="$(process_pattern)" '$3 == group && tolower($0) ~ pattern' |
             sort > "$case_root/process-after.txt" || true

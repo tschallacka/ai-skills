@@ -61,6 +61,17 @@ case "$deps" in
     *) note_fail 'dependencies view did not name the row Depends-on field' ;;
 esac
 
+summary=""
+read_rc=0
+summary="$(read_unit --unit W01 --view execution-summary)" || read_rc=$?
+[ "$read_rc" -eq 0 ] || note_fail "execution-summary on a work unit exited $read_rc, want 0"
+for field in '## Execution summary' '## Inventory' '## Acceptance criteria' '## Dependencies' '## Testing' '## Status' '- File:' '- Goal:'; do
+    case "$summary" in
+        *"$field"*) ;;
+        *) note_fail "execution-summary omitted '$field'" ;;
+    esac
+done
+
 # ---- a view that cannot apply refuses, with the documented code --------------
 rc=0
 out="$(read_unit --document plan --view inventory-row)" || rc=$?
@@ -77,6 +88,22 @@ out="$(read_unit --document plan --view testing)" || rc=$?
 [ "$rc" -eq 64 ] || note_fail "testing view on a companion-less document exited $rc, want 64"
 case "$out" in
     *'cannot open'*) note_fail 'the testing refusal leaked its follow-on awk error' ;;
+esac
+
+rc=0
+out="$(read_unit --unit W01 --view full 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || note_fail "full view on a work unit exited $rc, want 0"
+case "$out" in
+    *'returned_records='*'total_records='*'truncated='*) ;;
+    *) note_fail 'text read output omitted record-count metadata' ;;
+esac
+
+rc=0
+out="$(read_unit --unit W01 --view not-a-view)" || rc=$?
+[ "$rc" -eq 64 ] || note_fail "unsupported view exited $rc, want 64"
+case "$out" in
+    *'valid views are'*'--view summary'*'--view full'*) ;;
+    *) note_fail 'unsupported-view refusal did not list valid values and recovery guidance' ;;
 esac
 
 # ---- the entry hash covers every input --------------------------------------

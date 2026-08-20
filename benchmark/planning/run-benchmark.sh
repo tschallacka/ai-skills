@@ -233,7 +233,14 @@ choose_versions() {
                 valid=0
                 break
             fi
-            if [[ ! " ${selected[*]} " =~ " ${available[$((choice - 1))]} " ]]; then
+            already_selected=0
+            for selected_tag in "${selected[@]}"; do
+                if [ "$selected_tag" = "${available[$((choice - 1))]}" ]; then
+                    already_selected=1
+                    break
+                fi
+            done
+            if [ "$already_selected" -eq 0 ]; then
                 selected+=("${available[$((choice - 1))]}")
             fi
         done

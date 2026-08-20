@@ -133,6 +133,12 @@ grep -Fqx '§ 6.2' "$plan_dir/plan-description.md"
 "$script_dir/add-ui-story.sh" "$plan_dir" US-01 'A visitor sees the initial button.' \
     'Open the page and click the visible button.' 'Mouse click on the visible button.' \
     'The requested result is visible.' W01,W02
+"$script_dir/add-ui-story-links.sh" "$plan_dir" US-01 W02 >/dev/null
+grep -Fq '| US-01 | A visitor sees the initial button. | Open the page and click the visible button. | Mouse click on the visible button. | The requested result is visible. | 💤 untested | — | W02 | `ui-story-runs/US-01.md` |' "$plan_dir/ui-user-stories.md"
+if "$script_dir/add-ui-story-links.sh" "$plan_dir" US-01 W99 >/dev/null 2>&1; then
+    echo 'add-ui-story-links accepted an unknown related work unit.' >&2
+    exit 1
+fi
 "$script_dir/configure-ui-story-cache.sh" "$plan_dir" US-01 \
     'The locally served page is open and shows its initial button.' \
     'Mouse click on the visible button.' 'The visible button.' \
@@ -522,7 +528,16 @@ printf '# Verification: verify\n\n## Automated tests\n\nRun the verifier.\n' \
 # find --in coverage scopes to the Definition-of-done coverage rows.
 "$script_dir/plan-content.sh" find "$plan_dir" 'Order history renders.' --in coverage >/dev/null
 # add-coverage --replace collapses duplicate coverage rows for the same outcome.
-"$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'first' >/dev/null 2>&1
+coverage_out="$("$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'first')"
+case "$coverage_out" in
+    *'(coverage:'*) ;;
+    *) echo 'add-coverage did not report a coverage record id.' >&2; exit 1 ;;
+esac
+context_out="$(PLANNING_CONTEXT_CACHE=1 "$script_dir/plan-context.sh" read --plan-dir "$plan_dir" --document coverage --read-only 2>&1)"
+case "$context_out" in
+    *'returned_records='*'total_records='*'truncated='*'Duplicate-proof outcome.'*) ;;
+    *) echo 'coverage read did not expose metadata and the new row.' >&2; exit 1 ;;
+esac
 "$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'second' --replace >/dev/null 2>&1
 if [ "$(grep -c '| Duplicate-proof outcome.' "$plan_dir/work-unit-inventory.md")" -ne 1 ]; then
     echo 'add-coverage --replace did not collapse duplicate coverage rows.' >&2

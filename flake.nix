@@ -148,6 +148,7 @@
             packages = [
               (pkgs.python3.withPackages (pythonPackages: [ pythonPackages.pyyaml ]))
               pkgs.jq
+              pkgs.shellcheck
             ];
           };
         });

@@ -164,6 +164,34 @@ plan_validate_dependency_graph() {
     done
 }
 
+plan_validate_inventory_target_paths() {
+    local id type file scope target
+    [ -n "${repo_root:-}" ] || return 0
+    for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
+        plan_map_load unit_type "$id" || type=""
+        type="$plan_map_value"
+        plan_map_load unit_file "$id" || file=""
+        file="$plan_map_value"
+        case "$type" in
+            discovery|verification|generated) continue ;;
+        esac
+        [ "$file" != N/A ] || continue
+        target="$repo_root/$file"
+        if [ ! -f "$target" ]; then
+            fail "$id target file does not exist under --repo-root: $file"
+            continue
+        fi
+        plan_map_load unit_scope "$id" || scope=""
+        scope="$plan_map_value"
+        case "$scope" in
+            N/A|\#*|.*) continue ;;
+        esac
+        if ! grep -F "$scope" "$target" >/dev/null 2>&1; then
+            fail "$id primary symbol or file scope was not found in $file: $scope"
+        fi
+    done
+}
+
 # Recursive: do not rename. `proof_seen` is the memo that stops it looping on a
 # cyclic graph; the caller resets it before each root query.
 depends_on() {

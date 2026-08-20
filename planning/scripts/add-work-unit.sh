@@ -8,10 +8,10 @@
 # in temp files that a single EXIT trap removes.
 #
 # Usage:
-#   add-work-unit.sh [--plan-dir] <plan-directory> --id <WNN> --type <type> --file <path|N/A> \
+#   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A> \
 #       --scope <scope> --subscope <subscope|N/A> --change <intended change> \
 #       --depends-on <WNN,…|—> --goal <NN-name> --step <NN-step-name>
-#   add-work-unit.sh [--plan-dir] <plan-directory> <WNN> <type> <file|N/A> <scope> \
+#   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> \
 #       <subscope|N/A> <intended-change> <depends-on|—> <goal-name> <step-name>
 #   add-work-unit.sh --help
 #
@@ -33,10 +33,10 @@ export LC_ALL=C
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} [--plan-dir] <plan-directory> --id <WNN> --type <type> --file <path|N/A>
+Usage: ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>
            --scope <scope> --subscope <subscope|N/A> --change <intended change>
            --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>
-       ${0##*/} [--plan-dir] <plan-directory> <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
+       ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
        ${0##*/} --help
 
 The positional form is deprecated; it is kept working for existing callers.
@@ -55,6 +55,7 @@ depends_on=""
 goal_name=""
 step_name=""
 flags_used=false
+repo_root="${PLAN_REPO_ROOT:-}"
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -68,6 +69,7 @@ while [ "$#" -gt 0 ]; do
         --depends-on) [ "$#" -ge 2 ] || usage; depends_on="$2"; flags_used=true; shift 2 ;;
         --goal) [ "$#" -ge 2 ] || usage; goal_name="$2"; flags_used=true; shift 2 ;;
         --step) [ "$#" -ge 2 ] || usage; step_name="$2"; flags_used=true; shift 2 ;;
+        --repo-root) [ "$#" -ge 2 ] || usage; repo_root="$2"; shift 2 ;;
         --) shift; break ;;
         -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
         *) positional+=("$1"); shift ;;
@@ -116,6 +118,22 @@ elif [ "$unit_type" != discovery ]; then
     [ "$unit_file" != N/A ] || plan_die "Only verification and discovery work units may use file N/A"
 fi
 [[ "$unit_file" != *'*'* && "$unit_file" != */ ]] || plan_die "File must be one concrete file, not a glob or directory"
+
+if [ -n "$repo_root" ]; then
+    [ -d "$repo_root" ] || plan_die "repository root not found: $repo_root" 66
+    case "$unit_type" in
+        discovery|verification|generated) ;;
+        *)
+            target_path="$repo_root/$unit_file"
+            [ -f "$target_path" ] || plan_die "Target file does not exist under --repo-root: $unit_file" 66
+            case "$scope" in
+                N/A|\#*|.*) ;;
+                *) grep -F "$scope" "$target_path" >/dev/null 2>&1 \
+                    || plan_die "Primary symbol or file scope was not found in $unit_file: $scope" 66 ;;
+            esac
+            ;;
+    esac
+fi
 
 inventory="$plan_dir/work-unit-inventory.md"
 if [ ! -f "$inventory" ]; then

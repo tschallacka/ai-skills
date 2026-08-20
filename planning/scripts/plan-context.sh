@@ -45,6 +45,7 @@ Valid --document IDs:
   coverage             work-unit-inventory.md     (the coverage table)
   stories              ui-user-stories.md
   bugs                 bugs.md
+  planning-bugs        planning-bugs.json
   fixes                fixes.md
   fix-keys             fix-keys.json
   approval             approval.json
@@ -54,9 +55,9 @@ Valid --document IDs:
   --unit WNN           the step a work unit maps to in work-unit-inventory.md
 
 Views: full, summary, metadata, ownership, instructions, acceptance, handoff,
-testing, dependencies, changed-documents, inventory-row, validator. Default is
+testing, dependencies, execution-summary, changed-documents, inventory-row, validator. Default is
 `full` for whole documents that are not narrative (inventory, coverage,
-adversarial-review, stories, bugs, fixes, fix-keys, approval) and `summary`
+adversarial-review, stories, bugs, planning-bugs, fixes, fix-keys, approval) and `summary`
 otherwise.
 
 Paging: a page that withholds records reports next_token; pass it back as
@@ -121,9 +122,18 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$command" ] && [ -n "$plan_dir" ] || usage
-[ -d "$plan_dir" ] || { printf 'not-found: plan directory %s\n' "$plan_dir" >&2; exit 66; }
 [[ "$max_bytes" =~ ^[1-9][0-9]*$ && "$max_records" =~ ^[1-9][0-9]*$ ]] || { printf 'usage: limits must be positive integers\n' >&2; exit 2; }
 [ "$format" = text ] || [ "$format" = json ] || { printf 'usage: unsupported format\n' >&2; exit 2; }
+[ -z "$token" ] || [[ "$token" =~ ^continue:[0-9a-f]{64}:[a-z][a-z-]*:[0-9]+$ ]] || { printf 'usage: malformed --token\n' >&2; exit 2; }
+case "$command" in
+    init) [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage ;;
+    read) [ "$document_selector_count" -eq 1 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage ;;
+    check) [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 1 ] && { [ "$refresh_selector_count" -eq 0 ] || [ "$check_mode" = entry ]; } || usage ;;
+    refresh) [ "$document_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 1 ] && { [ "$check_selector_count" -eq 0 ] || [ "$refresh_mode" = entry ]; } || usage ;;
+    checkpoint) [ "$document_selector_count" -eq 0 ] && [ "$check_selector_count" -eq 0 ] && [ "$refresh_selector_count" -eq 0 ] && [ -z "$entry_id" ] || usage ;;
+    *) usage ;;
+esac
+[ -d "$plan_dir" ] || { printf 'not-found: plan directory %s\n' "$plan_dir" >&2; exit 66; }
 
 context_init_command() {
     local result
@@ -248,7 +258,7 @@ context_page_records() {
 }
 
 context_read_command() {
-    local file file_hash content bounded start=0 emitted more page token_body token_rest
+    local file file_hash content bounded start=0 emitted more page token_body token_rest total_records truncated
     [ "$document_selector_count" -eq 1 ] || { printf 'usage: read requires exactly one --document or --unit\n' >&2; exit 2; }
     context_entry_id "$document_id" >/dev/null
     [ -n "$view" ] || view="$(context_default_view "$document_id")"
@@ -266,7 +276,6 @@ context_read_command() {
         unit:*) row_text="$(context_unit_row_text "$plan_dir" "${document_id#unit:}" || true)" ;;
     esac
     if [ -n "$token" ]; then
-        [[ "$token" =~ ^continue:[0-9a-f]{64}:[a-z][a-z-]*:[0-9]+$ ]] || { printf 'usage: malformed --token\n' >&2; exit 2; }
         # Fail closed: a cursor is only meaningful against the exact bytes and
         # view it was minted from, so resuming into shifted records is refused.
         token_body="${token#continue:}"
@@ -297,6 +306,9 @@ context_read_command() {
     page="$(context_page_records "$start" "$max_records" "$max_bytes" "$read_bounded_file" "$read_full_file")"
     emitted="${page%%$'\t'*}"
     more="${page##*$'\t'}"
+    total_records="$(wc -l < "$read_full_file" | tr -d ' ')"
+    truncated=false
+    [ "$more" -eq 0 ] || truncated=true
     context_trim_partial_utf8 "$read_bounded_file"
     # Counted from the spool, not from "$bounded": in json format that variable
     # is already the escaped one-line string, so wc -l reports 1 however many
@@ -322,11 +334,13 @@ context_read_command() {
             excerpt_json="$(printf '{"shown_lines":%s,"document_lines":%s,"complete":false,"read_all_with":"--view full"}' \
                 "$shown_lines" "$document_lines")"
         fi
-        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","content":"%s","next_token":%s,"excerpt":%s}\n' \
-            "$document_id" "$view" "$bounded" \
+        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","returned_records":%s,"total_records":%s,"truncated":%s,"content":"%s","next_token":%s,"excerpt":%s}\n' \
+            "$document_id" "$view" "$emitted" "$total_records" "$truncated" "$bounded" \
             "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')" \
             "$excerpt_json"
     else
+        printf 'entry_id=%s\nview=%s\nreturned_records=%s\ntotal_records=%s\ntruncated=%s\n' \
+            "$document_id" "$view" "$emitted" "$total_records" "$truncated" >&2
         printf '%s\n' "$bounded"
         [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
         # The summary view is a fixed excerpt of the head of the file, so it

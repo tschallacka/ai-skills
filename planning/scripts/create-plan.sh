@@ -50,7 +50,8 @@ case "$plan_arg" in
         #
         # For the common call, a path inside the plans root, this is the same
         # answer as before.
-        plans_root="$(dirname "$plan_arg")"
+        plans_root="$(dirname "$plan_dir")"
+        mkdir -p "$plans_root"
         ;;
     *)
         resolved_root="$("$script_dir/plan-root.sh" resolve "${PROJECT_DIR:-$PWD}")"
@@ -141,14 +142,10 @@ inventory="$plan_dir/work-unit-inventory.md"
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$inventory"
 plan_root=$(cd "$plan_dir" && pwd -P)
-# The plans root may not exist, and creating it here would be wrong: a plan given
-# as an explicit path sets plans_root to the global default, which this run has no
-# business bringing into being. So canonicalise it only if it is there, and
-# otherwise carry the path as given -- the comparisons below simply will not
-# match, which is the right answer for a root that holds nothing.
-#
-# `cd` into it unconditionally is what failed on a machine with no ~/.plans yet,
-# with a raw shell error and no remedy. A fresh install is exactly that machine.
+# The plans root is expected to exist here: explicit paths create their parent
+# above, and bare plan names come from plan-root.sh. Keep the fallback anyway so
+# a surprising external removal reports cleanly instead of leaking a raw cd
+# failure.
 if [ -d "$plans_root" ]; then
     plans_root_path=$(cd "$plans_root" && pwd -P)
 else

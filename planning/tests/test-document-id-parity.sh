@@ -32,11 +32,12 @@ cp -R "$fixture" "$plan"
 printf '# UI user stories\n' > "$plan/ui-user-stories.md"
 printf '# Fixes\n' > "$plan/fixes.md"
 printf '# Bugs\n' > "$plan/bugs.md"
+printf '{"bugs":[]}\n' > "$plan/planning-bugs.json"
 printf '{"minted_by":"probe"}\n' > "$plan/fix-keys.json"
 printf '{"overall_plan_approval":true}\n' > "$plan/approval.json"
 
 goal=01-lossless-finding-contract
-canonical="plan inventory coverage progress adversarial-review stories bugs fixes fix-keys approval
+canonical="plan inventory coverage progress adversarial-review stories bugs planning-bugs fixes fix-keys approval
 goal:$goal goal-progress:$goal step:$goal/01-step-preserve-finding-envelope"
 
 rejected() { # <output> -> 0 when the id was refused rather than the file missing
@@ -78,6 +79,7 @@ check_serves() { # <id> <needle>
 }
 check_serves stories '# UI user stories'
 check_serves bugs '# Bugs'
+check_serves planning-bugs '"bugs"'
 check_serves fixes '# Fixes'
 check_serves fix-keys 'minted_by'
 check_serves approval 'overall_plan_approval'
@@ -92,13 +94,17 @@ for id in fix-keys approval; do
         *'"view":"full"'*) ;;
         *) note_fail "$id did not default to the full view" ;;
     esac
+    case "$out" in
+        *'"returned_records":'*'"total_records":'*'"truncated":'*) ;;
+        *) note_fail "$id JSON read did not include record-count metadata" ;;
+    esac
 done
 
 # check must see them, or an edit to one goes unreported.
 PLANNING_CONTEXT_CACHE=1 "$scripts_dir/plan-context.sh" init --plan-dir "$plan" >/dev/null 2>&1 || true
 index="$(find "$plan/context" -name index.tsv 2>/dev/null | head -1)"
 if [ -n "$index" ]; then
-    for id in coverage stories fixes fix-keys approval; do
+    for id in coverage stories planning-bugs fixes fix-keys approval; do
         entries="$(grep -c "^$id	" "$index" || true)"
         [ "${entries:-0}" -ge 1 ] || note_fail "the context index carries no '$id' entry"
     done
@@ -113,6 +119,10 @@ rm -f "$plan/bugs.md"
 rc=0
 "$scripts_dir/plan-content.sh" get "$plan" bugs >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 66 ] || note_fail "a missing document exited $rc, want 66"
+rm -f "$plan/planning-bugs.json"
+rc=0
+"$scripts_dir/plan-content.sh" get "$plan" planning-bugs >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 66 ] || note_fail "a missing planning-bugs document exited $rc, want 66"
 rc=0
 "$scripts_dir/plan-content.sh" get "$plan" no-such-id >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 64 ] || note_fail "an unknown document id exited $rc, want 64"

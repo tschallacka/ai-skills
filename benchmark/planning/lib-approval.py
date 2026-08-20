@@ -37,6 +37,15 @@ import pathlib
 import sys
 
 
+def canonical_path_string(path):
+    """Return a stable path spelling for equality across symlinked temp roots."""
+
+    try:
+        return str(pathlib.Path(path).resolve(strict=False))
+    except (OSError, RuntimeError):
+        return str(path)
+
+
 def approval_schema_validator(approval_path, report_path):
     """Validate one reviewer approval envelope; write the schema report.
 
@@ -135,13 +144,14 @@ def select_reviewer_b_approval(reviewer_root, lifecycle_path, selection_path):
         role = event.get("protocol_role")
         if isinstance(path, str) and role in ("reviewer-a", "reviewer-b"):
             roles_by_approval[path] = role
+            roles_by_approval[canonical_path_string(path)] = role
 
     candidates = []
     unauthorized = []
     paths = sorted(reviewer_root.glob("*/plan/approval.json")) if reviewer_root.is_dir() else []
     for path in paths:
         path_string = str(path)
-        role = roles_by_approval.get(path_string)
+        role = roles_by_approval.get(path_string) or roles_by_approval.get(canonical_path_string(path))
         if role is None:
             role = "unknown"
         try:
@@ -199,7 +209,13 @@ def reviewer_b_session_binding(selection_path, lifecycle_path, current_mode, bin
         binding_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return 65
 
-    handoffs = [event for event in events if event.get("event_type") == "handoff" and event.get("protocol_role") == "reviewer-b" and event.get("approval_path") == selected]
+    selected_canonical = canonical_path_string(selected)
+    handoffs = [
+        event for event in events
+        if event.get("event_type") == "handoff"
+        and event.get("protocol_role") == "reviewer-b"
+        and canonical_path_string(event.get("approval_path", "")) == selected_canonical
+    ]
     if len(handoffs) != 1:
         result["reason_codes"] = ["REVIEWER_BINDING_MISSING_EVENT" if not handoffs else "REVIEWER_BINDING_DUPLICATE"]
         binding_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

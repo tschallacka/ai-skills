@@ -125,6 +125,7 @@ context_resolve_document() {
         coverage) printf '%s/work-unit-inventory.md\n' "$plan_dir" ;;
         stories) printf '%s/ui-user-stories.md\n' "$plan_dir" ;;
         bugs) printf '%s/bugs.md\n' "$plan_dir" ;;
+        planning-bugs) printf '%s/planning-bugs.json\n' "$plan_dir" ;;
         fixes) printf '%s/fixes.md\n' "$plan_dir" ;;
         fix-keys) printf '%s/fix-keys.json\n' "$plan_dir" ;;
         approval) printf '%s/approval.json\n' "$plan_dir" ;;
@@ -168,14 +169,14 @@ context_unsupported_id() {
         context_die "usage: unsupported entry id: $given -- did you mean $suggestion? Run plan-context.sh with no arguments for the full id list."
         return
     fi
-    context_die "usage: unsupported entry id: $given -- valid ids are plan, inventory, progress, adversarial-review, coverage, stories, bugs, fixes, fix-keys, approval, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:WNN"
+    context_die "usage: unsupported entry id: $given -- valid ids are plan, inventory, progress, adversarial-review, coverage, stories, bugs, planning-bugs, fixes, fix-keys, approval, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:WNN"
 }
 
 context_entry_id() {
     case "$1" in
         plan|goal:*|goal-progress:*|step:*|unit:W*|inventory|progress|adversarial-review)
             printf '%s\n' "$1" ;;
-        coverage|stories|bugs|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
+        coverage|stories|bugs|planning-bugs|fixes|fix-keys|approval) printf '%s\n' "$1" ;;
         *) context_unsupported_id "$1" ;;
     esac
 }
@@ -184,7 +185,7 @@ context_entry_id() {
 # review reads as a complete one, so they page rather than summarize.
 context_default_view() {
     case "$1" in
-        inventory|adversarial-review|coverage|stories|bugs|fixes|fix-keys|approval)
+        inventory|adversarial-review|coverage|stories|bugs|planning-bugs|fixes|fix-keys|approval)
             printf 'full\n' ;;
         *) printf 'summary\n' ;;
     esac
@@ -259,6 +260,25 @@ context_view_text() {
             [ -f "$companion" ] || { context_die "usage: testing view unavailable for $file"; return; }
             awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
             ;;
+        execution-summary)
+            [ -n "$row_text" ] || { context_die "usage: execution-summary view applies only to a work unit"; return; }
+            printf '## Execution summary\n'
+            sed -n '/^## Ownership$/,/^## Objective$/p; /^## Change target$/,/^## Objective$/p' "$file" | sed '$d'
+            printf '\n## Inventory\n%s\n' "$row_text"
+            printf '\n## Acceptance criteria\n'
+            awk '/^## Acceptance criteria$/{seen=1; next} seen && /^§ 6\.1$/{getline; print; exit}' "$file"
+            printf '\n## Dependencies\n'
+            awk 'tolower($0) ~ /depends on/ {print}' "$file"
+            printf '%s\n' "$row_text" | awk 'tolower($0) ~ /depends on/ {print}'
+            printf '\n## Testing\n'
+            companion="${file%.md}-testing.md"
+            if [ -f "$companion" ]; then
+                awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
+            else
+                printf 'No testing companion found for this step.\n'
+            fi
+            printf '\n## Status\nRead the owning goal progress tracker for current completion status.\n'
+            ;;
         dependencies)
             awk 'tolower($0) ~ /depends on/ {print}' "$file"
             [ -z "$row_text" ] || printf '%s\n' "$row_text" |
@@ -267,7 +287,7 @@ context_view_text() {
         ownership) sed -n '/^## Ownership$/,/^## Change target$/p' "$file" | sed '$d' ;;
         changed-documents) sed -n '1,80p' "$file" | grep -E '^(#|§ |[-*] )' | head -20 ;;
         validator) sed -n '/^## Acceptance criteria$/,/^## Handoff$/p' "$file" | head -30 ;;
-        *) context_die "usage: unsupported view: $view" ;;
+        *) context_die "usage: unsupported view: $view -- valid views are full, summary, metadata, ownership, instructions, acceptance, handoff, testing, dependencies, execution-summary, changed-documents, inventory-row, and validator. Use --view summary for a bounded overview or --view full with paging for complete content." ;;
     esac
 }
 
@@ -304,7 +324,7 @@ context_build_index() {
                         "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
                 done
         fi
-        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md \
+        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md planning-bugs:planning-bugs.json \
                         fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
             extra_file="$plan_dir/${extra_id#*:}"
             [ -f "$extra_file" ] || continue

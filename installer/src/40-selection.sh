@@ -66,9 +66,6 @@ select_targets() {
     if [ -n "$TARGET_SELECTION" ]; then
         SELECTED_TARGET_PATHS=("$TARGET_SELECTION")
         SELECTED_TARGET_NAMES=("$TARGET_SELECTION")
-        if ! contains "$TARGET_SELECTION" "${TARGET_PATHS[@]}"; then
-            save_custom_location "$TARGET_SELECTION"
-        fi
         return
     fi
 
@@ -141,4 +138,3 @@ select_targets() {
         fi
     done
 }
-

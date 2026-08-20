@@ -5,7 +5,7 @@ plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;
         adversarial-review) printf '%s\n' review ;;
-        coverage|inventory|stories|bugs|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
+        coverage|inventory|stories|bugs|planning-bugs|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
         goal-progress:*) printf '%s\n' reference ;;
         goal:*) printf '%s\n' goal ;;
         step:*)

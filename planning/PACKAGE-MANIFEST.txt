@@ -21,6 +21,7 @@ planning/scripts/add-adversarial-finding.sh	scripts/add-adversarial-finding.sh	i
 planning/scripts/add-fix-claim.sh	scripts/add-fix-claim.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-goal.sh	scripts/add-goal.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-ui-story.sh	scripts/add-ui-story.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/add-ui-story-links.sh	scripts/add-ui-story-links.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-work-unit.sh	scripts/add-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/configure-ui-story-cache.sh	scripts/configure-ui-story-cache.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/create-adversarial-review.sh	scripts/create-adversarial-review.sh	installer	review-approved	backup-then-replace	false

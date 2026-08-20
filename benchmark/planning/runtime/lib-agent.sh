@@ -98,7 +98,7 @@ _agent_capture_pgid() {
 launch_agent() {
     local mode="$1" timeout_spec="$2" output="$3"
     local -a cmd=()
-    local timeout_bin="" cwd="${AGENT_CWD:-$PWD}"
+    local timeout_bin="" cwd="${AGENT_CWD:-$PWD}" isolation_mode="$mode"
 
     if [ -z "${AGENT_ARGV[*]+set}" ] || [ "${#AGENT_ARGV[@]}" -eq 0 ]; then
         printf 'lib-agent: AGENT_ARGV is empty; call a driver agent_argv_* first\n' >&2
@@ -106,7 +106,15 @@ launch_agent() {
     fi
     [ -d "$cwd" ] || { printf 'lib-agent: agent cwd is not a directory: %s\n' "$cwd" >&2; return 66; }
 
-    if [ "$mode" = "setsid" ]; then
+    if [ "$mode" = isolated ]; then
+        if command -v setsid >/dev/null 2>&1; then
+            isolation_mode=setsid
+        else
+            isolation_mode=registry
+        fi
+    fi
+
+    if [ "$isolation_mode" = "setsid" ]; then
         # setsid and timeout are Linux/util-linux+GNU tools. Stock macOS has
         # neither; coreutils installs GNU timeout as gtimeout.
         if ! command -v setsid >/dev/null 2>&1; then
@@ -129,26 +137,34 @@ launch_agent() {
         elif command -v gtimeout >/dev/null 2>&1; then
             timeout_bin="gtimeout"
         else
-            printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
-            return 69
+            if [ "$isolation_mode" = registry ]; then
+                printf 'lib-agent: neither timeout nor gtimeout found; registry fallback cannot bound the agent to %s\n' "$timeout_spec" >&2
+            else
+                printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
+                return 69
+            fi
         fi
-        cmd+=("$timeout_bin" "$timeout_spec")
+        [ -z "$timeout_bin" ] || cmd+=("$timeout_bin" "$timeout_spec")
     fi
     cmd+=("${AGENT_ARGV[@]}")
 
     # The subshell sets the agent's cwd portably: `env -C` is GNU-only and no
     # driver flag exists for every CLI. exec keeps $! pointing at the agent.
     if [ "$output" = "-" ]; then
-        ( cd "$cwd" && exec "${cmd[@]}" ) &
+        ( cd "$cwd" && if [ "$isolation_mode" = registry ] && [ -n "${BENCHMARK_NO_DETACH_SHIM_DIR:-}" ]; then PATH="$BENCHMARK_NO_DETACH_SHIM_DIR:$PATH"; export PATH; fi; exec "${cmd[@]}" ) &
     else
-        ( cd "$cwd" && exec "${cmd[@]}" ) > "$output" 2>&1 &
+        ( cd "$cwd" && if [ "$isolation_mode" = registry ] && [ -n "${BENCHMARK_NO_DETACH_SHIM_DIR:-}" ]; then PATH="$BENCHMARK_NO_DETACH_SHIM_DIR:$PATH"; export PATH; fi; exec "${cmd[@]}" ) > "$output" 2>&1 &
     fi
     AGENT_PID="$!"
+    AGENT_ISOLATION_MODE="$isolation_mode"
+    if [ "$isolation_mode" = registry ] && [ -n "${BENCHMARK_PROCESS_REGISTRY:-}" ] && command -v process_registry_append >/dev/null 2>&1; then
+        process_registry_append "$BENCHMARK_PROCESS_REGISTRY" agent "$AGENT_PID" "$output" "${cmd[@]}"
+    fi
 
     # Polled, not read once: a not-yet-scheduled agent has no observable group,
     # and an empty AGENT_PGID silently disables the process-group kill.
     AGENT_PGID=""
-    if command -v ps >/dev/null 2>&1; then
+    if [ "$isolation_mode" = setsid ] && command -v ps >/dev/null 2>&1; then
         local attempt=0
         while [ "$attempt" -lt 20 ]; do
             AGENT_PGID="$(_agent_capture_pgid "$AGENT_PID" || true)"

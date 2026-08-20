@@ -57,6 +57,9 @@ if [ -z "${T_TMPDIR:-}" ]; then
     else
         T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")"
     fi
+    if [ -n "${AI_SKILLS_TEST_RUN_ID:-}" ]; then
+        printf '%s\n' "$AI_SKILLS_TEST_RUN_ID" > "$T_TMPDIR/.ai-skills-test-run-id"
+    fi
     export T_TMPDIR
     export TMPDIR="$T_TMPDIR"
     # Removed on any exit, including a failure: a test that leaves its root

@@ -17,6 +17,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 runner="$repo_dir/benchmark/planning/run-benchmark.sh"
 setup="$repo_dir/benchmark/planning/setup-benchmark.sh"
 runtime="$repo_dir/benchmark/planning/runtime"
+process_lib="$repo_dir/benchmark/planning/lib-process.sh"
 
 harness_sources=("$setup")
 for case_source in "$repo_dir/benchmark/planning/case"/*.sh; do
@@ -95,6 +96,9 @@ fi
 grep -Fq 'launch_agent()' "$runtime/lib-agent.sh"
 grep -Fq 'cmd+=(setsid)' "$runtime/lib-agent.sh"
 grep -Fq 'cmd+=("$timeout_bin" "$timeout_spec")' "$runtime/lib-agent.sh"
+grep -Fq 'isolation_mode=registry' "$runtime/lib-agent.sh"
+grep -Fq 'BENCHMARK_NO_DETACH_SHIM_DIR' "$runtime/lib-agent.sh"
+grep -Fq 'process_registry_append "$BENCHMARK_PROCESS_REGISTRY"' "$runtime/lib-agent.sh"
 grep -Fq 'background' "$runtime/lib-agent.sh"
 # Behavioural, not textual: this used to grep for the phrase "no setsid" in a
 # comment, so it passed on prose and failed on rewording while proving nothing.
@@ -144,16 +148,89 @@ safeguard_background_launch() {
             ;;
     esac
 )
-# setsid/timeout are Linux/util-linux+GNU tools: the launcher must refuse loudly
-# on a host without them (stock macOS has neither, and ships GNU timeout as
-# gtimeout via coreutils) rather than abort the case through set -e.
+# setsid/timeout are Linux/util-linux+GNU tools. Worker/reviewer launches use
+# isolated mode: setsid stays the strong path when present, and registry fallback
+# is used only when setsid is unavailable.
 grep -Fq 'command -v setsid' "$runtime/lib-agent.sh"
 grep -Fq 'gtimeout' "$runtime/lib-agent.sh"
+grep -Fq 'process_prepare_no_detach_shims "$BENCHMARK_NO_DETACH_SHIM_DIR"' "$repo_dir/benchmark/planning/case/start-worker.sh"
+grep -Fq 'if ! command -v setsid >/dev/null 2>&1; then' "$repo_dir/benchmark/planning/case/start-worker.sh"
+if grep -R --line-number 'os\.setsid' "$repo_dir/benchmark/planning/tests" >/dev/null 2>&1; then
+    echo 'benchmark tests reintroduced a Python fake setsid shim' >&2
+    exit 1
+fi
+# shellcheck source=../lib-process.sh
+source "$process_lib"
+registry_probe="$(mktemp -d "${TMPDIR:-/tmp}/benchmark-registry.XXXXXX")"
+registry_file="$registry_probe/process-registry.tsv"
+process_registry_init "$registry_file"
+process_registry_append "$registry_file" worker 12345 worker.jsonl codex exec --dangerously-bypass-approvals-and-sandbox
+test -s "$registry_file"
+awk -F "$(printf '\t')" '
+    $1 == "worker" && $2 == "12345" && $5 == "worker.jsonl" && $6 ~ /codex exec/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+' "$registry_file"
+
+signal_probe_child="$registry_probe/child.pid"
+"$BASH" -c '
+set -euo pipefail
+sleep 60 &
+printf "%s\n" "$!" > "$1"
+wait
+' _ "$signal_probe_child" &
+signal_probe_root="$!"
+signal_wait=0
+while [ ! -s "$signal_probe_child" ] && [ "$signal_wait" -lt 50 ]; do
+    kill -0 "$signal_probe_root" 2>/dev/null || break
+    sleep 0.1
+    signal_wait=$((signal_wait + 1))
+done
+test -s "$signal_probe_child"
+signal_probe_descendant="$(cat "$signal_probe_child")"
+if (
+    set +E
+    trap - ERR
+    PROCESS_CLEANUP_CHILD_PID="$signal_probe_root"
+    PROCESS_CLEANUP_GROUP_ID=""
+    process_cleanup_on_signal
+); then
+    signal_status=0
+else
+    signal_status="$?"
+fi
+if [ "$signal_status" -ne 130 ]; then
+    printf 'safeguards: process_cleanup_on_signal exited %s, expected 130\n' "$signal_status" >&2
+    exit 1
+fi
+wait "$signal_probe_root" 2>/dev/null || true
+signal_wait=0
+while { kill -0 "$signal_probe_root" 2>/dev/null || kill -0 "$signal_probe_descendant" 2>/dev/null; } &&
+    [ "$signal_wait" -lt 20 ]; do
+    process_kill_tree "$signal_probe_root" KILL
+    sleep 0.1
+    signal_wait=$((signal_wait + 1))
+done
+if kill -0 "$signal_probe_root" 2>/dev/null || kill -0 "$signal_probe_descendant" 2>/dev/null; then
+    printf 'safeguards: signal cleanup left registered process tree running: root=%s child=%s\n' "$signal_probe_root" "$signal_probe_descendant" >&2
+    exit 1
+fi
+
+shim_probe="$(mktemp -d "${TMPDIR:-/tmp}/benchmark-no-detach.XXXXXX")"
+process_prepare_no_detach_shims "$shim_probe"
+for detach_tool in nohup setsid open; do
+    if "$shim_probe/$detach_tool" true >/dev/null 2>"$shim_probe/$detach_tool.err"; then
+        printf 'safeguards: %s shim allowed a detached command under registry fallback\n' "$detach_tool" >&2
+        exit 1
+    fi
+    grep -Fq 'detached subprocess launch is not allowed under registry isolation' "$shim_probe/$detach_tool.err"
+done
+rm -rf "$shim_probe"
+rm -rf "$registry_probe"
 # setsid forks when it already leads a process group, so $! can be a parent that
 # exits 0 while the agent still runs; --wait keeps AGENT_EXIT the agent's.
 grep -Fq 'cmd+=(--wait)' "$runtime/lib-agent.sh"
-harness_grep 'launch_agent setsid "${WORKER_TIMEOUT:-45m}"'
-harness_grep 'launch_agent setsid "${REVIEWER_TIMEOUT:-20m}"'
+harness_grep 'launch_agent isolated "${WORKER_TIMEOUT:-45m}"'
+harness_grep 'launch_agent isolated "${REVIEWER_TIMEOUT:-20m}"'
 # The analyzer gates the batch exit code, so it carries a bound in the same
 # shape as the worker's and the reviewer's. It used to be launched with "".
 if ! grep -Fq 'launch_agent background "${ANALYZER_TIMEOUT:-30m}"' "$runner"; then

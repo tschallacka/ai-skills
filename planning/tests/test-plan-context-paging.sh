@@ -58,7 +58,7 @@ count_rows() { { grep -c "$1" "$2" || true; } | tr -d ' '; }
 # `read` writes content on stdout; a truncated page appends one
 # `next_token=<token>` line. Split them rather than grep -q (pipefail-grep-q).
 token_of() { sed -n 's/^next_token=//p' "$1"; }
-content_of() { sed '/^next_token=/d' "$1"; }
+content_of() { sed '/^next_token=/d; /^entry_id=/d; /^view=/d; /^returned_records=/d; /^total_records=/d; /^truncated=/d' "$1"; }
 
 findings=30
 plan="$tmp/plan"

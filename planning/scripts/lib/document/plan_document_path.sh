@@ -27,6 +27,9 @@ plan_document_path() {
         bugs)
             printf '%s\n' "$plan_dir/bugs.md"
             ;;
+        planning-bugs)
+            printf '%s\n' "$plan_dir/planning-bugs.json"
+            ;;
         fixes)
             printf '%s\n' "$plan_dir/fixes.md"
             ;;
@@ -60,7 +63,7 @@ plan_document_path() {
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         *)
-            plan_die "Unknown document ID: $document_id (use plan, adversarial-review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, bugs, fixes, fix-keys, or approval)"
+            plan_die "Unknown document ID: $document_id (use plan, adversarial-review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, bugs, planning-bugs, fixes, fix-keys, or approval)"
             ;;
     esac
 }

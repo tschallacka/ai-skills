@@ -85,6 +85,14 @@ START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 PROCESS_AUDIT_STATE="$CASE_ROOT/process-audit-state.txt"
 process_audit_probe "$PROCESS_AUDIT_STATE"
+BENCHMARK_PROCESS_REGISTRY="$CASE_ROOT/process-registry.tsv"
+export BENCHMARK_PROCESS_REGISTRY
+process_registry_init "$BENCHMARK_PROCESS_REGISTRY"
+if ! command -v setsid >/dev/null 2>&1; then
+    BENCHMARK_NO_DETACH_SHIM_DIR="$CASE_ROOT/no-detach-bin"
+    export BENCHMARK_NO_DETACH_SHIM_DIR
+    process_prepare_no_detach_shims "$BENCHMARK_NO_DETACH_SHIM_DIR"
+fi
 
 benchmark_basenames "$BENCH_ROOT" | LC_ALL=C sort > "$CASE_ROOT/preflight-before-worker.txt"
 progress_log "case $REVISION ($TAG): preflight ready; starting worker"
@@ -98,10 +106,11 @@ trap process_cleanup_on_signal INT TERM
 persona_bootstrap worker || exit 64
 persona_bootstrap_prompt "$BENCH_ROOT/worker-prompt.md" worker "$REPO_ROOT/planning/roles/VOICES.md" || exit 64
 agent_argv_worker "$BENCH_ROOT" "$WORKER_CAPSULE" "$BENCH_ROOT/worker-prompt.md"
-launch_agent setsid "${WORKER_TIMEOUT:-45m}" "$BENCH_ROOT/worker.jsonl"
+launch_agent isolated "${WORKER_TIMEOUT:-45m}" "$BENCH_ROOT/worker.jsonl"
 PROCESS_CLEANUP_CHILD_PID="$AGENT_PID"
 PROCESS_CLEANUP_GROUP_ID="$AGENT_PGID"
 WORKER_PROCESS_GROUP_ID="$AGENT_PGID"
+WORKER_ISOLATION_MODE="$AGENT_ISOLATION_MODE"
 wait_agent
 CODE="$AGENT_EXIT"
 progress_log "case $REVISION ($TAG): worker exited code=$CODE"
@@ -111,13 +120,16 @@ END_EPOCH="$(date -u +%s)"
 END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ELAPSED="$((END_EPOCH - START_EPOCH))"
 
-PROCESS_AUDIT="$(process_audit "$PROCESS_AUDIT_STATE" "$WORKER_PROCESS_GROUP_ID" "$CASE_ROOT")"
+PROCESS_AUDIT="$(process_audit "$PROCESS_AUDIT_STATE" "$WORKER_PROCESS_GROUP_ID" "$CASE_ROOT" "${WORKER_ISOLATION_MODE:-setsid}" "$BENCHMARK_PROCESS_REGISTRY")"
 cat > "$BENCH_ROOT/process-audit.txt" <<AUDIT
 Process audit: $PROCESS_AUDIT
-The worker ran in process group $WORKER_PROCESS_GROUP_ID.
-The audit checks only matching browser/server/driver processes still belonging
-to that worker-owned process group after completion; unrelated host processes
-and other parallel workers are excluded.
+Worker isolation mode: ${WORKER_ISOLATION_MODE:-setsid}
+The worker process group was ${WORKER_PROCESS_GROUP_ID:-unavailable}.
+When process groups are available, the audit checks only matching
+browser/server/driver processes still belonging to that worker-owned process
+group. When setsid is unavailable, benchmark registry fallback records launched
+agent roots, rejects known detach commands in the benchmark child PATH, and
+audits descendants that remain attached to those registered roots.
 AUDIT
 
 if [ ! -s "$BENCH_ROOT/session-id.txt" ]; then
@@ -365,7 +377,7 @@ PROMPT
     else
         agent_argv_reviewer "$workspace" "$capsule" "$prompt"
     fi
-    launch_agent setsid "${REVIEWER_TIMEOUT:-20m}" "$output"
+    launch_agent isolated "${REVIEWER_TIMEOUT:-20m}" "$output"
     wait_agent
     code="$AGENT_EXIT"
     if [ "$role" = B ]; then

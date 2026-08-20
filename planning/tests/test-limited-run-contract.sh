@@ -91,6 +91,33 @@ case "$RUN_ERR" in
     *) note_fail "an unsupported OS did not say so: $RUN_ERR" ;;
 esac
 
+# ── Linux nested caps: an existing lower ulimit is already protective ────────
+cat >"$stub_bin/true" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$stub_bin/true"
+if (ulimit -v 262144) >/dev/null 2>&1; then
+    nested_bin="$temporary_root/nested-bin"
+    mkdir -p "$nested_bin"
+    cp "$stub_bin/uname" "$nested_bin/uname"
+    cp "$stub_bin/true" "$nested_bin/true"
+    ln -s "$BASH" "$nested_bin/bash"
+    set +e
+    (
+        ulimit -v 262144
+        STUB_LOG="$temporary_root/log" STUB_UNAME_S=Linux PATH="$nested_bin" \
+            "$BASH" "$wrapper" 512M 400 -- true
+    ) >"$temporary_root/nested.out" 2>"$temporary_root/nested.err"
+    RUN_RC=$?
+    set -e
+    [ "$RUN_RC" -eq 0 ] || note_fail "a nested lower Linux ulimit exited $RUN_RC, expected 0"
+    case "$(cat "$temporary_root/nested.err")" in
+        *'keeping existing virtual-memory limit'*) ;;
+        *) note_fail "a nested lower Linux ulimit did not report the kept cap: $(cat "$temporary_root/nested.err")" ;;
+    esac
+fi
+
 # ── Darwin selects memlimit when it is present ───────────────────────────────
 run_wrapper Darwin 'nice memlimit' 2G 400 -- my-command --flag
 [ "$RUN_RC" -eq 0 ] || note_fail "the memlimit path exited $RUN_RC, expected 0"

@@ -11,6 +11,7 @@ t_trap_assertions
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 env_tool="$repo_dir/planning/scripts/plan-env.sh"
 tmp="$(mktemp -d)"
+tmp="$(cd "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 
 plans_root="$tmp/plans"

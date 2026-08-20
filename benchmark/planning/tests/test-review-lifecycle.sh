@@ -470,7 +470,31 @@ cat > "$fake_bin/codex" <<'EOF'
 #!/usr/bin/env bash
 exec "$FAKE_WORKER_COMMAND" "$@"
 EOF
-chmod +x "$fake_bin/codex"
+cat > "$fake_bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -gt 1 ] || exit 64
+shift
+exec "$@"
+EOF
+chmod +x "$fake_bin/codex" "$fake_bin/timeout"
+no_setsid_path="$integration_root/no-setsid-path"
+mkdir -p "$no_setsid_path"
+old_ifs="$IFS"
+IFS=:
+for dir in $PATH; do
+    [ -d "$dir" ] || continue
+    for path in "$dir"/*; do
+        [ -x "$path" ] || continue
+        tool="${path##*/}"
+        case "$tool" in setsid|nohup|open) continue ;; esac
+        [ -e "$no_setsid_path/$tool" ] || ln -s "$path" "$no_setsid_path/$tool"
+    done
+done
+IFS="$old_ifs"
+for tool in codex fake-reviewer codex-worker timeout; do
+    ln -sf "$fake_bin/$tool" "$no_setsid_path/$tool"
+done
 # The run id must match UTC_TIMESTAMP-<name>, so the name is the only place
 # collision-proof entropy fits: two suite runs starting in the same second
 # otherwise derive the same RESULT_DIR and race the publication `mv`.
@@ -495,7 +519,7 @@ PY
 # the suite whose result depended on machine speed, and the only one that could
 # not run on macOS at all, where `timeout` does not exist. A hang here is a hang
 # to see, the same as in the other 79 tests, none of which are capped.
-if ! PATH="$fake_bin:$PATH" env \
+if ! PATH="$no_setsid_path" env \
     REVIEWER_COMMAND="$fake_bin/fake-reviewer" \
     REVIEWER_SESSION_ID="${run_id}-current-B-fixed" \
     REVIEWER_CAPSULE_ID="capsule-001" \
@@ -513,11 +537,24 @@ if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
     nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$fake_bin:$PATH" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$no_setsid_path" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
     cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1
 fi
+case_root="$integration_root/testing/current-$run_id"
+registry_file="$case_root/process-registry.tsv"
+test -s "$registry_file"
+awk -F "$(printf '\t')" '
+    $1 == "agent" && $2 ~ /^[0-9]+$/ && $5 ~ /worker\.jsonl$/ { worker = 1 }
+    $1 == "agent" && $2 ~ /^[0-9]+$/ && $5 ~ /reviewer\.jsonl$/ { reviewer = 1 }
+    END { exit(worker && reviewer ? 0 : 1) }
+' "$registry_file"
+test -x "$case_root/no-detach-bin/nohup"
+test -x "$case_root/no-detach-bin/setsid"
+test -x "$case_root/no-detach-bin/open"
+grep -Fq 'Worker isolation mode: registry' "$integration_root/testing/current-$run_id/workspace/process-audit.txt"
+grep -Fq 'Process audit: pass' "$integration_root/testing/current-$run_id/workspace/process-audit.txt"
 archive="$root/../results/codex/$(benchmark_result_parent current)/$run_id/current"
 for artifact in oracle-terminal-evidence.json oracle.json reviewer-state.json protocol-metadata.json reviewer-lifecycle.jsonl evaluation.md; do
     if ! test -f "$archive/$artifact"; then

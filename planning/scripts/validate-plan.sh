@@ -23,7 +23,8 @@
 #
 # Usage:
 #   validate-plan.sh [--complete] [--propagation|--no-propagation]
-#                    [--stale <file-of-phrases>|default] <plan-directory>
+#                    [--stale <file-of-phrases>|default] [--repo-root DIR]
+#                    <plan-directory>
 #   validate-plan.sh --help
 #   The plan directory may be given positionally or as --plan-dir <path>.
 #
@@ -35,7 +36,7 @@ export LC_ALL=C
 
 case "${1:-}" in
     -h|--help)
-        echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] [--plan-dir] <plan-directory>" >&2
+        echo "Usage: $(basename "$0") [--complete] [--propagation|--no-propagation] [--stale <file-of-phrases>|default] [--repo-root DIR] [--plan-dir] <plan-directory>" >&2
         exit 0
         ;;
 esac
@@ -46,6 +47,7 @@ stale_file=""
 stale_only=false
 plan_dir_only=false
 stale_requested=false
+repo_root=""
 filtered_args=()
 for arg in "$@"; do
     case "$arg" in
@@ -62,11 +64,16 @@ for arg in "$@"; do
             stale_file="${arg#--stale=}"
             stale_requested=true
             ;;
+        --repo-root) repo_root_pending=true ;;
+        --repo-root=*) repo_root="${arg#--repo-root=}" ;;
         --)
             filtered_args+=("$arg")
             ;;
         *)
-            if [ "$stale_only" = true ]; then
+            if [ "${repo_root_pending:-false}" = true ]; then
+                repo_root="$arg"
+                repo_root_pending=false
+            elif [ "$stale_only" = true ]; then
                 stale_file="$arg"
                 stale_only=false
             elif [ "$plan_dir_only" = true ]; then
@@ -87,9 +94,11 @@ elif [ "$#" -eq 2 ] && [ "$1" = '--complete' ]; then
     complete_mode=true
     plan_dir="$2"
 else
-    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>|default] [--plan-dir] <plan-directory>" >&2
+    echo "Usage: $(basename "$0") [--complete] [--propagation] [--stale <file-of-phrases>|default] [--repo-root DIR] [--plan-dir] <plan-directory>" >&2
     exit 64
 fi
+[ "${repo_root_pending:-false}" = false ] || { echo "Usage: $(basename "$0") --repo-root requires a directory" >&2; exit 64; }
+[ -z "$repo_root" ] || [ -d "$repo_root" ] || { echo "validate-plan.sh: repository root not found: $repo_root" >&2; exit 66; }
 
 inventory="$plan_dir/work-unit-inventory.md"
 errors=0
@@ -151,6 +160,7 @@ plan_validate_placeholders
 plan_validate_stale
 plan_validate_inventory
 plan_validate_dependency_graph
+plan_validate_inventory_target_paths
 plan_validate_proof_coverage
 plan_validate_ui
 plan_validate_goals
