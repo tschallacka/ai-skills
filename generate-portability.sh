@@ -15,7 +15,10 @@ export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rules="$repo_root/portability-rules.json"
-output="$repo_root/PORTABILITY.md"
+# Overridable so a test can generate two scans to temp paths and compare them.
+# Comparing against the committed file instead only answers "is it fresh",
+# which is a different question and goes stale for unrelated reasons.
+output="${PORTABILITY_OUTPUT:-$repo_root/PORTABILITY.md}"
 check_only=false
 [ "${1:-}" = "--check" ] && check_only=true
 case "${1:-}" in

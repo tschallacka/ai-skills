@@ -183,15 +183,19 @@ context_trim_partial_utf8() {
     done
 }
 
-# PORTABILITY(pattern-substitution-quote): bash 3.2 cannot parse
-# ${var//$'"'/...} and leaks quotes out of a quoted replacement, so the JSON
-# string escape runs through sed and awk instead of parameter expansion.
 # JSON forbids every character in U+0000-U+001F inside a string, so a tab or a
 # CR in a document made the whole payload unparseable -- `jq` reports "control
 # characters ... must be escaped" and reads nothing. Reachable through the
 # sanctioned writer: update-plan-content.sh -dp keeps a tab in the paragraph
 # text verbatim. Documents with no control characters take the fast path and are
 # copied through untouched.
+#
+# The marker below stays the last comment before the function: the catalogue
+# folds every comment line following a marker into that rule's reason, so a note
+# placed under it is published in PORTABILITY.md as part of the rule.
+# PORTABILITY(pattern-substitution-quote): bash 3.2 cannot parse
+# ${var//$'"'/...} and leaks quotes out of a quoted replacement, so the JSON
+# string escape runs through sed and awk instead of parameter expansion.
 context_json_escape_file() {
     sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$1" |
         awk -v sep='\\n' '

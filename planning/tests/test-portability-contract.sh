@@ -127,15 +127,29 @@ done < <(jq -r '.rules[].id' "$rules")
 # filesystem by design, so without a prune every finding is listed once per
 # worktree under a path that exists on one machine -- which made the committed
 # catalogue read as fresh here and stale in every clone.
+# Freshness of the committed file is a separate question, asked separately: it
+# goes stale whenever a *.sh change is committed without regenerating last, and
+# reporting that as pollution would be a false diagnosis of a real failure.
+"$repo_root/generate-portability.sh" --check >/dev/null 2>&1 \
+    || note_fail 'PORTABILITY.md is stale; a *.sh change was committed without regenerating the catalogue last'
+
+# Two scans to temp paths, compared with each other rather than with the
+# committed file, so the prune is tested whatever state that file is in.
+scan_without="$(mktemp "${TMPDIR:-/tmp}/portability-scan.XXXXXX")"
+scan_with="$(mktemp "${TMPDIR:-/tmp}/portability-scan.XXXXXX")"
 probe_dir="$repo_root/.claude/worktrees/probe-portability-scan/planning/scripts"
+PORTABILITY_OUTPUT="$scan_without" "$repo_root/generate-portability.sh" >/dev/null 2>&1
 mkdir -p "$probe_dir"
 printf '#!/usr/bin/env bash\ndeclare -A m\n' > "$probe_dir/probe-lib.sh"
-if "$repo_root/generate-portability.sh" --check >/dev/null 2>&1; then :; else
+PORTABILITY_OUTPUT="$scan_with" "$repo_root/generate-portability.sh" >/dev/null 2>&1
+if diff <(grep -v '^<!-- generated: ' "$scan_without") \
+        <(grep -v '^<!-- generated: ' "$scan_with") >/dev/null 2>&1; then :; else
     note_fail 'a checkout under .claude/ changed the catalogue; the scanner must prune it'
 fi
-if "$repo_root/generate-portability.sh" --check 2>/dev/null | grep -c 'probe-lib' >/dev/null 2>&1; then
+if grep -Fq 'probe-lib' "$scan_with"; then
     note_fail 'the catalogue names a file from a foreign checkout'
 fi
+rm -f "$scan_without" "$scan_with"
 rm -rf "$repo_root/.claude/worktrees/probe-portability-scan"
 
 [ "$(t_failures)" -eq 0 ] || exit 1
