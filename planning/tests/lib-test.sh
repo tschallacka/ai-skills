@@ -28,6 +28,35 @@
 # The tests run on the same bash 3.2 + BSD floor as the scripts (CI runs the
 # suite on macos), so they need the same shims. See PORTABILITY.md; the rule ids
 # in the markers below index into it.
+# Every test gets its own TMPDIR, assigned here at source time rather than in
+# t_begin: one test mktemps before calling it, and the tests using
+# t_trap_assertions never call it at all.
+#
+# Why it matters: planning_tmpdir() is "${TMPDIR:-/tmp}/planning-agent", and the
+# fix-key session secrets live under it. Two tests sharing a TMPDIR share that
+# directory, and one invalidating a session removes the other's secret. run-tests.sh
+# already gives each suite run its own root, so this closes the remaining hole --
+# a test invoked directly, which is how anyone debugs one.
+#
+# The outer leak check in run-tests.sh and in CI still scans the ambient TMPDIR,
+# so a test writing outside its own root is still caught. That is now the thing
+# worth catching: what a test writes inside its own root is scoped by definition.
+if [ -z "${T_TMPDIR:-}" ]; then
+    T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t-$(basename "${BASH_SOURCE[1]:-test}" .sh).XXXXXX")"
+    export T_TMPDIR
+    export TMPDIR="$T_TMPDIR"
+    # Removed on any exit, including a failure: a test that leaves its root
+    # behind turns a debugging session into a disk-space problem. `$$` guards
+    # against a subshell running the trap for its parent.
+    t_tmpdir_owner=$$
+    t_tmpdir_cleanup() {
+        [ "$$" = "$t_tmpdir_owner" ] || return 0
+        [ -n "${T_TMPDIR:-}" ] || return 0
+        case "$T_TMPDIR" in /tmp/*|/var/*|"${TMPDIR%/*}"/*) rm -rf -- "$T_TMPDIR" ;; esac
+    }
+    trap t_tmpdir_cleanup EXIT
+fi
+
 # No `set` here: this file is sourced, so changing the caller's shell options
 # changes the test's semantics. test-plan-context-paging.sh deliberately runs
 # without errexit because it invokes commands that exit non-zero on purpose,
