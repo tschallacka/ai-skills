@@ -116,6 +116,10 @@ planning/tests/test-stale-sweep.sh	tests/test-stale-sweep.sh	installer	review-ap
 planning/tests/test-adversarial-review-sources.sh	tests/test-adversarial-review-sources.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-adversarial-review-cycles.sh	tests/test-adversarial-review-cycles.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-add-fix-claim.sh	tests/test-add-fix-claim.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-lib-core.sh	tests/test-lib-core.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-lib-document.sh	tests/test-lib-document.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-lib-progress.sh	tests/test-lib-progress.sh	installer	review-approved	backup-then-replace	false
+planning/tests/test-lib-table.sh	tests/test-lib-table.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-fix-keys.sh	tests/test-fix-keys.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-coverage-gaps.sh	tests/test-coverage-gaps.sh	installer	review-approved	backup-then-replace	false
 planning/tests/test-flag-coverage.sh	tests/test-flag-coverage.sh	installer	review-approved	backup-then-replace	false

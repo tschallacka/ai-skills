@@ -2332,6 +2332,10 @@ tests/test-stale-sweep.sh
 tests/test-adversarial-review-sources.sh
 tests/test-adversarial-review-cycles.sh
 tests/test-add-fix-claim.sh
+tests/test-lib-core.sh
+tests/test-lib-document.sh
+tests/test-lib-progress.sh
+tests/test-lib-table.sh
 tests/test-fix-keys.sh
 tests/test-coverage-gaps.sh
 tests/test-flag-coverage.sh
