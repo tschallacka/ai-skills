@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 set -u
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

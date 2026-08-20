@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-runtime-dependencies — a shipped script that needs jq must refuse without
 # it, not quietly do less.
 #

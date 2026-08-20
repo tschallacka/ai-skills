@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # Require an input file; refuse to clobber an existing artifact. Same exit-code
 # vocabulary as plan_require_directory: 66 for "missing input", 73 for
 # "already there, not overwriting".

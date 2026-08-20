@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-mermaid-accuracy — the ARCHITECTURE mermaid diagrams may not name a
 # script, artifact, node id or function that does not exist.
 #

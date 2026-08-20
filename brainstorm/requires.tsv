@@ -1,3 +1,5 @@
+# MODE: PROD
+# PACKAGE: PROD
 # What this skill needs on the target machine at runtime, and how badly.
 #
 # installer/build.sh generates install.sh's dependency tables from every skill's

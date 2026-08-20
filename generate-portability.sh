@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # generate-portability — write PORTABILITY.md from portability-rules.json.
 #
 # Usage:

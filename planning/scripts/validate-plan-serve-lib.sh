@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-serve-lib.sh — the "the application still serves" advisory: a
 # goal that changes module state, schema, or configuration must verify the
 # running application, not just the changed artifact.

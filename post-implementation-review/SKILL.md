@@ -2,6 +2,8 @@
 name: post-implementation-review
 description: Use after an implementation that leaves potential bugs, undecided choices, or unverified risks, to offer a comprehensive after-the-fact review backed by three roles (implementer self-analysis, an independent solutions agent, and a critical-feedback agent) that ends in concrete proposed fixes. Do not use for tiny committed changes with no residual risk, or as a substitute for the planning skill's pre-implementation adversarial review.
 ---
+<!-- MODE: PROD -->
+<!-- PACKAGE: PROD -->
 
 # Post-implementation review
 

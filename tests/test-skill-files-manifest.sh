@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-skill-files-manifest.sh — skill_files() lists what the skill actually has.
 #
 # skill_files() is a hand-written list, on purpose: the planning arm is a second

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # add-fix-claim.sh — record one fix-key claim in a plan's fixes.md.
 #
 # fixes.md had five readers and no writer. The fixer was expected to produce it,

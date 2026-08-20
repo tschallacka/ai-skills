@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-installer-backups.sh — an install never destroys a file the user edited,
 # and never leaves a backup for one it wrote itself.
 #

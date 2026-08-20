@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # Resolve (and, on first use in a project, choose) the plans root.
 # This is the single decision point behind PLANS_ROOT so that the first plan
 # created in a project asks the human where plans should live, then remembers

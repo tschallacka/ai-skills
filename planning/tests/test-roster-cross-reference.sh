@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-roster-cross-reference.sh — the §9.x roster check reads the id that heads
 # each blurb, not every id mentioned in its description.
 #

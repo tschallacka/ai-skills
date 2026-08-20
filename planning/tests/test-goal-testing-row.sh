@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-goal-testing-row — the testing-requirement row survives every mutation,
 # and a yes/no table outside its registered section is reported.
 #

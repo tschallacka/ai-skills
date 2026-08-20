@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_replace_section() {
     local file="$1" heading="$2" body_file="$3" temporary_file
     plan_refuse_field_section "$file" "$heading"

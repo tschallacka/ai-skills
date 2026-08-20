@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-mutate.sh — the single dispatcher for every durable plan mutation.
 #
 # Each subcommand exec's the one helper that owns that mutation, so the protocol

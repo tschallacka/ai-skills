@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-target-reachability-gate.sh — verify-target.sh must check, or fail closed.
 #
 # The gate used to run its reachability checks for `markup` and `style` units

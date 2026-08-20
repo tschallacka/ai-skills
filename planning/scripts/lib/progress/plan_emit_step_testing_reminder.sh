@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_emit_step_testing_reminder() {
     local plan_dir="$1" document_id="$2" step_file goal_dir goal_file required companion
     case "$document_id" in

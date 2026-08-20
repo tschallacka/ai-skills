@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-context.sh — bounded reader and freshness gate for one plan's documents.
 #
 # Owns the plan-context cache: `init` snapshots every plan document with its

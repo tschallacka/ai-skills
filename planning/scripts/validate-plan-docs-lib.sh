@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-docs-lib.sh — the document-level gates: the required inputs
 # exist, plan-description.md carries every mandated heading and a valid
 # `UI affected` verdict, the adversarial review is present and its verdict is

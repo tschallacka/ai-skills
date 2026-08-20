@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-discovery-unit-target.sh — a discovery work unit may record File 'N/A'.
 #
 # SKILL.md 2.2 says to add a bounded discovery work unit exactly when the file or

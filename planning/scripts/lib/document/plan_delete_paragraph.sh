@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # Delete one numbered paragraph and renumber the rest of its section so labels
 # stay sequential. Targeted rather than re-emitting the section, which risks a
 # transcription slip damaging paragraphs no finding was about.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-inventory-lib.sh — the work-unit inventory: parse every row,
 # enforce the per-row rules (ID shape, type vocabulary, one file, one symbol,
 # selector shapes, goal/step names), cross-link the definition-of-done

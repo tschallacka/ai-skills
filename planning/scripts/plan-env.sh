@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-env.sh — write and verify the .env manifests that pin a plan's paths.
 #
 # Two manifests exist: a global one at <plans-root>/.env naming the plans root

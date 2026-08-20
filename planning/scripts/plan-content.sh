@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-content.sh — read-only queries over one plan's documents.
 #
 # Five subcommands, all non-mutating: `get` prints one document, `summary`

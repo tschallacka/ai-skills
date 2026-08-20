@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # update-adversarial-review.sh — rewrite the "## Findings" table in a plan's
 # adversarial-review.md from CSV rows (ID, Missing or over-broad item, Required
 # plan change, Status, Work unit).

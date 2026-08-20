@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-inventory-lib — the one reader of the work-unit inventory table.
 #
 # The inventory's data columns are addressed by number here and nowhere else,

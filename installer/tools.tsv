@@ -1,3 +1,5 @@
+# MODE: DEV
+# PACKAGE: DEV
 # Shared tool registry — how to verify a tool, and how to install it, written
 # once per tool rather than once per skill that needs it.
 #

@@ -2,6 +2,8 @@
 name: resource-limited-testing
 description: Use when you are about to run a test, build, analyzer, linter, browser-automation command, or similar tool that may consume substantial CPU or memory. It runs the command under a resource cap. Do not use for lightweight commands, ordinary application commands, or discussions about testing without running a command.
 ---
+<!-- MODE: PROD -->
+<!-- PACKAGE: PROD -->
 
 # Resource-limited testing
 

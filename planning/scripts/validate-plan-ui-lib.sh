@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-ui-lib.sh — the UI-validation surface: each user story records a
 # real direct interaction and no console/state/direct-API shortcut, its browser
 # run cache exists and is shaped correctly, its status is from the vocabulary

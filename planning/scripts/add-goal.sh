@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # add-goal.sh — create one goal directory (goal.md plus an empty steps/) in a
 # plan and refresh the plan-level progress tracker.
 #

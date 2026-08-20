@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # plan-context-lib.sh — shared implementation for the bounded planning context
 # cache: snapshot generations, the plan-directory lock, document resolution,
 # views, the freshness index, and the per-role reader gate.

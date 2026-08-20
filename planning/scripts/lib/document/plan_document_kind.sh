@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_document_kind() {
     case "$1" in
         plan) printf '%s\n' plan ;;

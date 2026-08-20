@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-comment-format — quoted material in comments is fenced, and fences are
 # not used to smuggle prose past the three-line limit.
 #

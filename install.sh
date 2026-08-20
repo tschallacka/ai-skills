@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # GENERATED FILE — do not edit. Assembled from installer/src/*.sh by:
 #   installer/build.sh
 set -euo pipefail

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-lib-core.sh — the core functions, each sourced on its own.
 #
 # The unit layer. Integration tests reach these through the compiled library and

@@ -1,3 +1,5 @@
+# MODE: DEV
+# PACKAGE: DEV
 # ---------------------------------------------------------------
 # 13. Step 2: planning runtime permissions (interactive main path only)
 # ---------------------------------------------------------------

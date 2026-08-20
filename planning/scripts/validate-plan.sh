@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan.sh — gate a plan directory against the planning contract and
 # report every finding, not just the first.
 #

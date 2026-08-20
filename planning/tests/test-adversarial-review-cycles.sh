@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-adversarial-review-cycles.sh — cycle numbering and the archive guard in
 # update-adversarial-review.sh.
 #

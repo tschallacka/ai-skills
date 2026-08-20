@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-register-schemas.sh — the register skills ship a schema for their version.
 #
 # The registers carry no backwards compatibility: an agent meeting a file written

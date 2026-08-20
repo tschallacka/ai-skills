@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # create-ui-story-run-cache.sh — create the empty browser run cache for one UI
 # story: its starting state, one buffered interaction, its readiness wait, and an
 # untested run result.

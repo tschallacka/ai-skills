@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # build-plan-libs.sh — compile planning/scripts/lib/<group>/*.sh into the four
 # shipped libraries.
 #
@@ -91,10 +93,12 @@ group_output() {
     esac
 }
 
-# A function file the prod library does without: the same PACKAGE marker the rest
-# of the tree uses, read from the file's own header rather than a list here.
+# A function file the prod library does without. MODE, not PACKAGE: every file
+# here is PACKAGE: DEV because none of them ships as a file -- the compiled
+# library does -- so PACKAGE cannot distinguish them. MODE describes the code,
+# and a dev-only helper is MODE: DEV while ordinary runtime functions are PROD.
 member_is_dev_only() { # <path>
-    sed -n '1,15p' "$1" | grep -q '^# PACKAGE: DEV$'
+    sed -n '1,15p' "$1" | grep -q '^# MODE: DEV$'
 }
 
 # Emitted once per library rather than once per source file.
@@ -108,6 +112,10 @@ emit_library() { # <group>
     purpose="${spec#*	}"
 
     printf '#!/usr/bin/env bash\n'
+    # The compiled library is a runtime artifact and it ships in both packages.
+    # Source markers are stripped below; this one describes the output.
+    printf '# MODE: PROD\n'
+    printf '# PACKAGE: PROD\n'
     printf '# GENERATED FILE — do not edit. Compiled from scripts/lib/%s/*.sh by:\n' "$group"
     printf '#   planning/scripts/build-plan-libs.sh\n'
     printf '# Edit the function file in that directory, then re-run the build.\n'

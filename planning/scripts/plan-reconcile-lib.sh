@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # Shared reconciliation helpers for plan mutations (sourced, not executed).
 #
 # These implement the "tools that reconcile references automatically" contract:

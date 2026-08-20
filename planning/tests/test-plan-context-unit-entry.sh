@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-plan-context-unit-entry.sh — a work-unit entry is served from its step
 # file AND its inventory row, and a view that cannot apply refuses.
 #

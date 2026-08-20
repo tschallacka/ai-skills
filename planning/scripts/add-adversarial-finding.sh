@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # add-adversarial-finding.sh — append one row to a plan's adversarial-review.md
 # "## Findings" table.
 #

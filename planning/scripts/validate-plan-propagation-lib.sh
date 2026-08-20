@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-propagation-lib.sh — the completion gate plus the propagation
 # checks: the surfaces of a work unit must agree. A finding cites one surface; a
 # fix must reach the others, and this is the mechanical part of that contract.

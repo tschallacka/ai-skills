@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # Work-unit inventory helper contract test (plan-inventory-lib.sh) plus the
 # status-label glyphs in plan-document-lib.sh.
 #

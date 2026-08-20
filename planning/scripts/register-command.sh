@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # register-command.sh — maintain a plan's command registry (commands.json).
 #
 # Every command literal in step instructions or testing companions must be

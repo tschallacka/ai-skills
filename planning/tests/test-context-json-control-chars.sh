@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-context-json-control-chars.sh — the reader's JSON must be parseable for
 # any document content. JSON forbids every character in U+0000-U+001F inside a
 # string, so one tab made the whole payload unreadable: jq stops with "control

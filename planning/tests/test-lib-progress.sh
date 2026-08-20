@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-lib-progress.sh — the progress functions, each sourced on its own.
 #
 # The second of two layers, and deliberately overlapping with the first. The

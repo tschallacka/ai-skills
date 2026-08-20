@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_cleanup() {
     local f body
     for f in ${plan_tmp_files[@]+"${plan_tmp_files[@]}"}; do

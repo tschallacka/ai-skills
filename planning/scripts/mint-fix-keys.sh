@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # mint-fix-keys.sh — derive a per-(finding, work-unit) HMAC-SHA256 fix key for
 # every gated findings row in adversarial-review.md and record the derived keys
 # in fix-keys.json beside the review file.

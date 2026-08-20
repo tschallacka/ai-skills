@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_render_paragraphs() {
     local number="$1" content="$2"
     [ -n "$content" ] || plan_die "Section content must not be empty"

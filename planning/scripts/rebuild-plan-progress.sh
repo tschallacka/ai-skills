@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # rebuild-plan-progress.sh — regenerate a plan's progress tracker from its
 # goals' own progress files.
 #

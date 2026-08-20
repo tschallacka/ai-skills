@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # Adversary-probe fixture version-compliance test.
 #
 # Guarantees the committed adversary-probe fixture (the reusable dummy plan

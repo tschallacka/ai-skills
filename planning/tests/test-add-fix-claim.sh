@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-add-fix-claim.sh — fixes.md has a writer.
 #
 # Five scripts read fixes.md and nothing wrote it. The fixer was expected to

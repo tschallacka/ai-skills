@@ -1,3 +1,5 @@
+<!-- MODE: PROD -->
+<!-- PACKAGE: PROD -->
 # Roles — index (router)
 
 The canonical registry (all role ids, names, and full authority boundaries)

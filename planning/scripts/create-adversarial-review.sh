@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # create-adversarial-review.sh — seed a plan's adversarial-review.md with the
 # Review scope, the 5-column Findings table, and a pending Verdict.
 #

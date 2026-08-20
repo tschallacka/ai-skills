@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # role-context.sh — role-gated context reader (persona registry + scope docs).
 #
 # Given a role id or canonical name, print the .md documents that single role

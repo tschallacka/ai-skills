@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # monitor-read.sh — gated, bounded, paginated monitor reader (pull-on-exception).
 #
 # Willie (the end-user-facing monitor, maintainer persona) supervises personas

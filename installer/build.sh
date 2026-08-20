@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # build — assemble install.sh from the ordered parts in installer/src/.
 #
 # install.sh is a build artifact. It stays committed and shipped because the
@@ -42,6 +44,12 @@ tab="$(printf '\t')"
 # shebang, and a part file must not claim to be the artifact.
 emit_banner() {
     printf '#!/usr/bin/env bash\n'
+    # install.sh is the one thing an end user runs, so it is PROD in both axes.
+    # The parts it is assembled from are MODE: DEV; their markers are stripped
+    # below, because a marker copied out of a source would say the artifact is a
+    # maintainer file.
+    printf '# MODE: PROD\n'
+    printf '# PACKAGE: PROD\n'
     printf '# GENERATED FILE — do not edit. Assembled from installer/src/*.sh by:\n'
     printf '#   installer/build.sh\n'
 }
@@ -206,7 +214,11 @@ emit() {
     emit_banner
     for part in "$src_dir"/[0-9][0-9]-*.sh; do
         [ -f "$part" ] || { printf '%s: no parts in %s\n' "${0##*/}" "$src_dir" >&2; exit 66; }
+        # The part's own MODE/PACKAGE markers are dropped: they describe the
+        # source file, and emit_banner has already declared what install.sh is.
         awk -v blockfile="$block" '
+            /^# MODE: (DEV|PROD)$/ { next }
+            /^# PACKAGE: (DEV|PROD)$/ { next }
             /^# BEGIN GENERATED DEPENDENCY BLOCK$/ {
                 print
                 while ((getline line < blockfile) > 0) print line

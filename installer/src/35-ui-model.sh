@@ -1,3 +1,5 @@
+# MODE: DEV
+# PACKAGE: DEV
 # ---------------------------------------------------------------
 # 6b. Full-screen skill picker: state, text metrics, requirement model
 # ---------------------------------------------------------------

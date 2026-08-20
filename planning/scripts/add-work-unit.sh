@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # add-work-unit.sh — add one work unit to a plan: an inventory row, its atomic
 # step file, and its `§ 9.N` entry in the owning goal's "Owned work units".
 #

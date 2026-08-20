@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_progress_bar() {
     local completed="$1" total="$2" width="${3:-20}" percent filled empty
     percent="$(plan_progress_percent "$completed" "$total")"

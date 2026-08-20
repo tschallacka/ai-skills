@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # cleanup-plans.sh — list completed plans and remove selected ones.
 #
 # Usage:

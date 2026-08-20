@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-context-summary-excerpt.sh — the summary view must say it is an excerpt.
 #
 # `summary` is `sed -n '1,12p'`: a fixed slice of the head of the file, applied

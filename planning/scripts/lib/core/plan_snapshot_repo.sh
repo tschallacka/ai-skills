@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # The repository that owns this plan's snapshots, as create-plan.sh pinned it in
 # PLAN_SNAPSHOT_REPO. Returns 1 when there is none, which is the honest answer
 # for a plan versioned in a repository the user owns: plan snapshots do not

@@ -1,3 +1,5 @@
+<!-- MODE: DEV -->
+<!-- PACKAGE: DEV -->
 # Maintainer guide — architecture, relations & behavior rules
 
 **Audience: skill maintainers and developers only. This is NOT part of the

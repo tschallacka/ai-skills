@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # Persona drift guard.
 #
 # Asserts the persona system stays in sync across three sources of truth:

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # remove-work-unit.sh — remove a work unit and reconcile every reference to it.
 #
 # Removes, in one pass so no follow-up call is needed: the inventory row; the id

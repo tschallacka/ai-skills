@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # create-ui-validation.sh — turn a plan into a UI-validating plan: add the
 # "## UI validation" section to plan-description.md, flip "UI affected" to yes,
 # and create the empty ui-user-stories.md and bugs.md tables.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-document-sections.sh — a section-form flag may only target a narrative
 # section. See CODE-CONTRACTS.md contract 1.
 #

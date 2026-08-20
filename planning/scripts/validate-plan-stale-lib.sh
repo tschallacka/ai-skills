@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # validate-plan-stale-lib.sh — the --stale sweep: a listed phrase surviving in a
 # paragraph that records no history marker may be a half-landed fix.
 #

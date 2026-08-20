@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-die-temp-file-cleanup.sh — a refused write leaves no temp file in the plan.
 #
 # The writer functions guard their temp file with `trap ... RETURN`, and a RETURN

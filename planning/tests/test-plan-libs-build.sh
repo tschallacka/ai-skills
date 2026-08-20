@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-plan-libs-build.sh — the four compiled libraries match their sources.
 #
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
@@ -96,6 +98,8 @@ mkdir -p "$copy"
 cp -R "$scripts_dir" "$copy/scripts"
 copied_builder="$copy/scripts/build-plan-libs.sh"
 
+# MODE: DEV is what marks a dev-only helper. PACKAGE: DEV is true of every file
+# in this directory -- none of them ships -- so it cannot be the discriminator.
 cat > "$copy/scripts/lib/core/plan_probe_dev_only.sh" <<'PROBE'
 #!/usr/bin/env bash
 # MODE: DEV
@@ -109,7 +113,7 @@ PROBE
 "$copied_builder" --target dev >/dev/null 2>&1
 dev_core="$work/dev-core-lib.sh"
 cp "$copy/scripts/plan-core-lib.sh" "$dev_core"
-t_assert_eq 'the dev target keeps a function file marked PACKAGE: DEV' \
+t_assert_eq 'the dev target keeps a function file marked MODE: DEV' \
     "$(grep -c '^plan_probe_dev_only()' "$dev_core")" '1'
 t_assert_eq 'the dev target says which target built it' \
     "$(grep -c '^# Target: dev$' "$dev_core")" '1'
@@ -127,10 +131,15 @@ t_assert_eq 'the prod target carries no provenance' \
     "$(grep -c '^# from scripts/lib/' "$prod_core" || true)" '0'
 t_assert_eq 'the prod target says which target built it' \
     "$(grep -c '^# Target: prod$' "$prod_core")" '1'
-# The markers are a property of the source file, not of the artifact compiled
-# from it: a compiled library claiming '# MODE: DEV' would be read as a source.
-t_assert_eq 'no MODE or PACKAGE marker reaches a compiled library' \
-    "$(grep -c '^# MODE: \|^# PACKAGE: ' "$prod_core" "$dev_core" 2>/dev/null | grep -v ':0$' | wc -l | tr -d ' ')" '0'
+# The compiled library declares itself in its banner -- MODE: PROD, PACKAGE:
+# PROD -- and carries nothing else. A source file's marker passing through would
+# be a second pair further down, and would say a compiled artifact is a source.
+for compiled in "$prod_core" "$dev_core"; do
+    t_assert_eq "${compiled##*/}: exactly the banner's two markers" \
+        "$(grep -c '^# MODE: \|^# PACKAGE: ' "$compiled")" '2'
+    t_assert_eq "${compiled##*/}: both of them in the banner" \
+        "$(sed -n '1,5p' "$compiled" | grep -c '^# MODE: PROD$\|^# PACKAGE: PROD$')" '2'
+done
 # The prod build is what --check compares against, so a dev build in the tree
 # has to read as stale -- that is the only thing stopping it being committed.
 "$copied_builder" --target dev >/dev/null 2>&1

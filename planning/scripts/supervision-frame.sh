@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # supervision-frame.sh — bounded supervision-frame emitter + grant log.
 #
 # Every subagent under Willie's supervision ends by writing one bounded

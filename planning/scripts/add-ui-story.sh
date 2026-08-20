@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: PROD
 # add-ui-story.sh — add one UI user story row to a plan's ui-user-stories.md and
 # create its browser run cache.
 #

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # The façade every planning script sources. It pulls in the sibling libraries so
 # that `source plan-document-lib.sh` provides the same symbols it always did:
 # 40-plus scripts source this path, and the split must be invisible to them.

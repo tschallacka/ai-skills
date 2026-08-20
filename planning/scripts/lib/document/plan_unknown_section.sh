@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # Concise, agent-friendly error for an unknown narrative section: list the
 # valid ids for the document kind and, when one is close, suggest it.
 plan_unknown_section() {

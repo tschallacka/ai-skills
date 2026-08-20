@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 # Ensure the planning scratch directory exists for this boot. Failure is
 # ignored: the helpers still work when a nonstandard TMPDIR is unwritable.
 planning_ensure_tmpdir() {

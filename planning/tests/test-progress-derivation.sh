@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-progress-derivation.sh — every progress-tracker builder must derive the
 # row Description from source intent, never write a literal placeholder into a
 # generated table. The derivation is duplicated across four builders, so each

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # Regression tests for planning-skill report 18:
 #   §2: add-work-unit.sh emits the next free § 9.N label per unit — four
 #       helper-built units produce 9.1..9.4 in order, never duplicate 9.2

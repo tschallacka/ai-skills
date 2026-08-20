@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-portability-contract — the portability catalogue stays true, and a gotcha
 # caught once stays caught.
 #

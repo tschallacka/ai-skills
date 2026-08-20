@@ -1,3 +1,5 @@
+<!-- MODE: PROD -->
+<!-- PACKAGE: PROD -->
 # Roles — cleanup phase
 
 Roles active after execution, when the plan is closed out and transient

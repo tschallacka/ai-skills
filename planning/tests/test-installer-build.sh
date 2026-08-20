@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-installer-build — the committed install.sh is exactly what the build
 # produces from installer/src/, so nobody hand-edits the artifact.
 #

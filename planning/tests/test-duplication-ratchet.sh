@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-duplication-ratchet — the known duplication may shrink, never grow.
 #
 # Usage: test-duplication-ratchet.sh

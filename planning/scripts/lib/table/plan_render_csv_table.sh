@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# PACKAGE: DEV
 plan_render_csv_table() {
     local columns="$1" csv="$2" csv_file csv_status=0
     local plan_csv_diag plan_csv_where

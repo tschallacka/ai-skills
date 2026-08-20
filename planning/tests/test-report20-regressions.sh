@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # Regression tests for planning-skill reports 20 + 21 — the language-agnostic
 # command-literal detector:
 #   - executable-bit signal: a path-shaped token that resolves to a

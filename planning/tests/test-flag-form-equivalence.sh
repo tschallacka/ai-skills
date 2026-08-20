@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-flag-form-equivalence — the named-flag form of the helpers that used to
 # take many positional arguments must produce byte-identical documents to the
 # deprecated positional form.

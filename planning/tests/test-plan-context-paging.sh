@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # plan-context paging contract test.
 #
 # Guards the defect this suite used to hide: the gated reader served a 12-line

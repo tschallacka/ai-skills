@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # test-stale-sweep — the --stale wording sweep flags what it claims to flag.
 #
 # Usage: test-stale-sweep.sh

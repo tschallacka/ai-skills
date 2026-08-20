@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: DEV
 # test-obsolete-plan.sh — a plan from an older skill version is refused, kept.
 #
 # The skill does no backwards compatibility, so a plan directory built by an
