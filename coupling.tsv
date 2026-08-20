@@ -20,3 +20,5 @@ installer/src/50-manifest.sh	fail	the file list must name files that exist and c
 installer/unshipped-planning-files.txt	fail	a planning file outside the installer list must be parked here deliberately	bash tests/test-skill-files-manifest.sh
 todo/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh
 bug-report/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh
+installer/build-release.sh	fail	the release tarball must hold exactly the files marked for production, byte for byte	bash tests/test-release-package.sh
+*/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh

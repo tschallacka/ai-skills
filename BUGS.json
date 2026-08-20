@@ -4,6 +4,28 @@
   "comment": "Defects found in this repository's own skills and installer.",
   "bugs": [
     {
+      "id": "B2",
+      "title": "The shipped core library lost plan_stat_mode and plan_stat_uid, so an installed skill could not read a file mode",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "bash planning/scripts/build-plan-libs.sh; grep -c \"^plan_stat_mode()\" planning/scripts/plan-core-lib.sh",
+      "observed": "0 definitions. Two tests said so: test-portable-helpers.sh reported plan_stat_mode: command not found for three assertions, and test-duplication-ratchet.sh reported it is referenced by MAINTAINER.md section 3 but no longer exists.",
+      "expected": "Both helpers present in the compiled library; plan_atomic_write calls plan_stat_mode to preserve a file mode.",
+      "mechanism": "The re-marking script kept PACKAGE: DEV on any path matching *probe* -- intended for a planted test fixture named plan_probe_dev_only.sh -- and planning/scripts/lib/core/plan_stat_probe.sh matched on its name. PACKAGE: DEV means dev-build-only, so the prod build excluded it.",
+      "surfaces": [
+        "planning/scripts/lib/core/plan_stat_probe.sh",
+        "planning/scripts/plan-core-lib.sh"
+      ],
+      "fix": "Marked plan_stat_probe.sh PACKAGE: PROD and rebuilt. Every other compiler input was checked for the same mistake; it was the only one.",
+      "verification": "test-portable-helpers.sh and test-duplication-ratchet.sh both pass; five stat-helper definitions and calls are back in plan-core-lib.sh. Re-marking the file PACKAGE: DEV reproduces the failure.",
+      "found_by": "the both-shell run of the release commit, on both bash 5.3 and 3.2",
+      "notes": "A name-substring match standing in for a marker. The marker was right in every file; the script that wrote it guessed from the filename. It also shows the release checks were not sufficient on their own: build-release.sh --list and a by-hand diff of npm pack both passed a library with a function missing, because they compare file sets and not file contents.",
+      "created_at": "2026-08-20T16:21:35Z",
+      "updated_at": "2026-08-20T16:21:35Z"
+    },
+    {
       "id": "B1",
       "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
       "status": "not-a-defect",

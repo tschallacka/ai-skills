@@ -30,6 +30,19 @@ registry="$root/scripts/role-context.sh"
 voices="$root/roles/VOICES.md"
 manifest="$root/PACKAGE-MANIFEST.txt"
 
+# The dev arm of skill_files(), for artifacts that are registered for delivery to
+# a maintainer rather than to an end user.
+dev_arm="$(mktemp "${TMPDIR:-/tmp}/persona-dev-arm.XXXXXX")"
+trap 'rm -f "$dev_arm"' EXIT
+(
+    # shellcheck disable=SC1090
+    source "$root/../installer/src/05-config.sh"
+    # shellcheck disable=SC1090
+    source "$root/../installer/src/50-manifest.sh"
+    SOURCE_ROOT="$(cd "$root/.." && pwd)"
+    skill_files planning dev
+) > "$dev_arm"
+
 note_fail() { echo "persona drift: $1" >&2; t_record "$1"; }
 
 # 1. Registry ids — derive from role-context.sh --list (identity-free) so
@@ -77,11 +90,19 @@ if [ -f "$manifest" ]; then
     done < "$manifest"
 fi
 
-# 5. The new persona scripts and tests must be shipped.
+# 5. Every persona artifact must be registered for delivery. The runtime ones go
+# to the end user; the tests that pin them are a maintainer's, so they belong to
+# the dev arm of skill_files() and are deliberately not in the ship manifest --
+# what matters is that neither is left out of both.
 for rel in scripts/role-context.sh scripts/monitor-read.sh scripts/supervision-frame.sh \
-           roles/VOICES.md ROLES.md MAINTAINER-STYLE-CONTRACT.md \
-           tests/test-supervision-frame.sh tests/test-voice-artifact-drift.sh; do
+           roles/VOICES.md ROLES.md MAINTAINER-STYLE-CONTRACT.md; do
     grep -q "planning/$rel	" "$manifest" || note_fail "persona artifact not shipped: planning/$rel"
+done
+for rel in tests/test-supervision-frame.sh tests/test-voice-artifact-drift.sh; do
+    [ -f "$root/$rel" ] \
+        || note_fail "persona test is missing from the tree: planning/$rel"
+    grep -qx "$rel" "$dev_arm" \
+        || note_fail "persona test is in neither arm of skill_files(): planning/$rel"
 done
 
 if [ "$(t_failures)" -eq 0 ]; then

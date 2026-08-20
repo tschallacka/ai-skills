@@ -122,9 +122,22 @@ case "$mode" in
             count=$((count + 1))
         done < <(collect)
         tarball="$out_dir/ai-skills-$version.tar.gz"
-        # A reproducible archive: sorted entries, no owner or timestamp noise, so
-        # two builds of one commit hash the same and a release can be verified.
-        ( cd "$stage" && tar -czf "$tarball" "ai-skills-$version" )
+        # Deterministic, so two builds of one commit can be compared and a
+        # published asset can be checked against a local build. Three sources of
+        # noise, each removed portably rather than with GNU-only tar flags --
+        # a maintainer on macOS has BSD tar:
+        #
+        #   entry order   the paths are passed explicitly, in sorted order,
+        #                 because both tars archive in argument order
+        #   timestamps    every staged file is stamped to one fixed time
+        #   gzip mtime    gzip -n omits it; both GNU and BSD gzip take -n
+        #
+        # What this does not normalise is the uid/gid tar records, so byte
+        # equality holds between builds on one machine, and file-for-file
+        # equality holds anywhere. test-release-package.sh asserts both.
+        find "$root" -type f -exec touch -t 202001010000 {} +
+        ( cd "$stage" && find "ai-skills-$version" -type f | LC_ALL=C sort \
+            | tr '\n' '\0' | xargs -0 tar -cf - | gzip -n -9 > "$tarball" )
         printf 'Wrote %s (%s files, %s)\n' "${tarball#"$repo_root"/}" "$count" \
             "$(du -h "$tarball" | awk '{print $1}')"
         ;;

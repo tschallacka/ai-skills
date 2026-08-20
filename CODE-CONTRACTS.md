@@ -236,13 +236,55 @@ its truth). All five are mutation-tested.
 ## 10. A new file under `planning/` ships only if it is registered
 
 Three rows plus a rebuild: `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
-`installer/src/50-manifest.sh`, then `installer/build.sh`.
+`installer/src/50-manifest.sh`, then `installer/build.sh`. The manifest arm to use
+is the one matching the file's declared mode (contract 10a): the prod arm if it
+ships, the dev arm if only a maintainer needs it.
 
 A registry that is not registered makes the gate that reads it die looking for a
 file that was never installed.
 
 **Enforced** by `test-installer-manifest.sh`, and reported by `./blast-radius.sh`
 before you commit.
+
+## 10a. Every file declares who receives it
+
+A file states its own purpose in its header, so that purpose cannot be inferred
+wrongly later. Two markers, two questions:
+
+| marker | question it answers |
+|---|---|
+| `MODE: PROD` | the end user receives this file. Exclusive: if a release needs it, it has to say PROD |
+| `MODE: DEV` | only a maintainer needs it. Inclusive: the dev side carries every PROD file as well |
+| `PACKAGE: PROD` | a compiler reads this file and compiles it into the end-user artifact |
+| `PACKAGE: DEV` | a compiler reads it for the dev build only, which carries the dev and prod inputs together |
+
+`PACKAGE` appears **only** on what a compiler reads — `planning/scripts/lib/*/*.sh`
+and `installer/src/[0-9][0-9]-*.sh`. A compiled artifact carries `MODE` alone,
+because that axis belongs to inputs, and a marker copied out of a source would
+describe the wrong file: every generator strips the markers it reads and emits its
+own.
+
+The pairs that look contradictory are the ones worth reading. A function file
+under `scripts/lib/` is `MODE: DEV` with `PACKAGE: PROD` — a maintainer's file
+whose content reaches the user inside the compiled library. `install.sh` is
+`MODE: PROD` although every part it is assembled from is `MODE: DEV`.
+
+Syntax follows the format, and the marker keyword is what stays constant:
+`# MODE: X` in shell and hash-commented data, `<!-- MODE: X -->` in Markdown
+because `# MODE: X` renders as a heading and would give a document a second
+top-level one. In a file with YAML frontmatter the marker goes **after** the
+frontmatter, which has to be the first thing in the file or the skill will not
+load. Fixtures, formats with no comment syntax, and the two generated data files
+are exempt, and are declared by `skill_files()` alone.
+
+No comment line may **begin** with `# MODE: ` or `# PACKAGE: `. The generators
+strip such lines, so a sentence starting that way is deleted from the artifact.
+
+**Enforced** by `tests/test-mode-markers.sh`, which cross-checks every marker
+against `skill_files()` — two lists, neither derived from the other, so a
+disagreement means one of them is wrong — and by
+`tests/test-release-package.sh`, which asserts no `MODE: DEV` file reaches the
+release tarball. `RELEASE.md` is the protocol that uses them.
 
 ## 11. One id vocabulary across every reader
 
@@ -337,7 +379,9 @@ finished.
    than a pattern (contract 8).
 4. Put anything irreversible last (contract 2), make refusals stop their own
    branch (contract 3), and give every message a remedy (contract 6).
-5. Register it if it ships (contract 10), then run `./blast-radius.sh`.
+5. Mark it `MODE: DEV` or `MODE: PROD` (contract 10a), register it in the
+   matching arm if it is under `planning/` (contract 10), then run
+   `./blast-radius.sh`.
 6. Open the document it wrote and read it as a reviewer would (contract 15).
 7. Mutation-test every assertion you add: revert the fix, watch the test fail,
    restore. An assertion never seen to fail is not verified.
