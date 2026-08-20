@@ -111,10 +111,22 @@ if [ -n "$dependents" ]; then
     if [ "$confirm_cascade" = false ]; then
         plan_die "refusing to remove $unit: $(printf '%s' "$dependents" | tr '\n' ' ') still list it in Depends-on; rerun with --confirm-cascade to prune those links (and restore them after a re-add with update-work-unit.sh --depends-on)" 73
     fi
-    printf 'plan: %s depends on %s; Depends-on links will be pruned\n' "$(printf '%s' "$dependents" | tr '\n' ' ')" "$unit" >&2
 fi
 
 plan_prune_work_unit "$inventory" "$unit"
+
+# One line per pruned edge, after the prune rather than before it: the
+# coverage-row drop reports the same way ("row dropped"), and a caller that has
+# to restore these links needs each edge named, not a collective count. Stated
+# as fact, because a notice printed ahead of the mutation is a promise that a
+# later failure turns into a lie.
+if [ -n "$dependents" ]; then
+    printf '%s\n' "$dependents" | while IFS= read -r dependent; do
+        [ -n "$dependent" ] || continue
+        printf 'plan: pruned Depends-on %s from %s\n' "$unit" "$dependent" >&2
+    done
+    printf 'plan: restore pruned links with update-work-unit.sh --depends-on\n' >&2
+fi
 plan_rewrite_owned_work_units "$goal_file" "$inventory" "$goal"
 rm -f "$step_file" "$testing_file"
 plan_rebuild_goal_progress "$script_dir" "$plan_dir/$goal" "$goal"

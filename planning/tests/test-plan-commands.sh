@@ -328,7 +328,33 @@ if "$script_dir/remove-work-unit.sh" "$plan_dir" W01 >"$temporary_root/cascade-r
     exit 1
 fi
 grep -Fq 'still list it in Depends-on' "$temporary_root/cascade-refused.log"
-"$script_dir/remove-work-unit.sh" "$plan_dir" W01 --confirm-cascade >/dev/null 2>&1
+# The cascade notice names every pruned edge on stderr. Discarding it here is
+# what let the notice go unasserted: a helper that prunes dependency edges
+# silently is the design defect an earlier report raised, and only a test keeps
+# the notice from being dropped again.
+"$script_dir/remove-work-unit.sh" "$plan_dir" W01 --confirm-cascade \
+    >/dev/null 2>"$temporary_root/cascade-notice.log"
+# The dependents come from the refusal this fixture just produced, so the
+# expectation cannot drift out of step with the plan the test builds.
+cascade_dependents="$(sed -n 's/.*refusing to remove [^:]*: \(.*\) still list it.*/\1/p' \
+    "$temporary_root/cascade-refused.log")"
+[ -n "$cascade_dependents" ] || {
+    echo 'Could not read the dependents out of the cascade refusal.' >&2
+    cat "$temporary_root/cascade-refused.log" >&2
+    exit 1
+}
+for pruned_from in $cascade_dependents; do
+    grep -Fq "pruned Depends-on W01 from $pruned_from" "$temporary_root/cascade-notice.log" || {
+        printf 'The cascade notice did not name the pruned edge W01 -> %s:\n' "$pruned_from" >&2
+        cat "$temporary_root/cascade-notice.log" >&2
+        exit 1
+    }
+done
+grep -Fq 'restore pruned links with update-work-unit.sh --depends-on' \
+    "$temporary_root/cascade-notice.log" || {
+    echo 'The cascade notice did not name the remedy for restoring pruned links.' >&2
+    exit 1
+}
 if grep -Fq '| W01 |' "$plan_dir/work-unit-inventory.md"; then
     echo 'Work unit W01 still present after a confirmed cascade removal.' >&2
     exit 1
