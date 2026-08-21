@@ -226,6 +226,244 @@ for detach_tool in nohup setsid open; do
 done
 rm -rf "$shim_probe"
 rm -rf "$registry_probe"
+
+# B13: with neither timeout nor gtimeout the registry fallback used to warn and
+# then launch a real, unbounded agent. The bound is a shell watchdog now, and
+# these assertions are behavioural — on fake agents, never a real one.
+watchdog_probe="$(mktemp -d "${TMPDIR:-/tmp}/benchmark-watchdog.XXXXXX")"
+watchdog_bin="$watchdog_probe/bin"
+mkdir -p "$watchdog_bin"
+# The launch PATH carries only what the launcher and the watchdog use, so
+# `command -v timeout` fails exactly as it does on stock macOS.
+for watchdog_tool in ps awk tr sleep; do
+    ln -s "$(command -v "$watchdog_tool")" "$watchdog_bin/$watchdog_tool"
+done
+cat > "$watchdog_probe/slow-agent" <<'AGENT'
+sleep 300 &
+printf '%s\n' "$!" > "$WATCHDOG_CHILD_PID_FILE"
+wait
+AGENT
+cat > "$watchdog_probe/quick-agent" <<'AGENT'
+exit 0
+AGENT
+cat > "$watchdog_probe/deaf-agent" <<'AGENT'
+trap '' TERM
+sleep 300 &
+printf '%s\n' "$!" > "$WATCHDOG_CHILD_PID_FILE"
+wait
+AGENT
+# Stubs are #!$BASH, not #!/usr/bin/env bash: the launch PATH has no bash.
+watchdog_timeout_bin="$watchdog_probe/timeout-bin"
+mkdir -p "$watchdog_timeout_bin"
+{
+    printf '#!%s\n' "$BASH"
+    cat <<'STUB'
+printf '%s\n' "${0##*/}" >> "$WATCHDOG_LADDER_LOG"
+shift
+exec "$@"
+STUB
+} > "$watchdog_timeout_bin/timeout"
+chmod +x "$watchdog_timeout_bin/timeout"
+watchdog_setsid_bin="$watchdog_probe/setsid-bin"
+mkdir -p "$watchdog_setsid_bin"
+{
+    printf '#!%s\n' "$BASH"
+    cat <<'STUB'
+case "${1:-}" in
+    --help) printf '%s\n' --wait; exit 0 ;;
+esac
+exec "$@"
+STUB
+} > "$watchdog_setsid_bin/setsid"
+chmod +x "$watchdog_setsid_bin/setsid"
+
+# watchdog_launch <action> <mode> <spec> <agent-script> <fact-dir> [extra-bin]
+# A subshell cannot return values, so every fact lands in a file under
+# <fact-dir>. action=detach leaves the launch running for the caller to observe,
+# wait reaps it through wait_agent, selfexit watches the watchdog stop itself.
+watchdog_launch() {
+    local action="$1" mode="$2" spec="$3" script="$4" facts="$5" extra_bin="${6:-}"
+    mkdir -p "$facts"
+    (
+        set +E
+        trap - ERR
+        # shellcheck source=/dev/null
+        . "$runtime/lib-agent.sh" 2>/dev/null || true
+        PATH="$watchdog_bin"
+        [ -z "$extra_bin" ] || PATH="$extra_bin:$PATH"
+        export PATH
+        export WATCHDOG_CHILD_PID_FILE="$facts/child.pid"
+        export WATCHDOG_LADDER_LOG="$facts/ladder.log"
+        : > "$WATCHDOG_LADDER_LOG"
+        AGENT_ARGV=("$BASH" "$script")
+        if launch_agent "$mode" "$spec" "$facts/agent.log"; then
+            printf '0\n' > "$facts/status"
+        else
+            printf '%s\n' "$?" > "$facts/status"
+        fi
+        printf '%s\n' "${AGENT_PID:-}" > "$facts/agent.pid"
+        printf '%s\n' "${AGENT_WATCHDOG_PID:-}" > "$facts/watchdog.pid"
+        watchdog_observe "$action" "$facts"
+    ) 2> "$facts/err"
+}
+
+# watchdog_observe <action> <fact-dir>: what happened after the launch. Called
+# inside watchdog_launch's subshell, so it reads the live AGENT_* state.
+watchdog_observe() {
+    local action="$1" facts="$2" guard=0 watchdog_pid="${AGENT_WATCHDOG_PID:-}"
+    if [ "$action" = selfexit ]; then
+        while [ -n "$watchdog_pid" ] && kill -0 "$watchdog_pid" 2>/dev/null &&
+            [ "$guard" -lt 50 ]; do
+            sleep 0.2
+            guard=$((guard + 1))
+        done
+        if [ -n "$watchdog_pid" ] && kill -0 "$watchdog_pid" 2>/dev/null; then
+            printf 'no\n' > "$facts/selfexit"
+        else
+            printf 'yes\n' > "$facts/selfexit"
+        fi
+    fi
+    [ "$action" != detach ] && [ -n "${AGENT_PID:-}" ] || return 0
+    # Recorded before the teardown: an orphaned sleep is reparented to init, so
+    # afterwards nothing links it back to the watchdog that started it.
+    sleep 0.3
+    process_descendants "$watchdog_pid" > "$facts/watchdog-children" || true
+    wait_agent || true
+    printf '%s\n' "${AGENT_EXIT:-}" > "$facts/exit"
+    if [ -n "$watchdog_pid" ] && kill -0 "$watchdog_pid" 2>/dev/null; then
+        printf 'alive\n' > "$facts/watchdog-after"
+    else
+        printf 'gone\n' > "$facts/watchdog-after"
+    fi
+}
+
+# 1 and 3. An agent that outlives its bound is killed, and so is its descendant:
+# registry mode owns no process group, so the ps walk is the only reach it has.
+watchdog_kill="$watchdog_probe/kill"
+watchdog_launch detach isolated 2s "$watchdog_probe/slow-agent" "$watchdog_kill"
+watchdog_status="$(cat "$watchdog_kill/status")"
+if [ "$watchdog_status" != 0 ]; then
+    printf 'safeguards: registry launch with no timeout binary returned %s (err: %s)\n' \
+        "$watchdog_status" "$(tr '\n' ' ' < "$watchdog_kill/err")" >&2
+    exit 1
+fi
+watchdog_agent="$(cat "$watchdog_kill/agent.pid")"
+watchdog_pid="$(cat "$watchdog_kill/watchdog.pid")"
+[ -n "$watchdog_agent" ]
+if [ -z "$watchdog_pid" ]; then
+    printf 'safeguards: registry mode launched agent pid %s with no watchdog; the run is unbounded (B13)\n' "$watchdog_agent" >&2
+    exit 1
+fi
+watchdog_wait=0
+while [ ! -s "$watchdog_kill/child.pid" ] && [ "$watchdog_wait" -lt 100 ]; do
+    sleep 0.1
+    watchdog_wait=$((watchdog_wait + 1))
+done
+test -s "$watchdog_kill/child.pid"
+watchdog_child="$(cat "$watchdog_kill/child.pid")"
+watchdog_wait=0
+while { kill -0 "$watchdog_agent" 2>/dev/null || kill -0 "$watchdog_child" 2>/dev/null; } &&
+    [ "$watchdog_wait" -lt 150 ]; do
+    sleep 0.2
+    watchdog_wait=$((watchdog_wait + 1))
+done
+if kill -0 "$watchdog_agent" 2>/dev/null; then
+    printf 'safeguards: the watchdog left agent pid %s running past its 2s bound\n' "$watchdog_agent" >&2
+    exit 1
+fi
+if kill -0 "$watchdog_child" 2>/dev/null; then
+    printf 'safeguards: the watchdog killed agent %s but left descendant %s running\n' \
+        "$watchdog_agent" "$watchdog_child" >&2
+    exit 1
+fi
+grep -Fq 'exceeded its 2s bound' "$watchdog_kill/err"
+
+# An agent that ignores TERM is still bounded: a CLI that traps the signal would
+# otherwise turn the escalation into a suggestion.
+watchdog_deaf="$watchdog_probe/deaf"
+watchdog_launch detach isolated 1s "$watchdog_probe/deaf-agent" "$watchdog_deaf"
+[ "$(cat "$watchdog_deaf/status")" = 0 ]
+watchdog_agent="$(cat "$watchdog_deaf/agent.pid")"
+watchdog_wait=0
+while kill -0 "$watchdog_agent" 2>/dev/null && [ "$watchdog_wait" -lt 150 ]; do
+    sleep 0.2
+    watchdog_wait=$((watchdog_wait + 1))
+done
+if kill -0 "$watchdog_agent" 2>/dev/null; then
+    printf 'safeguards: agent pid %s ignored TERM and survived; the watchdog never escalated to KILL\n' "$watchdog_agent" >&2
+    exit 1
+fi
+
+# 2. An agent that exits on its own is not killed, and nothing survives it.
+watchdog_normal="$watchdog_probe/normal"
+watchdog_launch wait isolated 300s "$watchdog_probe/quick-agent" "$watchdog_normal"
+[ "$(cat "$watchdog_normal/status")" = 0 ]
+[ "$(cat "$watchdog_normal/exit")" = 0 ]
+watchdog_pid="$(cat "$watchdog_normal/watchdog.pid")"
+[ -n "$watchdog_pid" ]
+if grep -Fq 'exceeded its' "$watchdog_normal/err"; then
+    printf 'safeguards: the watchdog killed an agent that had already exited\n' >&2
+    exit 1
+fi
+if [ "$(cat "$watchdog_normal/watchdog-after")" != gone ]; then
+    printf 'safeguards: watchdog pid %s outlived the agent it was bounding\n' "$watchdog_pid" >&2
+    exit 1
+fi
+watchdog_strays="$(tr '\n' ' ' < "$watchdog_normal/watchdog-children")"
+if [ -z "$watchdog_strays" ]; then
+    printf 'safeguards: the watchdog had no sleep to clean up, so the stray check proves nothing\n' >&2
+    exit 1
+fi
+for watchdog_stray in $watchdog_strays; do
+    if kill -0 "$watchdog_stray" 2>/dev/null; then
+        printf 'safeguards: watchdog teardown left sleep pid %s behind\n' "$watchdog_stray" >&2
+        exit 1
+    fi
+done
+
+# The watchdog also stops itself, for a caller that never reaches wait_agent.
+watchdog_self="$watchdog_probe/self"
+watchdog_launch selfexit isolated 300s "$watchdog_probe/quick-agent" "$watchdog_self"
+if [ "$(cat "$watchdog_self/selfexit")" != yes ]; then
+    printf 'safeguards: the watchdog kept polling after its agent exited; one long sleep is not a bound that cleans up\n' >&2
+    exit 1
+fi
+
+# 4. An unparseable bound refuses rather than guessing a unit.
+watchdog_spec="$watchdog_probe/spec"
+watchdog_launch detach isolated 45x "$watchdog_probe/quick-agent" "$watchdog_spec"
+if [ "$(cat "$watchdog_spec/status")" != 64 ]; then
+    printf 'safeguards: an unparseable timeout spec returned %s, expected 64\n' "$(cat "$watchdog_spec/status")" >&2
+    exit 1
+fi
+grep -Fq 'cannot parse timeout spec' "$watchdog_spec/err"
+[ -z "$(cat "$watchdog_spec/agent.pid")" ]
+
+# 5. Pin the ladder: a real timeout binary is used, and the watchdog is not.
+watchdog_ladder="$watchdog_probe/ladder"
+watchdog_launch wait isolated 300s "$watchdog_probe/quick-agent" "$watchdog_ladder" "$watchdog_timeout_bin"
+[ "$(cat "$watchdog_ladder/status")" = 0 ]
+grep -Fq timeout "$watchdog_ladder/ladder.log"
+if [ -n "$(cat "$watchdog_ladder/watchdog.pid")" ]; then
+    printf 'safeguards: the watchdog ran while timeout was on PATH; it is the last rung, not the default\n' >&2
+    exit 1
+fi
+
+# 6. The setsid path keeps its refusal: no timeout binary there is still 69.
+watchdog_setsid="$watchdog_probe/setsid"
+watchdog_launch detach isolated 5s "$watchdog_probe/quick-agent" "$watchdog_setsid" "$watchdog_setsid_bin"
+if [ "$(cat "$watchdog_setsid/status")" != 69 ]; then
+    printf 'safeguards: the setsid path returned %s with no timeout binary, expected 69\n' "$(cat "$watchdog_setsid/status")" >&2
+    exit 1
+fi
+grep -Fq 'cannot bound the agent to 5s' "$watchdog_setsid/err"
+[ -z "$(cat "$watchdog_setsid/watchdog.pid")" ]
+
+for watchdog_leftover in "$watchdog_kill" "$watchdog_deaf" "$watchdog_normal" "$watchdog_self" "$watchdog_ladder"; do
+    [ -s "$watchdog_leftover/agent.pid" ] || continue
+    process_kill_tree "$(cat "$watchdog_leftover/agent.pid")" KILL
+done
+rm -rf "$watchdog_probe"
 # setsid forks when it already leads a process group, so $! can be a parent that
 # exits 0 while the agent still runs; --wait keeps AGENT_EXIT the agent's.
 grep -Fq 'cmd+=(--wait)' "$runtime/lib-agent.sh"

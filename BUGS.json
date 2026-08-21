@@ -182,7 +182,7 @@
     {
       "id": "B13",
       "title": "On stock macOS the registry fallback runs a real benchmark agent with no time bound at all",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -194,12 +194,12 @@
         "benchmark/planning/runtime/lib-agent.sh",
         "benchmark/planning/case/start-worker.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "lib-agent.sh grew a third rung below timeout/gtimeout: in registry mode only, launch_agent parses the spec (<n>s/<n>m/<n>h, 64 on anything else) and starts _agent_watchdog as a background sibling of the agent. The watchdog polls kill -0 in one-second steps, then TERMs the ps-walked tree and escalates to KILL after 5s; wait_agent calls _agent_watchdog_stop, which kills the watchdog and its in-flight sleep. The setsid path still returns 69, and a present timeout/gtimeout still wins, so the watchdog is never used when a real bound exists.",
+      "verification": "test-safeguards.sh launches fake agents with a PATH holding neither timeout nor gtimeout: a 2s-bounded sleeper and its descendant are both killed, a TERM-ignoring agent is KILLed, an agent that exits on its own is not killed and leaves no watchdog or sleep, 45x is refused with 64, a stubbed timeout binary is used with no watchdog started, and the setsid path still returns 69. Mutations that each fail exactly one of those: never starting the watchdog (the B13 regression), TERMing the pid instead of the tree, dropping _agent_watchdog_stop, TERMing the watchdog without its sleep child, one long sleep instead of the poll, accepting any spec, skipping the timeout binary, starting the watchdog even when timeout is present, and turning the setsid 69 back into a warning.",
       "found_by": "reviewing 9f41091 after being asked about the setsid fix specifically",
       "notes": "These callers launch real worker and reviewer agents that spend real tokens, so an unbounded run is the expensive failure, not an inconvenient one. The new tests in test-safeguards.sh cover the registry wiring and prove the nohup/setsid/open shims refuse, but assert nothing about the timeout path. Options: keep the refusal in registry mode too; or implement a shell watchdog (background sleep plus kill of the registered pid and its ps-walked descendants) so the bound survives without GNU coreutils. The second is more work and is the only one that makes a macOS benchmark run at all.",
       "created_at": "2026-08-21T09:46:39Z",
-      "updated_at": "2026-08-21T09:46:39Z"
+      "updated_at": "2026-08-21T10:17:50Z"
     },
     {
       "id": "B14",
