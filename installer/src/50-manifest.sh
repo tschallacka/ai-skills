@@ -297,6 +297,7 @@ tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
 tests/test-target-path-validation.sh
 tests/test-target-reachability-gate.sh
+tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
 tests/test-voice-artifact-drift.sh
 EOF

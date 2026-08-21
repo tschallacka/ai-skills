@@ -71,15 +71,15 @@
     {
       "id": "T19",
       "title": "The run-cache prohibition is a whole-file grep, so it cannot tell an input from a description",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "`validate-plan-ui-lib.sh:18` builds `prohibited_pattern` from `evaluate(`, `devTools`, `inject`, `localStorage`, `sessionStorage` and friends, and line 38 greps it against the entire run cache, unconditionally rather than only under `--complete`. The intent is right: a UI story must be driven by a real interaction, not by console or state manipulation. The effect is that the word `localStorage` anywhere in the file fails, including in a Starting state or evidence field where naming browser storage is the honest description of what the page does. A reporter hit this and had to reword truthful evidence to pass, which is the worst outcome for a gate: it bought compliance by making the artifact less accurate. Fix by scoping the check to the fields that describe the input rather than the whole file, which means the rule needs to know the cache's sections -- the same section-shape knowledge `document-sections.json` already holds for other documents. A test would assert that a prohibited word in an input field still fails and that the same word in a starting-state or evidence field does not.",
-      "note": null,
+      "note": "Scoped to the input rather than the file. A cache_section helper takes one section of the run cache, and both the prohibition and the interaction requirement now apply to the Buffered interaction sequence, so localStorage in a Starting state or a Run result is the honest description it was always meant to be. The same defect was in the story row at line 92, which tested actions, interaction and evidence together: evidence describes the result, so it is out. document-sections.json was not needed -- the run cache has four fixed headings written by one script, so a local extractor is smaller than teaching the registry a fifth document shape.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-21T11:18:35Z"
     },
     {
       "id": "T20",

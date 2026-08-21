@@ -18,6 +18,21 @@ set -euo pipefail
 interaction_pattern='[Cc]lick|[Tt]ap|[Tt]ype|[Kk]eyboard|[Pp]ress|[Ss]wipe|[Pp]inch|[Dd]rag|[Ss]elect'
 prohibited_pattern='[Ee]valuate\(|[Dd]ev[Tt]ools|[Ii]nject|[Ll]ocal[Ss]torage|[Ss]ession[Ss]torage|[Xx][Mm][Ll][Hh][Tt][Tt][Pp][Rr]equest|[Ff]etch\(|[Cc]url|[Dd]irect[[:space:]-]API|[Cc]onsole[[:space:]](command|script)'
 
+# One section of a run cache, without its heading. The prohibition below applies
+# to what was done to the browser, not to prose describing what the page does:
+# naming localStorage in a starting state or a result is the honest description,
+# and failing it bought compliance by making the artifact less accurate.
+#
+# No `| grep -q`: with pipefail a grep that exits on its first match makes the
+# writer fail with SIGPIPE (PORTABILITY.md, pipefail-grep-q).
+cache_section() { # <file> <heading>
+    awk -v want="$2" '
+        $0 == want { inside = 1; next }
+        /^## / { inside = 0 }
+        inside { print }
+    ' "$1"
+}
+
 validate_story_cache() {
     local story_id="$1" cache_path="$2" story_status="$3" cache_file
     cache_path="$(trim "$cache_path")"
@@ -35,9 +50,12 @@ validate_story_cache() {
     require_heading "$cache_file" '## Buffered interaction sequence'
     require_heading "$cache_file" '## Waits and readiness'
     require_heading "$cache_file" '## Run result'
-    grep -Eq "$interaction_pattern" "$cache_file" || fail "$story_id run cache has no direct UI input"
-    if grep -Eq "$prohibited_pattern" "$cache_file"; then
-        fail "$story_id run cache contains prohibited console, state, or direct-API input"
+    local interactions
+    interactions="$(cache_section "$cache_file" '## Buffered interaction sequence')"
+    grep -Eq "$interaction_pattern" <<<"$interactions" \
+        || fail "$story_id run cache has no direct UI input in its interaction sequence"
+    if grep -Eq "$prohibited_pattern" <<<"$interactions"; then
+        fail "$story_id run cache drives the page with prohibited console, state, or direct-API input"
     fi
     if grep -Eq '<[^>]+>' "$cache_file"; then
         fail "$story_id run cache still contains a template placeholder"
@@ -71,8 +89,11 @@ plan_validate_ui() {
                 if ! [[ "$actions $interaction" =~ [Cc]lick|[Tt]ap|[Tt]ype|[Kk]eyboard|[Pp]ress|[Ss]wipe|[Pp]inch|[Dd]rag|[Ss]elect ]]; then
                     fail "$story_id has no documented direct user interaction"
                 fi
-                if [[ "$actions $interaction $evidence" =~ $prohibited_pattern ]]; then
-                    fail "$story_id contains prohibited console, state, or direct-API test evidence"
+                # actions and interaction only. Evidence describes the result,
+                # where naming browser storage is often the accurate account of
+                # what the page did, and failing that rewards a vaguer artifact.
+                if [[ "$actions $interaction" =~ $prohibited_pattern ]]; then
+                    fail "$story_id is driven by prohibited console, state, or direct-API input"
                 fi
                 validate_story_cache "$story_id" "$cache_path" "$status"
                 case "$status" in
