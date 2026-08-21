@@ -41,11 +41,11 @@
         "planning/scripts/update-plan-content.sh"
       ],
       "fix": "9f41091 (codex): plan_replace_paragraph writes the replacement to a temp file and reads it in awk BEGIN instead of passing it with -v. Undocumented at the time -- attributed here by matching the change against the failure.",
-      "verification": "CI run 32474258670 at a8d1285: both macOS legs pass, including test-plan-commands, which is the test that failed with \"awk: newline in string\" at run 32394476430. That is the first green BSD userland this branch has had.",
+      "verification": "CI run 32474258670 at a8d1285: both macOS legs pass, including test-plan-commands, which is the test that failed with \"awk: newline in string\" at run 32394476430. That is the first green BSD userland this branch has had. Confirmed again by run 32476867183, so the first green was not a one-off.",
       "found_by": "the macOS leg of CI, the first execution of this code on BSD userland",
       "notes": "Cannot be reproduced on this machine: it needs BSD awk. Diagnose from the CI log or a macOS runner, not by guessing here.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-21T10:55:23Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "B4",
@@ -63,11 +63,11 @@
         "planning/scripts/plan-env.sh"
       ],
       "fix": "9f41091 (codex): test-plan-env.sh canonicalises its temp root with tmp=\"$(cd \"$tmp\" && pwd -P)\" before building the expected strings, so both sides are resolved.",
-      "verification": "CI run 32474258670 at a8d1285: test-plan-env passes on both macOS legs, having failed at line 50 in run 32394476430.",
+      "verification": "CI run 32474258670 at a8d1285: test-plan-env passes on both macOS legs, having failed at line 50 in run 32394476430. Confirmed again by run 32476867183.",
       "found_by": "the macOS leg of CI",
       "notes": "The trailing-slash TMPDIR was the wrong half of my guess: the double slash in the log was cosmetic, and the symlink was the whole cause. Recorded because a plausible mechanism stated alongside the real one is what sends the next reader down the wrong path.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-21T10:55:23Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "B5",
@@ -217,11 +217,11 @@
         "installer/src/05-config.sh"
       ],
       "fix": "confirm() honours YES as well as YES_ALL, and the help line says --yes answers every prompt including the planning permission grants -- the widening is documented rather than silent, since those prompts grant agents read/write and script execution. ask() suppresses bash own read error so only the die message is shown.",
-      "verification": "test-installer-noninteractive.sh: a planning install under --yes exits 0, asks for nothing, creates the plans directory and installs the skill; without --yes it exits 1 with the actionable message and no raw shell error; and a second --yes run still writes the scripts, so yes-to-everything cannot be implemented as do-nothing. Mutations: restoring the YES_ALL-only test fails the first two assertions, and removing the 2>/dev/null fails the no-shell-noise assertion.",
+      "verification": "test-installer-noninteractive.sh: a planning install under --yes exits 0, asks for nothing, creates the plans directory and installs the skill; without --yes it exits 1 with the actionable message and no raw shell error; and a second --yes run still writes the scripts, so yes-to-everything cannot be implemented as do-nothing. Mutations: restoring the YES_ALL-only test fails the first two assertions, and removing the 2>/dev/null fails the no-shell-noise assertion. CI run 32476867183 exercises it on ubuntu and both macOS legs.",
       "found_by": "reported by Michael. I had hit the same failure earlier in the session while installing planning to a temp target and worked around it with a pipe instead of investigating.",
       "notes": "Two things I first called defects here were not. The exit code was correct all along -- my measurement read the status of a pipe. And the summary printed after the failure is deliberate: cleanup() prints it so a run that dies part-way still reports what it wrote, and says so in a comment. HOME has to be redirected to see any of this, because the prompt only appears when the plans directory does not exist, which on a developer machine it usually does.",
       "created_at": "2026-08-21T11:05:01Z",
-      "updated_at": "2026-08-21T11:05:01Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "B16",
@@ -240,9 +240,9 @@
       "fix": null,
       "verification": null,
       "found_by": "the verification of c565658, which I started and then started a second one for the next commit while it was still running",
-      "notes": "Same class as the test-root sweep in run-tests.sh, which codex fixed with a run-id marker after I had concluded a run could not distinguish its own leftovers from a concurrent run live directories. I wrote that reasoning down for run-tests.sh and did not apply it to my own harness. A fix is in the working tree, unverified: each run writes its pid beside its worktree and the sweep skips any whose owner is still running. Proving it means planting a worktree owned by a live process and running the sweep, which is invasive enough to want its own moment rather than being folded into another commit. Until then the rule is one verification at a time, and a wholesale failure with missing-file errors is this, not a regression in the code under test.",
+      "notes": "Same class as the test-root sweep in run-tests.sh, which codex fixed with a run-id marker after I had concluded a run could not distinguish its own leftovers from a concurrent run live directories. I wrote that reasoning down for run-tests.sh and did not apply it to my own harness. A fix is in the working tree, unverified: each run writes its pid beside its worktree and the sweep skips any whose owner is still running. Proving it means planting a worktree owned by a live process and running the sweep, which is invasive enough to want its own moment rather than being folded into another commit. Until then the rule is one verification at a time, and a wholesale failure with missing-file errors is this, not a regression in the code under test. CI cannot close this one: it runs a single suite per job, so nothing there exercises two concurrent verifications. The proof has to be local and deliberate.",
       "created_at": "2026-08-21T11:21:03Z",
-      "updated_at": "2026-08-21T11:21:03Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "B14",
@@ -353,6 +353,27 @@
       "notes": "The intent was inferred, not known: the test seeds {\"bugs\":[]}, the id is grouped with the optional artifacts, a missing file is asserted to give 66, and planning/SKILL.md never mentions it. So it reads as a plan-scoped defect register in the bug-report skill format. Writing the writer rather than documenting hand-authoring follows this repo own precedent, commit 3783dab. Building it turned up that jq handed an empty input never runs its filter, so the first version wrote a zero-byte register and reported success; the guard against that is now covered by a PATH seam rather than left as a known gap, because MAINTAINER.md step 3 asks for a test of the actionable-error path and a backstop with no test is a claim, not a guard.",
       "created_at": "2026-08-21T09:34:37Z",
       "updated_at": "2026-08-21T10:40:32Z"
+    },
+    {
+      "id": "B17",
+      "title": "verify-both-shells.sh executes a stray word, printing \"been: command not found\"",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Not yet isolated. Seen once in the run whose worktree base was 359e7ff: ./verify-both-shells.sh --keep printed the error between the worktree line and the bash 5.3 summary.",
+      "observed": "./verify-both-shells.sh: line 106: been: command not found — then both legs ran and reported 88 passed, 0 failed, so the run itself was unaffected.",
+      "expected": "No shell noise from the harness.",
+      "mechanism": "Not established, and deliberately not chased yet. The line number does not point at the culprit in the current file: the harness was edited after that run started, so numbering shifted. The word `been` appears in the repo only in a comment at line 97, which suggests a quoting fault where part of a comment or a multi-line string reaches the shell as a command -- the report function grew a multi-line printf and a comment block in the same change that added failing-test output. A stray word being executed means something there is unquoted, which is worth finding even though the symptom is cosmetic.",
+      "surfaces": [
+        "verify-both-shells.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the verification of 359e7ff, which reported it while otherwise passing 88 of 88 on both shells",
+      "notes": "Recorded to be investigated later rather than fixed on sight. Related to B16 only by file: that one is the worktree sweep deleting a live run, and its fix is in the tree unverified.",
+      "created_at": "2026-08-21T11:29:11Z",
+      "updated_at": "2026-08-21T11:29:11Z"
     }
   ]
 }

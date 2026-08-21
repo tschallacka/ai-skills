@@ -61,12 +61,12 @@
       "status": "done",
       "parent": null,
       "detail": "A registered placeholder is a WARN under plain validation and a FAIL only under `--complete` (`validate-plan-placeholders-lib.sh`, three paths: fail for one no author will fill, fail under complete, warn otherwise). The pattern is deliberate and documented in `validate-plan-common-lib.sh:10`. The cost showed up in a real run: \"Plan validation passed: 36 work units\" while all 36 steps still had `<direct action on this one target>` as their Instructions, 138 placeholders in total. SKILL.md §3.3 frames plain validation as the gate for presenting a plan as ready, and Instructions plus Acceptance criteria are exactly what an executor and a reviewer consume. The question is not whether to promote every placeholder to a failure, which would break the create-then-fill flow the WARN exists for. It is whether the summary line may say \"passed\" while a placeholder sits in a field nothing can act on. Options: keep the WARN but make the summary state the count and refuse the word \"passed\"; or promote placeholders in Instructions and Acceptance criteria only, since those two are the executor's contract, and leave narrative fields as warnings. A test would assert that a plan with a placeholder in Instructions cannot produce a summary a reader would take as ready.",
-      "note": "Took the first option in the detail: the WARN stays, and the summary stops claiming readiness. A plan with registered placeholders now reads \"Plan validation incomplete: N work units across M goals, K placeholder(s) still to fill in J document(s)\" followed by the remedy, and \"passed\" is reserved for a plan with none. Exit stays 0, and the test asserts that, because promoting placeholders to errors would break the create-then-fill flow and would violate validate-plan-common-lib.sh contract 1, which says warn never counts. The count is kept by the placeholder pass itself rather than by warn, for the same reason. Reproduced first on a built plan: two work units, five placeholder warnings, and \"Plan validation passed\" underneath them.",
+      "note": "Took the first option in the detail: the WARN stays, and the summary stops claiming readiness. A plan with registered placeholders now reads \"Plan validation incomplete: N work units across M goals, K placeholder(s) still to fill in J document(s)\" followed by the remedy, and \"passed\" is reserved for a plan with none. Exit stays 0, and the test asserts that, because promoting placeholders to errors would break the create-then-fill flow and would violate validate-plan-common-lib.sh contract 1, which says warn never counts. The count is kept by the placeholder pass itself rather than by warn, for the same reason. Reproduced first on a built plan: two work units, five placeholder warnings, and \"Plan validation passed\" underneath them. Verified on three platforms by CI run 32476867183 rather than locally: the local run for this commit was void, because a second verification deleted its worktree (B16).",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-21T11:14:06Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "T19",
@@ -74,12 +74,12 @@
       "status": "done",
       "parent": null,
       "detail": "`validate-plan-ui-lib.sh:18` builds `prohibited_pattern` from `evaluate(`, `devTools`, `inject`, `localStorage`, `sessionStorage` and friends, and line 38 greps it against the entire run cache, unconditionally rather than only under `--complete`. The intent is right: a UI story must be driven by a real interaction, not by console or state manipulation. The effect is that the word `localStorage` anywhere in the file fails, including in a Starting state or evidence field where naming browser storage is the honest description of what the page does. A reporter hit this and had to reword truthful evidence to pass, which is the worst outcome for a gate: it bought compliance by making the artifact less accurate. Fix by scoping the check to the fields that describe the input rather than the whole file, which means the rule needs to know the cache's sections -- the same section-shape knowledge `document-sections.json` already holds for other documents. A test would assert that a prohibited word in an input field still fails and that the same word in a starting-state or evidence field does not.",
-      "note": "Scoped to the input rather than the file. A cache_section helper takes one section of the run cache, and both the prohibition and the interaction requirement now apply to the Buffered interaction sequence, so localStorage in a Starting state or a Run result is the honest description it was always meant to be. The same defect was in the story row at line 92, which tested actions, interaction and evidence together: evidence describes the result, so it is out. document-sections.json was not needed -- the run cache has four fixed headings written by one script, so a local extractor is smaller than teaching the registry a fifth document shape.",
+      "note": "Scoped to the input rather than the file. A cache_section helper takes one section of the run cache, and both the prohibition and the interaction requirement now apply to the Buffered interaction sequence, so localStorage in a Starting state or a Run result is the honest description it was always meant to be. The same defect was in the story row at line 92, which tested actions, interaction and evidence together: evidence describes the result, so it is out. document-sections.json was not needed -- the run cache has four fixed headings written by one script, so a local extractor is smaller than teaching the registry a fifth document shape. Verified on three platforms by CI run 32476867183; the local run for it was void for the same reason as T18.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-21T11:18:35Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "T20",
@@ -118,13 +118,13 @@
       "priority": "high",
       "parent": null,
       "detail": "The workflow macos-known-failures job lists blocker 8 as the last one outstanding: the suite passing on a macOS runner under /bin/bash 3.2 and the default bash. Run 32474258670 does exactly that on both legs. Removing the flag makes a macOS regression block a PR, which is the point of having the legs. The job that lists the blockers should go with it, or say that the list is empty.",
-      "note": "Blocker 8 asked for two consecutive green runs; there is one. A second push will settle it.",
+      "note": "Earned now, not pending: run 32474258670 at a8d1285 and run 32476867183 at 1081e19 are both green on all seven jobs, which is the two consecutive green macOS runs blocker 8 asks for. Removing the flag makes a macOS regression block a PR, which is the point of the legs; the macos-known-failures job goes with it, or says the list is empty.",
       "blocked_on": null,
       "refs": [
         ".github/workflows/ci.yml"
       ],
       "created_at": "2026-08-21T10:55:23Z",
-      "updated_at": "2026-08-21T10:55:23Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "T1",
@@ -422,14 +422,14 @@
       "priority": "normal",
       "parent": null,
       "detail": "Measured at 15.6s of a 164s suite, third most expensive test. It loops files-outside, rules-inside: 23 gated rules x 246 scanned files. The nesting is only that way because each file is comment-stripped with sed before grepping, so many files cannot be passed to one grep. Strip once into a temp copy per file (246 seds), then run one grep per rule over all the copies at once (23 greps): about 269 spawns instead of 5658, and attribution per rule is preserved because the rule is still the outer loop.",
-      "note": "Each file is stripped once into a mirror tree, then each rule greps that tree in one pass: about 270 processes instead of 11,000. Measured 15.6s to 4.9s, so about 10s off a 164s suite. Substitution keeps the line count, so a line number in the mirror is the line number in the source. Two things the work turned up: stripping the ./ prefix from the grep output silently disabled every allowlist exemption, caught because a run then reported 28 sanctioned files; and the plan-map-lib.sh:assoc-array exemption is vestigial, since that file mentions declare -A only in a comment and comment-stripping already removes it -- recorded as T36 rather than deleted here.",
+      "note": "Each file is stripped once into a mirror tree, then each rule greps that tree in one pass: about 270 processes instead of 11,000. Measured 15.6s to 4.9s, so about 10s off a 164s suite. Substitution keeps the line count, so a line number in the mirror is the line number in the source. Two things the work turned up: stripping the ./ prefix from the grep output silently disabled every allowlist exemption, caught because a run then reported 28 sanctioned files; and the plan-map-lib.sh:assoc-array exemption is vestigial, since that file mentions declare -A only in a comment and comment-stripping already removes it -- recorded as T36 rather than deleted here. CI run 32476867183 is green, so the rewritten gate holds on macOS and on the bash 3.2 floor as well as here.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-portability-contract.sh",
         "portability-rules.json"
       ],
       "created_at": "2026-08-20T17:31:18Z",
-      "updated_at": "2026-08-21T10:51:52Z"
+      "updated_at": "2026-08-21T11:28:09Z"
     },
     {
       "id": "T31",
