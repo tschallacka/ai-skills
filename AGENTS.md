@@ -13,6 +13,12 @@ A portable collection of coding-agent skills (`planning/`, `brainstorm/`,
 and a shell installer (`install.sh`). The skills are plain Markdown meant to
 work across agent tools; keep them portable.
 
+`BUGS.json` and `TODO.json` are the defect register and the work queue, written
+with the `bug-report` and `todo` skills in this repo. Read the relevant one before
+starting — a defect you are about to rediscover may already be recorded with its
+mechanism — and update it when you finish. Nothing fails if you do not, which is
+why work here has repeatedly had to be reconstructed from diffs.
+
 `PORTABILITY.md` is generated and carries a `<!-- generated: … -->` stamp; if it
 looks stale or a test says so, run `./generate-portability.sh` — never hand-edit
 it, and never hand-resolve a conflict in it. Concurrent edits invalidate it

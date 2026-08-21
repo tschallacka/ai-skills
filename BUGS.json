@@ -138,7 +138,7 @@
     {
       "id": "B7",
       "title": "No maintainer document mentions the registers, so a change that resolves or finds a bug leaves BUGS.json and TODO.json untouched",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -152,12 +152,12 @@
         "CODE-CONTRACTS.md",
         "AGENTS.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "MAINTAINER.md section 4 gains step 8 (update the registers) and renumbers the commit step to 9, which now also says the message names the entries it closes. The artifact map gains a row for both registers. CONTRIBUTING.md gains a bullet in the pre-PR list, and AGENTS.md says to read the relevant register before starting and update it when finished.",
+      "verification": "grep for BUGS.json across the five maintainer-facing docs went from 0 hits to 4. No gate is possible -- no test can tell that a commit resolved a defect -- and each of the four places says so, so the absence of enforcement is documented rather than implied. The doc gates (duplication ratchet, mermaid accuracy, comment format, persona drift) and blast-radius still pass.",
       "found_by": "reviewing commit 9f41091 (codex, \"planning: resolve bug report items\"): 40 files and 789 insertions, zero changes to BUGS.json or TODO.json",
-      "notes": "The contrast is the evidence. In the same commit every *gated* obligation was met -- all four new files carry a MODE marker, and add-ui-story-links.sh is registered in PACKAGE-MANIFEST.txt, PACKAGE-MAP.tsv and skill_files() -- because a test fails otherwise. The one obligation with no gate is the one that was missed. My own register went stale four times before it was moved into JSON, for the same reason. A gate is hard here (no test can know a commit resolved a bug), so the checklist is what has to carry it, and section 4 is where a reader looks.",
+      "notes": "Written immediately after the review that found it, and the same review is the evidence: commit 9f41091 met every gated obligation and missed this one. The temptation while fixing it was to defer closing this very entry because a subagent holds BUGS.json in another worktree -- which is the same excuse the step exists to remove, so it was closed here and the conflict left to be resolved.",
       "created_at": "2026-08-21T09:19:59Z",
-      "updated_at": "2026-08-21T09:19:59Z"
+      "updated_at": "2026-08-21T09:56:31Z"
     },
     {
       "id": "B8",

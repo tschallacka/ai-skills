@@ -145,6 +145,12 @@ Then, specific to this repo:
   real inputs before the change and diff it after. Every difference should be
   one you intended and can name. This is how the refactors in this repo were
   verified, and it catches things the suite does not.
+- **Update the registers.** `BUGS.json` holds defects, `TODO.json` queued work,
+  written with the recipes in `bug-report/SKILL.md` and `todo/SKILL.md`. Close
+  what you fixed, add what you found and did not fix, and name those entries in
+  the commit message. Nothing fails when you skip this, which is exactly why it
+  needs saying: a fix whose entry is never closed reads as still broken, and a
+  defect noticed in passing and left only in prose is a defect nobody can find.
 - **`install.sh` is generated — never edit it.** It is assembled by
   `installer/build.sh` from the ordered parts in `installer/src/NN-<concern>.sh`,
   with the runtime-dependency tables generated into it between the
