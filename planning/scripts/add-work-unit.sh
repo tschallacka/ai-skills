@@ -1,15 +1,96 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# MODE: PROD
+# add-work-unit.sh — add one work unit to a plan: an inventory row, its atomic
+# step file, and its `§ 9.N` entry in the owning goal's "Owned work units".
+#
+# All three land together or none does: every input is validated before the
+# first write, and the inventory row, the step file and the goal edit are staged
+# in temp files that a single EXIT trap removes.
+#
+# Usage:
+#   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A> \
+#       --scope <scope> --subscope <subscope|N/A> --change <intended change> \
+#       --depends-on <WNN,…|—> --goal <NN-name> --step <NN-step-name>
+#   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> \
+#       <subscope|N/A> <intended-change> <depends-on|—> <goal-name> <step-name>
+#   add-work-unit.sh --help
+#
+# The second form is the deprecated positional spelling, kept working for
+# existing callers. Prefer the flags: ten unnamed arguments are unreadable at
+# the call site.
 
-if [ "$#" -ne 10 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on|—> <goal-name> <step-name>" >&2
-    exit 64
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>
+           --scope <scope> --subscope <subscope|N/A> --change <intended change>
+           --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>
+       ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
+       ${0##*/} --help
+
+The positional form is deprecated; it is kept working for existing callers.
+Types: source markup style test config docs data generated discovery verification
+USAGE
+    exit "$rc"
+}
+
+unit_id=""
+unit_type=""
+unit_file=""
+scope=""
+subscope=""
+intended=""
+depends_on=""
+goal_name=""
+step_name=""
+flags_used=false
+repo_root="${PLAN_REPO_ROOT:-}"
+positional=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage 0 ;;
+        --id) [ "$#" -ge 2 ] || usage; unit_id="$2"; flags_used=true; shift 2 ;;
+        --type) [ "$#" -ge 2 ] || usage; unit_type="$2"; flags_used=true; shift 2 ;;
+        --file) [ "$#" -ge 2 ] || usage; unit_file="$2"; flags_used=true; shift 2 ;;
+        --scope) [ "$#" -ge 2 ] || usage; scope="$2"; flags_used=true; shift 2 ;;
+        --subscope) [ "$#" -ge 2 ] || usage; subscope="$2"; flags_used=true; shift 2 ;;
+        --change) [ "$#" -ge 2 ] || usage; intended="$2"; flags_used=true; shift 2 ;;
+        --depends-on) [ "$#" -ge 2 ] || usage; depends_on="$2"; flags_used=true; shift 2 ;;
+        --goal) [ "$#" -ge 2 ] || usage; goal_name="$2"; flags_used=true; shift 2 ;;
+        --step) [ "$#" -ge 2 ] || usage; step_name="$2"; flags_used=true; shift 2 ;;
+        --repo-root) [ "$#" -ge 2 ] || usage; repo_root="$2"; shift 2 ;;
+        --) shift; break ;;
+        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
+        *) positional+=("$1"); shift ;;
+    esac
+done
+while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done
+
+set -- ${positional[@]+"${positional[@]}"}
+if [ "$flags_used" = true ]; then
+    [ "$#" -eq 1 ] || usage
+    plan_dir="$1"
+    for required in unit_id unit_type unit_file scope subscope intended depends_on goal_name step_name; do
+        [ -n "${!required}" ] || usage
+    done
+else
+    # Deprecated positional form.
+    [ "$#" -eq 10 ] || usage
+    plan_dir="$1"; unit_id="$2"; unit_type="$3"; unit_file="$4"; scope="$5"; subscope="$6"
+    intended="$7"; depends_on="$8"; goal_name="$9"; step_name="${10}"
 fi
 
-plan_dir="$1"; unit_id="$2"; unit_type="$3"; unit_file="$4"; scope="$5"; subscope="$6"
-intended="$7"; depends_on="$8"; goal_name="$9"; step_name="${10}"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 source "$script_dir/plan-reconcile-lib.sh"
 
 plan_require_directory "$plan_dir"
@@ -18,28 +99,81 @@ plan_git_snapshot "$plan_dir"
 case "$unit_type" in source|markup|style|test|config|docs|data|generated|discovery|verification) ;; *) plan_die "Unsupported work-unit type: $unit_type" ;; esac
 [[ "$goal_name" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]] || plan_die "Goal name must use 01-kebab-case"
 [[ "$step_name" =~ ^[0-9][0-9]-step-[a-z0-9-]+$ ]] || plan_die "Step name must use 01-step-kebab-case"
-[ -f "$plan_dir/$goal_name/goal.md" ] || plan_die "Goal does not exist: $goal_name"
+goal_file="$plan_dir/$goal_name/goal.md"
+if [ ! -f "$goal_file" ]; then
+    printf '%s: %s\n' "${0##*/}" "Goal does not exist: $goal_name" >&2
+    exit 66
+fi
 for value_name in unit_file scope subscope intended depends_on; do
     plan_require_safe_value "$value_name" "${!value_name}"
 done
 if [ "$unit_type" = verification ]; then
     [ "$unit_file" = N/A ] || plan_die "Verification work units must use file N/A"
-else
-    [ "$unit_file" != N/A ] || plan_die "Only verification work units may use file N/A"
+elif [ "$unit_type" != discovery ]; then
+    # discovery may use either. A bounded discovery unit exists precisely because
+    # the exact file or symbol is not yet knowable (SKILL.md 2.2), and TBD is
+    # forbidden in a step, so demanding a concrete file here forced the author to
+    # invent one. Naming a file stays allowed: discovery often knows the file and
+    # not the symbol.
+    [ "$unit_file" != N/A ] || plan_die "Only verification and discovery work units may use file N/A"
 fi
 [[ "$unit_file" != *'*'* && "$unit_file" != */ ]] || plan_die "File must be one concrete file, not a glob or directory"
 
+if [ -n "$repo_root" ]; then
+    [ -d "$repo_root" ] || plan_die "repository root not found: $repo_root" 66
+    case "$unit_type" in
+        discovery|verification|generated) ;;
+        *)
+            target_path="$repo_root/$unit_file"
+            [ -f "$target_path" ] || plan_die "Target file does not exist under --repo-root: $unit_file" 66
+            case "$scope" in
+                N/A|\#*|.*) ;;
+                *) grep -F "$scope" "$target_path" >/dev/null 2>&1 \
+                    || plan_die "Primary symbol or file scope was not found in $unit_file: $scope" 66 ;;
+            esac
+            ;;
+    esac
+fi
+
 inventory="$plan_dir/work-unit-inventory.md"
-[ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
+if [ ! -f "$inventory" ]; then
+    printf '%s: %s\n' "${0##*/}" "Work-unit inventory not found: $inventory" >&2
+    exit 66
+fi
 if awk -F'|' -v wanted="$unit_id" 'function t(v){gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v} /^\|/ && t($2)==wanted {found=1} END {exit !found}' "$inventory"; then
-    plan_die "Work-unit ID already exists: $unit_id"
+    printf '%s: %s\n' "${0##*/}" "Work-unit ID already exists: $unit_id" >&2
+    exit 73
 fi
 step_file="$plan_dir/$goal_name/steps/$step_name.md"
-[ ! -e "$step_file" ] || plan_die "Step already exists: $step_file"
+if [ -e "$step_file" ]; then
+    printf '%s: %s\n' "${0##*/}" "Step already exists: $step_file" >&2
+    exit 73
+fi
+# The number, not just the name. Two steps numbered 04 in one goal leave their
+# order undefined -- steps are read in number order and nothing breaks the tie --
+# and there is no renumbering helper, so the only fix is a hand edit the skill
+# forbids. Refuse at creation, naming the step already holding the number.
+step_number="${step_name%%-*}"
+existing_with_number=""
+for candidate in "$plan_dir/$goal_name/steps/$step_number-step-"*.md; do
+    [ -e "$candidate" ] || continue
+    case "${candidate##*/}" in *-testing.md) continue ;; esac
+    existing_with_number="${candidate##*/}"
+    break
+done
+if [ -n "$existing_with_number" ]; then
+    printf '%s: step number %s is already used by %s in %s; pick the next free number\n' \
+        "${0##*/}" "$step_number" "$existing_with_number" "$goal_name" >&2
+    exit 73
+fi
 
+# One trap for all three staging files, installed before any of them exists and
+# never released: re-trapping for the goal edit used to replace this handler and
+# leak the inventory and step temps on a later failure.
 inventory_tmp="${inventory}.tmp.$$"
 step_tmp="${step_file}.tmp.$$"
-trap 'rm -f "$inventory_tmp" "$step_tmp"' EXIT
+owned_tmp="${goal_file}.tmp.$$"
+trap 'rm -f "$inventory_tmp" "$step_tmp" "$owned_tmp"' EXIT
 awk -v row="| $unit_id | $unit_type | \`$unit_file\` | \`$scope\` | \`$subscope\` | $intended | $depends_on | $goal_name | $step_name |" '
     /^## Decomposition review$/ && !inserted { print row; print ""; inserted = 1 }
     { print }
@@ -57,58 +191,54 @@ awk -v row="| $unit_id | $unit_type | \`$unit_file\` | \`$scope\` | \`$subscope\
 } > "$step_tmp"
 mv "$inventory_tmp" "$inventory"
 mv "$step_tmp" "$step_file"
-goal_file="$plan_dir/$goal_name/goal.md"
 if grep -Fqx -- '<add work units with add-work-unit.sh>' "$goal_file"; then
     plan_replace_paragraph "$goal_file" '§ 9.1' "\`$unit_id\` — $intended"
 else
-    owned_tmp="${goal_file}.tmp.$$"
-    trap 'rm -f "$owned_tmp"' EXIT
-    awk -v addition="\`$unit_id\` — $intended" '
-        /^§ 9\.[0-9]+$/ { count++ }
-        /^## Goal-size exception$/ && !inserted {
-            if (count == 0) exit 2
-            print "§ 9." (count + 1)
+    # One scan yields "<next-label> <insert-after-line>"; both need the whole
+    # § 9 section. Computing either against a truncated view duplicates § 9.2
+    # from the third unit onward, or reverses the section's order.
+    read -r next_label insert_after < <(awk '
+        /^§ 9\.[0-9]+$/ {
+            n = $2; sub(/.*\./, "", n)
+            if (n + 0 > max) max = n + 0
+            last_label = NR; found = 1
+            next
+        }
+        last_label && NR == last_label + 1 {
+            content_end = NR
+            last_label = 0
+            next
+        }
+        content_end && $0 == "" {
+            insert_after = NR
+            content_end = 0
+        }
+        END {
+            if (!found) exit 1
+            print max + 1, insert_after
+        }
+    ' "$goal_file") || plan_die "Goal has no numbered Owned work units section: $goal_file"
+    [ -n "$insert_after" ] || plan_die "Goal Owned work units section has no paragraph to append after: $goal_file"
+    awk -v addition="\`$unit_id\` — $intended" -v label="$next_label" -v after="$insert_after" '
+        NR == after {
+            print
+            print "§ 9." label
             print addition
             print ""
             inserted = 1
-        }
-        /^## Testing requirement$/ && !inserted && !goal_size_seen {
-            # No Goal-size exception section (add-goal omits it by default):
-            # append the owned-unit blurbs after the Testing-requirement table
-            # that follows this heading.
-            print
-            in_testing = 1
             next
         }
-        in_testing && /^\|/ {
-            print
-            if ($0 ~ /\|/) {
-                if (seen_separator) {
-                    print ""
-                    print "§ 9." (count + 1)
-                    print addition
-                    print ""
-                    inserted = 1
-                    in_testing = 0
-                }
-                seen_separator = 1
-            }
-            next
-        }
-        in_testing { print; next }
         { print }
         END {
             if (!inserted) exit 2
         }
     ' "$goal_file" > "$owned_tmp" || plan_die "Goal has no numbered Owned work units section: $goal_file"
     mv "$owned_tmp" "$goal_file"
-    trap - EXIT
 fi
-trap - EXIT
-echo "Added $unit_id and $step_file"
+printf 'Added %s and %s\n' "$unit_id" "$step_file"
 testing_required="$(plan_testing_requirement_for_goal "$goal_file")"
 if [ "$testing_required" = yes ] && [ "$unit_type" != test ] && [ "$unit_type" != verification ]; then
-    printf 'Reminder: goal %s requires testing; continue with its test/proof step. Review any existing testing instructions for accuracy and completeness.\n' "$goal_name"
+    printf 'Reminder: goal %s requires testing; continue with its test/proof step. Review any existing testing instructions for accuracy and completeness.\n' "$goal_name" >&2
 fi
 plan_rebuild_goal_progress "$script_dir" "$plan_dir/$goal_name" "$goal_name"
 plan_rebuild_plan_progress "$script_dir" "$plan_dir"

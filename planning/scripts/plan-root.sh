@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# MODE: PROD
 # Resolve (and, on first use in a project, choose) the plans root.
 # This is the single decision point behind PLANS_ROOT so that the first plan
 # created in a project asks the human where plans should live, then remembers
@@ -22,10 +23,16 @@
 #      project storage and print a note.
 
 set -euo pipefail
+export LC_ALL=C
 
 usage() {
-    printf 'Usage: %s resolve|project-root [directory]\n' "${0##*/}" >&2
-    exit 64
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} resolve [directory]
+       ${0##*/} project-root [directory]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
 }
 
 die() {
@@ -71,7 +78,11 @@ home_plans() {
 }
 
 project_has_consistent_plans() {
-    local project="$1" candidate="$project/.plans" env_file
+    # Separate `local` statements: in `local a="$1" b="$a"` bash creates every
+    # name first, so $a is still empty when b is assigned and candidate became
+    # "/.plans" — rule 2 (an existing consistent project .plans) never fired.
+    local project="$1" env_file
+    local candidate="$project/.plans"
     [ -d "$candidate" ] || return 1
     env_file="$candidate/.env"
     [ -f "$env_file" ] || return 1
@@ -89,8 +100,14 @@ global_scoped_root() {
     if command -v git >/dev/null 2>&1; then
         local remote
         remote="$(git -C "$project" remote get-url origin 2>/dev/null || true)"
-        # https://host/owner/name.git | git@host:owner/name.git | ssh://host/owner/name.git
-        if [[ "$remote" =~ (ssh://[^/]+/|git@[^:]+:|https?://[^/]+/)(.*?)/([^/.]+)(\.git)?$ ]]; then
+        # `owner` must capture the WHOLE namespace path: collapsing a GitLab
+        # group/subgroup would collide two repos of the same name.
+        # ---- quoted: remote URL forms ----
+        # https://host/owner/name.git
+        # git@host:owner/name.git
+        # ssh://host/owner/name.git
+        # ---- end quoted ----
+        if [[ "$remote" =~ (ssh://[^/]+/|git@[^:]+:|https?://[^/]+/)(.*)/([^/.]+)(\.git)?$ ]]; then
             owner="${BASH_REMATCH[2]}"
             repo="${BASH_REMATCH[3]}"
         fi
@@ -132,7 +149,7 @@ choose_root() {
     esac
     case "$piped" in
         y|Y|yes) PIPED_GITIGNORE=yes ;;
-        n|N|no|N|no) PIPED_GITIGNORE=no ;;
+        n|N|no) PIPED_GITIGNORE=no ;;
     esac
     printf 'plan-root: automated run detected; defaulting to project storage (%s/.plans)%s\n' "$project" "$([ -n "$piped" ] && printf ' (piped answer: %s)' "$piped")" >&2
     printf '%s\n' "$project/.plans"
@@ -176,6 +193,7 @@ resolve() {
 }
 
 case "${1:-}" in
+    -h|--help) usage 0 ;;
     resolve) resolve "${2:-$PWD}" ;;
     project-root) project_root_for "${2:-$PWD}" ;;
     *) usage ;;

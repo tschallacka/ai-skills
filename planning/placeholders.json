@@ -1,32 +1,150 @@
 {
-  "comment": "Exact, finite list of the <...> tokens the skill's templates emit. Detection matches this list LITERALLY (any shape: single word, spaced, hyphenated) — a token is a placeholder iff it is registered here. Author-written <...> prose and patterns are never flagged because they are not in the list, so no code-span exemption is needed. Each entry carries surface: 'authored' (a human fills it in an authored doc; WARN mid-draft, FAIL under --complete) or 'generated' (a machine artifact no human edits; FAIL always).",
+  "comment": "Exact, finite list of the <...> tokens the skill's templates emit. Detection matches this list LITERALLY (any shape: single word, spaced, hyphenated) \u2014 a token is a placeholder iff it is registered here. Author-written <...> prose and patterns are never flagged because they are not in the list, so no code-span exemption is needed. Each entry carries surface: 'authored' (a human fills it in an authored doc; WARN mid-draft, FAIL under --complete) or 'generated' (a machine artifact no human edits; FAIL always).",
   "placeholders": [
-    { "token": "<agreed sequence and major implementation decisions>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<confirmed facts, available assets, and relevant prior work>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<definition of done>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<files, modules, layouts, services, data, and systems>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<included and explicitly excluded behavior>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<items that could affect execution>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<permissions, ownership, conventions, and user choices>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<why>", "emitted_by": "create-plan.sh", "surface": "authored" },
-    { "token": "<add work units with add-work-unit.sh>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<approach, risks, and edge cases>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<concrete affected areas>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<confirmed facts and prerequisite handoffs>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<how this goal contributes to the initiative>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<included and explicitly excluded behavior>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<prerequisites and precise downstream handoffs>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<set to yes when this goal has a testable behavior; explain research or other untestable goals>", "emitted_by": "add-goal.sh", "surface": "authored" },
-    { "token": "<direct action on this one target>", "emitted_by": "add-work-unit.sh", "surface": "authored" },
-    { "token": "<observable result for this target>", "emitted_by": "add-work-unit.sh", "surface": "authored" },
-    { "token": "<what the next named work unit can rely on>", "emitted_by": "add-work-unit.sh", "surface": "authored" },
-    { "token": "<one concrete change>", "emitted_by": "create-work-unit-inventory.sh", "surface": "authored" },
-    { "token": "<outcome>", "emitted_by": "create-work-unit-inventory.sh", "surface": "authored" },
-    { "token": "<why this work unit covers it>", "emitted_by": "create-work-unit-inventory.sh", "surface": "authored" },
-    { "token": "<verbatim or precise summary>", "emitted_by": "create-adversarial-review.sh", "surface": "authored" },
-    { "token": "<what was checked>", "emitted_by": "create-adversarial-review.sh", "surface": "authored" },
-    { "token": "<why no unresolved work remains>", "emitted_by": "create-adversarial-review.sh", "surface": "authored" },
-    { "token": "<short description>", "emitted_by": "rebuild-plan-progress.sh", "surface": "generated" },
-    { "token": "<required only when this goal has one permitted work unit>", "emitted_by": "add-goal.sh", "surface": "generated" }
+    {
+      "token": "<add work units with add-work-unit.sh>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<agreed sequence and major implementation decisions>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<approach, risks, and edge cases>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<concrete affected areas>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<confirmed facts and prerequisite handoffs>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<confirmed facts, available assets, and relevant prior work>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<definition of done>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<direct action on this one target>",
+      "emitted_by": "add-work-unit.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<files, modules, layouts, services, data, and systems>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<host or URL to verify on, auth route, and the order in which steps verify against the running application>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<how this goal contributes to the initiative>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<included and explicitly excluded behavior>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<included and explicitly excluded behavior>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<items that could affect execution>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<mechanism choices as prose: where each change lives and why, and alternatives considered and rejected>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<observable result for this target>",
+      "emitted_by": "add-work-unit.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<one concrete change>",
+      "emitted_by": "create-work-unit-inventory.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<outcome>",
+      "emitted_by": "create-work-unit-inventory.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<permissions, ownership, conventions, and user choices>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<prerequisites and precise downstream handoffs>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<required only when this goal has one permitted work unit>",
+      "emitted_by": "add-goal.sh",
+      "surface": "generated"
+    },
+    {
+      "token": "<set to yes when this goal has a testable behavior; explain research or other untestable goals>",
+      "emitted_by": "add-goal.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<short description>",
+      "emitted_by": "rebuild-plan-progress.sh",
+      "surface": "generated"
+    },
+    {
+      "token": "<verbatim or precise summary>",
+      "emitted_by": "create-adversarial-review.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<what the next named work unit can rely on>",
+      "emitted_by": "add-work-unit.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<what was checked>",
+      "emitted_by": "create-adversarial-review.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<why no unresolved work remains>",
+      "emitted_by": "create-adversarial-review.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<why this work unit covers it>",
+      "emitted_by": "create-work-unit-inventory.sh",
+      "surface": "authored"
+    },
+    {
+      "token": "<why>",
+      "emitted_by": "create-plan.sh",
+      "surface": "authored"
+    }
   ]
 }

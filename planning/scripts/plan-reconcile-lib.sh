@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
+# MODE: PROD
 # Shared reconciliation helpers for plan mutations (sourced, not executed).
-# Source plan-document-lib.sh first (provides plan_die, plan_replace_section, ...).
 #
 # These implement the "tools that reconcile references automatically" contract:
 # when a work-unit mutates (add/remove), related artifacts — coverage rows, the
@@ -9,30 +9,21 @@
 
 set -euo pipefail
 
-# Standard flag/arity guard. Accepts optional -h/--help (prints HELP, exit 0).
-# Args: <expected-arg-count> <help-text>
-plan_guard() {
-    local expected="$1" help_text="$2" args=("${@:3}")
-    if [ "${#args[@]}" -eq 1 ] && { [ "${args[0]}" = -h ] || [ "${args[0]}" = --help ]; }; then
-        printf '%s\n' "$help_text"
-        exit 0
-    fi
-    [ "${#args[@]}" -eq "$expected" ] || plan_die "$help_text"
-}
+# A library that depends on another sources it itself rather than trusting the
+# caller's order (CODE-STYLE §7). plan-document-lib.sh guards its own load-time
+# initialisation, so sourcing it here is harmless when the caller already did.
+if [ -z "${PLAN_DOCUMENT_LIB_INITIALISED:-}" ]; then
+    # shellcheck source=planning/scripts/plan-document-lib.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-document-lib.sh"
+fi
 
-# Actionable error: state the problem and what the agent can do.
-plan_err() {
-    printf 'plan: %s\n' "$1" >&2
-    exit 64
-}
 
-# Prune a work-unit id from the inventory: drop its W row, remove the id from
-# any coverage row (keeping other ids; deleting a row only when empty), and
-# remove the id from remaining rows' "Depends on" column so no dangling
-# dependency remains.
+# Prune a work-unit id from the inventory: drop its W row, remove it from
+# coverage rows (deleting a row only when it empties), and strip it from every
+# remaining "Depends on" column so no dangling dependency remains.
 plan_prune_work_unit() {
     local inventory="$1" unit="$2" temporary
-    [ -f "$inventory" ] || plan_err "work-unit inventory not found: $inventory"
+    [ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory" 66
     temporary="${inventory}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
     if ! awk -F'|' -v wanted="$unit" '
@@ -61,7 +52,7 @@ plan_prune_work_unit() {
         { print }
     ' "$inventory" > "$temporary"; then
         rm -f "$temporary"
-        plan_err "could not prune $unit from $inventory (malformed inventory?)"
+        plan_die "could not prune $unit from $inventory (malformed inventory?)" 65
     fi
     mv "$temporary" "$inventory"
     trap - RETURN
@@ -69,31 +60,23 @@ plan_prune_work_unit() {
 
 # Collect one goal's remaining work-unit rows as "id<TAB>intended-change".
 plan_goal_units() {
-    local inventory="$1" goal="$2"
-    awk -F'|' -v goal="$goal" '
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            g = $9; gsub(/^[[:space:]]+|[[:space:]]+$/, "", g)
-            if (g != goal) next
-            id = $2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-            ch = $7; gsub(/^[[:space:]]+|[[:space:]]+$/, "", ch)
-            gsub(/\t/, " ", ch)
-            printf "%s\t%s\n", id, ch
-        }
-    ' "$inventory"
+    local inventory="$1" goal="$2" row
+    while IFS= read -r row; do
+        plan_inventory_split "$row"
+        [ "$plan_inventory_goal" = "$goal" ] || continue
+        printf '%s\t%s\n' "$plan_inventory_id" "$plan_inventory_change"
+    done < <(plan_inventory_rows "$inventory")
 }
 
-# Re-derive a goal's Owned work units section from the inventory. The goal
-# template interleaves the "## Testing requirement" heading with the
-# owned-work-unit paragraphs, so rebuild the whole region between "## Owned
-# work units" and "## Goal-size exception": owned blocks first, then the
-# testing-requirement heading + table (kept from the current file). This
-# removes any stale/empty/truncated paragraph left by prior string-munging.
+# Re-derive a goal's Owned work units section from the inventory. The template
+# interleaves the "## Testing requirement" heading with the owned paragraphs, so
+# rebuild the whole region up to "## Goal-size exception", not just the blocks.
 plan_rewrite_owned_work_units() {
     local goal_file="$1" inventory="$2" goal="$3" body_file idx id ch region
     local testing_row testing_heading separator
-    [ -f "$goal_file" ] || plan_err "goal file not found: $goal_file"
+    [ -f "$goal_file" ] || plan_die "goal file not found: $goal_file" 66
     # Preserve the current testing-requirement row (e.g. "| yes | reason |").
-    testing_row="$(awk '/^\|[[:space:]]*(yes|no)[[:space:]]*\|/{print; exit}' "$goal_file")"
+    testing_row="$(plan_testing_requirement_row "$goal_file")"
     [ -n "$testing_row" ] || testing_row='| no | <rationale> |'
     testing_heading='## Testing requirement'
     separator='|---|---|'
@@ -124,10 +107,9 @@ plan_rewrite_owned_work_units() {
     trap - RETURN
 }
 
-# Rebuild a goal progress tracker from its step files (overwrites). If the
-# tracker does not exist yet and the goal has step files, create it first —
-# goals added after create-plan.sh never had a per-goal tracker otherwise, and
-# without one the validator's completion gate has nothing to read.
+# Rebuild a goal progress tracker from its step files (overwrites). Created when
+# absent: a goal added after the plan was created has no tracker, and the
+# validator's completion gate then has nothing to read.
 plan_rebuild_goal_progress() {
     local script_dir="$1" goal_dir="$2" goal="$3" progress_file
     progress_file="$goal_dir/progress.md"
@@ -135,7 +117,8 @@ plan_rebuild_goal_progress() {
         rm -f "$progress_file"
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2
-    elif find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' ! -name '*-testing.md' -print -quit 2>/dev/null | grep -q .; then
+    elif [ -n "$(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' \
+        ! -name '*-testing.md' -print -quit 2>/dev/null || true)" ]; then
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             printf 'plan: could not create goal progress for %s\n' "$goal" >&2
     fi

@@ -1,3 +1,4 @@
+<!-- MODE: PROD -->
 # Internal planning-style contract
 
 This is an internal maintainer document. It is not part of the agent-facing

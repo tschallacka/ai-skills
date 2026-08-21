@@ -7,8 +7,17 @@
 # `--permission-mode acceptEdits` auto-accepts file reads/writes inside the
 # allowed dirs so a non-interactive worker can produce plan artifacts without
 # prompting (claude cannot prompt in `-p` mode and otherwise denies writes).
-# `--allowedTools "Bash(...validate-plan.sh)"` is the worker's sole legitimate
+# `--allowedTools "Bash(...validate-plan.sh)"` is the *worker's* sole legitimate
 # shell command (running the tagged validator); everything else stays denied.
+# The allowlist is role-scoped: only the worker capsule contains
+# planning/scripts/, so the reviewer and analyzer roles pass no --allowedTools
+# at all (allowlisting a path absent from their capsule advertised a capability
+# they cannot have and denied nothing extra).
+#
+# cwd: claude has no cwd flag of its own (`--add-dir` grants access, it does not
+# chdir), so the driver reports the workspace through AGENT_CWD and
+# launch_agent runs the agent there — the same cwd codex gets from `-C` and
+# opencode from `--dir`.
 #
 # Model env decision (recorded W14): the harness override env is CLAUDE_MODEL
 # (consistent with CODEX_MODEL / OPENCODE_MODEL). claude itself also honours
@@ -29,14 +38,20 @@ agent_model_env="CLAUDE_MODEL"
 agent_default_model="opus"
 
 _agent_claude_argv() {
-    # $1 = binary, $2 = workspace, $3 = capsule, $4 = prompt
+    # $1 = binary, $2 = workspace, $3 = capsule, $4 = prompt, $5 = role
+    [ "$#" -eq 5 ] || return 64
+    local -a allowed=()
+    if [ "$5" = worker ]; then
+        allowed=(--allowedTools "Bash($3/planning/scripts/validate-plan.sh)")
+    fi
+    AGENT_CWD="$2"
     AGENT_ARGV=(
         "$1" -p
         --output-format=json
         --add-dir "$2"
         --add-dir "$3"
         --permission-mode acceptEdits
-        --allowedTools "Bash($3/planning/scripts/validate-plan.sh)"
+        ${allowed[@]+"${allowed[@]}"}
         --model "$(agent_resolve_model)"
         "$(cat "$4")"
     )
@@ -44,34 +59,30 @@ _agent_claude_argv() {
 
 agent_argv_worker() {
     # $1 = workspace, $2 = capsule, $3 = prompt
-    _agent_claude_argv "${agent_bin:-claude}" "$1" "$2" "$3"
+    _agent_claude_argv "${agent_bin:-claude}" "$1" "$2" "$3" worker
 }
 
 agent_argv_reviewer() {
     # $1 = workspace, $2 = capsule, $3 = prompt, $4 (optional) = binary override
     local binary="${4:-${agent_bin:-claude}}"
-    _agent_claude_argv "$binary" "$1" "$2" "$3"
+    _agent_claude_argv "$binary" "$1" "$2" "$3" reviewer
 }
 
 agent_argv_analyzer() {
     # $1 = workspace, $2 = capsule, $3 = prompt
-    _agent_claude_argv "${agent_bin:-claude}" "$1" "$2" "$3"
+    _agent_claude_argv "${agent_bin:-claude}" "$1" "$2" "$3" analyzer
 }
 
 agent_session_id() {
-    # $1 = claude single-JSON output; prints top-level session_id.
+    # $1 = claude output stream; prints the first session_id it carries.
+    # Line-oriented: the agent's stderr is merged into this JSONL, so a
+    # whole-file parse breaks on one warning. A missing file degrades to empty.
     [ "$#" -eq 1 ] || return 64
-    python3 - "$1" <<'PY'
-import json
-import sys
-path = sys.argv[1]
-try:
-    with open(path, encoding="utf-8") as handle:
-        value = json.load(handle)
-except (OSError, json.JSONDecodeError):
-    value = {}
-print(value.get("session_id", ""))
-PY
+    [ -f "$1" ] || return 0
+    # `sed -n '1p'`, not `head -1`: head closes the pipe early, which is
+    # SIGPIPE for sed and a failure under pipefail.
+    sed -nE 's/.*"session_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" 2>/dev/null |
+        sed -n '1p'
 }
 
 agent_telemetry() {

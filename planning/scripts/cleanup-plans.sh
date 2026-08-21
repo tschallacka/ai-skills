@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# MODE: PROD
 # cleanup-plans.sh — list completed plans and remove selected ones.
 #
 # Usage:
-#   cleanup-plans.sh [--list] [<plan-name> ...] [--yes]
+#   cleanup-plans.sh [-l|--list] [<plan-name> ...] [-y|--yes]
+#   cleanup-plans.sh --help
 #
 # With no plan names: lists every plan under the resolved plans root and marks
 # the completed ones (plan-level progress.md at 100%). With plan names: removes
@@ -12,36 +14,38 @@
 #
 # Plan names are matched against plan directory names (kebab-case). An unknown
 # name is an error, not a silent skip, so a typo cannot remove the wrong plan.
+#
+# Exit codes: 1 = the confirmation prompt was declined; 66 = the plans root or a
+# named plan does not exist.
 
 set -euo pipefail
+export LC_ALL=C
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/plan-document-lib.sh"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/plan-document-lib.sh"
 
 usage() {
-    printf 'Usage: %s [-l|--list] [<plan-name> ...] [-y|--yes]\n' "$(basename "$0")" >&2
-    printf '  -l, --list       list plans under the root, marking completed\n' >&2
-    printf '  -y, --yes        skip the confirmation prompt\n' >&2
-    exit 64
-}
-
-help() {
-    printf 'Usage: %s [-l|--list] [<plan-name> ...] [-y|--yes]\n' "$(basename "$0")"
-    printf '  -l, --list       list plans under the root, marking completed\n'
-    printf '  -y, --yes        skip the confirmation prompt\n'
-    exit 0
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [-l|--list] [<plan-name> ...] [-y|--yes]
+       ${0##*/} --help
+  -l, --list       list plans under the root, marking completed
+  -y, --yes        skip the confirmation prompt
+USAGE
+    exit "$rc"
 }
 
 yes_flag=false
 list_only=false
 wanted=()
-for arg in "$@"; do
-    case "$arg" in
-        -h|--help) help ;;
-        --yes|-y) yes_flag=true ;;
-        --list|-l) list_only=true ;;
-        --*) usage ;;
-        *) wanted+=("$arg") ;;
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage 0 ;;
+        --yes|-y) yes_flag=true; shift ;;
+        --list|-l) list_only=true; shift ;;
+        --) shift; break ;;
+        -*) usage ;;
+        *) wanted+=("$1"); shift ;;
     esac
 done
 
@@ -55,8 +59,13 @@ plan_is_complete() {
     grep -Fq '**Overall progress:** `100%' "$plan_dir/progress.md"
 }
 
-# All plan directories (directories containing plan-description.md), sorted.
-mapfile -t plan_dirs < <(find "$plans_root" -mindepth 2 -maxdepth 2 -name plan-description.md -printf '%h\n' 2>/dev/null | sort -u)
+# PORTABILITY(find-printf): also avoids `mapfile`. find's stderr is
+# deliberately not discarded, so a real error cannot masquerade as "no plans".
+plan_dirs=()
+while IFS= read -r manifest; do
+    [ -n "$manifest" ] || continue
+    plan_dirs+=("$(dirname "$manifest")")
+done < <(find "$plans_root" -mindepth 2 -maxdepth 2 -name plan-description.md -print | LC_ALL=C sort -u)
 
 if [ "${#plan_dirs[@]}" -eq 0 ]; then
     printf 'cleanup-plans: no plans under %s\n' "$plans_root"
@@ -111,11 +120,11 @@ if [ "$yes_flag" = false ]; then
     fi
     case "$answer" in
         y|Y|yes) ;;
-        *) printf 'cleanup-plans: cancelled\n'; exit 1 ;;
+        *) printf 'cleanup-plans: cancelled\n' >&2; exit 1 ;;
     esac
 fi
 
 for dir in "${targets[@]}"; do
-    "$SCRIPT_DIR/remove-plan.sh" "$dir"
+    "$script_dir/remove-plan.sh" "$dir"
 done
 printf 'cleanup-plans: removed %d plan(s)\n' "${#targets[@]}"

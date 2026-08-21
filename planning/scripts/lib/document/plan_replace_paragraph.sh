@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
+plan_replace_paragraph() {
+    local file="$1" paragraph_id="$2" content="$3" temporary_file replacement_file
+    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
+    [[ "$content" != *$'\n\n'* ]] || plan_die "A paragraph replacement must contain exactly one paragraph; use section for multiple paragraphs"
+    [ -n "$content" ] || plan_die "Paragraph content must not be empty"
+    temporary_file="${file}.tmp.$$"
+    replacement_file="${temporary_file}.replacement"
+    plan_register_temp_file "$temporary_file"
+    plan_register_temp_file "$replacement_file"
+    trap 'rm -f "$temporary_file" "$replacement_file"' RETURN
+    printf '%s\n' "$content" > "$replacement_file"
+    awk -v wanted="$paragraph_id" -v replacement_file="$replacement_file" '
+        BEGIN {
+            while ((getline line < replacement_file) > 0) {
+                replacement = replacement (replacement == "" ? "" : "\n") line
+            }
+            close(replacement_file)
+        }
+        $0 == wanted {
+            if (found++) exit 2
+            print
+            print replacement
+            skipping = 1
+            next
+        }
+        skipping && ($0 == "" || /^§[[:space:]][0-9]+\.[0-9]+$/ || /^## /) {
+            if ($0 ~ /^§[[:space:]][0-9]+\.[0-9]+$/ || $0 ~ /^## /) print ""
+            skipping = 0
+        }
+        !skipping { print }
+        END { if (found != 1) exit 2 }
+    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
+    mv "$temporary_file" "$file"
+    rm -f "$replacement_file"
+    trap - RETURN
+}

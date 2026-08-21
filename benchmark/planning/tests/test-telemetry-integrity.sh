@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../planning/tests" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 schema="$root/../../planning/telemetry-schema.json"
@@ -7,7 +13,15 @@ python3 -m json.tool "$schema" >/dev/null
 grep -Fq 'protocol_id' "$schema"
 grep -Fq 'taint_causes' "$schema"
 grep -Fq 'reviewer_records' "$schema"
-grep -Fq 'telemetry.json' "$root/setup-benchmark.sh"
+# The generated-case source spans setup-benchmark.sh *and* the extracted
+# benchmark/planning/case/*.sh, so harness-wide assertions search both, matching
+# the harness_grep idiom in test-safeguards.sh.
+harness_sources=("$root/setup-benchmark.sh")
+for case_source in "$root/case"/*.sh; do
+    [ -f "$case_source" ] && harness_sources+=("$case_source")
+done
+harness_grep() { grep -Fq -- "$1" "${harness_sources[@]}"; }
+harness_grep 'telemetry.json'
 python3 - <<'PY'
 import json
 from pathlib import Path
@@ -16,8 +30,11 @@ required = set(schema["required"])
 assert {"protocol_id", "taint_causes", "provenance", "phase_records"} <= required
 PY
 test -x "$root/validate-telemetry.sh"
-if "$root/telemetry.sh" 'bad id with spaces' | grep -Fq 'telemetry_status=available'; then
-    echo 'invalid telemetry identity was accepted' >&2
-    exit 1
-fi
+bad_id_out="$("$root/telemetry.sh" 'bad id with spaces' || true)"
+case "$bad_id_out" in
+    *telemetry_status=available*)
+        echo 'invalid telemetry identity was accepted' >&2
+        exit 1
+        ;;
+esac
 printf 'Telemetry integrity contract tests passed.\n'

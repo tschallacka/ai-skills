@@ -1,3 +1,4 @@
+<!-- MODE: DEV -->
 # Maintainer guide — architecture, relations & behavior rules
 
 **Audience: skill maintainers and developers only. This is NOT part of the
@@ -19,6 +20,7 @@ the maintainer must behave going forward.
 | `REVIEWER.md` | Reviewer contract (generated). | From review docs; loaded by reviewers. |
 | `MAINTAINER-STYLE-CONTRACT.md` | Canonical roles master + benchmark-domain roles + document-format contract (internal). | Maintainer only; phase docs reference ids, never redefine. |
 | `MAINTAINER.md` | This file (internal). | Maintainer only. |
+| `ARCHITECTURE.md` | The five cross-script flows as mermaid diagrams (plan lifecycle, role handoff and gates, script layering, the validation state machine, plan-directory state files) plus the recorded contradictions and dead ends (internal). | Maintainer only; not shipped, not in the manifest/map, not installed. Read it before changing a flow that crosses more than two scripts. |
 | `scripts/role-context.sh` | Gatekeeper: machine source of the persona registry (`ROLES=()`) + per-role scope (`role_docs()`); prints a role's docs + voice preamble (paginated). `--list` open (id/name only); `--paths` maintainer-only; content reads FAIL CLOSED without a valid `ROLE_ID`. Sourcing guard exposes registry + resolvers for reuse. | Reads `SKILL.md`, `ROLES.md`, `roles/*.md`, `REVIEWER.md`, `MAINTAINER-STYLE-CONTRACT.md`, `roles/VOICES.md` (voice preamble). |
 | `roles/VOICES.md` | Per-role voice/stance identity preamble, keyed by canonical `ROLE_ID`, byte-budgeted (≤512 B). | Injected by `role-context.sh` `voice_for()`; asserted by `test-voice-artifact-drift.sh` + `test-persona-drift.sh`. |
 | `scripts/monitor-read.sh` | Maintainer-only monitor reader: bounded supervision frames, pull-on-exception, grant log (case+command). | Reads frames written by `supervision-frame.sh`; identity-gates to maintainer (fail closed). |
@@ -26,11 +28,29 @@ the maintainer must behave going forward.
 | `scripts/plan-context.sh` | Bounded plan-context reader (init/read/check/refresh/checkpoint). | Gates per `ROLE_ID` via `plan-context-lib.sh`; context IDs tagged (`plan`, `goal:<id>`, `step:<goal>/<step>`, `unit:WNN`). |
 | `scripts/plan-context-lib.sh` | Shared bounded plan-context cache helper; owns per-role reader composition (`context_role_gate` / `context_role_reader_composition`). | Reads registry via `role-context.sh`; gates `plan-context.sh` per `ROLE_ID`. |
 | `scripts/plan-document-lib.sh` | Shared document helpers (sections, paragraphs, replace, guard). | All mutating helpers. |
-| `scripts/plan-reconcile-lib.sh` | Shared reconciliation (coverage prune, owned-work-units rewrite, progress rebuild, `plan_guard`/`plan_err`). | `add-work-unit.sh`, `remove-work-unit.sh`. |
+| `scripts/plan-reconcile-lib.sh` | Shared reconciliation (coverage prune, owned-work-units rewrite, progress rebuild). | `add-work-unit.sh`, `remove-work-unit.sh`, `update-adversarial-review.sh`. |
+| `scripts/validate-plan.sh` | Plan gate entry point: flags, the skill-root path, the single EXIT cleanup, and the ORDER of the 13 validation passes. Owns no check itself. | Sources every `validate-plan-*-lib.sh`; the pass order is load-bearing (see the file's docblock). |
+| `scripts/validate-plan-common-lib.sh` | `fail`/`warn` finding vocabulary, `trim`, `require_heading`, `get_single_field` (returns via the `field_value` global). `warn` never touches `errors` — the `--complete`-promotes-WARN-to-FAIL pattern depends on it. | Required by every other `validate-plan-*-lib.sh`. |
+| `scripts/validate-plan-docs-lib.sh` | Existence gate, plan-description headings, `UI affected` verdict, adversarial-review gate and mirror, inventory section shape, hand-edit damage (helper-flag text, duplicate `§` labels, `$script_dir` fragments). | Publishes `ui_affected` and the `plan_docs` list the placeholder and stale passes iterate. |
+| `scripts/validate-plan-placeholders-lib.sh` | Registered-template-token sweep; the registry surface (authored/generated) decides WARN vs FAIL. | Reads `planning/placeholders.json` via `skill_root`. |
+| `scripts/validate-plan-stale-lib.sh` | `--stale` phrase sweep, including the `*-testing.md` companions; bundled case-count and byte-identical phrase list. | Registers its temp phrase file with the entry script's `cleanup_files`, never its own EXIT trap. |
+| `scripts/validate-plan-inventory-lib.sh` | Work-unit row parser and all row rules, definition-of-done cross-links, dependency-cycle walk, and the (KNOWN DEAD) proof-coverage rule. | Owns the `unit_*` / `goal_units` data model every later pass reads. |
+| `scripts/validate-plan-ui-lib.sh` | UI user stories, browser run caches, story status vocabulary, `bugs.md` linkage. | Runs only when `ui_affected` is `yes`. |
+| `scripts/validate-plan-goals-lib.sh` | `goal.md` headings, the testing-requirement table, goal-size band and exception, step-file/inventory agreement, step-file naming. | Only writer of `goal_testing_required`. Reads `planning/goal-tables.json` via `skill_root` for the sections whose first column may be `yes`/`no`; a table under any other heading is hand-edit damage and fails. |
+| `scripts/validate-plan-serve-lib.sh` | The "the application still serves" WARN for a goal that changes module state, schema, or configuration. | Reads `planning/state-change-registry.json` via `skill_root`. |
+| `scripts/validate-plan-commands-lib.sh` | Command-literal detector (rules 1-8) against the plan's `commands.json`. | Reads `planning/never-executable-extensions.json` via `skill_root`; registry maintained by `register-command.sh`. |
+| `scripts/validate-plan-propagation-lib.sh` | `--complete` progress gate plus propagation (a) unowned edit targets, (c) verifier reachability, (c2) companion references, (d) unverified graph leaves, (e) §9.x roster vs inventory. | Runs only when `--propagation` (the default) is on. |
 | `scripts/*.sh` | Thin, single-purpose helpers. | Source `plan-document-lib.sh` (+ `plan-reconcile-lib.sh`). |
 | `PACKAGE-MANIFEST.txt` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
-| `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. |
+| `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
+| `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
 | Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md`, `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
+| `../verify-both-shells.sh` | Runs the suite on the working tree under the local bash and the bash 3.2 floor, in a linked worktree in `TMPDIR` so editing can continue. Prints each failing test's own output. | Sweeps its own leftover worktrees; never place one under the repo, or the filesystem scans land machine-specific paths in generated artifacts. |
+| `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `installer/build.sh --check`, `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
+| `../coupling.tsv` | The couplings a change must honour, as data rather than prose: glob, level, consequence, check. | Read by `blast-radius.sh`. Add a row when a new generated artifact or registry appears. |
+| `../BUGS.json` / `../TODO.json` | The defect register and the work queue, written by this repo's own `bug-report` and `todo` skills. Tracked, so they survive a machine. | Update them in the same change (checklist step 8). No gate enforces this — nothing can tell that a commit resolved a defect — so the checklist is the only mechanism. |
+| `../CODE-CONTRACTS.md` | Cross-script behavioural contracts: section shapes and their sole writer, irreversible-last, advisory vs gate, generated artifacts, registry-plus-gate, and human-followable documents. Each entry names the incident behind it. | Read with `CODE-STYLE.md` before changing a helper. Contract 1 is enforced by `document-sections.json` + `test-document-sections.sh`. |
+| `../planning/document-sections.json` | Every section-form target and its shape (narrative, fields, hybrid, table). | Read by `test-document-sections.sh`; the runtime guard lives in `plan_replace_section`. |
 | `.plans/` | Transient plan storage (gitignored). | Created by `plan-root.sh`/`create-plan.sh`; `.env` regenerated by `plan-env.sh`. |
 | `benchmark/planning/` | Benchmark harness; owns domain roles (Oracle/Pythia, Analyzer/Eve). | Not part of the end-user lifecycle. |
 
@@ -91,12 +111,69 @@ the maintainer must behave going forward.
   persona matrix only because scope-doc shipping requires every `ROLES=()` id to
   be present, but their authority is not defined there.
 
+### 2.7a `role-context.sh` is dual-natured
+
+- It is a CLI **and** a sourceable registry: the sourcing guard stops the CLI
+  main flow when the file is sourced, so `plan-context-lib.sh` can reuse
+  `resolve_id()` without the arg parsing, usage and exit firing in the caller.
+- `ROLES`, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`,
+  `voice_for` and `can_access` are the public surface of the sourced form.
+  `ROLES` keeps its UPPER_CASE name and none of these carry the `plan_` prefix
+  CODE-STYLE.md section 7 asks of a sourced file; renaming any of them is a
+  cross-file change. Everything script-local to the CLI half is lower-case.
+- Resolution accepts the canonical id and the canonical name
+  (case-insensitive) plus id/name aliases (`willie`/`maintainer`,
+  `pythia`/`oracle`, `benny-02` → `benny`). Unset or unknown `ROLE_ID` is a hard
+  refusal and the worker is denied a persona; `--paths` is maintainer-only.
+  Shell gates are advisory, not a security boundary — the agent framework is
+  what confines the process.
+- `ROLES=()` and `role_docs()` are the machine source of the persona registry
+  and per-role scope; the `ROLES.md` matrix is a maintained mirror, and
+  scope-doc shipping is enforced by `tests/test-persona-drift.sh`.
+
 ### 2.8 Review protocol invariants
 - Protocol 1.4.2: Reviewer A (`christian`) is handoff-only, never approves;
   Reviewer B (`christoph`) is sole approval authority. Adversarial review is
   done by a fresh secondary agent with no access to the planner's conclusions.
 - Validate before creating progress trackers; a plan is not ready until the
   review is approved and validation passes.
+
+### 2.8 The compiled libraries
+
+`plan-core-lib.sh`, `plan-document-lib.sh`, `plan-table-lib.sh` and
+`plan-progress-lib.sh` are compiled by `build-plan-libs.sh` from
+`scripts/lib/<group>/*.sh`, one function per file. Do not edit the compiled
+files; edit the function file and re-run the build. `--check` reports a stale
+library, and `test-plan-libs-build.sh` runs it.
+
+- `plan-document-lib.sh` remains the façade. Its `99-facade.sh` sources the other
+  three plus `plan-map-lib.sh` and `plan-inventory-lib.sh`, so the 40-plus
+  scripts that source that one path keep getting all 66 symbols. Verified as a
+  symbol-set comparison, not by inspection.
+- Each compiled library begins with a `PLAN_<GROUP>_LIB_LOADED` guard, because
+  the façade sources its siblings and a script may source both. Without it a
+  second source would re-run `00-state.sh` and drop the registered temp files.
+- Group membership is the directory. Moving a function between groups is a `git
+  mv` plus a build, and the symbol set must not change.
+
+### 2.8a Fix-key derivation
+
+- `mint-fix-keys.sh` parses the five-column Findings table
+  (`ID | Missing or over-broad item | Required plan change | Status | Work unit`)
+  and writes one hex key per (finding, work unit) row into `fix-keys.json`,
+  derived as `HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>")`. Rows
+  with no work unit carry no key.
+- HMAC-SHA256 has no coreutils equivalent, so `openssl` (or LibreSSL) is a hard
+  requirement for both minting and verification, refused with exit 69.
+- `ensure_session_secret` is the production creation path for the session
+  secret; tests seed the secret directory themselves.
+- `add-fix-claim.sh` is the only writer of `fixes.md`, which had five readers
+  and none. It gates on the same Findings table `mint-fix-keys.sh` and
+  `verify-fix-keys.sh` read, so a claim it accepts is a claim the verifier
+  gates; reading `fix-keys.json` for the pair list instead would let the three
+  disagree. It checks the key by membership in `fix-keys.json`, never by
+  derivation: derivation needs the session secret, and a fixer able to read that
+  secret could mint its own keys.
 
 ### 2.9 Per-role reader composition
 - `role-context.sh` (persona scope) and `plan-context.sh` (bounded plan content)
@@ -114,7 +191,114 @@ the maintainer must behave going forward.
 - The grant log records case + handed command, **never reasoning**. Frames and
   grants fail closed to any non-maintainer.
 
-## 3. Change checklist (minimum, per change)
+### 2.11 Which repository owns a plan's history
+
+`create-plan.sh` decides this once, at creation:
+
+| Situation | Repository used |
+|---|---|
+| Plans root is git-excluded (a project's `/.plans` in `.gitignore`) | Its own repo at the plans root, so the whole plans tree is versioned and cross-plan `plan-content.sh diff` can walk up. Re-initialised when the root's `.git` is missing. |
+| Plans root is outside any repo | Same: its own repo at the plans root. |
+| Plan sits inside an already-versioned tree | That tree; no new repo. |
+| Explicit path outside any repo | Its own per-plan repo. |
+
+### 2.12 Command-literal detection is registry-driven and language-agnostic
+
+Every command literal in a step file or testing companion must be registered in
+the plan's `commands.json` (seeded empty by `create-plan.sh`, maintained with
+`register-command.sh`), so the "when" context travels with the command instead
+of being lost when steps are copied. `validate-plan-commands-lib.sh` decides
+what is a command literal with ordered rules, no language table:
+
+A span is a **candidate** when any of these holds —
+
+1. its first token is a registered command's first token, or a universal core
+   word;
+2. it resolves on disk to a non-directory with the executable bit (the same
+   question a shell would ask);
+3. its last segment sits directly under a bin-like directory (`bin/`, `sbin/`,
+   `.bin/`, `Scripts/`, covering `vendor/bin/` and `node_modules/.bin/`).
+
+Rules 1–3 are the only entry points: arguments strengthen a qualifying span but
+never qualify one on their own. It is **disqualified** regardless when —
+
+5. its last segment carries a never-executable data/markup extension (the
+   jq-matched list in `never-executable-extensions.json`);
+6. it ends in a `:line` / `#Lnn` citation;
+7. it is route- or prose-shaped (a leading `/` without a bin-like segment whose
+   first token is not command-shaped, or a leading-`/` argument after a
+   non-command-shaped token, e.g. `GET /health`);
+8. its first token resolves to a directory.
+
+The vocabulary is the registry itself: each registered command's first token
+teaches the detector that tool word, so a Python plan registering `pytest -q`
+makes `pytest` a word with no language table to maintain. Findings WARN
+mid-draft and FAIL under `--complete`, like authored placeholders.
+
+### 2.13 Placeholder detection is literal registry membership
+
+`planning/placeholders.json` is the exact, finite list of `<...>` tokens the
+skill's templates emit. A token is a placeholder **iff** it is registered — no
+shape heuristic — so single-word (`<why>`), spaced and hyphenated tokens are all
+handled by construction, and author-written `<...>` prose is never flagged
+without a code-span exemption. Fenced code blocks are skipped regardless. Each
+entry carries a surface that drives the verdict:
+
+| Token state | Verdict |
+|---|---|
+| not registered | ignored — the author's own prose |
+| registered, in an authored document | WARN; FAIL under `--complete` |
+| registered, in a generated document | FAIL always — no human ever fills it |
+
+### 2.14 One EXIT trap, process-wide
+
+`plan-document-lib.sh` installs a single `plan_cleanup` on `EXIT INT TERM` at
+load and keeps one accumulating temp list, replacing the per-call
+`trap … EXIT` / `trap - EXIT` pair that leaked temps whenever two of them
+nested (CODE-STYLE §8).
+
+bash keeps exactly **one** EXIT handler, so the interaction with the ~30
+surviving `trap - EXIT` call sites is:
+
+- A script that installs its own `trap … EXIT` *after* sourcing the library
+  replaces `plan_cleanup`; its own `trap - EXIT` then clears the slot. Those
+  scripts behave exactly as before — their own temp handling is unaffected —
+  but they lose `plan_cleanup` for the rest of the run.
+- `plan_cleanup` stays installed on `INT` and `TERM` regardless, because
+  `trap - EXIT` names only `EXIT`.
+- An EXIT handler installed *before* the library was sourced is preserved and
+  chained: `plan_cleanup` runs it after itself.
+
+Converting those scripts to `plan_atomic_write`, which is the point of this
+vocabulary, removes the overlap. Until then, never use `trap - EXIT` to
+"release" a per-call handler.
+
+## 3. Pending consolidation (the duplication inventory)
+
+The single home for "this logic exists in N places and should be one helper".
+It lives here rather than as `# DEDUPE:` comments in the scripts: 58 such
+comments existed, 51 of them naming a helper that had already landed, and
+`references/comment-discipline-contract.md` clause 5 rules out comments whose
+only job is to point at another file. Counts are enforced by
+`tests/test-duplication-ratchet.sh`, which fails if any of them grows — that is
+what keeps this table from rotting the way the comments did.
+
+| Duplicated logic | Sites | Canonical helper | State |
+|---|---|---|---|
+| Hand-rolled `"$f.tmp.$$"` + `trap` + `mv` | 43 in 27 files | `plan_atomic_write`, `plan_track_tmp` | helper exists; call sites not migrated |
+| Inline `awk -F'\|'` inventory-row parsing with hard-coded field indices (`$2` ID … `$10` Step) | 28 in 18 files | `plan_inventory_row`, `plan_inventory_rows`, `plan_inventory_split` | helper exists in `scripts/plan-inventory-lib.sh`; the ten work-unit *readers* are migrated. What is left is not all inventory: the two `update-work-unit.sh` rewriters and `plan_prune_work_unit` edit rows in place (a writer helper, not this one), `plan-content.sh find` needs the raw row text rather than trimmed cells, and the rest parse other tables (coverage, `VOICES.md`, the progress trackers). The adversarial-review Findings table is no longer among them: `plan_review_gated_pairs` in `plan-document-lib.sh` owns it, and `mint-fix-keys.sh`, `verify-fix-keys.sh` and `add-fix-claim.sh` all call it — three copies of those field indices were three chances for the writer to accept a pair the verifier does not gate. The cap counts every literal `awk -F'|'` in `scripts/*.sh`, including three docblock mentions and the helper's own parser, so its floor is 1, not 0. |
+| Seed progress-bar literal `` `0%  #### ----------------  100%` `` | 4 files | `plan_progress_bar` | helper exists; glyphs are pinned by `tests/test-progress-bar-shape.sh`, so any migration must stay byte-identical |
+| percent / bar / icon derivation | 4 files | `plan_progress_percent`, `plan_progress_bar`, `plan_progress_icon` | helper exists; `update-progress.sh` is the canonical copy and the library's arithmetic and glyphs are transcribed from it. The other two agree on output but not on spelling, so do not assume a textual match when converting: `update-plan-progress.sh` collapses the filled/empty and icon branches to one-liners, and `rebuild-plan-progress.sh` additionally hard-codes 20 instead of a width variable and omits the `total > 0` guard (safe only because it exits 66 earlier on a zero-goal plan). Half-up rounding (`+ total / 2`) and the 20-column default width are part of the byte-identical contract. |
+| Status `case` map (`incomplete`/`in-progress`/`completed` → glyph) | 1 file | `plan_status_label` | helper exists in `scripts/plan-document-lib.sh`; `update-step.sh` and `update-plan-progress.sh` are migrated. `rebuild-plan-progress.sh` is the remaining site and is a different shape — it derives the glyph from the goal's own progress file rather than from a requested status word, so it needs a second helper or a rewrite, not this one. The glyphs are the on-disk contract. |
+| A test that does not source `lib-test.sh` | 7 of 64 | `t_begin` / `t_record` / `t_fail` / `t_end` (`tests/lib-test.sh`) | helper exists; six tests kept a byte-identical copy of its reporter that exited on the first finding, and that count is now 0. The cap counts the library-source line instead, because "a reporter whose body exits" needs brace matching and CODE-STYLE.md section 12 rules out parsing shell structure with a pattern. A `fail() { t_fail "$*"; }` shim is deliberate and is not counted: 32 tests have one, and they are why the call sites did not change. |
+| `stat(1)` GNU-vs-BSD probe | `plan-env.sh` + `plan-document-lib.sh` | `plan_stat_mode`, `plan_stat_uid` | helper exists, but `plan-env.sh` sources no library, so migrating it is a structural change |
+
+Migrating any row is a behaviour-preserving change and must be proved as one:
+capture the affected scripts' stdout, stderr and exit codes over real inputs
+before and after, and diff. `test-progress-bar-shape.sh` and
+`test-plan-commands.sh` pin much of the observable output already.
+
+## 4. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, `role_docs()`
    in `role-context.sh`, manifest/map, `install.sh skill_files`, capsule copy,
@@ -122,20 +306,33 @@ the maintainer must behave going forward.
 2. Update shared logic in the library, keep the helper thin.
 3. Add/update a regression fixture + test for the new behavior, including the
    actionable-error path.
-4. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
+4. If the change alters a flow that crosses more than two scripts, or adds/removes
+   a plan artifact, update the affected diagram in `ARCHITECTURE.md` in the same
+   change (`CODE-STYLE.md` §11 picks the diagram form).
+5. If a doc changed: keep `SKILL.md` small, update the phase/role docs and their
    references, regenerate `REVIEWER.md` if a reviewer section changed. Keep
    `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix +
    `plan-context-lib.sh` reader composition in sync with `role_docs()`/`ROLES=()`;
    re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
-5. Register new files in `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
+6. Register new files in `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
    and `install.sh skill_files`. If the file is a benchmark capsule dependency
    (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in `setup-benchmark.sh`'s
    capsule copy. The manifest line-count is derived from the map (no constant to
    bump) — `test-installer-manifest.sh` asserts the reconcile.
-6. Run `bash -n`, `git diff --check`, `test-plan-commands.sh`,
+7. Run `bash -n`, `git diff --check`, `test-plan-commands.sh`,
    `test-installer-manifest.sh` (asserts `skill_files()` ↔ manifest/map
    reconcile), `test-plan-env.sh`, the plan validator, and — after any
    role/reader/VOICES change — `test-persona-drift.sh`,
    `test-voice-artifact-drift.sh`, `test-supervision-frame.sh`,
    `test-progress-bar-shape.sh`, and `test-reviewer-projection.sh`.
-7. Commit as one coordinated, no-backwards-compat change.
+8. Update the registers, which nothing else will. A defect this change fixes is
+   closed in `../BUGS.json` with the commit and the mutation that proves it; a
+   defect it *finds* and does not fix is added there rather than left in a commit
+   message; queued work goes in `../TODO.json`. Recipes are in
+   `../bug-report/SKILL.md` and `../todo/SKILL.md`. This is the one step on this
+   list with no gate behind it — no test can tell that a commit resolved a bug —
+   so it is the one that gets skipped, and then the next reader has to
+   reconstruct the change from its diff.
+9. Commit as one coordinated, no-backwards-compat change. The message carries the
+   *why* that does not belong in a comment (`CODE-STYLE.md` §12) and names the
+   register entries it closes, so the two can be checked against each other.

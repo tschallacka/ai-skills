@@ -2,6 +2,7 @@
 name: resource-limited-testing
 description: Use when you are about to run a test, build, analyzer, linter, browser-automation command, or similar tool that may consume substantial CPU or memory. It runs the command under a resource cap. Do not use for lightweight commands, ordinary application commands, or discussions about testing without running a command.
 ---
+<!-- MODE: PROD -->
 
 # Resource-limited testing
 
@@ -22,14 +23,34 @@ On Linux, `scripts/limited-run.sh` runs a command inside a transient
 If the wrapped process tree exceeds the memory ceiling, the operating system
 kills only the processes in that scope.
 
-On macOS, the kernel does not provide a reliable per-process RAM cap that this
-wrapper can apply. The Linux cgroup memory controls and the shell's
-`ulimit -v` are therefore not available as a safe equivalent. The wrapper uses
-`nice` for lower scheduling priority and, when installed, `cpulimit` for a
-best-effort CPU throttle.
+macOS has no cgroups, and `setrlimit(RLIMIT_AS)` is rejected outright on Apple
+Silicon, so there is no kernel-enforced equivalent. Instead the wrapper uses
+[memlimit](https://github.com/pingiun/memlimit) when it is installed: it
+interposes the macOS virtual-memory entry points and *refuses* an allocation
+that would push real resident memory past the cap, so the runtime raises its own
+out-of-memory error instead of the process being killed after the memory is
+already taken. On macOS the wrapper runs
+`nice -n 10 memlimit <bytes> -- [cpulimit --limit=<percent> --] <command>`.
 
-If neither supported mechanism is available, stop and explain the limitation
-before running the command without a cap.
+memlimit is best-effort and not a cgroup-equivalent guarantee. What it does
+promise: the check is against real resident memory (`phys_footprint`), the
+budget covers the whole process tree by default, and it keeps the cap across
+shell-outs. What it does not promise:
+
+- Apple-shipped binaries (`/bin`, `/usr/bin`, `/System`) cannot be injected
+  because System Integrity Protection strips `DYLD_*`, so they are never capped
+  and never join the tree total. Homebrew, nix, and self-built binaries are.
+- Pages become resident when touched, not when allocated, so a run can overshoot
+  by whatever it touches after its last allocation call.
+- Large lazy mappings (JIT and opcache arenas) are deliberately not charged.
+- node/V8 aborts instead of failing gracefully; use `--max-old-space-size`
+  there. PHP and Python fail cleanly.
+- Apple Silicon only; Intel is untested and unsupported.
+
+Without memlimit the wrapper warns, names memlimit and how to install it, and
+degrades to `nice` plus optional `cpulimit` — a CPU throttle and a priority
+change, with no memory cap at all. In that state, stop and explain the
+limitation before running a command that could exhaust the machine.
 
 ## Ask before installing or changing configuration
 
@@ -69,13 +90,19 @@ stability and no adequate limit is available, ask before running it.
 
 ### macOS
 
-- There is no reliable RAM limit available through this wrapper on macOS.
-  Do not describe `ulimit -v` as RAM protection; it is not a supported
-  substitute for Linux cgroup memory limits here.
-- Prefer a memory ceiling provided by the command's interpreter or runtime,
-  when one exists. Add the appropriate interpreter-specific argument directly
-  to the wrapped command; keep the guidance generic and rely on the agent's
-  knowledge of that runtime.
+- Prefer `memlimit`, which the wrapper uses automatically when it is on `PATH`.
+  It is a preventive, best-effort cap on real resident memory, not a hard
+  kernel-enforced limit: state it that way, and never as a cgroup equivalent.
+  Install it with
+  `curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh`
+  after asking the user, or via
+  `brew tap pingiun/memlimit https://github.com/pingiun/memlimit && brew install --HEAD memlimit`.
+- Do not describe `ulimit -v` as RAM protection; it measures reserved address
+  space and is not a substitute for either mechanism.
+- A memory ceiling provided by the command's interpreter or runtime composes
+  well with memlimit and is worth adding on top, particularly for node/V8, which
+  aborts rather than failing gracefully under a refused allocation. Add the
+  appropriate interpreter-specific argument directly to the wrapped command.
 - Use the built-in `nice` command for lower scheduling priority. It is not a
   CPU usage limit.
 - For a best-effort percentage-based CPU throttle, recommend the optional
@@ -101,6 +128,19 @@ scripts/limited-run.sh <memory-max> <cpu-quota-percent> -- <command> [args...]
 - `<cpu-quota-percent>`: a percentage of one core; `400` means up to four
   cores on Linux. On macOS it is passed to `cpulimit` when available and is
   otherwise represented only by the `nice` priority change.
+
+`nice` is applied outside memlimit and `cpulimit` inside it: `/usr/bin/nice` is
+SIP-protected, so running memlimit underneath it would have `DYLD_*` — and with
+it the cap — scrubbed from the environment, while `cpulimit` comes from Homebrew
+and is injectable, so the command it starts stays inside the capped tree.
+
+## Third-party tools
+
+- [memlimit](https://github.com/pingiun/memlimit) — preventive, RSS-based memory
+  caps for macOS. MIT licence, by Jelle Besseling (pingiun). Not bundled and not
+  vendored: the wrapper detects it with `command -v`, and on macOS the installer
+  refuses to run until it is present.
+- `cpulimit` — optional best-effort CPU throttle on both platforms.
 
 ## Starting presets
 
@@ -132,6 +172,10 @@ scripts/limited-run.sh 6G 400 -- <child-process-command> ... &
 
 Use the tool's own low-resource or headless options when available. Those
 options reduce baseline usage but do not replace the process-level cap.
+
+Each wrapper invocation is its own budget: on Linux that is a separate cgroup
+scope, and on macOS a separate memlimit tree. Two wrapped commands with a 6G cap
+each can therefore use 12G together.
 
 ## After a run
 

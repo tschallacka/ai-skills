@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
+# MODE: DEV
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
@@ -21,7 +28,7 @@ cp -R "$fixture" "$tmp/plan"
 "$repo_dir/planning/scripts/update-plan-content.sh" --description-paragraph "$tmp/plan" 2.1 'Mutated through the canonical helper.' >/dev/null
 [ -s "$tmp/plan/context/mutation-handoff" ]
 for forbidden in .git registry versions changelog quarantine events compaction workers; do
-    if find "$tmp/plan" -name "$forbidden" -o -name "$forbidden.*" | grep -q .; then
+    if [ -n "$(find "$tmp/plan" -name "$forbidden" -o -name "$forbidden.*" || true)" ]; then
         printf 'deferred state created: %s\n' "$forbidden" >&2
         exit 1
     fi

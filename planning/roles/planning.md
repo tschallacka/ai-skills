@@ -1,3 +1,4 @@
+<!-- MODE: PROD -->
 # Roles — planning phase
 
 Roles active while a plan is being created and reviewed. Execution and

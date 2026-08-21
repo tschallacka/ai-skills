@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
+# MODE: DEV
 set -euo pipefail
+
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-command-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 plan_dir="$temporary_root/status-sync"
+
+# PORTABILITY(pipefail-grep-q): these assertions read a script's stdout, so the
+# reader drains the pipe instead of closing it on the first match.
+assert_stdout_contains() {
+    local needle="$1" text
+    text="$(cat)"
+    case "$text" in
+        *"$needle"*) return 0 ;;
+    esac
+    printf 'assertion failed: stdout does not contain %s\n' "$needle" >&2
+    exit 1
+}
 
 if "$script_dir/update-plan-content.sh" paragraph "$plan_dir" plan -p 2.1: 'Legacy form' >/dev/null 2>&1; then
     echo 'The removed positional update form unexpectedly passed.' >&2
@@ -50,7 +69,7 @@ fi
 step_writer_output="$temporary_root/step-writer-output.log"
 "$script_dir/add-work-unit.sh" "$plan_dir" W01 source planning/scripts/update-plan-content.sh \
     'review-status command' N/A 'Update both review status fields atomically.' '—' \
-    01-sync 01-step-update-status >"$step_writer_output"
+    01-sync 01-step-update-status 2>"$step_writer_output"
 grep -Fq 'Reminder: goal 01-sync requires testing; continue with its test/proof step.' "$step_writer_output"
 "$script_dir/add-work-unit.sh" "$plan_dir" W02 verification N/A 'validate-plan.sh' N/A \
     'Validate the status fields after synchronization.' W01 01-sync 02-step-validate-status
@@ -61,7 +80,7 @@ printf '# Verification: validate status\n\n## Automated tests\n\nRun the validat
 step_update_output="$temporary_root/step-update-output.log"
 "$script_dir/update-plan-content.sh" --step-section "$plan_dir" \
     01-sync/01-step-update-status objective \
-    -p 4.1: 'Update both status fields atomically.' >"$step_update_output"
+    -p 4.1: 'Update both status fields atomically.' 2>"$step_update_output"
 grep -Fq 'Reminder: testing instructions already exist at ' "$step_update_output"
 "$script_dir/add-coverage.sh" "$plan_dir" 'Status fields are synchronized.' W01 \
     'The update command owns the mutation.'
@@ -114,6 +133,12 @@ grep -Fqx '§ 6.2' "$plan_dir/plan-description.md"
 "$script_dir/add-ui-story.sh" "$plan_dir" US-01 'A visitor sees the initial button.' \
     'Open the page and click the visible button.' 'Mouse click on the visible button.' \
     'The requested result is visible.' W01,W02
+"$script_dir/add-ui-story-links.sh" "$plan_dir" US-01 W02 >/dev/null
+grep -Fq '| US-01 | A visitor sees the initial button. | Open the page and click the visible button. | Mouse click on the visible button. | The requested result is visible. | 💤 untested | — | W02 | `ui-story-runs/US-01.md` |' "$plan_dir/ui-user-stories.md"
+if "$script_dir/add-ui-story-links.sh" "$plan_dir" US-01 W99 >/dev/null 2>&1; then
+    echo 'add-ui-story-links accepted an unknown related work unit.' >&2
+    exit 1
+fi
 "$script_dir/configure-ui-story-cache.sh" "$plan_dir" US-01 \
     'The locally served page is open and shows its initial button.' \
     'Mouse click on the visible button.' 'The visible button.' \
@@ -140,23 +165,28 @@ if "$script_dir/validate-plan.sh" --complete "$plan_dir" >"$temporary_root/compl
     exit 1
 fi
 grep -Fqx 'FAIL: Adversarial review is not approved' "$temporary_root/complete-pending.log"
-"$script_dir/update-plan-content.sh" --review-section "$plan_dir" findings \
-    -p 2.1: 'No unresolved findings remain after review.'
-"$script_dir/update-plan-content.sh" -rp "$plan_dir" 2.1 \
-    'No unresolved findings remain after the independent review.'
+# The findings table is written by its own helper, never by a section form:
+# `--review-section findings` rewrites the section as paragraphs and discards
+# every row, which plan_replace_section now refuses (CODE-CONTRACTS.md
+# contract 1).
+printf '%s\n' 'AR-01,No unresolved findings remain after review.,N/A,resolved,N/A' \
+    > "$temporary_root/resolved-findings.csv"
+"$script_dir/update-adversarial-review.sh" "$plan_dir" \
+    --file "$temporary_root/resolved-findings.csv"
+grep -Fq 'No unresolved findings remain after review.' "$plan_dir/adversarial-review.md"
 "$script_dir/update-plan-content.sh" --review-status "$plan_dir" approved
 grep -Fqx -- '- Status: `✅ approved`' "$plan_dir/adversarial-review.md"
 grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"
 
-"$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | grep -Fq '"id":"unit:W01"'
+"$script_dir/plan-content.sh" get "$plan_dir" unit:W01 json | assert_stdout_contains '"id":"unit:W01"'
 # plan-content.sh get is deterministic: <plan> <document-id> [format].
-"$script_dir/plan-content.sh" get "$plan_dir" plan json | grep -Fq '"id":"plan"'
-"$script_dir/plan-content.sh" get "$plan_dir" plan | grep -Fq '# Plan: '
+"$script_dir/plan-content.sh" get "$plan_dir" plan json | assert_stdout_contains '"id":"plan"'
+"$script_dir/plan-content.sh" get "$plan_dir" plan | assert_stdout_contains '# Plan: '
 if "$script_dir/plan-content.sh" get "$plan_dir" json >/dev/null 2>&1; then
     echo 'plan-content get without an explicit document-id unexpectedly passed.' >&2
     exit 1
 fi
-"$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | grep -Fq '"downstream":["W02"]'
+"$script_dir/plan-content.sh" blast-radius "$plan_dir" W01 json | assert_stdout_contains '"downstream":["W02"]'
 "$script_dir/validate-plan.sh" "$plan_dir"
 
 missing_companion="$plan_dir/01-sync/steps/02-step-validate-status-testing.md"
@@ -213,7 +243,7 @@ missing_dir="$temporary_root/missing-section"
 mkdir -p "$missing_dir"
 missing_source="$missing_dir/SKILL.md"
 cp "$script_dir/../SKILL.md" "$missing_source"
-sed -i '/REVIEWER_SECTION:END bounded-context/d' "$missing_source"
+t_sed_i '/REVIEWER_SECTION:END bounded-context/d' "$missing_source"
 if "$script_dir/generate-reviewer.sh" "$missing_dir" "$temporary_root/missing.md" >/dev/null 2>&1; then
     echo 'A missing reviewer section unexpectedly passed generation.' >&2
     exit 1
@@ -223,7 +253,7 @@ empty_dir="$temporary_root/empty-section"
 mkdir -p "$empty_dir"
 empty_source="$empty_dir/SKILL.md"
 cp "$script_dir/../SKILL.md" "$empty_source"
-sed -i '/REVIEWER_SECTION:START bounded-context/,/REVIEWER_SECTION:END bounded-context/{ /START/d; /END/!d; }' "$empty_source"
+t_sed_i '/REVIEWER_SECTION:START bounded-context/,/REVIEWER_SECTION:END bounded-context/{ /START/d; /END/!d; }' "$empty_source"
 if "$script_dir/generate-reviewer.sh" "$empty_dir" "$temporary_root/empty.md" >/dev/null 2>&1; then
     echo 'An empty reviewer section unexpectedly passed generation.' >&2
     exit 1
@@ -299,21 +329,184 @@ grep -Fq 'Record bounded research findings in the archive. | W01 | 02-research |
 grep -Fq -- '- Type: `docs`' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq 'Record bounded research findings in the archive.' "$plan_dir/02-research/steps/01-step-research.md"
 grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-inventory.md"
+# A plan already holding a duplicate blocks plan creation in that root, loudly.
+# The state is only repairable by a rename the calling agent has to make, and a
+# broken plan left behind while new work starts elsewhere is how it survives.
+blocked_root="$temporary_root/blocked-root"
+rm -rf "$blocked_root"; mkdir -p "$blocked_root"
+cp -R "$plan_dir" "$blocked_root/already-broken"
+broken_step="$(ls "$blocked_root/already-broken/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+cp "$blocked_root/already-broken/02-research/steps/$broken_step" \
+   "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+rc=0
+blocked_out="$(PLANS_ROOT="$blocked_root" "$script_dir/create-plan.sh" \
+    "$blocked_root/a-new-plan" 'A new plan' 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'create-plan proceeded while a plan in the root held a duplicate step number.' >&2; exit 1; }
+[ ! -d "$blocked_root/a-new-plan" ] || { echo 'create-plan left a directory behind after refusing.' >&2; exit 1; }
+for expected in 'REFUSING TO CREATE A PLAN' 'already-broken' '02-research' 'step-collision.md' 'five surfaces'; do
+    case "$blocked_out" in
+        *"$expected"*) ;;
+        *) printf 'the refusal did not mention %s:\n%s\n' "$expected" "$blocked_out" >&2; exit 1 ;;
+    esac
+done
+# And a clean root still creates, so the block is not unconditional.
+rm -rf "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+PLANS_ROOT="$blocked_root" "$script_dir/create-plan.sh" "$blocked_root/a-new-plan" 'A new plan' >/dev/null 2>&1 \
+    || { echo 'create-plan refused although the root is clean.' >&2; exit 1; }
+
+# And the validator reports it as a failure, not a warning.
+val_rc=0
+val_out="$("$script_dir/validate-plan.sh" "$blocked_root/already-broken" 2>&1)" || val_rc=$?
+cp "$blocked_root/already-broken/02-research/steps/$broken_step" \
+   "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
+val_rc=0
+val_out="$("$script_dir/validate-plan.sh" "$blocked_root/already-broken" 2>&1)" || val_rc=$?
+[ "$val_rc" -ne 0 ] || { echo 'validate-plan passed a plan with two steps sharing a number.' >&2; exit 1; }
+case "$val_out" in
+    *'two steps numbered'*) ;;
+    *) printf 'validate-plan did not name the duplicate:\n%s\n' "$val_out" >&2; exit 1 ;;
+esac
+
+# A step number must be unique within its goal. Two steps numbered 04 leave
+# their order undefined -- steps are read in number order and nothing breaks the
+# tie -- and with no renumbering helper the only fix is the hand edit the skill
+# forbids. Reported by a worker who ended up with two 04s and no 01 or 03.
+dup_probe="$temporary_root/plan-dup-step"
+rm -rf "$dup_probe"
+cp -R "$plan_dir" "$dup_probe"
+existing_step="$(ls "$dup_probe/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+[ -n "$existing_step" ] || { echo 'the probe goal has no step to collide with.' >&2; exit 1; }
+dup_number="${existing_step%%-*}"
+rc=0
+dup_out="$("$script_dir/add-work-unit.sh" "$dup_probe" --id W91 --type source \
+    --file probe/dup.sh --scope sym --subscope N/A --change 'A duplicate number.' \
+    --depends-on '—' --goal 02-research --step "$dup_number-step-duplicate-number" 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'add-work-unit accepted a second step with an existing number.' >&2; exit 1; }
+case "$dup_out" in
+    *"$existing_step"*) ;;
+    *) printf 'the refusal did not name the step already holding the number:\n%s\n' "$dup_out" >&2; exit 1 ;;
+esac
+if [ -e "$dup_probe/02-research/steps/$dup_number-step-duplicate-number.md" ]; then
+    echo 'the refused step file was created anyway.' >&2; exit 1
+fi
+# A free number in the same goal still works, so the guard is not simply
+# refusing everything.
+"$script_dir/add-work-unit.sh" "$dup_probe" --id W92 --type source \
+    --file probe/free.sh --scope sym --subscope N/A --change 'A free number.' \
+    --depends-on '—' --goal 02-research --step "89-step-free-number" >/dev/null 2>&1 \
+    || { echo 'add-work-unit refused a step with an unused number.' >&2; exit 1; }
+
+# --description has to reach all four surfaces. It synced the inventory row and
+# the step objective but not the goal blurb, which SKILL.md lists as surface 5 of
+# seven under "Resolving a finding" -- so a goal kept instructing the old
+# behaviour after the decision changed.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 \
+    --description 'Description synced across every surface.' >/dev/null 2>&1
+for surface in "$plan_dir/work-unit-inventory.md" "$plan_dir/02-research/goal.md"; do
+    grep -Fq 'Description synced across every surface.' "$surface" \
+        || { printf 'update-work-unit --description did not reach %s\n' "${surface#$plan_dir/}" >&2; exit 1; }
+done
+grep -rlFq 'Description synced across every surface.' "$plan_dir/02-research/steps/" >/dev/null 2>&1 \
+    || { echo 'update-work-unit --description did not reach the step objective.' >&2; exit 1; }
+
+# A goal with no blurb for the unit is reported, and the run still succeeds: the
+# awk exit that signals it used to abort under set -e with a raw 9, after the
+# inventory row had already been written.
+#
+# On a copy, not the shared fixture: deleting a blurb here changed the roster a
+# later assertion in this file depends on, which is the hidden coupling between
+# assertions that a fail-fast reporter hides.
+blurb_probe="$temporary_root/plan-no-blurb"
+rm -rf "$blurb_probe"
+cp -R "$plan_dir" "$blurb_probe"
+grep -v '^`W03`' "$blurb_probe/02-research/goal.md" > "$blurb_probe/02-research/goal.new"
+mv "$blurb_probe/02-research/goal.new" "$blurb_probe/02-research/goal.md"
+no_blurb="$temporary_root/no-blurb.log"
+rc=0
+"$script_dir/update-work-unit.sh" "$blurb_probe" W03 --description 'Second description.' \
+    >/dev/null 2>"$no_blurb" || rc=$?
+[ "$rc" -eq 0 ] || { printf 'a missing goal blurb aborted the run (rc=%s)\n' "$rc" >&2; cat "$no_blurb" >&2; exit 1; }
+grep -Fq 'has no `W03` blurb' "$no_blurb" \
+    || { echo 'a missing goal blurb was skipped without a word.' >&2; cat "$no_blurb" >&2; exit 1; }
+
+# An overwritten inventory field is content a person wrote, so the value being
+# replaced is named -- "type,depends-on" said which fields changed but left no
+# trace of what they held. CODE-CONTRACTS.md contract 9a.
+# `config`, not `docs`: an earlier step already set this unit to docs, so that
+# would have been a no-op and the case would have proved nothing.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 --type config \
+    >/dev/null 2>"$temporary_root/unit-replace.log"
+grep -Fq 'replaced W03 type:' "$temporary_root/unit-replace.log" \
+    || { echo 'update-work-unit did not report the value it replaced.' >&2
+         cat "$temporary_root/unit-replace.log" >&2; exit 1; }
+grep -Eq 'replaced W03 type: [^ ]+ -> config' "$temporary_root/unit-replace.log" \
+    || { echo 'the notice did not name both the previous and the new value.' >&2
+         cat "$temporary_root/unit-replace.log" >&2; exit 1; }
+# Re-setting a field to the value it already holds loses nothing, and saying so
+# would train the reader to skip these lines.
+"$script_dir/update-work-unit.sh" "$plan_dir" W03 --type config \
+    >/dev/null 2>"$temporary_root/unit-noop.log"
+if grep -Fq 'replaced W03 type:' "$temporary_root/unit-noop.log"; then
+    echo 'a no-op field change was reported as a replacement.' >&2
+    exit 1
+fi
+
+# --replace collapses every row carrying the same outcome, so it discards rows a
+# person wrote. Reporting only "Replaced coverage for WNN" loses which ones --
+# the same class as the cascade notice below.
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W01 'first' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W02 'second' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W03 'third' >/dev/null 2>&1
+"$script_dir/add-coverage.sh" "$plan_dir" 'Collapse probe outcome.' W01 'collapsed' --replace \
+    >/dev/null 2>"$temporary_root/coverage-collapse.log"
+for dropped in W02 W03; do
+    grep -Fq "dropped duplicate coverage row" "$temporary_root/coverage-collapse.log" \
+        || { echo 'add-coverage --replace collapsed rows without reporting them.' >&2; exit 1; }
+    grep -Fq "work units $dropped" "$temporary_root/coverage-collapse.log" \
+        || { printf 'the collapse notice did not name the dropped row for %s:\n' "$dropped" >&2
+             cat "$temporary_root/coverage-collapse.log" >&2; exit 1; }
+done
+
 # P2-2: removal refuses to cascade dependency pruning without --confirm-cascade.
 if "$script_dir/remove-work-unit.sh" "$plan_dir" W01 >"$temporary_root/cascade-refused.log" 2>&1; then
     echo 'Removal with dependents unexpectedly passed without --confirm-cascade.' >&2
     exit 1
 fi
 grep -Fq 'still list it in Depends-on' "$temporary_root/cascade-refused.log"
-"$script_dir/remove-work-unit.sh" "$plan_dir" W01 --confirm-cascade >/dev/null 2>&1
+# The cascade notice names every pruned edge on stderr. Discarding it here is
+# what let the notice go unasserted: a helper that prunes dependency edges
+# silently is the design defect an earlier report raised, and only a test keeps
+# the notice from being dropped again.
+"$script_dir/remove-work-unit.sh" "$plan_dir" W01 --confirm-cascade \
+    >/dev/null 2>"$temporary_root/cascade-notice.log"
+# The dependents come from the refusal this fixture just produced, so the
+# expectation cannot drift out of step with the plan the test builds.
+cascade_dependents="$(sed -n 's/.*refusing to remove [^:]*: \(.*\) still list it.*/\1/p' \
+    "$temporary_root/cascade-refused.log")"
+[ -n "$cascade_dependents" ] || {
+    echo 'Could not read the dependents out of the cascade refusal.' >&2
+    cat "$temporary_root/cascade-refused.log" >&2
+    exit 1
+}
+for pruned_from in $cascade_dependents; do
+    grep -Fq "pruned Depends-on W01 from $pruned_from" "$temporary_root/cascade-notice.log" || {
+        printf 'The cascade notice did not name the pruned edge W01 -> %s:\n' "$pruned_from" >&2
+        cat "$temporary_root/cascade-notice.log" >&2
+        exit 1
+    }
+done
+grep -Fq 'restore pruned links with update-work-unit.sh --depends-on' \
+    "$temporary_root/cascade-notice.log" || {
+    echo 'The cascade notice did not name the remedy for restoring pruned links.' >&2
+    exit 1
+}
 if grep -Fq '| W01 |' "$plan_dir/work-unit-inventory.md"; then
     echo 'Work unit W01 still present after a confirmed cascade removal.' >&2
     exit 1
 fi
 # ---- report 3: propagation, coverage/stories readability, history, --replace,
 #      stale sweep, verify-target, diff ----
-# Re-establish W01/W02 under a fresh goal for the propagation/grader checks
-# (the earlier W01/W02 were removed by the P2-2 cascade test).
+# W01/W02 are re-established here; the P2-2 cascade test removed the originals.
 "$script_dir/add-goal.sh" "$plan_dir" 03-wire 'Wire history' \
     'Wire the order history surface.' >/dev/null 2>&1
 "$script_dir/add-work-unit.sh" "$plan_dir" W10 markup \
@@ -330,12 +523,21 @@ printf '# Verification: verify\n\n## Automated tests\n\nRun the verifier.\n' \
 "$script_dir/add-coverage.sh" "$plan_dir" 'Order history renders.' W10 'covers render' >/dev/null 2>&1
 "$script_dir/add-coverage.sh" "$plan_dir" 'Order history is verified.' W11 'grader' >/dev/null 2>&1
 # coverage and stories are readable document ids for get.
-"$script_dir/plan-content.sh" get "$plan_dir" coverage | grep -Fq '## Definition-of-done coverage'
-"$script_dir/plan-content.sh" get "$plan_dir" stories | grep -Fq 'UI user stories'
+"$script_dir/plan-content.sh" get "$plan_dir" coverage | assert_stdout_contains '## Definition-of-done coverage'
+"$script_dir/plan-content.sh" get "$plan_dir" stories | assert_stdout_contains 'UI user stories'
 # find --in coverage scopes to the Definition-of-done coverage rows.
 "$script_dir/plan-content.sh" find "$plan_dir" 'Order history renders.' --in coverage >/dev/null
 # add-coverage --replace collapses duplicate coverage rows for the same outcome.
-"$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'first' >/dev/null 2>&1
+coverage_out="$("$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'first')"
+case "$coverage_out" in
+    *'(coverage:'*) ;;
+    *) echo 'add-coverage did not report a coverage record id.' >&2; exit 1 ;;
+esac
+context_out="$(PLANNING_CONTEXT_CACHE=1 "$script_dir/plan-context.sh" read --plan-dir "$plan_dir" --document coverage --read-only 2>&1)"
+case "$context_out" in
+    *'returned_records='*'total_records='*'truncated='*'Duplicate-proof outcome.'*) ;;
+    *) echo 'coverage read did not expose metadata and the new row.' >&2; exit 1 ;;
+esac
 "$script_dir/add-coverage.sh" "$plan_dir" 'Duplicate-proof outcome.' W10 'second' --replace >/dev/null 2>&1
 if [ "$(grep -c '| Duplicate-proof outcome.' "$plan_dir/work-unit-inventory.md")" -ne 1 ]; then
     echo 'add-coverage --replace did not collapse duplicate coverage rows.' >&2
@@ -351,33 +553,34 @@ grep -Fq '## Cycle 8' "$plan_dir/adversarial-review-history.md"
 # cycle 8 archived the cycle-7 table, which held AR-20.
 grep -Fq '| AR-20 |' "$plan_dir/adversarial-review-history.md"
 grep -Fq '## Cycle 7' "$plan_dir/adversarial-review-history.md"
-# stale sweep: a phrase in an unmarked paragraph fails; with a history marker
-# the stale check itself passes (unrelated later-plan failures are ignored here).
-# The phrase is unique to the step objective so it does not collide with the
-# goal owned-unit roster.
+# stale sweep: an unmarked paragraph is reported, a history-marked one is not.
+# The sweep is advisory -- it warns and never fails the gate -- because on real
+# plans the count phrases found 0 defects in 24 hits. The phrase is unique to the
+# step objective so it cannot collide with the goal's owned-unit roster.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the source retarget.' >/dev/null 2>&1
 printf 'rows must still render after the source retarget\n' > "$temporary_root/stale.txt"
-if "$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-fail.log" 2>&1; then
-    echo '--stale accepted a phrase in an unmarked paragraph.' >&2
+"$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" \
+    >"$temporary_root/stale-fail.log" 2>&1 || true
+grep -Fq "WARN: count 'rows must still render after the source retarget'" \
+    "$temporary_root/stale-fail.log"
+if grep -Eq '^FAIL: (count|stale phrase|wording) ' "$temporary_root/stale-fail.log"; then
+    echo 'the stale sweep failed the gate; it is advisory.' >&2
     exit 1
 fi
-grep -Fq 'stale phrase' "$temporary_root/stale-fail.log"
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the source retarget (previously the rows must still render after the source retarget).' >/dev/null 2>&1
 "$script_dir/validate-plan.sh" --stale "$temporary_root/stale.txt" "$plan_dir" >"$temporary_root/stale-pass.log" 2>&1 || true
-if grep -Fq 'stale phrase' "$temporary_root/stale-pass.log"; then
+if grep -Fq "count 'rows must still render" "$temporary_root/stale-pass.log"; then
     echo '--stale flagged a phrase inside a history-marked paragraph.' >&2
     exit 1
 fi
 # --stale default ships a bundled case-count list and sweeps companions.
 printf '# Verification: history\n\n## Automated tests\n\nCheck all four states emit a row.\n' \
     > "$plan_dir/03-wire/steps/01-step-history-testing.md"
-if "$script_dir/validate-plan.sh" --stale default "$plan_dir" >"$temporary_root/stale-default.log" 2>&1; then
-    echo '--stale default missed a case-count phrase in a companion.' >&2
-    exit 1
-fi
-grep -Fq 'stale phrase' "$temporary_root/stale-default.log"
+"$script_dir/validate-plan.sh" --stale default "$plan_dir" \
+    >"$temporary_root/stale-default.log" 2>&1 || true
+grep -Fq "WARN: count 'all four'" "$temporary_root/stale-default.log"
 grep -Fq '01-step-history-testing' "$temporary_root/stale-default.log"
 # propagation: a grader that names a unit it does not depend on fails.
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/02-step-verify 4.1 \
@@ -422,10 +625,10 @@ grep -Fq 'Only criterion.' "$plan_dir/03-wire/steps/01-step-history.md"
 printf 'AR-01\tW10\tkey\n' > "$plan_dir/fixes.md"
 printf '{"session_id":"s1","keys":{}}\n' > "$plan_dir/fix-keys.json"
 printf '{"status":"pending"}\n' > "$plan_dir/approval.json"
-"$script_dir/plan-content.sh" get "$plan_dir" fixes | grep -Fq 'AR-01'
-"$script_dir/plan-content.sh" get "$plan_dir" fix-keys | grep -Fq 'session_id'
-"$script_dir/plan-content.sh" get "$plan_dir" approval | grep -Fq 'pending'
-"$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | grep -Fq 'unit:'
+"$script_dir/plan-content.sh" get "$plan_dir" fixes | assert_stdout_contains 'AR-01'
+"$script_dir/plan-content.sh" get "$plan_dir" fix-keys | assert_stdout_contains 'session_id'
+"$script_dir/plan-content.sh" get "$plan_dir" approval | assert_stdout_contains 'pending'
+"$script_dir/plan-content.sh" find "$plan_dir" '01-step-history' --in inventory | assert_stdout_contains 'unit:'
 # report 12: roster↔inventory set check — a goal §9.x roster that omits an
 # inventory-assigned unit is a propagation fail.
 git -C "$plan_dir" checkout -- 03-wire/goal.md 2>/dev/null || true
@@ -496,9 +699,8 @@ if grep -Fq 'ticket number' "$temporary_root/placeholder-prose.log" || grep -Fq 
 fi
 git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
 # report 16 (authored docs): a registered placeholder in an AUTHORED doc is a
-# WARN without --complete and a FAIL under --complete. Build a fresh plan with
-# the real generators (create-plan + add-goal + add-work-unit) so its authored
-# docs carry genuine template placeholders.
+# WARN without --complete and a FAIL under --complete. The plan is built with
+# the real generators so its authored docs carry genuine template placeholders.
 fresh_plan="$temporary_root/fresh-plan"
 "$script_dir/create-plan.sh" "$fresh_plan" 'Fresh plan' >/dev/null
 "$script_dir/add-goal.sh" "$fresh_plan" 01-goal 'Fresh goal' 'Fresh outcome' >/dev/null
@@ -520,10 +722,13 @@ if ! grep -Fq 'still contains a registered placeholder' "$temporary_root/fresh-c
 fi
 # retargeting a unit lists the verification units that grade it.
 retarget_output="$("$script_dir/update-work-unit.sh" "$plan_dir" W10 '#order_history' app/design/frontend/FakeTheme/templates/order/history.phtml 2>&1)"
-printf '%s\n' "$retarget_output" | grep -Fq 're-read its grader(s) W11' || {
-    echo 'retargeting did not list the grading verification unit.' >&2
-    exit 1
-}
+case "$retarget_output" in
+    *'re-read its grader(s) W11'*) ;;
+    *)
+        echo 'retargeting did not list the grading verification unit.' >&2
+        exit 1
+        ;;
+esac
 # verify-target: a markup unit whose block is removed by a layout fails.
 fake_repo="$temporary_root/fakerepo"
 mkdir -p "$fake_repo/app/code/Fake/Module/view/frontend/layout" \
@@ -554,15 +759,20 @@ git -C "$plan_dir" -c user.name=plan-skill -c user.email=plan-skill@localhost \
 before_ref="$(git -C "$plan_dir" rev-parse HEAD)"
 "$script_dir/update-plan-content.sh" -sp "$plan_dir" 03-wire/01-step-history 4.1 \
     'The rows must still render after the diff baseline.' >/dev/null 2>&1
-"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '03-wire/steps/01-step-history.md'
-"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" | grep -Fq '§ 4.1'
+# Capture once and grep the capture rather than piping into `grep -q`: under
+# `pipefail` a matching `grep -q` exits immediately, the producer gets SIGPIPE,
+# and the pipeline reports 141 even though the assertion held.
+diff_output="$temporary_root/plan-content-diff.log"
+"$script_dir/plan-content.sh" diff "$plan_dir" "$before_ref" >"$diff_output"
+grep -Fq '03-wire/steps/01-step-history.md' "$diff_output"
+grep -Fq '§ 4.1' "$diff_output"
 # ---- report 5: companion find scope, --delete-paragraph, --scope, story
 #      placeholder-free cache, goal-size placeholder omission ----
 # find reaches the *-testing.md companions via --in testing and --in all.
 "$script_dir/create-step-testing.sh" "$plan_dir/03-wire" 01-step-history \
     'Verify the rows still render.\nRecord the observed result.' --overwrite >/dev/null 2>&1
 "$script_dir/plan-content.sh" find "$plan_dir" 'Verify the rows still render' --in testing \
-    | grep -Fq 'step:03-wire/01-step-history-testing'
+    | assert_stdout_contains 'step:03-wire/01-step-history-testing'
 # --delete-paragraph removes one paragraph and renumbers the rest of the section.
 "$script_dir/update-plan-content.sh" -ss "$plan_dir" 03-wire/01-step-history instructions \
     -p 5.1: 'Instruction one.' -p 5.2: 'Instruction two.' -p 5.3: 'Instruction three.' >/dev/null 2>&1
@@ -591,9 +801,8 @@ if [ -f "$plan_dir/ui-story-runs/US-01.md" ]; then
     fi
 fi
 # ---- report 16 §5 case 5: registry hygiene ----
-# Every in-document placeholder the authoring/generated templates can emit must
-# be registered in placeholders.json (a literal-list contract). CLI usage/arg
-# tokens are NOT document placeholders and must stay out of the registry.
+# Every in-document placeholder the templates can emit must be registered; CLI
+# usage/arg tokens are not document placeholders and must stay out.
 registry="$script_dir/../placeholders.json"
 jq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
     echo 'placeholders.json is not a JSON array.' >&2; exit 1

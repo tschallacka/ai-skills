@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# MODE: DEV
 # Progress-bar shape contract test.
 #
 # Every Markdown file that renders a progress bar under the plans root must be
@@ -23,6 +24,10 @@
 # instead of invoking the helpers, keeping this test usable from a fixture dir.
 
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scripts="$root/planning/scripts"
@@ -36,8 +41,7 @@ if [ ! -d "$plans_root" ] && [ -d "$fixture_plans_root" ]; then
     plans_root="$fixture_plans_root"
 fi
 
-fail=0
-note_fail() { echo "progress-bar: $1" >&2; fail=1; }
+note_fail() { echo "progress-bar: $1" >&2; t_record "$1"; }
 
 # ---- shape helpers (mirror the parsers exactly, so they can't drift apart) ----
 # update-progress.sh: -F'|'  goal=$2  status=$5   (canonical 4 data cols)
@@ -113,9 +117,8 @@ recompute_goal_bar() {
 }
 
 # recompute_plan_bar <progress-file> : derive plan % from its goal dirs'
-# completion, mirroring rebuild-plan-progress.sh (a goal is complete only when
-# its progress.md shows `**Progress:** `100%`; a goal dir with goal.md but no
-# progress.md counts in total and as incomplete).
+# completion. A goal counts complete only at `**Progress:** `100%`; a goal dir
+# with goal.md but no progress.md counts in the total, as incomplete.
 recompute_plan_bar() {
     local f="$1" plan_dir ptotal=0 pdone=0 pe declared_p gdir
     plan_dir="$(dirname "$f")"
@@ -156,14 +159,13 @@ done < <(find "$plans_root" -type f -name 'progress.md' -not -path '*/context/*'
 # mismatch-detection branch is exercised (not just the positive shape path).
 negative_fixture="$root/planning/tests/fixtures/progress-shape-bad"
 if [ -z "${PROGRESS_SHAPE_NEG_DONE:-}" ] && [ -d "$negative_fixture" ]; then
-    bad_out="$(PROGRESS_SHAPE_NEG_DONE=1 PLANS_ROOT="$negative_fixture" bash "$0" 2>&1 || true)"
-    if printf '%s\n' "$bad_out" | grep -q 'FAIL'; then
-        :  # correctly detected
-    else
-        note_fail "negative fixture $negative_fixture did not FAIL (mismatch path broken)"
-    fi
+    bad_out="$(PROGRESS_SHAPE_NEG_DONE=1 PLANS_ROOT="$negative_fixture" "$BASH" "$0" 2>&1 || true)"
+    case "$bad_out" in
+        *FAIL*) ;;
+        *) note_fail "negative fixture $negative_fixture did not FAIL (mismatch path broken)" ;;
+    esac
 fi
 
 echo
-echo "progress-bar: validated $count progress file(s) under $plans_root; $([ "$fail" -eq 0 ] && echo PASS || echo FAIL)"
-[ "$fail" -eq 0 ]
+echo "progress-bar: validated $count progress file(s) under $plans_root; $([ "$(t_failures)" -eq 0 ] && echo PASS || echo FAIL)"
+[ "$(t_failures)" -eq 0 ]

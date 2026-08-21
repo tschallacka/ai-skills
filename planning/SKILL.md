@@ -2,6 +2,7 @@
 name: planning
 description: Use when the user requests a durable plan or a multi-step initiative genuinely needs resumable files, ordered goals and steps, verification instructions, progress trackers, or handoff notes. Do not use for small, self-contained changes or temporary in-chat checklists.
 ---
+<!-- MODE: PROD -->
 
 # Planning
 
@@ -61,7 +62,9 @@ MUST be read via `plan-context.sh read --plan-dir <PLAN_DIR> --document ID`
 (or `--unit WNN`), never by `cat`/`Read`/whole-directory load of a plan file or
 the `.plans/` tree. A wholesale plan read is a context-overflow violation; if
 the gate cannot serve something, report it as a limitation rather than
-bypassing it.
+bypassing it. Each read returns one **page**: while a page reports
+`next_token`, records are still withheld — pass it back as `--token` until a
+page returns without one, and never treat a single page as the whole document.
 
 ## Operating rules
 
@@ -319,14 +322,18 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 the flagged `update-plan-content.sh` commands for narrative edits; the helpers
 enforce paragraph numbering, spacing, sequencing, and safe content.
 
-`create-plan.sh` git-initializes the plan directory, and every mutating helper
-commits the pre-mutation state first — `git -C <planname> log` recovers an
-overwritten paragraph. When the plans root is git-excluded from its enclosing
-work tree (a project's `/.plans` in `.gitignore`) or sits outside any repo,
-`create-plan.sh` initializes one repo at the plans root itself so the whole
-plans tree is versioned and cross-plan diffs work; `cleanup-plans.sh` clears
-that root history when the last plan is removed, and the next `create-plan.sh`
-re-initializes it. Read plan documents only through `plan-content.sh`;
+`create-plan.sh` git-initializes a repository for the plan and records which one
+in the plan's `.env` as `PLAN_SNAPSHOT_REPO`. Every mutating helper commits the
+pre-mutation state into that repository first, so `git -C <the recorded repo>
+log` recovers an overwritten paragraph. When the plans root is git-excluded from
+its enclosing work tree (a project's `/.plans` in `.gitignore`) or sits outside
+any repo, that repository is the plans root itself, so the whole plans tree is
+versioned and cross-plan diffs work; `cleanup-plans.sh` clears that root history
+when the last plan is removed, and the next `create-plan.sh` re-initializes it.
+A plan tracked inside a repository you own is the one layout with no
+per-mutation snapshots: `PLAN_SNAPSHOT_REPO` is empty there, because a commit
+per helper call does not belong in your project's history. Gitignore the plans
+root to get the undo back. Read plan documents only through `plan-content.sh`;
 its `find` subcommand locates a literal string across plan documents and
 prints every `docid<TAB>§ N.N<TAB>excerpt` match (exits 1 on zero or multiple
 hits). Use it before a paragraph-level edit to confirm the target is unique:
@@ -400,16 +407,37 @@ Create `<planname>/plan-description.md`. It must contain:
 - **Constraints and decisions:** permissions, ownership, conventions, and
   user choices
 - **Risks and open questions:** only items that could affect execution
+- **Environment facts:** the host or URL to verify on, the auth route if the
+  application requires one, and the order in which steps verify against the
+  running application. This is what lets verification steps name a reachable
+  endpoint instead of leaving them dangling. Seeded by `create-plan.sh` as
+  § 9.1; the validator requires the section, and the P0 serve check (see
+  § 3.3) relies on it.
+- **Approach decisions:** mechanism choices as prose — where each change
+  lives and why, and alternatives considered and rejected. Seeded by
+  `create-plan.sh` as § 10.1; the validator requires the section.
 
 Use one clear section per topic. Do not duplicate goal-specific implementation
 details here; put them in the owning goal.
 
 The canonical plan description has replaceable `title`, `current-state`,
-`desired-outcome`, `approach`, `scope`, `affected-areas`,
-`constraints-and-decisions`, and `risks-and-open-questions` sections. Replace
+`desired-outcome`, `approach`, `approach-decisions`, `scope`, `affected-areas`,
+`constraints-and-decisions`, `risks-and-open-questions`, and
+`environment-facts` sections. Replace
 their narrative content through flagged `update-plan-content.sh` targets; use
 `--title` for the document title and `--field` for structured values such as
 `UI affected`.
+
+**A goal document's ids are not the plan description's, and neither set is
+derivable from the headings.** `-gs`/`--goal-section` accepts
+`current-state-and-prior-goal-handoffs`, `outcome-and-definition-of-done`,
+`why-this-goal-is-needed`, `scope`, `affected-areas`,
+`dependencies-and-handoffs`, `implementation-approach-risks-and-edge-cases`,
+`owned-work-units`, and `goal-size-exception`. Only `scope` and
+`affected-areas` are spelled the same in both documents; a goal's approach
+section is `implementation-approach-risks-and-edge-cases`, not `approach`.
+Guessing wrong is safe — the refusal lists every valid id for that document
+kind — but the lists are here so a first attempt need not fail to find them.
 
 ### 2.2 Reason about the work-unit inventory before choosing goals
 
@@ -464,7 +492,9 @@ seems obvious:
    it enables. Do not rely on directory order to imply a dependency.
 6. **Form goal candidates.** Group only adjacent, mutually necessary work
    units that produce one demonstrable outcome. Apply the goal size limit;
-   split candidates at the first stable boundary.
+   split candidates at the first stable boundary. When a late approach change
+   pushes a goal past the cap, prefer splitting the goal at a stable outcome
+   boundary over widening a work unit.
 7. **Assign one step per unit.** Give every unit exactly one owning goal and
    exactly one numbered implementation or verification step. There must be no
    unowned, multiply owned, or bundled units.
@@ -630,20 +660,34 @@ command, plan directory, and supported entry ids/views. Its starting prompt
 must include verbatim:
 
 "Read plan files and artifacts ONLY through the gated reader:
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
-Valid --document IDs: plan, inventory, progress, adversarial-review,
-goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
---max-records for a large inventory if needed. Plan-read bytes are capped at
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
+Valid --document IDs: plan, inventory, coverage, progress,
+goal-progress:<goal>, adversarial-review, stories, bugs, fixes, fix-keys,
+approval,
+goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
+document. The documents that are not narrative — inventory, coverage,
+adversarial-review, stories, bugs, fixes, fix-keys, approval — default to the
+whole-document `full` view; every other id defaults to `summary`, and
+`--view full` is available for
+any of them. A page that withheld records reports next_token — pass it back as
+--token and keep going until no next_token comes back. You have NOT read a
+document until a page returns without one; treat a page you stopped early on as
+an unread document and say so. **The `summary` view is an excerpt of the head of
+the file, not a condensation of it, and it truncates before paging — so it
+returns no next_token however much it left out, and prints an `excerpt=` line
+saying so. No next_token from `summary` does NOT mean you have read the
+document. Reviewing a plan, judging a finding, or approving anything requires
+`--view full` paged to exhaustion.** Plan-read bytes are capped at
 the per-role budget when ROLE_ID is set (the gate lowers --max-bytes to it) —
-do not rely on --max-bytes above that cap. Never load a whole
+do not rely on --max-bytes above that cap; page instead. Never load a whole
 plan file, an entire plan directory, or the `.plans/` tree wholesale. A
 wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
 spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`bash <PLANNING_SKILL_DIR>/scripts/role-context.sh chris` (which injects its
+`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
 stance preamble), and require it to state its persona id in the returned
 findings. The adversary forms its own findings from the bounded-read gate and
 its scoped role docs; it never receives the planning agent's conclusions. A
@@ -795,6 +839,18 @@ use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
 shell-friendly escaped quote is clearer. Use
 `--insert-after` or `--insert-before` with a document ID and paragraph label
 to add one paragraph; later labels in that same section shift automatically.
+The `-p N.N:` forms auto-create only when the section's labels are contiguous
+`1..max` with no trailing unlabeled content — a section with gaps or
+unlabeled paragraphs must be re-authored (e.g. re-run
+`create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
+label) instead of silently appending.
+
+A section number is fixed per section name, not by position: automated tests
+are `§ 2.x`, browser `§ 3.x`, backend `§ 4.x`, manual `§ 5.x`, whichever of
+them a companion carries. A section form can only rewrite a section the
+companion already has, so supply the section when you create it — `-ss` cannot
+add one, and re-creating with `--overwrite` only helps if you pass the
+section flag as well.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
@@ -807,8 +863,14 @@ keys. When recording which key a fix used, write one claim line per
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
 
-**Reviewers may write `adversarial-review-incoming.md`** (the one plan file a
-reviewer may write, so findings survive the coordinator's context).
+**Reviewers must be allowed to write `adversarial-review-incoming.md`** (the one
+plan file a reviewer may write, so findings survive the coordinator's context).
+Instructing a reviewer subagent to be *strictly* read-only breaks the fix-key
+gate rather than tightening it: the reviewer cannot publish its findings, so the
+coordinator mints the keys from the reviewer's returned prose, and minting and
+claiming then happen in one session -- self-certification by construction, which
+`verify-fix-keys.sh` refuses. Read-only everywhere else, this one file
+excepted.
 `update-adversarial-review.sh` consumes it as its findings source and removes
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
@@ -817,9 +879,10 @@ land them.
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
-the session recorded as `minted_by`, and a warning is a review finding, not a
-pass. If a fixer must mint its own keys to record a finding the reviewer
+`verify-fix-keys.sh --claimed-by <session>` FAILS when the claiming session is
+the session recorded as `minted_by`, and the approval gate always passes a
+claiming session, so a self-certified fix set cannot be approved. If a fixer
+must mint its own keys to record a finding the reviewer
 missed, surface it as an open finding for a fresh review rather than resolving
 it on its own authority.
 
@@ -840,13 +903,20 @@ must match `^AR-[0-9]+$` and work-unit IDs `^W[0-9]+$`: minting warns per
 non-conforming gated row and fails the run if any gated row could not be
 minted, so a typo cannot silently disable the whole gate. `fix-keys.json`
 records `minted_by` (the session that minted; override with `MINTED_BY`), and
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
+`verify-fix-keys.sh --claimed-by <session>` fails when the claiming session is
 the minting session (self-certification).
 
-The fixer records which key each fix used in `fixes.md` as tab-separated claim
-lines (`finding_id \t work_unit \t key`, one per gated pair). The approval gate
-runs `verify-fix-keys.sh` before `--review-status approved` flips the verdict:
-every gated pair must be claimed with a matching key, then the session secret
+The fixer records which key each fix used with `add-fix-claim.sh <plan>
+--finding AR-NN --work-unit WNN --key <hex>`, one call per gated pair. It writes
+the tab-separated claim line (`finding_id \t work_unit \t key`) into `fixes.md`,
+refuses a pair the review does not gate and a key that is not in
+`fix-keys.json`, and never derives a key — that needs the minting session's
+secret, and a fixer that could read it could mint its own. The approval gate
+runs `verify-fix-keys.sh --claimed-by "${CLAIMED_BY:-<the minting session>}"`
+before `--review-status approved` flips the verdict: every gated pair must be
+claimed with a matching key by a session that is not the minting one, so export
+`CLAIMED_BY=<fixer session>` at approval — the default is the minting session
+and the gate refuses it as self-certification. Then the session secret
 dir is removed (invalidation) so a stale `fix-keys.json` fails closed on
 re-approval. Plans without `fix-keys.json` (ungated) and plans whose findings
 all carry no work unit approve without verification.
@@ -887,9 +957,61 @@ Include only the relevant sections:
   behavior against the running system, plus expected output.
 - **Automated tests:** required unit or integration tests, their locations,
   commands, and relevant project testing conventions.
+- **Artifact comparisons (optional):** when a proof compares a produced file
+  against a reference, declare it as a table rather than in prose, so the gate
+  can check that the comparison is one the target can actually produce:
+
+  ```
+  update-plan-content.sh -tp <plan> step:<goal>/<step>-testing <N.N> \
+      'Artifact,Comparison' 'pub/media/invoice.pdf,text-layer'
+  ```
+
+  `planning/artifact-comparisons.json` lists the comparisons and the artifacts
+  that cannot be reproduced byte for byte. Asking for `exact` on a PDF, an image
+  or any zip-backed document is refused: those embed a creation timestamp or an
+  encoder version, so the criterion would fail correct work. Say what tolerance
+  the proof allows instead.
 
 A step may require multiple verification methods. Do not mark it complete until
 all listed checks have actually passed.
+
+**The application still serves (P0).** A goal that changes module state,
+schema, or configuration (`etc/module.xml`, `etc/config.php`, `db_schema.xml`
+or equivalent — see `state-change-registry.json`) must carry an acceptance
+condition that exercises the running application, not just the changed
+artifact: for a Magento plan, a plain request returning HTTP 200. The
+validator WARNs when such a goal's verification units contain no request or
+health-check phrase. This is the check that catches "all artifacts verified,
+site is down".
+
+**Command registry (P1).** Every command literal in step instructions or
+testing companions must be registered in the plan's `commands.json` with its
+"when" context, so the purpose travels with the command instead of being lost
+when steps are copied:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/register-command.sh" <plan-directory> cache-flush \
+  'bin/magento cache:flush' 'routine; after a constructor change'
+```
+
+`create-plan.sh` seeds an empty registry; `register-command.sh` adds,
+removes, and lists entries; `validate-plan.sh` WARNs on any unregistered
+command literal (and FAILs under `--complete`). When the validator flags a
+literal, register it with its correct "when" — never delete the literal to
+silence the check.
+
+Detection is language-agnostic: a candidate is a path that resolves to an
+executable non-directory, a path whose last segment sits under a bin-like
+directory (`bin/`, `sbin/`, `.bin/`, `Scripts/` — covering `vendor/bin/`,
+`node_modules/.bin/`, `.venv/bin/`), or a first token in the small universal
+core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
+points — arguments strengthen a candidate but never qualify a span on their
+own. Data/markup extensions (the jq-matched list in
+`never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
+`:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
+without a bin-like segment) never flag. Each registered command's first token
+teaches the detector that tool word, so registering `pytest -q` makes
+`pytest` a word — no per-language list to maintain.
 
 ### 3.3 Validate, then create progress trackers
 
@@ -899,9 +1021,28 @@ Run the validator before creating trackers or presenting the plan as ready:
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --propagation <plan-directory>   # surface-consistency checks (on by default); --no-propagation disables it
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # fail when a listed phrase appears in an unmarked paragraph
-"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # bundled case-count phrase list; sweeps companions too
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale <file-of-phrases> <plan-directory>   # advisory: WARN on a listed phrase in an unmarked paragraph
+"$PLANNING_SKILL_DIR/scripts/validate-plan.sh" --stale default <plan-directory>              # advisory: bundled wording list; sweeps companions too
 ```
+
+`--stale` is a **wording review aid, not a gate.** Every finding is a WARN and it
+never changes the exit status, so a plan is not blocked by it and its output does
+not need clearing before the plan is ready. Read the warnings and judge each one:
+measured on real plans the count phrases were right 0 times in 24 hits, because a
+count that has drifted reads exactly like one that cannot. What *is* gated is the
+part that can be decided: an acceptance criterion declaring a comparison in the
+step's `## Artifact comparisons` table is checked against
+`planning/artifact-comparisons.json`, so asking for `exact` on a PDF or an image
+fails.
+
+Beyond structure, propagation, the advisory wording sweep, and the placeholder
+registry, the validator checks two more things. The **serve check** WARNs when a goal
+that changes module state, schema, or configuration (per
+`state-change-registry.json`) has no verification acceptance condition
+mentioning a request or health check. The **command registry** WARNs on any
+command literal in a step or testing companion that is not registered in the
+plan's `commands.json` with its "when" context (and FAILs under
+`--complete`); register flagged literals with `register-command.sh`.
 
 `--propagation` encodes the surface rule (§ "Resolving a finding") and runs
 by default. It flags a verification unit that grades a sibling with no
@@ -1005,6 +1146,15 @@ Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
+**A read returns one page, and the budgets bound the page, not the document.**
+Whenever a page withholds records it reports `next_token`; pass that value back
+as `--token` and repeat until a page comes back without one. The token carries
+the document's hash and view, so a token replayed after the document changed is
+refused (exit 65) rather than resuming into shifted records — re-read from page
+one after such a refusal. Raising `--max-records`/`--max-bytes` enlarges the
+page up to the per-role byte cap; past that cap the only way to see the rest of
+a document is to page.
+
 **All plan reads go through the gated readers** (see
 [`references/plan-read-contract.md`](references/plan-read-contract.md)). Both
 the planning agent and every fresh subagent (adversarial review, reviewer) MUST
@@ -1018,11 +1168,13 @@ with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash.
 
 The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
-takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
-`--max-bytes`, `--max-records`, and `--read-only`; `check` takes exactly one
-of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly one of
-`--entry` or `--stale`. Defaults are `summary`, `text`, 32768 bytes, and 128
-records. `--all` audits without registering entries. Global IDs, Git history,
+takes exactly one `--document` or `--unit` plus optional `--view`, `--token`,
+`--format`, `--max-bytes`, `--max-records`, and `--read-only`; `check` takes
+exactly one of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly
+one of `--entry` or `--stale`. Defaults are `text`, 32768 bytes, and 128
+records; the default view is `full` for `inventory` and `adversarial-review`
+and `summary` for every other id. `--all` audits without registering entries.
+Global IDs, Git history,
 versions/changelogs, quarantine, events, compaction, and workers remain
 explicitly deferred from this Phase 1 cache.
 
@@ -1098,7 +1250,7 @@ from step numbering" note is the sanctioned pattern. Reviewers must not reject
 ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"            # append a coverage row
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01,W02 "<notes>" --replace  # amend (collapses duplicate rows for the same outcome)
-"$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override
+"$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override; a unit with no target, or a render surface with no block name, fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
@@ -1115,9 +1267,10 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W88 --type source --description "<new intended change>"   # amend type/description in place
 "$PLANNING_SKILL_DIR/scripts/create-adversarial-review.sh" <plan-directory>
 "$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --file review.csv      # rewrite the Findings table from a CSV file
-"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table into adversarial-review-history.md under Cycle 7
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --cycle 7              # archive the prior Findings table under Cycle 7; refused (73) if Cycle 7 already holds other findings
 "$PLANNING_SKILL_DIR/scripts/mint-fix-keys.sh" <plan-directory>                                     # (re)derive per-(finding,work-unit) fix keys into fix-keys.json
-"$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; warn on self-certification
+"$PLANNING_SKILL_DIR/scripts/add-fix-claim.sh" <plan-directory> --finding <AR-NN> --work-unit <WNN> --key <hex>   # record one fix-key claim in fixes.md
+"$PLANNING_SKILL_DIR/scripts/verify-fix-keys.sh" <plan-directory> [--claimed-by <session>]          # verify fixes.md claims against fix-keys.json; self-certification fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --field <plan-directory> plan 'UI affected' no
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --decomposition-review <plan-directory> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --review-status <plan-directory> approved
@@ -1126,6 +1279,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/plan-content.sh" blast-radius <plan-directory> W01 markdown
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>"
 "$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --overwrite   # replace a companion; input is validated before any file is touched
+"$PLANNING_SKILL_DIR/scripts/create-step-testing.sh" <goal-directory> <step-name> "<instructions>" --browser "<instructions>" --backend "<instructions>" --manual "<instructions>"   # the other verification sections; each is optional, and a companion can only be given a section at creation
  "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -ss <plan-directory> <goal>/<step>-testing automated-tests -p 2.1: "<first paragraph>" -p 2.2: "<second paragraph>"
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" -sp <plan-directory> <goal>/<step>-testing 2.1 "<replacement>"   # the -testing companion is a writable surface with its own section ids
 ```
@@ -1238,3 +1392,47 @@ planning --target TARGET --approval yes`. Before that boundary, use
 approval and destination collisions fail before copy or backup; preserve the
 target, record the failure, resolve the collision or approval decision, and
 resume the same manifest rather than installing a partial package.
+
+### 4.7 A plan from an older skill version is obsolete, not migrated
+
+This skill does no backwards compatibility, and a plan directory is one of its
+interfaces. A plan built by an older version of the skill is therefore not
+resumed, not repaired, and not migrated: it is marked obsolete, and the
+initiative is rebuilt as a new plan in a new plan directory with the current
+tools.
+
+**Detect it from the plan's own `.env`.** `plan-env.sh write-plan` records
+`PLAN_ENV_SCHEMA_VERSION`, and that is the version signal — nothing else in the
+plan carries one. A plan directory is from an older skill version when its
+`.env` is missing, when its `PLAN_ENV_SCHEMA_VERSION` differs from the value
+the installed `plan-env.sh` writes, or when
+`plan-env.sh check <plan-directory>` refuses it with a schema or manifest error
+(exit 65). Run that check before reading anything else in a plan
+you did not create in this session.
+
+**Mark it with a file, not with prose.** Write `<plan-directory>/OBSOLETE`:
+
+```
+obsoleted-at: <YYYY-MM-DD>
+obsoleted-because: built by an older planning-skill version
+replaced-by: <new plan directory name>
+```
+
+`replaced-by:` is mandatory and names the plan that supersedes this one. The
+marker is a separate file rather than a key in `.env` or a status line in
+`plan-description.md`, because neither of those can carry it: `.env` is a closed
+manifest whose key allow-list rejects an unknown key and whose schema check
+demands the current version, and the `- Status:` field is already owned by the
+review-status gate, which permits only `💤 pending` and `✅ approved`. A file is
+also visible in a directory listing, which is where somebody about to resume the
+wrong plan is looking.
+
+**`validate-plan.sh` refuses an obsolete plan** before its first pass: exit 65,
+naming the replacement, instead of a wall of findings about a plan nobody should
+be using. Fix the marker, not the plan, if that refusal is unexpected.
+
+**Nothing is deleted, ever.** The obsolete plan directory stays exactly as it
+is — its description, inventory, goals, steps, progress trackers, adversarial
+review and handoffs are the record of what was decided and why, and the rebuild
+reads them as input. Do not remove it, do not empty it, and do not edit its
+documents to make it look current.

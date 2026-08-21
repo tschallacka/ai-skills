@@ -1,0 +1,46 @@
+{
+  "schema": "bug-report",
+  "version": "1.4.2",
+  "file": "BUGS.json",
+  "comment": "Machine-readable shape of BUGS.json at skill version 1.4.2. Read this when a BUGS.json records a different skill_version than the installed skill: there is no backwards compatibility, so the agent holding the file upgrades it or rewrites it.",
+  "supersedes": null,
+  "header": {
+    "required": ["skill", "skill_version", "bugs"],
+    "optional": ["comment"],
+    "skill": "bug-report",
+    "item_key": "bugs"
+  },
+  "item": {
+    "required": ["id", "title", "status", "severity", "priority", "reproduce", "observed", "expected", "created_at", "updated_at"],
+    "optional": ["parent", "mechanism", "surfaces", "fix", "verification", "found_by", "notes"],
+    "fields": {
+      "id": {"type": "string"},
+      "title": {"type": "string", "note": "the defect in one line, stated as what goes wrong"},
+      "status": {"type": "string", "enum": ["reported", "confirmed", "fixed", "not-a-defect", "wont-fix", "obsolete"]},
+      "severity": {"type": "string", "enum": ["blocking", "major", "minor", "cosmetic"], "note": "how bad it is when it happens"},
+      "priority": {"type": "string", "enum": ["urgent", "high", "normal", "low", "someday"], "note": "when it gets fixed; a separate judgement from severity"},
+      "parent": {"type": ["string", "null"], "note": "a defect this is a facet of"},
+      "reproduce": {"type": "string", "note": "runnable, not described"},
+      "observed": {"type": "string", "note": "quoted from the output"},
+      "expected": {"type": "string"},
+      "mechanism": {"type": ["string", "null"], "note": "required once status is confirmed or later"},
+      "surfaces": {"type": "array", "items": "string", "note": "every file that has to change"},
+      "fix": {"type": ["string", "null"], "note": "commit plus what it changed"},
+      "verification": {"type": ["string", "null"], "note": "required when status is fixed; names the mutation that fails without the fix"},
+      "found_by": {"type": ["string", "null"]},
+      "notes": {"type": ["string", "null"], "note": "especially why it went unnoticed"},
+      "created_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"},
+      "updated_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"}
+    }
+  },
+  "invariants": [
+    "ids are unique",
+    "every parent names an existing id",
+    "every entry has a reproduction",
+    "a fixed entry has a verification",
+    "a confirmed entry has a mechanism",
+    "every write sets updated_at"
+  ],
+  "upgrade_from": {},
+  "if_no_schema_for_a_version": "Rewrite the file from the current schema rather than guessing the difference. Carry every reproduction across verbatim: it is the one field that cannot be reconstructed later."
+}

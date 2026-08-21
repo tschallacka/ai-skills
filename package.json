@@ -12,17 +12,29 @@
     "ai-skills-install": "install.sh"
   },
   "scripts": {
-    "install-skills": "./install.sh"
+    "install-skills": "./install.sh",
+    "prepack": "tests/test-skill-files-manifest.sh && tests/test-register-schemas.sh",
+    "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [
     "install.sh",
+    "install-ui.sh",
     "planning",
     "project-specificies",
     "resource-limited-testing",
     "brainstorm",
+    "todo",
+    "bug-report",
     "post-implementation-review",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!planning/tests/**",
+    "!planning/scripts/lib/**",
+    "!planning/scripts/build-plan-libs.sh",
+    "!planning/ARCHITECTURE.md",
+    "!planning/MAINTAINER.md",
+    "!planning/PACKAGE-MAP.tsv",
+    "!project-specificies/*-deviations.md"
   ],
   "engines": {
     "node": ">=14"

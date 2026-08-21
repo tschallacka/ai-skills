@@ -1,89 +1,110 @@
 #!/usr/bin/env bash
-# Shared helpers for the planning document commands. This file is sourced.
+# MODE: PROD
+# GENERATED FILE — do not edit. Compiled from scripts/lib/document/*.sh by:
+#   planning/scripts/build-plan-libs.sh
+# Edit the function file in that directory, then re-run the build.
+# Target: prod
+#
+# sections, paragraphs, titles and fields
 
 set -euo pipefail
 
-plan_default_root() {
-    if [ -n "${PLANS_ROOT:-}" ]; then
-        printf '%s\n' "${PLANS_ROOT%/}"
-        return 0
-    fi
-    local home_dir="${HOME:-}"
-    if [ -z "$home_dir" ] && [ -n "${USERPROFILE:-}" ]; then
-        home_dir="$USERPROFILE"
-    fi
-    if [ -z "$home_dir" ] && [ -n "${HOMEDRIVE:-}${HOMEPATH:-}" ]; then
-        home_dir="${HOMEDRIVE:-}${HOMEPATH:-}"
-    fi
-    [ -n "$home_dir" ] || plan_die "Unable to resolve the user home directory; set PLANS_ROOT"
-    printf '%s/.plans\n' "${home_dir%/}"
+[ -z "${PLAN_DOCUMENT_LIB_LOADED:-}" ] || return 0
+PLAN_DOCUMENT_LIB_LOADED=1
+
+# The façade every planning script sources. It pulls in the sibling libraries so
+# that `source plan-document-lib.sh` provides the same symbols it always did:
+# 40-plus scripts source this path, and the split must be invisible to them.
+#
+# Sorted last in the group (99-) so every definition above it exists before the
+# initialisation block runs.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-core-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-table-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-progress-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
+
+# ── Load-time initialisation ─────────────────────────────────────────────────
+# Guarded: this library is sourced more than once per process, and re-running it
+# would reset plan_error_count and record plan_cleanup as its own "prior" handler.
+if [ -z "${PLAN_DOCUMENT_LIB_INITIALISED:-}" ]; then
+    PLAN_DOCUMENT_LIB_INITIALISED=1
+    plan_error_count=0
+    plan_tmp_files=()
+    plan_prior_exit_trap="$(trap -p EXIT)"
+    trap plan_cleanup EXIT INT TERM
+fi
+
+# Delete one numbered paragraph and renumber the rest of its section so labels
+# stay sequential. Targeted rather than re-emitting the section, which risks a
+# transcription slip damaging paragraphs no finding was about.
+plan_delete_paragraph() {
+    local file="$1" paragraph_id="$2" temporary_file
+    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
+    temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
+    trap 'rm -f "$temporary_file"' RETURN
+    awk -v wanted="$paragraph_id" '
+        BEGIN {
+            target_value = wanted
+            sub(/^§ /, "", target_value)
+            split(target_value, target_parts, /\./)
+            target_section = target_parts[1]
+            target_number = target_parts[2] + 0
+        }
+        /^§ [0-9]+\.[0-9]+$/ {
+            current_value = $0
+            sub(/^§ /, "", current_value)
+            split(current_value, current_parts, /\./)
+            section = current_parts[1]
+            number = current_parts[2] + 0
+            if (section == target_section && number == target_number) {
+                if (target_found++) exit 2
+                skipping = 1
+                next
+            }
+            skipping = 0
+            if (section == target_section && number > target_number) {
+                print "§ " section "." (number - 1)
+            } else {
+                print
+            }
+            next
+        }
+        /^## / {
+            # A section boundary always stops the delete: never swallow a
+            # following heading even when the deleted paragraph was the last in
+            # its section (that would re-parent the next section under it).
+            skipping = 0
+            print
+            next
+        }
+        skipping { next }
+        { print }
+        END { if (target_found != 1) exit 3 }
+    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
+    mv "$temporary_file" "$file"
+    trap - RETURN
 }
 
-plan_ensure_root_permissions() {
-    local root="${1:-$(plan_default_root)}" helper_dir="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-    local probe
-    mkdir -p "$root" || plan_die "Cannot create plan root: $root"
-    [ -d "$root" ] && [ -r "$root" ] && [ -w "$root" ] && [ -x "$root" ] \
-        || plan_die "Plan root is not readable, writable, and searchable: $root"
-    probe="$root/.permission-probe.$$"
-    ( : > "$probe" && rm -f "$probe" ) || plan_die "Plan root does not permit file editing: $root"
-    [ -d "$helper_dir" ] && [ -r "$helper_dir" ] && [ -x "$helper_dir" ] \
-        || plan_die "Planning helper directory is not readable/searchable: $helper_dir"
-    find "$helper_dir" -maxdepth 1 -type f -name '*.sh' -exec test -r {} \; -exec test -x {} \; \
-        || plan_die "One or more planning helpers cannot be read and executed: $helper_dir"
-    printf '%s\n' "$root"
-}
-
-plan_die() {
-    printf '%s\n' "$*" >&2
-    exit 64
-}
-
-# Commit the current plan directory state before a mutation so every overwrite
-# is recoverable. Plan directories are usually gitignored by the host repo
-# (agent scratch space), so create-plan.sh git-initializes them and mutating
-# helpers snapshot the pre-mutation state here. No-op without git or without a
-# git-initialized plan dir; skips silently when there is nothing to commit.
-plan_git_snapshot() {
-    local plan_dir="$1"
-    command -v git >/dev/null 2>&1 || return 0
-    [ -d "$plan_dir/.git" ] || return 0
-    git -C "$plan_dir" add -A -- . 2>/dev/null || return 0
-    git -C "$plan_dir" -c user.name='plan-skill' -c user.email='plan-skill@localhost' \
-        commit -q -m "snapshot before ${0##*/}" 2>/dev/null || true
-}
-
-# Scratch directory the planning skill may write temporary capsules and run
-# artifacts into. It lives under the system temp dir so it is fresh per boot;
-# the agent's existing write access to the temp dir suffices to create it.
-planning_tmpdir() {
-    printf '%s\n' "${TMPDIR:-/tmp}/planning-agent"
-}
-
-# Ensure the planning scratch directory exists for this boot. Creating a
-# directory under the (world-writable, sticky) system temp dir needs no extra
-# permission, so this is present, cheap, and idempotent. Failure is ignored:
-# the helpers still work when a nonstandard TMPDIR is unwritable.
-planning_ensure_tmpdir() {
-    local d
-    d="$(planning_tmpdir)"
-    mkdir -p "$d" 2>/dev/null && chmod 700 "$d" 2>/dev/null || true
-}
-
-plan_require_directory() {
-    [ -d "$1" ] || plan_die "Plan directory not found: $1"
-}
-
-plan_require_safe_value() {
-    local label="$1" value="$2"
-    [ -n "$value" ] || plan_die "$label must not be empty"
-    [[ "$value" != *'|'* ]] || plan_die "$label must not contain a Markdown table separator (|)"
-    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || plan_die "$label must be one line"
-}
-
-plan_decode_escaped_newlines() {
-    local value="$1"
-    printf '%s' "${value//\\n/$'\n'}"
+plan_document_kind() {
+    case "$1" in
+        plan) printf '%s\n' plan ;;
+        adversarial-review) printf '%s\n' review ;;
+        coverage|inventory|stories|bugs|planning-bugs|fixes|fix-keys|fixkeys|approval|progress) printf '%s\n' reference ;;
+        goal-progress:*) printf '%s\n' reference ;;
+        goal:*) printf '%s\n' goal ;;
+        step:*)
+            # A step id ending in -testing names the step's testing companion,
+            # which has its own writable sections (Automated tests, ...).
+            case "$1" in
+                *-testing) printf '%s\n' testing ;;
+                *) printf '%s\n' step ;;
+            esac
+            ;;
+        unit:*) printf '%s\n' step ;;
+        *) plan_die "Unknown document ID: $1" ;;
+    esac
 }
 
 plan_document_path() {
@@ -92,14 +113,28 @@ plan_document_path() {
         plan)
             printf '%s\n' "$plan_dir/plan-description.md"
             ;;
-        review)
+        adversarial-review)
             printf '%s\n' "$plan_dir/adversarial-review.md"
             ;;
         coverage|inventory)
             printf '%s\n' "$plan_dir/work-unit-inventory.md"
             ;;
+        progress)
+            printf '%s\n' "$plan_dir/progress.md"
+            ;;
+        goal-progress:*)
+            goal="${document_id#goal-progress:}"
+            [ -n "$goal" ] || plan_die "Goal progress IDs use goal-progress:<goal>"
+            printf '%s\n' "$plan_dir/$goal/progress.md"
+            ;;
         stories)
             printf '%s\n' "$plan_dir/ui-user-stories.md"
+            ;;
+        bugs)
+            printf '%s\n' "$plan_dir/bugs.md"
+            ;;
+        planning-bugs)
+            printf '%s\n' "$plan_dir/planning-bugs.json"
             ;;
         fixes)
             printf '%s\n' "$plan_dir/fixes.md"
@@ -126,314 +161,17 @@ plan_document_path() {
             ;;
         unit:W*)
             unit="${document_id#unit:}"
-            IFS=$'\t' read -r goal step < <(
-                awk -F'|' -v wanted="$unit" '
-                    function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); return value }
-                    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ && trim($2) == wanted {
-                        print trim($9) "\t" trim($10)
-                    }
-                ' "$plan_dir/work-unit-inventory.md"
-            )
+            if plan_inventory_row "$plan_dir/work-unit-inventory.md" "$unit"; then
+                goal="$plan_inventory_goal"
+                step="$plan_inventory_step"
+            fi
             [ -n "${goal:-}" ] && [ -n "${step:-}" ] || plan_die "Work unit not found: $unit"
             printf '%s\n' "$plan_dir/$goal/steps/$step.md"
             ;;
         *)
-            plan_die "Unknown document ID: $document_id (use plan, review, goal:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, stories, fixes, fix-keys, or approval)"
+            plan_die "Unknown document ID: $document_id (use plan, adversarial-review, goal:<goal>, goal-progress:<goal>, step:<goal>/<step>, unit:<WNN>, coverage, inventory, progress, stories, bugs, planning-bugs, fixes, fix-keys, or approval)"
             ;;
     esac
-}
-
-plan_document_kind() {
-    case "$1" in
-        plan) printf '%s\n' plan ;;
-        review) printf '%s\n' review ;;
-        coverage|inventory|stories|fixes|fix-keys|fixkeys|approval) printf '%s\n' reference ;;
-        goal:*) printf '%s\n' goal ;;
-        step:*)
-            # A step id ending in -testing names the step's testing companion,
-            # which has its own writable sections (Automated tests, ...).
-            case "$1" in
-                *-testing) printf '%s\n' testing ;;
-                *) printf '%s\n' step ;;
-            esac
-            ;;
-        unit:*) printf '%s\n' step ;;
-        *) plan_die "Unknown document ID: $1" ;;
-    esac
-}
-
-# Print the required heading and its paragraph-number prefix for a mutable
-# narrative section. Structured sections are intentionally excluded.
-plan_section_spec() {
-    local kind="$1" section="$2"
-    case "$kind/$section" in
-        plan/current-state) printf '%s\t%s\n' '## Current state' 2 ;;
-        plan/desired-outcome) printf '%s\t%s\n' '## Desired outcome' 3 ;;
-        plan/approach) printf '%s\t%s\n' '## Approach' 4 ;;
-        plan/scope) printf '%s\t%s\n' '## Scope' 5 ;;
-        plan/affected-areas) printf '%s\t%s\n' '## Affected areas' 6 ;;
-        plan/constraints-and-decisions) printf '%s\t%s\n' '## Constraints and decisions' 7 ;;
-        plan/risks-and-open-questions) printf '%s\t%s\n' '## Risks and open questions' 8 ;;
-        goal/current-state-and-prior-goal-handoffs) printf '%s\t%s\n' '## Current state and prior-goal handoffs' 2 ;;
-        goal/outcome-and-definition-of-done) printf '%s\t%s\n' '## Outcome and definition of done' 3 ;;
-        goal/why-this-goal-is-needed) printf '%s\t%s\n' '## Why this goal is needed' 4 ;;
-        goal/scope) printf '%s\t%s\n' '## Scope' 5 ;;
-        goal/affected-areas) printf '%s\t%s\n' '## Affected files, systems, data, and interfaces' 6 ;;
-        goal/dependencies-and-handoffs) printf '%s\t%s\n' '## Dependencies and handoffs' 7 ;;
-        goal/implementation-approach-risks-and-edge-cases) printf '%s\t%s\n' '## Implementation approach, risks, and edge cases' 8 ;;
-        goal/owned-work-units) printf '%s\t%s\n' '## Owned work units' 9 ;;
-        goal/goal-size-exception) printf '%s\t%s\n' '## Goal-size exception' 11 ;;
-        step/objective) printf '%s\t%s\n' '## Objective' 4 ;;
-        step/instructions) printf '%s\t%s\n' '## Instructions' 5 ;;
-        step/acceptance-criteria) printf '%s\t%s\n' '## Acceptance criteria' 6 ;;
-        step/handoff) printf '%s\t%s\n' '## Handoff' 7 ;;
-        testing/automated-tests) printf '%s\t%s\n' '## Automated tests' 2 ;;
-        testing/browser-verification) printf '%s\t%s\n' '## Browser verification' 3 ;;
-        testing/backend-verification) printf '%s\t%s\n' '## Backend verification' 4 ;;
-        testing/manual-verification) printf '%s\t%s\n' '## Manual verification' 5 ;;
-        review/review-scope) printf '%s\t%s\n' '## Review scope' 1 ;;
-        review/findings) printf '%s\t%s\n' '## Findings' 2 ;;
-        review/rationale) printf '%s\t%s\n' '## Verdict' 3 ;;
-        *) plan_die "$(plan_unknown_section "$kind" "$section")" ;;
-    esac
-}
-
-# Concise, agent-friendly error for an unknown narrative section: list the
-# valid ids for the document kind and, when one is close, suggest it.
-plan_unknown_section() {
-    local kind="$1" section="$2" valid id close="" best=""
-    case "$kind" in
-        plan) valid="current-state desired-outcome approach scope affected-areas constraints-and-decisions risks-and-open-questions" ;;
-        goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
-        step) valid="objective instructions acceptance-criteria handoff" ;;
-        testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
-        review) valid="review-scope findings rationale" ;;
-        *) valid="" ;;
-    esac
-    for id in $valid; do
-        if [ "$id" = "$section" ]; then
-            printf 'Section is valid: %s\n' "$section"
-            return 0
-        fi
-        # Simple closeness: same prefix or >50% shared prefix length.
-        if [[ "$id" == "$section"* ]] || [[ "$section" == "$id"* ]]; then
-            [ -z "$close" ] && close="$id"
-        fi
-        if [ -z "$best" ] || [ "${#id}" -lt "${#best}" ]; then
-            # crude nearest: shortest id differing in fewest chars by prefix
-            :
-        fi
-    done
-    printf "Section '%s' is not a mutable narrative section for a %s document.\n" "$section" "$kind"
-    if [ -n "$close" ]; then
-        printf 'Closest match: %s\n' "$close"
-    fi
-    printf 'Valid %s section ids: %s\n' "$kind" "$valid"
-}
-
-plan_replace_testing_requirement() {
-    local file="$1" required="$2" rationale="$3" replacement temporary_file
-    case "$required" in
-        yes|no) ;;
-        *) plan_die "Test requirement must be yes or no" ;;
-    esac
-    plan_require_safe_value rationale "$rationale"
-    replacement="| $required | $rationale |"
-    temporary_file="${file}.tmp.$$"
-    trap 'rm -f "$temporary_file"' RETURN
-    awk -v replacement="$replacement" '
-        $0 == "## Testing requirement" {
-            in_section = 1
-            print
-            next
-        }
-        in_section && /^## / {
-            in_section = 0
-        }
-        in_section && $0 == "| Test required | Rationale |" {
-            header = 1
-            print
-            next
-        }
-        in_section && header && /^\|---\|---\|$/ {
-            separator = 1
-            print
-            next
-        }
-        in_section && separator && /^\|[^|]+\|[^|]+\|$/ {
-            if (data_row++) exit 3
-            print replacement
-            next
-        }
-        { print }
-        END {
-            if (!header || !separator || data_row != 1) exit 2
-        }
-    ' "$file" > "$temporary_file" || plan_die "Testing requirement table was not found exactly once: $file"
-    mv "$temporary_file" "$file"
-    trap - RETURN
-}
-
-plan_testing_requirement_for_goal() {
-    local goal_file="$1"
-    awk -F'|' '
-        $0 == "## Testing requirement" { in_section = 1; next }
-        in_section && /^## / { exit }
-        in_section && /^\|[[:space:]]*(yes|no)[[:space:]]*\|/ {
-            value = $2
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-            print value
-            exit
-        }
-    ' "$goal_file"
-}
-
-plan_emit_step_testing_reminder() {
-    local plan_dir="$1" document_id="$2" step_file goal_dir goal_file required companion
-    case "$document_id" in
-        step:*|unit:*) ;;
-        *) return 0 ;;
-    esac
-    step_file="$(plan_document_path "$plan_dir" "$document_id")"
-    goal_dir="$(dirname "$(dirname "$step_file")")"
-    goal_file="$goal_dir/goal.md"
-    [ -f "$goal_file" ] || return 0
-    required="$(plan_testing_requirement_for_goal "$goal_file")"
-    [ "$required" = yes ] || return 0
-    companion="${step_file%.md}-testing.md"
-    if [ -f "$companion" ]; then
-        printf 'Reminder: testing instructions already exist at %s; review them for accuracy and completeness after updating this step.\n' "$companion"
-    else
-        printf 'Reminder: this goal requires testing; continue with its test/proof step before marking the goal complete.\n'
-    fi
-}
-
-plan_render_paragraphs() {
-    local number="$1" content="$2"
-    [ -n "$content" ] || plan_die "Section content must not be empty"
-    printf '%s' "$content" | awk -v number="$number" '
-        BEGIN { RS=""; ORS="" }
-        {
-            text = $0
-            sub(/^[[:space:]\n]+/, "", text)
-            sub(/[[:space:]\n]+$/, "", text)
-            if (text == "") next
-            if (count++) printf "\n\n"
-            printf "§ %s.%d\n%s", number, count, text
-        }
-        END { if (count == 0) exit 1 }
-    '
-}
-
-plan_replace_section() {
-    local file="$1" heading="$2" body_file="$3" temporary_file
-    temporary_file="${file}.tmp.$$"
-    trap 'rm -f "$temporary_file"' RETURN
-    awk -v heading="$heading" -v replacement="$body_file" '
-        BEGIN {
-            while ((getline line < replacement) > 0) {
-                body = body (body == "" ? "" : "\n") line
-            }
-            close(replacement)
-        }
-        $0 == heading {
-            if (found++) exit 2
-            print
-            print ""
-            print body
-            skipping = 1
-            next
-        }
-        skipping && /^## / { skipping = 0; print "" }
-        !skipping { print }
-        END { if (found != 1) exit 2 }
-    ' "$file" > "$temporary_file" || plan_die "Section heading was not found exactly once: $heading"
-    mv "$temporary_file" "$file"
-    trap - RETURN
-}
-
-plan_replace_paragraph() {
-    local file="$1" paragraph_id="$2" content="$3" temporary_file
-    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
-    [[ "$content" != *$'\n\n'* ]] || plan_die "A paragraph replacement must contain exactly one paragraph; use section for multiple paragraphs"
-    [ -n "$content" ] || plan_die "Paragraph content must not be empty"
-    temporary_file="${file}.tmp.$$"
-    trap 'rm -f "$temporary_file"' RETURN
-    awk -v wanted="$paragraph_id" -v replacement="$content" '
-        $0 == wanted {
-            if (found++) exit 2
-            print
-            print replacement
-            skipping = 1
-            next
-        }
-        skipping && ($0 == "" || /^§[[:space:]][0-9]+\.[0-9]+$/ || /^## /) {
-            if ($0 ~ /^§[[:space:]][0-9]+\.[0-9]+$/ || $0 ~ /^## /) print ""
-            skipping = 0
-        }
-        !skipping { print }
-        END { if (found != 1) exit 2 }
-    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
-    mv "$temporary_file" "$file"
-    trap - RETURN
-}
-
-plan_render_csv_table() {
-    local columns="$1" csv="$2" csv_file
-    [[ "$columns" =~ ^[1-9][0-9]*$ ]] || plan_die "Table column count must be a positive integer"
-    csv_file="$(mktemp "${TMPDIR:-/tmp}/plan-table.XXXXXX")"
-    trap 'rm -f "$csv_file"' RETURN
-    plan_decode_escaped_newlines "$csv" > "$csv_file"
-    awk -v expected="$columns" '
-        function parse_csv(line, fields,    i, ch, next_ch, quoted, field, count) {
-            for (i = 1; i <= length(line); i++) {
-                ch = substr(line, i, 1)
-                if (ch == "\\" && substr(line, i + 1, 1) == "\"") {
-                    field = field "\""
-                    i++
-                } else if (ch == "\"") {
-                    next_ch = substr(line, i + 1, 1)
-                    if (quoted && next_ch == "\"") {
-                        field = field "\""
-                        i++
-                    } else {
-                        quoted = !quoted
-                    }
-                } else if (ch == "," && !quoted) {
-                    fields[++count] = field
-                    field = ""
-                } else {
-                    field = field ch
-                }
-            }
-            if (quoted) return -1
-            fields[++count] = field
-            return count
-        }
-        function emit_row(fields, count,    i) {
-            printf "|"
-            for (i = 1; i <= count; i++) {
-                if (fields[i] ~ /\|/ || fields[i] ~ /\r/) exit 4
-                printf " %s |", fields[i]
-            }
-            printf "\n"
-        }
-        {
-            if ($0 ~ /^[[:space:]]*$/) exit 5
-            count = parse_csv($0, fields)
-            if (count < 0) exit 2
-            if (count != expected) exit 3
-            emit_row(fields, count)
-            if (NR == 1) {
-                printf "|"
-                for (i = 1; i <= expected; i++) printf "---|"
-                printf "\n"
-            }
-        }
-        END { if (NR == 0) exit 6 }
-    ' "$csv_file" || plan_die "CSV table must have $columns columns on every non-empty row and no pipe characters"
-    rm -f "$csv_file"
-    trap - RETURN
 }
 
 plan_insert_paragraph() {
@@ -441,6 +179,7 @@ plan_insert_paragraph() {
     [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
     case "$mode" in before|after) ;; *) plan_die "Paragraph insertion mode must be before or after" ;; esac
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v wanted="$paragraph_id" -v mode="$mode" -v body_file="$body_file" '
         function output(line) {
@@ -499,62 +238,80 @@ plan_insert_paragraph() {
     trap - RETURN
 }
 
-# Delete one numbered paragraph and renumber the following paragraphs in the
-# same section so labels stay sequential. Deleting content by re-emitting the
-# whole section risks a transcription slip that damages paragraphs no finding
-# was about; a targeted delete removes that hazard.
-plan_delete_paragraph() {
-    local file="$1" paragraph_id="$2" temporary_file
-    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
-    temporary_file="${file}.tmp.$$"
-    trap 'rm -f "$temporary_file"' RETURN
-    awk -v wanted="$paragraph_id" '
-        BEGIN {
-            target_value = wanted
-            sub(/^§ /, "", target_value)
-            split(target_value, target_parts, /\./)
-            target_section = target_parts[1]
-            target_number = target_parts[2] + 0
+# A section form can only rewrite a section the document already holds, so the
+# refusal has to say which sections it does hold. Without that, a valid section
+# id that this particular file never received reads as a broken helper: a
+# reviewer hit `-ss ... browser-verification` on a companion created without
+# browser content, was told only "not found exactly once", and inferred a remedy
+# (re-create with --overwrite) that cannot work -- create-step-testing.sh emits
+# `## Automated tests` and nothing else.
+plan_missing_section_message() {
+    local file="$1" heading="$2" present
+    present="$(grep '^## ' "$file" 2>/dev/null | tr '\n' ' ')"
+    printf '%s not found in %s' "$heading" "${file##*/}"
+    if [ -n "$present" ]; then
+        printf '; it has: %s' "$present"
+    fi
+    printf -- ' -- a section form rewrites a section that already exists, it cannot add one. '
+    case "$file" in
+        *-testing.md) printf 'A testing companion carries only the sections its creator emitted; create-step-testing.sh emits "## Automated tests".' ;;
+        *) printf 'Create the document with the helper that owns it, then rewrite the section.' ;;
+    esac
+}
+
+# A section holding `- Label:` lines is field-shaped whatever the allow-list says,
+# and rewriting it removes labels another mechanism may own -- `- Status:` in
+# `## Verdict` belongs to the review-status gate. Refuse rather than destroy.
+plan_refuse_field_section() {
+    local file="$1" heading="$2" shape
+    [ -f "$file" ] || return 0
+    # A section whose body carries `- Label:` lines is field-shaped, and one
+    # whose body OPENS with a table row is table-shaped. A narrative section may
+    # still contain a table paragraph, which is why the discriminator is the
+    # first body line rather than the presence of a pipe anywhere.
+    shape="$(awk -v want="$heading" '
+        $0 == want { inside = 1; next }
+        inside && /^## / { exit }
+        inside && /^[[:space:]]*$/ { next }
+        inside && /^- [A-Z][^:]*:/ { fields++ }
+        inside && first == "" { first = ($0 ~ /^\|/) ? "table" : "other" }
+        END {
+            if (fields > 0) print "fields"
+            else if (first == "table") print "table"
+            else print "narrative"
+        }' "$file")"
+    case "$shape" in
+        fields)
+            plan_die "Section '$heading' holds fields (- Label: value); rewriting it would remove them, and a field there may belong to another gate. Write one field at a time with --field." 65 ;;
+        table)
+            plan_die "Section '$heading' is a table; rewriting it as paragraphs would discard every row. Use the helper that owns that table." 65 ;;
+    esac
+}
+
+plan_render_paragraphs() {
+    local number="$1" content="$2"
+    [ -n "$content" ] || plan_die "Section content must not be empty"
+    printf '%s' "$content" | awk -v number="$number" '
+        BEGIN { RS=""; ORS="" }
+        {
+            text = $0
+            # No "\n" inside the bracket expression: a backslash escape there
+            # is undefined in POSIX awk, and [[:space:]] already covers newline.
+            sub(/^[[:space:]]+/, "", text)
+            sub(/[[:space:]]+$/, "", text)
+            if (text == "") next
+            if (count++) printf "\n\n"
+            printf "§ %s.%d\n%s", number, count, text
         }
-        /^§ [0-9]+\.[0-9]+$/ {
-            current_value = $0
-            sub(/^§ /, "", current_value)
-            split(current_value, current_parts, /\./)
-            section = current_parts[1]
-            number = current_parts[2] + 0
-            if (section == target_section && number == target_number) {
-                if (target_found++) exit 2
-                skipping = 1
-                next
-            }
-            skipping = 0
-            if (section == target_section && number > target_number) {
-                print "§ " section "." (number - 1)
-            } else {
-                print
-            }
-            next
-        }
-        /^## / {
-            # A section boundary always stops the delete: never swallow a
-            # following heading even when the deleted paragraph was the last in
-            # its section (that would re-parent the next section under it).
-            skipping = 0
-            print
-            next
-        }
-        skipping { next }
-        { print }
-        END { if (target_found != 1) exit 3 }
-    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
-    mv "$temporary_file" "$file"
-    trap - RETURN
+        END { if (count == 0) exit 1 }
+    '
 }
 
 plan_replace_field() {
     local file="$1" label="$2" value="$3" temporary_file
     plan_require_safe_value "$label" "$value"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v label="$label" -v replacement="$value" '
         $0 ~ "^- " label ":" {
@@ -569,11 +326,78 @@ plan_replace_field() {
     trap - RETURN
 }
 
+plan_replace_paragraph() {
+    local file="$1" paragraph_id="$2" content="$3" temporary_file replacement_file
+    [[ "$paragraph_id" =~ ^§[[:space:]][0-9]+\.[0-9]+$ ]] || plan_die "Paragraph ID must use the form '§ 2.1'"
+    [[ "$content" != *$'\n\n'* ]] || plan_die "A paragraph replacement must contain exactly one paragraph; use section for multiple paragraphs"
+    [ -n "$content" ] || plan_die "Paragraph content must not be empty"
+    temporary_file="${file}.tmp.$$"
+    replacement_file="${temporary_file}.replacement"
+    plan_register_temp_file "$temporary_file"
+    plan_register_temp_file "$replacement_file"
+    trap 'rm -f "$temporary_file" "$replacement_file"' RETURN
+    printf '%s\n' "$content" > "$replacement_file"
+    awk -v wanted="$paragraph_id" -v replacement_file="$replacement_file" '
+        BEGIN {
+            while ((getline line < replacement_file) > 0) {
+                replacement = replacement (replacement == "" ? "" : "\n") line
+            }
+            close(replacement_file)
+        }
+        $0 == wanted {
+            if (found++) exit 2
+            print
+            print replacement
+            skipping = 1
+            next
+        }
+        skipping && ($0 == "" || /^§[[:space:]][0-9]+\.[0-9]+$/ || /^## /) {
+            if ($0 ~ /^§[[:space:]][0-9]+\.[0-9]+$/ || $0 ~ /^## /) print ""
+            skipping = 0
+        }
+        !skipping { print }
+        END { if (found != 1) exit 2 }
+    ' "$file" > "$temporary_file" || plan_die "Paragraph was not found exactly once: $paragraph_id"
+    mv "$temporary_file" "$file"
+    rm -f "$replacement_file"
+    trap - RETURN
+}
+
+plan_replace_section() {
+    local file="$1" heading="$2" body_file="$3" temporary_file
+    plan_refuse_field_section "$file" "$heading"
+    temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
+    trap 'rm -f "$temporary_file"' RETURN
+    awk -v heading="$heading" -v replacement="$body_file" '
+        BEGIN {
+            while ((getline line < replacement) > 0) {
+                body = body (body == "" ? "" : "\n") line
+            }
+            close(replacement)
+        }
+        $0 == heading {
+            if (found++) exit 2
+            print
+            print ""
+            print body
+            skipping = 1
+            next
+        }
+        skipping && /^## / { skipping = 0; print "" }
+        !skipping { print }
+        END { if (found != 1) exit 2 }
+    ' "$file" > "$temporary_file" || plan_die "$(plan_missing_section_message "$file" "$heading")"
+    mv "$temporary_file" "$file"
+    trap - RETURN
+}
+
 plan_replace_title() {
     local file="$1" title="$2" temporary_file
     plan_require_safe_value title "$title"
     [[ "$title" != *$'\n'* ]] || plan_die "Title must be one line"
     temporary_file="${file}.tmp.$$"
+    plan_register_temp_file "$temporary_file"
     trap 'rm -f "$temporary_file"' RETURN
     awk -v replacement="$title" '
         /^# / {
@@ -589,47 +413,77 @@ plan_replace_title() {
     trap - RETURN
 }
 
-# Derive a single-line row description from a step's Objective paragraph
-# (§ 4.1) — the text after the first "§ N.N" label inside "## Objective".
-# Truncated to 100 chars; falls back to "$2" (the step name) when there is no
-# Objective or no § label, so a generated progress table never carries a
-# literal placeholder (report 15 §2 / report 16). Shared by every goal-level
-# progress-tracker builder.
-plan_step_objective() {
-    local step_file="$1" fallback="$2"
-    local desc
-    desc="$(awk '
-        /^## Objective$/ { in_obj = 1; next }
-        /^§ [0-9]+\.[0-9]+$/ && in_obj { after_label = 1; next }
-        after_label && NF {
-            line = $0; sub(/^[[:space:]]+/, "", line)
-            if (length(line) > 100) line = substr(line, 1, 100) "..."
-            print line; exit
-        }
-        /^## / && in_obj { exit }
-    ' "$step_file" 2>/dev/null)"
-    [ -n "$desc" ] || desc="$fallback"
-    printf '%s\n' "$desc"
+# Print the required heading and its paragraph-number prefix for a mutable
+# narrative section. Structured sections are intentionally excluded.
+plan_section_spec() {
+    local kind="$1" section="$2"
+    case "$kind/$section" in
+        plan/current-state) printf '%s\t%s\n' '## Current state' 2 ;;
+        plan/desired-outcome) printf '%s\t%s\n' '## Desired outcome' 3 ;;
+        plan/approach) printf '%s\t%s\n' '## Approach' 4 ;;
+        plan/scope) printf '%s\t%s\n' '## Scope' 5 ;;
+        plan/affected-areas) printf '%s\t%s\n' '## Affected areas' 6 ;;
+        plan/constraints-and-decisions) printf '%s\t%s\n' '## Constraints and decisions' 7 ;;
+        plan/risks-and-open-questions) printf '%s\t%s\n' '## Risks and open questions' 8 ;;
+        plan/environment-facts) printf '%s\t%s\n' '## Environment facts' 9 ;;
+        plan/approach-decisions) printf '%s\t%s\n' '## Approach decisions' 10 ;;
+        goal/current-state-and-prior-goal-handoffs) printf '%s\t%s\n' '## Current state and prior-goal handoffs' 2 ;;
+        goal/outcome-and-definition-of-done) printf '%s\t%s\n' '## Outcome and definition of done' 3 ;;
+        goal/why-this-goal-is-needed) printf '%s\t%s\n' '## Why this goal is needed' 4 ;;
+        goal/scope) printf '%s\t%s\n' '## Scope' 5 ;;
+        goal/affected-areas) printf '%s\t%s\n' '## Affected files, systems, data, and interfaces' 6 ;;
+        goal/dependencies-and-handoffs) printf '%s\t%s\n' '## Dependencies and handoffs' 7 ;;
+        goal/implementation-approach-risks-and-edge-cases) printf '%s\t%s\n' '## Implementation approach, risks, and edge cases' 8 ;;
+        goal/owned-work-units) printf '%s\t%s\n' '## Owned work units' 9 ;;
+        goal/goal-size-exception) printf '%s\t%s\n' '## Goal-size exception' 11 ;;
+        step/objective) printf '%s\t%s\n' '## Objective' 4 ;;
+        step/instructions) printf '%s\t%s\n' '## Instructions' 5 ;;
+        step/acceptance-criteria) printf '%s\t%s\n' '## Acceptance criteria' 6 ;;
+        step/handoff) printf '%s\t%s\n' '## Handoff' 7 ;;
+        testing/automated-tests) printf '%s\t%s\n' '## Automated tests' 2 ;;
+        testing/browser-verification) printf '%s\t%s\n' '## Browser verification' 3 ;;
+        testing/backend-verification) printf '%s\t%s\n' '## Backend verification' 4 ;;
+        testing/manual-verification) printf '%s\t%s\n' '## Manual verification' 5 ;;
+        review/review-scope) printf '%s\t%s\n' '## Review scope' 1 ;;
+        review/findings) printf '%s\t%s\n' '## Findings' 2 ;;
+        review/rationale) printf '%s\t%s\n' '## Verdict' 3 ;;
+        *) plan_die "$(plan_unknown_section "$kind" "$section")" ;;
+    esac
 }
 
-# Derive a single-line row description from a goal's "## Outcome and definition
-# of done" section, skipping "§ N.N" labels. Truncated to 100 chars; falls back
-# to "$2" (the goal name) when there is no DoD, so a generated plan-level
-# tracker never carries a literal placeholder. Shared by every plan-level
-# progress-tracker builder.
-plan_goal_definition_of_done() {
-    local goal_file="$1" fallback="$2"
-    local desc
-    desc="$(awk '
-        /^## Outcome and definition of done$/ { in_sec = 1; next }
-        in_sec && /^## / { exit }
-        in_sec && /^§ [0-9]+\.[0-9]+[[:space:]]*$/ { next }
-        in_sec && NF {
-            line = $0; sub(/^[[:space:]]+/, "", line)
-            if (length(line) > 100) line = substr(line, 1, 100) "..."
-            print line; exit
-        }
-    ' "$goal_file" 2>/dev/null)"
-    [ -n "$desc" ] || desc="$fallback"
-    printf '%s\n' "$desc"
+# Concise, agent-friendly error for an unknown narrative section: list the
+# valid ids for the document kind and, when one is close, suggest it.
+plan_unknown_section() {
+    local kind="$1" section="$2" valid id close="" best=""
+    case "$kind" in
+        plan) valid="current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts" ;;
+        goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
+        step) valid="objective instructions acceptance-criteria handoff" ;;
+        testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
+        # A review has no narrative section: Review scope and Verdict hold
+        # fields (-f writes them, one label at a time) and Findings is a table
+        # (update-adversarial-review.sh writes it). A section rewrite here
+        # dropped `- Status:` and left the plan unapprovable.
+        review) valid="" ;;
+        *) valid="" ;;
+    esac
+    for id in $valid; do
+        if [ "$id" = "$section" ]; then
+            printf 'Section is valid: %s\n' "$section"
+            return 0
+        fi
+        # Simple closeness: same prefix or >50% shared prefix length.
+        if [[ "$id" == "$section"* ]] || [[ "$section" == "$id"* ]]; then
+            [ -z "$close" ] && close="$id"
+        fi
+        if [ -z "$best" ] || [ "${#id}" -lt "${#best}" ]; then
+            # crude nearest: shortest id differing in fewest chars by prefix
+            :
+        fi
+    done
+    printf "Section '%s' is not a mutable narrative section for a %s document.\n" "$section" "$kind"
+    if [ -n "$close" ]; then
+        printf 'Closest match: %s\n' "$close"
+    fi
+    printf 'Valid %s section ids: %s\n' "$kind" "$valid"
 }
