@@ -28,46 +28,46 @@
     {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
       "reproduce": "CI run 32394476430, job \"Test suite passes on macos-latest\": planning/tests/test-plan-commands.sh",
       "observed": "awk: newline in string | A | B |  — then the test failed (exit 64).",
       "expected": "The row is written as it is under GNU awk.",
-      "mechanism": "Not yet located. A literal newline reaches an awk string, which one-true-awk on macOS refuses and GNU awk accepts. The candidates are the awk calls that build or rewrite a table row.",
+      "mechanism": "plan_replace_paragraph passed the replacement text to awk with -v. A newline inside a -v assignment is what one-true-awk refuses outright, and GNU awk accepts, so a multi-paragraph or multi-line cell broke the write on macOS only.",
       "surfaces": [
         "planning/scripts/plan-content.sh",
         "planning/scripts/update-plan-content.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "9f41091 (codex): plan_replace_paragraph writes the replacement to a temp file and reads it in awk BEGIN instead of passing it with -v. Undocumented at the time -- attributed here by matching the change against the failure.",
+      "verification": "CI run 32474258670 at a8d1285: both macOS legs pass, including test-plan-commands, which is the test that failed with \"awk: newline in string\" at run 32394476430. That is the first green BSD userland this branch has had.",
       "found_by": "the macOS leg of CI, the first execution of this code on BSD userland",
       "notes": "Cannot be reproduced on this machine: it needs BSD awk. Diagnose from the CI log or a macOS runner, not by guessing here.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-20T17:17:13Z"
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "B4",
       "title": "A plans-root path comparison fails on macOS, where TMPDIR carries a trailing slash and /var is a symlink",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
       "reproduce": "CI run 32394476430, macos-latest: planning/tests/test-plan-env.sh line 50",
       "observed": "assertion failed: grep -Fqx \"demo-plan|$plan_root/plan-description.md|$plan_root/steps\". The log shows paths like /var/folders/.../T//ai-skills-tests.XmQi3B — note the double slash.",
       "expected": "The helper output holds the plan paths exactly as the test builds them.",
-      "mechanism": "Two candidates, both macOS-specific and both plausible: TMPDIR ends with a slash there, so \"$TMPDIR/x\" yields a double slash; and /var is a symlink to /private/var, so pwd -P resolves a path the test built literally. An -Fx comparison is exact, so either is enough.",
+      "mechanism": "The test compared a path it had built literally against one the code had resolved. On macOS /var is a symlink to /private/var, so pwd -P returns the resolved form and an -Fx comparison cannot match.",
       "surfaces": [
         "planning/tests/test-plan-env.sh",
         "planning/scripts/plan-env.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "9f41091 (codex): test-plan-env.sh canonicalises its temp root with tmp=\"$(cd \"$tmp\" && pwd -P)\" before building the expected strings, so both sides are resolved.",
+      "verification": "CI run 32474258670 at a8d1285: test-plan-env passes on both macOS legs, having failed at line 50 in run 32394476430.",
       "found_by": "the macOS leg of CI",
-      "notes": "Worth a portability rule once the mechanism is settled: every literal path comparison in the suite has the same exposure.",
+      "notes": "The trailing-slash TMPDIR was the wrong half of my guess: the double slash in the log was cosmetic, and the symlink was the whole cause. Recorded because a plausible mechanism stated alongside the real one is what sends the next reader down the wrong path.",
       "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-20T17:17:13Z"
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "B5",

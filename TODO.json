@@ -6,15 +6,15 @@
     {
       "id": "T7",
       "title": "Push the branch and read the two macOS legs",
-      "status": "partly",
+      "status": "done",
       "parent": null,
       "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
-      "note": "Branch pushed and PR #2 opened, which is what runs CI. The macOS legs have now been read for the first time: seven failures, three fixed here (a GNU-only sed alternation that leaked every marker into the compiled libraries on macOS, BSD od padding, and no local master ref) and four recorded as B3-B6. Removing continue-on-error waits on those four.",
+      "note": "CI run 32474258670 at a8d1285 is green on all seven jobs, both macOS legs included -- the first green BSD userland this branch has had. That closes the blocker the workflow macos-known-failures job lists, so continue-on-error can come off both macOS legs; recorded as T37.",
       "blocked_on": "the maintainer",
       "refs": [],
       "priority": "urgent",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T17:17:38Z"
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "T10",
@@ -110,6 +110,21 @@
       ],
       "created_at": "2026-08-20T15:31:12Z",
       "updated_at": "2026-08-20T16:26:44Z"
+    },
+    {
+      "id": "T37",
+      "title": "Remove continue-on-error from the two macOS legs, now that they pass",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "The workflow macos-known-failures job lists blocker 8 as the last one outstanding: the suite passing on a macOS runner under /bin/bash 3.2 and the default bash. Run 32474258670 does exactly that on both legs. Removing the flag makes a macOS regression block a PR, which is the point of having the legs. The job that lists the blockers should go with it, or say that the list is empty.",
+      "note": "Blocker 8 asked for two consecutive green runs; there is one. A second push will settle it.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml"
+      ],
+      "created_at": "2026-08-21T10:55:23Z",
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "T1",
@@ -573,18 +588,18 @@
     {
       "id": "T36",
       "title": "The plan-map-lib.sh assoc-array exemption is vestigial",
-      "status": "open",
+      "status": "done",
       "priority": "low",
       "parent": null,
       "detail": "in_allowlist exempts ./planning/scripts/plan-map-lib.sh from assoc-array, but that file names declare -A only in a comment, and section 4 strips comments before matching. Removing the exemption changes nothing, which is how it was found. Delete it, or keep it and say in the comment that it guards prose that no longer exists.",
-      "note": "Found while proving the allowlist still worked after T30: the removal test on this entry was inconclusive because the entry does nothing, so the proof used the stat-probe exemption instead, which is load-bearing.",
+      "note": "Deleted. Testing every exemption the same way found this was the only dead one: the glob entries benchmark/*, planning/tests/* and the sha256 and stat-format entries are all live, and run-tests.sh:python3-shipped needs a second look because the probe could not read glob patterns and returned an unsound answer for three of four.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-portability-contract.sh",
         "planning/scripts/plan-map-lib.sh"
       ],
       "created_at": "2026-08-21T10:51:52Z",
-      "updated_at": "2026-08-21T10:51:52Z"
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "T0",
