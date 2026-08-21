@@ -83,14 +83,71 @@ _agent_capture_pgid() {
     printf '%s\n' "$child"
 }
 
+# _agent_timeout_seconds <spec>: <n>s | <n>m | <n>h -> seconds on stdout.
+# Anything else is refused with 64: guessing a unit for a model run that spends
+# real money is worse than not starting it. 10# because 045 is octal in $(( )).
+_agent_timeout_seconds() {
+    local spec="$1" number unit seconds=0
+    number="${spec%[smh]}"
+    unit="${spec#"$number"}"
+    case "$number" in ''|*[!0-9]*) unit=unparseable ;; esac
+    case "$unit" in
+        s) seconds=$((10#$number)) ;;
+        m) seconds=$((10#$number * 60)) ;;
+        h) seconds=$((10#$number * 3600)) ;;
+    esac
+    if [ "$seconds" -le 0 ]; then
+        printf 'lib-agent: cannot parse timeout spec "%s"; expected a positive <n>s, <n>m or <n>h\n' "$spec" >&2
+        return 64
+    fi
+    printf '%s\n' "$seconds"
+}
+
+# _agent_watchdog <pid> <seconds>: bound <pid> without a timeout binary.
+# Polled in one-second steps rather than one long sleep, so an agent that exits
+# on its own leaves neither a watchdog nor a sleep behind.
+_agent_watchdog() {
+    local pid="$1" seconds="$2" waited=0 grace=0
+    while [ "$waited" -lt "$seconds" ]; do
+        kill -0 "$pid" 2>/dev/null || return 0
+        sleep 1
+        waited=$((waited + 1))
+    done
+    kill -0 "$pid" 2>/dev/null || return 0
+    printf 'lib-agent: watchdog: agent pid %s exceeded its %ss bound; terminating it and its descendants\n' "$pid" "$seconds" >&2
+    kill_process_tree "$pid" TERM
+    while [ "$grace" -lt 10 ]; do
+        kill -0 "$pid" 2>/dev/null || return 0
+        sleep 0.5
+        grace=$((grace + 1))
+    done
+    kill_process_tree "$pid" KILL
+}
+
+# _agent_watchdog_stop(): reap the watchdog and its in-flight sleep.
+_agent_watchdog_stop() {
+    [ -n "${AGENT_WATCHDOG_PID:-}" ] || return 0
+    kill_process_tree "$AGENT_WATCHDOG_PID" TERM
+    wait "$AGENT_WATCHDOG_PID" 2>/dev/null || true
+    AGENT_WATCHDOG_PID=""
+}
+
 # Runs AGENT_ARGV from AGENT_CWD in the background, setting AGENT_PID/AGENT_PGID.
-# Exits 69 when setsid/timeout are required but absent, 70 on empty argv.
+# Exits 69 when setsid/timeout are required but absent, 70 on empty argv, 64 on
+# an unparseable timeout spec.
 # ---- quoted: launch_agent arguments ----
 # launch_agent <mode> <timeout|''> <output|'-'>
 #   mode=setsid      setsid --wait + timeout, records the process group
+#   mode=isolated    setsid when present, else the registry fallback
 #   mode=background  plain background run, no process group of its own
-#   timeout          e.g. '45m'; bounds the agent in BOTH modes, '' for unbounded
+#   timeout          e.g. '45m'; bounds the agent in EVERY mode, '' for unbounded
 #   output           path for stdout+stderr, or '-' to inherit
+#
+# How the bound is applied, strongest first:
+#   1. timeout <spec>       GNU coreutils
+#   2. gtimeout <spec>      the same binary under its macOS name
+#   3. shell watchdog       registry mode only; polls, then kills the ps-walked
+#                           tree. Sets AGENT_WATCHDOG_PID; wait_agent stops it.
 # ---- end quoted ----
 # The timeout is orthogonal to the process group: an unbounded background agent
 # whose exit code gates a batch hangs that batch forever, so every caller that
@@ -98,7 +155,7 @@ _agent_capture_pgid() {
 launch_agent() {
     local mode="$1" timeout_spec="$2" output="$3"
     local -a cmd=()
-    local timeout_bin="" cwd="${AGENT_CWD:-$PWD}" isolation_mode="$mode"
+    local timeout_bin="" cwd="${AGENT_CWD:-$PWD}" isolation_mode="$mode" watchdog_seconds=""
 
     if [ -z "${AGENT_ARGV[*]+set}" ] || [ "${#AGENT_ARGV[@]}" -eq 0 ]; then
         printf 'lib-agent: AGENT_ARGV is empty; call a driver agent_argv_* first\n' >&2
@@ -138,7 +195,10 @@ launch_agent() {
             timeout_bin="gtimeout"
         else
             if [ "$isolation_mode" = registry ]; then
-                printf 'lib-agent: neither timeout nor gtimeout found; registry fallback cannot bound the agent to %s\n' "$timeout_spec" >&2
+                # Last rung, and the weakest: a sibling process racing a poll,
+                # not a bound on the agent itself. A real timeout binary always
+                # wins, so this branch is never taken when one exists.
+                watchdog_seconds="$(_agent_timeout_seconds "$timeout_spec")" || return 64
             else
                 printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
                 return 69
@@ -159,6 +219,13 @@ launch_agent() {
     AGENT_ISOLATION_MODE="$isolation_mode"
     if [ "$isolation_mode" = registry ] && [ -n "${BENCHMARK_PROCESS_REGISTRY:-}" ] && command -v process_registry_append >/dev/null 2>&1; then
         process_registry_append "$BENCHMARK_PROCESS_REGISTRY" agent "$AGENT_PID" "$output" "${cmd[@]}"
+    fi
+
+    AGENT_WATCHDOG_PID=""
+    if [ -n "$watchdog_seconds" ]; then
+        printf 'lib-agent: neither timeout nor gtimeout found; bounding agent pid %s to %s with a shell watchdog\n' "$AGENT_PID" "$timeout_spec" >&2
+        _agent_watchdog "$AGENT_PID" "$watchdog_seconds" &
+        AGENT_WATCHDOG_PID="$!"
     fi
 
     # Polled, not read once: a not-yet-scheduled agent has no observable group,
@@ -186,6 +253,7 @@ wait_agent() {
     else
         AGENT_EXIT=$?
     fi
+    _agent_watchdog_stop
     AGENT_PID=""
     AGENT_PGID=""
 }
