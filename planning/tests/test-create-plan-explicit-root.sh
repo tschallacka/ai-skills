@@ -44,4 +44,21 @@ if grep -Fq "REFUSING TO CREATE A PLAN" "$work/create.err"; then
     t_fail "explicit create-plan refused because of unrelated global duplicates"
 fi
 
+# ---- a refused call leaves nothing on disk -------------------------------
+# The parent is created for an explicit path, so it has to be created after the
+# guards rather than while parsing the arguments: contract 2 puts the
+# irreversible step last. It ran first, so a bad plan name created the parent and
+# then died.
+refused_root="$work/refused"
+rc=0
+"$scripts/create-plan.sh" "$refused_root/BadName" 'A title' >/dev/null 2>&1 || rc=$?
+t_assert_eq "a non-kebab plan name is refused" "$rc" 64
+[ ! -d "$refused_root" ] \
+    || t_fail "a refused call created its parent directory: $refused_root"
+
+mkdir -p "$work/occupied/taken-name"
+rc=0
+"$scripts/create-plan.sh" "$work/occupied/taken-name" 'A title' >/dev/null 2>&1 || rc=$?
+t_assert_eq "an existing plan directory is refused" "$rc" 73
+
 t_end "test-create-plan-explicit-root"

@@ -247,7 +247,7 @@
     {
       "id": "B11",
       "title": "create-plan.sh creates the plans root before validating the plan name, so a refused call leaves a directory behind",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -258,12 +258,12 @@
       "surfaces": [
         "planning/scripts/create-plan.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The mkdir moved out of the argument case to just after the guards -- the kebab-case check, the refuse-existing check and plan_require_safe_value -- and is now conditional on the directory being absent. An explicit path still creates the directory that holds it; a call about to be refused no longer does.",
+      "verification": "test-create-plan-explicit-root.sh gains two assertions: a non-kebab name is refused with 64 and its parent does not exist afterwards, and an occupied plan directory is refused with 73. Mutation: moving the mkdir back into the argument case fails the first with \"a refused call created its parent directory\". test-coverage-gaps and test-plan-commands still pass, which is what exercises the bare-name path that does not create anything itself.",
       "found_by": "reviewing 9f41091",
       "notes": "The mkdir itself is right - an explicit path should be able to create its parent. Only the order is wrong: move it after both guards.",
       "created_at": "2026-08-21T09:34:37Z",
-      "updated_at": "2026-08-21T09:34:37Z"
+      "updated_at": "2026-08-21T10:15:27Z"
     },
     {
       "id": "B12",

@@ -51,7 +51,6 @@ case "$plan_arg" in
         # For the common call, a path inside the plans root, this is the same
         # answer as before.
         plans_root="$(dirname "$plan_dir")"
-        mkdir -p "$plans_root"
         ;;
     *)
         resolved_root="$("$script_dir/plan-root.sh" resolve "${PROJECT_DIR:-$PWD}")"
@@ -66,6 +65,12 @@ if [ -e "$plan_dir" ]; then
     exit 73
 fi
 plan_require_safe_value title "$title"
+
+# After the guards, not before: an explicit path may create the directory that
+# holds it, but a call that is about to be refused must leave nothing behind
+# (CODE-CONTRACTS.md contract 2). It ran in the argument case, so a bad plan name
+# created the parent and then died.
+[ -d "$plans_root" ] || mkdir -p "$plans_root"
 
 # ---- refuse while any plan under this root holds a duplicate step number ----
 # Two steps numbered alike in one goal have no defined order, and there is no
