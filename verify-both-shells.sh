@@ -48,16 +48,30 @@ cleanup() {
 # behind. A SIGKILL still can, which is what the sweep below is for.
 trap cleanup EXIT INT TERM HUP
 
-# Self-cleaning is not a trap alone. Sweep this harness's own leftovers first: a
-# killed run leaves a registered worktree, and a registration under the repo is
-# what puts machine-specific paths into generated artifacts.
-git -C "$src" worktree list --porcelain \
-    | sed -n 's|^worktree \(.*/verify-wt\..*\)$|\1|p' \
-    | while IFS= read -r stale; do
-        printf 'sweeping leftover worktree %s\n' "$stale"
-        git -C "$src" worktree remove --force "$stale" 2>/dev/null
-        rm -rf "$(dirname "$stale")"
-    done
+# Self-cleaning is not a trap alone. Sweep this harness's own leftovers: a killed
+# run leaves a registered worktree, and a registration under the repo is what puts
+# machine-specific paths into generated artifacts.
+#
+# Only leftovers, never a live one. Each run records its pid beside its worktree,
+# and a worktree whose owner is still running belongs to a concurrent run. Without
+# that check this sweep deleted the tree a second run was executing in, and 56 of
+# its 87 tests failed on files that had vanished mid-run -- the same class of
+# mistake as sweeping another run's test roots, which run-tests.sh avoids the same
+# way.
+printf '%s\n' "$$" > "$(dirname "$wt")/harness.pid"
+while IFS= read -r stale; do
+    [ -n "$stale" ] || continue
+    [ "$stale" = "$wt" ] && continue
+    owner="$(cat "$(dirname "$stale")/harness.pid" 2>/dev/null || true)"
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+        printf 'leaving live worktree %s (harness pid %s)\n' "$stale" "$owner"
+        continue
+    fi
+    printf 'sweeping leftover worktree %s\n' "$stale"
+    git -C "$src" worktree remove --force "$stale" 2>/dev/null
+    rm -rf "$(dirname "$stale")"
+done < <(git -C "$src" worktree list --porcelain \
+    | sed -n 's|^worktree \(.*/verify-wt\..*\)$|\1|p')
 
 git -C "$src" worktree add --detach --quiet "$wt" HEAD || exit 70
 # The working tree, including uncommitted edits, so what is verified is what is

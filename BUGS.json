@@ -224,6 +224,27 @@
       "updated_at": "2026-08-21T11:05:01Z"
     },
     {
+      "id": "B16",
+      "title": "verify-both-shells.sh deletes a concurrent run's live worktree, failing that run wholesale",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start ./verify-both-shells.sh, and while it runs start a second one. The second sweeps the first worktree away.",
+      "observed": "The first run reported 87 tests, 31 passed, 56 failed on its bash 3.2 leg, with errors like \"cd: /tmp/verify-wt.PLtaGy/tree/planning/scripts: No such file or directory\" and \"/tmp/verify-wt.PLtaGy/tree/install.sh: No such file or directory\". Its bash 5.3 leg, which had finished before the second run started, passed all 87.",
+      "expected": "A second run leaves a live worktree alone and sweeps only leftovers.",
+      "mechanism": "The startup sweep removes every registered worktree matching verify-wt.*, on the assumption that any it finds is a leftover from a killed run. It cannot tell a leftover from a live one, so a concurrent run deletes the tree the first is executing in, file by file, underneath it.",
+      "surfaces": [
+        "verify-both-shells.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the verification of c565658, which I started and then started a second one for the next commit while it was still running",
+      "notes": "Same class as the test-root sweep in run-tests.sh, which codex fixed with a run-id marker after I had concluded a run could not distinguish its own leftovers from a concurrent run live directories. I wrote that reasoning down for run-tests.sh and did not apply it to my own harness. A fix is in the working tree, unverified: each run writes its pid beside its worktree and the sweep skips any whose owner is still running. Proving it means planting a worktree owned by a live process and running the sweep, which is invasive enough to want its own moment rather than being folded into another commit. Until then the rule is one verification at a time, and a wholesale failure with missing-file errors is this, not a regression in the code under test.",
+      "created_at": "2026-08-21T11:21:03Z",
+      "updated_at": "2026-08-21T11:21:03Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
