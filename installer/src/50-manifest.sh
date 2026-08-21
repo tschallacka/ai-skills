@@ -252,6 +252,7 @@ tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-manifest.sh
+tests/test-installer-skill-selection.sh
 tests/test-inventory-helpers.sh
 tests/test-lib-core.sh
 tests/test-lib-document.sh

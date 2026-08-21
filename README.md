@@ -130,9 +130,10 @@ curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/instal
   | bash -s -- --skill planning --target "$HOME/.codex/skills"
 ```
 
-`--skill` takes **one selection**, but that selection may be a comma-separated
-list — `--skill planning,brainstorm`. Repeating the flag does not accumulate;
-the last one wins. Menu numbers work too (`--skill 1,4`).
+`--skill` may be given more than once, and each value may itself be a
+comma-separated list, so `--skill planning --skill brainstorm` and
+`--skill planning,brainstorm` install the same two. Repeats are collapsed, menu
+numbers work (`--skill 1,4`), and `all` selects everything wherever it appears.
 
 ### Headless and CI usage
 

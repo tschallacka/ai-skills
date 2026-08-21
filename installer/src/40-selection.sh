@@ -46,6 +46,14 @@ select_skills() {
         # A menu number selects by position in SKILL_NAMES. The patterns exclude
         # a leading zero so `08` cannot reach $(( )) and be read as octal; an
         # out-of-range number falls through to the name check and dies there.
+        # `all` anywhere in the selection means every skill, so
+        # `--skill all --skill todo` is not a contradiction to be resolved by
+        # ordering. The bare "6" spelling stays whole-string only, above: with
+        # seven skills, 6 is also a valid position, and reading it as "all" in a
+        # list would silently install one thing when a list was asked for.
+        case "$name" in
+            all) SELECTED_SKILLS=("${SKILL_NAMES[@]}"); return ;;
+        esac
         case "$name" in
             [1-9]|[1-9][0-9])
                 if [ "$name" -le "${#SKILL_NAMES[@]}" ]; then

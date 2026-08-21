@@ -291,9 +291,9 @@
     {
       "id": "B1",
       "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
-      "status": "not-a-defect",
-      "severity": "cosmetic",
-      "priority": "low",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
       "parent": null,
       "reproduce": "bash install.sh --skill todo --skill bug-report --target /tmp/two --yes; ls /tmp/two",
       "observed": "Selected skills: bug-report — and only bug-report is installed. Reversing the two flags installs only todo. No warning either way.",
@@ -304,12 +304,12 @@
         "installer/src/40-selection.sh",
         "installer/src/05-config.sh"
       ],
-      "fix": null,
-      "verification": "README.md:133-135 documents it: \"--skill takes one selection... Repeating the flag does not accumulate; the last one wins\", and --skill todo,bug-report installs both. Verified: Selected skills: todo bug-report, both directories written. The behaviour matches its documentation, so it is not a defect.",
+      "fix": "--skill accumulates: 10-cli-args.sh joins repeated values with a comma, which is what select_skills already splits, so the repeated and comma spellings meet in one place. select_skills also learns `all` as a token, so --skill all --skill todo is not a contradiction resolved by ordering. The bare 6 stays whole-string only: with seven skills 6 is also a position, and reading it as all inside a list would install one thing when a list was asked for.",
+      "verification": "test-installer-skill-selection.sh asserts against what was installed, not the Selected skills line: two flags install both in either order, three install three, the comma and repeated forms agree, mixing them works, a repeat collapses, a menu number combines with a name, all wins wherever it appears, the bare 6 still means all, and the three refusals are unchanged. Mutations: restoring last-one-wins fails the first two assertions; dropping the all token fails the combined case.",
       "found_by": "installing the two register skills for the user in one command",
-      "notes": "Recorded from the install itself without reading the flag documentation first. The residual objection -- that silently discarding a supplied argument is worse than refusing it -- is a design preference, not a defect, and belongs in TODO.json.",
+      "notes": "Closed as not-a-defect first, because README.md documented last-one-wins and the comma form worked. That was right about the documentation and wrong about the behaviour being acceptable: silently discarding a supplied argument is a defect whatever the manual says, and the manual was the thing to change. The status moved from not-a-defect to fixed rather than a second entry being opened, so the history stays in one place.",
       "created_at": "2026-08-20T15:44:50Z",
-      "updated_at": "2026-08-20T16:03:14Z"
+      "updated_at": "2026-08-21T11:00:42Z"
     }
   ]
 }

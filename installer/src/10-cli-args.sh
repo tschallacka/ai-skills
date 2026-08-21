@@ -57,7 +57,15 @@ while [ "$#" -gt 0 ]; do
             ;;
         --skill)
             [ "$#" -ge 2 ] || die "--skill needs a skill name"
-            SKILL_SELECTION="$2"
+            # Accumulates. `--skill a --skill b` is the form people reach for
+            # first, and it used to keep only the last one, installing something
+            # other than what was asked with no warning. A comma-joined value is
+            # what select_skills already splits, so both spellings meet there.
+            if [ -n "$SKILL_SELECTION" ]; then
+                SKILL_SELECTION="$SKILL_SELECTION,$2"
+            else
+                SKILL_SELECTION="$2"
+            fi
             shift 2
             ;;
         --package)

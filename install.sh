@@ -32,7 +32,7 @@ set -euo pipefail
 #   14. Main
 #
 # Usage:
-#   install.sh [--all | --skill <name>] [--target <path>] [--yes]
+#   install.sh [--all | --skill <name> ...] [--target <path>] [--yes]
 #   install.sh --help
 #
 # Exit codes: 0 success, 1 any error, plus the machine contract of the
@@ -145,7 +145,8 @@ Usage: install.sh [options]
 
 Interactive by default. Options are useful for automation:
   --all                    Install or update all skills
-  --skill <name>           Install or update one skill
+  --skill <name>           Install or update a skill; repeatable, and the value
+                           may be a comma-separated list
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
   --target <path>          Install into one skill root without prompting
@@ -222,7 +223,15 @@ while [ "$#" -gt 0 ]; do
             ;;
         --skill)
             [ "$#" -ge 2 ] || die "--skill needs a skill name"
-            SKILL_SELECTION="$2"
+            # Accumulates. `--skill a --skill b` is the form people reach for
+            # first, and it used to keep only the last one, installing something
+            # other than what was asked with no warning. A comma-joined value is
+            # what select_skills already splits, so both spellings meet there.
+            if [ -n "$SKILL_SELECTION" ]; then
+                SKILL_SELECTION="$SKILL_SELECTION,$2"
+            else
+                SKILL_SELECTION="$2"
+            fi
             shift 2
             ;;
         --package)
@@ -2133,6 +2142,14 @@ select_skills() {
         # A menu number selects by position in SKILL_NAMES. The patterns exclude
         # a leading zero so `08` cannot reach $(( )) and be read as octal; an
         # out-of-range number falls through to the name check and dies there.
+        # `all` anywhere in the selection means every skill, so
+        # `--skill all --skill todo` is not a contradiction to be resolved by
+        # ordering. The bare "6" spelling stays whole-string only, above: with
+        # seven skills, 6 is also a valid position, and reading it as "all" in a
+        # list would silently install one thing when a list was asked for.
+        case "$name" in
+            all) SELECTED_SKILLS=("${SKILL_NAMES[@]}"); return ;;
+        esac
         case "$name" in
             [1-9]|[1-9][0-9])
                 if [ "$name" -le "${#SKILL_NAMES[@]}" ]; then
@@ -2529,6 +2546,7 @@ tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-manifest.sh
+tests/test-installer-skill-selection.sh
 tests/test-inventory-helpers.sh
 tests/test-lib-core.sh
 tests/test-lib-document.sh

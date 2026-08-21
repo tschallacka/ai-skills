@@ -382,11 +382,11 @@
     {
       "id": "T26",
       "title": "Make a repeated --skill accumulate, so the intuitive form works too",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "--skill a --skill b should install both, alongside the documented comma form. SELECTED_SKILLS is already an array and 40-selection.sh de-duplicates into it, so accumulating costs nothing; installer/src/10-cli-args.sh:60 assigns a scalar. Update README.md:133-135, which currently documents last-one-wins, and cover both forms in a test.",
-      "note": "Asked for directly: the intuitive usage should work, not merely be refused. Came out of B1, closed as not-a-defect because the behaviour matched its documentation.",
+      "note": "Fixed with B1, which was reopened rather than left closed as not-a-defect. README.md:133 no longer documents last-one-wins, the --skill help line and the usage synopsis say the flag is repeatable, and test-installer-skill-selection.sh pins the replacement behaviour.",
       "blocked_on": null,
       "refs": [
         "installer/src/10-cli-args.sh",
@@ -395,7 +395,7 @@
         "BUGS.json"
       ],
       "created_at": "2026-08-20T16:03:14Z",
-      "updated_at": "2026-08-20T16:04:10Z"
+      "updated_at": "2026-08-21T11:00:42Z"
     },
     {
       "id": "T27",

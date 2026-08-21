@@ -107,7 +107,8 @@ Usage: install.sh [options]
 
 Interactive by default. Options are useful for automation:
   --all                    Install or update all skills
-  --skill <name>           Install or update one skill
+  --skill <name>           Install or update a skill; repeatable, and the value
+                           may be a comma-separated list
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
   --target <path>          Install into one skill root without prompting

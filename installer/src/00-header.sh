@@ -30,7 +30,7 @@ set -euo pipefail
 #   14. Main
 #
 # Usage:
-#   install.sh [--all | --skill <name>] [--target <path>] [--yes]
+#   install.sh [--all | --skill <name> ...] [--target <path>] [--yes]
 #   install.sh --help
 #
 # Exit codes: 0 success, 1 any error, plus the machine contract of the
