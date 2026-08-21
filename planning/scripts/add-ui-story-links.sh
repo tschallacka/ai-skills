@@ -44,10 +44,23 @@ inventory="$plan_dir/work-unit-inventory.md"
 [ -f "$stories" ] || plan_die "UI story artifact not found; run create-ui-validation.sh first" 66
 [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory" 66
 
-printf '%s\n' "$work_units" | tr ',' '\n' | while IFS= read -r unit; do
+# No pipeline around this loop. A `while` at the end of a pipeline runs in a
+# subshell, so plan_die exits the subshell and not the script -- and on bash 3.2
+# `set -e` does not abort on that pipeline's non-zero status either, so the guard
+# simply did not refuse on the floor while passing under bash 5.
+# PORTABILITY(pipeline-subshell-guard).
+#
+# The regex above has already restricted $work_units to W-ids and commas, so
+# word-splitting on a comma is safe and there is nothing for a glob to match.
+saved_ifs="$IFS"
+IFS=','
+for unit in $work_units; do
+    IFS="$saved_ifs"
     unit="$(printf '%s' "$unit" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     plan_inventory_row "$inventory" "$unit" >/dev/null || plan_die "Related work unit not found: $unit" 66
+    IFS=','
 done
+IFS="$saved_ifs"
 
 if ! awk -v wanted="$story_id" 'BEGIN { FS = "|" } function t(v){gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v} /^\|/ && t($2)==wanted {found=1} END {exit !found}' "$stories"; then
     plan_die "Story ID not found: $story_id" 66

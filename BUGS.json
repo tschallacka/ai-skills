@@ -26,6 +26,28 @@
       "updated_at": "2026-08-20T16:21:35Z"
     },
     {
+      "id": "B10",
+      "title": "The per-test TMPDIR leaked for 67 of the tests, because a test setting its own EXIT trap replaces the one lib-test.sh installs",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "source planning/tests/lib-test.sh; trap 'rm -rf x' EXIT; exit 0   # then look for /tmp/t.?????",
+      "observed": "The root survives. 67 test files set their own EXIT trap, and six stale roots were sitting in /tmp.",
+      "expected": "Each test root is removed when the test ends.",
+      "mechanism": "lib-test.sh installs an EXIT trap at source time; bash keeps one EXIT trap per shell, so a test that traps EXIT afterwards silently discards it. Commit 1044857 introduced this, and the assertion written with it only covered a shell that sets no trap of its own.",
+      "surfaces": [
+        "planning/tests/lib-test.sh",
+        "run-tests.sh"
+      ],
+      "fix": "9f41091 (codex): run-tests.sh exports AI_SKILLS_TEST_RUN_ID, lib-test.sh writes it into each root as .ai-skills-test-run-id, and the runner sweeps only roots carrying this run id.",
+      "verification": "A run leaves no /tmp/t.????? behind. The marker keeps the sweep safe under concurrency, which was the objection behind refusing to sweep at all.",
+      "found_by": "reviewing 9f41091 - its comment named the trap hazard, and the reproduction confirmed it",
+      "notes": "Better than the decision recorded in T10: a run was said to be unable to distinguish its own leftovers from a concurrent run live directories. A run id distinguishes them.",
+      "created_at": "2026-08-21T09:34:37Z",
+      "updated_at": "2026-08-21T09:34:37Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "confirmed",
@@ -90,6 +112,116 @@
       "notes": "Candidate for a gated portability rule: an empty branch is textually detectable, unlike the general BRE-alternation case.",
       "created_at": "2026-08-20T17:17:13Z",
       "updated_at": "2026-08-20T17:27:05Z"
+    },
+    {
+      "id": "B7",
+      "title": "No maintainer document mentions the registers, so a change that resolves or finds a bug leaves BUGS.json and TODO.json untouched",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "grep -c \"BUGS.json\\|TODO.json\\|bug-report\" planning/MAINTAINER.md CONTRIBUTING.md AGENTS.md CODE-CONTRACTS.md DEVELOPMENT.md",
+      "observed": "Zero in all five. MAINTAINER.md section 4, the per-change checklist, has eight steps covering consumers, fixtures, diagrams, docs, manifest/map/skill_files registration, which tests to run, and the commit shape — and no step touching either register.",
+      "expected": "The checklist names the registers: an entry closed when its defect is fixed, an entry added when one is found and not fixed in the same breath, and the version stamp refreshed.",
+      "mechanism": "The registers arrived late and were documented only in their own skills. Every other obligation in the checklist has a gate that fails without it, so the checklist is a convenience for those; for the registers it is the only instruction there is, and it is silent. Nothing fails when BUGS.json is stale.",
+      "surfaces": [
+        "planning/MAINTAINER.md",
+        "CONTRIBUTING.md",
+        "CODE-CONTRACTS.md",
+        "AGENTS.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reviewing commit 9f41091 (codex, \"planning: resolve bug report items\"): 40 files and 789 insertions, zero changes to BUGS.json or TODO.json",
+      "notes": "The contrast is the evidence. In the same commit every *gated* obligation was met -- all four new files carry a MODE marker, and add-ui-story-links.sh is registered in PACKAGE-MANIFEST.txt, PACKAGE-MAP.tsv and skill_files() -- because a test fails otherwise. The one obligation with no gate is the one that was missed. My own register went stale four times before it was moved into JSON, for the same reason. A gate is hard here (no test can know a commit resolved a bug), so the checklist is what has to carry it, and section 4 is where a reader looks.",
+      "created_at": "2026-08-21T09:19:59Z",
+      "updated_at": "2026-08-21T09:19:59Z"
+    },
+    {
+      "id": "B8",
+      "title": "add-ui-story-links.sh could not reject an unknown work unit on bash 3.2, because its guard ran in a pipeline subshell",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "nix develop --command bash32-run planning/tests/test-plan-commands.sh  # from commit 9f41091",
+      "observed": "add-ui-story-links accepted an unknown related work unit. Passed under bash 5.3, failed on 3.2 only.",
+      "expected": "W99 is not in the inventory, so the call refuses with exit 66.",
+      "mechanism": "The validating loop was the last stage of a pipeline, so it ran in a subshell and plan_die exited that subshell rather than the script. On bash 5 set -e then aborts on the pipeline status; on bash 3.2 it does not. Isolated: `set -euo pipefail; printf a | while read x; do exit 66; done; echo CONTINUED` prints CONTINUED on 3.2 and aborts on 5.3.",
+      "surfaces": [
+        "planning/scripts/add-ui-story-links.sh"
+      ],
+      "fix": "Split on commas with IFS and a for loop, so the guard runs in the current shell. No other guard in the repo has this shape — checked.",
+      "verification": "test-plan-commands passes on both shells; before the fix it passed on 5.3 and failed on 3.2. Catalogued as the pipeline-subshell-guard rule, documentation-only because the shape spans several lines and a pipeline-while is fine when it is not guarding.",
+      "found_by": "reviewing commit 9f41091 (codex) — the bash 3.2 leg of ./verify-both-shells.sh",
+      "notes": "The floor earning its keep: a guard that reads correctly and does nothing is worse than no guard, and only 3.2 showed it. Codex met every gated obligation in that commit and this one had no gate.",
+      "created_at": "2026-08-21T09:27:06Z",
+      "updated_at": "2026-08-21T09:27:06Z"
+    },
+    {
+      "id": "B9",
+      "title": "Every test install wrote its throwaway --target into the real XDG config of the user, 1894 lines of it",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "wc -l \"${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/custom-locations\"",
+      "observed": "1895 lines, 120K: 1894 of them /tmp paths from test runs, one real entry.",
+      "expected": "A one-off --target is not a location the user chose to remember.",
+      "mechanism": "select_targets called save_custom_location on the non-interactive --target path, so every test that installed into a temp directory appended to a persistent user config file.",
+      "surfaces": [
+        "installer/src/40-selection.sh"
+      ],
+      "fix": "9f41091 (codex) removed the call. The interactive path still saves, which is where a user does choose a location.",
+      "verification": "No new entries after a --target install; the interactive caller at 40-selection.sh:129 is untouched, so the feature survives.",
+      "found_by": "reviewing 9f41091 - the diff removed a call, and the file it wrote to turned out to hold 120K of test debris",
+      "notes": "The stale entries are gone: pruned 2026-08-21 from 1895 lines to the single live one, with a backup at custom-locations.bak. Measured before pruning: only 1 of the 1895 directories still existed, so load_custom_locations already filtered the rest with [ -d ] and the menu was never visibly wrong. The objection was the write itself, plus the fact that a leaked test root that did still exist would have been offered as an install target.",
+      "created_at": "2026-08-21T09:34:37Z",
+      "updated_at": "2026-08-21T09:45:02Z"
+    },
+    {
+      "id": "B11",
+      "title": "create-plan.sh creates the plans root before validating the plan name, so a refused call leaves a directory behind",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/create-plan.sh /tmp/mkdir-probe/BadName title; ls -d /tmp/mkdir-probe",
+      "observed": "Refuses with \"Plan directory name must be kebab-case\", and /tmp/mkdir-probe exists afterwards.",
+      "expected": "Nothing on disk changes when the call is refused.",
+      "mechanism": "The mkdir -p added in 9f41091 sits in the argument case around line 53; the kebab-case check and the refuse-existing check are at 63 and 65. CODE-CONTRACTS.md contract 2 puts anything irreversible last.",
+      "surfaces": [
+        "planning/scripts/create-plan.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reviewing 9f41091",
+      "notes": "The mkdir itself is right - an explicit path should be able to create its parent. Only the order is wrong: move it after both guards.",
+      "created_at": "2026-08-21T09:34:37Z",
+      "updated_at": "2026-08-21T09:34:37Z"
+    },
+    {
+      "id": "B12",
+      "title": "The planning-bugs.json plan artifact was added with no writer and no diagram update",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "grep -rn planning-bugs --include=*.sh planning/scripts",
+      "observed": "Readers everywhere - plan_document_path, plan_document_kind, plan-context-lib, the plan-content usage text, test-document-id-parity - and nothing that creates the file. Only the test writes one.",
+      "expected": "Either a script that produces it, or a stated reason it is written by an agent by hand.",
+      "mechanism": "The id was wired through every reader consistently, which is the hard part; the producer and the documentation were not. MAINTAINER.md section 4 step 4 requires the ARCHITECTURE.md diagram to be updated in the same change when a plan artifact is added, and that file is untouched.",
+      "surfaces": [
+        "planning/ARCHITECTURE.md",
+        "planning/scripts/lib/document/plan_document_path.sh",
+        "planning/scripts/plan-context-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reviewing 9f41091",
+      "notes": "A reader-only artifact is not broken, just undiscoverable: an agent can ask for it and will always get exit 66 until something writes one.",
+      "created_at": "2026-08-21T09:34:37Z",
+      "updated_at": "2026-08-21T09:34:37Z"
     },
     {
       "id": "B6",

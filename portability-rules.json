@@ -259,6 +259,15 @@
       "symptom": "the value differs only by trailing whitespace, so an equality assertion fails with two strings that look identical in the report",
       "replacement": "trim the end before comparing: `| sed 's/[[:space:]]*$//'`. Not gated: a pattern cannot tell a byte dump being compared from one being converted, so this is a documented caution and the macOS CI leg is the backstop. Do not widen the comparison to a substring match -- the point of a byte dump is that every byte is checked.",
       "note": "Found by the macOS leg: test-lib-core.sh asserted ' a \\n b' and BSD od produced ' a \\n b ', which reads as a mysterious failure because the report shows the two values with no visible difference."
+    },
+    {
+      "id": "pipeline-subshell-guard",
+      "construct": "a guard inside a `while` at the end of a pipeline, e.g. printf ... | while read -r x; do ... || die; done",
+      "detect": null,
+      "breaks": "bash 3.2 (the floor), silently",
+      "symptom": "the guard never refuses: it exits a subshell, and on bash 3.2 `set -e` does not abort on that pipeline's non-zero status either, so the script carries on and the caller sees success",
+      "replacement": "keep the loop in the current shell: split with IFS and a `for`, or redirect a here-document into the `while`. Not gated -- the shape spans several lines, and a pipeline-while is perfectly fine when it is not guarding, so a per-line pattern cannot tell them apart.",
+      "note": "Found by the bash 3.2 leg on add-ui-story-links.sh: rejecting an unknown work unit passed under bash 5 and did nothing on 3.2. Verified in isolation -- `set -euo pipefail; printf a | while read x; do exit 66; done; echo CONTINUED` prints CONTINUED on 3.2 and aborts on 5.3."
     }
   ]
 }
