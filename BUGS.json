@@ -48,6 +48,28 @@
       "updated_at": "2026-08-21T09:34:37Z"
     },
     {
+      "id": "B13",
+      "title": "On stock macOS the registry fallback runs a real benchmark agent with no time bound at all",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a host with neither setsid nor timeout/gtimeout: start-worker.sh calls launch_agent isolated \"${WORKER_TIMEOUT:-45m}\" - mode becomes registry, no timeout binary is found, and lib-agent.sh warns and launches anyway.",
+      "observed": "lib-agent.sh:140-148 prints \"registry fallback cannot bound the agent to 45m\" and then runs the agent unbounded, because cmd gets no timeout prefix.",
+      "expected": "A worker that cannot be bounded is refused, as it was before: the setsid path still returns 69 in the same situation.",
+      "mechanism": "9f41091 added an isolated mode that degrades setsid to a registry fallback when setsid is missing, which is stock macOS. The same change turned the missing-timeout refusal into a warning for that fallback only. The two degradations compose: no process group and no clock.",
+      "surfaces": [
+        "benchmark/planning/runtime/lib-agent.sh",
+        "benchmark/planning/case/start-worker.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reviewing 9f41091 after being asked about the setsid fix specifically",
+      "notes": "These callers launch real worker and reviewer agents that spend real tokens, so an unbounded run is the expensive failure, not an inconvenient one. The new tests in test-safeguards.sh cover the registry wiring and prove the nohup/setsid/open shims refuse, but assert nothing about the timeout path. Options: keep the refusal in registry mode too; or implement a shell watchdog (background sleep plus kill of the registered pid and its ps-walked descendants) so the bound survives without GNU coreutils. The second is more work and is the only one that makes a macOS benchmark run at all.",
+      "created_at": "2026-08-21T09:46:39Z",
+      "updated_at": "2026-08-21T09:46:39Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "confirmed",
