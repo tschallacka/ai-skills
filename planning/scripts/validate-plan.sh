@@ -183,6 +183,19 @@ if [ "$errors" -gt 0 ]; then
     exit 1
 fi
 
-# shellcheck disable=SC2154  # unit_ids is published by the inventory lib.
-printf 'Plan validation passed: %d work units across %d goals.\n' \
-    "${#unit_ids[@]}" "$(plan_map_count goal_units)"
+# "passed" is reserved for a plan with nothing left to fill. A registered
+# placeholder is a WARN, not an error, so this still exits 0 -- but the summary
+# said "passed" over 138 placeholders in a real run, including
+# `<direct action on this one target>` sitting in every step's Instructions, and
+# that is the line a reader takes as the readiness verdict.
+# shellcheck disable=SC2154  # unit_ids is published by the inventory lib;
+# placeholder_warnings by the placeholder lib.
+if [ "${placeholder_warnings:-0}" -gt 0 ]; then
+    printf 'Plan validation incomplete: %d work units across %d goals, %d placeholder(s) still to fill in %d document(s).\n' \
+        "${#unit_ids[@]}" "$(plan_map_count goal_units)" "$placeholder_warnings" \
+        "$(printf '%s' "$placeholder_warning_docs" | wc -w | tr -d ' ')"
+    printf 'Structure is sound; fill the placeholders above before presenting the plan, or run with --complete to have them reported as errors.\n'
+else
+    printf 'Plan validation passed: %d work units across %d goals.\n' \
+        "${#unit_ids[@]}" "$(plan_map_count goal_units)"
+fi

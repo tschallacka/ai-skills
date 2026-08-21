@@ -19,6 +19,14 @@ set -euo pipefail
 registry_file="$skill_root/placeholders.json"
 placeholder_re='<[^<>]*[A-Za-z][^<>]*>'
 
+# Counted here rather than by warn(), because common-lib contract 1 says warn
+# never touches the error count and the --complete promotion depends on that.
+# The summary needs the number anyway: a plan whose Instructions are still
+# placeholders is structurally sound and not ready, and those are different
+# things to say.
+placeholder_warnings=0
+placeholder_warning_docs=''
+
 # Print the registry surface for a token; empty if not registered.
 token_surface() {
     [ -f "$registry_file" ] || return 1
@@ -39,6 +47,11 @@ check_placeholders() {
             fail "$label still contains a registered placeholder: $tok"
         else
             warn "$label contains a registered placeholder (fill before completion): $tok"
+            placeholder_warnings=$((placeholder_warnings + 1))
+            case " $placeholder_warning_docs " in
+                *" $label "*) ;;
+                *) placeholder_warning_docs="$placeholder_warning_docs $label" ;;
+            esac
         fi
     done < <(awk -v re="$placeholder_re" '
         /^```/ { in_fence = !in_fence; next }

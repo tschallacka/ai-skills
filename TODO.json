@@ -58,15 +58,15 @@
     {
       "id": "T18",
       "title": "Plain validation passes a plan whose instructions are all placeholders",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "A registered placeholder is a WARN under plain validation and a FAIL only under `--complete` (`validate-plan-placeholders-lib.sh`, three paths: fail for one no author will fill, fail under complete, warn otherwise). The pattern is deliberate and documented in `validate-plan-common-lib.sh:10`. The cost showed up in a real run: \"Plan validation passed: 36 work units\" while all 36 steps still had `<direct action on this one target>` as their Instructions, 138 placeholders in total. SKILL.md §3.3 frames plain validation as the gate for presenting a plan as ready, and Instructions plus Acceptance criteria are exactly what an executor and a reviewer consume. The question is not whether to promote every placeholder to a failure, which would break the create-then-fill flow the WARN exists for. It is whether the summary line may say \"passed\" while a placeholder sits in a field nothing can act on. Options: keep the WARN but make the summary state the count and refuse the word \"passed\"; or promote placeholders in Instructions and Acceptance criteria only, since those two are the executor's contract, and leave narrative fields as warnings. A test would assert that a plan with a placeholder in Instructions cannot produce a summary a reader would take as ready.",
-      "note": null,
+      "note": "Took the first option in the detail: the WARN stays, and the summary stops claiming readiness. A plan with registered placeholders now reads \"Plan validation incomplete: N work units across M goals, K placeholder(s) still to fill in J document(s)\" followed by the remedy, and \"passed\" is reserved for a plan with none. Exit stays 0, and the test asserts that, because promoting placeholders to errors would break the create-then-fill flow and would violate validate-plan-common-lib.sh contract 1, which says warn never counts. The count is kept by the placeholder pass itself rather than by warn, for the same reason. Reproduced first on a built plan: two work units, five placeholder warnings, and \"Plan validation passed\" underneath them.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-21T11:14:06Z"
     },
     {
       "id": "T19",
