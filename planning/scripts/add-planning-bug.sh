@@ -4,8 +4,7 @@
 #
 # planning-bugs.json had readers in five places and nothing that wrote it, so an
 # agent asking for it got exit 66 on every plan that ever existed. This is the
-# writer, in the same shape as add-fix-claim.sh, which fixes.md needed for the
-# same reason.
+# writer.
 #
 # Usage:
 #   add-planning-bug.sh [--plan-dir] <plan-directory> --id <PB-NN> --title <text> \

@@ -435,6 +435,7 @@ flowchart LR
         UPC["update-plan-content.sh"]
         UAR["update-adversarial-review.sh"]
         MINT["mint-fix-keys.sh"]
+        ACLAIM["add-fix-claim.sh"]
         PBUG["add-planning-bug.sh"]
         CAR["create-adversarial-review.sh"]
         CST["create-step-testing.sh"]
@@ -501,7 +502,7 @@ flowchart LR
     UPC --> MUTH
     CAR --> AR
     AGENT --> ARIN
-    AGENT --> FIXES
+    ACLAIM --> FIXES
     PBUG --> PBUGS
     AGENT --> APPROVAL
     AGENT --> WCTX

@@ -101,6 +101,54 @@ rendered="$(jq -r '
 t_assert_contains 'the skill render lists the first entry' 'PB-01' "$rendered"
 t_assert_contains 'and the second' 'PB-02' "$rendered"
 
+# ── the read-back refuses a write that produced nothing ────────────────────
+# The actionable-error path (MAINTAINER.md section 4 step 3). It needs a write
+# that succeeds and yet leaves the entry out, which is what happened for real:
+# jq handed an empty input never runs its filter, so the register came out
+# zero-length and the script still reported success. The seam is a jq on PATH
+# that passes everything through except the append -- the one call carrying
+# --arg now -- which it answers with nothing.
+stub_dir="$work/stub-bin"
+mkdir -p "$stub_dir"
+real_jq="$(command -v jq)"
+cat > "$stub_dir/jq" <<STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    if [ "\$arg" = now ]; then
+        exit 0
+    fi
+done
+exec "$real_jq" "\$@"
+STUB
+chmod +x "$stub_dir/jq"
+
+empty_plan="$work/root/empty-write"
+"$scripts/create-plan.sh" "$empty_plan" 'Demo' >/dev/null 2>&1
+rc=0
+PATH="$stub_dir:$PATH" "$scripts/add-planning-bug.sh" "$empty_plan" --id PB-01 \
+    --title t --reproduce r --observed o --expected e >"$work/stub.out" 2>"$work/stub.err" || rc=$?
+t_assert_eq 'a write that produced nothing is refused, not reported as success' "$rc" '70'
+t_assert_contains 'and the message names the register and the id' 'PB-01' "$(cat "$work/stub.err")"
+t_assert_eq 'no success line was printed' \
+    "$(grep -c 'Recorded' "$work/stub.out" || true)" '0'
+# The refusal leaves the damaged register in place rather than deleting it: a
+# plan snapshot was taken before the write, so it is recoverable, and a writer
+# that tidied away the evidence would hide which write went wrong. The next call
+# therefore refuses it as damaged, which is the 65 path already asserted above.
+t_assert_eq 'the damaged register is left for inspection' \
+    "$([ -f "$empty_plan/planning-bugs.json" ] && printf yes || printf no)" 'yes'
+t_assert_eq 'and it is empty, which is what went wrong' \
+    "$(wc -c < "$empty_plan/planning-bugs.json" | tr -d ' ')" '0'
+
+# The seam has to be real, or the case above passes for the wrong reason: the
+# same call on a clean plan, without the stub, succeeds.
+control_plan="$work/root/control"
+"$scripts/create-plan.sh" "$control_plan" 'Demo' >/dev/null 2>&1
+rc=0
+"$scripts/add-planning-bug.sh" "$control_plan" --id PB-02 \
+    --title t --reproduce r --observed o --expected e >/dev/null 2>&1 || rc=$?
+t_assert_eq 'the same call without the stub succeeds' "$rc" '0'
+
 # ── the writer is registered, or an install cannot run it ──────────────────
 t_assert_eq 'the script ships' \
     "$(grep -c '^planning/scripts/add-planning-bug.sh\b' "$repo_root/planning/PACKAGE-MANIFEST.txt")" '1'
