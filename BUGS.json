@@ -26,50 +26,6 @@
       "updated_at": "2026-08-20T16:21:35Z"
     },
     {
-      "id": "B10",
-      "title": "The per-test TMPDIR leaked for 67 of the tests, because a test setting its own EXIT trap replaces the one lib-test.sh installs",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "source planning/tests/lib-test.sh; trap 'rm -rf x' EXIT; exit 0   # then look for /tmp/t.?????",
-      "observed": "The root survives. 67 test files set their own EXIT trap, and six stale roots were sitting in /tmp.",
-      "expected": "Each test root is removed when the test ends.",
-      "mechanism": "lib-test.sh installs an EXIT trap at source time; bash keeps one EXIT trap per shell, so a test that traps EXIT afterwards silently discards it. Commit 1044857 introduced this, and the assertion written with it only covered a shell that sets no trap of its own.",
-      "surfaces": [
-        "planning/tests/lib-test.sh",
-        "run-tests.sh"
-      ],
-      "fix": "9f41091 (codex): run-tests.sh exports AI_SKILLS_TEST_RUN_ID, lib-test.sh writes it into each root as .ai-skills-test-run-id, and the runner sweeps only roots carrying this run id.",
-      "verification": "A run leaves no /tmp/t.????? behind. The marker keeps the sweep safe under concurrency, which was the objection behind refusing to sweep at all.",
-      "found_by": "reviewing 9f41091 - its comment named the trap hazard, and the reproduction confirmed it",
-      "notes": "Better than the decision recorded in T10: a run was said to be unable to distinguish its own leftovers from a concurrent run live directories. A run id distinguishes them.",
-      "created_at": "2026-08-21T09:34:37Z",
-      "updated_at": "2026-08-21T09:34:37Z"
-    },
-    {
-      "id": "B13",
-      "title": "On stock macOS the registry fallback runs a real benchmark agent with no time bound at all",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "On a host with neither setsid nor timeout/gtimeout: start-worker.sh calls launch_agent isolated \"${WORKER_TIMEOUT:-45m}\" - mode becomes registry, no timeout binary is found, and lib-agent.sh warns and launches anyway.",
-      "observed": "lib-agent.sh:140-148 prints \"registry fallback cannot bound the agent to 45m\" and then runs the agent unbounded, because cmd gets no timeout prefix.",
-      "expected": "A worker that cannot be bounded is refused, as it was before: the setsid path still returns 69 in the same situation.",
-      "mechanism": "9f41091 added an isolated mode that degrades setsid to a registry fallback when setsid is missing, which is stock macOS. The same change turned the missing-timeout refusal into a warning for that fallback only. The two degradations compose: no process group and no clock.",
-      "surfaces": [
-        "benchmark/planning/runtime/lib-agent.sh",
-        "benchmark/planning/case/start-worker.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "reviewing 9f41091 after being asked about the setsid fix specifically",
-      "notes": "These callers launch real worker and reviewer agents that spend real tokens, so an unbounded run is the expensive failure, not an inconvenient one. The new tests in test-safeguards.sh cover the registry wiring and prove the nohup/setsid/open shims refuse, but assert nothing about the timeout path. Options: keep the refusal in registry mode too; or implement a shell watchdog (background sleep plus kill of the registered pid and its ps-walked descendants) so the bound survives without GNU coreutils. The second is more work and is the only one that makes a macOS benchmark run at all.",
-      "created_at": "2026-08-21T09:46:39Z",
-      "updated_at": "2026-08-21T09:46:39Z"
-    },
-    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "confirmed",
@@ -202,6 +158,93 @@
       "updated_at": "2026-08-21T09:45:02Z"
     },
     {
+      "id": "B10",
+      "title": "The per-test TMPDIR leaked for 67 of the tests, because a test setting its own EXIT trap replaces the one lib-test.sh installs",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "source planning/tests/lib-test.sh; trap 'rm -rf x' EXIT; exit 0   # then look for /tmp/t.?????",
+      "observed": "The root survives. 67 test files set their own EXIT trap, and six stale roots were sitting in /tmp.",
+      "expected": "Each test root is removed when the test ends.",
+      "mechanism": "lib-test.sh installs an EXIT trap at source time; bash keeps one EXIT trap per shell, so a test that traps EXIT afterwards silently discards it. Commit 1044857 introduced this, and the assertion written with it only covered a shell that sets no trap of its own.",
+      "surfaces": [
+        "planning/tests/lib-test.sh",
+        "run-tests.sh"
+      ],
+      "fix": "9f41091 (codex): run-tests.sh exports AI_SKILLS_TEST_RUN_ID, lib-test.sh writes it into each root as .ai-skills-test-run-id, and the runner sweeps only roots carrying this run id.",
+      "verification": "A run leaves no /tmp/t.????? behind. The marker keeps the sweep safe under concurrency, which was the objection behind refusing to sweep at all.",
+      "found_by": "reviewing 9f41091 - its comment named the trap hazard, and the reproduction confirmed it",
+      "notes": "Better than the decision recorded in T10: a run was said to be unable to distinguish its own leftovers from a concurrent run live directories. A run id distinguishes them.",
+      "created_at": "2026-08-21T09:34:37Z",
+      "updated_at": "2026-08-21T09:34:37Z"
+    },
+    {
+      "id": "B13",
+      "title": "On stock macOS the registry fallback runs a real benchmark agent with no time bound at all",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a host with neither setsid nor timeout/gtimeout: start-worker.sh calls launch_agent isolated \"${WORKER_TIMEOUT:-45m}\" - mode becomes registry, no timeout binary is found, and lib-agent.sh warns and launches anyway.",
+      "observed": "lib-agent.sh:140-148 prints \"registry fallback cannot bound the agent to 45m\" and then runs the agent unbounded, because cmd gets no timeout prefix.",
+      "expected": "A worker that cannot be bounded is refused, as it was before: the setsid path still returns 69 in the same situation.",
+      "mechanism": "9f41091 added an isolated mode that degrades setsid to a registry fallback when setsid is missing, which is stock macOS. The same change turned the missing-timeout refusal into a warning for that fallback only. The two degradations compose: no process group and no clock.",
+      "surfaces": [
+        "benchmark/planning/runtime/lib-agent.sh",
+        "benchmark/planning/case/start-worker.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reviewing 9f41091 after being asked about the setsid fix specifically",
+      "notes": "These callers launch real worker and reviewer agents that spend real tokens, so an unbounded run is the expensive failure, not an inconvenient one. The new tests in test-safeguards.sh cover the registry wiring and prove the nohup/setsid/open shims refuse, but assert nothing about the timeout path. Options: keep the refusal in registry mode too; or implement a shell watchdog (background sleep plus kill of the registered pid and its ps-walked descendants) so the bound survives without GNU coreutils. The second is more work and is the only one that makes a macOS benchmark run at all.",
+      "created_at": "2026-08-21T09:46:39Z",
+      "updated_at": "2026-08-21T09:46:39Z"
+    },
+    {
+      "id": "B14",
+      "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "jq -r 'def prank: {urgent:0,high:1,normal:2,low:3,someday:4}[.priority]//5; def srank: {blocking:0,major:1,minor:2,cosmetic:3}[.severity]//4; [.bugs[]] | sort_by(prank, srank, .id)[] | .id' BUGS.json",
+      "observed": "B2 B10 B13 B3 B4 B5 B7 B8 B9 B11 B12 B6 B1 - B10 sits between B2 and B3. The todo queue renders T13 T14 T15 before T21, and T5 T6 after T31.",
+      "expected": "Numeric order within a priority band: B2 B3 B4 B5 B6 B7 ... B13.",
+      "mechanism": "Seven snippets across the two SKILL.md files sort with sort_by(rank, .id) or sort_by(prank, srank, .id), where .id is a string, so jq compares byte-wise and \"B10\" < \"B3\". jq has no natural-sort builtin.",
+      "surfaces": [
+        "todo/SKILL.md",
+        "bug-report/SKILL.md"
+      ],
+      "fix": "def idkey: [(. | scan(\"[0-9]+\") | tonumber)?, .]; added beside the existing rank defs in all seven snippets across both SKILL.md files, and every sort_by now passes (.id | idkey). Ids stay free-form, so nothing had to be renumbered and the commit messages that reference T30 and B8 still resolve. The id row in both field tables says why the def is there, so it does not get removed as noise.",
+      "verification": "The documented snippets were extracted from SKILL.md and run verbatim against the real registers: top-level normal tasks read T1 T2 T3 T4 T5 T6 T13 T14 T15 T16 T17 T21 T23 T24 T26 T27 T30 T31, and a sub-task renders under its parent. Mutation: dropping idkey from one snippet gives T1 T13 T14 T15 T16 T17 T2 T21 ... T3 T30 T31 T4 T5 T6. A first mutation probe looked green because within the high band the ids happen to sort identically either way -- the normal band is where it shows.",
+      "found_by": "a bug report written against 1.4.2 by an earlier session (bug-report-old-version.md), re-verified against the current registers",
+      "notes": "Live, and it produced misleading output all through this session without being noticed - every register render printed above is in the wrong order. Two candidate fixes. Zero-padded ids make lexical sort correct with no snippet change, but require renumbering ids that commit messages already reference (T30, B8), because a mix of T5 and T05 sorts wrong anyway. A derived key - def idkey: [(. | scan(\"[0-9]+\") | tonumber)?, .] - keeps ids free-form and is the only option that also respects the skills own T1 -> T1a convention, placing a child immediately after its parent in a flat render; length-then-lexical looked cheaper but drifts T1a to the end. Its stated cost, a def copied into seven snippets, is already the pattern in these files: the rank and prank/srank defs are duplicated across all of them today, so this adds no new kind of debt.",
+      "created_at": "2026-08-21T09:59:41Z",
+      "updated_at": "2026-08-21T10:04:58Z"
+    },
+    {
+      "id": "B6",
+      "title": "A benchmark test calls timeout, which macOS does not have",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CI run 32394476430, macos-latest: benchmark/planning/tests/test-review-lifecycle.sh line 492",
+      "observed": "timeout: command not found, after every earlier assertion in the file had passed.",
+      "expected": "Either a portable timeout, or the test degrading honestly on a platform without one.",
+      "mechanism": "GNU coreutils timeout is not on macOS. PORTABILITY.md already lists it under gnu-only-tools with a gtimeout fallback; this call site predates the rule or was missed because the gate does not scan benchmark tests the same way.",
+      "surfaces": [
+        "benchmark/planning/tests/test-review-lifecycle.sh"
+      ],
+      "fix": "Both `timeout 60s` wrappers removed rather than given a gtimeout fallback. What they wrapped is a shell script in the fixture that writes a file and exits, so the cap could only fire on a defect and would then report a timeout instead of the defect.",
+      "verification": "The test passes and takes 5 seconds against a 60s cap per call. It was the only test in an 80-test suite with a wall clock, and the only reason this file could not run on macOS.",
+      "found_by": "the macOS leg of CI",
+      "notes": "Asked directly: why a timeout at all. lib-agent.sh does bound a real agent and handles timeout/gtimeout properly with an explicit refusal — that one is a genuine need, these two were a hedge. A `sleep 1` remains in the codex-worker fake, with a stated reason: the runner must capture a live process group. That is a real synchronisation point and wants a handshake rather than a sleep; recorded as T29.",
+      "created_at": "2026-08-20T17:17:13Z",
+      "updated_at": "2026-08-20T17:27:05Z"
+    },
+    {
       "id": "B11",
       "title": "create-plan.sh creates the plans root before validating the plan name, so a refused call leaves a directory behind",
       "status": "confirmed",
@@ -244,27 +287,6 @@
       "notes": "A reader-only artifact is not broken, just undiscoverable: an agent can ask for it and will always get exit 66 until something writes one.",
       "created_at": "2026-08-21T09:34:37Z",
       "updated_at": "2026-08-21T09:34:37Z"
-    },
-    {
-      "id": "B6",
-      "title": "A benchmark test calls timeout, which macOS does not have",
-      "status": "fixed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "CI run 32394476430, macos-latest: benchmark/planning/tests/test-review-lifecycle.sh line 492",
-      "observed": "timeout: command not found, after every earlier assertion in the file had passed.",
-      "expected": "Either a portable timeout, or the test degrading honestly on a platform without one.",
-      "mechanism": "GNU coreutils timeout is not on macOS. PORTABILITY.md already lists it under gnu-only-tools with a gtimeout fallback; this call site predates the rule or was missed because the gate does not scan benchmark tests the same way.",
-      "surfaces": [
-        "benchmark/planning/tests/test-review-lifecycle.sh"
-      ],
-      "fix": "Both `timeout 60s` wrappers removed rather than given a gtimeout fallback. What they wrapped is a shell script in the fixture that writes a file and exits, so the cap could only fire on a defect and would then report a timeout instead of the defect.",
-      "verification": "The test passes and takes 5 seconds against a 60s cap per call. It was the only test in an 80-test suite with a wall clock, and the only reason this file could not run on macOS.",
-      "found_by": "the macOS leg of CI",
-      "notes": "Asked directly: why a timeout at all. lib-agent.sh does bound a real agent and handles timeout/gtimeout properly with an explicit refusal — that one is a genuine need, these two were a hedge. A `sleep 1` remains in the codex-worker fake, with a stated reason: the runner must capture a live process group. That is a real synchronisation point and wants a handshake rather than a sleep; recorded as T29.",
-      "created_at": "2026-08-20T17:17:13Z",
-      "updated_at": "2026-08-20T17:27:05Z"
     },
     {
       "id": "B1",

@@ -56,7 +56,7 @@ characters a reader treats as syntax. Query it, never scrape it.
 
 | field | meaning |
 |---|---|
-| `id` | short stable handle. A sub-task conventionally extends its parent's id (`T1` → `T1a`), but nesting comes from `parent`, not the spelling |
+| `id` | short stable handle. A sub-task conventionally extends its parent's id (`T1` → `T1a`), but nesting comes from `parent`, not the spelling. The renders sort it through `idkey`, which compares the number numerically, so `T10` follows `T9`; without that def `sort_by` compares strings and item 10 lands between 1 and 2 |
 | `title` | one line, no trailing full stop, readable on its own |
 | `status` | `open`, `partly`, `blocked`, `decided`, `done`, `dropped`, `obsolete` |
 | `parent` | the id this nests under, or `null` for a top-level task |
@@ -224,8 +224,9 @@ jq -r '
   def glyph: {open:"💤", partly:"⏳", blocked:"⛔", decided:"📌",
               done:"✅", dropped:"✔️", obsolete:"🚫"}[.status] // "❔";
   def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   def render($parent; $depth):
-    ([.tasks[] | select(.parent == $parent)] | sort_by(rank, .id))[] as $task
+    ([.tasks[] | select(.parent == $parent)] | sort_by(rank, (.id | idkey)))[] as $task
     | ("  " * $depth) + ($task | glyph) + " " + $task.id
       + "  [" + ($task.priority // "?") + "]  " + $task.title,
       render($task.id; $depth + 1);
@@ -260,8 +261,9 @@ What is live, one line each:
 
 ```sh
 jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   [.tasks[] | select(.status == "open" or .status == "partly" or .status == "blocked")]
-  | sort_by(rank, .id)[]
+  | sort_by(rank, (.id | idkey))[]
   | "\(.priority)\t\(.id)\t\(.status)\t\(.title)"' TODO.json \
   | column -t -s "$(printf '\t')"
 ```
@@ -277,11 +279,12 @@ Ready to start — open, with nothing open beneath it:
 
 ```sh
 jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   .tasks as $all
   | [ $all[] | . as $task
       | select(.status == "open")
       | select([$all[] | select(.parent == $task.id and .status != "done")] | length == 0) ]
-  | sort_by(rank, .id)[]
+  | sort_by(rank, (.id | idkey))[]
   | "\(.priority)\t\(.id)\t\(.title)"' TODO.json | column -t -s "$(printf '\t')"
 ```
 
@@ -323,7 +326,8 @@ visible, appended at the bottom it is not.
 
 ```sh
 jq 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-    .tasks |= sort_by(rank, .id)' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
+    .tasks |= sort_by(rank, (.id | idkey))' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
 
 Run it after adding tasks. A pure reordering: only the sequence of the array

@@ -50,7 +50,7 @@ impression.
 
 | field | why it is there |
 |---|---|
-| `id` | short stable handle, referenced from commits and conversations |
+| `id` | short stable handle, referenced from commits and conversations. The renders sort it through `idkey`, which compares the number numerically, so `B10` follows `B9`; without that def `sort_by` compares strings and item 10 lands between 1 and 2 |
 | `title` | the defect in one line, stated as what goes wrong |
 | `status` | `reported`, `confirmed`, `fixed`, `not-a-defect`, `wont-fix`, `obsolete` |
 | `severity` | `blocking`, `major`, `minor`, `cosmetic`. How bad it is when it happens |
@@ -187,8 +187,9 @@ jq -r '
               "not-a-defect":"✔️", "wont-fix":"🚫", obsolete:"🚫"}[.status] // "❔";
   def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   def render($parent; $depth):
-    ([.bugs[] | select(.parent == $parent)] | sort_by(prank, srank, .id))[] as $bug
+    ([.bugs[] | select(.parent == $parent)] | sort_by(prank, srank, (.id | idkey)))[] as $bug
     | ("  " * $depth) + ($bug | glyph) + " " + $bug.id
       + "  [" + ($bug.priority // "?") + "/" + ($bug.severity // "?") + "]  " + $bug.title,
       render($bug.id; $depth + 1);
@@ -211,8 +212,9 @@ What is open and confirmed, which is the work queue:
 ```sh
 jq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
+  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   [.bugs[] | select(.status == "reported" or .status == "confirmed")]
-  | sort_by(prank, srank, .id)[]
+  | sort_by(prank, srank, (.id | idkey))[]
   | "\(.priority)\t\(.severity)\t\(.id)\t\(.title)"' BUGS.json \
   | column -t -s "$(printf '\t')"
 ```
@@ -269,7 +271,8 @@ visible, and appended at the bottom it is not.
 ```sh
 jq 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
     def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
-    .bugs |= sort_by(prank, srank, .id)' \
+    def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
+    .bugs |= sort_by(prank, srank, (.id | idkey))' \
   BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
 ```
 
