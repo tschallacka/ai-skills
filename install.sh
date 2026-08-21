@@ -150,7 +150,8 @@ Interactive by default. Options are useful for automation:
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
   --target <path>          Install into one skill root without prompting
-  --yes                    Accept replacements; an edited file is still backed up  
+  --yes                    Answer yes to every prompt, including the planning
+                           permission grants; an edited file is still backed up  
   --help                   Show this help
 
 Interactive prompts accept a for "yes to all" (auto-accepts every
@@ -293,12 +294,19 @@ fi
 ask() {
     local prompt="$1"
     printf '%s' "$prompt" >&2
-    IFS= read -r -u 3 REPLY || die "Interactive input is required"
+    # 2>/dev/null: fd 3 is deliberately closed when there is no tty, and bash
+    # prints its own "invalid file descriptor" before this can die, so the real
+    # message arrived buried under shell noise.
+    IFS= read -r -u 3 REPLY 2>/dev/null || die "Interactive input is required"
 }
 
 confirm() {
     local prompt="$1"
-    if [ "${YES_ALL:-0}" -eq 1 ]; then
+    # --yes answers every prompt, not only the replacement ones. It is the flag
+    # for a headless run, and a headless run that stops on a question is the thing
+    # it exists to prevent -- installing planning under --yes died on the plans
+    # directory prompt. YES_ALL is the same answer reached interactively with "a".
+    if [ "${YES:-0}" -eq 1 ] || [ "${YES_ALL:-0}" -eq 1 ]; then
         return 0
     fi
     ask "$prompt [y/N/a] "
@@ -2546,6 +2554,7 @@ tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-manifest.sh
+tests/test-installer-noninteractive.sh
 tests/test-installer-skill-selection.sh
 tests/test-inventory-helpers.sh
 tests/test-lib-core.sh

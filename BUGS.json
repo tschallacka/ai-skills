@@ -202,6 +202,28 @@
       "updated_at": "2026-08-21T10:17:50Z"
     },
     {
+      "id": "B15",
+      "title": "--yes did not answer the planning permission prompts, so a headless install died on a question",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "HOME=/tmp/fresh bash install.sh --skill planning --target /tmp/t --yes </dev/null",
+      "observed": "Create /tmp/fresh/.plans as the global plans directory? [y/N/a] install.sh: line 296: read: 3: invalid file descriptor: Bad file descriptor / Error: Interactive input is required, exit 1.",
+      "expected": "--yes answers the prompt and the install completes.",
+      "mechanism": "confirm() tested YES_ALL, which only the interactive \"a\" answer sets, and never YES, which is what --yes sets. Its help text scoped --yes to replacements, but README sells it for headless and CI use, and a flag for headless runs that stops on a question defeats itself. Separately, fd 3 is deliberately closed when there is no tty, so bash printed its own invalid-file-descriptor complaint before ask() could die with the actionable message.",
+      "surfaces": [
+        "installer/src/15-input-channel.sh",
+        "installer/src/05-config.sh"
+      ],
+      "fix": "confirm() honours YES as well as YES_ALL, and the help line says --yes answers every prompt including the planning permission grants -- the widening is documented rather than silent, since those prompts grant agents read/write and script execution. ask() suppresses bash own read error so only the die message is shown.",
+      "verification": "test-installer-noninteractive.sh: a planning install under --yes exits 0, asks for nothing, creates the plans directory and installs the skill; without --yes it exits 1 with the actionable message and no raw shell error; and a second --yes run still writes the scripts, so yes-to-everything cannot be implemented as do-nothing. Mutations: restoring the YES_ALL-only test fails the first two assertions, and removing the 2>/dev/null fails the no-shell-noise assertion.",
+      "found_by": "reported by Michael. I had hit the same failure earlier in the session while installing planning to a temp target and worked around it with a pipe instead of investigating.",
+      "notes": "Two things I first called defects here were not. The exit code was correct all along -- my measurement read the status of a pipe. And the summary printed after the failure is deliberate: cleanup() prints it so a run that dies part-way still reports what it wrote, and says so in a comment. HOME has to be redirected to see any of this, because the prompt only appears when the plans directory does not exist, which on a developer machine it usually does.",
+      "created_at": "2026-08-21T11:05:01Z",
+      "updated_at": "2026-08-21T11:05:01Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -222,6 +244,29 @@
       "notes": "Live, and it produced misleading output all through this session without being noticed - every register render printed above is in the wrong order. Two candidate fixes. Zero-padded ids make lexical sort correct with no snippet change, but require renumbering ids that commit messages already reference (T30, B8), because a mix of T5 and T05 sorts wrong anyway. A derived key - def idkey: [(. | scan(\"[0-9]+\") | tonumber)?, .] - keeps ids free-form and is the only option that also respects the skills own T1 -> T1a convention, placing a child immediately after its parent in a flat render; length-then-lexical looked cheaper but drifts T1a to the end. Its stated cost, a def copied into seven snippets, is already the pattern in these files: the rank and prank/srank defs are duplicated across all of them today, so this adds no new kind of debt.",
       "created_at": "2026-08-21T09:59:41Z",
       "updated_at": "2026-08-21T10:04:58Z"
+    },
+    {
+      "id": "B1",
+      "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash install.sh --skill todo --skill bug-report --target /tmp/two --yes; ls /tmp/two",
+      "observed": "Selected skills: bug-report — and only bug-report is installed. Reversing the two flags installs only todo. No warning either way.",
+      "expected": "Both skills installed, or a refusal naming the conflict. Discarding an argument the caller supplied is the one thing it must not do silently.",
+      "mechanism": "installer/src/10-cli-args.sh:60 assigns SKILL_SELECTION=\"$2\" as a scalar, so each --skill overwrites the previous. --all takes the array path; --skill never did.",
+      "surfaces": [
+        "installer/src/10-cli-args.sh",
+        "installer/src/40-selection.sh",
+        "installer/src/05-config.sh"
+      ],
+      "fix": "--skill accumulates: 10-cli-args.sh joins repeated values with a comma, which is what select_skills already splits, so the repeated and comma spellings meet in one place. select_skills also learns `all` as a token, so --skill all --skill todo is not a contradiction resolved by ordering. The bare 6 stays whole-string only: with seven skills 6 is also a position, and reading it as all inside a list would install one thing when a list was asked for.",
+      "verification": "test-installer-skill-selection.sh asserts against what was installed, not the Selected skills line: two flags install both in either order, three install three, the comma and repeated forms agree, mixing them works, a repeat collapses, a menu number combines with a name, all wins wherever it appears, the bare 6 still means all, and the three refusals are unchanged. Mutations: restoring last-one-wins fails the first two assertions; dropping the all token fails the combined case.",
+      "found_by": "installing the two register skills for the user in one command",
+      "notes": "Closed as not-a-defect first, because README.md documented last-one-wins and the comma form worked. That was right about the documentation and wrong about the behaviour being acceptable: silently discarding a supplied argument is a defect whatever the manual says, and the manual was the thing to change. The status moved from not-a-defect to fixed rather than a second entry being opened, so the history stays in one place.",
+      "created_at": "2026-08-20T15:44:50Z",
+      "updated_at": "2026-08-21T11:00:42Z"
     },
     {
       "id": "B6",
@@ -287,29 +332,6 @@
       "notes": "The intent was inferred, not known: the test seeds {\"bugs\":[]}, the id is grouped with the optional artifacts, a missing file is asserted to give 66, and planning/SKILL.md never mentions it. So it reads as a plan-scoped defect register in the bug-report skill format. Writing the writer rather than documenting hand-authoring follows this repo own precedent, commit 3783dab. Building it turned up that jq handed an empty input never runs its filter, so the first version wrote a zero-byte register and reported success; the guard against that is now covered by a PATH seam rather than left as a known gap, because MAINTAINER.md step 3 asks for a test of the actionable-error path and a backstop with no test is a claim, not a guard.",
       "created_at": "2026-08-21T09:34:37Z",
       "updated_at": "2026-08-21T10:40:32Z"
-    },
-    {
-      "id": "B1",
-      "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "bash install.sh --skill todo --skill bug-report --target /tmp/two --yes; ls /tmp/two",
-      "observed": "Selected skills: bug-report — and only bug-report is installed. Reversing the two flags installs only todo. No warning either way.",
-      "expected": "Both skills installed, or a refusal naming the conflict. Discarding an argument the caller supplied is the one thing it must not do silently.",
-      "mechanism": "installer/src/10-cli-args.sh:60 assigns SKILL_SELECTION=\"$2\" as a scalar, so each --skill overwrites the previous. --all takes the array path; --skill never did.",
-      "surfaces": [
-        "installer/src/10-cli-args.sh",
-        "installer/src/40-selection.sh",
-        "installer/src/05-config.sh"
-      ],
-      "fix": "--skill accumulates: 10-cli-args.sh joins repeated values with a comma, which is what select_skills already splits, so the repeated and comma spellings meet in one place. select_skills also learns `all` as a token, so --skill all --skill todo is not a contradiction resolved by ordering. The bare 6 stays whole-string only: with seven skills 6 is also a position, and reading it as all inside a list would install one thing when a list was asked for.",
-      "verification": "test-installer-skill-selection.sh asserts against what was installed, not the Selected skills line: two flags install both in either order, three install three, the comma and repeated forms agree, mixing them works, a repeat collapses, a menu number combines with a name, all wins wherever it appears, the bare 6 still means all, and the three refusals are unchanged. Mutations: restoring last-one-wins fails the first two assertions; dropping the all token fails the combined case.",
-      "found_by": "installing the two register skills for the user in one command",
-      "notes": "Closed as not-a-defect first, because README.md documented last-one-wins and the comma form worked. That was right about the documentation and wrong about the behaviour being acceptable: silently discarding a supplied argument is a defect whatever the manual says, and the manual was the thing to change. The status moved from not-a-defect to fixed rather than a second entry being opened, so the history stays in one place.",
-      "created_at": "2026-08-20T15:44:50Z",
-      "updated_at": "2026-08-21T11:00:42Z"
     }
   ]
 }

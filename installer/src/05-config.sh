@@ -112,7 +112,8 @@ Interactive by default. Options are useful for automation:
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
   --target <path>          Install into one skill root without prompting
-  --yes                    Accept replacements; an edited file is still backed up  
+  --yes                    Answer yes to every prompt, including the planning
+                           permission grants; an edited file is still backed up  
   --help                   Show this help
 
 Interactive prompts accept a for "yes to all" (auto-accepts every
