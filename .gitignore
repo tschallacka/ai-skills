@@ -21,9 +21,6 @@ benchmark/results/*/.staging/
 #   !.plans/<plan-under-audit>/**
 .plans/*
 
-# Agent-session handoff note (not source; regenerated as needed).
-MEMORY.md
-
 # Benchmark evidence tagged `current` (live working tree smoke runs) is
 # transient, never published evidence: never index it.
 benchmark/results/*/current/
