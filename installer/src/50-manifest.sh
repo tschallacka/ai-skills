@@ -74,6 +74,7 @@ scripts/add-coverage.sh
 scripts/add-adversarial-finding.sh
 scripts/add-fix-claim.sh
 scripts/add-goal.sh
+scripts/add-planning-bug.sh
 scripts/add-ui-story.sh
 scripts/add-ui-story-links.sh
 scripts/add-work-unit.sh
@@ -223,6 +224,7 @@ tests/fixtures/progress-shape/02-goal-b/steps/02-step-b2.md
 tests/fixtures/progress-shape/progress.md
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
+tests/test-add-planning-bug.sh
 tests/test-adversarial-review-cycles.sh
 tests/test-adversarial-review-sources.sh
 tests/test-adversary-probe-fixture.sh

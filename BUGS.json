@@ -268,7 +268,7 @@
     {
       "id": "B12",
       "title": "The planning-bugs.json plan artifact was added with no writer and no diagram update",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -281,12 +281,12 @@
         "planning/scripts/lib/document/plan_document_path.sh",
         "planning/scripts/plan-context-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "add-planning-bug.sh writes the register, in the shape add-fix-claim.sh established when fixes.md needed the same thing: validate everything before touching the file, snapshot the plan, append through plan_atomic_write. The file follows the bug-report skill schema, so that skill jq recipes read a plan register unchanged. Registered in PACKAGE-MANIFEST.txt, PACKAGE-MAP.tsv and the prod arm of skill_files, and both the artifact and its writer are now in the section 5 diagram, which MAINTAINER.md step 4 requires.",
+      "verification": "test-add-planning-bug.sh: the register does not exist until written and asking for it gives 66; first use creates it and the entry is read back rather than trusted from an exit code; a backslash and embedded quotes survive; six refusals each with their own code (73 duplicate, 64 bad id, 64 missing reproduction, 64 unknown severity, 64 status fixed, 66 missing plan, 65 damaged register) and the damaged file is left untouched; and the bug-report skill own render lists both entries. Mutations caught: dropping the duplicate check, widening the status enum, appending to a damaged register. All 10 mermaid diagrams render with the new nodes under mmdc.",
       "found_by": "reviewing 9f41091",
-      "notes": "A reader-only artifact is not broken, just undiscoverable: an agent can ask for it and will always get exit 66 until something writes one.",
+      "notes": "The intent was inferred, not known: the test seeds {\"bugs\":[]}, the id is grouped with the optional artifacts, a missing file is asserted to give 66, and planning/SKILL.md never mentions it. So it reads as a plan-scoped defect register in the bug-report skill format. Writing the writer rather than documenting hand-authoring follows this repo own precedent, commit 3783dab \"fixes.md has a writer\". Two things found while building it: jq handed /dev/null as input never runs its filter, so the first version wrote a zero-byte register and reported success -- there is now a read-back guard, and it is the only thing that catches that class; and the section 5 diagram still shows fixes.md as agent-written although add-fix-claim.sh has existed since 3783dab, which was left alone as out of scope.",
       "created_at": "2026-08-21T09:34:37Z",
-      "updated_at": "2026-08-21T09:34:37Z"
+      "updated_at": "2026-08-21T10:36:50Z"
     },
     {
       "id": "B1",

@@ -435,6 +435,7 @@ flowchart LR
         UPC["update-plan-content.sh"]
         UAR["update-adversarial-review.sh"]
         MINT["mint-fix-keys.sh"]
+        PBUG["add-planning-bug.sh"]
         CAR["create-adversarial-review.sh"]
         CST["create-step-testing.sh"]
         REG["register-command.sh"]
@@ -453,6 +454,7 @@ flowchart LR
         FKJ["fix-keys.json"]
         SECRET["session secret outside the plan"]
         FIXES["fixes.md"]
+        PBUGS["planning-bugs.json"]
         APPROVAL["approval.json"]
         PPROG["progress.md"]
         GOALMD["goal.md"]
@@ -500,6 +502,7 @@ flowchart LR
     CAR --> AR
     AGENT --> ARIN
     AGENT --> FIXES
+    PBUG --> PBUGS
     AGENT --> APPROVAL
     AGENT --> WCTX
     ARIN --> UAR
