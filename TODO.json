@@ -403,18 +403,18 @@
     {
       "id": "T30",
       "title": "test-portability-contract spawns 5658 greps; invert the loop and it is one per rule",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "Measured at 15.6s of a 164s suite, third most expensive test. It loops files-outside, rules-inside: 23 gated rules x 246 scanned files. The nesting is only that way because each file is comment-stripped with sed before grepping, so many files cannot be passed to one grep. Strip once into a temp copy per file (246 seds), then run one grep per rule over all the copies at once (23 greps): about 269 spawns instead of 5658, and attribution per rule is preserved because the rule is still the outer loop.",
-      "note": "Found by timing every test after a wrong hypothesis (sleeps, 3.0s in total across 13 sites) and a second wrong one of mine (chromium via mmdc, which is 389ms). The cost is fork/exec volume, not waiting.",
+      "note": "Each file is stripped once into a mirror tree, then each rule greps that tree in one pass: about 270 processes instead of 11,000. Measured 15.6s to 4.9s, so about 10s off a 164s suite. Substitution keeps the line count, so a line number in the mirror is the line number in the source. Two things the work turned up: stripping the ./ prefix from the grep output silently disabled every allowlist exemption, caught because a run then reported 28 sanctioned files; and the plan-map-lib.sh:assoc-array exemption is vestigial, since that file mentions declare -A only in a comment and comment-stripping already removes it -- recorded as T36 rather than deleted here.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-portability-contract.sh",
         "portability-rules.json"
       ],
       "created_at": "2026-08-20T17:31:18Z",
-      "updated_at": "2026-08-20T17:31:18Z"
+      "updated_at": "2026-08-21T10:51:52Z"
     },
     {
       "id": "T31",
@@ -569,6 +569,22 @@
       ],
       "created_at": "2026-08-21T10:29:27Z",
       "updated_at": "2026-08-21T10:29:27Z"
+    },
+    {
+      "id": "T36",
+      "title": "The plan-map-lib.sh assoc-array exemption is vestigial",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "in_allowlist exempts ./planning/scripts/plan-map-lib.sh from assoc-array, but that file names declare -A only in a comment, and section 4 strips comments before matching. Removing the exemption changes nothing, which is how it was found. Delete it, or keep it and say in the comment that it guards prose that no longer exists.",
+      "note": "Found while proving the allowlist still worked after T30: the removal test on this entry was inconclusive because the entry does nothing, so the proof used the stat-probe exemption instead, which is load-bearing.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-portability-contract.sh",
+        "planning/scripts/plan-map-lib.sh"
+      ],
+      "created_at": "2026-08-21T10:51:52Z",
+      "updated_at": "2026-08-21T10:51:52Z"
     },
     {
       "id": "T0",

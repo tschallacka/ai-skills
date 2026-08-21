@@ -43,7 +43,6 @@ in_allowlist() {
     case "$1:$2" in
         ./planning/scripts/plan-map-lib.sh:assoc-array) return 0 ;;
         # The probe that chooses between the GNU and BSD forms must name both.
-        # The probe that chooses between the GNU and BSD forms must name both.
         # It lives in one function file and is compiled into plan-core-lib.sh.
         ./planning/scripts/lib/core/plan_stat_probe.sh:stat-format) return 0 ;;
         ./planning/scripts/plan-core-lib.sh:stat-format) return 0 ;;
@@ -112,21 +111,47 @@ done < <(script_list)
 
 # 4. No new banned constructs. Comments are stripped first, so prose that names a
 # construct (a marker, a docblock) is not mistaken for a use of it.
-while IFS= read -r rule_id; do
-    detect="$(jq -r --arg i "$rule_id" '.rules[]|select(.id==$i)|.detect' "$rules")"
-    [ "$detect" != null ] || continue
-    while IFS= read -r file; do
+#
+# Each file is stripped once into a mirror tree, then each rule greps that tree
+# in a single pass. The obvious shape -- strip and grep per rule per file -- runs
+# sed and grep 23x246 times and cost 15.6s of a 164s suite; this is about 270
+# processes instead of 11,000. Substitution keeps the line count, so a line
+# number in the mirror is the line number in the source.
+stripped_root="$(mktemp -d "${TMPDIR:-/tmp}/portability-stripped.XXXXXX")"
+scan_files="$(mktemp "${TMPDIR:-/tmp}/portability-files.XXXXXX")"
+script_list > "$scan_files"
+
+# One mkdir for every directory, not one per file.
+# PORTABILITY(xargs-empty): BSD xargs runs the command once with no arguments when
+# input is empty, so the list is known non-empty here by construction.
+sed 's|/[^/]*$||' "$scan_files" | sort -u \
+    | while IFS= read -r dir; do printf '%s\0' "$stripped_root/$dir"; done \
+    | xargs -0 mkdir -p
+while IFS= read -r file; do
+    sed 's/[[:space:]]*#.*$//' "$repo_root/$file" > "$stripped_root/$file"
+done < "$scan_files"
+
+# One grep per rule over the whole mirror. No -q and no -m1: either would close
+# the pipe on the first match and report the writer's SIGPIPE (141) instead of
+# the finding. Only the first hit per file is reported, as before -- a rule
+# violated twice in one file is one thing to fix.
+while IFS="$(printf '\t')" read -r rule_id detect; do
+    [ -n "$rule_id" ] || continue
+    reported=''
+    while IFS= read -r hit; do
+        [ -n "$hit" ] || continue
+        # The ./ prefix is kept: script_list yields ./path and in_allowlist
+        # matches that form, so stripping it silently disabled every exemption.
+        file="${hit%%:*}"
+        rest="${hit#*:}"
+        line="${rest%%:*}"
+        case " $reported " in *" $file "*) continue ;; esac
         in_allowlist "$file" "$rule_id" && continue
-        # Strip full-line comments and trailing comments, then match. No -q and
-        # no -m1: either would close the pipe on the first match and report the
-        # writer's SIGPIPE (141) instead of the finding.
-        hits="$(sed 's/[[:space:]]*#.*$//' "$repo_root/$file" | grep -nE -- "$detect" || true)"
-        if [ -n "$hits" ]; then
-            hit="${hits%%$'\n'*}"
-            note_fail "$file uses banned construct '$rule_id' at line ${hit%%:*} — see PORTABILITY.md"
-        fi
-    done < <(script_list)
-done < <(jq -r '.rules[].id' "$rules")
+        reported="$reported $file"
+        note_fail "$file uses banned construct '$rule_id' at line $line — see PORTABILITY.md"
+    done < <(cd "$stripped_root" && grep -rnE -- "$detect" . 2>/dev/null || true)
+done < <(jq -r '.rules[] | select(.detect != null) | "\(.id)\t\(.detect)"' "$rules")
+rm -rf "$stripped_root" "$scan_files"
 
 # 5. A foreign checkout under the repo does not reach the catalogue. An agent
 # worktree checks the repo out under .claude/, and the scanner walks the
