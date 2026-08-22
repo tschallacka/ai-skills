@@ -1,0 +1,308 @@
+<!-- MODE: PROD -->
+<!DOCTYPE html>
+<html lang="en" data-state="@_STATE_@">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="@_REFRESH_@">
+<title>@_PLAN_NAME_@ — plan overview</title>
+<style>
+:root{
+  --bg:#07080f; --bg2:#0b0d1a; --panel:rgba(255,255,255,.045); --line:rgba(255,255,255,.09);
+  --txt:#e8ecff; --dim:#8b93b8; --faint:#565e85;
+  --accent:#7c6cff; --accent2:#22d3ee; --good:#34d399; --warn:#fbbf24; --bad:#fb7185;
+  --glow:0 0 24px rgba(124,108,255,.35);
+}
+html[data-state="planning"]{--accent:#a78bfa;--accent2:#f472b6;--glow:0 0 26px rgba(167,139,250,.4)}
+html[data-state="implementation"]{--accent:#22d3ee;--accent2:#7c6cff;--glow:0 0 26px rgba(34,211,238,.38)}
+html[data-state="delivered"]{--accent:#34d399;--accent2:#a3e635;--glow:0 0 26px rgba(52,211,153,.4)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--txt); min-height:100vh; overflow-x:hidden;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(124,108,255,.16), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(34,211,238,.12), transparent 60%),
+    linear-gradient(160deg,var(--bg),var(--bg2));
+  background-size:200% 200%;
+  animation:drift 26s ease-in-out infinite alternate;
+}
+@keyframes drift{from{background-position:0% 0%}to{background-position:100% 100%}}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 22px 90px}
+a{color:var(--accent2)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* ---------- header ---------- */
+header{
+  position:relative;overflow:hidden;border:1px solid var(--line);border-radius:18px;
+  padding:26px 28px;margin-bottom:20px;
+  background:linear-gradient(120deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
+  backdrop-filter:blur(6px);
+}
+header::before{content:"";position:absolute;inset:-40%;pointer-events:none;
+  background:conic-gradient(from 0deg,transparent 0 70%,rgba(124,108,255,.14) 82%,transparent 94%);
+  animation:sweep 9s linear infinite;}
+@keyframes sweep{to{transform:rotate(360deg)}}
+.h-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;position:relative}
+h1{font-size:clamp(20px,3vw,30px);letter-spacing:.4px;display:flex;align-items:center;gap:12px;min-width:0}
+h1 .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60vw}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:11px;letter-spacing:2px;color:var(--dim);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:rgba(0,0,0,.25)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:var(--glow);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.55);opacity:.55}}
+.state-chip{font-size:13px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
+  padding:7px 16px;border-radius:999px;color:#0b0d1a;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  box-shadow:var(--glow);animation:breathe 3.4s ease-in-out infinite}
+@keyframes breathe{50%{filter:brightness(1.22)}}
+.h-sub{position:relative;color:var(--dim);font-size:13px;margin-top:10px;display:flex;gap:18px;flex-wrap:wrap}
+.h-sub b{color:var(--txt)}
+
+/* ---------- grid & cards ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.card{
+  position:relative;border:1px solid var(--line);border-radius:16px;padding:18px 18px 16px;
+  background:var(--panel);backdrop-filter:blur(8px);overflow:hidden;
+  transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;
+  opacity:0;animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards;
+}
+.card:hover{transform:translateY(-4px);border-color:rgba(124,108,255,.45);box-shadow:0 12px 40px rgba(0,0,0,.45),var(--glow)}
+.card:nth-child(1){animation-delay:.05s}.card:nth-child(2){animation-delay:.15s}.card:nth-child(3){animation-delay:.25s}
+.card:nth-child(4){animation-delay:.35s}.card:nth-child(5){animation-delay:.45s}.card:nth-child(n+6){animation-delay:.55s}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.card h2{font-size:11px;letter-spacing:2.2px;text-transform:uppercase;color:var(--dim);margin-bottom:12px;
+  display:flex;align-items:center;justify-content:space-between;gap:8px}
+.card h2 .tag{color:var(--accent2);letter-spacing:1px}
+
+/* ---------- donut ---------- */
+.donut-wrap{display:flex;align-items:center;gap:20px}
+.donut{position:relative;width:150px;height:150px;flex:none}
+.donut svg{transform:rotate(-90deg)}
+.donut .track{stroke:rgba(255,255,255,.08)}
+.donut .val{stroke:url(#gradMain);stroke-linecap:round;transition:stroke-dashoffset 1.2s cubic-bezier(.2,.7,.2,1)}
+.donut .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.donut .num b{font-size:30px;line-height:1}
+.donut .num span{font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:5px}
+
+/* ---------- bars ---------- */
+.bars{display:flex;flex-direction:column;gap:13px;min-width:0}
+.bar-row{display:grid;grid-template-columns:minmax(90px,150px) 1fr 44px;align-items:center;gap:10px;font-size:13px}
+.bar-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}
+.bar-track{height:10px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:inherit;width:0;position:relative;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));box-shadow:var(--glow);
+  transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+.bar-fill::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.55) 50%,transparent 80%);
+  transform:translateX(-100%);animation:shimmer 2.4s ease-in-out infinite}
+@keyframes shimmer{60%,100%{transform:translateX(100%)}}
+.bar-pct{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+.legend{display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--dim);flex-wrap:wrap}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
+.i-done{background:var(--good)}.i-wip{background:var(--warn)}.i-todo{background:rgba(255,255,255,.18)}
+
+/* ---------- charts ---------- */
+.chart svg{width:100%;height:auto;display:block}
+.chart .axis{stroke:rgba(255,255,255,.14);stroke-width:1}
+.chart text{fill:var(--dim);font-size:9px;font-family:ui-monospace,Menlo,monospace}
+.chart .bar-f{fill:url(#gradBars);opacity:.92}
+.chart .bar-f:hover{opacity:.6}
+.chart .line-res{fill:none;stroke:var(--good);stroke-width:2.4;stroke-linejoin:round;
+  filter:drop-shadow(0 0 6px rgba(52,211,153,.6));animation:drawline 1.6s ease-out both}
+@keyframes drawline{from{stroke-dashoffset:1200}to{stroke-dashoffset:0}}
+.chart .dot-res{fill:var(--good)}
+.rings{display:flex;gap:10px;flex-wrap:wrap}
+.ring{flex:1 1 90px;text-align:center;padding:8px 4px;border:1px dashed var(--line);border-radius:12px}
+.ring b{display:block;font-size:19px}
+.ring span{font-size:10px;color:var(--dim);letter-spacing:1px}
+
+/* ---------- narration ---------- */
+.narr{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13.5px;line-height:1.75;min-height:96px}
+.narr .ln{opacity:0;animation:fadeup .5s ease forwards;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.narr .ln:nth-child(1){animation-delay:.2s}.narr .ln:nth-child(2){animation-delay:.55s}
+.narr .ln:nth-child(3){animation-delay:.9s}.narr .ln:nth-child(4){animation-delay:1.25s}
+@keyframes fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.caret{display:inline-block;width:8px;height:15px;background:var(--accent2);vertical-align:-2px;
+  animation:blink 1s steps(1) infinite;margin-left:2px}
+@keyframes blink{50%{opacity:0}}
+.typeline{color:var(--accent2);overflow:hidden;white-space:nowrap;max-width:100%;
+  border-right:2px solid transparent}
+
+/* ---------- step log ---------- */
+.log{max-height:180px;overflow-y:auto;overscroll-behavior:contain;padding-right:6px}
+.log::-webkit-scrollbar{width:8px}
+.log::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px}
+.steprow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+  padding:7px 9px;border-radius:10px;font-size:12.5px;border:1px solid transparent}
+.steprow:hover{background:rgba(255,255,255,.05);border-color:var(--line)}
+.steprow .st{font-size:14px}
+.steprow .nm{font-family:ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steprow .go{color:var(--faint);font-size:11px}
+.st-done{color:var(--good)}.st-wip{color:var(--warn)}.st-todo{color:var(--faint)}
+
+/* ---------- ticker ---------- */
+.ticker{position:fixed;left:0;right:0;bottom:0;height:34px;z-index:5;overflow:hidden;
+  background:rgba(7,8,15,.85);border-top:1px solid var(--line);backdrop-filter:blur(8px);
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}
+.ticker-inner{display:inline-block;white-space:nowrap;line-height:34px;font-size:12px;color:var(--dim);
+  padding-left:100%;animation:tick 36s linear infinite}
+.ticker-inner b{color:var(--accent2);margin:0 14px}
+@keyframes tick{to{transform:translateX(-100%)}}
+
+/* ---------- refresh ring ---------- */
+.ringbtn{position:fixed;right:18px;bottom:48px;width:58px;height:58px;z-index:6;cursor:default}
+.ringbtn svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ringbtn .rbg{stroke:rgba(255,255,255,.1)}
+.ringbtn .rfg{stroke:url(#gradMain);stroke-linecap:round}
+.ringbtn .rlab{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+.foot{margin-top:26px;color:var(--faint);font-size:11px;text-align:center;letter-spacing:.6px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gradMain" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent2)"/>
+    </linearGradient>
+    <linearGradient id="gradBars" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity=".55"/><stop offset="1" stop-color="var(--accent2)"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <div class="h-row">
+    <h1><span class="state-chip">@_STATE_@</span> <span class="pname">@_PLAN_NAME_@</span></h1>
+    <span class="live"><span class="dot"></span>LIVE&nbsp;·&nbsp;auto-refresh @_REFRESH_@s</span>
+  </div>
+  <div class="h-sub">
+    <span>phase <b>@_PHASE_LINE_@</b></span>
+    <span>goals <b>@_N_GOALS_@</b></span>
+    <span>steps <b>@_N_STEPS_@</b></span>
+    <span>work units <b>@_N_UNITS_@</b></span>
+    <span>findings <b>@_F_TOTAL_@</b> (<b>@_F_OPEN_@</b> open)</span>
+    <span>review rounds <b>@_CYCLES_@</b></span>
+    <span>updated <b class="mono">@_GENERATED_@</b></span>
+  </div>
+</header>
+
+<div class="grid">
+
+  <section class="card">
+    <h2>Overall completion <span class="tag">donut</span></h2>
+    <div class="donut-wrap">
+      <div class="donut">
+        <svg viewBox="0 0 120 120">
+          <circle class="track" cx="60" cy="60" r="52" fill="none" stroke-width="11"/>
+          <circle class="val" cx="60" cy="60" r="52" fill="none" stroke-width="11"
+                  stroke-dasharray="@_CIRCUMFERENCE_@" stroke-dashoffset="@_DONUT_OFFSET_@"/>
+        </svg>
+        <div class="num"><b class="count" data-target="@_PCT_@">0%</b><span>COMPLETE</span></div>
+      </div>
+      <div style="min-width:0">
+        <div class="bars">
+          <div class="bar-row"><span class="bar-name">steps done</span>
+            <div class="bar-track"><div class="bar-fill" data-w="@_PCT_@"></div></div>
+            <span class="bar-pct">@_PCT_@%</span></div>
+          <div class="bar-row"><span class="bar-name">findings resolved</span>
+            <div class="bar-track"><div class="bar-fill" data-w="@_F_RES_PCT_@" style="background:linear-gradient(90deg,var(--good),var(--accent2))"></div></div>
+            <span class="bar-pct">@_F_RES_PCT_@%</span></div>
+          <div class="bar-row"><span class="bar-name">review depth</span>
+            <div class="bar-track"><div class="bar-fill" data-w="@_REVIEW_DEPTH_@" style="background:linear-gradient(90deg,var(--warn),var(--accent))"></div></div>
+            <span class="bar-pct">@_CYCLES_@/@_REVIEW_TARGET_@</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Goals <span class="tag">per-goal progress</span></h2>
+    <div class="bars">
+@_GOAL_BARS_@
+    </div>
+    <div class="legend"><span><i class="i-done"></i>completed</span><span><i class="i-wip"></i>in progress</span><span><i class="i-todo"></i>pooled</span></div>
+  </section>
+
+  <section class="card chart">
+    <h2>Feedback × work × findings <span class="tag">cycles</span></h2>
+@_CYCLE_CHART_@
+    <div class="legend"><span><i class="i-wip"></i>findings raised that cycle</span><span><i class="i-done"></i>cumulative resolved</span></div>
+  </section>
+
+  <section class="card chart">
+    <h2>Relations <span class="tag">radials</span></h2>
+    <div class="rings">
+      <div class="ring"><svg viewBox="0 0 40 40" width="64" height="64"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="5"/><circle cx="20" cy="20" r="16" fill="none" stroke="url(#gradMain)" stroke-width="5" stroke-linecap="round" stroke-dasharray="100.53" stroke-dashoffset="@_RING_WORK_@" transform="rotate(-90 20 20)"/></svg><b>@_PCT_@%</b><span>WORK</span></div>
+      <div class="ring"><svg viewBox="0 0 40 40" width="64" height="64"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="5"/><circle cx="20" cy="20" r="16" fill="none" stroke="var(--good)" stroke-width="5" stroke-linecap="round" stroke-dasharray="100.53" stroke-dashoffset="@_RING_FIND_@" transform="rotate(-90 20 20)"/></svg><b>@_F_RESOLVED_@/@_F_TOTAL_@</b><span>FINDINGS RESOLVED</span></div>
+      <div class="ring"><svg viewBox="0 0 40 40" width="64" height="64"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="5"/><circle cx="20" cy="20" r="16" fill="none" stroke="var(--warn)" stroke-width="5" stroke-linecap="round" stroke-dasharray="100.53" stroke-dashoffset="@_RING_REVIEW_@" transform="rotate(-90 20 20)"/></svg><b>@_CYCLES_@</b><span>FEEDBACK ROUNDS</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Narration <span class="tag">what happened</span></h2>
+    <div class="narr" id="narr">
+@_NARRATION_@<span class="caret"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Step ledger <span class="tag">@_N_STEPS_@ rows</span></h2>
+    <div class="log">
+@_STEP_LEDGER_@
+    </div>
+  </section>
+
+</div>
+
+<div class="foot">@_FOOTER_@</div>
+</div>
+
+<div class="ticker"><div class="ticker-inner">@_TICKER_@</div></div>
+
+<div class="ringbtn" title="next auto-refresh">
+  <svg viewBox="0 0 58 58">
+    <circle class="rbg" cx="29" cy="29" r="25" fill="rgba(7,8,15,.8)" stroke-width="4"/>
+    <circle class="rfg" id="rfg" cx="29" cy="29" r="25" fill="none" stroke-width="4"
+            stroke-dasharray="157.08" stroke-dashoffset="0"/>
+  </svg>
+  <div class="rlab" id="rlab">@_REFRESH_@s</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var REFRESH=@_REFRESH_JS_@;
+/* count-up numbers */
+document.querySelectorAll(".count").forEach(function(el){
+  var target=parseFloat(el.getAttribute("data-target"))||0,t0=null;
+  function step(t){if(!t0)t0=t;var k=Math.min((t-t0)/1400,1);
+    k=1-Math.pow(1-k,3);el.textContent=Math.round(target*k)+"%";if(k<1)requestAnimationFrame(step);}
+  requestAnimationFrame(step);
+});
+/* bar fills */
+document.querySelectorAll(".bar-fill").forEach(function(el,i){
+  setTimeout(function(){el.style.width=(parseFloat(el.getAttribute("data-w"))||0)+"%";},250+i*130);
+});
+/* narration rotation */
+var lines=[].slice.call(document.querySelectorAll("#narr .ln"));
+lines.forEach(function(el){el.classList.add("typeline");
+  var txt=el.textContent,len=txt.length,k=0;
+  el.textContent="";
+  var iv=setInterval(function(){k+=2;if(k>=len){k=len;clearInterval(iv);}el.textContent=txt.slice(0,k);},26);});
+/* refresh ring */
+var C=157.08,left=REFRESH,lab=document.getElementById("rlab"),fg=document.getElementById("rfg");
+lab&&(lab.textContent=left+"s");
+var iv=setInterval(function(){
+  left--;if(left<0)left=REFRESH;
+  if(lab)lab.textContent=left+"s";
+  if(fg)fg.setAttribute("stroke-dashoffset",(C*(left/REFRESH)).toFixed(1));
+},1000);
+setTimeout(function(){location.reload();},REFRESH*1000+400);
+})();
+</script>
+</body>
+</html>
