@@ -245,6 +245,91 @@
       "updated_at": "2026-08-21T11:28:09Z"
     },
     {
+      "id": "B18",
+      "title": "dep_reaches memoizes every visited pair before exploring and reads the memo back as failure, so an earlier probe of a pair turns a later valid check into a false FAIL",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In one goal give two verification steps prose naming each other's unit id (W17 with W15 in its Depends-on cell, W15's step mentioning W17), then run validate-plan.sh <plan>. Isolated: source the propagation lib, populate the unit_depends/unit_type/unit_goal maps for both edges, set dep_seen=() once, and call plan_validate_propagation_reach.",
+      "observed": "\"W17 is a verification unit that grades W15 but has no dependency path to it\" although work-unit-inventory.md lists W15 in W17's Depends-on cell. A standalone probe of dep_reaches on the same pair returned success.",
+      "expected": "A pair with a satisfiable edge in either direction counts as ordered.",
+      "mechanism": "dep_reaches does plan_map_has dep_seen \"$key\" && return 1 before exploring and then plan_map_set dep_seen \"$key\" 1 immediately, so the map records visited-but-not-outcome while every hit is read as known-failure. Within one pair check the elif reverse probe (dep_reaches named id) runs against the memo the failed forward attempt left dirty — dep_seen=() is reset only before the forward attempt — and a key first written during an earlier successful exploration answers a later direct check with return 1.",
+      "surfaces": [
+        "planning/scripts/validate-plan-propagation-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #1)",
+      "notes": "Worked around on the VPS by authoring around the validator: never mention another unit's WNN inside verification-step narrative so no cross-pair probes fire. The suggested fix from the report: treat the memo as a failure cache only — set keys on the failure paths, or clear the key before returning success.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T16:21:07Z"
+    },
+    {
+      "id": "B19",
+      "title": "update-adversarial-review.sh parses every line of adversarial-review-incoming.md as a CSV row, so a reviewer title/header preamble gets the findings rejected",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Write adversarial-review-incoming.md as: a '# Adversarial review incoming findings - <persona>' title line, the header row ID,Missing or over-broad item,Required plan change,Status,Work unit, then finding rows; run update-adversarial-review.sh <plan> (the incoming file is consumed automatically when present).",
+      "observed": "\"CSV row 2 has 1 columns, expected 5\" — the named row points into the data, while the offending line is the preamble above it. The exact same rows parse cleanly once everything above the ID,... line is stripped and the file is passed via --file.",
+      "expected": "Title/comment lines, blank lines, and the reviewer's own copy of the canonical header row are skipped, and the findings render.",
+      "mechanism": "The whole incoming file is copied to csv_file and handed to plan_render_csv_table, which demands every non-empty line be a full 5-column row. That contract fits the stdin/--file sources (bare rows) but not the documented reviewer write format this consumer exists to read.",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #2)",
+      "notes": "Reviewers following the documented write format get their findings rejected with an error that mislocates the fault. Workaround on the VPS: strip everything above the header line into a temp CSV and use --file.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T16:21:07Z"
+    },
+    {
+      "id": "B20",
+      "title": "add-work-unit.sh moves the inventory row and step file into place before editing the goal roster, so a roster failure strands a half-created unit whose retry is refused",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Take a goal whose Owned work units section holds no numbered paragraphs (e.g. after B21), then run add-work-unit.sh <plan> --id W05 --type docs --file N/A --scope x --subscope N/A --change y --depends-on - --goal <goal> --step <step>; repeat the identical call.",
+      "observed": "First call writes the inventory row and the step file, then dies with \"Goal has no numbered Owned work units section\". The retry dies earlier with \"Work-unit ID already exists\": row and step exist, the roster entry does not.",
+      "expected": "All three writes land together or none does, which is what this script's docblock promises.",
+      "mechanism": "The inventory and step temp files are mv'd into place before the goal-roster edit runs; that edit can still plan_die (no numbered §9.x section, no paragraph to append after). Only the goal temp is discarded by the trap — the two completed renames are never undone.",
+      "surfaces": [
+        "planning/scripts/add-work-unit.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #3)",
+      "notes": "Recovery today is undocumented and manual: recreate the roster paragraph via update-plan-content.sh owned-work-units, then use update-work-unit.sh for the stranded id. Contract 2 (irreversible last) is the rule this violates.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T16:21:07Z"
+    },
+    {
+      "id": "B22",
+      "title": "update-adversarial-review.sh rewrites the Findings table and archives history before mint-fix-keys.sh runs, so a gated-row failure leaves the table replaced without keys",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Feed findings whose Work unit cell is 'W01-W18' through adversarial-review-incoming.md (or stdin); run update-adversarial-review.sh <plan>; then compare fix-keys.json, adversarial-review.md and adversarial-review-history.md against their pre-call state.",
+      "observed": "\"WARN skipping gated row ... could not be minted\" and a nonzero exit; fix-keys.json was not written — but the Findings table rewrite and the history archive had already been applied. The approval gate later demands claims for keys that were never minted.",
+      "expected": "No user-visible state changes unless the keys were minted: the irreversible mutation comes last (CODE-CONTRACTS.md contract 2).",
+      "mechanism": "mint-fix-keys.sh is invoked as the script's final statement, after the history append, the review-file rename, and the incoming-file removal. Any of its refusals — a gated row with non-conforming ids, openssl unavailable — therefore lands on top of completed mutations.",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh",
+        "planning/scripts/mint-fix-keys.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #5)",
+      "notes": "Same class as the contract 2 incident where --review-status approved destroyed the session secret before its own guard sites. Workaround on the VPS: normalize Work unit cells to a single WNN or N/A before running, and verify with verify-fix-keys.sh afterwards.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T16:21:07Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -374,6 +459,27 @@
       "notes": "Recorded to be investigated later rather than fixed on sight. Related to B16 only by file: that one is the worktree sweep deleting a live run, and its fix is in the tree unverified.",
       "created_at": "2026-08-21T11:29:11Z",
       "updated_at": "2026-08-21T11:29:11Z"
+    },
+    {
+      "id": "B21",
+      "title": "remove-work-unit.sh on a goal's last unit deletes the whole numbered Owned-work-units roster instead of leaving the empty scaffold, which breaks the next add",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Plan with one goal owning exactly one work unit; run remove-work-unit.sh <plan> W01; inspect the goal's Owned work units section; then run add-work-unit.sh for the same goal.",
+      "observed": "All §9.x paragraphs are gone (heading and testing-requirement table remain). The subsequent add-work-unit.sh refuses with \"Goal has no numbered Owned work units section\".",
+      "expected": "An emptied roster returns to the just-created shape: a § 9.1 holding '<add work units with add-work-unit.sh>'.",
+      "mechanism": "plan_rewrite_owned_work_units emits one §9.N paragraph per remaining inventory row and nothing at all when none remain; add-work-unit.sh's placeholder branch keys on the literal '<add work units with add-work-unit.sh>' line, which no longer exists anywhere in the section.",
+      "surfaces": [
+        "planning/scripts/plan-reconcile-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #4)",
+      "notes": "This manufactures the precondition of B20. The registered placeholder token is already in placeholders.json and is what add-goal.sh emits, so restoring it keeps the roster in a shape every reader already knows.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T16:21:07Z"
     }
   ]
 }
