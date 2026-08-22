@@ -189,10 +189,13 @@ awk -v row="| $unit_id | $unit_type | \`$unit_file\` | \`$scope\` | \`$subscope\
     printf '## Handoff\n\n§ 7.1\n<what the next named work unit can rely on>\n\n'
     printf '## Atomicity check\n\n- [x] This step owns exactly one inventory work unit.\n- [x] No other file, symbol, test target, or verification flow changes here.\n- [x] Any follow-on target has a separately named work unit and step.\n'
 } > "$step_tmp"
-mv "$inventory_tmp" "$inventory"
-mv "$step_tmp" "$step_file"
+
+# The goal edit is staged while the other two writes are still temps, so a
+# roster failure refuses before anything lands: all three renames happen
+# together, or none does.
 if grep -Fqx -- '<add work units with add-work-unit.sh>' "$goal_file"; then
-    plan_replace_paragraph "$goal_file" '§ 9.1' "\`$unit_id\` — $intended"
+    cat "$goal_file" > "$owned_tmp"
+    plan_replace_paragraph "$owned_tmp" '§ 9.1' "\`$unit_id\` — $intended"
 else
     # One scan yields "<next-label> <insert-after-line>"; both need the whole
     # § 9 section. Computing either against a truncated view duplicates § 9.2
@@ -233,8 +236,11 @@ else
             if (!inserted) exit 2
         }
     ' "$goal_file" > "$owned_tmp" || plan_die "Goal has no numbered Owned work units section: $goal_file"
-    mv "$owned_tmp" "$goal_file"
 fi
+
+mv "$inventory_tmp" "$inventory"
+mv "$step_tmp" "$step_file"
+mv "$owned_tmp" "$goal_file"
 printf 'Added %s and %s\n' "$unit_id" "$step_file"
 testing_required="$(plan_testing_requirement_for_goal "$goal_file")"
 if [ "$testing_required" = yes ] && [ "$unit_type" != test ] && [ "$unit_type" != verification ]; then

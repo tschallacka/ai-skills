@@ -289,7 +289,7 @@
     {
       "id": "B20",
       "title": "add-work-unit.sh moves the inventory row and step file into place before editing the goal roster, so a roster failure strands a half-created unit whose retry is refused",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -300,12 +300,12 @@
       "surfaces": [
         "planning/scripts/add-work-unit.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The goal-roster edit is staged into its temp before the inventory and step renames: the placeholder branch copies the goal and runs plan_replace_paragraph on the copy; the scan branch writes the insert awk output to the temp. All three mv statements now sit together after every fallible step, so a roster failure leaves the plan byte-identical.",
+      "verification": "planning/tests/test-add-work-unit-staging.sh: against HEAD a refused call left both the W02 inventory row and 02-step-b.md behind; with the fix the refusal message is unchanged and the plan holds no trace of the call. Controls prove the healthy-goal path still lands all three writes. Mutation: whole-revert to HEAD reproduces both stranded artifacts.",
       "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #3)",
       "notes": "Recovery today is undocumented and manual: recreate the roster paragraph via update-plan-content.sh owned-work-units, then use update-work-unit.sh for the stranded id. Contract 2 (irreversible last) is the rule this violates.",
       "created_at": "2026-08-22T16:21:07Z",
-      "updated_at": "2026-08-22T16:21:07Z"
+      "updated_at": "2026-08-22T19:50:57Z"
     },
     {
       "id": "B22",
