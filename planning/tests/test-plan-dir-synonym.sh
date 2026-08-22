@@ -86,6 +86,7 @@ check_pair update-work-unit - update-work-unit.sh W01 --scope 'a rescoped symbol
 check_pair remove-work-unit - remove-work-unit.sh W08
 check_pair update-plan-progress - update-plan-progress.sh 01-plan-dir-synonym in-progress
 check_pair rebuild-plan-progress - rebuild-plan-progress.sh
+check_pair render-plan-overview - render-plan-overview.sh
 check_pair create-plan-progress 'rm -f progress.md' create-plan-progress.sh
 check_pair register-command - register-command.sh probe-key 'ls -la' 'while probing'
 check_pair mint-fix-keys - mint-fix-keys.sh

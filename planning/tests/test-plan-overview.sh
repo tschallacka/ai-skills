@@ -50,6 +50,28 @@ t_assert_eq "placeholder cycle chart present with zero cycles" \
     "$(grep -c 'no review cycles recorded yet' "$out")" 1
 t_assert_eq "meta refresh honours --refresh" "$(grep -c '"refresh" content="7"' "$out")" 1
 
+# --out writes where it is told, leaving the plan untouched.
+rc=0
+OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --out "$temporary_root/custom.html" >/dev/null 2>&1 || rc=$?
+t_assert_eq "--out render exits 0" "$rc" 0
+[ -f "$temporary_root/custom.html" ] || fail "--out produced no file"
+cp "$out" "$temporary_root/before-out.html"
+OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --out "$temporary_root/custom2.html" >/dev/null 2>&1
+cmp -s "$temporary_root/before-out.html" "$out" || fail "--out run also rewrote the plan's overview.html"
+
+# --watch regenerates when an input changes (2 s poll, one forced edit).
+wd="$temporary_root/watched"
+cp -R "$plan" "$wd"
+rm -f "$wd/overview.html"
+OVERVIEW_NOW=$NOW timeout 9 "$script_dir/render-plan-overview.sh" "$wd" --watch 2 --refresh 5 \
+    >"$temporary_root/watch.log" 2>&1 &
+wpid=$!
+sleep 3
+printf '\n# touched\n' >> "$wd/work-unit-inventory.md"
+wait $wpid || true
+renders="$(grep -c '^Rendered ' "$temporary_root/watch.log")"
+if [ "$renders" -lt 2 ]; then fail "--watch did not re-render on change ($renders renders)"; fi
+
 # determinism: same inputs, pinned clock, byte-identical bytes.
 cp "$out" "$temporary_root/first.html"
 OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --refresh 7 >/dev/null 2>&1

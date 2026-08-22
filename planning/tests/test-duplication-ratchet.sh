@@ -55,7 +55,10 @@ check_cap 'tests not sourcing lib-test.sh' 7 \
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
 # now owns the work-unit rows; the remainder are other tables plus the two
 # inventory rewriters, and the floor is 1 (the helper's own parser).
-check_cap "inline awk -F'|' parsers" 28 \
+# 29th site: render-plan-overview.sh cells() is a generic canonical-table reader
+# (any table, header-aware), not the ten-field inventory parse; admitted here so
+# the debt is visible rather than hidden behind a rewritten pattern.
+check_cap "inline awk -F'|' parsers" 29 \
     "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
