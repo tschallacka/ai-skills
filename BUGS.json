@@ -268,7 +268,7 @@
     {
       "id": "B19",
       "title": "update-adversarial-review.sh parses every line of adversarial-review-incoming.md as a CSV row, so a reviewer title/header preamble gets the findings rejected",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -279,12 +279,12 @@
       "surfaces": [
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "f2ee108 — update-adversarial-review.sh filters its CSV source before rendering: title/comment lines starting with #, blank lines, and one repeated copy of the canonical header row are skipped whatever the source; a preamble-only document is refused with 65 naming the missing rows.",
+      "verification": "planning/tests/test-adversarial-review-preamble.sh: an incoming file holding title + header + three rows (one after a blank line) renders all three rows, exactly one header, and no title text against adversarial-review.md — against HEAD it exited 65 with \"row 2 has 1 columns\". Controls: bare rows via stdin still render, and a preamble-only document keeps a nonzero exit now naming the real fault. Mutation: reverting the script to HEAD fails the first assertion.",
       "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #2)",
       "notes": "Reviewers following the documented write format get their findings rejected with an error that mislocates the fault. Workaround on the VPS: strip everything above the header line into a temp CSV and use --file.",
       "created_at": "2026-08-22T16:21:07Z",
-      "updated_at": "2026-08-22T16:21:07Z"
+      "updated_at": "2026-08-22T17:18:11Z"
     },
     {
       "id": "B20",
