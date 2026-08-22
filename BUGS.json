@@ -527,7 +527,7 @@
     {
       "id": "B26",
       "title": "Nothing in the execution-phase docs names the sanctioned way to mark a step completed, so executors hand-sed the generated tracker",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -538,12 +538,12 @@
       "surfaces": [
         "planning/roles/execution.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "roles/execution.md gained an Updating-trackers section: update-step.sh per step (row rewrite plus bar re-derivation), update-plan-progress.sh at plan level, and the explicit statement that hand-editing either tracker is damage with no sanctioned spelling. No new helper: their suggested complete-step.sh is update-step.sh, and a second name would be dedupe debt.",
+      "verification": "The routing gap is grep-provable on the pre-fix doc (no update-step/completed hits in roles/execution.md) and closed by the new section naming both helpers verbatim. test-persona-drift and test-voice-artifact-drift pass unchanged; the file keeps its MODE marker and its registered manifest row, so no packaging surface moved.",
       "found_by": "health-app worker finding #7 in bugs-found-by-ox-alpha.md and ../health-app/bug-fixed/fixed-by-ai-skills.md (2026-08-22)",
       "notes": "Deliberately NOT building their suggested complete-step.sh: it would duplicate update-step.sh, which the dedupe ratchet exists to prevent. The fix is the missing route plus the prohibition. The worker sed edits were semantically valid (the status cell is the on-disk contract) - the mechanics were the violation.",
       "created_at": "2026-08-22T21:35:13Z",
-      "updated_at": "2026-08-22T21:35:13Z"
+      "updated_at": "2026-08-22T21:35:54Z"
     },
     {
       "id": "B25",

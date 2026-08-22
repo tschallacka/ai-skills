@@ -16,3 +16,16 @@ them. Cleanup roles intentionally omitted (see `cleanup.md`). Canonical master
 | `dana` | Dana | Monitor: steers a long-running worker/reviewer process (bounded polling, explicit next-action commands, terminal-evidence stop). | Read-only observer of child processes; issues steering; does not edit plan artifacts directly. |
 
 `maintainer` / `installer` appear only for skill/installer changes.
+
+## Updating trackers during execution
+
+Progress trackers are generated documents: status cells and bars are written
+by helpers, never by hand. After a step is executed, record it with
+
+    scripts/update-step.sh <goal-directory> <step-name> <incomplete|in-progress|completed>
+
+which rewrites that step's row and re-derives the goal bar; after a goal's
+work lands, `scripts/update-plan-progress.sh <plan-directory> <goal-name>
+<in-progress|completed>` does the same at plan level. Hand-editing either
+tracker (sed included) is damage the helpers exist to prevent — there is no
+sanctioned spelling of a manual edit.
