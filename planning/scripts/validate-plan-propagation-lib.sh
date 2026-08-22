@@ -167,12 +167,14 @@ plan_validate_propagation_symbols() {
     #     grades. Reverse edges are deliberate (a baseline-capture verification
     #     runs FIRST), so an opposite-direction edge is a guard, not a violation.
 
-# Recursive: do not rename. `dep_seen` is the memo that stops the walk looping
-# on a cyclic graph; the caller resets it before each root query.
+# Recursive: do not rename. `dep_seen` marks pairs whose walk is in progress
+# and cuts cycles; `dep_failed` caches pairs proven unreachable after a
+# complete exploration, so an earlier success can never read back as one.
 dep_reaches() {
     local from="$1" to="$2" dep key
     [ "$from" = "$to" ] && return 0
     key="$from/$to"
+    plan_map_has dep_failed "$key" && return 1
     plan_map_has dep_seen "$key" && return 1
     plan_map_set dep_seen "$key" 1
     while IFS= read -r dep; do
@@ -180,6 +182,7 @@ dep_reaches() {
         [ "$dep" = "$to" ] && return 0
         dep_reaches "$dep" "$to" && return 0
     done < <(plan_map_load unit_depends "$from" || true; printf '%s' "$plan_map_value" | grep -oE 'W[0-9][0-9]+' || true)
+    plan_map_set dep_failed "$key" 1
     return 1
 }
 
@@ -204,7 +207,8 @@ plan_validate_propagation_reach() {
             fi
             plan_map_load unit_goal "$named" || plan_map_value=""
             if [ "$plan_map_value" = "$u_goal" ]; then
-                dep_seen=()
+                plan_map_clear dep_seen
+                plan_map_clear dep_failed
                 if dep_reaches "$id" "$named"; then
                     : # already transitively ordered
                 elif dep_reaches "$named" "$id"; then
