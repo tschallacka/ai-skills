@@ -22,6 +22,10 @@
 # with `#`, blank lines, and one repeated copy of the header row are skipped,
 # whatever the source, so a reviewer can paste their whole document.
 #
+# Nothing is rewritten unless the new rows mint cleanly: the rewrite is minted
+# against a throwaway copy first, so a gated-row or openssl refusal leaves
+# every plan file byte-identical.
+#
 # The previous Findings table is archived into adversarial-review-history.md
 # under a `## Cycle N` heading (--cycle numbers it; otherwise the highest
 # recorded number plus one) so reviewers of later cycles can see what earlier
@@ -124,7 +128,8 @@ csv_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-table.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-rendered.XXXXXX")"
 filtered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-filtered.XXXXXX")"
 temporary_file="${review_file}.tmp.$$"
-trap 'rm -f "$csv_file" "$rendered_file" "$filtered_file" "$temporary_file"' EXIT
+preview_dir=""
+trap 'rm -f "$csv_file" "$rendered_file" "$filtered_file" "$temporary_file"; [ -z "$preview_dir" ] || rm -rf "$preview_dir"' EXIT
 
 # Reviewers write their findings to adversarial-review-incoming.md; this is its
 # only consumer. It takes precedence over stdin so a reviewer report survives
@@ -166,6 +171,41 @@ mv "$filtered_file" "$csv_file"
 # header, so the two must stay identical.
 plan_render_csv_table 5 "$(printf '%s\\n' "$findings_header"; awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
 
+awk -v replacement_file="$rendered_file" '
+    function emit_replacement(    line) {
+        while ((getline line < replacement_file) > 0) print line
+        close(replacement_file)
+    }
+    /^## Findings$/ {
+        print
+        print ""
+        emit_replacement()
+        in_findings = 1
+        next
+    }
+    in_findings && /^## Verdict$/ {
+        print ""
+        print
+        in_findings = 0
+        next
+    }
+    in_findings { next }
+    { print }
+' "$review_file" > "$temporary_file"
+
+# Mint against a throwaway copy before anything is written (contract 2: the
+# irreversible step is last). Every refusal mint can produce — a gated row
+# with non-conforming ids, openssl unavailable — lands here, while every plan
+# file still holds its original bytes. The success line names a directory the
+# caller will never see, so only its diagnostics flow through.
+preview_dir="$(mktemp -d "${TMPDIR:-/tmp}/adversarial-review-mint.XXXXXX")"
+cp -- "$temporary_file" "$preview_dir/adversarial-review.md"
+mint_rc=0
+"$script_dir/mint-fix-keys.sh" "$preview_dir" >/dev/null || mint_rc=$?
+if [ "$mint_rc" -ne 0 ]; then
+    plan_die "findings were not minted; nothing was modified — fix the finding/work-unit cells and rerun (diagnosis above)" "$mint_rc"
+fi
+
 # Archive the prior Findings rows (if any) into adversarial-review-history.md
 # so reviewers of later cycles can see what earlier ones found.
 history_file="$plan_dir/adversarial-review-history.md"
@@ -196,27 +236,6 @@ else
     printf 'Archived previous Findings table to %s (Cycle %s)\n' "$history_file" "$cycle_number" >&2
 fi
 
-awk -v replacement_file="$rendered_file" '
-    function emit_replacement(    line) {
-        while ((getline line < replacement_file) > 0) print line
-        close(replacement_file)
-    }
-    /^## Findings$/ {
-        print
-        print ""
-        emit_replacement()
-        in_findings = 1
-        next
-    }
-    in_findings && /^## Verdict$/ {
-        print ""
-        print
-        in_findings = 0
-        next
-    }
-    in_findings { next }
-    { print }
-' "$review_file" > "$temporary_file"
 mv "$temporary_file" "$review_file"
 # A reviewer report only survives the coordinator's context while the file does,
 # so it is removed only when it was the source that got rendered.
