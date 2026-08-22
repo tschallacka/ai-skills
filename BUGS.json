@@ -352,6 +352,27 @@
       "updated_at": "2026-08-22T19:42:10Z"
     },
     {
+      "id": "B24",
+      "title": "add-planning-bug's damaged-register guard relies on jq 1.7 empty-input behaviour, so under jq 1.6 a zero-byte register reports success",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Stub a jq on PATH that exits 0 silently when any argument equals the --arg name 'now' (planning/tests/test-add-planning-bug.sh does exactly this), then run add-planning-bug.sh on a plan with no planning-bugs.json under jq-1.6.",
+      "observed": "The stubbed append writes a zero-byte register; the read-back guard jq -e on an empty file exits 0 under jq-1.6 (no input means no output, so -e never gets a false/null last output), the writer prints Recorded, and test-add-planning-bug fails its three refusal assertions. The same test passed where CI runs jq >= 1.7, whose -e exits 4 on no output.",
+      "expected": "A write that produced nothing is refused with 70 naming the register and id, whatever jq version reads it back.",
+      "mechanism": "The guard delegated the emptiness check to jq -e's no-output exit status, which changed between jq 1.6 and 1.7 instead of being decided by this script.",
+      "surfaces": [
+        "planning/scripts/add-planning-bug.sh"
+      ],
+      "fix": "add-planning-bug.sh checks the register itself before the read-back: a zero-byte result is refused with the same 70 message naming register and id. The guard no longer depends on jq -e empty-input behaviour, which differs between jq 1.6 (exit 0) and 1.7 (exit 4).",
+      "verification": "test-add-planning-bug.sh fails at 885cba2 and on this branch pre-fix under jq-1.6 with three refusal assertions; it passes with the guard. Mutation: removing only the [ -s ] line reproduces all three failures under jq-1.6. The existing assertions were already mutation-hardened in B12 work; no new test needed — the seam test was right, the guard was version-dependent.",
+      "found_by": "the full-suite run on this machine after the B18-B22 fixes: test-add-planning-bug failed identically at 885cba2, before this branch touched anything",
+      "notes": "Second site of the same class, not fixed here for scope: validate-plan-commands-lib.sh line ~29 answers extension registration with jq -e index() against the registry file — an empty never-executable-extensions.json would read as every extension registered under jq-1.6. That registry ships non-empty and is gate-checked elsewhere, so the exposure differs from a caller-supplied write; worth hardening if it is ever regenerated empty.",
+      "created_at": "2026-08-22T20:20:09Z",
+      "updated_at": "2026-08-22T20:21:22Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",

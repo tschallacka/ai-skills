@@ -148,7 +148,10 @@ $current
 JSON
 
 # A writer that reports success having written nothing is worse than one that
-# fails: the caller believes the defect is recorded. Read the result back.
+# fails: the caller believes the defect is recorded. The emptiness check is
+# ours, not jq's: jq -e on empty input exits 0 through 1.6 and 4 from 1.7, so
+# a guard keyed on that status flips with the jq version. Read the result back.
+[ -s "$register" ] || plan_die "wrote $register but $bug_id is not in it; the register may be damaged" 70
 jq -e --arg id "$bug_id" 'any(.bugs[]?; .id == $id)' "$register" >/dev/null 2>&1 \
     || plan_die "wrote $register but $bug_id is not in it; the register may be damaged" 70
 

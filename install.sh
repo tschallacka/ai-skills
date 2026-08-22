@@ -2527,8 +2527,11 @@ tests/fixtures/progress-shape/progress.md
 tests/lib-test.sh
 tests/test-add-fix-claim.sh
 tests/test-add-planning-bug.sh
+tests/test-add-work-unit-staging.sh
 tests/test-adversarial-review-cycles.sh
 tests/test-adversarial-review-sources.sh
+tests/test-adversarial-review-mint-order.sh
+tests/test-adversarial-review-preamble.sh
 tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
@@ -2574,6 +2577,7 @@ tests/test-plan-context-reviewer.sh
 tests/test-plan-context-unit-entry.sh
 tests/test-plan-context.sh
 tests/test-plan-dir-synonym.sh
+tests/test-owned-roster-scaffold.sh
 tests/test-plan-env.sh
 tests/test-plan-integrity-and-monitor.sh
 tests/test-plan-libs-build.sh
@@ -2601,6 +2605,7 @@ tests/test-target-path-validation.sh
 tests/test-target-reachability-gate.sh
 tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
+tests/test-verifier-reach-memo.sh
 tests/test-voice-artifact-drift.sh
 EOF
             ;;
