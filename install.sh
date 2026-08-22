@@ -2368,6 +2368,7 @@ PACKAGE-MANIFEST.txt
 requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
+templates/plan-overview.html.tmpl
 roles/planning.md
 roles/execution.md
 roles/cleanup.md
@@ -2388,6 +2389,7 @@ scripts/create-progress.sh
 scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
+scripts/render-plan-overview.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
@@ -2567,6 +2569,7 @@ tests/test-lib-table.sh
 tests/test-limited-run-contract.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
+tests/test-plan-overview.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh
