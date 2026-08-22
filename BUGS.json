@@ -523,6 +523,28 @@
       "notes": "This manufactures the precondition of B20. The registered placeholder token is already in placeholders.json and is what add-goal.sh emits, so restoring it keeps the roster in a shape every reader already knows.",
       "created_at": "2026-08-22T16:21:07Z",
       "updated_at": "2026-08-22T19:55:28Z"
+    },
+    {
+      "id": "B25",
+      "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Feed a finding row whose prose cell contains a literal | (or \\|) through update-adversarial-review.sh.",
+      "observed": "plan_render_csv_table refuses: the cell contains a pipe character that would break the Markdown table. An escaped \\| matches the same post-parse /\\|/ test, so no spelling of a pipe reaches a cell today.",
+      "expected": "Either an escape spelling that lands a literal pipe in the rendered cell, or documented wording guidance for referencing table rows without pipes.",
+      "mechanism": "The renderer rejects any parsed field containing a pipe before emitting the row; parse_csv knows no backslash-pipe escape, only doubled quotes for quotes.",
+      "surfaces": [
+        "planning/scripts/lib/table/plan_render_csv_table.sh",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "health-app worker minor note in ../health-app/bug-fixed/fixed-by-ai-skills.md (2026-08-22): reviewer prose quoting table syntax needs guidance",
+      "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
+      "created_at": "2026-08-22T20:49:54Z",
+      "updated_at": "2026-08-22T20:49:54Z"
     }
   ]
 }
