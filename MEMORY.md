@@ -58,7 +58,9 @@ untestable, build the seam — a stub on `PATH` is usually enough.
 
 **`jq` given empty input never runs its filter.** It exits 0 having written
 nothing, so a writer reports success over a zero-byte file. `jq -e` also exits
-**4** on empty output, which is the sound case for a validator.
+**4** on empty output — but only from 1.7: under 1.6 an empty input still
+exits **0**, so a guard keyed on `-e`'s status flips with the jq version
+(B24). Decide emptiness in the script, not in the tool.
 
 **Documented behaviour can still be a defect.** `--skill a --skill b` discarding
 `a` was in the README, which made it documented and no less wrong. The manual was
