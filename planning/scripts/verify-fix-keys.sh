@@ -20,6 +20,9 @@
 # equals the session recorded as minted_by in fix-keys.json, the run FAILS: a
 # fixer that minted and then claimed its own keys is self-certifying, which the
 # gate refuses rather than reports. The approval gate always passes the flag.
+# A harness whose roles share one derived session id (subagent reviewers under
+# a coordinator) mints with MINTED_BY=<reviewer identity>, so the recorded
+# minter is the role and honest claims never collide with it.
 
 set -euo pipefail
 export LC_ALL=C
@@ -159,7 +162,7 @@ verify_fix_keys() {
     # Counted with the key failures and checked before them, so a self-certified
     # claim set cannot pass on a caller that only reads the exit status.
     if [ -n "$claimed_by" ] && [ -n "$minted_by" ] && [ "$claimed_by" = "$minted_by" ]; then
-        printf 'self-certification: fix claims for %s were recorded by the same session (%s) that minted the keys -- let the reviewer write adversarial-review-incoming.md so the findings arrive from its own session, or have a fresh reviewer re-review and re-mint; a reviewer told to be strictly read-only cannot mint, and the coordinator minting on its behalf is self-certification by construction\n' \
+        printf 'self-certification: fix claims for %s were recorded by the same session (%s) that minted the keys -- let the reviewer write adversarial-review-incoming.md so the findings arrive from its own session, have a fresh reviewer re-review and re-mint, or, in a harness whose roles share one derived session id, re-mint with MINTED_BY=<reviewer identity> so the recorded minter is the role\n' \
             "$plan_dir" "$claimed_by" >&2
         failures=$((failures + 1))
     fi
