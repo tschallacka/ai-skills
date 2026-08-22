@@ -89,6 +89,13 @@ plan_rewrite_owned_work_units() {
             idx=$((idx + 1))
             printf '§ 9.%d\n`%s` — %s\n\n' "$idx" "$id" "$ch"
         done < <(plan_goal_units "$inventory" "$goal")
+        # An emptied roster returns to the just-created shape rather than
+        # vanishing: the placeholder is registered and is what the next
+        # add-work-unit.sh replaces, so a goal stays addable after its last
+        # unit goes.
+        if [ "$idx" -eq 0 ]; then
+            printf '§ 9.1\n<add work units with add-work-unit.sh>\n\n'
+        fi
         printf '%s\n\n' "$testing_heading"
         printf '| Test required | Rationale |\n%s\n%s\n' "$separator" "$testing_row"
     } > "$body_file"

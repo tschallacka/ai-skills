@@ -485,7 +485,7 @@
     {
       "id": "B21",
       "title": "remove-work-unit.sh on a goal's last unit deletes the whole numbered Owned-work-units roster instead of leaving the empty scaffold, which breaks the next add",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -496,12 +496,12 @@
       "surfaces": [
         "planning/scripts/plan-reconcile-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "plan_rewrite_owned_work_units emits the created scaffold when the goal has zero remaining rows: a § 9.1 holding <add work units with add-work-unit.sh>, the registered placeholder add-goal.sh writes and add-work-unit.sh replaces. Survivors keep their renumbered §9.N labels; only the empty case gained the scaffold.",
+      "verification": "planning/tests/test-owned-roster-scaffold.sh: against HEAD removing the last unit left no §9.1 and no placeholder, and the next add refused with 64; with the fix the scaffold survives, the re-add succeeds end to end, and the control proves survivors are relabelled without a stray placeholder. Mutation: whole-revert to HEAD reproduces all five failures.",
       "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #4)",
       "notes": "This manufactures the precondition of B20. The registered placeholder token is already in placeholders.json and is what add-goal.sh emits, so restoring it keeps the roster in a shape every reader already knows.",
       "created_at": "2026-08-22T16:21:07Z",
-      "updated_at": "2026-08-22T16:21:07Z"
+      "updated_at": "2026-08-22T19:55:28Z"
     }
   ]
 }
