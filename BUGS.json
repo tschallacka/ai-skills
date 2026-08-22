@@ -310,7 +310,7 @@
     {
       "id": "B22",
       "title": "update-adversarial-review.sh rewrites the Findings table and archives history before mint-fix-keys.sh runs, so a gated-row failure leaves the table replaced without keys",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -322,12 +322,34 @@
         "planning/scripts/update-adversarial-review.sh",
         "planning/scripts/mint-fix-keys.sh"
       ],
+      "fix": "5c047d9 — update-adversarial-review.sh stages the rewrite into its temp file, mints that staged copy against a throwaway plan directory, and only then archives history, renames the review file, removes the incoming file, and runs the real mint; a refusal forwards mint exit code and adds the remedy.",
+      "verification": "planning/tests/test-adversarial-review-mint-order.sh: against HEAD the unmintable row rewrote adversarial-review.md, archived a history cycle and consumed the incoming file; with the fix all three files stay byte-identical, no fix-keys.json appears, the repaired retry completes end to end, and direct mint invocations still refuse. Mutation: whole-revert to HEAD reproduces the three symptoms.",
+      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #5)",
+      "notes": "Same class as the contract 2 incident where --review-status approved destroyed the session secret before its own guard sites. Workaround on the VPS (normalize Work unit cells before running) is no longer needed for safety, though clean cells still avoid refusals. Sequenced first at the health-app worker request; they had hit this twice on 2026-08-22.",
+      "created_at": "2026-08-22T16:21:07Z",
+      "updated_at": "2026-08-22T19:42:10Z"
+    },
+    {
+      "id": "B23",
+      "title": "verify-fix-keys.sh self-certification gate cannot pass when reviewers share the coordinator's session id, so a legitimate claim reads as self-certified",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In an opencode harness: coordinator mints (or a subagent reviewer re-mints) with the shared derived session id, then the fixer claims via add-fix-claim.sh and verify-fix-keys.sh --claimed-by <session> runs — minted_by equals the claimed session for every pair, which the approval gate treats as self-certification.",
+      "observed": "minted_by == claimed session no matter who ran mint, because subagent reviewers share the coordinator's derived session id; the gate cannot distinguish roles. Workaround used on the VPS: the documented MINTED_BY override, attributing the mint to the reviewer role.",
+      "expected": "Either an explicit MINTED_BY is accepted as legitimate attribution, or the harness limitation is documented next to the gate so operators know the check is advisory there.",
+      "mechanism": "The session id names the secret dir and is derived per plan, not per agent; every role in one harness session derives the same id, so the minted_by/claimed-by equality the gate checks holds identically for honest and self-certifying flows.",
+      "surfaces": [
+        "planning/scripts/verify-fix-keys.sh",
+        "planning/scripts/mint-fix-keys.sh"
+      ],
       "fix": null,
       "verification": null,
-      "found_by": "ox-alpha exercising the planning skill on the health-app VPS (bugs-found-by-ox-alpha.md #5)",
-      "notes": "Same class as the contract 2 incident where --review-status approved destroyed the session secret before its own guard sites. Workaround on the VPS: normalize Work unit cells to a single WNN or N/A before running, and verify with verify-fix-keys.sh afterwards.",
-      "created_at": "2026-08-22T16:21:07Z",
-      "updated_at": "2026-08-22T16:21:07Z"
+      "found_by": "ox-alpha (<HEALTH> worker) reply in ../health-app/bug-fixed/fixed-by-ai-skills.md, 2026-08-22; details pending append to bugs-found-by-ox-alpha.md (#6)",
+      "notes": "Decision needed before fixing: accept explicit MINTED_BY as legitimate when set (weaker gate), or document that the self-certification check is only meaningful across distinct session secrets. Recorded from the worker's report; reproduction not yet run locally.",
+      "created_at": "2026-08-22T19:42:10Z",
+      "updated_at": "2026-08-22T19:42:10Z"
     },
     {
       "id": "B14",
