@@ -18,6 +18,10 @@
 # for findings that carry no fix key, or name the owning work unit (WNN) to gate
 # the finding. Cells must not contain `|`, and input must be LF, not CRLF.
 #
+# The input is a findings document, not bare rows: title/comment lines starting
+# with `#`, blank lines, and one repeated copy of the header row are skipped,
+# whatever the source, so a reviewer can paste their whole document.
+#
 # The previous Findings table is archived into adversarial-review-history.md
 # under a `## Cycle N` heading (--cycle numbers it; otherwise the highest
 # recorded number plus one) so reviewers of later cycles can see what earlier
@@ -25,7 +29,7 @@
 # already-recorded cycle while holding different rows is refused rather than
 # dropping them.
 #
-# Exit codes: 64 bad invocation or unusable CSV, 66 the plan or its review file
+# Exit codes: 64 bad invocation, 65 unusable CSV, 66 the plan or its review file
 # is missing, 73 --cycle collides with a recorded cycle holding other findings.
 
 set -euo pipefail
@@ -118,8 +122,9 @@ review_file="$plan_dir/adversarial-review.md"
 # leaked both mktemp files on every successful run.
 csv_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-table.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-rendered.XXXXXX")"
+filtered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-filtered.XXXXXX")"
 temporary_file="${review_file}.tmp.$$"
-trap 'rm -f "$csv_file" "$rendered_file" "$temporary_file"' EXIT
+trap 'rm -f "$csv_file" "$rendered_file" "$filtered_file" "$temporary_file"' EXIT
 
 # Reviewers write their findings to adversarial-review-incoming.md; this is its
 # only consumer. It takes precedence over stdin so a reviewer report survives
@@ -140,13 +145,25 @@ else
 fi
 [ -s "$csv_file" ] || plan_die "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
 
+# The input is a findings document, not bare rows: a reviewer's title line,
+# blank lines, and their own copy of the header row arrive here whatever the
+# source. Skip all three so the renderer sees rows only.
+findings_header='ID,Missing or over-broad item,Required plan change,Status,Work unit'
+awk -v header="$findings_header" '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    !header_dropped && $0 == header { header_dropped = 1; next }
+    { print }
+' "$csv_file" > "$filtered_file"
+mv "$filtered_file" "$csv_file"
+[ -s "$csv_file" ] || plan_die "no finding rows beneath the title/comment lines: write one row per line with 5 comma-separated columns (ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
+
 # The header row is prepended here, not left to the renderer. plan_render_csv_table
 # emits the |---| delimiter after row 1, which is correct for --table-paragraph
 # where the caller's first row IS the header. Passing findings straight in made
 # the first finding of every cycle the header: the table lost its column names
 # and AR-nn was presented as one. create-adversarial-review.sh writes this same
 # header, so the two must stay identical.
-findings_header='ID,Missing or over-broad item,Required plan change,Status,Work unit'
 plan_render_csv_table 5 "$(printf '%s\\n' "$findings_header"; awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
 
 # Archive the prior Findings rows (if any) into adversarial-review-history.md
