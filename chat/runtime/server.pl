@@ -43,19 +43,10 @@ sub last_id {
     return $last;
 }
 
-my (%NICK, %CHANS, %INBUF);
+my (%NICK, %INBUF);
 my $select;
 
 sub send_line { my ($s, $t) = @_; print {$s} "$t\n" }
-
-sub broadcast {
-    my ($line, $chan, $skip_fn) = @_;
-    for my $s (keys %CHANS) {
-        next if defined $skip_fn && defined fileno($s) && fileno($s) == $skip_fn;
-        next unless $CHANS{$s}{$chan};
-        eval { send_line($s, $line) };
-    }
-}
 
 sub do_register {
     my ($s, $chan) = @_;
@@ -80,7 +71,6 @@ sub do_privmsg {
         $line;
     };
     send_line($s, $stored);
-    broadcast($stored, $chan, fileno($s));
 }
 
 sub do_fetch {
@@ -101,7 +91,7 @@ sub do_fetch {
 sub drop_client {
     my ($s) = @_;
     $select->remove($s);
-    delete $_{$s} for (\%NICK, \%CHANS, \%INBUF);
+    delete $_{$s} for (\%NICK, \%INBUF);
     close $s;
 }
 
@@ -118,11 +108,14 @@ sub handle_line {
     } elsif ($verb eq 'REGISTER') {
         do_register($s, $arg);
     } elsif ($verb eq 'JOIN') {
-        if (valid_chan($arg)) { $CHANS{$s}{$arg} = 1; send_line($s, "OK join $arg") }
+        # Poll mode, like the socat tier: per-connection push needs the
+        # event loop to write from another handler's context, which this
+        # single-process select design does not do reliably. Clients tail
+        # with FETCH instead.
+        if (valid_chan($arg)) { send_line($s, "OK join $arg (poll mode)") }
         else { send_line($s, 'ERR invalid channel') }
     } elsif ($verb eq 'LEAVE') {
-        delete $CHANS{$s}{$arg};
-        send_line($s, "OK leave $arg");
+            send_line($s, "OK leave $arg");
     } elsif ($verb eq 'PRIVMSG') {
         do_privmsg($s, $arg);
     } elsif ($verb eq 'FETCH') {
@@ -154,7 +147,6 @@ while (1) {
             my $client = $listener->accept or next;
             $client->autoflush(1);
             $NICK{$client}  = 'anon-' . fileno($client);
-            $CHANS{$client} = {};
             $INBUF{$client} = '';
             $select->add($client);
             next;

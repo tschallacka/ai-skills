@@ -56,9 +56,10 @@ speak the protocol over the socket instead.
 ## Server runtimes
 
 `chat-server.sh` picks the first present of `python3 → node → perl → socat
-(driving runtime/bash-handler.sh)`, or honour `--runtime`. The socat tier is
-poll-mode: JOIN answers `OK join (poll mode)`, so clients should tail with
-FETCH; every other verb behaves identically.
+(driving runtime/bash-handler.sh)`, or honour `--runtime`. The python3 and
+node tiers push joined connections live; the perl and socat tiers are
+poll-mode - JOIN answers `OK join (poll mode)` and clients tail with FETCH.
+Every other verb behaves identically across tiers.
 
 ## When not to use
 
