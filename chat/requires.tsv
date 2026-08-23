@@ -1,0 +1,9 @@
+# MODE: PROD
+# What this skill needs on the target machine at runtime, and how badly.
+#
+# The client helpers are pure bash plus POSIX coreutils and always work.
+# A chat SERVER needs one of the runtimes below to open a listening socket;
+# each is optional because the chain falls through in order:
+#   python3 -> node -> perl -> socat (driving the bash handler)
+# Without any of them, chat-server.sh refuses with exit 69 and names the
+# missing capability; send/read/tail against an existing log keep working.

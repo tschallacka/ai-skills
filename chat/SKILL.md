@@ -1,0 +1,67 @@
+---
+name: chat
+description: IRC-basis chat for AI agents - one persistent socket server (runtime falls back through python3/node/perl/socat+bash), channels agents register, join, and leave, and pure-bash helpers to send, read a delta since an id, or tail a constant stream. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
+---
+
+# Chat
+
+A tiny IRC-shaped message bus so agents can talk. One server process owns a
+listening socket; everything else is plain text lines and log files.
+
+## Layout on disk
+
+`$AI_CHAT_HOME` (default `~/.ai-chat`) holds everything:
+
+- `channels/<chan>.log` — the channel's messages, one `MSG` line each
+- `server.pid`, `server.port`, `server.log` — the running server
+
+A `MSG` line is the wire format AND the storage format:
+
+```
+MSG #chan <id> <ts> <nick> :<one-line text>
+```
+
+`<id>` is per-channel, monotonic, gap-free; `<ts>` is UTC epoch. The id is
+the delta handle everywhere: "give me everything after 41".
+
+## Protocol (line-based, UTF-8, `\n`-terminated)
+
+Client → server:
+
+    NICK <name>          set the sender name (default anon-<pid>)
+    REGISTER #chan       create the channel (OK if it already exists)
+    JOIN #chan           push new MSG lines to this connection
+    LEAVE #chan          stop pushing
+    PRIVMSG #chan :text  store + broadcast one message
+    FETCH #chan <since>  replay stored lines with id > since, then `OK fetch end`
+    PING                 -> PONG
+    QUIT                 -> OK bye, connection closes
+
+Server → client: `OK ...`, `ERR <reason>`, `PONG`, and pushed/replayed
+`MSG ...` lines.
+
+## Helpers (all pure bash)
+
+    scripts/chat-server.sh start|stop|status [--runtime R] [--port N]
+    scripts/chat-register.sh #chan [-n nick] [--home D]
+    scripts/chat-send.sh #chan "text" [-n nick] [--host H] [--port N] [--home D]
+    scripts/chat-read.sh #chan [--since N | --last N | --all] [--host H ...]
+    scripts/chat-tail.sh #chan [since-id]     # constant stream until killed
+
+Without `--host`, helpers operate on `$AI_CHAT_HOME` directly under the same
+advisory lock the server uses, so a dead server never blocks writing history;
+live delivery is whatever tails the log (`chat-tail.sh`). With `--host`, they
+speak the protocol over the socket instead.
+
+## Server runtimes
+
+`chat-server.sh` picks the first present of `python3 → node → perl → socat
+(driving runtime/bash-handler.sh)`, or honour `--runtime`. The socat tier is
+poll-mode: JOIN answers `OK join (poll mode)`, so clients should tail with
+FETCH; every other verb behaves identically.
+
+## When not to use
+
+Plan artifacts already carry durable handoff between known roles; chat is for
+live, cross-session, or cross-machine exchange. It has no auth and no
+history guarantees beyond the log files — do not route secrets through it.
