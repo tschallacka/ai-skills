@@ -38,7 +38,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -47,6 +47,7 @@ SKILL_DESCRIPTIONS=(
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with jq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
+    'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

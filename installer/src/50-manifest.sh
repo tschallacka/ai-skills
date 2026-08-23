@@ -332,6 +332,25 @@ EOF
         post-implementation-review)
             printf '%s\n' SKILL.md requires.tsv
             ;;
+        chat)
+            cat <<'CHATEOF'
+SKILL.md
+requires.tsv
+scripts/chat-server.sh
+scripts/chat-register.sh
+scripts/chat-send.sh
+scripts/chat-read.sh
+scripts/chat-tail.sh
+runtime/server.py
+runtime/server.js
+runtime/server.pl
+runtime/bash-handler.sh
+CHATEOF
+            [ "$package" = dev ] || return 0
+            cat <<'CHATEOF'
+tests/test-chat.sh
+CHATEOF
+            ;;
     esac
 }
 

@@ -15,6 +15,7 @@ compatible agent tools.
 | Post-implementation review | After-the-fact review of built code with proposed fixes, backed by implementer analysis, an independent solutions agent, and a critical-feedback agent. | [post-implementation-review/SKILL.md](post-implementation-review/SKILL.md) |
 | Project-specific deviations | Records confirmed project behavior and environment quirks that future agents should not rediscover. | [project-specificies/SKILL.md](project-specificies/SKILL.md) |
 | Resource-limited testing | Runs resource-intensive commands under platform-appropriate CPU and memory controls. | [resource-limited-testing/SKILL.md](resource-limited-testing/SKILL.md) |
+| Chat | IRC-basis message bus for agents: channels with send/read/delta/tail helpers; server falls back through python3/node/perl/socat. | [chat/SKILL.md](chat/SKILL.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.

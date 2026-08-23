@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -85,6 +85,7 @@ SKILL_DESCRIPTIONS=(
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with jq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
+    'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -357,6 +358,8 @@ runtime_requirements() {
             ;;
         bug-report)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
+            ;;
+        chat)
             ;;
         planning)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
@@ -2633,6 +2636,25 @@ EOF
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md requires.tsv
+            ;;
+        chat)
+            cat <<'CHATEOF'
+SKILL.md
+requires.tsv
+scripts/chat-server.sh
+scripts/chat-register.sh
+scripts/chat-send.sh
+scripts/chat-read.sh
+scripts/chat-tail.sh
+runtime/server.py
+runtime/server.js
+runtime/server.pl
+runtime/bash-handler.sh
+CHATEOF
+            [ "$package" = dev ] || return 0
+            cat <<'CHATEOF'
+tests/test-chat.sh
+CHATEOF
             ;;
     esac
 }
