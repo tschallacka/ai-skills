@@ -7,6 +7,11 @@ generated artifact; keep the scripts, validator, tests, and this contract in
 sync. See `MAINTAINER.md` for the architecture, artifact relations, and
 behavior rules.
 
+"Internal" describes the audience, not the distribution: this file ships in
+the prod install and `role-context.sh` serves it to the maintainer, installer,
+oracle and eve roles (T28 decision), so it cannot be moved to dev-only without
+breaking the installed gatekeeper.
+
 ## Source of truth
 
 - Creation scripts define canonical document order, headings, tables, labels,

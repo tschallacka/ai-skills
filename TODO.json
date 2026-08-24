@@ -339,15 +339,15 @@
     {
       "id": "T21",
       "title": "Audit this repo for a rule whose complexity exceeds what it buys",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "From a worker report on another tree: a working-directory rebase rule bought exactly one relation out of ten, and produced roughly thirty findings across five review cycles -- the confinement set, a CDPATH predicate wrong three times, a stack-form table wrong twice in opposite directions, physical mode, stickiness, a base parameter and its unknown state. The replacement is the conservative rule that yields no edge where resolution is not obvious, costing the one measured relation. The reusable move is to measure the coverage a rule buys before deciding it is worth its failure rate. This repo has candidates: the `--stale` gate policies, the placeholder WARN/FAIL split in T18, the run-cache prohibited-word grep in T19, and the `plan_refuse_field_section` shape detection. For each: how many real defects has it caught, how many false positives has it produced, and what breaks if it is replaced with the conservative version. Precedent here is the Class A ban, approved and then withdrawn on evidence -- 24 hits, zero defects, several rewrites that made documents worse.",
-      "note": null,
+      "note": "Audit walked: ratchets (duplication, function-length) demand cap-lowering ceremony but caught two real migrations today and block growth, so they pay; registry-plus-gate rules (placeholders, goal-tables, state-change, document-sections, couplings) each name their gate; the shellcheckrc silences are three documented noise checks. Closest call was cap-maintenance friction on every dedupe; kept because the alternative is caps that lie. No rule found whose complexity exceeds what it buys.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T10:30:43Z"
     },
     {
       "id": "T23",
@@ -434,11 +434,11 @@
     {
       "id": "T31",
       "title": "Measure inside the two most expensive tests before deciding they are inherently slow",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "test-artifact-comparisons is 19.7s and test-plan-commands 18.0s, the top two of a 164s suite. Both drive real script invocations, which is the point of them, so the cost may be inherent -- but that has not been measured, only assumed. Time the invocations inside each and separate the work the test exists to do from setup repeated per case: a fixture built once and copied is cheaper than one built per assertion. Decide per test, and record which are inherent so nobody re-opens this.",
-      "note": "Baseline recorded 2026-08-20: 164s sequential for 80 tests. Sleeps are 3.0s across 13 sites and mermaid rendering 389ms, so neither is worth touching. See T30 for the one case with an already-proven win.",
+      "note": "Measured this session under limited-run: test-plan-commands 26s, test-safeguards 18s, test-review-lifecycle 16s. Both leaders are structurally expensive: plan-commands drives ~30 real helper CLIs each paying git snapshot + interpreter startup; safeguards spends deliberate wall clock proving time-based behaviour (bounds, grace, escalation). No hot loop found inside either; the cost is the design, not a defect.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-artifact-comparisons.sh",
@@ -446,7 +446,7 @@
         "run-tests.sh"
       ],
       "created_at": "2026-08-20T17:32:40Z",
-      "updated_at": "2026-08-20T17:32:40Z"
+      "updated_at": "2026-08-24T10:30:43Z"
     },
     {
       "id": "T32",
@@ -522,11 +522,11 @@
     {
       "id": "T28",
       "title": "Decide whether MAINTAINER-STYLE-CONTRACT.md belongs in a prod install",
-      "status": "open",
+      "status": "done",
       "priority": "low",
       "parent": null,
       "detail": "It is the one file whose name says maintainer while it still sits in the prod arm of skill_files() and is marked MODE: PROD. Shipped ROLES.md references it in prose, and four tests assert against it. Either it is a runtime contract an installed skill reads -- in which case the name is wrong -- or it is a maintainer document and should move to the dev arm.",
-      "note": "Surfaced by making the npm package and the release tarball agree file for file: it was the only disagreement.",
+      "note": "Decision: keeps shipping. role-context.sh serves MAINTAINER-STYLE-CONTRACT.md to maintainer, installer, oracle and eve roles, so it is a runtime dependency of the installed gatekeeper, not a maintainer luxury. Its header now says internal means audience, not distribution.",
       "blocked_on": null,
       "refs": [
         "planning/MAINTAINER-STYLE-CONTRACT.md",
@@ -535,7 +535,7 @@
         "RELEASE.md"
       ],
       "created_at": "2026-08-20T16:09:57Z",
-      "updated_at": "2026-08-20T16:09:57Z"
+      "updated_at": "2026-08-24T10:30:43Z"
     },
     {
       "id": "T29",
@@ -572,18 +572,18 @@
     {
       "id": "T34",
       "title": "test-safeguards went from 0.4s to 13s; decide whether the deaf-agent case earns 6.5s of it",
-      "status": "open",
+      "status": "done",
       "priority": "low",
       "parent": null,
       "detail": "The watchdog tests are wall-clock bound by construction: 6.5s is the TERM-ignoring agent (1s bound plus the 5s KILL grace) and 2.5s the ordinary kill case. That is the one scenario proving the KILL escalation, so dropping it removes real coverage; shortening the grace to make the test fast would weaken the production value. Options: keep it, make the grace configurable so the test can use a shorter one, or move the slow case behind an opt-in.",
-      "note": "Measured at 13s here after the merge, against the 164s suite baseline in T31. Reported by the subagent as the cost of its own tests.",
+      "note": "Decision: the deaf-agent case stays. It is the only pin of TERM-then-KILL escalation (an agent that traps TERM would otherwise turn the bound into a suggestion), costs roughly 5s of an 18s test (1s bound plus escalation grace plus poll granularity, measured), and its removal would trade a real guarantee for dev-only seconds.",
       "blocked_on": null,
       "refs": [
         "benchmark/planning/tests/test-safeguards.sh",
         "benchmark/planning/runtime/lib-agent.sh"
       ],
       "created_at": "2026-08-21T10:29:27Z",
-      "updated_at": "2026-08-21T10:29:27Z"
+      "updated_at": "2026-08-24T10:30:43Z"
     },
     {
       "id": "T36",
