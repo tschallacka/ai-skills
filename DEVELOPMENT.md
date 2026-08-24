@@ -100,6 +100,27 @@ The package contents should include `install.sh`, `package.json`, `README.md`,
 to the existing `install.sh`; do not duplicate the installer in JavaScript or
 move the skills to satisfy npm packaging.
 
+## Verifying on both shells
+
+`./verify-both-shells.sh` runs the whole suite twice — local bash and the bash
+3.2 floor via the dev flake — in a detached worktree under `TMPDIR`, so it
+verifies what is in front of you without blocking edits here. The macOS legs
+of CI are blocking, so this is also where a BSD-only failure first shows.
+
+- One verification at a time: two concurrent runs used to sweep each other's
+  worktree away mid-run (B16). `--keep` preserves the logs and worktree of a
+  red run; everything else cleans up after itself.
+- Never rewrite `verify-both-shells.sh` while a run is in flight. Bash reads
+  its source incrementally, so an edit lands mid-parse and executes comment
+  fragments as commands (B17, the `been: command not found` ghost).
+- Editing any other file during a run is fine: the worktree is overlaid once,
+  at startup, from the then-current tree — later edits belong to the next run.
+- A failure that only exists on macOS cannot be reproduced on Linux. Diagnose
+  it by pushing and reading the leg's output, not by reading code — which only
+  works if tests can speak: never redirect a setup command to `/dev/null`
+  under `set -euo pipefail`, because `set -e` kills the test there with its
+  diagnosis already discarded (B31).
+
 ## Versioning and publishing
 
 Use semantic versioning for releases:
