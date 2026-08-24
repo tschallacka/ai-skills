@@ -344,7 +344,9 @@ plan_validate_propagation_roster() {
                 if (id ~ /^W[0-9][0-9]+$/) print id
             }
         ' "$goal_file")"
-        roster_ids="$(printf '%s\n%s\n' "$roster_ids" "$blurb_ids" | grep -E '^W[0-9][0-9]+$' | sort -u | tr '\n' ' ')"
+        # An empty match is a real answer here, not an error: grep's exit 1
+        # under pipefail would abort the whole run before any verdict prints.
+        roster_ids="$(printf '%s\n%s\n' "$roster_ids" "$blurb_ids" | { grep -E '^W[0-9][0-9]+$' || true; } | sort -u | tr '\n' ' ')"
         # Roster-only units: a roster id the inventory does not assign to this
         # goal. Ids not in the plan at all are skipped; cross-plan references
         # sit after the em-dash and are already out of the leading run.

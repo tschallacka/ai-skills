@@ -75,7 +75,7 @@
     {
       "id": "B36",
       "title": "A goal with no bare work-unit ids in its roster aborts validate-plan, which exits 1 with no verdict",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "urgent",
       "parent": null,
@@ -86,12 +86,12 @@
       "surfaces": [
         "planning/scripts/validate-plan-propagation-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session — the roster_ids pipeline guards its grep with || true inside a brace group, the same escape every sibling assignment in the file already uses; an empty match is an answer, not an error",
+      "verification": "New empty-roster case in test-roster-cross-reference.sh: stripping the bare WNN blurbs must still produce roster-omits findings and a Plan validation failed verdict. Mutation: reverting to the unguarded grep fails with \"the roster check never ran\" — exactly the missing-summary signature.",
       "found_by": "an active worker on the installed skill, hitting it on goal 05; reproduced here against the current tree",
       "notes": "Worse than a wrong verdict: the run reports none, and every pass after the roster is skipped silently, so a plan can be far more broken than the output suggests. A guard on that assignment is the immediate fix, but the class deserves the gate -- PORTABILITY.md already bans `| grep -q` under pipefail for the SIGPIPE variant, and this is its sibling: a grep whose empty result is the ordinary case, inside an assignment, under set -e. A first fix-probe here added || true and appeared not to help, which was a botched edit rather than evidence; the bash -x trace is what settled the mechanism.",
       "created_at": "2026-08-24T13:33:28Z",
-      "updated_at": "2026-08-24T13:33:28Z"
+      "updated_at": "2026-08-24T14:54:23Z"
     },
     {
       "id": "B3",

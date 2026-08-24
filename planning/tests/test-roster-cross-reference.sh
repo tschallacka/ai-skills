@@ -77,4 +77,28 @@ case "$message" in
     *) t_fail "the refusal did not name the mis-claimed unit: $message" ;;
 esac
 
+# ---- an empty roster must not abort the run before any verdict (B36) --------
+# A goal whose §9.x section holds no bare `WNN` blurb leaves both awk passes
+# empty; grep then matches nothing, and its exit 1 under pipefail used to abort
+# validate-plan mid-pass with no summary at all. An empty match is a real
+# answer: the run continues and reports the roster omission like any other.
+plan="$(fresh_plan empty-roster)"
+goal_file="$plan/01-plan-dir-synonym/goal.md"
+grep -v '^`W[0-9][0-9]` —' "$goal_file" > "$goal_file.tmp"
+mv "$goal_file.tmp" "$goal_file"
+if grep -qE '^`W[0-9][0-9]`' "$goal_file"; then
+    t_fail 'the empty-roster fixture still carries a bare work-unit id'
+fi
+rc=0
+message="$("$scripts_dir/validate-plan.sh" "$plan" 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || t_fail 'an empty roster validated clean'
+case "$message" in
+    *'roster omits'*) ;;
+    *) t_fail "the roster check never ran: $message" ;;
+esac
+case "$message" in
+    *'Plan validation failed'*) ;;
+    *) t_fail "the run aborted before a verdict printed: $message" ;;
+esac
+
 t_end
