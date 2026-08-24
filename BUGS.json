@@ -226,7 +226,7 @@
     {
       "id": "B16",
       "title": "verify-both-shells.sh deletes a concurrent run's live worktree, failing that run wholesale",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -237,12 +237,12 @@
       "surfaces": [
         "verify-both-shells.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "already in tree (pid beside the worktree, sweep skips a live owner); verified this session, see verification",
+      "verification": "Planted three registered verify-wt.* fixtures -- one whose harness.pid is a live sleep, one with pid 999999, one with no pid file -- then ran ./verify-both-shells.sh once. Output: leaving live worktree ...livefix (harness pid N), sweeping leftover ...stalefix and ...stalefix2; after the run only the live fixture remained registered. The registration-before-pid-write race cannot happen: a run registers its worktree only after its pid file exists.",
       "found_by": "the verification of c565658, which I started and then started a second one for the next commit while it was still running",
       "notes": "Same class as the test-root sweep in run-tests.sh, which codex fixed with a run-id marker after I had concluded a run could not distinguish its own leftovers from a concurrent run live directories. I wrote that reasoning down for run-tests.sh and did not apply it to my own harness. A fix is in the working tree, unverified: each run writes its pid beside its worktree and the sweep skips any whose owner is still running. Proving it means planting a worktree owned by a live process and running the sweep, which is invasive enough to want its own moment rather than being folded into another commit. Until then the rule is one verification at a time, and a wholesale failure with missing-file errors is this, not a regression in the code under test. CI cannot close this one: it runs a single suite per job, so nothing there exercises two concurrent verifications. The proof has to be local and deliberate.",
       "created_at": "2026-08-21T11:21:03Z",
-      "updated_at": "2026-08-21T11:28:09Z"
+      "updated_at": "2026-08-24T08:47:14Z"
     },
     {
       "id": "B18",
@@ -529,23 +529,23 @@
     {
       "id": "B17",
       "title": "verify-both-shells.sh executes a stray word, printing \"been: command not found\"",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
       "reproduce": "Not yet isolated. Seen once in the run whose worktree base was 359e7ff: ./verify-both-shells.sh --keep printed the error between the worktree line and the bash 5.3 summary.",
       "observed": "./verify-both-shells.sh: line 106: been: command not found — then both legs ran and reported 88 passed, 0 failed, so the run itself was unaffected.",
       "expected": "No shell noise from the harness.",
-      "mechanism": "Not established, and deliberately not chased yet. The line number does not point at the culprit in the current file: the harness was edited after that run started, so numbering shifted. The word `been` appears in the repo only in a comment at line 97, which suggests a quoting fault where part of a comment or a multi-line string reaches the shell as a command -- the report function grew a multi-line printf and a comment block in the same change that added failing-test output. A stray word being executed means something there is unquoted, which is worth finding even though the symptom is cosmetic.",
+      "mechanism": "Not a code path. The observed run executed the uncommitted working-tree copy while the B16 sweep block was being written into it (base 359e7ff at 11:18-11:21 UTC; the block landed as 1081e19). Bash reads scripts incrementally, so when the file was rewritten beneath the running instance it resumed mid-comment and executed a fragment as a command word. No committed revision of the harness can execute a stray word: there is no eval, and shellcheck reports no unquoted-expansion finding. A clean single-writer full run printed zero stray output.",
       "surfaces": [
         "verify-both-shells.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session -- a header warning on verify-both-shells.sh (never rewrite the file while a run is in flight); the code needed no change",
+      "verification": "Static: no eval/unquoted execution path in any revision (shellcheck clean at error severity). Dynamic: baseline ./verify-both-shells.sh run at 3701d04 completed 95/95 on bash 5.3 with no stray output.",
       "found_by": "the verification of 359e7ff, which reported it while otherwise passing 88 of 88 on both shells",
       "notes": "Recorded to be investigated later rather than fixed on sight. Related to B16 only by file: that one is the worktree sweep deleting a live run, and its fix is in the tree unverified.",
       "created_at": "2026-08-21T11:29:11Z",
-      "updated_at": "2026-08-21T11:29:11Z"
+      "updated_at": "2026-08-24T08:47:14Z"
     },
     {
       "id": "B21",
@@ -610,6 +610,27 @@
       "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
       "created_at": "2026-08-22T20:49:54Z",
       "updated_at": "2026-08-22T20:49:54Z"
+    },
+    {
+      "id": "B29",
+      "title": "test-mermaid-accuracy fails under the flake browser: chromium sandbox blocks mmdc, and every sequenceDiagram loses puppeteer render race",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "nix develop -c bash planning/tests/test-mermaid-accuracy.sh   # with mmdc provided by flake.nix",
+      "observed": "10x \"mmdc rejected the diagram ... Failed to launch the browser process ... SUID sandbox helper binary\" without flags; with --no-sandbox, exactly the sequenceDiagram blocks fail with \"svg element not in render tree\" while flowcharts render. CI mermaid-render renders the same diagrams green.",
+      "expected": "The render gate passes where the diagrams are valid, reports UNCONFIGURED when no browser can launch here, and still rejects genuinely invalid diagrams.",
+      "mechanism": "Two stacked environment mismatches. (1) mmdc launched chromium with its default sandbox, impossible in this container/root context -- ci.yml already solves that for CI. (2) The nixpkgs mermaid-cli/chromium pair has a version skew: puppeteer evaluation loses the render race for every sequenceDiagram regardless of content, proven by minimal controls (flowchart TD A-->B renders; sequenceDiagram A->>B hi fails deterministically).",
+      "surfaces": [
+        "planning/tests/test-mermaid-accuracy.sh"
+      ],
+      "fix": "this session -- per-render --no-sandbox/--disable-dev-shm-usage with an isolated chromium profile dir; two control probes classify the renderer before its verdicts are trusted; the known skew signature on a sequenceDiagram downgrades to WARN only while the control pair reproduces it, everything else still fails",
+      "verification": "Suite leg green locally. Mutations: a broken flowchart still FAILs (UnknownDiagramError reported); a broken sequenceDiagram still FAILs (parse error, different signature, not masked by the skew tolerance); removing the no-sandbox flags reproduces the original browser-launch failure the UNCONFIGURED branch now names.",
+      "found_by": "./verify-both-shells.sh baseline run during B16 verification -- the failure was invisible until the dev flake supplied mmdc to the bash 3.2 leg",
+      "notes": "CI remains the syntax authority: it brings its own browser via npx and has always rendered these blocks. The local probes exist so the suite is green in the environment flake.nix declares without weakening rejection of real defects.",
+      "created_at": "2026-08-24T08:47:14Z",
+      "updated_at": "2026-08-24T08:47:14Z"
     }
   ]
 }

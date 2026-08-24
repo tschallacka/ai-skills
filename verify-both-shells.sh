@@ -19,6 +19,10 @@
 # in the main repo, and it lives in TMPDIR, never under the repo: a worktree
 # inside it gets picked up by the filesystem scans and lands machine-specific
 # paths in generated artifacts, which is how PORTABILITY.md was once polluted.
+#
+# Never rewrite this file while a run is in flight: bash reads its source
+# incrementally, so a mid-run edit makes it execute a fragment of the new text
+# as commands -- the "been: command not found" of B17 came from exactly that.
 set -uo pipefail
 
 src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

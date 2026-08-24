@@ -327,13 +327,70 @@ done
 
 if command -v mmdc >/dev/null 2>&1; then
     rendered=0
+    sequence_skew=0
+    # Chromium cannot use its setuid sandbox in a container or under a root uid,
+    # so mmdc dies launching the browser rather than parsing the diagram -- the
+    # same reason the mermaid-render CI job passes these flags (ci.yml). Without
+    # them a flake-provided mmdc reads as broken diagrams.
+    #
+    # render_once <diagram> <output>: one mmdc attempt with its own chromium
+    # profile directory, so a browser that died mid-render cannot leave the
+    # shared default profile locked for every later diagram. Returns the render
+    # status; the caller retries and classifies.
+    render_once() {
+        local diagram="$1" output="$2"
+        profile="$(mktemp -d "$work/profile.XXXXXX")"
+        printf '%s\n' "{ \"args\": [\"--no-sandbox\", \"--disable-dev-shm-usage\", \"--user-data-dir=$profile\"] }" > "$work/puppeteer.json"
+        if mmdc -q -p "$work/puppeteer.json" -i "$diagram" -o "$output" >"$work/render.log" 2>&1; then
+            rm -rf "$profile"
+            return 0
+        fi
+        rm -rf "$profile"
+        return 1
+    }
+    # Probe the renderer before trusting its verdicts. The nixpkgs pair of
+    # mermaid-cli and chromium has a version skew that loses puppeteer's
+    # evaluation race on every sequenceDiagram ("svg element not in render
+    # tree") while flowcharts still render, and CI -- which brings its own
+    # browser -- renders the same diagrams fine. Two minimal controls separate
+    # that local skew from a diagram actually being rejected: only the known
+    # signature, only while the control sequence reproduces it and the control
+    # flowchart renders, is a failure downgraded to a warning.
+    ctrl="$work/mmd/control-flowchart.mmd"
+    printf '%s\n' 'flowchart TD' '    A-->B' > "$ctrl"
+    if ! render_once "$ctrl" "$ctrl.svg"; then
+        printf '%s\n' 'test-mermaid-accuracy: UNCONFIGURED (browser) — mmdc cannot launch even for a control flowchart here; the structural checks ran, mermaid syntax itself is unverified; `mermaid-render` CI always runs it' >&2
+        group_done "mmdc rendered 0 diagrams"
+        [ "$(t_failures)" -eq 0 ] || exit 1
+        printf '%s\n' 'test-mermaid-accuracy: PASS'
+        exit 0
+    fi
+    ctrl="$work/mmd/control-sequence.mmd"
+    printf '%s\n' 'sequenceDiagram' '    A->>B: hi' > "$ctrl"
+    if ! render_once "$ctrl" "$ctrl.svg"; then
+        sequence_skew=1
+        printf '%s\n' 'mermaid-accuracy: WARN: this browser build cannot render any sequenceDiagram (mermaid-cli/chromium skew); sequence blocks are checked structurally, and CI mermaid-render is the syntax authority for them' >&2
+    fi
     for f in "$work"/mmd/*.mmd; do
+        case "$(basename "$f")" in control-*) continue ;; esac
         rendered=$((rendered + 1))
         where="$(basename "$f" .mmd | tr '@' ':')"
-        render_log="$work/render.log"
-        if ! mmdc -q -i "$f" -o "$f.svg" >"$render_log" 2>&1; then
-            note_fail "mmdc rejected the diagram at $where: $(tr '\n' ' ' < "$render_log" | cut -c1-200)"
+        if render_once "$f" "$f.svg"; then
+            continue
         fi
+        # One retry: under load puppeteer can lose its evaluation race on a
+        # diagram that renders fine standalone. A genuinely rejected diagram
+        # fails twice and is still classified below.
+        if render_once "$f" "$f.svg"; then
+            continue
+        fi
+        if [ "$sequence_skew" -eq 1 ] \
+            && grep -q 'svg element not in render tree' "$work/render.log" \
+            && grep -qE '^sequenceDiagram' "$f"; then
+            printf '%s\n' "mermaid-accuracy: WARN: $where not rendered -- the local browser build rejects every sequenceDiagram; see the probe warning above" >&2
+            continue
+        fi
+        note_fail "mmdc rejected the diagram at $where: $(tr '\n' ' ' < "$work/render.log" | cut -c1-200)"
     done
     group_done "mmdc rendered $rendered diagrams"
 else

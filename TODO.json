@@ -604,15 +604,15 @@
     {
       "id": "T0",
       "title": "A plan-to-HTML renderer",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "A shell script that turns a plan's Markdown into one self-contained HTML file suitable for publishing through the artifact skill, so a reviewer can read a whole plan — description, inventory, goals, steps, findings, progress — in a browser instead of opening twenty files. Contract 15 says the documents exist to be human-followable; this is the logical next step for the reviewer who is not sitting in the repo. Constraints it must respect: no new runtime dependency (jq is the ceiling, so no pandoc/node), bash 3.2 and BSD userland, self-contained output with no external assets (the artifact CSP blocks them), and it must read plan content through the sanctioned readers rather than parsing files directly. Dev-only, so it does not need a manifest row.",
-      "note": null,
+      "note": "Shipped as render-plan-overview.sh plus plan-overview.html.tmpl (5cc9e31), registered and pinned by test-plan-overview.sh (516ddc4, fe35b27); the entry was never closed.",
       "blocked_on": null,
       "refs": [],
       "priority": "someday",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T08:47:35Z"
     }
   ]
 }
