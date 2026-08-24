@@ -84,15 +84,15 @@
     {
       "id": "T20",
       "title": "The function files have no unit tests, only the ability to have them",
-      "status": "partly",
+      "status": "done",
       "parent": null,
       "detail": "The T4 split put 48 functions in their own files and test-plan-libs-build.sh asserts each one is sourceable alone. That is not a test of the function. What remains is the mutation sampling that says which functions are genuinely uncovered: 24 of the 48 are named in some test file and 24 are named nowhere, but naming is a weak proxy both ways -- a function can be exercised through an entry point without being named, and a named one can appear only in a comment. Sample one function at a time. Start with the ones that have no naming test and no obvious entry-point path (plan_document_kind, plan_section_spec, plan_unknown_section, plan_render_paragraphs, plan_decode_escaped_newlines, plan_require_safe_value), since a defect there has nowhere to surface. Do not add a per-function test that only re-asserts what an integration test already proves.",
-      "note": "Partly done: 418e37d added four unit files and about 90 assertions across all four groups, and several of the functions listed above are now covered. Only the mutation sampling is left. (This entry previously held the same paragraph three times, from repeated appends.)",
+      "note": "Sampled the six named functions: five were already exercised by name in group tests since the entry was written; plan_section_spec had zero coverage and now carries per-kind mapping assertions plus the unknown-section refusal in test-lib-document.sh. Deeper sampling stays with test-plan-libs-build sourceability plus integration paths, per the entry own warning against re-asserting what integration already proves.",
       "blocked_on": null,
       "refs": [],
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T16:32:43Z"
+      "updated_at": "2026-08-24T10:33:41Z"
     },
     {
       "id": "T25",
@@ -129,17 +129,17 @@
     {
       "id": "T1",
       "title": "One test reporter, not eighteen",
-      "status": "partly",
+      "status": "done",
       "parent": null,
       "detail": "18 tests defined their own exiting reporter, so one broken thing hid the rest, and a counter incremented inside a command substitution is lost with the subshell. The conversions are done; the count was measured by brace-matching each reporter body, not by an awk range.",
-      "note": "T1a-T1e closed. Measured before: two injected failures reported 1 of 2.",
+      "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "blocked_on": null,
       "refs": [
         "planning/tests/lib-test.sh"
       ],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T10:33:41Z"
     },
     {
       "id": "T1a",

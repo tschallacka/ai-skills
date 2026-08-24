@@ -48,6 +48,33 @@ t_assert_eq 'kind of a step' "$(unit document/plan_document_kind.sh -- 'plan_doc
 t_assert_eq 'kind of a testing companion' \
     "$(unit document/plan_document_kind.sh -- 'plan_document_kind step:01-build/02-step-x-testing')" 'testing'
 t_assert_eq 'kind of the inventory' "$(unit document/plan_document_kind.sh -- 'plan_document_kind inventory')" 'reference'
+
+# ── plan_section_spec: kind/section -> heading + order, unknown refused ─────
+# One per kind vocabulary, plus the refusal: the order numbers are load-bearing
+# for every section writer, so a drift here reorders documents silently.
+t_assert_eq 'section spec on a plan' \
+    "$(unit document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec plan current-state')" \
+    "$(printf '## Current state\t2')"
+t_assert_eq 'section spec on a goal' \
+    "$(unit document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec goal owned-work-units')" \
+    "$(printf '## Owned work units\t9')"
+t_assert_eq 'section spec on a step' \
+    "$(unit document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec step acceptance-criteria')" \
+    "$(printf '## Acceptance criteria\t6')"
+t_assert_eq 'section spec on a testing companion' \
+    "$(unit document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec testing automated-tests')" \
+    "$(printf '## Automated tests\t2')"
+t_assert_eq 'section spec on a review' \
+    "$(unit document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec review findings')" \
+    "$(printf '## Findings\t2')"
+t_assert_eq 'an unknown section is refused' \
+    "$(unit_rc document/plan_section_spec.sh core/plan_die.sh document/plan_unknown_section.sh -- \
+        'plan_section_spec plan no-such-section')" '64'
 t_assert_eq 'kind of a per-goal progress file' \
     "$(unit document/plan_document_kind.sh -- 'plan_document_kind goal-progress:01-build')" 'reference'
 
