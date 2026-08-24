@@ -804,11 +804,11 @@
     {
       "id": "T40",
       "title": "The python3-shipped rule, its gate and the tree now disagree",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "chat/runtime/server.py ships to end users, while the stated rule is that jq is the ceiling for a runtime dependency and python3 is dev-only. The gate cannot see the conflict: test-portability-contract scans *.sh only, so a shipped .py file was never in its reach, and the two allowlist entries added for chat cover the shell files that probe for python3, not the python file itself. The fallback design is intended, so one of three things should change: the rule text, so it bans requiring python3 rather than shipping it; the gate, so it can see non-shell files; or the tree.",
-      "note": "Raised as a budget violation during review and corrected by Michael: optional capability with a fallback is the same shape as memlimit and openssl. What remains is that a documented rule is now untrue and nothing would ever report it.",
+      "note": "Decision: the rule text changed, not the gate or the tree. python3-shipped now bans REQUIRING python3 at runtime; declaring optional runtimes through requires.tsv soft any-of groups is sanctioned, with allowlist rows for probe sites and the generated installer tables. The detector and *.sh scan are unchanged; chat/runtime/server.py remains outside the gate by construction.",
       "blocked_on": null,
       "refs": [
         "portability-rules.json",
@@ -816,7 +816,7 @@
         "chat/runtime/server.py"
       ],
       "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
+      "updated_at": "2026-08-24T16:28:52Z"
     },
     {
       "id": "T42e",

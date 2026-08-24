@@ -184,11 +184,11 @@
     },
     {
       "id": "python3-shipped",
-      "construct": "python3 in shipped code",
+      "construct": "python3 required at runtime by shipped skills",
       "detect": "python3",
       "breaks": "the dependency budget, not a platform",
       "symptom": "a machine without python3 loses a documented feature",
-      "replacement": "awk for text, jq for JSON. python3 is development-only (benchmark/, unregistered tests)."
+      "replacement": "awk for text, jq for JSON — jq stays the ceiling for a required runtime. Declaring an OPTIONAL runtime is fine: requires.tsv soft any-of groups feed the verify and hint tables, naming is not requiring, and strength decides what a missing one costs. Probe sites, the generated installer tables, and dev-only trees carry allowlist rows."
     },
     {
       "id": "pipefail-grep-q",
