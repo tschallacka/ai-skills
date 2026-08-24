@@ -816,7 +816,7 @@
     {
       "id": "B38",
       "title": "An executing agent can leave the plan describing a world that no longer exists, and nothing in verification notices",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -830,10 +830,11 @@
         "planning/scripts/validate-plan.sh",
         "planning/scripts/validate-plan-propagation-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session — the freshness pass makes code-after-record drift visible at validation time (see T44); the summary-contract half lives in the execution rule that outstanding lists are mutations to perform, not disclosures",
+      "verification": "test-plan-freshness: control silent, drift named with unit and dates, catch-up silent, outside-repo target skipped. Mutation inverted comparison fails the drift-named assertion.",
       "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
-      "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative."
+      "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative.",
+      "updated_at": "2026-08-24T18:08:32Z"
     },
     {
       "id": "B39",

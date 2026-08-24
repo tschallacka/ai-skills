@@ -176,6 +176,7 @@ if [ "$propagation_mode" = true ]; then
     plan_validate_propagation_companion
     plan_validate_propagation_leaves
     plan_validate_propagation_roster
+    plan_validate_propagation_freshness
 fi
 
 if [ "$errors" -gt 0 ]; then

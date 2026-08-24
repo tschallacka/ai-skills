@@ -14,6 +14,7 @@
 #   plan_validate_propagation_companion (c2) a companion's unit references
 #   plan_validate_propagation_leaves   (d) unverified graph leaves
 #   plan_validate_propagation_roster   (e) §9.x roster vs inventory
+#   plan_validate_propagation_freshness (f) code moving after the last record
 # (b) was removed by report 7 and is documented at its old site below.
 
 # shellcheck disable=SC2154
@@ -294,6 +295,41 @@ plan_validate_propagation_leaves() {
 # (e) Roster vs inventory: a goal's §9.x Owned-work-units roster must be
 #     exactly the set the inventory assigns to it. The authoritative roster is
 #     §9.1, not the §9.2+ blurbs, which need not exist for every unit.
+# (f) Freshness: a unit whose target code was committed after the plan's own
+# last commit is the B38 signature — shipped work with no recorded mutation.
+# Advisory (WARN): needs --repo-root and both sides inside that repository;
+# silently skipped otherwise.
+plan_validate_propagation_freshness() {
+    local abs_repo abs_plan rel_plan uid tgt code_newest plan_newest drift=0
+    [ -n "${repo_root:-}" ] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    abs_repo="$(cd "$repo_root" && pwd -P)"
+    abs_plan="$(cd "$plan_dir" && pwd -P)"
+    case "$abs_plan" in
+        "$abs_repo"/*) rel_plan="${abs_plan#"$abs_repo"/}" ;;
+        *) return 0 ;;
+    esac
+    plan_newest="$(git -C "$repo_root" log -1 --format=%cI -- "$rel_plan" 2>/dev/null)" || plan_newest=""
+    [ -n "$plan_newest" ] || return 0
+    while IFS= read -r uid; do
+        [ -n "$uid" ] || continue
+        plan_map_load unit_file "$uid" || continue
+        tgt="$plan_map_value"
+        [ -n "$tgt" ] && [ "$tgt" != N/A ] || continue
+        code_newest="$(git -C "$repo_root" log -1 --format=%cI -- "$tgt" 2>/dev/null)" || code_newest=""
+        [ -n "$code_newest" ] || continue
+        if [ "$code_newest" \> "$plan_newest" ]; then
+            drift=$((drift + 1))
+            if [ "$drift" -le 3 ]; then
+                warn "unit $uid target '$tgt' changed at ${code_newest%T*}, after the last plan record (${plan_newest%T*}); record the mutation with update-step or update-progress"
+            fi
+        fi
+    done < <(plan_map_keys unit_type)
+    [ "$drift" -le 3 ] || warn "$drift unit targets changed after the last plan record; bring the plan back to the world"
+    return 0
+}
+
 plan_validate_propagation_roster() {
     while IFS= read -r goal_name; do
         [ -n "$goal_name" ] || continue
