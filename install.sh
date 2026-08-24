@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -366,6 +366,8 @@ runtime_requirements() {
             ;;
         chat)
             case "$platform" in *:*) printf '%s\n' @server-runtimes ;; esac
+            ;;
+        git-worktrees)
             ;;
         planning)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
@@ -2811,6 +2813,9 @@ EOF
             done
             ;;
         brainstorm)
+            printf '%s\n' SKILL.md requires.tsv
+            ;;
+        git-worktrees)
             printf '%s\n' SKILL.md requires.tsv
             ;;
         todo)

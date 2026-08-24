@@ -327,6 +327,9 @@ EOF
         brainstorm)
             printf '%s\n' SKILL.md requires.tsv
             ;;
+        git-worktrees)
+            printf '%s\n' SKILL.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
             ;;
