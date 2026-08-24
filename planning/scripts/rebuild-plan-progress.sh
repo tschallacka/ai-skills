@@ -59,47 +59,47 @@ plan_git_snapshot "$plan_dir"
 plan_name="$(basename "$plan_dir")"
 completed=0
 total=0
+rows=''
+# Scan first, then write once: the bar needs the totals, and composing the file
+# in a single pass removes the placeholder-plus-sed substitution this used to
+# need (T5).
+while IFS= read -r goal_dir; do
+    [ -f "$goal_dir/goal.md" ] || continue
+    goal_name="$(basename "$goal_dir")"
+    goal_progress="$goal_dir/progress.md"
+    status='💤 incomplete'
+    if [ -f "$goal_progress" ] && grep -Fq '**Progress:** `100%' "$goal_progress"; then
+        status='✅ completed'
+        completed=$((completed + 1))
+    elif [ -f "$goal_progress" ] && grep -Fq '⏳ in progress' "$goal_progress"; then
+        status='⏳ in progress'
+    fi
+    total=$((total + 1))
+    # Derive the Description from the goal's Outcome (Definition of done),
+    # never a literal placeholder — a plan-level tracker with a hardcoded
+    # <short description> carries no information.
+    desc="$(plan_goal_definition_of_done "$goal_dir/goal.md" "$goal_name")"
+    rows="${rows}$(printf '| %s | %s | %s |\n' "$goal_name" "$desc" "$status")"
+done < <(find "$plan_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+[ "$total" -gt 0 ] || { printf 'No goal directories found\n' >&2; exit 66; }
+
+# The glyphs are an on-disk contract — test-progress-bar-shape.sh pins them
+# byte for byte — so both the percentage and the bar come from the canonical
+# helpers instead of a local re-derivation that can drift. The width is the
+# documented default, named here so it is not a bare literal.
+bar_width=20
+percent="$(plan_progress_percent "$completed" "$total")"
+bar="$(plan_progress_bar "$completed" "$total" "$bar_width")"
+icon='💤'; [ "$completed" -gt 0 ] && icon='⏳'; [ "$percent" -eq 100 ] && icon='✅'
+
 temporary="${progress_file}.tmp.$$"
-barred="${progress_file}.bar.$$"
-trap 'rm -f "$temporary" "$barred"' EXIT
+trap 'rm -f "$temporary"' EXIT
 {
     printf '# Progress: %s\n\n' "$plan_name"
-    # Placeholder only: the real bar is substituted below before the file is
-    # moved into place. Glyphs are pinned by test-progress-bar-shape.sh.
-    printf '**Overall progress:** `0%%  #### ----------------  100%%` 💤\n\n'
+    printf '**Overall progress:** `%s%%  %s  100%%` %s\n\n' "$percent" "$bar" "$icon"
     printf '| Goalname | Description | Completion status |\n|---|---|---|\n'
-    # LC_ALL=C (exported above) pins the collation: a bare `sort` orders the
-    # generated rows by the ambient locale, so two developers would otherwise
-    # generate different row orders from the same plan.
-    while IFS= read -r goal_dir; do
-        [ -f "$goal_dir/goal.md" ] || continue
-        goal_name="$(basename "$goal_dir")"
-        goal_progress="$goal_dir/progress.md"
-        status='💤 incomplete'
-        if [ -f "$goal_progress" ] && grep -Fq '**Progress:** `100%' "$goal_progress"; then
-            status='✅ completed'
-            completed=$((completed + 1))
-        elif [ -f "$goal_progress" ] && grep -Fq '⏳ in progress' "$goal_progress"; then
-            status='⏳ in progress'
-        fi
-        total=$((total + 1))
-        # Derive the Description from the goal's Outcome (Definition of done),
-        # never a literal placeholder — a plan-level tracker with a hardcoded
-        # <short description> carries no information.
-        desc="$(plan_goal_definition_of_done "$goal_dir/goal.md" "$goal_name")"
-        printf '| %s | %s | %s |\n' "$goal_name" "$desc" "$status"
-    done < <(find "$plan_dir" -mindepth 1 -maxdepth 1 -type d | sort)
-    [ "$total" -gt 0 ] || { printf 'No goal directories found\n' >&2; exit 66; }
+    printf '%s' "$rows"
 } > "$temporary"
-
-# Drops the total>0 guard, which is safe only because the block above already
-# exited 66 when total is 0.
-percent=$(( (completed * 100 + total / 2) / total ))
-filled=$(( percent * 20 / 100 )); empty=$(( 20 - filled ))
-bar="$(printf '%*s' "$filled" '' | tr ' ' '#')$(printf '%*s' "$empty" '' | tr ' ' '-')"
-icon='💤'; [ "$completed" -gt 0 ] && icon='⏳'; [ "$percent" -eq 100 ] && icon='✅'
-sed "s|^\*\*Overall progress:\*\*.*$|**Overall progress:** \`${percent}%  ${bar}  100%\` ${icon}|" \
-    "$temporary" > "$barred"
-mv "$barred" "$progress_file"
+mv "$temporary" "$progress_file"
 
 printf 'Updated %s (%s/%s goals, %s%%)\n' "$progress_file" "$completed" "$total" "$percent"

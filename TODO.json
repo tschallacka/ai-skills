@@ -248,15 +248,15 @@
     {
       "id": "T5",
       "title": "`rebuild-plan-progress.sh` still hard-codes the progress glyphs",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "Line 68 prints the seed bar literally and line 78 greps for `**Progress:** \\`100%`. MAINTAINER.md section 3 records `plan_progress_bar` as the canonical helper, and this is the remaining site. It is a different shape from the migrated ones: it derives the glyph from a goal's own progress file rather than from a requested status word, and it hard-codes width 20 instead of a variable, and omits the `total > 0` guard (safe only because it exits 66 earlier on a zero-goal plan). The glyphs are an on-disk contract — `test-progress-bar-shape.sh` pins them byte for byte, so any migration must be byte-identical.",
-      "note": null,
+      "note": "Bar and percent now come from plan_progress_bar/plan_progress_percent (the total>0 guard included); the seed-literal plus sed substitution is gone entirely — the file is composed in one pass after the goal scan. Byte-identity held: test-progress-bar-shape and test-progress-derivation pass.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:03:05Z"
     },
     {
       "id": "T6",
