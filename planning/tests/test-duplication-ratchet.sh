@@ -58,7 +58,10 @@ check_cap 'tests not sourcing lib-test.sh' 7 \
 # 29th site: render-plan-overview.sh cells() is a generic canonical-table reader
 # (any table, header-aware), not the ten-field inventory parse; admitted here so
 # the debt is visible rather than hidden behind a rewritten pattern.
-check_cap "inline awk -F'|' parsers" 29 \
+# 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
+# a new distinct table, admitted on the same terms as the 29th. The shared
+# reader that would absorb both remains future work tracked in MAINTAINER §3.
+check_cap "inline awk -F'|' parsers" 30 \
     "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a

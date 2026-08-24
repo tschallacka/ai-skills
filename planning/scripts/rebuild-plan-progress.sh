@@ -79,7 +79,9 @@ while IFS= read -r goal_dir; do
     # never a literal placeholder — a plan-level tracker with a hardcoded
     # <short description> carries no information.
     desc="$(plan_goal_definition_of_done "$goal_dir/goal.md" "$goal_name")"
-    rows="${rows}$(printf '| %s | %s | %s |\n' "$goal_name" "$desc" "$status")"
+    # The newline is appended outside the substitution: $( ) strips it, and an
+    # interior loss would concatenate this row onto the previous one.
+    rows="${rows}$(printf '| %s | %s | %s |' "$goal_name" "$desc" "$status")"$'\n'
 done < <(find "$plan_dir" -mindepth 1 -maxdepth 1 -type d | sort)
 [ "$total" -gt 0 ] || { printf 'No goal directories found\n' >&2; exit 66; }
 

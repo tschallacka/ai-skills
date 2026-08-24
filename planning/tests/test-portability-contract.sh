@@ -52,6 +52,12 @@ in_allowlist() {
         ./planning/tests/test-sha256-fallbacks.sh:sha256-tool) return 0 ;;
         ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
         ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
+        # Fix keys probe the same sha256sum->shasum->openssl chain (T16): the
+        # minter, the verifier and their key tests each name what they may use.
+        ./planning/scripts/mint-fix-keys.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/verify-fix-keys.sh:sha256-tool) return 0 ;;
+        ./planning/tests/test-fix-keys.sh:sha256-tool) return 0 ;;
+        ./planning/tests/test-add-fix-claim.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;

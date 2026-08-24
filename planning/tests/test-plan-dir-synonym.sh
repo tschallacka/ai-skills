@@ -80,6 +80,9 @@ export SCRIPTS="$scripts"
 
 check_pair add-goal - add-goal.sh 03-new-goal 'A third goal' 'Something verifiable happens.'
 check_pair add-coverage - add-coverage.sh 'Another required proof' W01 'A note.'
+# Removes the row the pristine fixture already carries, not the one the previous
+# pair added: every check_pair resets a/b/p from the fixture first.
+check_pair remove-coverage - remove-coverage.sh 'A converted test still reports and still fails when an assertion breaks'
 check_pair add-work-unit - add-work-unit.sh --id W09 --type source --file a/b.sh --scope sym \
     --subscope N/A --change 'do a thing' --depends-on -- --goal 01-plan-dir-synonym --step 09-step-new
 check_pair update-work-unit - update-work-unit.sh W01 --scope 'a rescoped symbol'

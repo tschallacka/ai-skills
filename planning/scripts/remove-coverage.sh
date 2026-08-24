@@ -61,11 +61,17 @@ inventory="$plan_dir/work-unit-inventory.md"
 [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory" 66
 plan_git_snapshot "$plan_dir"
 
-temporary_file="${inventory}.tmp.$$"
-trap 'rm -f "$temporary_file"' EXIT
-
+# One pass does both jobs: writes the row-free copy and captures what the
+# dropped row carried, so the contract 9a notice can name it after the move.
+# A second parsing pass here would be a second copy of the cell grammar.
 removed=0
-awk -F'|' -v wanted="$outcome" '
+units_capture="$(mktemp "${TMPDIR:-/tmp}/remove-coverage.XXXXXX")"
+plan_track_tmp "$units_capture"
+filtered="$(mktemp "${TMPDIR:-/tmp}/remove-coverage.XXXXXX")"
+plan_track_tmp "$filtered"
+# The awk status is read before anything is written: piping straight into
+# plan_atomic_write would report the writer's status and lose the no-match 3.
+awk -F'|' -v wanted="$outcome" -v capture="$units_capture" '
     function cell(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); gsub(/^`|`$/, "", v); return v }
     BEGIN { in_coverage = 0 }
     /^## Definition-of-done coverage/ { in_coverage = 1; print; next }
@@ -73,28 +79,20 @@ awk -F'|' -v wanted="$outcome" '
     in_coverage && /^\|/ {
         header_or_sep = ($2 ~ /Required outcome/) || ($2 ~ /^-+[[:space:]]*-*/)
         if (!header_or_sep && cell($2) == wanted) {
+            print cell($3) > capture
             found = 1
             next
         }
     }
     { print }
     END { exit found ? 0 : 3 }
-' "$inventory" > "$temporary_file" || removed=$?
+' "$inventory" > "$filtered" || removed=$?
 
 if [ "$removed" -ne 0 ]; then
-    rm -f "$temporary_file"
     plan_die "no coverage row with required outcome '$outcome' in $inventory (check the wording; add-coverage.sh lists rows via plan-content.sh)" 66
 fi
 
-# Contract 9a: name what the row carried, read from the original while the row
-# is still there — a notice pointing at content that is already gone is worse
-# than silence.
-units="$(awk -F'|' -v wanted="$outcome" '
-    function cell(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); gsub(/^`|`$/, "", v); return v }
-    /^## Work units$/ { exit }
-    /^\|/ && cell($2) == wanted { print cell($3) }
-' "$inventory")"
-
-mv "$temporary_file" "$inventory"
+plan_atomic_write "$inventory" < "$filtered"
+units="$(tr -d '\n' < "$units_capture")"
 printf 'dropped coverage row for outcome %s: work units %s\n' "$outcome" "${units:-none}" >&2
 printf 'Removed coverage for %s\n' "$outcome"
