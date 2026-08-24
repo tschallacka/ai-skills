@@ -172,7 +172,7 @@ iui_info_requirements() {
             [ "${IUI_REQ_STRENGTH[$i]}" = "hard" ] && role=redstone
         fi
         printf -v line '  %-14s %-5s %s' \
-            "${IUI_REQ_TOOL[$i]}" "${IUI_REQ_STRENGTH[$i]}" "$IUI_DEP_STATE"
+            "$(runtime_requirement_label "${IUI_REQ_TOOL[$i]}")" "${IUI_REQ_STRENGTH[$i]}" "$IUI_DEP_STATE"
         iui_info_push "$role" "$line" body "$width"
         [ "$IUI_DEP_STATE" = "missing" ] || continue
         iui_wrap "${IUI_REQ_WHY[$i]}" $((width - 4))

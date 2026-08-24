@@ -47,8 +47,8 @@ summary_blocked_block() {
     printf 'To install %s once its requirements are met:\n' "$skill"
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
-        printf '  %d. install %s:\n' "$step" "$tool"
-        runtime_tool_install_hint "$tool" | sed 's/^/  /'
+        printf '  %d. install %s:\n' "$step" "$(runtime_requirement_label "$tool")"
+        runtime_requirement_install_hint "$tool" | sed 's/^/  /'
         step=$((step + 1))
     done < <(runtime_unmet_tools "$skill" hard)
     printf '  %d. replay this run:\n' "$step"
@@ -60,7 +60,7 @@ summary_soft_note() {
     local skill="$1" tool note=""
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
-        note="$note   (warning: $tool missing — $(runtime_requirement_why "$skill" "$tool"))"
+        note="$note   (warning: $(runtime_requirement_label "$tool") missing — $(runtime_requirement_why "$skill" "$tool"))"
     done < <(runtime_unmet_tools "$skill" soft)
     printf '%s' "$note"
 }

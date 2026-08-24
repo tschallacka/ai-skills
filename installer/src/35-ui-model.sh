@@ -269,11 +269,15 @@ iui_dep_state() {
     IUI_DEP_STATE="${IUI_DEP_STATES[$IUI_DEP_INDEX]}"
 }
 
-# The generated runtime_tool_verify() from section 4 is the authority, so the
-# picker and verify_runtime_tools() can never disagree about a tool. Overridable
-# so a test can inject a probe result without installing tools.
+# The generated runtime_tool_verify() from section 4 is the authority for a
+# single tool, and runtime_requirement_met() extends it to any-of groups, so
+# the picker and verify_runtime_tools() can never disagree. Overridable so a
+# test can inject a probe result without installing tools.
 iui_dep_probe() {
-    runtime_tool_verify "$1"
+    case $1 in
+        @*) runtime_requirement_met "$1" ;;
+        *) runtime_tool_verify "$1" ;;
+    esac
 }
 
 iui_dep_verify() {

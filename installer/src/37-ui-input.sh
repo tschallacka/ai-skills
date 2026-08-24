@@ -188,13 +188,13 @@ iui_action_dep_hint() {
         iui_dep_state "${IUI_REQ_TOOL[$i]}"
         [ "$IUI_DEP_STATE" = "missing" ] || continue
         any=1
-        IUI_MESSAGE+=("${IUI_REQ_TOOL[$i]} (${IUI_REQ_STRENGTH[$i]}): ${IUI_REQ_WHY[$i]}")
+        IUI_MESSAGE+=("$(runtime_requirement_label "${IUI_REQ_TOOL[$i]}") (${IUI_REQ_STRENGTH[$i]}): ${IUI_REQ_WHY[$i]}")
         # Section 4's generated hint table, so the picker offers the same
         # instruction verify_runtime_tools() prints on the non-interactive path.
         while IFS= read -r line; do
             [ -n "$line" ] || continue
             IUI_MESSAGE+=("$line")
-        done < <(runtime_tool_install_hint "${IUI_REQ_TOOL[$i]}")
+        done < <(runtime_requirement_install_hint "${IUI_REQ_TOOL[$i]}")
     done
     [ "$any" -eq 1 ] || IUI_MESSAGE+=('nothing missing for this skill')
 }

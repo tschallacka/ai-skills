@@ -33,7 +33,43 @@ kind	tool	condition	group	probe	text
 verify	jq	*:*	1	-	command -v jq
 verify	memlimit	*:*	1	-	command -v memlimit
 verify	openssl	*:*	1	-	command -v openssl
+verify	python3	*:*	1	-	command -v python3
+verify	node	*:*	1	-	command -v node
+verify	perl	*:*	1	-	command -v perl
+verify	socat	*:*	1	-	command -v socat
 verify	*	*:*	1	-	command -v "$1"
+hint	python3	Darwin:*	1	brew	  brew install python3
+hint	python3	Darwin:*	1	port	  sudo port install python3
+hint	python3	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install python3
+hint	python3	Linux:*	1	apt-get	  sudo apt-get install -y python3
+hint	python3	Linux:*	1	dnf	  sudo dnf install -y python3
+hint	python3	Linux:*	1	pacman	  sudo pacman -S --noconfirm python
+hint	python3	Linux:*	1	apk	  sudo apk add python3
+hint	python3	Linux:*	1	-	  install the python3 package for your distribution
+hint	node	Darwin:*	1	brew	  brew install node
+hint	node	Darwin:*	1	port	  sudo port install nodejs
+hint	node	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install node
+hint	node	Linux:*	1	apt-get	  sudo apt-get install -y nodejs
+hint	node	Linux:*	1	dnf	  sudo dnf install -y nodejs
+hint	node	Linux:*	1	pacman	  sudo pacman -S --noconfirm nodejs
+hint	node	Linux:*	1	apk	  sudo apk add nodejs
+hint	node	Linux:*	1	-	  install the nodejs package for your distribution
+hint	perl	Darwin:*	1	brew	  brew install perl
+hint	perl	Darwin:*	1	port	  sudo port install perl
+hint	perl	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install perl
+hint	perl	Linux:*	1	apt-get	  sudo apt-get install -y perl
+hint	perl	Linux:*	1	dnf	  sudo dnf install -y perl
+hint	perl	Linux:*	1	pacman	  sudo pacman -S --noconfirm perl
+hint	perl	Linux:*	1	apk	  sudo apk add perl
+hint	perl	Linux:*	1	-	  install the perl package for your distribution
+hint	socat	Darwin:*	1	brew	  brew install socat
+hint	socat	Darwin:*	1	port	  sudo port install socat
+hint	socat	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install socat
+hint	socat	Linux:*	1	apt-get	  sudo apt-get install -y socat
+hint	socat	Linux:*	1	dnf	  sudo dnf install -y socat
+hint	socat	Linux:*	1	pacman	  sudo pacman -S --noconfirm socat
+hint	socat	Linux:*	1	apk	  sudo apk add socat
+hint	socat	Linux:*	1	-	  install the socat package for your distribution
 hint	jq	Darwin:*	1	brew	  brew install jq
 hint	jq	Darwin:*	1	port	  sudo port install jq
 hint	jq	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install jq

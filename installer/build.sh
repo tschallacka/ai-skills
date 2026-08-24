@@ -86,19 +86,123 @@ skill_manifests() {
     done
 }
 
+# ── any-of groups ─────────────────────────────────────────────────────────────
+# A requires.tsv row may name a group in a fifth column: the requirement is
+# then satisfied by ANY of the rows sharing that group id, so four server
+# runtimes warn once when none is present instead of once each. Group rules,
+# refused at build time rather than softened silently:
+#   identical condition, strength and why across a group's rows — a mixed
+#     strength would let one member quietly downgrade the others;
+#   group id is [A-Za-z0-9_-]+ and unique across every skill, because the
+#     generated member table is keyed by the id alone;
+#   a hard group is allowed and gates exactly like a hard single tool.
+validate_requires_groups() {
+    local manifest seen="" id
+    while IFS= read -r manifest; do
+        while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            case $id in
+                *[!A-Za-z0-9_-]*)
+                    printf '%s: bad group id %q in %s\n' "${0##*/}" "$id" "$manifest" >&2
+                    exit 65 ;;
+            esac
+            case "$seen" in
+                *"|$id|"*)
+                    printf '%s: group %s is declared by more than one skill\n' "${0##*/}" "$id" >&2
+                    exit 65 ;;
+            esac
+            seen="$seen|$id|"
+        done < <(awk -F '\t' '
+            /^[[:space:]]*#/ { next }
+            NF == 0 { next }
+            $1 == "tool" { next }
+            $5 != "" && $5 != "-" { print $5 }
+        ' "$manifest" | LC_ALL=C sort -u)
+    done < <(skill_manifests)
+}
+
+# Manifest rows with group membership collapsed: the first row of a group stands
+# for all of them as a requirement named @<group>, later members dropped after
+# their condition/strength/why were checked against the first.
+requires_rows() {
+    local manifest="$1"
+    awk -F '\t' -v OFS='\t' -v prog="${0##*/}" -v manifest="$manifest" '
+        /^[[:space:]]*#/ { next }
+        NF == 0 { next }
+        $1 == "tool" { next }
+        $5 == "" || $5 == "-" { print; next }
+        $5 !~ /^[A-Za-z0-9_-]+$/ {
+            printf "%s: bad group id %s in %s\n", prog, $5, manifest > "/dev/stderr"
+            exit 65
+        }
+        $5 in cond {
+            if (cond[$5] != $2 || str[$5] != $3 || why[$5] != $4) {
+                printf "%s: %s of group %s disagrees on condition/strength/why\n", prog, $1, $5 | "cat 1>&2"
+                close("cat 1>&2")
+                exit 65
+            }
+            next
+        }
+        { cond[$5] = $2; str[$5] = $3; why[$5] = $4; $1 = "@" $5; $5 = ""; print }
+    ' "$manifest"
+}
+
 # runtime_requirements() stays a self-contained case statement: it is extracted
 # from install.sh and sourced on its own by test-limited-run-contract.sh.
 gen_requirements() {
-    local manifest skill tool condition strength why
+    local manifest skill tool condition strength why group
     printf 'runtime_requirements() {\n    local platform\n    platform="$(uname -s):$(uname -m)"\n'
     printf '    case "$1" in\n'
     while IFS= read -r manifest; do
         skill="$(basename "$(dirname "$manifest")")"
         printf '        %s)\n' "$skill"
-        while IFS="$tab" read -r tool condition strength why; do
+        while IFS="$tab" read -r tool condition strength why group; do
             printf '%s\n' "            case \"\$platform\" in $condition) printf '%s\\n' $tool ;; esac"
-        done < <(tsv_rows "$manifest")
+        done < <(requires_rows "$manifest")
         printf '            ;;\n'
+    done < <(skill_manifests)
+    printf '    esac\n}\n'
+}
+
+# Members of one any-of group, one per line, keyed by @group. Group ids are
+# unique across skills (validate_requires_groups), so no skill component is
+# needed and every consumer can resolve a requirement entry with one lookup.
+gen_requirement_members() {
+    local manifest skill line
+    printf 'runtime_requirement_members() {\n    local platform\n'
+    printf '    platform="$(uname -s):$(uname -m)"\n    case "$1" in\n'
+    while IFS= read -r manifest; do
+        skill="$(basename "$(dirname "$manifest")")"
+        while IFS="$tab" read -r group condition members; do
+            [ -n "$group" ] || continue
+            reject_quote "$members" "$skill:@$group members"
+            printf '%s\n' "        @$group) case \"\$platform\" in $condition) printf '%s\\n' $members ;; esac ;;"
+        done < <(awk -F '\t' '
+            /^[[:space:]]*#/ { next }
+            NF == 0 { next }
+            $1 == "tool" { next }
+            {
+                g = $5
+                if (g == "" || g == "-") { next }
+                if (!(g in group_seen)) {
+                    group_seen[g] = 1
+                    count++
+                    order[count] = g
+                    cond[g] = $2
+                }
+                key = g SUBSEP $1
+                if (!(key in member_seen)) {
+                    member_seen[key] = 1
+                    members[g] = members[g] (members[g] == "" ? "" : " ") $1
+                }
+            }
+            END {
+                for (i = 1; i <= count; i++) {
+                    k = order[i]
+                    print k "\t" cond[k] "\t" members[k]
+                }
+            }
+        ' "$manifest")
     done < <(skill_manifests)
     printf '    esac\n}\n'
 }
@@ -106,16 +210,16 @@ gen_requirements() {
 # <skill>:<tool> -> strength, and -> why. Two tables rather than one so each
 # caller reads exactly the field it needs on one line of output.
 gen_requirement_field() {
-    local field="$1" name="$2" manifest skill tool condition strength why value
+    local field="$1" name="$2" manifest skill tool condition strength why group value
     printf 'runtime_requirement_%s() {\n    local platform\n' "$name"
     printf '    platform="$(uname -s):$(uname -m)"\n    case "$1:$2" in\n'
     while IFS= read -r manifest; do
         skill="$(basename "$(dirname "$manifest")")"
-        while IFS="$tab" read -r tool condition strength why; do
+        while IFS="$tab" read -r tool condition strength why group; do
             if [ "$field" = strength ]; then value="$strength"; else value="$why"; fi
             reject_quote "$value" "$skill:$tool"
             printf '%s\n' "        $skill:$tool) case \"\$platform\" in $condition) printf '%s\\n' '$value' ;; esac ;;"
-        done < <(tsv_rows "$manifest")
+        done < <(requires_rows "$manifest")
     done < <(skill_manifests)
     printf '    esac\n}\n'
 }
@@ -195,11 +299,14 @@ gen_install_hint() {
 }
 
 gen_dependency_block() {
+    validate_requires_groups
     gen_requirements
     printf '\n'
     gen_requirement_field strength strength
     printf '\n'
     gen_requirement_field why why
+    printf '\n'
+    gen_requirement_members
     printf '\n'
     gen_verify
     printf '\n'
