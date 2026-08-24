@@ -812,6 +812,28 @@
       "parent": null,
       "fix": "fa97d9f and follow-ups — validate_one_requires_manifest carries the per-skill checks (24 lines back under cap) and run_reviewer split into five helpers; cap follows the count down to 66",
       "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD."
+    },
+    {
+      "id": "B38",
+      "title": "An executing agent can leave the plan describing a world that no longer exists, and nothing in verification notices",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Execute any real work order under SKILL.md rules in a consumer repo: commit code for steps without calling update-step.sh in the same turn; implement an unplanned requirement and describe it in prose instead of add-work-unit.sh; deliver a step through a path outside the planned files. Then bash planning/scripts/validate-plan.sh <plan> — it passes or fails only on unrelated structural grounds, while progress.md still reads 0% and the inventory omits shipped units.",
+      "observed": "Two health-app plans, cycle-15 era. order-split-api-attribute read 0% with all nine steps incomplete although the code was committed and REST-verified; EmployeeSplitSpecificationInterface and its model shipped with no unit; goal 05 of order-split-extended-rendering-v2 carried delivered work (order PDF, quote PDF) with no units at all. The executor listed every one of these as outstanding in its per-burst summaries, and the user caught the drift twice in one night.",
+      "expected": "Completing work and recording it are one act. Verification must make plan-versus-reality drift visible when it is created — at the turn where code lands without its plan mutation — rather than depending on the operator reading both sides and catching it.",
+      "mechanism": "The rules exist and are explicit: the progress-accuracy operating rule, §4.1.1 (dynamic scope additions are plan mutations), §2.5 (one step per unit). Nothing executes them. validate-plan checks structure before/during approval, never sync during execution; no gate connects target-repo changes to inventory, step or progress mutations; the executor summary ritual (reporting outstanding bookkeeping) made deferral feel like disclosure. Executor self-analysis names the habit: each burst optimised for visible code progress, treating the plan as a report written afterwards instead of live state mutated at the moment of discovery.",
+      "surfaces": [
+        "planning/SKILL.md",
+        "planning/EXECUTION.md",
+        "planning/scripts/validate-plan.sh",
+        "planning/scripts/validate-plan-propagation-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
+      "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative."
     }
   ]
 }
