@@ -790,6 +790,28 @@
       "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
       "created_at": "2026-08-22T20:49:54Z",
       "updated_at": "2026-08-24T09:24:39Z"
+    },
+    {
+      "id": "B37",
+      "title": "validate_requires_groups grew past the 40-line cap, so the ratchet gate is red on every leg",
+      "severity": "major",
+      "priority": "high",
+      "status": "open",
+      "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
+      "created_at": "2026-08-24T14:27:49Z",
+      "updated_at": "2026-08-24T14:27:49Z",
+      "reproduce": "bash planning/tests/test-function-length-ratchet.sh",
+      "expected": "exit 0: the over-cap count stays at or below CAP=67",
+      "observed": "exit 1: \"function-length-ratchet: 68 function(s) exceed the 40-line cap (cap 67). New over-cap code must be split or the cap lowered deliberately.\" — installer/build.sh:99 validate_requires_groups() is listed at 45 lines. Fails on all three CI legs (ubuntu-latest, macos-latest, macOS bash 3.2).",
+      "mechanism": "4befd4e (installer: the verification reds name themselves, and the gates accept the group tables) grew validate_requires_groups() from 24 to 45 lines. Confirmed: `git show 89ec358:installer/build.sh` measures the function at 24 lines, HEAD at 45. Crossing 40 adds a new over-cap site, taking the count 67 -> 68. test-function-length-ratchet pins CAP=67 and documents that the count may shrink but never grow, so the new site is a hard fail. The same commit fixed test-install-ui and test-portability-contract, which is why this is the only remaining new red.",
+      "surfaces": [
+        "installer/build.sh",
+        "planning/tests/test-function-length-ratchet.sh"
+      ],
+      "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
+      "parent": null,
+      "fix": null,
+      "verification": null
     }
   ]
 }
