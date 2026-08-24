@@ -165,7 +165,7 @@ grep -Fq 'openssl' "$temporary_root/err-ssl" \
 # fails twice; a resource-cap kill of one awk pass must not read as drift.
 check_ok=0
 for _attempt in 1 2; do
-    if bash "$repo_dir/installer/build.sh" --check >/dev/null 2>&1; then
+    if "$BASH" "$repo_dir/installer/build.sh" --check >/dev/null 2>&1; then
         check_ok=1
         break
     fi

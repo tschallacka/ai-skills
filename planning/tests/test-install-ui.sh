@@ -38,6 +38,12 @@ note_pass() { printf 'PASS %s\n' "$1"; }
 # shellcheck source=/dev/null
 . "$ui"
 
+# Section 4's generated tables are not sourced here, so the requirement
+# helpers the renderer gained with any-of groups stand in as identity: these
+# tests exercise plain tools, whose label is the tool itself.
+runtime_requirement_label() { printf '%s' "$1"; }
+runtime_requirement_install_hint() { printf '  install %s\n' "$1"; }
+
 has_non_ascii() {
     [ -n "$(printf '%s' "$1" | tr -d ' -~')" ]
 }
@@ -419,6 +425,8 @@ seam_probe() {
       # shellcheck source=/dev/null
       . "$ui"
       runtime_tool_verify() { [ "$1" != jq ]; }
+      runtime_requirement_label() { printf '%s' "$1"; }
+      runtime_requirement_install_hint() { printf '  install %s\n' "$1"; }
       SOURCE_VERSION=""
       TARGET_SELECTION=""
       SELECTED_SKILLS=()

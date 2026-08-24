@@ -58,6 +58,10 @@ in_allowlist() {
         ./planning/scripts/verify-fix-keys.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-fix-keys.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-add-fix-claim.sh:sha256-tool) return 0 ;;
+        # The generated dependency tables name every optional runtime they may
+        # verify or hint (chat's any-of group, T39). Naming is not requiring:
+        # strength still decides, and chat's members are soft.
+        ./install.sh:python3-shipped) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;

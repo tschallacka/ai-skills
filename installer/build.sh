@@ -99,13 +99,34 @@ skill_manifests() {
 validate_requires_groups() {
     local manifest seen="" id
     while IFS= read -r manifest; do
+        # Foreground, not a process substitution: a refusal that fires inside
+        # one is lost by the reader loop, and the build would continue on a
+        # half-read manifest.
+        awk -F '\t' -v prog="${0##*/}" -v manifest="$manifest" '
+            /^[[:space:]]*#/ { next }
+            NF == 0 { next }
+            $1 == "tool" { next }
+            {
+                g = $5
+                if (g == "" || g == "-") { next }
+                if (g !~ /^[A-Za-z0-9_-]+$/) {
+                    printf "%s: bad group id %s in %s\n", prog, g, manifest | "cat 1>&2"
+                    close("cat 1>&2")
+                    exit 65
+                }
+                if (g in cond) {
+                    if (cond[g] != $2 || str[g] != $3 || why[g] != $4) {
+                        printf "%s: %s of group %s disagrees on condition/strength/why\n", prog, $1, g | "cat 1>&2"
+                        close("cat 1>&2")
+                        exit 65
+                    }
+                    next
+                }
+                cond[g] = $2; str[g] = $3; why[g] = $4
+            }
+        ' "$manifest" || exit 65
         while IFS= read -r id; do
             [ -n "$id" ] || continue
-            case $id in
-                *[!A-Za-z0-9_-]*)
-                    printf '%s: bad group id %q in %s\n' "${0##*/}" "$id" "$manifest" >&2
-                    exit 65 ;;
-            esac
             case "$seen" in
                 *"|$id|"*)
                     printf '%s: group %s is declared by more than one skill\n' "${0##*/}" "$id" >&2
@@ -316,7 +337,13 @@ gen_dependency_block() {
 emit() {
     local part block
     block="$(mktemp "${TMPDIR:-/tmp}/dependency-block.XXXXXX")"
-    gen_dependency_block > "$block"
+    # A silent generation failure would reach blast-radius as an empty capture
+    # and read as "no output"; name the stage that died instead.
+    if ! gen_dependency_block > "$block"; then
+        printf '%s: generating the dependency block failed\n' "${0##*/}" >&2
+        rm -f "$block"
+        exit 70
+    fi
     emit_banner
     for part in "$src_dir"/[0-9][0-9]-*.sh; do
         [ -f "$part" ] || { printf '%s: no parts in %s\n' "${0##*/}" "$src_dir" >&2; exit 66; }
