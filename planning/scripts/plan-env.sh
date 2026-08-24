@@ -116,7 +116,7 @@ manifest_check() {
         esac
         seen="$seen$key "
         case "$value" in
-            *'$'*|*'`'*|*';'*|*'&'*|*'<'*|*'>'*|*'~'*|*$'\n'*)
+            *'$'*|*'`'*|*';'*|*'|'*|*'&'*|*'<'*|*'>'*|*'~'*|*$'\n'*)
                 die "unsafe manifest value for $key in $file" 65
                 ;;
         esac

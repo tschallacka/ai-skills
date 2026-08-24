@@ -83,6 +83,17 @@ if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
     exit 1
 fi
 
+# A pipe in a value is refused by the checker's copy of the character rule —
+# the third site carrying it (the reader copy is pinned by the parity block
+# below), so a rule weakened there fails here rather than silently.
+grep -v '^PLAN_NAME=' "$plan_root/.env" > "$bad/.env"
+printf 'PLAN_NAME=a|b\n' >> "$bad/.env"
+chmod 600 "$bad/.env"
+if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
+    printf '%s\n' 'manifest value with a pipe was accepted' >&2
+    exit 1
+fi
+
 cp "$plan_root/.env" "$bad/.env"
 chmod 600 "$bad/.env"
 printf 'PLAN_ENV_SCHEMA_VERSION=0\n' >> "$bad/.env"
