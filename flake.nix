@@ -119,6 +119,7 @@
               runOn32
               runOne32
               pkgs.shellcheck
+              pkgs.actionlint
               pkgs.jq
               pkgs.git
               # Renders the architecture diagrams. Development-only: the test

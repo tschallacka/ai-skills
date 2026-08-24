@@ -114,17 +114,17 @@
     {
       "id": "T37",
       "title": "Remove continue-on-error from the two macOS legs, now that they pass",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "The workflow macos-known-failures job lists blocker 8 as the last one outstanding: the suite passing on a macOS runner under /bin/bash 3.2 and the default bash. Run 32474258670 does exactly that on both legs. Removing the flag makes a macOS regression block a PR, which is the point of having the legs. The job that lists the blockers should go with it, or say that the list is empty.",
-      "note": "Earned now, not pending: run 32474258670 at a8d1285 and run 32476867183 at 1081e19 are both green on all seven jobs, which is the two consecutive green macOS runs blocker 8 asks for. Removing the flag makes a macOS regression block a PR, which is the point of the legs; the macos-known-failures job goes with it, or says the list is empty.",
+      "note": "Flags removed from both legs, macos-known-failures job deleted, CONTRIBUTING.md and portability-rules.json updated; actionlint added to the dev flake and the workflow validates.",
       "blocked_on": null,
       "refs": [
         ".github/workflows/ci.yml"
       ],
       "created_at": "2026-08-21T10:55:23Z",
-      "updated_at": "2026-08-21T11:28:09Z"
+      "updated_at": "2026-08-24T08:49:35Z"
     },
     {
       "id": "T1",

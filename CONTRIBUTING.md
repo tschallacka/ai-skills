@@ -192,10 +192,9 @@ Then, specific to this repo:
 `.github/workflows/ci.yml` runs the suite on `ubuntu-latest` and
 `macos-latest`, plus a leg pinned to macOS's system bash 3.2, the shellcheck
 gate, and the `installer-build` job that rebuilds `install.sh` and fails if the
-committed artifact differs. The macOS legs are currently `continue-on-error` behind a
-checked-in list of remaining blockers; that list is the definition of done for
-making them blocking, and it lives in the workflow so the flag and its reason
-travel together.
+committed artifact differs. Both macOS legs are blocking: a regression there
+fails the PR (T37 removed the old informational flag once two consecutive
+runner runs came back green under both shells).
 
 ## Testing on bash 3.2 without nix
 

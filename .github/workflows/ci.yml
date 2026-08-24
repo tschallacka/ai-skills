@@ -13,10 +13,10 @@ jobs:
     # supported operating systems with each one's default bash.
     name: Test suite passes on ${{ matrix.os }} (default bash)
     runs-on: ${{ matrix.os }}
-    # The macOS leg is informational until the breakages listed in
-    # macos-known-failures below are fixed. Do not remove this expression
-    # without deleting that list.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    # Both operating systems are blocking. The macOS leg earned this once two
+    # consecutive runner runs were green under both bash flavors (runs
+    # 32474258670 and 32476867183), closing blocker 8; a macOS regression now
+    # fails the PR instead of being informational.
     strategy:
       fail-fast: false
       matrix:
@@ -68,9 +68,6 @@ jobs:
     # bash-4-only construct.
     name: Test suite passes on macOS system bash 3.2 (portability floor)
     runs-on: macos-latest
-    # Informational for the same reasons as the macOS leg above, plus the
-    # bash-4 constructs that are explicitly deferred.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,44 +106,10 @@ jobs:
             exit 1
           fi
 
-  macos-known-failures:
-    # Proves nothing by itself: it is the checked-in list of what must be fixed
-    # before `continue-on-error` is removed from the two macOS legs above. Keep
-    # it in the workflow, not in a doc, so the flag and its reason travel
-    # together.
-    name: List the macOS breakages that keep the macOS legs non-blocking
-    runs-on: ubuntu-latest
-    steps:
-      - name: Outstanding blockers
-        run: |
-          cat <<'BLOCKERS'
-          Remove continue-on-error from `test` (macos-latest) and `test-bash32`
-          only when all of the following are true.
-
-          CLEARED — verified mechanically, and each is now enforced by a test so
-          it cannot come back:
-
-          1-3. `declare -A` is gone from planning/scripts. The maps are
-               plan_map_* (plan-map-lib.sh); plan-env.sh uses a string set.
-          4.   cleanup-plans.sh no longer uses `mapfile` or `find -printf`.
-          5.   run-benchmark.sh and runtime/codex/agent.sh no longer use
-               `declare -A` or `mapfile`.
-          6.   The GNU-only utilities named in CODE-STYLE.md section 1 are
-               replaced or guarded. planning/tests/test-portability-contract.sh
-               fails on a new one, so this stays cleared.
-          7.   limited-run.sh's Darwin path degrades honestly and is arch-aware:
-               memlimit is arm64-only, so an Intel Mac is not asked for it.
-               planning/tests/test-limited-run-contract.sh covers both.
-
-          OUTSTANDING — the only remaining blocker:
-
-          8.   The full suite passes twice in a row on macos-latest under both
-               /bin/bash 3.2 and the runner's default bash. This cannot be
-               verified anywhere but a macOS runner: a real bash 3.2 proves the
-               shell floor (the suite is green on 3.2.57 via the flake), but BSD
-               userland is still verified by reading, not by execution. Push the
-               branch, read these two legs, then remove the flag.
-          BLOCKERS
+  # The former macos-known-failures job is gone (T37): its blocker list is
+  # fully cleared -- items 1-7 are enforced by tests, and blocker 8 was closed
+  # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
+  # macOS legs above are now blocking.
 
   shellcheck:
     # Proves: no `error`-severity shellcheck finding exists in any tracked live

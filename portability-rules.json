@@ -5,7 +5,7 @@
     "locale": "LC_ALL=C for anything that sorts, compares or byte-counts",
     "verified": {
       "bash-3.2": "yes \u2014 the full suite runs green under a real 3.2.57 (nix develop; bash32-run-tests)",
-      "bsd-userland": "no \u2014 the GNU-vs-BSD flag rules below are verified by reading, not by execution. CI's macos legs are the intended proof and are still continue-on-error."
+      "bsd-userland": "yes \u2014 CI's macOS legs are blocking since T37 and run the full suite under BSD userland on every push; locally those rules are still verified by reading, not by execution."
     }
   },
   "rules": [
