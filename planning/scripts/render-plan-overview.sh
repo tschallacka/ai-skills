@@ -150,13 +150,51 @@ if [ -f "$review_file" ]; then
     done < <(awk '/^## Findings$/{f=1; next} /^## Verdict$/{f=0} f' "$review_file" | cells /dev/stdin ID || true)
 fi
 
-cycles=0
-[ -f "$history_file" ] && cycles="$(grep -c '^## Cycle [0-9]' "$history_file" || true)"
+# Rounds actually seen, from one normalised stream both the count and the chart
+# read. History cycles are the record of completed rounds; each landing
+# archives the previous table there, so once history exists the live Findings
+# table merely mirrors the last round and must not add another. Only a plan
+# with findings but no archive at all synthesises its first cycle from the live
+# table. Placeholder rows never count, and cycles left empty by their removal
+# disappear (B34).
+live_rows=""
+if [ -f "$review_file" ] && [ ! -f "$history_file" ]; then
+    live_rows="$(awk '/^## Findings$/{f=1;next} /^## Verdict$/{f=0} f && /^\|[[:space:]]*AR-[0-9]/ && $0 !~ /No finding recorded yet/' "$review_file")"
+fi
+open_round=1
+cycles_tmp="$(mktemp "${TMPDIR:-/tmp}/overview-cycles.XXXXXX")"
+{
+    if [ -f "$history_file" ]; then
+        grep -v 'No finding recorded yet' "$history_file" || true
+    fi
+    if [ -n "$live_rows" ]; then
+        printf '## Cycle live\n%s\n' "$live_rows"
+    fi
+} > "$cycles_tmp"
+awk '
+    function flush_block() {
+        if (pending && rows > 0) {
+            out++
+            printf "## Cycle %d\n", out
+            for (i = 1; i <= rows; i++) print kept[i]
+        }
+        pending = 0; rows = 0
+    }
+    BEGIN { pending = 0; rows = 0; out = 0 }
+    /^## Cycle/ { flush_block(); pending = 1; next }
+    # A cycle survives only if it holds at least one finding row; headers,
+    # separators and the seeded "no finding yet" placeholder do not count.
+    pending && /^\|[[:space:]]*AR-[0-9]/ { rows++; kept[rows] = $0; next }
+    END { flush_block() }
+' "$cycles_tmp" > "$cycles_tmp.final"
+mv "$cycles_tmp.final" "$cycles_tmp"
+cycles="$(grep -c '^## Cycle' "$cycles_tmp" || true)"
+open_round=$((cycles + 1))
 
-# One awk pass turns the history into bars (raised per cycle) plus a
-# cumulative-resolved polyline; empty history renders a friendly placeholder.
+# The chart reads the same normalised stream, so bars can never disagree with
+# the count (B34). Zero real rounds leave it empty for the placeholder below.
 cycle_chart_svg=""
-if [ -f "$history_file" ]; then
+if [ -s "$cycles_tmp" ]; then
     cycle_chart_svg="$(awk '
         function flushc() { if (inc) { raised[++n] = rc; cums[++nc] = crc } }
         /^## Cycle [0-9]+/ { flushc(); rc = 0; inc = 1; next }
@@ -186,7 +224,7 @@ if [ -f "$history_file" ]; then
             }
             if (n > 0) s = s "<polyline class=\"line-res\" points=\"" pts "\" stroke-dasharray=\"1200\"/>"
             print s "</svg>"
-        }' "$history_file")"
+        }' "$cycles_tmp")"
 fi
 [ -n "$cycle_chart_svg" ] || cycle_chart_svg="<svg viewBox=\"0 0 460 150\"><text x=\"230\" y=\"78\" text-anchor=\"middle\">no review cycles recorded yet — the chart lights up after cycle 1</text></svg>"
 
@@ -203,7 +241,7 @@ if [ -f "$review_file" ]; then
             else
                 state="implementation"; phase_line="review approved · executing ($done_steps/$total_steps steps done)"
             fi ;;
-        *) phase_line="adversarial review round $((cycles + 1)) open · execution waits for approval" ;;
+        *) phase_line="adversarial review round $open_round open · execution waits for approval" ;;
     esac
 fi
 if [ "$state" = "implementation" ] && [ "$total_steps" -gt 0 ] && [ "$done_steps" -eq "$total_steps" ]; then

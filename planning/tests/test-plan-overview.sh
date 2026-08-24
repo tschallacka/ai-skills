@@ -31,9 +31,9 @@ must() {
     tmp="$(mktemp "${TMPDIR:-/tmp}/overview-must.XXXXXX")"
     OVERVIEW_NOW=$NOW "$@" >"$tmp" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
+        printf 'test-plan-overview: %s exited %d\n' "$label" "$rc" >&2
         sed 's/^/  | /' "$tmp" >&2
         rm -f "$tmp"
-        printf 'test-plan-overview: %s exited %d\n' "$label" "$rc" >&2
         t_end
         exit "$rc"
     fi
@@ -107,6 +107,15 @@ ID,Missing or over-broad item,Required plan change,Status,Work unit
 AR-05,Thin scope,Narrow it,✅ resolved,W01
 CSV
 must 'render implementation' "$script_dir/render-plan-overview.sh" "$plan"
+# One completed round lives only in the Findings table at this point — history
+# is written when the NEXT round starts — so the counts must still see it (B34).
+# Narration renders once per pane, hence two occurrences.
+t_assert_contains "a live-only round counts as one review round" \
+    '1 review round(s) raised 1 finding(s)' "$(cat "$out")"
+t_assert_eq "the empty-round placeholder is gone" \
+    "$(grep -c 'no review cycles recorded yet' "$out" || true)" 0
+t_assert_contains "the live round renders as a chart bar" \
+    'class="bar-f"' "$(cat "$out")"
 t_assert_eq "approved review flips state to implementation" "$(grep -c '^<html[^>]*data-state="implementation"' "$out")" 1
 t_assert_eq "step ledger counts data rows only (no header rows)" \
     "$(grep -o '<span class="go">' "$out" | wc -l | tr -d ' ')" 2
