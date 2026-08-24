@@ -373,6 +373,31 @@
       "updated_at": "2026-08-22T20:21:22Z"
     },
     {
+      "id": "B30",
+      "title": "chat promises exchange across machines, but every server tier binds 127.0.0.1 with no way to change it",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "grep -n '127\\.0\\.0\\.1' chat/runtime/server.py chat/runtime/server.pl chat/runtime/server.js chat/scripts/chat-server.sh; then grep -n 'bind\\|--host' chat/scripts/chat-server.sh",
+      "observed": "server.py binds (\"127.0.0.1\", port), server.pl sets LocalAddr => '127.0.0.1', server.js listens on \"127.0.0.1\", and the socat tier uses TCP-LISTEN:...,bind=127.0.0.1. chat-server.sh has no bind or listen-address option: its only network flag is --port. Meanwhile chat/SKILL.md's description says the skill is for when agents need to exchange messages \"across sessions or machines\", and every client helper takes --host.",
+      "expected": "Either a machine other than the server's own can reach it, or the documentation does not offer that.",
+      "mechanism": "The loopback bind is hard-coded in all four tiers and no flag reaches it. --host on the client side therefore only ever resolves to a server on the same machine, or to one reachable through a tunnel that nothing in the skill sets up or mentions. The promise and the socket disagree, and the socket is right.",
+      "surfaces": [
+        "chat/SKILL.md",
+        "chat/scripts/chat-server.sh",
+        "chat/runtime/server.py",
+        "chat/runtime/server.pl",
+        "chat/runtime/server.js"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "reading the diff of the -ox branch: the description was checked against the sockets rather than taken at its word",
+      "notes": "Two ways out, and they are not equivalent. Correcting the description is the cheap one and probably the right one: the skill states it has no auth, so a loopback-only bus is a sane default and offering a listener on a routable address without authentication would be worse than the missing feature. Making the bind configurable is the other, and it should not be done without deciding what protects it -- at minimum a documented warning, and the four tiers each need the change since the address is hard-coded in each. Whichever is chosen, the cross-machine claim must not survive unqualified in the description, because an agent selecting this skill reads that line to decide whether it fits.",
+      "created_at": "2026-08-24T12:23:50Z",
+      "updated_at": "2026-08-24T12:23:50Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -460,6 +485,27 @@
       "notes": "Went unnoticed because no test drove the opencode branch of the permission step, and development machines happened to have opencode.json. The claude editor keeps its rebuild-from-{} behaviour for settings.json, which has no JSON-C allowance.",
       "created_at": "2026-08-23T21:30:00Z",
       "updated_at": "2026-08-23T21:30:00Z"
+    },
+    {
+      "id": "B29",
+      "title": "test-mermaid-accuracy fails under the flake browser: chromium sandbox blocks mmdc, and every sequenceDiagram loses puppeteer render race",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "nix develop -c bash planning/tests/test-mermaid-accuracy.sh   # with mmdc provided by flake.nix",
+      "observed": "10x \"mmdc rejected the diagram ... Failed to launch the browser process ... SUID sandbox helper binary\" without flags; with --no-sandbox, exactly the sequenceDiagram blocks fail with \"svg element not in render tree\" while flowcharts render. CI mermaid-render renders the same diagrams green.",
+      "expected": "The render gate passes where the diagrams are valid, reports UNCONFIGURED when no browser can launch here, and still rejects genuinely invalid diagrams.",
+      "mechanism": "Two stacked environment mismatches. (1) mmdc launched chromium with its default sandbox, impossible in this container/root context -- ci.yml already solves that for CI. (2) The nixpkgs mermaid-cli/chromium pair has a version skew: puppeteer evaluation loses the render race for every sequenceDiagram regardless of content, proven by minimal controls (flowchart TD A-->B renders; sequenceDiagram A->>B hi fails deterministically).",
+      "surfaces": [
+        "planning/tests/test-mermaid-accuracy.sh"
+      ],
+      "fix": "this session -- per-render --no-sandbox/--disable-dev-shm-usage with an isolated chromium profile dir; two control probes classify the renderer before its verdicts are trusted; the known skew signature on a sequenceDiagram downgrades to WARN only while the control pair reproduces it, everything else still fails",
+      "verification": "Suite leg green locally. Mutations: a broken flowchart still FAILs (UnknownDiagramError reported); a broken sequenceDiagram still FAILs (parse error, different signature, not masked by the skew tolerance); removing the no-sandbox flags reproduces the original browser-launch failure the UNCONFIGURED branch now names.",
+      "found_by": "./verify-both-shells.sh baseline run during B16 verification -- the failure was invisible until the dev flake supplied mmdc to the bash 3.2 leg",
+      "notes": "CI remains the syntax authority: it brings its own browser via npx and has always rendered these blocks. The local probes exist so the suite is green in the environment flake.nix declares without weakening rejection of real defects.",
+      "created_at": "2026-08-24T08:47:14Z",
+      "updated_at": "2026-08-24T08:47:14Z"
     },
     {
       "id": "B6",
@@ -610,27 +656,6 @@
       "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
       "created_at": "2026-08-22T20:49:54Z",
       "updated_at": "2026-08-24T09:24:39Z"
-    },
-    {
-      "id": "B29",
-      "title": "test-mermaid-accuracy fails under the flake browser: chromium sandbox blocks mmdc, and every sequenceDiagram loses puppeteer render race",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "nix develop -c bash planning/tests/test-mermaid-accuracy.sh   # with mmdc provided by flake.nix",
-      "observed": "10x \"mmdc rejected the diagram ... Failed to launch the browser process ... SUID sandbox helper binary\" without flags; with --no-sandbox, exactly the sequenceDiagram blocks fail with \"svg element not in render tree\" while flowcharts render. CI mermaid-render renders the same diagrams green.",
-      "expected": "The render gate passes where the diagrams are valid, reports UNCONFIGURED when no browser can launch here, and still rejects genuinely invalid diagrams.",
-      "mechanism": "Two stacked environment mismatches. (1) mmdc launched chromium with its default sandbox, impossible in this container/root context -- ci.yml already solves that for CI. (2) The nixpkgs mermaid-cli/chromium pair has a version skew: puppeteer evaluation loses the render race for every sequenceDiagram regardless of content, proven by minimal controls (flowchart TD A-->B renders; sequenceDiagram A->>B hi fails deterministically).",
-      "surfaces": [
-        "planning/tests/test-mermaid-accuracy.sh"
-      ],
-      "fix": "this session -- per-render --no-sandbox/--disable-dev-shm-usage with an isolated chromium profile dir; two control probes classify the renderer before its verdicts are trusted; the known skew signature on a sequenceDiagram downgrades to WARN only while the control pair reproduces it, everything else still fails",
-      "verification": "Suite leg green locally. Mutations: a broken flowchart still FAILs (UnknownDiagramError reported); a broken sequenceDiagram still FAILs (parse error, different signature, not masked by the skew tolerance); removing the no-sandbox flags reproduces the original browser-launch failure the UNCONFIGURED branch now names.",
-      "found_by": "./verify-both-shells.sh baseline run during B16 verification -- the failure was invisible until the dev flake supplied mmdc to the bash 3.2 leg",
-      "notes": "CI remains the syntax authority: it brings its own browser via npx and has always rendered these blocks. The local probes exist so the suite is green in the environment flake.nix declares without weakening rejection of real defects.",
-      "created_at": "2026-08-24T08:47:14Z",
-      "updated_at": "2026-08-24T08:47:14Z"
     }
   ]
 }
