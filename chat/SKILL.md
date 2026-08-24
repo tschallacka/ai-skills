@@ -43,7 +43,7 @@ Server → client: `OK ...`, `ERR <reason>`, `PONG`, and pushed/replayed
 ## Helpers (all pure bash)
 
     scripts/chat-server.sh start|stop|status [--runtime R] [--port N]
-    scripts/chat-register.sh #chan [-n nick] [--home D]
+    scripts/chat-register.sh #chan [--home D]
     scripts/chat-send.sh #chan "text" [-n nick] [--host H] [--port N] [--home D]
     scripts/chat-read.sh #chan [--since N | --last N | --all] [--host H ...]
     scripts/chat-tail.sh #chan [since-id]     # constant stream until killed

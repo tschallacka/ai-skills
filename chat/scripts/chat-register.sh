@@ -4,7 +4,7 @@
 # Idempotent: an existing channel answers OK, not 73.
 #
 # Usage:
-#   chat-register.sh #chan [-n NICK] [--home D]
+#   chat-register.sh #chan [--home D]
 #   chat-register.sh --help
 
 set -euo pipefail
@@ -13,11 +13,10 @@ export LC_ALL=C
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} #chan [-n NICK] [--home D]
+Usage: ${0##*/} #chan [--home D]
 
-Creates channels/<chan>.log under AI_CHAT_HOME (default ~/.ai-chat).
-NICK only matters for the socket path (--host); locally the register is
-attributed to nick 'system'.
+Creates channels/<chan>.log under AI_CHAT_HOME (default ~/.ai-chat) with
+a 'system :channel registered' seed line as id 1.
 USAGE
     exit "$rc"
 }
