@@ -13,6 +13,12 @@ planning/scripts/plan-context-lib.sh	warn	entry ids and view names are documente
 planning/scripts/plan-inventory-lib.sh	warn	the nine-field TSV order is a contract for every caller of plan_inventory_split	
 planning/scripts/plan-document-lib.sh	warn	plan_die exit codes are a contract callers branch on (CODE-STYLE §5)	
 planning/scripts/plan-map-lib.sh	warn	the hex key encoding must keep AR-01 distinct from AR_01	
+planning/scripts/mint-fix-keys.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	
+planning/scripts/verify-fix-keys.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	
+planning/scripts/add-fix-claim.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	
+planning/goal-tables.json	warn	sections whose first column may be yes/no are read by validate-plan-goals-lib; a new table shape needs that reader updated	bash planning/tests/test-goal-testing-row.sh
+planning/placeholders.json	warn	registered template tokens are swept by validate-plan-placeholders-lib; a new surface changes WARN vs FAIL	bash planning/tests/test-plan-commands.sh
+planning/state-change-registry.json	warn	module-state/schema/config goals serve only when their entry exists here	bash planning/tests/test-goal-testing-row.sh
 benchmark/planning/case/start-worker.sh	warn	a byte-identical copy is placed in each generated case	
 CODE-STYLE.md	warn	rules here are asserted by the suite; a new rule needs an assertion or an explicit note that it is a review item	
 planning/MAINTAINER.md	warn	the artifact map must still describe the tree	

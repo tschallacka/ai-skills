@@ -496,15 +496,15 @@
     {
       "id": "T9",
       "title": "Move MAINTAINER.md's artifact map into `coupling.tsv`",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "`blast-radius.sh` reads `coupling.tsv` to warn when one side of a coupled pair changes without the other. Some couplings still live only in MAINTAINER.md's prose artifact map, where nothing can read them — tonight's `plan_review_gated_pairs` is exactly such a pair (three scripts must agree on one parser). Each row moved turns a convention into a warning.",
-      "note": null,
+      "note": "Seven prose-only couplings moved into coupling.tsv as warn rows: the three plan_review_gated_pairs callers, goal-tables.json, placeholders.json and state-change-registry.json with their pinning tests as check-commands. blast-radius stays green; MAINTAINER.md keeps the descriptive map, coupling.tsv owns the change-together rules.",
       "blocked_on": null,
       "refs": [],
       "priority": "low",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T10:00:24Z"
     },
     {
       "id": "T22",
