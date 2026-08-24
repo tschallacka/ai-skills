@@ -44,9 +44,9 @@
       "fix": null,
       "verification": null,
       "found_by": "CI on PR #3, opened for exactly this reason: 46 commits with 88 files changed had never run on BSD userland, and the branch itself had just made the macOS legs blocking",
-      "notes": "Blocking because -ox removed continue-on-error from both macOS legs (T37), so this fails the PR rather than being informational. Diagnose it on a runner, not by reading: stop discarding the setup commands' output first -- capture and print it on failure -- and the cause will name itself. Worth checking the same pattern in the other new tests from this branch, since a setup command redirected to /dev/null hides a BSD failure the same way anywhere it appears.",
+      "notes": "Blocking because -ox removed continue-on-error from both macOS legs (T37), so this fails the PR rather than being informational. Diagnose it on a runner, not by reading: stop discarding the setup commands' output first -- capture and print it on failure -- and the cause will name itself. Worth checking the same pattern in the other new tests from this branch, since a setup command redirected to /dev/null hides a BSD failure the same way anywhere it appears. Order of work: make the test able to speak before fixing what it fails on -- capture the setup commands' output and print it on failure -- then push and read the macOS leg rather than reading the code. The same discarded-output pattern is worth checking in the other tests this branch added: test-add-work-unit-staging, test-adversarial-review-mint-order, test-adversarial-review-preamble, test-function-length-ratchet, test-installer-opencode-permissions, test-owned-roster-scaffold, test-verifier-reach-memo and chat/tests/test-chat.sh. And the flag cannot go back: making those legs blocking is what caught this.",
       "created_at": "2026-08-24T12:26:51Z",
-      "updated_at": "2026-08-24T12:26:51Z"
+      "updated_at": "2026-08-24T12:27:49Z"
     },
     {
       "id": "B3",
