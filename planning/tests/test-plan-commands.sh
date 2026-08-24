@@ -467,6 +467,29 @@ for dropped in W02 W03; do
              cat "$temporary_root/coverage-collapse.log" >&2; exit 1; }
 done
 
+# remove-coverage.sh is the sanctioned undo for an obsolete row whose work units
+# still exist (T17). Contract 9a: the notice names the work units the row
+# carried, read before they were gone, and a missing row refuses instead of
+# reporting success over nothing.
+"$script_dir/add-coverage.sh" "$plan_dir" 'Removal probe outcome.' W02,W05 'obsolete after re-plan' \
+    >/dev/null 2>&1
+before_rows="$(grep -cF '| Removal probe outcome. |' "$plan_dir/work-unit-inventory.md" || true)"
+[ "$before_rows" -eq 1 ] || { echo 'coverage removal fixture did not seed one row.' >&2; exit 1; }
+"$script_dir/remove-coverage.sh" "$plan_dir" 'Removal probe outcome.' \
+    >/dev/null 2>"$temporary_root/coverage-remove.log"
+grep -Fq 'dropped coverage row for outcome Removal probe outcome.: work units W02,W05' \
+    "$temporary_root/coverage-remove.log" \
+    || { echo 'remove-coverage did not name the row it discarded:' >&2
+         cat "$temporary_root/coverage-remove.log" >&2; exit 1; }
+after_rows="$(grep -cF '| Removal probe outcome. |' "$plan_dir/work-unit-inventory.md" || true)"
+[ "$after_rows" -eq 0 ] || { echo 'remove-coverage left the row in place.' >&2; exit 1; }
+if "$script_dir/remove-coverage.sh" "$plan_dir" 'Removal probe outcome.' \
+    >/dev/null 2>"$temporary_root/coverage-remove-miss.log"; then
+    echo 'remove-coverage reported success over a row that does not exist.' >&2
+    exit 1
+fi
+grep -Fq 'no coverage row' "$temporary_root/coverage-remove-miss.log"
+
 # P2-2: removal refuses to cascade dependency pruning without --confirm-cascade.
 if "$script_dir/remove-work-unit.sh" "$plan_dir" W01 >"$temporary_root/cascade-refused.log" 2>&1; then
     echo 'Removal with dependents unexpectedly passed without --confirm-cascade.' >&2

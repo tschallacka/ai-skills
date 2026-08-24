@@ -18,6 +18,7 @@ planning/context/brainstorm-limiting-context-oracle.json	context/brainstorm-limi
 planning/PACKAGE-MANIFEST.tsv	PACKAGE-MANIFEST.tsv	W20	review-approved	backup-then-replace	false
 planning/requires.tsv	requires.tsv	installer	review-approved	backup-then-replace	false
 planning/scripts/add-coverage.sh	scripts/add-coverage.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/remove-coverage.sh	scripts/remove-coverage.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-adversarial-finding.sh	scripts/add-adversarial-finding.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-fix-claim.sh	scripts/add-fix-claim.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/add-goal.sh	scripts/add-goal.sh	installer	review-approved	backup-then-replace	false

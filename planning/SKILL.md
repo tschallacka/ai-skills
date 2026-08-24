@@ -1269,6 +1269,7 @@ from step numbering" note is the sanctioned pattern. Reviewers must not reject
 ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01 "<notes>"            # append a coverage row
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> "<outcome or proof>" W01,W02 "<notes>" --replace  # amend (collapses duplicate rows for the same outcome)
+"$PLANNING_SKILL_DIR/scripts/remove-coverage.sh" <plan-directory> "<outcome or proof>"  # remove an obsolete coverage row (names the work units it carried)
 "$PLANNING_SKILL_DIR/scripts/verify-target.sh" <plan-directory> W01 [--repo <root>]   # static reachability check: file exists, layout removes/re-points the block, theme override; a unit with no target, or a render surface with no block name, fails
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --testing-requirement <plan-directory> 01-<goal> <yes|no> "<rationale>"
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> in-progress

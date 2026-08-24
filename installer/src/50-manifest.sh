@@ -72,6 +72,7 @@ roles/execution.md
 roles/cleanup.md
 roles/VOICES.md
 scripts/add-coverage.sh
+scripts/remove-coverage.sh
 scripts/add-adversarial-finding.sh
 scripts/add-fix-claim.sh
 scripts/add-goal.sh
