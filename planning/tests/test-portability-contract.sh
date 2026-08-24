@@ -59,6 +59,10 @@ in_allowlist() {
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
+        # chat probes its optional server-runtime chain, so the fallback order
+        # must name each runtime it may pick (chat/requires.tsv).
+        ./chat/scripts/chat-server.sh:python3-shipped) return 0 ;;
+        ./chat/tests/test-chat.sh:python3-shipped) return 0 ;;
     esac
     return 1
 }
