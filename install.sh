@@ -2787,6 +2787,7 @@ tests/test-report17-regressions.sh
 tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
+tests/test-register-helpers.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
 tests/test-self-hosted-plan.sh

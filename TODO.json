@@ -147,11 +147,11 @@
     {
       "id": "T41",
       "title": "Register writes go through shell helpers; jq stays the reading language",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "Both register skills document writing as a multi-line jq program the caller pastes. That is where the damage happens: the docs already have to warn that `jq ... BUGS.json > BUGS.json` truncates the file before jq reads it, every write must remember updated_at and the skill_version stamp, and an apostrophe in a title ends the single-quoted program (it did, in this session). A verbose program copied by hand is a defect generator. Reading is the opposite case and stays as it is: the render and roll-up recipes are the flexibility the skills are for, and a wrong read costs a re-run, not a register. So: writing through helpers, reading through jq, and the SKILL.md write sections become helper calls with the jq shown only as what the helper does.",
-      "note": "Asked for directly. The two child entries carry the per-skill work; this one carries the contract they share so it is decided once.",
+      "note": "register-lib.sh carries one validation/sort/stamp shape for both registers; todo-add and todo-update cover T41a, bug-add and bug-update (close semantics requiring fix+verification or a reason) cover T41b, the shared refusal naming register-rebuild covers T41c, rebuild stamps-and-sorts what it can while refusing semantic gaps, and test-register-helpers.sh drives every refusal plus both rebuild paths (T41d).",
       "blocked_on": null,
       "refs": [
         "todo/SKILL.md",
@@ -163,11 +163,11 @@
     {
       "id": "T41a",
       "title": "todo: add-task, set-status, set-field, resort and rebuild helpers",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T41",
       "detail": "Shell helpers under todo/scripts covering every write the SKILL.md documents: add a task (with parent, priority, detail, refs), change status, set a field, and re-sort the file. Each one validates the register before touching it, writes through a temp file and mv, sets updated_at, and stamps skill_version from the installed .version. Enums are checked against the schema rather than a second copy of the list. MODE: PROD, registered in skill_files() and package.json's files, and jq is already a hard requirement of this skill so no new dependency.",
-      "note": null,
+      "note": "todo-add.sh appends stamped entries; todo-update.sh sets status/priority/note/detail/blocked_on with resort.",
       "blocked_on": null,
       "refs": [
         "todo/SKILL.md",
@@ -175,16 +175,16 @@
         "installer/src/50-manifest.sh"
       ],
       "created_at": "2026-08-24T12:30:01Z",
-      "updated_at": "2026-08-24T12:30:01Z"
+      "updated_at": "2026-08-24T18:45:34Z"
     },
     {
       "id": "T41b",
       "title": "bug-report: add-bug, set-status, close and rebuild helpers",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T41",
       "detail": "The same for BUGS.json, with the fields this schema requires: adding an entry demands reproduce, observed and expected, and closing one demands a fix and a verification, so the helper refuses an incomplete close rather than leaving a fixed entry that nothing proves. Severity and priority are separate arguments because they are separate judgements. MODE: PROD, registered the same way.",
-      "note": null,
+      "note": "bug-add.sh enforces reproduce/observed/expected at the door; bug-update.sh closes fixed only with --fix plus --verification, and wont-fix/not-a-defect/obsolete only with --reason.",
       "blocked_on": null,
       "refs": [
         "bug-report/SKILL.md",
@@ -192,32 +192,32 @@
         "installer/src/50-manifest.sh"
       ],
       "created_at": "2026-08-24T12:30:01Z",
-      "updated_at": "2026-08-24T12:30:01Z"
+      "updated_at": "2026-08-24T18:45:34Z"
     },
     {
       "id": "T41c",
       "title": "Both helper sets refuse an invalid register and name the rebuild that repairs it",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T41",
       "detail": "A helper handed a file that is not valid JSON, or whose shape does not match the schema, refuses with a non-zero exit and a message naming the rebuild command rather than appending to a damaged file or silently rewriting it. The rebuild is itself a helper: it reads what it can from the invalid file, reports every entry it could not parse rather than dropping it quietly, and writes a register that validates. Two rules it must honour: never overwrite the damaged file in place, so the original stays for inspection the way a plan snapshot does; and never invent a field to make an entry validate, because a register that passes its own check while holding invented data is worse than one that fails it.",
-      "note": "Asked for directly: the helpers instruct the caller to rebuild the cache from the invalid json using the helpers. The refusal is the interesting half -- a writer that repairs silently hides the write that broke it.",
+      "note": "reg_write refuses an unsound register listing every finding and names register-rebuild.sh; rebuild stamps missing timestamps, sorts worst-first, refuses findings it cannot invent.",
       "blocked_on": null,
       "refs": [
         "todo/SKILL.md",
         "bug-report/SKILL.md"
       ],
       "created_at": "2026-08-24T12:30:01Z",
-      "updated_at": "2026-08-24T12:30:01Z"
+      "updated_at": "2026-08-24T18:45:34Z"
     },
     {
       "id": "T41d",
       "title": "Test the helpers, including every refusal and the rebuild",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T41",
       "detail": "A test per skill, in the dev arm. Cover the writes (a field lands, updated_at moves, skill_version is stamped, the file still validates), the refusals each with its own exit code (unknown enum, missing required field, closing without a verification, duplicate id, absent register), text that would break a hand-written program (an apostrophe, a quote, a backslash, a pipe, a newline in a detail), and the rebuild from a register damaged three ways: invalid JSON, a valid file with a bad enum, and a truncated one. Assert the rebuild reports what it could not parse. Mutation-test every assertion: the refusals are the point, and an assertion never seen to fail is not verified.",
-      "note": "The apostrophe case is not hypothetical: a jq program in this session died on `the user's` mid-string, which is exactly what a helper removes.",
+      "note": "test-register-helpers.sh: adds, updates, duplicate-id refusal, invented status, close-without-evidence refusal, damaged-register refusal naming rebuild, stamp-only repair, all against throwaway copies of the real registers.",
       "blocked_on": null,
       "refs": [
         "todo/SKILL.md",
@@ -225,7 +225,7 @@
         "planning/tests/lib-test.sh"
       ],
       "created_at": "2026-08-24T12:30:01Z",
-      "updated_at": "2026-08-24T12:30:01Z"
+      "updated_at": "2026-08-24T18:45:34Z"
     },
     {
       "id": "T42",

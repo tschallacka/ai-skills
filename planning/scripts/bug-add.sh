@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# MODE: DEV
+# bug-add.sh — append one defect to BUGS.json through the shared register
+# checks, then resort. Reproduction, observation and expectation are required:
+# a report without a reproduction is a rumour.
+#
+# Usage:
+#   bug-add.sh --title "text" --reproduce "cmd" --observed "text" \
+#              --expected "text" [--severity major] [--priority normal]
+#              [--status reported|confirmed] [--mechanism "text"]
+#              [--parent B37] [--found-by "who"] [--surfaces f1,f2]
+#   bug-add.sh --help
+
+set -euo pipefail
+export LC_ALL=C
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/register-lib.sh
+source "$script_dir/register-lib.sh"
+
+file="${BUGS_JSON:-$(cd "$script_dir/.." && pwd)/BUGS.json}"
+[ -f "$file" ] || { printf '%s: register not found: %s\n' "${0##*/}" "$file" >&2; exit 66; }
+
+title="" reproduce="" observed="" expected="" severity="major" priority="normal"
+status="reported" mechanism="null" parent="null" found_by="register writer" surfaces=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --title) [ "$#" -ge 2 ] || exit 64; title="$2"; shift 2 ;;
+        --reproduce) [ "$#" -ge 2 ] || exit 64; reproduce="$2"; shift 2 ;;
+        --observed) [ "$#" -ge 2 ] || exit 64; observed="$2"; shift 2 ;;
+        --expected) [ "$#" -ge 2 ] || exit 64; expected="$2"; shift 2 ;;
+        --severity) [ "$#" -ge 2 ] || exit 64; severity="$2"; shift 2 ;;
+        --priority) [ "$#" -ge 2 ] || exit 64; priority="$2"; shift 2 ;;
+        --status) [ "$#" -ge 2 ] || exit 64; status="$2"; shift 2 ;;
+        --mechanism) [ "$#" -ge 2 ] || exit 64; mechanism="\"$2\""; shift 2 ;;
+        --parent) [ "$#" -ge 2 ] || exit 64; parent="\"$2\""; shift 2 ;;
+        --found-by) [ "$#" -ge 2 ] || exit 64; found_by="$2"; shift 2 ;;
+        --surfaces) [ "$#" -ge 2 ] || exit 64; surfaces="$2"; shift 2 ;;
+        *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; exit 64 ;;
+    esac
+done
+[ -n "$title" ] && [ -n "$reproduce" ] && [ -n "$observed" ] && [ -n "$expected" ] || { printf '%s: --title --reproduce --observed --expected are required\n' "${0##*/}" >&2; exit 64; }
+
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+id="B$(reg_next_id bug "$file")"
+surfaces_json="[]"
+if [ -n "$surfaces" ]; then
+    surfaces_json="$(printf '%s' "$surfaces" | tr ',' '\n' | jq -R . | jq -s .)"
+fi
+
+jq --arg id "$id" --arg title "$title" --arg now "$now" \
+   --arg reproduce "$reproduce" --arg observed "$observed" --arg expected "$expected" \
+   --arg severity "$severity" --arg priority "$priority" --arg status "$status" \
+   --argjson mechanism "$mechanism" --argjson parent "$parent" \
+   --arg found_by "$found_by" --argjson surfaces "$surfaces_json" '
+   .bugs += [{
+     id: $id, title: $title, status: $status, severity: $severity,
+     priority: $priority, parent: $parent,
+     reproduce: $reproduce, observed: $observed, expected: $expected,
+     mechanism: (if $mechanism == null then null else $mechanism end),
+     surfaces: $surfaces, fix: null, verification: null,
+     found_by: $found_by, notes: null,
+     created_at: $now, updated_at: $now }]
+' "$file" > "$file.tmp"
+mv "$file.tmp" "$file"
+
+reg_write bug "$file"
+printf 'Filed %s: %s\n' "$id" "$title"
