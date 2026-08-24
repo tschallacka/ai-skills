@@ -228,6 +228,116 @@
       "updated_at": "2026-08-24T12:30:01Z"
     },
     {
+      "id": "T42",
+      "title": "Make the plan overview a reviewing tool, not only a monitor",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "The page answers how far along and nothing else. As a review surface it is opaque: no plan description, no goal prose, no way to open a step and read what it entails, narration truncated mid-sentence, no picture of how steps depend on each other, and no sight of the tests at all. Everything needed is already in the plan tree -- plan-description.md, goal.md, the step files and their -testing.md companions, work-unit-inventory.md with its depends-on column, the coverage table, and adversarial-review.md -- so this is a rendering gap, not a data gap. Constraints that hold for every child: one self-contained file with no external asset references (its own test asserts this), the state palette keyed on html[data-state], every interpolated value HTML-escaped through esc, and no dependency beyond what the skill already declares.",
+      "note": "Asked for directly, from a render of .plans/gated-review-fix-keys: \"This will be my reviewing tool, not only my monitoring tool.\"",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/templates/plan-overview.html.tmpl",
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42a",
+      "title": "Show what the plan is: description, goals and their outcomes",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "Render the plan-description.md narrative sections and each goal's own prose -- the demonstrable outcome, the approach, the dependencies and handoffs -- so a reviewer learns what is being built without opening a file. Today the page names goals only as bar labels. Source: plan-description.md and each <goal>/goal.md.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42b",
+      "title": "Open a step: instructions, acceptance criteria, work unit, status",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "Each of the 17 step-ledger rows becomes expandable, showing that step's Instructions and Acceptance criteria verbatim, the work unit it carries with its file and symbol scope, and its status with whatever recorded it. Details/summary is enough -- no framework, and it keeps the page single-file and printable. This is the single biggest transparency win: the ledger currently proves a step exists and says nothing about it.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42c",
+      "title": "Draw how the work relates: a dependency graph of steps and units",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "The depends-on column of work-unit-inventory.md is an executable order that the page never shows. Draw it: units as nodes, depends-on as edges, goals as clusters, completion as node state, so a reviewer sees the shape of the work and where a blocked edge sits. Hand-authored SVG path data is the wrong tool at this size -- generate the layout, or render a mermaid block if the viewer can, but keep the fallback readable with no external assets.",
+      "note": "The \"no story on how edges touch\" complaint. A graph is also the only view that makes a cycle or an orphan obvious.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/plan-inventory-lib.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42d",
+      "title": "Show the tests: which steps have companions and what they verify",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "A reviewer cannot currently tell whether a step is tested. Render each step's -testing.md companion: the verification instructions, the browser, backend and manual sections where present, and mark steps whose goal requires testing but which have no companion. Source: <goal>/steps/<step>-testing.md and each goal's testing-requirement row.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/create-step-testing.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42f",
+      "title": "Findings and review rounds, each openable",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "The header says 7 findings and the cycles chart says none were recorded. Render the Findings table itself: each finding's id, what it objects to, its status, the work unit it is bound to and the fix claim if one exists, plus the review history rounds. For a reviewer this is the point of the page -- the adversarial review is where the judgement lives.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/plan-table-lib.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42i",
+      "title": "Test each new surface, and keep the single-file guarantees",
+      "status": "open",
+      "priority": "high",
+      "parent": "T42",
+      "detail": "Extend test-plan-overview.sh per surface: the description and goal prose appear, a step expansion carries its instructions and acceptance criteria, the graph has a node per unit and an edge per depends-on, a step whose goal requires testing but has no companion is marked, findings render with their ids and statuses, and coverage rows map to units. Keep the existing guarantees asserted: no external asset references, no unsubstituted template tokens, and markup planted in plan prose comes out escaped -- the escaping test matters more once real prose reaches the page. Mutation-test every assertion.",
+      "note": "Note for whoever picks this up: test-plan-overview is currently the test failing on both macOS legs (B31), so fix that first or these additions land on a red test.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -612,6 +722,51 @@
       ],
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T42e",
+      "title": "Narration reads as an account, and is not truncated",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T42",
+      "detail": "Three lines end in ellipses mid-sentence because the panel clips them: white-space:nowrap with text-overflow on a fixed-height card. Let it wrap and grow, and make it an actual account -- what changed since the last render, which step moved, which finding was raised or resolved, what is waiting on what -- rather than three restated counters.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42g",
+      "title": "Coverage: which outcome each work unit answers",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T42",
+      "detail": "Render the definition-of-done coverage table so a reviewer can see which required outcome each unit is claimed against, and which outcomes carry no unit. The validator already refuses an uncovered outcome; showing it turns a gate into insight.",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
+    },
+    {
+      "id": "T42h",
+      "title": "Make it navigable and reviewable: anchors, keyboard, print",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T42",
+      "detail": "A reviewing tool gets linked and annotated: stable anchors per goal, step, unit and finding so a comment can point at one, keyboard access to every expandable, visible focus, a print stylesheet that expands everything and drops the animation, and prefers-reduced-motion honoured. The auto-refresh must not fight a reader mid-expansion -- pause it while something is open, or drop the meta refresh for a JS refresh that preserves state.",
+      "note": "The 15s meta refresh currently reloads the page wholesale, which would close every expanded section a reviewer had opened.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T12:59:21Z",
+      "updated_at": "2026-08-24T12:59:21Z"
     },
     {
       "id": "T8",
