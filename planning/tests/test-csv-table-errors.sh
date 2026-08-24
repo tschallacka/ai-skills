@@ -50,10 +50,22 @@ expect_message() { # <label> <columns> <csv> <needle>...
 
 expect_message 'CRLF'            5 "AR-01,item,change,open,W01$(printf '\r')" 'carriage return' 'CRLF' 'row 1'
 expect_message 'column count'    5 'AR-01,item,change'            'expected 5' 'row 1 has 3'
-expect_message 'pipe in a cell'  5 'AR-01,it|em,change,open,W01'  'pipe character' 'row 1, column 2'
+expect_message 'raw pipe in a cell' 5 'AR-01,it|em,change,open,W01'  'unescaped pipe character' 'row 1, column 2'
 expect_message 'unbalanced quote' 5 'AR-01,"item,change,open,W01' 'unbalanced double quote' 'row 1'
 expect_message 'blank row'       5 'AR-01,a,b,open,W01\n\nAR-02,a,b,open,W02' 'blank' 'row 2'
 expect_message 'empty input'     5 ''                             'empty'
+
+# The escaped spelling lands the pipe in the cell (B25): reviewer prose can
+# quote table syntax by writing \|, which GFM renders as a literal pipe.
+rc=0
+out="$(render 5 'AR-01,it\|em,change,open,W01')" || rc=$?
+[ "$rc" -eq 0 ] || note_fail "an escaped pipe exited $rc, want 0"
+case "$out" in
+    *'| it\|em |'*) ;;
+    *) note_fail "an escaped pipe did not render verbatim — got: $out" ;;
+esac
+# An escape must not rescue a row that also carries a raw pipe elsewhere.
+expect_message 'escaped and raw pipe' 5 'AR-01,it\|em,ch|nge,open,W01' 'unescaped pipe character' 'row 1, column 3'
 
 # Each message must be distinguishable from the others, or the reader is no
 # better off than with the single message this replaced.

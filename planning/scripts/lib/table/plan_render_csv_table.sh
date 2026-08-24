@@ -38,10 +38,17 @@ plan_render_csv_table() {
             fields[++count] = field
             return count
         }
-        function emit_row(fields, count,    i) {
+        function emit_row(fields, count,    i, cleaned, p) {
             printf "|"
             for (i = 1; i <= count; i++) {
-                if (fields[i] ~ /\|/) { printf "row %d, column %d", NR, i > diag; exit 4 }
+                # A literal pipe is spelled \| in the cell and emitted verbatim:
+                # GFM renders \| inside a table row as a pipe. An unescaped
+                # pipe would split the Markdown row, so strip the escapes and
+                # whatever raw pipe remains is a fault.
+                cleaned = fields[i]
+                while ((p = index(cleaned, "\\|")) > 0)
+                    cleaned = substr(cleaned, 1, p - 1) substr(cleaned, p + 2)
+                if (index(cleaned, "|") > 0) { printf "row %d, column %d", NR, i > diag; exit 4 }
                 if (fields[i] ~ /\r/) { printf "row %d, column %d", NR, i > diag; exit 7 }
                 printf " %s |", fields[i]
             }
@@ -66,7 +73,7 @@ plan_render_csv_table() {
         case "$csv_status" in
             2) plan_die "CSV ${plan_csv_where:-input} has an unbalanced double quote; a quoted cell needs a closing quote, and a literal quote inside one is doubled" 65 ;;
             3) plan_die "CSV ${plan_csv_where:-row has the wrong number of} columns, expected $columns comma-separated columns on every row" 65 ;;
-            4) plan_die "CSV ${plan_csv_where:-input} contains a pipe character, which would break the Markdown table; remove it or spell it differently" 65 ;;
+            4) plan_die "CSV ${plan_csv_where:-input} contains an unescaped pipe character, which would break the Markdown table; spell a literal pipe as \\| in the cell, or reword" 65 ;;
             5) plan_die "CSV ${plan_csv_where:-input} is blank; remove the empty row rather than leaving a gap between records" 65 ;;
             6) plan_die "CSV input is empty; expected $columns comma-separated columns on at least one row" 65 ;;
             7) plan_die "CSV ${plan_csv_where:-input} contains a carriage return: the file has CRLF line endings. Convert it to LF" 65 ;;

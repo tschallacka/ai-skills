@@ -592,7 +592,7 @@
     {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -604,12 +604,12 @@
         "planning/scripts/lib/table/plan_render_csv_table.sh",
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session — emit_row strips \\\\-escapes before testing for a raw pipe, so a cell spelled with the GFM escape renders verbatim and only an unescaped pipe is refused; refusal message and REVIEWER.md document the spelling",
+      "verification": "test-csv-table-errors: escaped pipe renders as | it\\\\|em |; raw pipe still refused naming column; mixed escaped+raw row still refused at the raw column. Mutation: reverting emit_row to reject any pipe fails the escaped-spelling assertion.",
       "found_by": "health-app worker minor note in ../health-app/bug-fixed/fixed-by-ai-skills.md (2026-08-22): reviewer prose quoting table syntax needs guidance",
       "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
       "created_at": "2026-08-22T20:49:54Z",
-      "updated_at": "2026-08-22T20:49:54Z"
+      "updated_at": "2026-08-24T09:24:39Z"
     },
     {
       "id": "B29",
