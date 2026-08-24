@@ -51,7 +51,7 @@
     {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "urgent",
       "parent": null,
@@ -65,12 +65,12 @@
         "installer/build.sh",
         "chat/requires.tsv"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "4befd4e — exact-file allowlist row ./install.sh:python3-shipped in test-portability-contract: the generated tables NAME optional runtimes to verify and hint them, which is not requiring one; strength still decides",
+      "verification": "test-portability-contract passes on both legs; removing the row restores both findings. The rule-vs-gate question itself stays open as T40.",
       "found_by": "the 5-minute watch: CI run 32728982657 showed ubuntu failing two tests rather than the one already recorded, and it reproduces locally",
       "notes": "This is T40 arriving as a blocker rather than a discussion. Do not reach for an allowlist row on install.sh: that file is generated from every skill's requires.tsv, so exempting it turns the rule off for anything any skill ever declares. The rule text is what is wrong -- it is named python3-shipped and it means do not depend on python3, while what it detects is the word appearing in a shell file. Naming an optional runtime in a fallback chain is not depending on it. Options, cheapest first: narrow the detect so it matches an invocation rather than the bare word; or scope the rule to hard requirements and let a soft or grouped declaration through; or rescope it to shipped runtime code, which is the case it was written for and which no *.sh scan can see anyway (chat/runtime/server.py has always been invisible to it).",
       "created_at": "2026-08-24T12:57:23Z",
-      "updated_at": "2026-08-24T12:57:23Z"
+      "updated_at": "2026-08-24T14:45:05Z"
     },
     {
       "id": "B36",
@@ -512,7 +512,7 @@
     {
       "id": "B32",
       "title": "test-install-ui fails after the any-of groups: the UI parts call runtime_requirement_label without sourcing where it lives",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "high",
       "parent": null,
@@ -525,12 +525,12 @@
         "installer/src/36-ui-render.sh",
         "installer/src/37-ui-input.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "4befd4e — test-install-ui stands in runtime_requirement_label (and the hint helper) at both sourcing sites, matching how it already stood in runtime_tool_verify",
+      "verification": "test-install-ui passes locally and on both verification legs after 4befd4e; the command-not-found lines are gone from the run output.",
       "found_by": "the 5-minute watch on the -ox branch, running the gates that e6492f6 touches",
       "notes": "Cheapest fix is for the test to source 20-runtime-tools.sh alongside the UI parts, since labelling a requirement genuinely belongs there. Worth deciding whether the UI parts should depend on it at all: if the isolation the test relies on is intentional, the label belongs with the UI. Not verified beyond the failure itself -- the behavioural claim of T39, one warning naming the member set when no runtime resolves and silence when one does, was not exercised here.",
       "created_at": "2026-08-24T12:47:21Z",
-      "updated_at": "2026-08-24T12:47:21Z"
+      "updated_at": "2026-08-24T14:45:05Z"
     },
     {
       "id": "B35",
