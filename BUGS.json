@@ -834,6 +834,29 @@
       "verification": null,
       "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
       "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative."
+    },
+    {
+      "id": "B39",
+      "title": "install.sh with no --target exits 1 printing nothing at all, so a headless install fails silently",
+      "severity": "major",
+      "priority": "high",
+      "status": "confirmed",
+      "found_by": "installing the new git-worktrees skill without --target",
+      "created_at": "2026-08-24T16:30:16Z",
+      "updated_at": "2026-08-24T16:30:16Z",
+      "reproduce": "bash install.sh --skill git-worktrees --yes; echo \"exit $?\"   # exit 1, zero bytes\nbash install.sh --skill git-worktrees --target \"$HOME/.claude/skills\" --yes; echo \"exit $?\"   # exit 0, installs",
+      "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
+      "observed": "exit 1 with 0 bytes captured from 2>&1, both with stdout on a pipe and redirected to /dev/null. The same command with an explicit --target exits 0 and prints 400 bytes ending 'Installed: /home/mdibbets/.claude/skills/git-worktrees'.",
+      "mechanism": "Not the target logic. install.sh:3552 calls show_splash only when SKILL_SELECTION or TARGET_SELECTION is empty, which is why passing --target hides the bug. show_splash (install.sh:1077) starts with a bare 'return' guarded by a tty test on fd 3; with no tty the test fails and the bare return propagates status 1. show_splash is the last command in that then-branch, so under set -euo pipefail (install.sh:5) the script aborts there, before select_targets runs, printing nothing. Isolated proof: a function whose body is the same tty test plus bare return exits 1 and never reaches the next statement, while the same function with 'return 0' reaches it.",
+      "surfaces": [
+        "install.sh",
+        "installer/src (the show_splash source and its call site)",
+        "tests/test-install-ui.sh"
+      ],
+      "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
+      "parent": null,
+      "fix": null,
+      "verification": null
     }
   ]
 }
