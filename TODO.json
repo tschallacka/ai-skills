@@ -451,11 +451,11 @@
     {
       "id": "T32",
       "title": "kill_process_tree and process_kill_tree are identical twins in two files",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "lib-agent.sh carries kill_process_tree and lib-process.sh carries process_kill_tree, byte-equivalent. The safeguards test pins that run-benchmark.sh must not add a third copy but tolerates these two. Deduping needs a sourcing decision -- lib-agent.sh does not source lib-process.sh today -- which is a coupling change, not a cleanup.",
-      "note": "Reported by the watchdog subagent, which reused the existing twin rather than adding a third and left the decision here.",
+      "note": "lib-process.sh is the single definition (renamed to kill_process_tree, the pinned caller-facing name); runtime/lib-agent.sh sources it before agent resolution instead of carrying a byte-equivalent twin; test-safeguards pins the definition site and the source line.",
       "blocked_on": null,
       "refs": [
         "benchmark/planning/runtime/lib-agent.sh",
@@ -463,7 +463,7 @@
         "benchmark/planning/tests/test-safeguards.sh"
       ],
       "created_at": "2026-08-21T10:29:27Z",
-      "updated_at": "2026-08-21T10:29:27Z"
+      "updated_at": "2026-08-24T08:53:22Z"
     },
     {
       "id": "T35",

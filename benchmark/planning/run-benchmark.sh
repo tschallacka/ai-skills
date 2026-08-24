@@ -320,7 +320,7 @@ for TAG in "${TAGS[@]}"; do
     progress_log "case prepared: $TAG -> $TEST_BASE_DIR/$REVISION-$RUN_ID"
 done
 
-# kill_process_tree comes from runtime/lib-agent.sh (sourced above); this file
+# kill_process_tree comes from lib-process.sh, which runtime/lib-agent.sh sources (sourced above); this file
 # used to carry a third verbatim copy of it.
 WORKER_PIDS=()
 ANALYZER_PID=""

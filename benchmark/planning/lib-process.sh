@@ -8,7 +8,7 @@
 #   1. process_pattern           the audited process families, one ERE
 #   2. process_audit_probe       is `ps`+`setsid` present? record it before the run
 #   3. process registry helpers  fallback roots when setsid is unavailable
-#   4. process_kill_tree         recursive TERM/KILL of one pid's descendants
+#   4. kill_process_tree         recursive TERM/KILL of one pid's descendants
 #   5. process_cleanup_on_signal INT/TERM handler; exits 130
 #   6. process_audit             post-run verdict: pass | fail | unavailable
 #
@@ -83,7 +83,7 @@ process_descendants() {
     done < <(ps -eo pid=,ppid= 2>/dev/null | awk -v parent="$pid" '$2 == parent { print $1 }')
 }
 
-process_kill_tree() {
+kill_process_tree() {
     local pid="$1"
     local signal="${2:-TERM}"
     local child
@@ -92,7 +92,7 @@ process_kill_tree() {
     if command -v ps >/dev/null 2>&1; then
         while read -r child; do
             [ -n "$child" ] || continue
-            process_kill_tree "$child" "$signal"
+            kill_process_tree "$child" "$signal"
         done < <(ps -eo pid=,ppid= | awk -v parent="$pid" '$2 == parent {print $1}')
     fi
     kill -"$signal" "$pid" 2>/dev/null || true
@@ -106,12 +106,12 @@ process_cleanup_on_signal() {
         if [ -n "$PROCESS_CLEANUP_GROUP_ID" ]; then
             kill -TERM -- "-$PROCESS_CLEANUP_GROUP_ID" 2>/dev/null || true
         fi
-        process_kill_tree "$PROCESS_CLEANUP_CHILD_PID" TERM
+        kill_process_tree "$PROCESS_CLEANUP_CHILD_PID" TERM
         sleep 1
         if [ -n "$PROCESS_CLEANUP_GROUP_ID" ]; then
             kill -KILL -- "-$PROCESS_CLEANUP_GROUP_ID" 2>/dev/null || true
         fi
-        process_kill_tree "$PROCESS_CLEANUP_CHILD_PID" KILL
+        kill_process_tree "$PROCESS_CLEANUP_CHILD_PID" KILL
     fi
     exit 130
 }

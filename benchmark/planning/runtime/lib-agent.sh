@@ -21,6 +21,13 @@ set -euo pipefail
 
 RUNTIME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Process-control primitives live in lib-process.sh (T32): kill_process_tree is
+# generic teardown, not launcher machinery, and lib-agent.sh used to carry a
+# byte-equivalent twin of it. Sourced before agent-env.sh so the primitive
+# exists even when driver resolution fails below.
+# shellcheck source=../lib-process.sh
+. "$RUNTIME_DIR/../lib-process.sh"
+
 # resolve_rep_root(): print the repository root that owns this runtime.
 resolve_rep_root() {
     echo "$(cd "$RUNTIME_DIR/../../.." && pwd)"
@@ -325,21 +332,7 @@ persona_bootstrap_prompt() {
     trap - RETURN
 }
 
-# kill_process_tree <pid> <signal>
-kill_process_tree() {
-    local pid="$1"
-    local signal="${2:-TERM}"
-    local child
-
-    [ "$pid" -gt 0 ] 2>/dev/null || return 0
-    if command -v ps >/dev/null 2>&1; then
-        while read -r child; do
-            [ -n "$child" ] || continue
-            kill_process_tree "$child" "$signal"
-        done < <(ps -eo pid=,ppid= | awk -v parent="$pid" '$2 == parent {print $1}')
-    fi
-    kill -"$signal" "$pid" 2>/dev/null || true
-}
+# kill_process_tree comes from lib-process.sh, sourced at the top of this file.
 
 # benchmark_latest_tag(): latest git tag reachable from HEAD, or "-" so the
 # results path stays valid when it is unresolvable. Resolves the repo root

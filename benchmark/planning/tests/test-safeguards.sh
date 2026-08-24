@@ -48,12 +48,14 @@ harness_refute() {
 
 grep -Fq 'trap cleanup_on_signal INT TERM' "$runner"
 # The runner must *call* kill_process_tree, and must not carry its own copy of
-# it: the canonical definition lives in runtime/lib-agent.sh, which the runner
-# sources. (This assertion used to accept the runner's own third verbatim copy.)
+# it: the canonical definition lives in lib-process.sh, which runtime/lib-agent.sh
+# sources through to the runner. (This assertion used to accept the runner's own
+# third verbatim copy, and until T32 both libraries still carried a twin.)
 grep -Fq 'kill_process_tree "$pid" TERM' "$runner"
-grep -Fq 'kill_process_tree() {' "$runtime/lib-agent.sh"
+grep -Fq 'kill_process_tree() {' "$process_lib"
+grep -Fq 'lib-process.sh' "$runtime/lib-agent.sh"
 if grep -Fq 'kill_process_tree() {' "$runner"; then
-    echo 'run-benchmark.sh redefines kill_process_tree instead of using lib-agent.sh' >&2
+    echo 'run-benchmark.sh redefines kill_process_tree instead of using lib-process.sh via lib-agent.sh' >&2
     exit 1
 fi
 # Substring, not the whole line: the generated case's handler has been renamed
@@ -206,7 +208,7 @@ wait "$signal_probe_root" 2>/dev/null || true
 signal_wait=0
 while { kill -0 "$signal_probe_root" 2>/dev/null || kill -0 "$signal_probe_descendant" 2>/dev/null; } &&
     [ "$signal_wait" -lt 20 ]; do
-    process_kill_tree "$signal_probe_root" KILL
+    kill_process_tree "$signal_probe_root" KILL
     sleep 0.1
     signal_wait=$((signal_wait + 1))
 done
@@ -461,7 +463,7 @@ grep -Fq 'cannot bound the agent to 5s' "$watchdog_setsid/err"
 
 for watchdog_leftover in "$watchdog_kill" "$watchdog_deaf" "$watchdog_normal" "$watchdog_self" "$watchdog_ladder"; do
     [ -s "$watchdog_leftover/agent.pid" ] || continue
-    process_kill_tree "$(cat "$watchdog_leftover/agent.pid")" KILL
+    kill_process_tree "$(cat "$watchdog_leftover/agent.pid")" KILL
 done
 rm -rf "$watchdog_probe"
 # setsid forks when it already leads a process group, so $! can be a parent that
