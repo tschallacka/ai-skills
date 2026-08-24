@@ -149,6 +149,12 @@ t_trap_assertions() {
 t_begin() {
     T_FINDINGS="$(mktemp "${TMPDIR:-/tmp}/t-findings.XXXXXX")"
     export T_FINDINGS
+    # A setup command dying under set -e used to end a test in silence: the
+    # findings file was never printed, so a red leg said nothing (B31). Say
+    # which line failed, then let set -e do its job. Guarded probes — `|| rc=$?`,
+    # `if ! cmd` — do not fire ERR, so refusal cases stay quiet.
+    set -E
+    trap 'printf "%s:%s: command failed: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2' ERR
 }
 
 # Record a finding without printing one. A test that already prints its own

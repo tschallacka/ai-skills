@@ -22,6 +22,24 @@ trap 'rm -rf "$temporary_root"' EXIT
 fail() { t_fail "$*"; }
 NOW=2026-08-22T1200Z
 
+# A bare setup command under set -e dies with its diagnosis discarded, which is
+# how a macOS-only failure read as a silent exit 1 (B31). Setup runs through
+# here: on failure the captured output prints before the exit.
+must() {
+    local label="$1" rc=0 tmp
+    shift
+    tmp="$(mktemp "${TMPDIR:-/tmp}/overview-must.XXXXXX")"
+    OVERVIEW_NOW=$NOW "$@" >"$tmp" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        sed 's/^/  | /' "$tmp" >&2
+        rm -f "$tmp"
+        printf 'test-plan-overview: %s exited %d\n' "$label" "$rc" >&2
+        t_end
+        exit "$rc"
+    fi
+    rm -f "$tmp"
+}
+
 seed_plan() { # <plan-dir>
     local plan="$1"
     "$script_dir/create-plan.sh" "$plan" 'Overview fixture' >/dev/null
@@ -56,7 +74,7 @@ OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --out "$temporar
 t_assert_eq "--out render exits 0" "$rc" 0
 [ -f "$temporary_root/custom.html" ] || fail "--out produced no file"
 cp "$out" "$temporary_root/before-out.html"
-OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --out "$temporary_root/custom2.html" >/dev/null 2>&1
+must 'render --out custom2' "$script_dir/render-plan-overview.sh" "$plan" --out "$temporary_root/custom2.html"
 cmp -s "$temporary_root/before-out.html" "$out" || fail "--out run also rewrote the plan's overview.html"
 
 # --watch regenerates when an input changes (2 s poll, one forced edit).
@@ -74,19 +92,21 @@ if [ "$renders" -lt 2 ]; then fail "--watch did not re-render on change ($render
 
 # determinism: same inputs, pinned clock, byte-identical bytes.
 cp "$out" "$temporary_root/first.html"
-OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --refresh 7 >/dev/null 2>&1
+must 'determinism render' "$script_dir/render-plan-overview.sh" "$plan" --refresh 7
 cmp -s "$temporary_root/first.html" "$out" || fail "output is not deterministic under OVERVIEW_NOW"
 
 # --- implementation: approved review plus partial steps ----------------------
-"$script_dir/add-adversarial-finding.sh" "$plan" AR-05 'Thin scope' 'Narrow it' resolved --work-unit W01 >/dev/null
-MINTED_BY=test-reviewer "$script_dir/mint-fix-keys.sh" "$plan" >/dev/null
+must 'add finding AR-05' "$script_dir/add-adversarial-finding.sh" "$plan" AR-05 'Thin scope' 'Narrow it' resolved --work-unit W01
+MINTED_BY=test-reviewer must 'mint fix keys' "$script_dir/mint-fix-keys.sh" "$plan"
 k="$(jq -r '.keys["AR-05"]["W01"]' "$plan/fix-keys.json")"
-"$script_dir/add-fix-claim.sh" "$plan" --finding AR-05 --work-unit W01 --key "$k" >/dev/null
-"$script_dir/update-plan-content.sh" --review-status "$plan" approved >/dev/null
-"$script_dir/update-step.sh" "$plan/01-build" 01-step-a completed >/dev/null
-"$script_dir/update-adversarial-review.sh" "$plan" --cycle 1 <<< 'ID,Missing or over-broad item,Required plan change,Status,Work unit
-AR-05,Thin scope,Narrow it,✅ resolved,W01' >/dev/null 2>&1
-OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" >/dev/null 2>&1
+must 'add fix claim' "$script_dir/add-fix-claim.sh" "$plan" --finding AR-05 --work-unit W01 --key "$k"
+must 'review approved' "$script_dir/update-plan-content.sh" --review-status "$plan" approved
+must 'step 01-step-a completed' "$script_dir/update-step.sh" "$plan/01-build" 01-step-a completed
+must 'land findings cycle 1' "$script_dir/update-adversarial-review.sh" "$plan" --cycle 1 <<'CSV'
+ID,Missing or over-broad item,Required plan change,Status,Work unit
+AR-05,Thin scope,Narrow it,✅ resolved,W01
+CSV
+must 'render implementation' "$script_dir/render-plan-overview.sh" "$plan"
 t_assert_eq "approved review flips state to implementation" "$(grep -c '^<html[^>]*data-state="implementation"' "$out")" 1
 t_assert_eq "step ledger counts data rows only (no header rows)" \
     "$(grep -o '<span class="go">' "$out" | wc -l | tr -d ' ')" 2
@@ -95,8 +115,8 @@ t_assert_eq "narration reports the next step" "$(grep -c 'class="ln">[^<]*next u
 t_assert_eq "findings counted without the header row" "$(grep -o 'findings <b>[0-9]*</b>' "$out" | head -1)" 'findings <b>1</b>'
 
 # --- delivered: every step complete ------------------------------------------
-"$script_dir/update-step.sh" "$plan/01-build" 02-step-v completed >/dev/null
-OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" >/dev/null 2>&1
+must 'step 02-step-v completed' "$script_dir/update-step.sh" "$plan/01-build" 02-step-v completed
+must 'render delivered' "$script_dir/render-plan-overview.sh" "$plan"
 t_assert_eq "all steps done flips state to delivered" "$(grep -c '^<html[^>]*data-state="delivered"' "$out")" 1
 
 # --- refusals ------------------------------------------------------------------
