@@ -73,6 +73,27 @@
       "updated_at": "2026-08-24T12:57:23Z"
     },
     {
+      "id": "B36",
+      "title": "A goal with no bare work-unit ids in its roster aborts validate-plan, which exits 1 with no verdict",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "cp -R .plans/harden-test-reporting-and-plan-dir /tmp/rost/plan; g=/tmp/rost/plan/01-plan-dir-synonym/goal.md; grep -v '^`W[0-9]' \"$g\" > \"$g.n\" && mv \"$g.n\" \"$g\"; bash planning/scripts/validate-plan.sh /tmp/rost/plan; echo \"exit $?\"",
+      "observed": "exit 1 with four FAIL lines and no summary at all -- no \"Plan validation failed with N error(s).\" and no \"passed\" line. bash -x ends: printf '%s\\n%s\\n' '' '' / grep -E '^W[0-9][0-9]+$' / sort -u / tr, then roster_ids= followed immediately by plan_validate_cleanup, which is the EXIT trap rather than the next pass.",
+      "expected": "A goal whose roster names no unit is a finding or a warning, and the run still reports its verdict.",
+      "mechanism": "validate-plan-propagation-lib.sh:347 assigns from a pipeline: roster_ids=\"$(printf ... | grep -E '^W[0-9][0-9]+$' | sort -u | tr '\\n' ' ')\". With both awk passes empty the printf emits two blank lines, grep matches nothing and exits 1, pipefail makes that the pipeline's status, the assignment inherits it, and set -e aborts the script -- before the summary and before every later pass. The reporter saw the WARN-only variant, which is the same abort in a plan whose earlier passes had produced no FAIL lines; the missing summary is the signature either way.",
+      "surfaces": [
+        "planning/scripts/validate-plan-propagation-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "an active worker on the installed skill, hitting it on goal 05; reproduced here against the current tree",
+      "notes": "Worse than a wrong verdict: the run reports none, and every pass after the roster is skipped silently, so a plan can be far more broken than the output suggests. A guard on that assignment is the immediate fix, but the class deserves the gate -- PORTABILITY.md already bans `| grep -q` under pipefail for the SIGPIPE variant, and this is its sibling: a grep whose empty result is the ordinary case, inside an assignment, under set -e. A first fix-probe here added || true and appeared not to help, which was a botched edit rather than evidence; the bash -x trace is what settled the mechanism.",
+      "created_at": "2026-08-24T13:33:28Z",
+      "updated_at": "2026-08-24T13:33:28Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
