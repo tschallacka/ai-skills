@@ -535,7 +535,7 @@
     {
       "id": "B35",
       "title": "The new any-of test invokes bash by path lookup, tripping the portability gate it was added alongside",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "high",
       "parent": null,
@@ -546,12 +546,12 @@
       "surfaces": [
         "planning/tests/test-installer-any-of.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "4befd4e — test-installer-any-of invokes installer/build.sh through \"$BASH\" like every sibling test",
+      "verification": "test-portability-contract names no bash-by-path-lookup finding on the current tree; the detector regex still fires on the pre-fix line (reproduced from CI output before fixing).",
       "found_by": "the 5-minute watch, gating ox's 4600a0b: the new test itself passes, and it makes test-portability-contract fail a second way on top of B33",
       "notes": "One character of fix -- \"$BASH\" for bash -- and it is worth doing separately from B33 so the portability gate goes green in two identifiable steps rather than one ambiguous one. Worth flagging alongside it: 6f8f426 closes T39 in the register while the suite is red on B32, B33 and this, so the queue now says done for work whose gates do not pass. The register entry is not wrong about the feature landing; it is that a closure and a green suite have come apart, which is the state a reviewer would want named rather than discovered.",
       "created_at": "2026-08-24T13:13:39Z",
-      "updated_at": "2026-08-24T13:13:39Z"
+      "updated_at": "2026-08-24T14:14:22Z"
     },
     {
       "id": "B1",
