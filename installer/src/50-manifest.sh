@@ -250,6 +250,7 @@ tests/test-duplication-ratchet.sh
 tests/test-fix-keys.sh
 tests/test-flag-coverage.sh
 tests/test-flag-form-equivalence.sh
+tests/test-function-length-ratchet.sh
 tests/test-goal-testing-row.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh

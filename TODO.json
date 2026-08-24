@@ -556,18 +556,18 @@
     {
       "id": "T33",
       "title": "launch_agent is 93 lines against the 40-line function limit, and nothing gates function length",
-      "status": "open",
+      "status": "done",
       "priority": "low",
       "parent": null,
       "detail": "CODE-STYLE section 3 sets 40 lines per function. launch_agent was 83 before the watchdog and is 93 after. No test enforces the limit, which is why it drifted -- the same gap the deferred-refactor note records for file sizes. Either gate the limit and pay off the violations, or state the exemption for launch paths.",
-      "note": "Flagged rather than restructured by the watchdog subagent, correctly: reshaping a launch path inside a bug fix is how a bug fix becomes a regression.",
+      "note": "launch_agent split into _agent_resolve_isolation / _agent_timeout_binary / _agent_spawn / _agent_capture_group (all under 40, safeguards pins intact). The cap is now ratcheted by test-function-length-ratchet.sh at 67: growth fails, shrink demands a lower cap. Registered in the manifest and install.sh.",
       "blocked_on": null,
       "refs": [
         "benchmark/planning/runtime/lib-agent.sh",
         "CODE-STYLE.md"
       ],
       "created_at": "2026-08-21T10:29:27Z",
-      "updated_at": "2026-08-21T10:29:27Z"
+      "updated_at": "2026-08-24T09:36:21Z"
     },
     {
       "id": "T34",

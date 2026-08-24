@@ -159,32 +159,69 @@ _agent_watchdog_stop() {
 # The timeout is orthogonal to the process group: an unbounded background agent
 # whose exit code gates a batch hangs that batch forever, so every caller that
 # waits on a model passes one.
-launch_agent() {
-    local mode="$1" timeout_spec="$2" output="$3"
-    local -a cmd=()
-    local timeout_bin="" cwd="${AGENT_CWD:-$PWD}" isolation_mode="$mode" watchdog_seconds=""
+#
+# launch_agent is now a small orchestrator (T33): _agent_resolve_isolation
+# decides the mode, _agent_spawn builds and launches the command, and
+# _agent_capture_group observes the setsid group.
 
-    if [ -z "${AGENT_ARGV[*]+set}" ] || [ "${#AGENT_ARGV[@]}" -eq 0 ]; then
-        printf 'lib-agent: AGENT_ARGV is empty; call a driver agent_argv_* first\n' >&2
-        return 70
-    fi
-    [ -d "$cwd" ] || { printf 'lib-agent: agent cwd is not a directory: %s\n' "$cwd" >&2; return 66; }
-
-    if [ "$mode" = isolated ]; then
-        if command -v setsid >/dev/null 2>&1; then
+# _agent_resolve_isolation <requested>: print the isolation mode actually used.
+# "isolated" prefers setsid and degrades to registry when it is absent; an
+# explicit setsid is a requirement, not a preference, so its absence is fatal.
+# Anything else passes through unchanged.
+_agent_resolve_isolation() {
+    local requested="$1"
+    case "$requested" in
+        isolated)
+            if command -v setsid >/dev/null 2>&1; then
+                isolation_mode=setsid
+            else
+                isolation_mode=registry
+            fi
+            ;;
+        setsid)
+            if ! command -v setsid >/dev/null 2>&1; then
+                printf 'lib-agent: setsid not found; process-group isolation is required for mode=setsid (install util-linux, or run the analyzer-style background mode)\n' >&2
+                return 69
+            fi
             isolation_mode=setsid
-        else
-            isolation_mode=registry
-        fi
+            ;;
+        *) isolation_mode="$requested" ;;
+    esac
+}
+
+# _agent_timeout_binary <timeout-spec>: choose how the agent is bounded and
+# set watchdog_seconds when the last-rung shell watchdog is the answer.
+# Prints nothing; the caller reads timeout_bin. Empty spec bounds nothing.
+timeout_bin=""
+watchdog_seconds=""
+_agent_timeout_binary() {
+    local timeout_spec="$1" isolation_mode="$2"
+    timeout_bin=""
+    watchdog_seconds=""
+    [ -n "$timeout_spec" ] || return 0
+    if command -v timeout >/dev/null 2>&1; then
+        timeout_bin="timeout"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        timeout_bin="gtimeout"
+    elif [ "$isolation_mode" = registry ]; then
+        # Last rung, and the weakest: a sibling process racing a poll,
+        # not a bound on the agent itself. A real timeout binary always
+        # wins, so this branch is never taken when one exists.
+        watchdog_seconds="$(_agent_timeout_seconds "$timeout_spec")" || return 64
+    else
+        printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
+        return 69
     fi
+}
+
+# _agent_spawn <isolation_mode> <cwd> <output> <timeout-spec>: assemble the
+# command, launch it detached from a cwd-fixing subshell, register it, and arm
+# the watchdog when needed. Sets AGENT_PID / AGENT_WATCHDOG_PID.
+_agent_spawn() {
+    local isolation_mode="$1" cwd="$2" output="$3" timeout_spec="$4"
+    local -a cmd=()
 
     if [ "$isolation_mode" = "setsid" ]; then
-        # setsid and timeout are Linux/util-linux+GNU tools. Stock macOS has
-        # neither; coreutils installs GNU timeout as gtimeout.
-        if ! command -v setsid >/dev/null 2>&1; then
-            printf 'lib-agent: setsid not found; process-group isolation is required for mode=setsid (install util-linux, or run the analyzer-style background mode)\n' >&2
-            return 69
-        fi
         cmd+=(setsid)
         # setsid forks instead of exec'ing when it already leads a process
         # group; without --wait $! can be a parent that exits 0 immediately, so
@@ -195,24 +232,8 @@ launch_agent() {
             printf 'lib-agent: setsid has no --wait; AGENT_EXIT may report the setsid parent rather than the agent\n' >&2
         fi
     fi
-    if [ -n "$timeout_spec" ]; then
-        if command -v timeout >/dev/null 2>&1; then
-            timeout_bin="timeout"
-        elif command -v gtimeout >/dev/null 2>&1; then
-            timeout_bin="gtimeout"
-        else
-            if [ "$isolation_mode" = registry ]; then
-                # Last rung, and the weakest: a sibling process racing a poll,
-                # not a bound on the agent itself. A real timeout binary always
-                # wins, so this branch is never taken when one exists.
-                watchdog_seconds="$(_agent_timeout_seconds "$timeout_spec")" || return 64
-            else
-                printf 'lib-agent: neither timeout nor gtimeout found; cannot bound the agent to %s (install GNU coreutils)\n' "$timeout_spec" >&2
-                return 69
-            fi
-        fi
-        [ -z "$timeout_bin" ] || cmd+=("$timeout_bin" "$timeout_spec")
-    fi
+    _agent_timeout_binary "$timeout_spec" "$isolation_mode" || return $?
+    [ -z "$timeout_bin" ] || cmd+=("$timeout_bin" "$timeout_spec")
     cmd+=("${AGENT_ARGV[@]}")
 
     # The subshell sets the agent's cwd portably: `env -C` is GNU-only and no
@@ -234,23 +255,41 @@ launch_agent() {
         _agent_watchdog "$AGENT_PID" "$watchdog_seconds" &
         AGENT_WATCHDOG_PID="$!"
     fi
+}
 
-    # Polled, not read once: a not-yet-scheduled agent has no observable group,
-    # and an empty AGENT_PGID silently disables the process-group kill.
+# _agent_capture_group: observe the agent's process group for the group kill.
+# Polled, not read once: a not-yet-scheduled agent has no observable group,
+# and an empty AGENT_PGID silently disables the process-group kill.
+_agent_capture_group() {
     AGENT_PGID=""
-    if [ "$isolation_mode" = setsid ] && command -v ps >/dev/null 2>&1; then
-        local attempt=0
-        while [ "$attempt" -lt 20 ]; do
-            AGENT_PGID="$(_agent_capture_pgid "$AGENT_PID" || true)"
-            [ -z "$AGENT_PGID" ] || break
-            kill -0 "$AGENT_PID" 2>/dev/null || break
-            sleep 0.1
-            attempt=$((attempt + 1))
-        done
-        if [ -z "$AGENT_PGID" ]; then
-            printf 'lib-agent: could not observe a process group for agent pid %s (it may have exited immediately)\n' "$AGENT_PID" >&2
-        fi
+    [ "$AGENT_ISOLATION_MODE" = setsid ] || return 0
+    command -v ps >/dev/null 2>&1 || return 0
+    local attempt=0
+    while [ "$attempt" -lt 20 ]; do
+        AGENT_PGID="$(_agent_capture_pgid "$AGENT_PID" || true)"
+        [ -z "$AGENT_PGID" ] || break
+        kill -0 "$AGENT_PID" 2>/dev/null || break
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+    if [ -z "$AGENT_PGID" ]; then
+        printf 'lib-agent: could not observe a process group for agent pid %s (it may have exited immediately)\n' "$AGENT_PID" >&2
     fi
+}
+
+launch_agent() {
+    local mode="$1" timeout_spec="$2" output="$3"
+    local cwd="${AGENT_CWD:-$PWD}"
+
+    if [ -z "${AGENT_ARGV[*]+set}" ] || [ "${#AGENT_ARGV[@]}" -eq 0 ]; then
+        printf 'lib-agent: AGENT_ARGV is empty; call a driver agent_argv_* first\n' >&2
+        return 70
+    fi
+    [ -d "$cwd" ] || { printf 'lib-agent: agent cwd is not a directory: %s\n' "$cwd" >&2; return 66; }
+
+    _agent_resolve_isolation "$mode" || return $?
+    _agent_spawn "$isolation_mode" "$cwd" "$output" "$timeout_spec" || return $?
+    _agent_capture_group
 }
 
 # wait_agent(): wait for AGENT_PID, store exit code in AGENT_EXIT, clear PID.
