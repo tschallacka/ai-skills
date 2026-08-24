@@ -1077,11 +1077,14 @@ pixel_message() {
 }
 
 show_splash() {
-    [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return
-    [ -t 3 ] || return
+    # Every early exit says 0 explicitly: a bare return here propagated the
+    # tty test's status 1 and, under set -e, killed headless installs before
+    # they printed anything at all (B39).
+    [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return 0
+    [ -t 3 ] || return 0
     [ -n "$COLOR_MODE" ] || detect_color_mode
     # A terminal with no colour at all gets no pixel mascot; the menu still works.
-    [ "$COLOR_MODE" = "none" ] && return
+    [ "$COLOR_MODE" = "none" ] && return 0
 
     local columns lines scale art_width art_height offset_x offset_y state step anim_scale anim_x anim_y message_y
     columns="${COLUMNS:-80}"
@@ -2398,8 +2401,15 @@ select_targets() {
     custom_choice=$(( ${#AVAILABLE_TARGET_PATHS[@]} + 1 ))
     echo "  $custom_choice) custom directory" >&2
     echo "  a) all listed roots" >&2
-    ask "Choose 1-$custom_choice, comma-separated numbers, or a [1]: "
-    selection="${REPLY:-1}"
+    # --yes exists to prevent a headless run stopping on a question; with no
+    # interactive channel it takes the menu's own default, the first root.
+    if [ "${YES:-0}" -eq 1 ] && ! [ -t 3 ]; then
+        printf '%s: no interactive channel; using the first listed root\n' "${0##*/}" >&2
+        selection="1"
+    else
+        ask "Choose 1-$custom_choice, comma-separated numbers, or a [1]: "
+        selection="${REPLY:-1}"
+    fi
 
     if [ "$selection" = "a" ] || [ "$selection" = "all" ]; then
         SELECTED_TARGET_PATHS=("${AVAILABLE_TARGET_PATHS[@]}")

@@ -443,7 +443,7 @@
     {
       "id": "B30",
       "title": "chat promises exchange across machines, but every server tier binds 127.0.0.1 with no way to change it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -458,12 +458,12 @@
         "chat/runtime/server.pl",
         "chat/runtime/server.js"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "c36bab8 — --bind ADDR sets AI_CHAT_BIND; socat option and the python3/node/perl listeners read it, status reports server.bind, and SKILL.md documents the unauthenticated-protocol caveat for non-loopback binds",
+      "verification": "Contract pins cover all four runtime sites; an explicit-bind roundtrip runs on the python3 tier in test-chat.sh. A real cross-machine exchange needs two hosts and stays a documented manual step.",
       "found_by": "reading the diff of the -ox branch: the description was checked against the sockets rather than taken at its word",
       "notes": "Two ways out, and they are not equivalent. Correcting the description is the cheap one and probably the right one: the skill states it has no auth, so a loopback-only bus is a sane default and offering a listener on a routable address without authentication would be worse than the missing feature. Making the bind configurable is the other, and it should not be done without deciding what protects it -- at minimum a documented warning, and the four tiers each need the change since the address is hard-coded in each. Whichever is chosen, the cross-machine claim must not survive unqualified in the description, because an agent selecting this skill reads that line to decide whether it fits.",
       "created_at": "2026-08-24T12:23:50Z",
-      "updated_at": "2026-08-24T12:23:50Z"
+      "updated_at": "2026-08-24T18:58:14Z"
     },
     {
       "id": "B34",
@@ -834,17 +834,18 @@
       "verification": "test-plan-freshness: control silent, drift named with unit and dates, catch-up silent, outside-repo target skipped. Mutation inverted comparison fails the drift-named assertion.",
       "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
       "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative.",
-      "updated_at": "2026-08-24T18:08:32Z"
+      "updated_at": "2026-08-24T18:08:32Z",
+      "created_at": "2026-08-24T15:00:31Z"
     },
     {
       "id": "B39",
       "title": "install.sh with no --target exits 1 printing nothing at all, so a headless install fails silently",
       "severity": "major",
       "priority": "high",
-      "status": "confirmed",
+      "status": "fixed",
       "found_by": "installing the new git-worktrees skill without --target",
       "created_at": "2026-08-24T16:30:16Z",
-      "updated_at": "2026-08-24T16:30:16Z",
+      "updated_at": "2026-08-24T18:58:14Z",
       "reproduce": "bash install.sh --skill git-worktrees --yes; echo \"exit $?\"   # exit 1, zero bytes\nbash install.sh --skill git-worktrees --target \"$HOME/.claude/skills\" --yes; echo \"exit $?\"   # exit 0, installs",
       "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
       "observed": "exit 1 with 0 bytes captured from 2>&1, both with stdout on a pipe and redirected to /dev/null. The same command with an explicit --target exits 0 and prints 400 bytes ending 'Installed: /home/mdibbets/.claude/skills/git-worktrees'.",
@@ -856,8 +857,8 @@
       ],
       "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
       "parent": null,
-      "fix": null,
-      "verification": null
+      "fix": "this session — show_splash says return 0 on every early exit, and a --yes run with no interactive channel takes the target menu default (first listed root) with a printed note instead of dying in ask",
+      "verification": "Sandboxed headless install without --target exits 0, prints the no-channel note and Installed: path. Regression pinned in test-installer-noninteractive.sh: exit must be 0, output non-empty."
     }
   ]
 }

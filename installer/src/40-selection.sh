@@ -108,8 +108,15 @@ select_targets() {
     custom_choice=$(( ${#AVAILABLE_TARGET_PATHS[@]} + 1 ))
     echo "  $custom_choice) custom directory" >&2
     echo "  a) all listed roots" >&2
-    ask "Choose 1-$custom_choice, comma-separated numbers, or a [1]: "
-    selection="${REPLY:-1}"
+    # --yes exists to prevent a headless run stopping on a question; with no
+    # interactive channel it takes the menu's own default, the first root.
+    if [ "${YES:-0}" -eq 1 ] && ! [ -t 3 ]; then
+        printf '%s: no interactive channel; using the first listed root\n' "${0##*/}" >&2
+        selection="1"
+    else
+        ask "Choose 1-$custom_choice, comma-separated numbers, or a [1]: "
+        selection="${REPLY:-1}"
+    fi
 
     if [ "$selection" = "a" ] || [ "$selection" = "all" ]; then
         SELECTED_TARGET_PATHS=("${AVAILABLE_TARGET_PATHS[@]}")

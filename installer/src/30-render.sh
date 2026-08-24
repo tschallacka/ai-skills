@@ -262,11 +262,14 @@ pixel_message() {
 }
 
 show_splash() {
-    [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return
-    [ -t 3 ] || return
+    # Every early exit says 0 explicitly: a bare return here propagated the
+    # tty test's status 1 and, under set -e, killed headless installs before
+    # they printed anything at all (B39).
+    [ "${AI_SKILLS_NO_SPLASH:-0}" = "1" ] && return 0
+    [ -t 3 ] || return 0
     [ -n "$COLOR_MODE" ] || detect_color_mode
     # A terminal with no colour at all gets no pixel mascot; the menu still works.
-    [ "$COLOR_MODE" = "none" ] && return
+    [ "$COLOR_MODE" = "none" ] && return 0
 
     local columns lines scale art_width art_height offset_x offset_y state step anim_scale anim_x anim_y message_y
     columns="${COLUMNS:-80}"
