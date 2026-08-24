@@ -443,6 +443,29 @@
       "updated_at": "2026-08-21T10:04:58Z"
     },
     {
+      "id": "B32",
+      "title": "test-install-ui fails after the any-of groups: the UI parts call runtime_requirement_label without sourcing where it lives",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash planning/tests/test-install-ui.sh   # at e6492f6",
+      "observed": "installer/src/36-ui-render.sh: line 174: runtime_requirement_label: command not found, twice, and the test reports FAIL while its own layout assertions still pass.",
+      "expected": "The suite is green, so the ubuntu leg and the PR are not red for a test-harness reason.",
+      "mechanism": "e6492f6 gave the UI parts a dependency they did not have: 36-ui-render.sh:175 and 37-ui-input.sh:191 now call runtime_requirement_label, which is defined in installer/src/20-runtime-tools.sh:54. test-install-ui sources the UI parts in isolation, so the function is absent there. The shipped installer is unaffected -- install.sh is one file and defines it at line 660, and installer/build.sh --check passes -- so this is a test-harness gap rather than a defect in the feature.",
+      "surfaces": [
+        "planning/tests/test-install-ui.sh",
+        "installer/src/36-ui-render.sh",
+        "installer/src/37-ui-input.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the 5-minute watch on the -ox branch, running the gates that e6492f6 touches",
+      "notes": "Cheapest fix is for the test to source 20-runtime-tools.sh alongside the UI parts, since labelling a requirement genuinely belongs there. Worth deciding whether the UI parts should depend on it at all: if the isolation the test relies on is intentional, the label belongs with the UI. Not verified beyond the failure itself -- the behavioural claim of T39, one warning naming the member set when no runtime resolves and silence when one does, was not exercised here.",
+      "created_at": "2026-08-24T12:47:21Z",
+      "updated_at": "2026-08-24T12:47:21Z"
+    },
+    {
       "id": "B1",
       "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
       "status": "fixed",
