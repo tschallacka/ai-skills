@@ -72,12 +72,27 @@ page returns without one, and never treat a single page as the whole document.
 - Separate the initiative into non-overlapping goals. Each goal owns one
   meaningful outcome or area of change.
 - Make every goal and step self-contained. Include the context needed to act;
-  do not require the agent to infer details from unrelated files.
+  do not require the agent to infer details from unrelated files. A claimed
+  property is self-contained only when its condition travels with the claim: a
+  cache needs its key (absolute vs relative path, exact spelling), idempotence
+  needs what makes a repeat safe, ordering needs the sort key, validation
+  needs what was validated. "Already memoized" without the key shape cost one
+  plan a re-read on every call — the instruction achieved the opposite of what
+  it said.
+- One module over one piece of state owns every export that state needs. When
+  decomposition splits a module so unit B must reach into unit A's file to
+  invalidate or extend A's export, the split is wrong: give A both the export
+  and its invalidator, make B depend on A, and assert the dependency in B's
+  acceptance criteria. This is the rule the classify seams, synthesis and
+  attribution findings each re-derived at decomposition cost; apply it there
+  instead of discovering it in cycle 12.
 - Record confirmed facts separately from assumptions. Ask the user only when
   an unresolved choice could materially change scope, implementation, risk, or
   verification. Otherwise make a reasonable assumption and record it.
 - Do not invent details to make a plan appear complete. Mark unknowns as open
-  questions or risks.
+  questions or risks. A weaker true claim beats a stronger false one: when a
+  unit's criterion cannot be met by construction, narrow the claim and record
+  the blocking mechanism as a non-goal instead of promising the unreachable.
 - Keep progress accurate. A completed status requires the implementation and
   all applicable verification to have passed.
 - Treat decomposition as a design activity, not a formatting activity. Do not
@@ -792,6 +807,10 @@ verification units name it).
 "execution order differs from step numbering" is sanctioned documentation when
 the dependency edges are also recorded; it is not a substitute for those edges.
 Reviewers reject ordering prose used as a substitute for recorded dependencies.
+**Numbering gaps are not a defect**: steps reading 02 and 04 with no 01 or 03
+need no repair when the Depends-on edges state the real order — a rename is a
+five-surface edit (file, inventory row, roster, companion, tracker) and risks
+more than the gap it fixes.
 
 The review boundary is filesystem-enforced: each worker and reviewer receives
 only its capsule and workspace, and each fresh reviewer receives a newly built

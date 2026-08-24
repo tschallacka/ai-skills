@@ -274,41 +274,41 @@
     {
       "id": "T13",
       "title": "The sweep is documented in prose and never connected to the tool that does it",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "A model on the older skill hit the same class five cycles running: a fix lands in one surface and not the others that mention the unit. Correction to how this was first recorded here. `SKILL.md` **does** document the sweep: \"Resolving a finding\" enumerates seven surfaces and calls out the coverage table and one more as worth sweeping too, and says a finding is not closed until every surface agrees. The rule is there. What is missing is the mechanism. Nothing in that passage names `plan-content.sh find <WNN> --in all`, which performs the whole sweep in one call: verified for W05 on the self-hosted fixture, five surfaces including the coverage row. So an agent reads nine surfaces to check by hand and does it by hand, which is how the coverage row gets missed twice. Two things to fix. Name the command in the \"Resolving a finding\" passage, next to the list it automates. And `plan-content.sh blast-radius <WNN>` has the name an agent reaches for first and answers a different question: downstream *units* by dependency, not *documents* mentioning the unit. It returns something plausible, so the agent stops there. Either rename it, or have it name the sweep in its own output. The same report describes a stale-wording guard grown to 20 phrases that caught two drifted surfaces by itself. That is a registry with a gate, which is this repo's pattern; worth asking whether the phrase list belongs here as data rather than in each agent's habits.",
-      "note": null,
+      "note": "The find-command half had already landed in SKILL.md Mechanically paragraph since recording; the remaining gap was blast-radius answering a different question plausibly — it now prints a stderr pointer to the document sweep on every run. Declined for now: growing the stale-wording guard into a 20-phrase registry with a gate; the phrases live in agent habits until the drift recurs.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:58:58Z"
     },
     {
       "id": "T14",
       "title": "Nothing catches a unit that must edit another unit's file",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "From the same report: W24 creates a module-level memo for a shebang predicate and exports no invalidator, while W36 in `src/sync/watcher.ts` has to drop a stale entry when a file gains or loses its shebang, so W36 can only succeed by editing `src/extraction/shebang.ts`, which is W24's file and which its own atomicity check forbids. **The fourth instance of that shape** in one plan, after the classifyShellCommand seams, the synthesis call site, and the attribution rule. That breaks the one-unit-one-target rule after decomposition, and `validate-plan.sh` does not see it. Two units naming the same file is mechanically detectable and may already be covered; a unit whose acceptance criteria require a change in another unit's file is not, and the honest first step is to find out which of the two this is. The fix that worked is a decomposition rule worth writing down: **one module over one piece of state owns every export that state needs**, so W24 took both the predicate and its invalidator, W36 depends on it, and the companion asserts that invalidation forces a re-read. That last assertion is what proves the watcher never reaches into the module. If the rule were in the atomization guidance, the shape would be caught at decomposition rather than in cycle 12. Related and not mechanically checkable: the same report found an instruction telling an implementer to reuse a predicate \"whose result is already memoized\", where the predicate keys on an absolute path and the callers hold relative ones. A differently spelled key is a memo miss, so the instruction cost the extra read it existed to prevent. An instruction that depends on a cache has to name the key. That belongs in the adversarial-review prompt, not in a gate. Also worth encouraging: that report deleted two units whose acceptance criteria were unreachable by construction and recorded the blocking mechanism as a non-goal. A weaker true claim beats a stronger false one.",
-      "note": null,
+      "note": "Decomposition rule written into SKILL.md operating rules: one module over one piece of state owns every export that state needs; B depends on A and asserts it, never edits A file. The weaker-true-claim advice from the same report joined the no-invented-details bullet. Mechanical detection stays open-shaped (acceptance-prose analysis) and is not pretended into a gate.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:58:58Z"
     },
     {
       "id": "T15",
       "title": "An instruction that leans on a property must state the condition",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "From the memo-key defect: a step told an implementer to reuse a predicate \"whose result is already memoized\", the predicate keys on an absolute path, and the callers hold relative ones. Every call was a miss, so the instruction cost the extra read it existed to prevent. The general rule fits an existing one rather than needing its own. SKILL.md line 73 already says to make every step self-contained and not to require the agent to infer details from unrelated files. A claimed property is the same failure in a smaller space: the instruction is self-contained in appearance only. So extend that bullet. A cache needs its key. Idempotence needs what makes a repeat safe. Ordering needs the sort key. Validation needs what was validated. Partly gateable, with care. The claim words are a short list (memoized, cached, already computed, idempotent, sorted, validated, normalised) and a step instruction using one without a qualifying clause nearby is detectable, which is the shape of the stale-wording guard in T13. The risk is crying wolf: \"already validated by the caller\" is a complete claim. Build the phrase list as data and make it a warning first, then decide whether it earns a failure.",
-      "note": null,
+      "note": "Self-contained bullet extended: a claimed property must carry its condition (cache needs key, idempotence needs repeat-safety, ordering needs sort key, validation needs what was validated), with the memoized-predicate miss as the recorded cost. Detector deferred deliberately per the crying-wolf risk noted in the task.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:58:58Z"
     },
     {
       "id": "T16",
@@ -352,15 +352,15 @@
     {
       "id": "T23",
       "title": "There is no way to renumber steps",
-      "status": "partly",
+      "status": "done",
       "parent": null,
       "detail": "PARTLY DONE — the state is now impossible to create (f711f30) and blocks plan creation and validation loudly (10954ed). What remains is the repair path for a plan already holding one. Steps only append, and a plan that ends up with a gap or an out-of-order sequence has no helper to fix it -- the only route is the hand edit `SKILL.md:1295` forbids. A worker hit this after creating two steps numbered 04 in one goal, with no 01 or 03, and worked around it by recording an ordering note naming the real dependency edges. The duplicate-number half is fixed: `add-work-unit.sh` now refuses a step number already used in that goal, naming the file holding it. What remains is the repair path for a plan already in that state, and the answer is not obviously a renumbering helper: renaming a step file moves a path that the inventory row, the goal roster, the testing companion and any progress tracker all reference, so a rename is a five-surface edit. Options, worst last: leave it, and treat the ordering note as the sanctioned workaround since dependency edges are the real order anyway; add `renumber-step.sh` that moves one step and updates every surface, with the seven-surface sweep as its checklist; or allow gaps explicitly in the documentation so nobody feels obliged to fix them. Worth deciding rather than drifting, because the workaround the worker chose -- an ordering note -- is sound and may simply be the answer.",
-      "note": "PARTLY DONE — the state is now impossible to create (f711f30) and blocks plan creation and validation loudly (10954ed). What remains is the repair path for a plan already holding one. Steps only append, and a plan that ends up with a gap or an out-of-order sequence has no helper to fix it -- the only route is the hand edit `SKILL.md:1295` forbids. A worker hit this after creating two steps numbered 04 in one goal, with no 01 or 03, and worked around it by recording an ordering note naming the real dependency edges.",
+      "note": "Decision: leave it. Ordering note plus recorded edges is sanctioned (already documented at both SKILL.md sites); numbering gaps are now blessed explicitly as not-a-defect, naming the five-surface rename cost that makes repair worse than the gap.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:58:58Z"
     },
     {
       "id": "T24",

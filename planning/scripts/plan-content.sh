@@ -119,6 +119,10 @@ case "$command" in
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
         plan_dir="$1"; target="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
+        # This answers "which units depend on this one", not "where is it
+        # mentioned" — and the plausible half answer is where readers stop
+        # (T13). Point at the document sweep before the output begins.
+        printf '%s\n' "plan-content.sh: blast-radius walks dependency edges. To sweep every document mentioning this unit, run: $0 find --plan-dir <plan-directory> \"$target\" --in all" >&2
         inventory="$plan_dir/work-unit-inventory.md"
         [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
         # bash 3.2 has no associative arrays, so these are plan_map_* maps.
@@ -172,8 +176,7 @@ case "$command" in
         done
         # Render one map's rows through $1 as a printf template taking id, goal
         # and step. Keys come out in insertion order; markdown/text sort anyway.
-        blast_rows() {
-            local map="$1" template="$2" id
+        blast_rows() {            local map="$1" template="$2" id
             while IFS= read -r id; do
                 [ -n "$id" ] || continue
                 plan_map_load unit_goal "$id" || plan_map_value=""

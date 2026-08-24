@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `cbac3ade7d7f03428e4498e5952c6fd306afa786d88c516a28ae84b1290d1479`
+> Source SHA-256: `2bdb346474933f5ec77b1996fba2f4556db7ba4804343116a7d5308b069b4f33`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -172,6 +172,10 @@ verification units name it).
 "execution order differs from step numbering" is sanctioned documentation when
 the dependency edges are also recorded; it is not a substitute for those edges.
 Reviewers reject ordering prose used as a substitute for recorded dependencies.
+**Numbering gaps are not a defect**: steps reading 02 and 04 with no 01 or 03
+need no repair when the Depends-on edges state the real order — a rename is a
+five-surface edit (file, inventory row, roster, companion, tracker) and risks
+more than the gap it fixes.
 
 The review boundary is filesystem-enforced: each worker and reviewer receives
 only its capsule and workspace, and each fresh reviewer receives a newly built
