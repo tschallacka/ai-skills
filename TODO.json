@@ -261,15 +261,15 @@
     {
       "id": "T6",
       "title": "`plan-env.sh` duplicates what it deliberately cannot source",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "282 lines that source no library on purpose, so `read_pinned_snapshot_repo` re-implements `plan_snapshot_repo`, and the `stat(1)` GNU/BSD probe exists here as well as in `plan-document-lib.sh`. The no-library rule is why the manifest gate can verify a skill root before any library is trusted, so this is not a simple migration: either accept the duplication and pin both copies with a test that fails when they diverge, or extract a leaf library with no dependencies that both can source. Decide which, because right now the duplication is real and unpinned.",
-      "note": null,
+      "note": "Decision: keep the duplication (plan-env must stay library-free for the manifest gate) and pin it. test-plan-env now extracts read_pinned_snapshot_repo and asserts output parity with plan_snapshot_repo across five manifest fixtures, including a pipe-only value so every refused character class is isolated, plus a positive control and a unique-set comparison of both stat probes. Mutation: dropping the pipe rule from the reader fails the parity assertion.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:19:35Z"
     },
     {
       "id": "T13",

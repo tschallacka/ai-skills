@@ -144,4 +144,65 @@ if "$env_tool" check "$bad" "$plans_root" >/dev/null 2>&1; then
     exit 1
 fi
 
+# ── Duplication parity (T6) ───────────────────────────────────────────────────
+# plan-env.sh sources no library on purpose — the manifest gate verifies a skill
+# root before any library is trusted — so read_pinned_snapshot_repo here
+# re-implements lib/core/plan_snapshot_repo.sh, and the GNU/BSD stat probe is
+# carried twice (here and in plan_stat_probe.sh). The copies cannot share code,
+# so this pins them to identical behaviour instead: same verdict on the same
+# manifest fixtures, and the same stat flag pair. The known deliberate
+# difference is return-status shape only (this reader reports absence as empty
+# output with status 0; the library reports it as status 1), so parity compares
+# output, not status.
+parity="$tmp/parity"
+mkdir -p "$parity/with-pin" "$parity/hostile" "$parity/pipe" "$parity/empty" "$parity/absent"
+printf 'PLAN_SNAPSHOT_REPO=%q\n' "$plans_root/a repo with spaces" > "$parity/with-pin/.env"
+printf "PLAN_SNAPSHOT_REPO='/tmp/x\$(touch y);rm -r / | true'\n" > "$parity/hostile/.env"
+# A pipe is the only metacharacter here: each refused class needs an isolated
+# fixture, or a rule weakened on one character stays hidden behind another.
+printf "PLAN_SNAPSHOT_REPO='/tmp/a|b'\n" > "$parity/pipe/.env"
+printf 'PLAN_SNAPSHOT_REPO=\n' > "$parity/empty/.env"
+
+awk '/^read_pinned_snapshot_repo\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$env_tool" \
+    > "$parity/reader-fn.sh"
+grep -Fq 'read_pinned_snapshot_repo()' "$parity/reader-fn.sh"
+{
+    printf '#!/usr/bin/env bash\nset -uo pipefail\n'
+    cat "$parity/reader-fn.sh"
+    printf '\nread_pinned_snapshot_repo "$1"\n'
+} > "$parity/reader.sh"
+mkdir -p "$parity/hostile" "$parity/pipe"
+# Both runners always exit 0: parity is compared through their output, and the
+# library's deliberate status-1 for an absent pin would otherwise fire this
+# test's ERR trap on every clean run. A broken runner shows up as an output
+# mismatch below.
+run_reader() { "$BASH" "$parity/reader.sh" "$1" 2>/dev/null; return 0; }
+run_library_reader() {
+    "$BASH" -c '
+        set -uo pipefail
+        source "'"$repo_dir"'/planning/scripts/lib/core/plan_snapshot_repo.sh"
+        plan_snapshot_repo "$1"
+    ' parity-library "$1" 2>/dev/null || true
+}
+
+# Values are captured into variables before comparing: a bare [ ] whose
+# operands come straight from $( ) does not abort under set -e when it fails,
+# and this epilogue would then print PASS over a failed assertion.
+reader_value="$(run_reader "$parity/with-pin/.env")"
+[ "$reader_value" = "$plans_root/a repo with spaces" ]
+for parity_case in with-pin hostile pipe empty absent; do
+    reader_value="$(run_reader "$parity/$parity_case/.env")"
+    library_value="$(run_library_reader "$parity/$parity_case")"
+    [ "$reader_value" = "$library_value" ]
+done
+
+# The stat probes must name the same set of formats, so a format fix on one
+# side cannot leave the other side probing something the other abandoned.
+# Compared as a set: the load-time probe lines legitimately repeat a format the
+# function definitions also use.
+env_stat_flags="$(grep -oE "stat -[cf] '[^']+'" "$env_tool" | LC_ALL=C sort -u | tr '\n' ';')"
+probe_stat_flags="$(grep -oE "stat -[cf] '[^']+'" "$repo_dir/planning/scripts/lib/core/plan_stat_probe.sh" | LC_ALL=C sort -u | tr '\n' ';')"
+[ -n "$env_stat_flags" ]
+[ "$env_stat_flags" = "$probe_stat_flags" ]
+
 printf '%s\n' 'test-plan-env: PASS'
