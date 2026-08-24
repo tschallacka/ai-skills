@@ -445,6 +445,28 @@
       "updated_at": "2026-08-24T12:23:50Z"
     },
     {
+      "id": "B34",
+      "title": "The overview counts only archived review rounds, so a plan whose review happened reports zero",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash planning/scripts/render-plan-overview.sh .plans/reviewer-oracle-evidence-hardening --out /tmp/o.html   # then read the header and the CYCLES panel",
+      "observed": "A delivered plan -- review approved, all 16 steps complete, findings 1 (0 open), 1/1 resolved -- reports review rounds 0, review depth 0/3, and a CYCLES panel reading \"no review cycles recorded yet - the chart lights up after cycle 1\". The same plan's adversarial-review.md carries an approved verdict and one finding row.",
+      "expected": "A review that raised and resolved a finding and then approved the plan counts as at least one round, and the cycles panel plots it.",
+      "mechanism": "render-plan-overview.sh:153-154 sets cycles=0 and then counts '^## Cycle [0-9]' headings in adversarial-review-history.md. That file only exists once a round has been archived, which update-adversarial-review.sh does when a *new* round starts. A plan with exactly one round therefore has no history file and counts zero, and every figure derived from cycles -- the rounds count, the review-depth ring against its target of 3, and the chart -- reports as though no review occurred. The undercount is by one everywhere, and it is worst on a finished plan, where the reader concludes the work was never reviewed.",
+      "surfaces": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, reading the delivered render: review approved and all steps complete, yet feedback and cycles empty",
+      "notes": "The live round is the missing term: rounds are archived history plus the current review when one exists. Both screenshots show it -- the planning plan reports 7 findings with 0 rounds while its phase line says round 1 is open, and the delivered plan reports a resolved finding with 0 rounds. Whatever counts a round must agree with the phase line, which already says \"round $((cycles + 1))\" and so has the correct number in hand. Worth deciding at the same time whether review depth against a target of 3 is meaningful for a plan that needed one round and got approval; a ring reading 0/3 on an approved plan reads as a failure rather than a completed review.",
+      "created_at": "2026-08-24T13:03:57Z",
+      "updated_at": "2026-08-24T13:03:57Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
