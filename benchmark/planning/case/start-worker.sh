@@ -274,15 +274,12 @@ reviewer_b_session_binding() {
 
 REVIEWER_STATUS="not-run"
 REVIEWER_B_TRANSCRIPT=""
-run_reviewer() {
-    local role="$1" session capsule capsule_id review_mode approved_at workspace prompt output code reviewer_started_at reviewer_ended_at capsule_manifest_sha256 approval=""
-    # Refused for either role, before any lifecycle event is recorded:
-    # REVIEWER_COMMAND is a codex-shaped seam, and falling through to the real
-    # driver under another one spends real model budget inside a test.
-    if [ -n "${REVIEWER_COMMAND:-}" ] && [ "$AGENT_DRIVER" != codex ]; then
-        echo "REVIEWER_COMMAND is a codex-only test seam and AGENT_DRIVER=$AGENT_DRIVER; refusing to run the real reviewer in its place (unset REVIEWER_COMMAND, or set BENCHMARK_AGENT=codex)" >&2
-        exit 78
-    fi
+
+# reviewer_identity <role> — resolve who reviews and under which terms: the
+# codex test seam pins its identity through REVIEWER_* variables, anything else
+# derives one from the run. Sets session, capsule_id, review_mode, approved_at.
+reviewer_identity() {
+    local role="$1"
     if [ "$role" = B ] && [ -n "${REVIEWER_COMMAND:-}" ]; then
         session="${REVIEWER_SESSION_ID:?REVIEWER_SESSION_ID is required with REVIEWER_COMMAND}"
         capsule_id="${REVIEWER_CAPSULE_ID:?REVIEWER_CAPSULE_ID is required with REVIEWER_COMMAND}"
@@ -294,19 +291,12 @@ run_reviewer() {
         review_mode="${REVIEW_MODE:-fresh-review}"
         approved_at="${REVIEWER_APPROVED_AT:-}"
     fi
-    capsule="$CAPSULE_BASE/$RUN_ID/$REVISION/reviewers/$session"
-    workspace="$REVIEWER_WORKSPACE_ROOT/$session/workspace"
-    reviewer_started_at="${approved_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-    mkdir -p "$capsule" "$workspace"
-    cp -R "$ORACLE_PLAN_DIR" "$capsule/plan"
-    cp "$CAPSULE_ROOT/task-spec.md" "$capsule/task-spec.md"
-    cp "$CAPSULE_ROOT/planning/SKILL.md" "$capsule/SKILL.md"
-    [ -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && cp "$CAPSULE_ROOT/planning/REVIEWER.md" "$capsule/REVIEWER.md" || true
-    prompt="$capsule/reviewer-prompt.md"
-    output="$workspace/reviewer.jsonl"
-    rp_id="$(persona_id_for "reviewer-$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')")"
-    rp_voice="$(persona_voice "$rp_id" "$REPO_ROOT/planning/roles/VOICES.md" 2>/dev/null)"
-    python3 - "$capsule" "$session" "$capsule_id" "$review_mode" "$approved_at" <<'PY'
+}
+
+# reviewer_manifest_py <capsule> <session> <capsule-id> <mode> <approved-at>:
+# write the capsule manifest and print nothing; the caller hashes the file.
+reviewer_manifest_py() {
+    python3 - "$1" "$2" "$3" "$4" "$5" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -336,6 +326,34 @@ manifest["sha256"] = hashlib.sha256(
     json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
 )
 PY
+}
+
+# reviewer_persona <role>: the reviewer persona id and voice line for the
+# prompt header.
+reviewer_persona() {
+    local role="$1"
+    rp_id="$(persona_id_for "reviewer-$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')")"
+    rp_voice="$(persona_voice "$rp_id" "$REPO_ROOT/planning/roles/VOICES.md" 2>/dev/null)"
+}
+
+# reviewer_prepare_capsule <role>: assemble the capsule (plan copy, task spec,
+# skill docs), its manifest, and the persona prompt; append the launch event.
+# Sets capsule, workspace, prompt, output, reviewer_started_at and
+# capsule_manifest_sha256 for the caller.
+reviewer_prepare_capsule() {
+    local role="$1"
+    capsule="$CAPSULE_BASE/$RUN_ID/$REVISION/reviewers/$session"
+    workspace="$REVIEWER_WORKSPACE_ROOT/$session/workspace"
+    reviewer_started_at="${approved_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+    mkdir -p "$capsule" "$workspace"
+    cp -R "$ORACLE_PLAN_DIR" "$capsule/plan"
+    cp "$CAPSULE_ROOT/task-spec.md" "$capsule/task-spec.md"
+    cp "$CAPSULE_ROOT/planning/SKILL.md" "$capsule/SKILL.md"
+    [ -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && cp "$CAPSULE_ROOT/planning/REVIEWER.md" "$capsule/REVIEWER.md" || true
+    prompt="$capsule/reviewer-prompt.md"
+    output="$workspace/reviewer.jsonl"
+    reviewer_persona "$role"
+    reviewer_manifest_py "$capsule" "$session" "$capsule_id" "$review_mode" "$approved_at"
     capsule_manifest_sha256="$(benchmark_hash_file "$capsule/capsule-manifest.json")"
     cat > "$prompt" <<PROMPT
 [PERSONA] id=$rp_id ROLE_ID=$rp_id
@@ -361,6 +379,55 @@ Do not inspect parent paths, source checkouts, installed skills, or prior
 reviewer capsules.
 PROMPT
     printf '{"event_id":"%s-start","actor":"reviewer","session_id":"%s","reviewer_session_id":"%s","capsule_id":"%s","capsule_manifest_sha256":"%s","event_type":"launch","protocol_role":"reviewer-%s","cycle":1,"verification_pass":0,"review_mode":"%s","approved_at":"%s","timestamp":"%s"}\n' "$role" "$session" "$session" "$capsule_id" "$capsule_manifest_sha256" "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" "$review_mode" "$approved_at" "$reviewer_started_at" >> "$REVIEWER_LIFECYCLE"
+}
+
+# reviewer_collect_approval <capsule>: Reviewer B's handoff made canonical,
+# schema-checked, and required to approve the overall plan. Prints the
+# effective approval path before validating, so a failed handoff is still
+# recorded with the path it was expected at; exits 65 when it is missing or
+# invalid.
+reviewer_collect_approval() {
+    local capsule="$1" approval="$capsule/plan/approval.json"
+    printf '%s\n' "$approval"
+    # Reviewers write the handoff either beside their capsule plan or in
+    # the plan directory; accept both, then archive the canonical copy.
+    if [ ! -s "$approval" ] && [ -s "$capsule/approval.json" ]; then
+        approval="$capsule/approval.json"
+        cp "$approval" "$capsule/plan/approval.json"
+    fi
+    if [ ! -s "$approval" ]; then
+        exit 65
+    fi
+    if ! approval_schema_validator "$approval" "$capsule/approval-schema.json"; then
+        exit 65
+    elif [ -z "${BLINDED_ORACLE_SPEC:-}" ] && ! python3 - "$approval" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    approval = json.load(handle)
+if approval.get("overall_plan_approval") is not True:
+    raise SystemExit(65)
+PY
+    then
+        exit 65
+    fi
+}
+
+# reviewer_refuse_wrong_driver: REVIEWER_COMMAND is a codex-shaped test seam;
+# under any other driver it would fall through to the real reviewer and spend
+# model budget inside a test.
+reviewer_refuse_wrong_driver() {
+    if [ -n "${REVIEWER_COMMAND:-}" ] && [ "$AGENT_DRIVER" != codex ]; then
+        echo "REVIEWER_COMMAND is a codex-only test seam and AGENT_DRIVER=$AGENT_DRIVER; refusing to run the real reviewer in its place (unset REVIEWER_COMMAND, or set BENCHMARK_AGENT=codex)" >&2
+        exit 78
+    fi
+}
+
+run_reviewer() {
+    local role="$1" session capsule capsule_id review_mode approved_at workspace prompt output code reviewer_ended_at capsule_manifest_sha256 approval=""
+    reviewer_refuse_wrong_driver || exit $?
+    reviewer_identity "$role"
+    reviewer_prepare_capsule "$role"
     if [ "$role" = A ]; then
         persona_bootstrap reviewer-a || exit 64
     else
@@ -380,31 +447,11 @@ PROMPT
     launch_agent isolated "${REVIEWER_TIMEOUT:-20m}" "$output"
     wait_agent
     code="$AGENT_EXIT"
+    approval=""
+    collect_rc=0
     if [ "$role" = B ]; then
-        approval="$capsule/plan/approval.json"
-        # Reviewers write the handoff either beside their capsule plan or in
-        # the plan directory; accept both, then archive the canonical copy.
-        if [ ! -s "$approval" ] && [ -s "$capsule/approval.json" ]; then
-            approval="$capsule/approval.json"
-            cp "$approval" "$capsule/plan/approval.json"
-        fi
-        if [ ! -s "$approval" ]; then
-            code=65
-        else
-            if ! approval_schema_validator "$approval" "$capsule/approval-schema.json"; then
-                code=65
-            elif [ -z "${BLINDED_ORACLE_SPEC:-}" ] && ! python3 - "$approval" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    approval = json.load(handle)
-if approval.get("overall_plan_approval") is not True:
-    raise SystemExit(65)
-PY
-            then
-                code=65
-            fi
-        fi
+        approval="$(reviewer_collect_approval "$capsule")" || collect_rc=$?
+        [ "$collect_rc" -eq 0 ] || code=65
     fi
     reviewer_ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf '{"event_id":"%s-end","actor":"reviewer","session_id":"%s","reviewer_session_id":"%s","capsule_id":"%s","capsule_manifest_sha256":"%s","approval_path":"%s","event_type":"handoff","protocol_role":"reviewer-%s","cycle":1,"verification_pass":1,"review_mode":"%s","approved_at":"%s","exit_code":%s,"independence":%s,"timestamp":"%s"}\n' "$role" "$session" "$session" "$capsule_id" "$capsule_manifest_sha256" "$approval" "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" "$review_mode" "$approved_at" "$code" "$([ "$role" = B ] && echo true || echo false)" "$reviewer_ended_at" >> "$REVIEWER_LIFECYCLE"
