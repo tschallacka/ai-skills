@@ -127,6 +127,24 @@
       "updated_at": "2026-08-24T08:49:35Z"
     },
     {
+      "id": "T39",
+      "title": "Declare the chat server runtimes as an any-of requirement so the installer says what to install",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "chat/requires.tsv holds only comments, so installing chat prints nothing about the runtimes a server needs (python3 -> node -> perl -> socat, socat driving runtime/bash-handler.sh). Four soft rows are wrong: requires.tsv is one row per tool with no any-of concept, so three of them would warn while nothing is missing, which teaches people to ignore warnings. Needs an any-of group in the requirement format, consumed by installer/build.sh into the generated tables, warning once when no member resolves and staying silent when one does; plus verify and hint rows in installer/tools.tsv for python3, node, perl and socat, none of which are registered today.",
+      "note": "Not a dependency-budget problem: the fallback is intended and the client helpers work regardless, with chat-server.sh refusing at exit 69 and naming the capability. The gap is that the machine-readable rows which drive the warning and the per-platform install hint are absent. A brief for this was handed to the -ox agent.",
+      "blocked_on": null,
+      "refs": [
+        "chat/requires.tsv",
+        "installer/tools.tsv",
+        "installer/build.sh",
+        "installer/src/20-runtime-tools.sh"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -479,6 +497,38 @@
       ],
       "created_at": "2026-08-21T10:29:27Z",
       "updated_at": "2026-08-24T09:38:24Z"
+    },
+    {
+      "id": "T38",
+      "title": "Review record: what was checked on the -ox merge, and what was not",
+      "status": "decided",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
+      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/ai-skills/pull/3"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T40",
+      "title": "The python3-shipped rule, its gate and the tree now disagree",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "chat/runtime/server.py ships to end users, while the stated rule is that jq is the ceiling for a runtime dependency and python3 is dev-only. The gate cannot see the conflict: test-portability-contract scans *.sh only, so a shipped .py file was never in its reach, and the two allowlist entries added for chat cover the shell files that probe for python3, not the python file itself. The fallback design is intended, so one of three things should change: the rule text, so it bans requiring python3 rather than shipping it; the gate, so it can see non-shell files; or the tree.",
+      "note": "Raised as a budget violation during review and corrected by Michael: optional capability with a fallback is the same shape as memlimit and openssl. What remains is that a documented rule is now untrue and nothing would ever report it.",
+      "blocked_on": null,
+      "refs": [
+        "portability-rules.json",
+        "planning/tests/test-portability-contract.sh",
+        "chat/runtime/server.py"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
     },
     {
       "id": "T8",
