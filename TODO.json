@@ -866,18 +866,18 @@
     {
       "id": "T42j",
       "title": "Numbers must be readable at rest: no count-up animation on a review surface",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T42",
       "detail": "Every headline figure animates from zero: the donut renders <b class=\"count\" data-target=\"...\">0%</b> and counts up, the bars grow from width 0, and the narration lines fade in on a delay. On a monitor that is fine. On a review surface it is not: a screenshot or a print taken before the animation settles shows a number that is simply wrong -- a render of a 17-of-17 plan was read as 98% complete for exactly this reason, and the reader had no way to know the figure was still moving. Render the true value as the text content and let the animation be an enhancement over it, so the page is correct at rest, under print, in a screenshot, and when prefers-reduced-motion is set.",
-      "note": "Found by a screenshot of the real render being read as a data inconsistency. The figures were right; the page just could not be trusted at a glance, which is the whole job of a review tool.",
+      "note": "The count-up JS writes each number once, synchronously, and the narration typewriter is removed — a snapshot or print shows final values and the full account. Bar-fill width transitions remain; they carry no numbers.",
       "blocked_on": null,
       "refs": [
         "planning/templates/plan-overview.html.tmpl",
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T13:00:54Z",
-      "updated_at": "2026-08-24T13:00:54Z"
+      "updated_at": "2026-08-24T18:48:01Z"
     },
     {
       "id": "T43d",

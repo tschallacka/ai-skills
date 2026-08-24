@@ -276,23 +276,18 @@ h1 .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60
 (function(){
 "use strict";
 var REFRESH=@_REFRESH_JS_@;
-/* count-up numbers */
+/* numbers are readable at rest: no count-up animation on a review surface
+   (T42j) — the final value is written once, synchronously */
 document.querySelectorAll(".count").forEach(function(el){
-  var target=parseFloat(el.getAttribute("data-target"))||0,t0=null;
-  function step(t){if(!t0)t0=t;var k=Math.min((t-t0)/1400,1);
-    k=1-Math.pow(1-k,3);el.textContent=Math.round(target*k)+"%";if(k<1)requestAnimationFrame(step);}
-  requestAnimationFrame(step);
+  el.textContent=Math.round(parseFloat(el.getAttribute("data-target"))||0)+"%";
 });
 /* bar fills */
 document.querySelectorAll(".bar-fill").forEach(function(el,i){
   setTimeout(function(){el.style.width=(parseFloat(el.getAttribute("data-w"))||0)+"%";},250+i*130);
 });
-/* narration rotation */
+/* narration reads as an account: rendered as its full text, never typed out */
 var lines=[].slice.call(document.querySelectorAll("#narr .ln"));
-lines.forEach(function(el){el.classList.add("typeline");
-  var txt=el.textContent,len=txt.length,k=0;
-  el.textContent="";
-  var iv=setInterval(function(){k+=2;if(k>=len){k=len;clearInterval(iv);}el.textContent=txt.slice(0,k);},26);});
+lines.forEach(function(el){el.classList.remove("typeline");});
 /* refresh ring */
 var C=157.08,left=REFRESH,lab=document.getElementById("rlab"),fg=document.getElementById("rfg");
 lab&&(lab.textContent=left+"s");
