@@ -49,6 +49,30 @@
       "updated_at": "2026-08-24T12:27:49Z"
     },
     {
+      "id": "B33",
+      "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "bash planning/tests/test-portability-contract.sh   # at fa1bd62",
+      "observed": "portability: ./install.sh uses banned construct 'python3-shipped' at line 417 -- see PORTABILITY.md. install.sh:417 is the generated members table: @server-runtimes) case \"$platform\" in *:*) printf '%s\\n' python3 node perl socat ;; esac ;;",
+      "expected": "Either declaring an optional runtime is allowed, or the gate says why it is not, but the suite is not red for doing the thing T39 asked for.",
+      "mechanism": "e6492f6 declared the any-of group in chat/requires.tsv, and installer/build.sh generates the requirement tables into install.sh, so the literal python3 now appears in the shipped installer. The portability gate scans every tracked *.sh including the generated install.sh, and its allowlist exempts only ./chat/scripts/chat-server.sh and ./chat/tests/test-chat.sh. So the declaration the brief asked for is exactly what trips the rule.",
+      "surfaces": [
+        "planning/tests/test-portability-contract.sh",
+        "portability-rules.json",
+        "installer/build.sh",
+        "chat/requires.tsv"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the 5-minute watch: CI run 32728982657 showed ubuntu failing two tests rather than the one already recorded, and it reproduces locally",
+      "notes": "This is T40 arriving as a blocker rather than a discussion. Do not reach for an allowlist row on install.sh: that file is generated from every skill's requires.tsv, so exempting it turns the rule off for anything any skill ever declares. The rule text is what is wrong -- it is named python3-shipped and it means do not depend on python3, while what it detects is the word appearing in a shell file. Naming an optional runtime in a fallback chain is not depending on it. Options, cheapest first: narrow the detect so it matches an invocation rather than the bare word; or scope the rule to hard requirements and let a soft or grouped declaration through; or rescope it to shipped runtime code, which is the case it was written for and which no *.sh scan can see anyway (chat/runtime/server.py has always been invisible to it).",
+      "created_at": "2026-08-24T12:57:23Z",
+      "updated_at": "2026-08-24T12:57:23Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
