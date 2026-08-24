@@ -16,6 +16,7 @@ compatible agent tools.
 | Project-specific deviations | Records confirmed project behavior and environment quirks that future agents should not rediscover. | [project-specificies/SKILL.md](project-specificies/SKILL.md) |
 | Resource-limited testing | Runs resource-intensive commands under platform-appropriate CPU and memory controls. | [resource-limited-testing/SKILL.md](resource-limited-testing/SKILL.md) |
 | Chat | IRC-basis message bus for agents: channels with send/read/delta/tail helpers; server falls back through python3/node/perl/socat. | [chat/SKILL.md](chat/SKILL.md) |
+| Git worktrees | Parallel agents in one repository: isolated worktree verification, per-agent trees, and merging back without trampling the main checkout. | [git-worktrees/SKILL.md](git-worktrees/SKILL.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.
