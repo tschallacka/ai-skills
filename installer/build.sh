@@ -96,35 +96,42 @@ skill_manifests() {
 #   group id is [A-Za-z0-9_-]+ and unique across every skill, because the
 #     generated member table is keyed by the id alone;
 #   a hard group is allowed and gates exactly like a hard single tool.
+# validate_one_requires_manifest <manifest>: every group inside one skill
+# agrees on condition, strength and why, and every id is well-formed.
+validate_one_requires_manifest() {
+    local manifest="$1"
+    awk -F '\t' -v prog="${0##*/}" -v manifest="$1" '
+        /^[[:space:]]*#/ { next }
+        NF == 0 { next }
+        $1 == "tool" { next }
+        {
+            g = $5
+            if (g == "" || g == "-") { next }
+            if (g !~ /^[A-Za-z0-9_-]+$/) {
+                printf "%s: bad group id %s in %s\n", prog, g, manifest | "cat 1>&2"
+                close("cat 1>&2")
+                exit 65
+            }
+            if (g in cond) {
+                if (cond[g] != $2 || str[g] != $3 || why[g] != $4) {
+                    printf "%s: %s of group %s disagrees on condition/strength/why\n", prog, $1, g | "cat 1>&2"
+                    close("cat 1>&2")
+                    exit 65
+                }
+                next
+            }
+            cond[g] = $2; str[g] = $3; why[g] = $4
+        }
+    ' "$manifest"
+}
+
 validate_requires_groups() {
     local manifest seen="" id
     while IFS= read -r manifest; do
         # Foreground, not a process substitution: a refusal that fires inside
         # one is lost by the reader loop, and the build would continue on a
         # half-read manifest.
-        awk -F '\t' -v prog="${0##*/}" -v manifest="$manifest" '
-            /^[[:space:]]*#/ { next }
-            NF == 0 { next }
-            $1 == "tool" { next }
-            {
-                g = $5
-                if (g == "" || g == "-") { next }
-                if (g !~ /^[A-Za-z0-9_-]+$/) {
-                    printf "%s: bad group id %s in %s\n", prog, g, manifest | "cat 1>&2"
-                    close("cat 1>&2")
-                    exit 65
-                }
-                if (g in cond) {
-                    if (cond[g] != $2 || str[g] != $3 || why[g] != $4) {
-                        printf "%s: %s of group %s disagrees on condition/strength/why\n", prog, $1, g | "cat 1>&2"
-                        close("cat 1>&2")
-                        exit 65
-                    }
-                    next
-                }
-                cond[g] = $2; str[g] = $3; why[g] = $4
-            }
-        ' "$manifest" || exit 65
+        validate_one_requires_manifest "$manifest" || exit 65
         while IFS= read -r id; do
             [ -n "$id" ] || continue
             case "$seen" in
