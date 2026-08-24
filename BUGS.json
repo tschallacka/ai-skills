@@ -796,10 +796,10 @@
       "title": "validate_requires_groups grew past the 40-line cap, so the ratchet gate is red on every leg",
       "severity": "major",
       "priority": "high",
-      "status": "open",
+      "status": "fixed",
       "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
       "created_at": "2026-08-24T14:27:49Z",
-      "updated_at": "2026-08-24T14:27:49Z",
+      "updated_at": "2026-08-24T14:44:04Z",
       "reproduce": "bash planning/tests/test-function-length-ratchet.sh",
       "expected": "exit 0: the over-cap count stays at or below CAP=67",
       "observed": "exit 1: \"function-length-ratchet: 68 function(s) exceed the 40-line cap (cap 67). New over-cap code must be split or the cap lowered deliberately.\" — installer/build.sh:99 validate_requires_groups() is listed at 45 lines. Fails on all three CI legs (ubuntu-latest, macos-latest, macOS bash 3.2).",
@@ -810,8 +810,8 @@
       ],
       "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
       "parent": null,
-      "fix": null,
-      "verification": null
+      "fix": "fa97d9f and follow-ups — validate_one_requires_manifest carries the per-skill checks (24 lines back under cap) and run_reviewer split into five helpers; cap follows the count down to 66",
+      "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD."
     }
   ]
 }
