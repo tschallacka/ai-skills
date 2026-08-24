@@ -914,7 +914,7 @@ Gated findings bind a reviewer finding to an owning work unit. The
 **mandatory-with-blank-allowed** `Work unit` column (the last of five): every
 row carries a final `WNN` cell, or an empty/`N/A` cell when the finding needs
 no fix key. `update-adversarial-review.sh` mints a
-per-(finding, work-unit) HMAC-SHA256 fix key for every gated row and stores only
+per-(finding, work-unit) SHA-256 fix key (secret concatenated before the message) for every gated row and stores only
 the derived keys in `fix-keys.json` beside the review file; the secret itself
 lives in the private scratch dir `$(planning_tmpdir)/review-fix-keys/<session-id>/`
 (`chmod 700` dir, `chmod 600` secret) and never enters the plan. Finding IDs

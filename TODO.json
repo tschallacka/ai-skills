@@ -313,15 +313,15 @@
     {
       "id": "T16",
       "title": "openssl is a second runtime dependency, beyond the jq ceiling",
-      "status": "blocked",
+      "status": "done",
       "parent": null,
       "detail": "Two different uses, and only one is hard. For plain SHA-256 it is the third fallback after `sha256sum` and `shasum` (`plan-context-lib.sh`, `generate-reviewer.sh`), which is the `sha256-tool` portability rule and needs nothing. For HMAC-SHA256 it is required: `mint-fix-keys.sh` and `verify-fix-keys.sh` derive a fix key as `HMAC-SHA256(secret, \"<session>|<finding>|<unit>\")`, and no coreutils tool does keyed HMAC. Both guard it and exit 69 with a named message, and the tool list in `test-runtime-dependencies.sh` includes it. So the fix-key gate has a dependency the rest of the skill does not, and the recommendation here was wrong at first. Two facts settle it. The secret lives at `$TMPDIR/planning-agent/review-fix-keys/<session>/secret`, mode 600, and the reviewer and fixer run as the **same Unix user**. The fixer can read it. The gate never resisted a determined agent; it prevents accidental self-certification and makes a deliberate bypass an explicit act. That is worth having and it is a speed bump, not a security boundary. Once the threat is accident rather than attack, HMAC's advantage over `digest(secret || message)` disappears. HMAC exists to stop length extension by someone who cannot see the key, and here they can. Since this was written, two things reduced the urgency without settling it. openssl is now a declared **soft** requirement of planning (`requires.tsv` plus hints in `installer/tools.tsv`), so a host without it is warned at install time with a per-platform install command instead of discovering the gap when mint-fix-keys.sh exits 69 mid-review. And `test-sha256-fallbacks.sh` now proves the three hash branches agree, so the alternative below has a tested mechanism under it rather than an assumed one. **Preferred fix: derive the key with the SHA-256 fallback chain that already exists** (`sha256sum`, then `shasum`, then openssl) over `secret || message`. Three lines, no ipad/xpad construction, and openssl becomes one of three ways to satisfy the requirement instead of mandatory, matching every other hash in the repo. Note that `openssl rand -hex 32` already falls back to `/dev/urandom | od`, so key generation is not the problem; the HMAC call is the only place openssl is required rather than preferred. Not `cksum`, which is right for the installer's change detection and wrong here: CRC32 collisions are cheap to produce deliberately, and a fixer hand-editing `fixes.md` is the case this gate exists for. Changing the derivation invalidates keys minted by the old scheme, so it needs the same before/after proof as any migration plus a note that an in-flight review must re-mint. Smaller and separate: `test-fix-keys.sh` calls openssl with no guard, so on a host without it the run fails confusingly instead of reporting UNCONFIGURED the way `test-add-fix-claim.sh` does.",
-      "note": null,
-      "blocked_on": "the maintainer",
+      "note": "Unblocked by implementing the preferred fix from the entry own analysis: fix keys are SHA-256 over (secret)(session|finding|unit) through the sha256sum -> shasum -> openssl chain, identical in minter and verifier (ratchet pin updated to fix_key), openssl demoted from hard requirement to third rung with a chain-wide 69 guard, docs and both key tests moved to the new derivation. Keys minted under HMAC do not verify; re-mint.",
+      "blocked_on": null,
       "refs": [],
       "priority": "normal",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T10:13:12Z"
     },
     {
       "id": "T17",

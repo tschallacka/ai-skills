@@ -67,7 +67,7 @@ check_cap 'seed progress-bar literal copies' 4 \
     "$( { grep -l '0%%  #### ' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # percent/bar/icon derivation; update-progress.sh is the canonical copy.
-check_cap 'percent/bar/icon derivation copies' 4 \
+check_cap 'percent/bar/icon derivation copies' 3 \
     "$( { grep -l 'completed \* 100 + total / 2' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # Repo-wide, not just $scripts: two `# DEDUPE:` markers once survived in
@@ -93,9 +93,10 @@ assert_identical() {
     fi
 }
 
-# A fix key is HMAC(secret, "sid|finding|unit"). If the minting and verifying
-# derivations drift, every previously minted key silently stops verifying.
-assert_identical 'fix-key derivation' hmac_key \
+# A fix key is SHA-256 over (secret)(sid|finding|unit), secret first (T16
+# retired HMAC). If the minting and verifying derivations drift, every
+# previously minted key silently stops verifying.
+assert_identical 'fix-key derivation' fix_key \
     "$scripts/mint-fix-keys.sh" "$scripts/verify-fix-keys.sh"
 
 # The table must actually exist and name every capped row, so the caps and the

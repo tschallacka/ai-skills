@@ -12,7 +12,8 @@
 # A plan without fix-keys.json is ungated and passes without verification.
 # A gated plan must hold, per gated (finding, work-unit) pair, a fixes.md claim
 # line with exactly three tab-separated fields (finding id, work unit, key) and
-# the key must match HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>").
+# the key must match SHA-256 over (secret)(session_id|finding|work unit),
+# secret first. Keys minted under the retired HMAC scheme do not verify.
 # Mismatched or unclaimed pairs fail; well-formed claims for pairs that are not
 # gated are ignored with a warning.
 #
@@ -74,12 +75,23 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$plan_dir" ] || usage
 
-# hmac_key SECRET MESSAGE — lowercase hex HMAC-SHA256 of MESSAGE under SECRET.
+# fix_key SECRET MESSAGE — lowercase hex SHA-256 over SECRET||MESSAGE.
+# The secret is always 64 lowercase hex chars, so the concatenation has exactly
+# one split and needs no separator. HMAC was retired (T16): the gate exists to
+# stop accidental self-certification by an agent that can read the secret
+# anyway, so a plain keyed digest through the repo's standard SHA-256 chain
+# removes the last hard dependency without weakening what the gate is for.
+# Keys minted under the retired HMAC scheme do not verify and must be re-minted.
 # Must stay byte-identical to the derivation in mint-fix-keys.sh.
-hmac_key() {
+fix_key() {
     local secret="$1" message="$2"
-    printf '%s' "$message" | openssl dgst -sha256 -hmac "$secret" -binary \
-        | od -An -vtx1 | tr -d ' \n'
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s%s' "$secret" "$message" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s%s' "$secret" "$message" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s%s' "$secret" "$message" | openssl dgst -sha256 | awk '{print $NF}'
+    fi
 }
 
 verify_fix_keys() {
@@ -115,9 +127,10 @@ verify_fix_keys() {
 
     # Refuse with 69 rather than report a mismatch that is really a missing
     # tool. The check sits after the ungated early-returns so an ungated plan
-    # still passes without openssl installed.
-    command -v openssl >/dev/null 2>&1 || \
-        plan_die 'openssl (or LibreSSL) is required to verify fix keys via HMAC-SHA256' 69
+    # still passes with no hash tool installed.
+    command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || \
+        command -v openssl >/dev/null 2>&1 || \
+        plan_die 'no SHA-256 tool available (need sha256sum, shasum, or openssl) to verify fix keys' 69
 
     secret_file="$(printf '%s/review-fix-keys/%s/secret\n' "$(planning_tmpdir)" "$session_id")"
     [ -f "$secret_file" ] || plan_die "session secret missing: $secret_file (was the session invalidated at approval?)"
@@ -143,7 +156,7 @@ verify_fix_keys() {
             warnings=$((warnings + 1))
             continue
         fi
-        expected="$(hmac_key "$secret" "$session_id|$fid|$wu")"
+        expected="$(fix_key "$secret" "$session_id|$fid|$wu")"
         if [ "$expected" != "$key" ]; then
             printf 'fix key mismatch for %s/%s (forged or stale key)\n' "$fid" "$wu" >&2
             failures=$((failures + 1))

@@ -34,8 +34,9 @@ seed_secret_session() {
 
 expected_key() {
     local sid="$1" fid="$2" wu="$3"
-    printf '%s' "$sid|$fid|$wu" | openssl dgst -sha256 -hmac "$FIXED_SECRET" -binary \
-        | od -An -vtx1 | tr -d ' \n'
+    # Same derivation as the scripts under test: SHA-256 over SECRET||MESSAGE
+    # through the standard chain (T16 retired the openssl-HMAC scheme).
+    printf '%s%s' "$FIXED_SECRET" "$sid|$fid|$wu" | sha256sum | awk '{print $1}'
 }
 
 seed_gated_plan() {
@@ -83,9 +84,9 @@ grep -Fq '00112233' "$plan_a/fix-keys.json" && fail 'the session secret leaked i
 key_01="$(expected_key test-session-a AR-01 W05)"
 key_03="$(expected_key test-session-a AR-03 W07)"
 grep -Fq "\"W05\": \"$key_01\"" "$plan_a/fix-keys.json" \
-    || fail 'derived key for AR-01/W05 does not match HMAC-SHA256(secret, sid|fid|wu)'
+    || fail 'derived key for AR-01/W05 does not match SHA-256 over (secret)(sid|fid|wu)'
 grep -Fq "\"W07\": \"$key_03\"" "$plan_a/fix-keys.json" \
-    || fail 'derived key for AR-03/W07 does not match HMAC-SHA256(secret, sid|fid|wu)'
+    || fail 'derived key for AR-03/W07 does not match SHA-256 over (secret)(sid|fid|wu)'
 cp "$plan_a/fix-keys.json" "$temporary_root/fix-keys-before.json"
 "$script_dir/mint-fix-keys.sh" "$plan_a" >/dev/null 2>&1
 cmp -s "$temporary_root/fix-keys-before.json" "$plan_a/fix-keys.json" \

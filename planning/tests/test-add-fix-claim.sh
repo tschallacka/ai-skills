@@ -23,13 +23,8 @@ trap 'rm -rf "$work"' EXIT
 
 FIXED_SECRET='00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 expected_key() { # <session> <finding> <work-unit>
-    printf '%s' "$1|$2|$3" | openssl dgst -sha256 -hmac "$FIXED_SECRET" -binary \
-        | od -An -vtx1 | tr -d ' \n'
-}
-
-command -v openssl >/dev/null 2>&1 || {
-    printf 'test-add-fix-claim: UNCONFIGURED (openssl) — keys are HMAC-SHA256\n' >&2
-    exit 0
+    # Same derivation as the scripts under test: SHA-256 over SECRET||MESSAGE.
+    printf '%s%s' "$FIXED_SECRET" "$1|$2|$3" | sha256sum | awk '{print $1}'
 }
 
 # verify-fix-keys derives the expected keys from the session secret, which lives

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# mint-fix-keys.sh — derive a per-(finding, work-unit) HMAC-SHA256 fix key for
+# mint-fix-keys.sh — derive a per-(finding, work-unit) SHA-256 fix key for
 # every gated findings row in adversarial-review.md and record the derived keys
 # in fix-keys.json beside the review file.
 #
@@ -13,8 +13,8 @@
 #   mint-fix-keys.sh [--plan-dir] <plan-directory>
 #   mint-fix-keys.sh --help
 #
-# Exit codes: 65 = a gated findings row has non-conforming ids; 69 = openssl is
-# unavailable (no other tool computes HMAC-SHA256).
+# Exit codes: 65 = a gated findings row has non-conforming ids; 69 = no SHA-256
+ # tool is available (sha256sum, shasum, or openssl).
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,11 +47,12 @@ USAGE
     exit "$rc"
 }
 
-# HMAC-SHA256 has no coreutils equivalent, so openssl is a hard requirement
-# rather than a guarded optimisation: refuse up front with 69 instead of
-# minting keys that would never verify.
-command -v openssl >/dev/null 2>&1 || \
-    plan_die 'openssl (or LibreSSL) is required to derive fix keys via HMAC-SHA256' 69
+# No single SHA-256 tool is a hard requirement: the chain is sha256sum ->
+# shasum -> openssl. Refuse up front with 69 only when none of the three
+# exists, instead of minting keys that would never verify.
+command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || \
+    command -v openssl >/dev/null 2>&1 || \
+    plan_die 'no SHA-256 tool available (need sha256sum, shasum, or openssl) to derive fix keys' 69
 
 # plan_session_id PLAN_DIR — the session id recorded in fix-keys.json, or empty.
 plan_session_id() {
@@ -96,11 +97,23 @@ ensure_session_secret() {
     printf '%s\n' "$session_id"
 }
 
-# hmac_key SECRET MESSAGE — lowercase hex HMAC-SHA256 of MESSAGE under SECRET.
-hmac_key() {
+# fix_key SECRET MESSAGE — lowercase hex SHA-256 over SECRET||MESSAGE.
+# The secret is always 64 lowercase hex chars, so the concatenation has exactly
+# one split and needs no separator. HMAC was retired (T16): the gate exists to
+# stop accidental self-certification by an agent that can read the secret
+# anyway, so a plain keyed digest through the repo's standard SHA-256 chain
+# removes the last hard dependency without weakening what the gate is for.
+# Keys minted under the retired HMAC scheme do not verify and must be re-minted.
+# Must stay byte-identical to the derivation in verify-fix-keys.sh.
+fix_key() {
     local secret="$1" message="$2"
-    printf '%s' "$message" | openssl dgst -sha256 -hmac "$secret" -binary \
-        | od -An -vtx1 | tr -d ' \n'
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s%s' "$secret" "$message" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s%s' "$secret" "$message" | shasum -a 256 | awk '{print $1}'
+    else
+        printf '%s%s' "$secret" "$message" | openssl dgst -sha256 | awk '{print $NF}'
+    fi
 }
 
 # A gated row whose ids fail ^AR-[0-9]+$ / ^W[0-9]+$ must fail the whole run,
@@ -110,7 +123,7 @@ hmac_key() {
 # ID | Missing or over-broad item | Required plan change | Status | Work unit
 # ---- end quoted ----
 # ---- quoted: fix-key derivation ----
-# HMAC-SHA256(secret, "<session_id>|<finding>|<work unit>")
+# SHA-256 over (secret)(session_id|finding|work unit), secret first
 # ---- end quoted ----
 mint_fix_keys() {
     local plan_dir="$1" review_file="$1/adversarial-review.md"
@@ -177,7 +190,7 @@ mint_fix_keys() {
 
     while IFS=$'\t' read -r fid wu; do
         [ -n "$fid" ] || continue
-        printf '%s\t%s\t%s\n' "$fid" "$wu" "$(hmac_key "$secret" "$session_id|$fid|$wu")"
+        printf '%s\t%s\t%s\n' "$fid" "$wu" "$(fix_key "$secret" "$session_id|$fid|$wu")"
     done < "$pairs_file" > "$tsv_file"
 
     # Record the identity that minted so the approval gate can detect a fixer
