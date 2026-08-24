@@ -426,15 +426,32 @@ JSON
 cat > "$fake_bin/codex-worker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-# Stay alive briefly so the runner can capture this worker's process group for
-# the post-run process audit (a real worker outlives the group-id capture).
-sleep 1
+# Stay alive until the runner has captured this worker, then exit: the worker
+# polls the process registry (its path arrives through the exported
+# BENCHMARK_PROCESS_REGISTRY) for its own pid -- or, if the detach shim forked,
+# any registered agent row writing this worker's jsonl -- so the handshake is
+# event-driven instead of a wall-clock sleep that loses races on loaded runners.
+# The ceiling exists only to bound a defect; reaching it proceeds normally,
+# which is the old sleep's behaviour with a bound instead of a guess.
 workspace=''
 capsule=''
 while [ "$#" -gt 0 ]; do
     if [ "$1" = -C ]; then workspace="$2"; shift 2; continue; fi
     if [ "$1" = --add-dir ] && [ -z "$capsule" ]; then capsule="$2"; shift 2; continue; fi
     shift
+done
+tab="$(printf '\t')"
+attempt=0
+while [ "$attempt" -lt 150 ]; do
+    if [ -n "${BENCHMARK_PROCESS_REGISTRY:-}" ] \
+        && awk -F "$tab" -v me="$$" '
+            $1 == "agent" && ($2 == me || $5 ~ /worker\.jsonl$/) { found = 1 }
+            END { exit found ? 0 : 1 }
+        ' "$BENCHMARK_PROCESS_REGISTRY" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
 done
 cp -R "$FAKE_PLAN_SOURCE/." "$workspace/$PLAN_NAME/"
 printf '{"type":"thread.started","thread_id":"fake-worker-session"}\n'
