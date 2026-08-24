@@ -72,10 +72,17 @@ it. Scope a rule to the field it is about.
 
 **Back up before mutating, never after**, and commit before running anything
 destructive. Work has been lost here to `git checkout --` on an uncommitted file.
+The complement bit within one session: a mutation applied by sed hit a different
+site than intended, the "restore" step was forgotten once, and the weakened rule
+slipped into a commit. **A mutation is not closed until `git diff` shows the tree
+back at HEAD** — verify the restore with the same suspicion as the mutation.
 
 **Mutation-test every assertion you add.** An assertion never seen to fail is not
 verified, and roughly one in five written here was inert until a mutation proved
-otherwise.
+otherwise. Two refinements from the same day: aim the mutation at the exact line
+(a sed matched an identical pattern in another function, and the test correctly
+stayed green), and give each refused class its own fixture — a value carrying
+several metacharacters hides a dropped rule behind the others that still fire.
 
 ## Verified only on this machine
 
