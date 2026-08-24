@@ -63,7 +63,7 @@ check_cap "inline awk -F'|' parsers" 29 \
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
 # migration must stay byte-identical.
-check_cap 'seed progress-bar literal copies' 4 \
+check_cap 'seed progress-bar literal copies' 3 \
     "$( { grep -l '0%%  #### ' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # percent/bar/icon derivation; update-progress.sh is the canonical copy.
