@@ -509,15 +509,15 @@
     {
       "id": "T22",
       "title": "`plan_replace_title` is a silent no-op on a colonless heading",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "Found by unit-testing the function alone. It rewrites the title with `sub(/:.*/, \": \" replacement)`, so the heading must read `# Kind: title`. Given `# NoColonHeading` it changes nothing, returns 0, and reports success. Every creator writes the `# Kind: title` form, so this is only reachable on a heading that has already been damaged -- but a rename that silently does nothing is the shape of defect the drop-notice contract exists to prevent. Either refuse a heading it cannot rewrite, or say what it did. Current behaviour is pinned in `test-lib-document.sh` so a change is deliberate.",
-      "note": null,
+      "note": "Refuses instead: awk exits 3 on a heading with no colon and plan_die names the damage; the test-lib-document pin flipped from recording the no-op to asserting refusal, untouched heading, and message.",
       "blocked_on": null,
       "refs": [],
       "priority": "low",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T08:57:23Z"
     },
     {
       "id": "T28",

@@ -92,16 +92,24 @@ unit document/plan_replace_title.sh core/plan_die.sh core/plan_atomic_write.sh c
     "plan_replace_title '$work/doc.md' 'New title'" >/dev/null 2>&1
 t_assert_eq 'the title after the colon is replaced' "$(head -1 "$work/doc.md")" '# Plan: New title'
 t_assert_eq 'the body is untouched' "$(grep -c '^Prose\.$' "$work/doc.md")" '1'
-# Current behaviour, recorded rather than endorsed: a heading with no colon is
-# left alone and the call still reports success. Every document a creator writes
-# has the "# Kind: title" form, so this is only reachable on a damaged heading.
+# A heading with no colon is refused, not silently ignored: a rename that
+# changes nothing while reporting success is the shape the drop-notice contract
+# exists to prevent. Every document a creator writes has the "# Kind: title"
+# form, so this is only reachable on a damaged heading -- and damage must be
+# loud.
 printf '# NoColonHeading\n\nProse.\n' > "$work/no-colon.md"
-t_assert_eq 'a colonless heading is a silent no-op' \
+t_assert_eq 'a colonless heading is refused' \
+    "$(unit_rc document/plan_replace_title.sh core/plan_die.sh core/plan_atomic_write.sh \
+        core/plan_track_tmp.sh core/plan_stat_probe.sh core/plan_require_safe_value.sh \
+        core/plan_register_temp_file.sh core/00-state.sh -- \
+        "plan_replace_title '$work/no-colon.md' 'New'")" '64'
+t_assert_eq 'the refused heading is left untouched' "$(head -1 "$work/no-colon.md")" '# NoColonHeading'
+t_assert_contains 'the refusal says why' \
+    'Document title heading has no '"'"': title'"'"' part to replace' \
     "$(unit document/plan_replace_title.sh core/plan_die.sh core/plan_atomic_write.sh \
         core/plan_track_tmp.sh core/plan_stat_probe.sh core/plan_require_safe_value.sh \
         core/plan_register_temp_file.sh core/00-state.sh -- \
-        "plan_replace_title '$work/no-colon.md' 'New'; head -1 '$work/no-colon.md'")" \
-    '# NoColonHeading'
+        "plan_replace_title '$work/no-colon.md' 'New'" 2>&1)"
 # Exactly one top-level heading is the contract: a second one is ambiguous about
 # which is the title, so it refuses rather than guessing.
 printf '# One\n\n# Two\n' > "$work/two-titles.md"
