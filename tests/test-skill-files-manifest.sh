@@ -3,7 +3,7 @@
 # test-skill-files-manifest.sh — skill_files() lists what the skill actually has.
 #
 # skill_files() is a hand-written list, on purpose: the planning arm is a second
-# copy of PACKAGE-MANIFEST.txt and the duplication IS the cross-check. A hand
+# copy of PACKAGE-MANIFEST.tsv and the duplication IS the cross-check. A hand
 # list only works if something notices when it drifts, in either direction:
 #
 #   listed but absent    an installed skill missing a file it was promised --
@@ -45,7 +45,7 @@ REPO_REF='test'
 unshipped_reason() { # <skill> <path> → prints the reason, or nothing
     case "$1/$2" in
         # Developer-facing documentation and the maintainer's own tooling. The
-        # shipped set of planning is PACKAGE-MANIFEST.txt, diffed against this
+        # shipped set of planning is PACKAGE-MANIFEST.tsv, diffed against this
         # list by planning/tests/test-installer-manifest.sh.
         planning/ARCHITECTURE.md | planning/MAINTAINER.md | planning/PACKAGE-MAP.tsv | planning/.gitignore)
             printf 'developer documentation, not part of the installed skill\n' ;;

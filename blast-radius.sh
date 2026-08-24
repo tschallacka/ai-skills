@@ -131,7 +131,7 @@ while IFS= read -r path; do
     case "$path" in planning/*) ;; *) continue ;; esac
     # Only files that are new to the tree can be missing a row.
     git ls-files --error-unmatch "$path" >/dev/null 2>&1 && continue
-    rows="$(grep -Fc "$path" planning/PACKAGE-MANIFEST.txt 2>/dev/null || true)"
+    rows="$(grep -Fc "$path" planning/PACKAGE-MANIFEST.tsv 2>/dev/null || true)"
     [ "${rows:-0}" -eq 0 ] || continue
     case "$path" in
         *.json)

@@ -252,7 +252,7 @@ that skips the check is a documented violation rather than an unknown unknown.
 
 ## 10. A new file under `planning/` ships only if it is registered
 
-Three rows plus a rebuild: `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
+Three rows plus a rebuild: `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
 `installer/src/50-manifest.sh`, then `installer/build.sh`. The manifest arm to use
 is the one matching the file's declared mode (contract 10a): the prod arm if it
 ships, the dev arm if only a maintainer needs it.

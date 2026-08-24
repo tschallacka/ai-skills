@@ -6,7 +6,7 @@
 #   - the registry (planning/scripts/role-context.sh ROLES=()),
 #   - the scope docs each persona reads (planning/ROLES.md + role-context.sh
 #     role_docs()),
-#   - the shipped install set (planning/PACKAGE-MANIFEST.txt + the
+#   - the shipped install set (planning/PACKAGE-MANIFEST.tsv + the
 #     install.sh skill_files() list).
 #
 # It fails (drift, no backwards compatibility) when:
@@ -28,7 +28,7 @@ t_begin
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 registry="$root/scripts/role-context.sh"
 voices="$root/roles/VOICES.md"
-manifest="$root/PACKAGE-MANIFEST.txt"
+manifest="$root/PACKAGE-MANIFEST.tsv"
 
 # The dev arm of skill_files(), for artifacts that are registered for delivery to
 # a maintainer rather than to an end user.

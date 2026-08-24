@@ -41,7 +41,7 @@ the maintainer must behave going forward.
 | `scripts/validate-plan-commands-lib.sh` | Command-literal detector (rules 1-8) against the plan's `commands.json`. | Reads `planning/never-executable-extensions.json` via `skill_root`; registry maintained by `register-command.sh`. |
 | `scripts/validate-plan-propagation-lib.sh` | `--complete` progress gate plus propagation (a) unowned edit targets, (c) verifier reachability, (c2) companion references, (d) unverified graph leaves, (e) §9.x roster vs inventory. | Runs only when `--propagation` (the default) is on. |
 | `scripts/*.sh` | Thin, single-purpose helpers. | Source `plan-document-lib.sh` (+ `plan-reconcile-lib.sh`). |
-| `PACKAGE-MANIFEST.txt` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
+| `PACKAGE-MANIFEST.tsv` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
 | `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
 | `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
 | Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md`, `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
@@ -314,7 +314,7 @@ before and after, and diff. `test-progress-bar-shape.sh` and
    `roles/VOICES.md` registry-aligned and keep `ROLES.md`'s persona doc matrix +
    `plan-context-lib.sh` reader composition in sync with `role_docs()`/`ROLES=()`;
    re-run `test-persona-drift.sh` + `test-voice-artifact-drift.sh`.
-6. Register new files in `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,
+6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`,
    and `install.sh skill_files`. If the file is a benchmark capsule dependency
    (`scripts/*`, `SKILL.md`, `REVIEWER.md`), reflect it in `setup-benchmark.sh`'s
    capsule copy. The manifest line-count is derived from the map (no constant to

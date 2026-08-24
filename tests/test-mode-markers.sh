@@ -24,7 +24,7 @@
 # The gate: MODE must agree with skill_files(). The marker is the declaration in
 # the file, skill_files() is the list the installer reads, and neither is derived
 # from the other -- so a disagreement means one of them is wrong, which is the
-# same cross-check PACKAGE-MANIFEST.txt gets.
+# same cross-check PACKAGE-MANIFEST.tsv gets.
 #
 # Markdown carries the marker as an HTML comment: '# MODE: PROD' would render as
 # a heading, and a second top-level heading is exactly what the document rules
@@ -69,7 +69,7 @@ exempt() { # <path> → prints the reason, or nothing
             printf 'a fixture; its bytes are the test input\n' ;;
         *.json | *.jsonl | *.pub | */FIXTURE-VERSION)
             printf 'the format has no comment syntax\n' ;;
-        planning/PACKAGE-MANIFEST.txt | planning/PACKAGE-MAP.tsv)
+        planning/PACKAGE-MANIFEST.tsv | planning/PACKAGE-MAP.tsv)
             printf 'structured data with its own cross-check\n' ;;
         *.gitignore)
             printf 'read by git, not by the skill\n' ;;

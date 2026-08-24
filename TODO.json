@@ -400,11 +400,11 @@
     {
       "id": "T27",
       "title": "Rename PACKAGE-MANIFEST.txt to PACKAGE-MANIFEST.tsv",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "It is tab-separated data with the same column shape as PACKAGE-MAP.tsv, so the .txt extension misdescribes it. Touches: the file itself, installer/src/50-manifest.sh (both the planning arm entry and any reader), planning/tests/test-installer-manifest.sh, PACKAGE-MAP.tsv row, planning/MAINTAINER.md, coupling.tsv, and the exemption list in tests/test-mode-markers.sh.",
-      "note": null,
+      "note": "git mv to .tsv and every live reference updated in the same commit (37 sites across scripts, tests, docs, coupling.tsv); BUGS.json history notes keep their old name. Packaging gates, mode markers, blast radius and reviewer projection all pass.",
       "blocked_on": null,
       "refs": [
         "planning/PACKAGE-MANIFEST.txt",
@@ -413,7 +413,7 @@
         "coupling.tsv"
       ],
       "created_at": "2026-08-20T16:07:32Z",
-      "updated_at": "2026-08-20T16:07:32Z"
+      "updated_at": "2026-08-24T09:43:52Z"
     },
     {
       "id": "T30",

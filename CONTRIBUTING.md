@@ -178,7 +178,7 @@ Then, specific to this repo:
   that is missing it.
 - **A new or renamed file under a skill directory moves in four places** or
   `planning/tests/test-installer-manifest.sh` fails:
-  `planning/PACKAGE-MANIFEST.txt`, `planning/PACKAGE-MAP.tsv`,
+  `planning/PACKAGE-MANIFEST.tsv`, `planning/PACKAGE-MAP.tsv`,
   `installer/src/50-manifest.sh`'s `skill_files()` (then rebuild), and
   `package.json`'s `files` (directory level only). The manifest and the map are
   compared byte-for-byte, so row *order* matters.

@@ -15,7 +15,7 @@ It complements the other three internal documents and duplicates none of them:
 | `ARCHITECTURE.md` (this file) | The five cross-script flows, as diagrams |
 
 `SKILL.md` remains the only agent-facing instruction. This file is **not** in
-`PACKAGE-MANIFEST.txt`, not in `PACKAGE-MAP.tsv`, and not in
+`PACKAGE-MANIFEST.tsv`, not in `PACKAGE-MAP.tsv`, and not in
 `install.sh skill_files()` — it is never installed, never copied into a
 benchmark capsule, and never loaded by the skill, exactly like `MAINTAINER.md`.
 

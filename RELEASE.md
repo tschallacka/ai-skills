@@ -24,7 +24,7 @@ Every file says so in its own header:
 Two independent lists have to agree, and neither is derived from the other:
 the marker in each file, and `skill_files()` in `installer/src/50-manifest.sh`.
 `tests/test-mode-markers.sh` fails on any disagreement. That duplication is the
-cross-check, the same arrangement `planning/PACKAGE-MANIFEST.txt` has.
+cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
 
 ## Cutting a release
 
@@ -123,7 +123,7 @@ written, by whoever knows the answer, and not at release time by whoever is
 holding the tag.
 
 Then register it in `skill_files()` — the prod arm if it ships, the dev arm if it
-does not — and in `planning/PACKAGE-MANIFEST.txt` and `PACKAGE-MAP.tsv` for a
+does not — and in `planning/PACKAGE-MANIFEST.tsv` and `PACKAGE-MAP.tsv` for a
 planning file. `tests/test-skill-files-manifest.sh` asserts the two arms account
 for every tracked file, so a file in neither is a failure rather than a silent
 omission.

@@ -2308,7 +2308,7 @@ download_source() {
 # ---------------------------------------------------------------
 # 9. Per-skill file manifest
 # ---------------------------------------------------------------
-# The planning list is a deliberate second copy of planning/PACKAGE-MANIFEST.txt:
+# The planning list is a deliberate second copy of planning/PACKAGE-MANIFEST.tsv:
 # the two are diffed by planning/tests/test-installer-manifest.sh, which extracts
 # this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
 # not derive it from the manifest — the duplication IS the cross-check.
@@ -2340,7 +2340,7 @@ version_marker_content() {
 # out of install.sh, and a comment shaped like a marker reads as one.
 #
 # Still a hand list, deliberately: the planning arms are a second copy of
-# PACKAGE-MANIFEST.txt and the duplication is the cross-check.
+# PACKAGE-MANIFEST.tsv and the duplication is the cross-check.
 # tests/test-mode-markers.sh compares both arms against the markers in the files.
 skill_files() {
     local package="${2:-prod}"
@@ -2367,7 +2367,7 @@ context/brainstorm-limiting-context.md
 context/brainstorm-limiting-context-contract.json
 context/brainstorm-limiting-context-benchmark.json
 context/brainstorm-limiting-context-oracle.json
-PACKAGE-MANIFEST.txt
+PACKAGE-MANIFEST.tsv
 requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
@@ -2675,7 +2675,7 @@ source_file() {
 cli_print_skill_files() {
     [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
     [ "$CLI_FORMAT" = "tsv" ] || die "unsupported CLI format: $CLI_FORMAT"
-    cat "$SOURCE_ROOT/planning/PACKAGE-MANIFEST.txt"
+    cat "$SOURCE_ROOT/planning/PACKAGE-MANIFEST.tsv"
 }
 
 cli_resolve_source() {

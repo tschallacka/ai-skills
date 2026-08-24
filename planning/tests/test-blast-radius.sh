@@ -5,7 +5,7 @@
 # not ship fails, and a consistent tree is quiet.
 #
 # Dev-only, like test-mermaid-accuracy.sh: blast-radius.sh is maintainer tooling
-# and is not in PACKAGE-MANIFEST.txt, so neither is its test.
+# and is not in PACKAGE-MANIFEST.tsv, so neither is its test.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh

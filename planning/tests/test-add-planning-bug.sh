@@ -151,7 +151,7 @@ t_assert_eq 'the same call without the stub succeeds' "$rc" '0'
 
 # ── the writer is registered, or an install cannot run it ──────────────────
 t_assert_eq 'the script ships' \
-    "$(grep -c '^planning/scripts/add-planning-bug.sh\b' "$repo_root/planning/PACKAGE-MANIFEST.txt")" '1'
+    "$(grep -c '^planning/scripts/add-planning-bug.sh\b' "$repo_root/planning/PACKAGE-MANIFEST.tsv")" '1'
 t_assert_eq 'and is in the map' \
     "$(grep -c '^planning/scripts/add-planning-bug.sh\b' "$repo_root/planning/PACKAGE-MAP.tsv")" '1'
 

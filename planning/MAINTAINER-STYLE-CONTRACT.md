@@ -114,7 +114,7 @@ Verdict by document surface:
 
 Adding a new template placeholder to any generator script requires registering
 it (with the correct `surface`) in `placeholders.json`; the installer-manifest
-test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.txt`,
+test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.tsv`,
 and `PACKAGE-MAP.tsv`. A typo'd placeholder (`<shortdescription>`) is a
 maintainer bug caught by the test suite, not by the validator.
 

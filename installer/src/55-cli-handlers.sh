@@ -9,7 +9,7 @@
 cli_print_skill_files() {
     [ "$CLI_SKILL" = "planning" ] || die "unsupported CLI skill: $CLI_SKILL"
     [ "$CLI_FORMAT" = "tsv" ] || die "unsupported CLI format: $CLI_FORMAT"
-    cat "$SOURCE_ROOT/planning/PACKAGE-MANIFEST.txt"
+    cat "$SOURCE_ROOT/planning/PACKAGE-MANIFEST.tsv"
 }
 
 cli_resolve_source() {

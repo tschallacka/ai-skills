@@ -1371,7 +1371,7 @@ an intermediate failure.
 
 The replacement package is repository-owned until its closure plan is
 approved. Its finite installable boundary is the six-column
-`planning/PACKAGE-MANIFEST.txt`; `planning/PACKAGE-MAP.tsv` is the
+`planning/PACKAGE-MANIFEST.tsv`; `planning/PACKAGE-MAP.tsv` is the
 source/destination ownership record and the two repository-root brainstorm
 inputs are source-only. The package contains the contract, benchmark and
 oracle records, fixtures, runner evidence, installer proof, this skill, and

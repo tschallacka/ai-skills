@@ -5,7 +5,7 @@
 #
 # Usage: test-installer-manifest.sh
 #
-# This file is itself shipped (it is registered in PACKAGE-MANIFEST.txt), so it
+# This file is itself shipped (it is registered in PACKAGE-MANIFEST.tsv), so it
 # holds to the shipped-runtime dependency rule in CODE-STYLE.md §1: bash, POSIX
 # coreutils, awk, sed, grep, git only. No python3.
 set -euo pipefail
@@ -13,7 +13,7 @@ export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
-manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.txt"
+manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.tsv"
 
 # Normalise a path without requiring GNU `realpath -m` (absent on macOS).
 # Both callers pass paths that exist, so resolving the parent is sufficient.
@@ -30,7 +30,7 @@ test_manifest_emission() {
     map_installable=$(mktemp)
     trap 'rm -f "$emitted" "$map_installable"' RETURN
 
-    # --print-skill-files cats PACKAGE-MANIFEST.txt, so emitted-vs-manifest is a
+    # --print-skill-files cats PACKAGE-MANIFEST.tsv, so emitted-vs-manifest is a
     # tautology; the real contract is manifest == the map's installable rows.
     "$BASH" "$repo_dir/install.sh" --print-skill-files planning --format=tsv >"$emitted"
     awk -F '\t' 'NR == 1 { next } $6 == "false" { print }' "$map_file" >"$map_installable"
@@ -85,7 +85,7 @@ test_skill_files_matches_manifest() {
     sort "$skill_files" -o "$skill_files"
 
     if ! cmp -s "$skill_files" "$manifest_dests"; then
-        echo "skill_files() planning set does not match PACKAGE-MANIFEST.txt destinations:" >&2
+        echo "skill_files() planning set does not match PACKAGE-MANIFEST.tsv destinations:" >&2
         diff "$skill_files" "$manifest_dests" >&2 || true
         return 1
     fi

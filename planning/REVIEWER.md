@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `d9400b6a58f60078a910c56c4b5b2d799d44eda46a0ccfc64ff39cdd5b537db4`
+> Source SHA-256: `cbac3ade7d7f03428e4498e5952c6fd306afa786d88c516a28ae84b1290d1479`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -216,9 +216,7 @@ more `-p N.N: content` paragraphs. For example:
 Use `--table-paragraph <plan> <document-id> <N.N> <columns> "<CSV>"` to
 replace one paragraph with a validated Markdown table. Quote the CSV fields;
 use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
-shell-friendly escaped quote is clearer. A literal pipe inside a cell is
-spelled `\|` — the renderer refuses an unescaped pipe because it would split
-the Markdown row, and emits `\|` verbatim so it renders as `|`. Use
+shell-friendly escaped quote is clearer. Use
 `--insert-after` or `--insert-before` with a document ID and paragraph label
 to add one paragraph; later labels in that same section shift automatically.
 The `-p N.N:` forms auto-create only when the section's labels are contiguous

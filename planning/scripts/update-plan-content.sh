@@ -100,7 +100,7 @@ trim_leading_space() {
 eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 # Sourced unconditionally: a missing library is a broken install, not an
 # optional feature (CODE-STYLE §7). plan-context-lib.sh is in
-# PACKAGE-MANIFEST.txt and install.sh's skill_files(), so it is always present.
+# PACKAGE-MANIFEST.tsv and install.sh's skill_files(), so it is always present.
 source "$script_dir/plan-context-lib.sh"
 
 [[ "$command" == -* ]] || usage

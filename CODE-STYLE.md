@@ -92,7 +92,7 @@ The dependency budget differs between what we ship to a user's machine and what
 only a contributor runs. Know which side of the line your file is on.
 
 **Shipped runtime** — `install.sh`, `planning/scripts/**`, anything registered
-in `planning/PACKAGE-MANIFEST.txt`, and the other skill directories:
+in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
 
 | Tool | Status |
 |---|---|
@@ -133,7 +133,7 @@ where it once used a python regex).
 Check which side you are on before adding a dependency:
 
 ```bash
-grep -Fq "<your/file.sh>" planning/PACKAGE-MANIFEST.txt && echo shipped || echo dev-only
+grep -Fq "<your/file.sh>" planning/PACKAGE-MANIFEST.tsv && echo shipped || echo dev-only
 ```
 
 `awk` must stay POSIX regardless of side — see the paragraph below.
@@ -237,7 +237,7 @@ sourced, never executed.
 When a file in `planning/` is added, renamed, or removed, four places move
 together or `planning/tests/test-installer-manifest.sh` fails:
 
-1. `planning/PACKAGE-MANIFEST.txt`
+1. `planning/PACKAGE-MANIFEST.tsv`
 2. `planning/PACKAGE-MAP.tsv`
 3. `installer/src/50-manifest.sh` → `skill_files()`, then `installer/build.sh`
 4. `package.json` `files` (directory level only — no change for a new sibling)
