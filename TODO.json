@@ -129,11 +129,11 @@
     {
       "id": "T39",
       "title": "Declare the chat server runtimes as an any-of requirement so the installer says what to install",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "chat/requires.tsv holds only comments, so installing chat prints nothing about the runtimes a server needs (python3 -> node -> perl -> socat, socat driving runtime/bash-handler.sh). Four soft rows are wrong: requires.tsv is one row per tool with no any-of concept, so three of them would warn while nothing is missing, which teaches people to ignore warnings. Needs an any-of group in the requirement format, consumed by installer/build.sh into the generated tables, warning once when no member resolves and staying silent when one does; plus verify and hint rows in installer/tools.tsv for python3, node, perl and socat, none of which are registered today.",
-      "note": "Not a dependency-budget problem: the fallback is intended and the client helpers work regardless, with chat-server.sh refusing at exit 69 and naming the capability. The gap is that the machine-readable rows which drive the warning and the per-platform install hint are absent. A brief for this was handed to the -ox agent.",
+      "note": "Shipped: requires.tsv grew a fifth group column (any member satisfies, identical condition/strength/why enforced at build time, ids unique across skills, hard groups allowed and gating like a hard single); build.sh collapses each group to one @group requirement and generates runtime_requirement_members(); every consumer treats an @group as one requirement so chat warns exactly once naming python3/node/perl/socat and the lost capability, silent when any resolves, with hints per platform in tools.tsv. Pinned by test-installer-any-of.sh; six mutations each broke their target assertion.",
       "blocked_on": null,
       "refs": [
         "chat/requires.tsv",
@@ -142,7 +142,7 @@
         "installer/src/20-runtime-tools.sh"
       ],
       "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
+      "updated_at": "2026-08-24T13:11:22Z"
     },
     {
       "id": "T41",
