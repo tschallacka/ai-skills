@@ -98,4 +98,27 @@ printf '%s\n%s\n' "$header" 'AR-51,bare rows,change it,✅ resolved,N/A' \
 t_assert_eq "bare CSV via stdin exits 0" "$rc" 0
 t_assert_eq "bare row AR-51 rendered" "$(count_rows "$plan_bare/adversarial-review.md" AR-51)" 1
 
+# --- --check validates without writing (T8) -----------------------------------
+# A reviewer should learn about a malformed row while still in the conversation,
+# not when the coordinator lands the findings after they left. --check runs the
+# same shape gate and the same mint preview as a write, then stops: no table
+# rewrite, no history archive, no keys, and the incoming file stays for the real
+# run.
+plan_check="$temporary_root/checkmode"
+seed_plan "$plan_check"
+printf '%s\n' "$preamble_doc" > "$plan_check/adversarial-review-incoming.md"
+review_before="$(cat "$plan_check/adversarial-review.md")"
+check_out="$temporary_root/check-out"
+rc=0
+"$script_dir/update-adversarial-review.sh" --check "$plan_check" > "$check_out" 2>&1 || rc=$?
+t_assert_eq "--check on valid rows exits 0" "$rc" 0
+grep -Fq 'nothing was written' "$check_out" || fail "--check does not say nothing was written: $(cat "$check_out")"
+t_assert_eq "--check left the Findings table untouched" "$(cat "$plan_check/adversarial-review.md")" "$review_before"
+[ -f "$plan_check/adversarial-review-incoming.md" ] || fail "--check consumed the incoming file"
+
+printf 'AR-01,only,three\n' > "$plan_check/adversarial-review-incoming.md"
+rc=0
+"$script_dir/update-adversarial-review.sh" --check "$plan_check" >/dev/null 2>&1 || rc=$?
+t_assert_eq "--check refuses a malformed row with exit 65" "$rc" 65
+
 t_end

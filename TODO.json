@@ -483,15 +483,15 @@
     {
       "id": "T8",
       "title": "A `--check` mode for a findings CSV",
-      "status": "open",
+      "status": "done",
       "parent": null,
       "detail": "Validate the shape of an adversarial-review CSV without committing it, so a reviewer learns about a malformed row before it lands in the table. Was P1-5, downgraded to P2 because `update-adversarial-review.sh` refuses a malformed row anyway — the gap is that it refuses at write time, when the reviewer has already left.",
-      "note": null,
+      "note": "--check runs the write-path shape gate and mint preview, prints the row count with an explicit nothing-was-written line, and exits before any table, history, key or incoming-file consumption. Pinned in test-adversarial-review-preamble.sh; mutation (dropping the exit) fails both the untouched-table and message assertions.",
       "blocked_on": null,
       "refs": [],
       "priority": "low",
       "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
+      "updated_at": "2026-08-24T09:49:44Z"
     },
     {
       "id": "T9",

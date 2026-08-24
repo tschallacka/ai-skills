@@ -62,6 +62,7 @@ CSV, else from stdin.
 
   --file CSV   read the rows from CSV instead of stdin
   --cycle N    number the archived history entry N instead of the next one up
+  --check      validate the rows (shape and mint) and report; writes nothing
 
 This does not set the Verdict to approved. Author the Verdict and run
 \`update-plan-content.sh --review-status <plan> approved\` separately.
@@ -104,11 +105,13 @@ plan_dir=""
 csv_source=""
 consumed_incoming=0
 cycle_number=""
+check_only=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
         --file) [ "$#" -ge 2 ] || usage; csv_source="$2"; shift 2 ;;
         --cycle) [ "$#" -ge 2 ] || usage; cycle_number="$2"; shift 2 ;;
+        --check) check_only=1; shift ;;
         --) shift; break ;;
         -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
         *) [ -z "$plan_dir" ] || usage; plan_dir="$1"; shift ;;
@@ -204,6 +207,17 @@ mint_rc=0
 "$script_dir/mint-fix-keys.sh" "$preview_dir" >/dev/null || mint_rc=$?
 if [ "$mint_rc" -ne 0 ]; then
     plan_die "findings were not minted; nothing was modified — fix the finding/work-unit cells and rerun (diagnosis above)" "$mint_rc"
+fi
+
+# --check stops here: the shape gate above and the mint preview are exactly the
+# refusals a write run would produce, so a reviewer learns about a malformed row
+# before it lands — and before they have left the conversation (T8). The
+# incoming file is deliberately not consumed and no table, history or key is
+# written.
+if [ "$check_only" -eq 1 ]; then
+    rows="$(grep -c . "$csv_file" || true)"
+    printf 'CSV is valid: %s finding row(s) passed the shape and mint checks; nothing was written\n' "$rows"
+    exit 0
 fi
 
 # Archive the prior Findings rows (if any) into adversarial-review-history.md
