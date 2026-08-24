@@ -233,6 +233,23 @@ printed.
 field values) and `test-adversarial-review-sources.sh` (the archive notice and
 its truth). All five are mutation-tested.
 
+## 9b. Work dispatched to a worktree agent names its base commit
+
+Whoever sends work into a linked worktree states the exact commit the tree must
+sit at, and the agent's first act is to verify it — `git rev-parse HEAD` against
+the stated id — before reading or writing anything. A mismatch is reported back,
+not worked around: the agent may reset to the *stated* commit only because the
+statement exists to check against.
+
+**Cost:** a watchdog subagent found its worktree at `de02b9f`, an old master
+commit with no `BUGS.json` and no `lib-process.sh`, while its instructions
+talked about files that only existed at `d8e8cee`. It guessed, reset itself, and
+carried on — which worked once and proves nothing about the next dispatch.
+
+**Enforced** by discipline, not a test: no repo script creates subagent
+worktrees, so there is nothing to gate. The contract lives here so a dispatch
+that skips the check is a documented violation rather than an unknown unknown.
+
 ## 10. A new file under `planning/` ships only if it is registered
 
 Three rows plus a rebuild: `PACKAGE-MANIFEST.txt`, `PACKAGE-MAP.tsv`,

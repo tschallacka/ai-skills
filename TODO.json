@@ -468,17 +468,17 @@
     {
       "id": "T35",
       "title": "A subagent worktree is created from an old master commit, not from the current HEAD",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "The watchdog subagent found its worktree checked out at de02b9f, an old master commit with no BUGS.json, no lib-process.sh and no verify-both-shells.sh, despite being told it was branched from d8e8cee. It reset --hard to d8e8cee itself and said so. Anyone dispatching work to a worktree agent has to state the base commit and have the agent verify it before starting, or the work lands on a tree missing the files it was told about.",
-      "note": "Caught only because the agent checked and reported it. The worktree also lives at .claude/worktrees/ inside the repo, which is the hazard CODE-CONTRACTS section 7 records; no generated artifact was polluted because the generators prune .claude, which was verified after the merge.",
+      "note": "CODE-CONTRACTS.md 9b: a dispatch states the base commit, the agent verifies HEAD against it before touching anything, and a mismatch is reported — reset to the stated commit is the sanctioned recovery, guessing is not.",
       "blocked_on": null,
       "refs": [
         "CODE-CONTRACTS.md"
       ],
       "created_at": "2026-08-21T10:29:27Z",
-      "updated_at": "2026-08-21T10:29:27Z"
+      "updated_at": "2026-08-24T09:38:24Z"
     },
     {
       "id": "T8",
