@@ -81,13 +81,33 @@ cmp -s "$temporary_root/before-out.html" "$out" || fail "--out run also rewrote 
 wd="$temporary_root/watched"
 cp -R "$plan" "$wd"
 rm -f "$wd/overview.html"
-OVERVIEW_NOW=$NOW timeout 9 "$script_dir/render-plan-overview.sh" "$wd" --watch 2 --refresh 5 \
+# No timeout(1): macOS does not ship it (B6). Bound the watch by polling for
+# the second render, then stop the watcher — the ceiling exists only so a
+# defect cannot hang the suite.
+OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$wd" --watch 2 --refresh 5 \
     >"$temporary_root/watch.log" 2>&1 &
 wpid=$!
 sleep 3
 printf '\n# touched\n' >> "$wd/work-unit-inventory.md"
-wait $wpid || true
-renders="$(grep -c '^Rendered ' "$temporary_root/watch.log")"
+watch_poll=0
+while [ "$(grep -c '^Rendered ' "$temporary_root/watch.log" || true)" -lt 2 ] &&
+    [ "$watch_poll" -lt 50 ]; do
+    sleep 0.1
+    watch_poll=$((watch_poll + 1))
+done
+kill "$wpid" 2>/dev/null || true
+# TERM is deferred while the watcher sits in its sleep child, so give it a
+# grace window and then make the death certain before waiting.
+kill_grace=0
+while [ "$kill_grace" -lt 20 ] && kill -0 "$wpid" 2>/dev/null; do
+    sleep 0.1
+    kill_grace=$((kill_grace + 1))
+done
+if kill -0 "$wpid" 2>/dev/null; then
+    kill -9 "$wpid" 2>/dev/null || true
+fi
+wait "$wpid" 2>/dev/null || true
+renders="$(grep -c '^Rendered ' "$temporary_root/watch.log" || true)"
 if [ "$renders" -lt 2 ]; then fail "--watch did not re-render on change ($renders renders)"; fi
 
 # determinism: same inputs, pinned clock, byte-identical bytes.

@@ -35,18 +35,18 @@
       "reproduce": "CI run 32726302448 on PR #3 (head f699f84). Both macOS jobs: 96 ran, 95 passed, 1 failed -- test-plan-overview, exit 1. ubuntu-latest passes all 96, and ./verify-both-shells.sh passes 96/96 on bash 5.3 and bash 3.2 on Linux.",
       "observed": "The only output under the FAIL line is the limited-run wrapper's memlimit warnings. No assertion text, no t_end summary, and no sed/awk/grep error anywhere in the full job log.",
       "expected": "Either the test passes on macOS, or it says which assertion failed.",
-      "mechanism": "Not proven, but the shape is clear and there is a strong candidate. The test runs under set -euo pipefail and writes findings to a file that t_end prints; dying before t_end therefore loses every finding, which is exactly what a silent exit 1 looks like. The candidate is a bare setup command whose output is discarded -- planning/tests/test-plan-overview.sh line 8 from the end runs update-step.sh with >/dev/null, and the render call after it with >/dev/null 2>&1. If either exits non-zero on macOS, set -e kills the test at that point with its diagnosis already thrown away. That would make this two defects: whatever fails on BSD, and a test that cannot say so.",
+      "mechanism": "Confirmed by the speaking trap on CI run 32751254496: test-plan-overview.sh line 90 called timeout(9) on render-plan-overview --watch, and macOS does not ship timeout (the B6 class). The watcher died instantly of exit 127, watch.log stayed empty, grep -c exited 1 under pipefail+set -e, and the ERR trap named the exact line — the diagnosis the first half of the fix was built to produce.",
       "surfaces": [
         "planning/tests/test-plan-overview.sh",
         "planning/scripts/render-plan-overview.sh",
         "planning/scripts/update-step.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session — the watch case bounds itself by polling for the second render (no timeout binary); chat/tests/test-chat.sh swaps its one timeout(5) for a read -t loop with the same ceiling; render-plan-overview traps TERM/INT so a stopped watcher exits promptly instead of deferring the signal behind its sleep child",
+      "verification": "Pending the macOS legs of the next PR run — that is the only place this reproduces. Linux: test-plan-overview and chat tests pass under limited-run after the change.",
       "found_by": "CI on PR #3, opened for exactly this reason: 46 commits with 88 files changed had never run on BSD userland, and the branch itself had just made the macOS legs blocking",
       "notes": "Blocking because -ox removed continue-on-error from both macOS legs (T37), so this fails the PR rather than being informational. Diagnose it on a runner, not by reading: stop discarding the setup commands' output first -- capture and print it on failure -- and the cause will name itself. Worth checking the same pattern in the other new tests from this branch, since a setup command redirected to /dev/null hides a BSD failure the same way anywhere it appears. Order of work: make the test able to speak before fixing what it fails on -- capture the setup commands' output and print it on failure -- then push and read the macOS leg rather than reading the code. The same discarded-output pattern is worth checking in the other tests this branch added: test-add-work-unit-staging, test-adversarial-review-mint-order, test-adversarial-review-preamble, test-function-length-ratchet, test-installer-opencode-permissions, test-owned-roster-scaffold, test-verifier-reach-memo and chat/tests/test-chat.sh. And the flag cannot go back: making those legs blocking is what caught this.",
       "created_at": "2026-08-24T12:26:51Z",
-      "updated_at": "2026-08-24T12:27:49Z"
+      "updated_at": "2026-08-24T17:23:55Z"
     },
     {
       "id": "B33",

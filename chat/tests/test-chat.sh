@@ -76,7 +76,17 @@ exercise_runtime() { # <runtime>
     (
         exec 3<> /dev/tcp/127.0.0.1/"$port"
         printf 'NICK watcher\nJOIN #ops\n' >&3
-        timeout 5 cat <&3 > "$temporary_root/push.$rt"
+        # No timeout(1) on macOS (B6): read -t bounds each line-wait, and the
+        # loop stops once this client's expected reply arrives or ~5s lapse.
+        chat_deadline=$(( SECONDS + 5 ))
+        while [ "$SECONDS" -lt "$chat_deadline" ]; do
+            if IFS= read -t 1 -r chat_line <&3; then
+                printf '%s\n' "$chat_line" >> "$temporary_root/push.$rt"
+                case "$chat_line" in
+                    *pusher\ :pushed*|*poll\ mode*) break ;;
+                esac
+            fi
+        done
     ) &
     pusher=$!
     sleep 1

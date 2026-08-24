@@ -346,6 +346,9 @@ render_once() {
 }
 
 if [ "$watch" = true ]; then
+    # Without this, TERM arriving while bash waits on the sleep child is
+    # deferred until that child exits, so a watcher can outlive its killer.
+    trap 'exit 0' TERM INT
     render_once
     # A content checksum over every input, so edits inside any one of them
     # trigger a re-render; paths come from find and plans are kebab-cased.
