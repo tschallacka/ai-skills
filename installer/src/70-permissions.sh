@@ -100,10 +100,33 @@ def allowed: objectify | .permissions | objectify | .allow
     fi
 }
 
+# opencode reads ~/.config/opencode/opencode.json or opencode.jsonc -- either
+# name, JSON-C syntax allowed in both. Edit whichever exists, .json preferred;
+# when neither exists, create opencode.json so the grant below has a home --
+# skipping would leave every planning helper behind a permission prompt.
+opencode_configfile() {
+    local dir="$HOME/.config/opencode"
+    if [ -n "${OPENCODE_CONFIGFILE:-}" ]; then
+        printf '%s\n' "$OPENCODE_CONFIGFILE"
+    elif [ -f "$dir/opencode.json" ] || [ ! -f "$dir/opencode.jsonc" ]; then
+        printf '%s\n' "$dir/opencode.json"
+    else
+        printf '%s\n' "$dir/opencode.jsonc"
+    fi
+}
+
 opencode_permissions() {
-    local cfg="${OPENCODE_CONFIGFILE:-$HOME/.config/opencode/opencode.json}" scripts="$1" plans="$2" tmp="$3"
-    local doc added legacy tmpfile program
-    [ -f "$cfg" ] || { echo "  opencode: no $cfg found; skipped" >&2; return 0; }
+    local cfg scripts="$1" plans="$2" tmp="$3"
+    local doc added legacy tmpfile program created=0
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" \
+            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_permissions opencode "$scripts" "$plans" "$tmp"; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; print_manual_permissions opencode "$scripts" "$plans" "$tmp"; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
     if ! command -v jq >/dev/null 2>&1; then
         echo "  opencode: jq is not installed; cannot edit $cfg safely." >&2
         print_manual_permissions opencode "$scripts" "$plans" "$tmp"
@@ -112,7 +135,16 @@ opencode_permissions() {
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    backup_file "$cfg"
+    # A non-empty config that strict jq cannot parse carries JSON-C comments or
+    # trailing commas, which a rewrite would strip: print manual instructions
+    # instead of rebuilding from {}. Emptiness is decided here -- jq's own exit
+    # status for empty input flips between versions.
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! jq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
+        print_manual_permissions opencode "$scripts" "$plans" "$tmp"
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
 
     doc="$(jq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'

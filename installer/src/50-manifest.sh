@@ -258,6 +258,7 @@ tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-manifest.sh
 tests/test-installer-noninteractive.sh
+tests/test-installer-opencode-permissions.sh
 tests/test-installer-skill-selection.sh
 tests/test-inventory-helpers.sh
 tests/test-lib-core.sh

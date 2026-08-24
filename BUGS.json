@@ -418,6 +418,50 @@
       "updated_at": "2026-08-21T11:00:42Z"
     },
     {
+      "id": "B27",
+      "title": "test-portability-contract fails on committed HEAD: the chat runtime probes name python3 without an allowlist row, so the whole suite reads red",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git checkout 9b5e502 -- . && ./run-tests.sh   # or: nix develop -c bash planning/tests/test-portability-contract.sh on any tree containing chat/",
+      "observed": "portability: ./chat/tests/test-chat.sh uses banned construct 'python3-shipped' at line 26; same for ./chat/scripts/chat-server.sh line 59; Total: Failed: 1.",
+      "expected": "Files that probe an optional runtime chain must name what they may pick and are exempted like the stat-format/sha256-tool probes, keeping the suite green at HEAD.",
+      "mechanism": "Assertion 4 greps comment-stripped sources against portability-rules.json detectors; chat-server.sh and its test list python3 in their python3->node->perl->socat fallback (chat/requires.tsv declares it soft), but in_allowlist() gained no chat rows when the skill landed.",
+      "surfaces": [
+        "planning/tests/test-portability-contract.sh",
+        "chat/scripts/chat-server.sh",
+        "chat/tests/test-chat.sh"
+      ],
+      "fix": "This change — two exact-file allowlist rows for python3-shipped with the probe rationale commented; PORTABILITY.md regenerated last per contract 7.",
+      "verification": "test-portability-contract PASSes on the working tree; the pre-fix output above is the mutation (removing the rows restores both findings).",
+      "found_by": "./run-tests.sh while verifying B26 — the failure predates this session's changes and sits on committed HEAD",
+      "notes": "Nothing else in the suite covered the chat landing's interaction with the portability gate; the suite had not been run between the chat commits and this check.",
+      "created_at": "2026-08-23T21:31:00Z",
+      "updated_at": "2026-08-23T21:31:00Z"
+    },
+    {
+      "id": "B28",
+      "title": "The opencode permission autoset looks only at opencode.json, so a machine whose config is opencode.jsonc gets no grant and a commented one would have been stripped",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "home=$(mktemp -d); mkdir -p $home/.config/opencode; printf '{\"$schema\":\"https://opencode.ai/config.json\"}\\n' > $home/.config/opencode/opencode.jsonc; HOME=$home ./install.sh --skill planning --target $home/.config/opencode/skills --yes",
+      "observed": "\"opencode: no $HOME/.config/opencode/opencode.json found; skipped\" — the consented grant is written nowhere and every planning helper stays behind a prompt.",
+      "expected": "The editor resolves the config that exists (.json preferred over .jsonc), creates a minimal opencode.json when neither exists, and refuses to rewrite a file strict jq cannot parse instead of rebuilding it from {}.",
+      "mechanism": "OPENCODE_CONFIGFILE defaulted to a hardcoded opencode.json path and a missing file returned early; separately, doc=\"$(jq '.')\" on JSON-C comments yields empty so doc='{}' fed the rewrite — stripping every comment the schema explicitly allows.",
+      "surfaces": [
+        "installer/src/70-permissions.sh"
+      ],
+      "fix": "This change — opencode_configfile() resolves override/.json/.jsonc/create-.json; a non-empty non-strict-JSON target prints manual instructions instead of being rebuilt; the fresh-created file skips its own backup.",
+      "verification": "planning/tests/test-installer-opencode-permissions.sh pins all four behaviours and each written config loads under `opencode debug config`. Mutation: forcing the old single-path resolution fails three assertions (grant missing from jsonc, stray opencode.json created, refusal notice gone).",
+      "found_by": "User asked to install these skills into opencode; reproduced in a sandbox HOME mirroring this machine's opencode.jsonc-only setup",
+      "notes": "Went unnoticed because no test drove the opencode branch of the permission step, and development machines happened to have opencode.json. The claude editor keeps its rebuild-from-{} behaviour for settings.json, which has no JSON-C allowance.",
+      "created_at": "2026-08-23T21:30:00Z",
+      "updated_at": "2026-08-23T21:30:00Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
