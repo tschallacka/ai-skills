@@ -135,4 +135,26 @@ rm -rf "$home"
 line="$("$scripts/chat-read.sh" '#solo' --last 1 --home "$home")"
 case "$line" in *ghost\ :without\ any\ server) : ;; *) fail "log-only flow broken: [$line]" ;; esac
 
+# --- the bind address plumbs to every runtime (B30) ---------------------------
+# Each tier reads AI_CHAT_BIND for its listening socket, and the launcher
+# records what it bound. A non-loopback functional bind depends on interfaces
+# this machine may not have, so the cross-machine case is documented in
+# SKILL.md rather than automated here.
+for bind_site in \
+    "$scripts/chat-server.sh" \
+    "$root/runtime/server.py" \
+    "$root/runtime/server.js" \
+    "$root/runtime/server.pl"; do
+    grep -q 'AI_CHAT_BIND' "$bind_site" || fail "$(basename "$bind_site") ignores AI_CHAT_BIND"
+done
+bind_home="$temporary_root/bindhome"
+if "$scripts/chat-server.sh" start --runtime python3 --port 18471 --bind 127.0.0.1 --home "$bind_home" >/dev/null 2>&1; then
+    [ "$(cat "$bind_home/server.bind")" = "127.0.0.1" ] || fail "server.bind did not record the bind address"
+    "$scripts/chat-send.sh" '#b' 'bound roundtrip' -n binder --host 127.0.0.1 --port 18471 --home "$bind_home" >/dev/null 2>&1 \
+        || fail "explicit --bind broke the send path"
+    line="$("$scripts/chat-read.sh" '#b' --last 1 --host 127.0.0.1 --port 18471 --home "$bind_home")"
+    case "$line" in *bound\ roundtrip*) : ;; *) fail "explicit --bind broke delivery: [$line]" ;; esac
+    "$scripts/chat-server.sh" stop --home "$bind_home" >/dev/null 2>&1 || true
+fi
+
 t_end

@@ -157,6 +157,7 @@ function handle(sock, nickOf, line) {
 
 const port = parseInt(process.argv[2] || "0", 10);
 fs.mkdirSync(CHAN_DIR, { recursive: true });
-server.listen(port, "127.0.0.1", () => {
+const bind = process.env.AI_CHAT_BIND || "127.0.0.1";
+server.listen(port, bind, () => {
   fs.writeFileSync(path.join(HOME, "server.port"), server.address().port + "\n");
 });

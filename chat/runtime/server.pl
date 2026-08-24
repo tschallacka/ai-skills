@@ -132,7 +132,7 @@ sub handle_line {
 
 my $port     = $ARGV[0] // 0;
 my $listener = IO::Socket::INET->new(
-    LocalAddr => '127.0.0.1', LocalPort => $port,
+    LocalAddr => ($ENV{AI_CHAT_BIND} // '127.0.0.1'), LocalPort => $port,
     Proto => 'tcp', Listen => 16, ReuseAddr => 1,
 ) or die "listen: $@\n";
 open my $pf, '>', "$HOME/server.port" or die "port file: $!";

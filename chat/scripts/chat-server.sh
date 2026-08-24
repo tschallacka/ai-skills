@@ -5,13 +5,16 @@
 # handler (poll mode). State lives under $AI_CHAT_HOME (default ~/.ai-chat).
 #
 # Usage:
-#   chat-server.sh start [--runtime R] [--port N] [--home D]
-#   chat-server.sh stop|status [--home D]
+#   chat-server.sh start [--runtime R] [--port N] [--bind ADDR] [--home D]
+#   chat-server.sh status [--home D]
+#   chat-server.sh stop   [--home D]
 #   chat-server.sh --help
 #
 # start waits until the chosen port is written to <home>/server.port and then
-# prints it. Exit codes: 64 bad invocation, 66 runtime missing, 69 no runtime
-# at all, 70 internal.
+# prints it. --bind sets the listening address (default 127.0.0.1); a
+# non-loopback bind exposes an unauthenticated protocol to its network, so set
+# it only where that is the point.
+# Exit codes: 64 bad invocation, 66 runtime missing, 69 no runtime at all, 70 internal.
 
 set -euo pipefail
 export LC_ALL=C
@@ -19,11 +22,13 @@ export LC_ALL=C
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} start [--runtime python3|node|perl|socat] [--port N] [--home D]
+Usage: ${0##*/} start [--runtime python3|node|perl|socat] [--port N] [--bind ADDR] [--home D]
        ${0##*/} status [--home D]
        ${0##*/} stop   [--home D]
 
 The runtime chain falls back through what is installed; --runtime pins one.
+--bind defaults to 127.0.0.1; a non-loopback address exposes the unauthenticated
+protocol to that network.
 Without any of them the server cannot open a socket (exit 69) while every
 client helper keeps working against existing logs.
 USAGE
@@ -31,19 +36,27 @@ USAGE
 }
 
 HOME_DIR="${AI_CHAT_HOME:-$HOME/.ai-chat}"
-cmd="" want_runtime="" want_port=""
+cmd="" want_runtime="" want_port="" want_bind=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
         start|stop|status) [ -z "$cmd" ] || usage; cmd="$1"; shift ;;
         --runtime) [ "$#" -ge 2 ] || usage; want_runtime="$2"; shift 2 ;;
         --port) [ "$#" -ge 2 ] || usage; want_port="$2"; shift 2 ;;
+        --bind) [ "$#" -ge 2 ] || usage; want_bind="$2"; shift 2 ;;
         --home) [ "$#" -ge 2 ] || usage; HOME_DIR="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
 [ -n "$cmd" ] || usage
 case "$want_port" in ''|*[!0-9]*) want_port="" ;; esac
+# Conservative address charset (IPv4/IPv6/hostname) when set — this string
+# reaches a socat option and three interpreters.
+case "${want_bind:-}" in
+    ''|*[!A-Za-z0-9.:_-]*) [ -z "${want_bind:-}" ] || usage ;;
+esac
+AI_CHAT_BIND="${want_bind:-127.0.0.1}"
+export AI_CHAT_BIND
 
 CHAN_DIR="$HOME_DIR/channels"
 RUN_DIR="$HOME_DIR/run"
@@ -102,9 +115,10 @@ do_start() {
     esac
 
     : > "$HOME_DIR/server.log"
+    printf '%s\n' "$AI_CHAT_BIND" > "$HOME_DIR/server.bind"
     if [ "$runtime" = socat ]; then
         handler="$(dirname "${BASH_SOURCE[0]}")/../runtime/bash-handler.sh"
-        AI_CHAT_HOME="$HOME_DIR" nohup socat "TCP-LISTEN:${want_port:-0},fork,reuseaddr,bind=127.0.0.1" \
+        AI_CHAT_HOME="$HOME_DIR" nohup socat "TCP-LISTEN:${want_port:-0},fork,reuseaddr,bind=$AI_CHAT_BIND" \
             "EXEC:$handler" >> "$HOME_DIR/server.log" 2>&1 &
     else
         AI_CHAT_HOME="$HOME_DIR" nohup ${runtime} ${script:+$script} ${want_port:+$want_port} \
@@ -159,7 +173,9 @@ do_stop() {
 
 do_status() {
     if is_running; then
-        printf 'running: pid %s, port %s\n' "$(cat "$pidfile")" "$(cat "$portfile" 2>/dev/null || echo '?')"
+        printf 'running: pid %s, port %s, bind %s\n' "$(cat "$pidfile")" \
+            "$(cat "$portfile" 2>/dev/null || echo '?')" \
+            "$(cat "$HOME_DIR/server.bind" 2>/dev/null || echo '?')"
         exit 0
     fi
     printf 'not running\n'

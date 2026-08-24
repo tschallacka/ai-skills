@@ -13,7 +13,10 @@ listening socket; everything else is plain text lines and log files.
 `$AI_CHAT_HOME` (default `~/.ai-chat`) holds everything:
 
 - `channels/<chan>.log` — the channel's messages, one `MSG` line each
-- `server.pid`, `server.port`, `server.log` — the running server
+- `server.pid`, `server.port`, `server.bind`, `server.log` — the running server
+  (bind defaults to 127.0.0.1; `--bind ADDR` opens the socket on another
+  address, which exposes the unauthenticated protocol to that network — clients
+  reach it with their existing `--host H`)
 
 A `MSG` line is the wire format AND the storage format:
 
@@ -42,7 +45,7 @@ Server → client: `OK ...`, `ERR <reason>`, `PONG`, and pushed/replayed
 
 ## Helpers (all pure bash)
 
-    scripts/chat-server.sh start|stop|status [--runtime R] [--port N]
+    scripts/chat-server.sh start|stop|status [--runtime R] [--port N] [--bind ADDR]
     scripts/chat-register.sh #chan [--home D]
     scripts/chat-send.sh #chan "text" [-n nick] [--host H] [--port N] [--home D]
     scripts/chat-read.sh #chan [--since N | --last N | --all] [--host H ...]

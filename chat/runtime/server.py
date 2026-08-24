@@ -178,7 +178,7 @@ if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     os.makedirs(HOME, exist_ok=True)
     os.makedirs(CHAN_DIR, exist_ok=True)
-    srv = Server(("127.0.0.1", port), Handler)
+    srv = Server((os.environ.get("AI_CHAT_BIND", "127.0.0.1"), port), Handler)
     with open(os.path.join(HOME, "server.port"), "w") as fh:
         fh.write("%d\n" % srv.server_address[1])
     srv.serve_forever()
