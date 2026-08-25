@@ -59,7 +59,14 @@ jq --arg id "$id" --arg now "$now" \
          | (if $blocked != "" then .blocked_on = $blocked else . end)
        else . end)
 ' "$file" > "$tmp"
-mv "$tmp" "$file"
 
-reg_write todo "$file"
+findings="$(reg_findings todo "$tmp")"
+if [ -n "$findings" ]; then
+    printf '%s\n' "$findings" >&2
+    rm -f "$tmp"
+    printf '%s: update refused; nothing was written\n' "${0##*/}" >&2
+    exit 65
+fi
+mv "$tmp" "$file"
+printf 'Updated %s\n' "$id"
 printf 'Updated %s\n' "$id"

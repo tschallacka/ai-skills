@@ -488,6 +488,118 @@
       "updated_at": "2026-08-24T15:45:14Z"
     },
     {
+      "id": "B37",
+      "title": "validate_requires_groups grew past the 40-line cap, so the ratchet gate is red on every leg",
+      "severity": "major",
+      "priority": "high",
+      "status": "fixed",
+      "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
+      "created_at": "2026-08-24T14:27:49Z",
+      "updated_at": "2026-08-24T14:44:04Z",
+      "reproduce": "bash planning/tests/test-function-length-ratchet.sh",
+      "expected": "exit 0: the over-cap count stays at or below CAP=67",
+      "observed": "exit 1: \"function-length-ratchet: 68 function(s) exceed the 40-line cap (cap 67). New over-cap code must be split or the cap lowered deliberately.\" — installer/build.sh:99 validate_requires_groups() is listed at 45 lines. Fails on all three CI legs (ubuntu-latest, macos-latest, macOS bash 3.2).",
+      "mechanism": "4befd4e (installer: the verification reds name themselves, and the gates accept the group tables) grew validate_requires_groups() from 24 to 45 lines. Confirmed: `git show 89ec358:installer/build.sh` measures the function at 24 lines, HEAD at 45. Crossing 40 adds a new over-cap site, taking the count 67 -> 68. test-function-length-ratchet pins CAP=67 and documents that the count may shrink but never grow, so the new site is a hard fail. The same commit fixed test-install-ui and test-portability-contract, which is why this is the only remaining new red.",
+      "surfaces": [
+        "installer/build.sh",
+        "planning/tests/test-function-length-ratchet.sh"
+      ],
+      "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
+      "parent": null,
+      "fix": "fa97d9f and follow-ups — validate_one_requires_manifest carries the per-skill checks (24 lines back under cap) and run_reviewer split into five helpers; cap follows the count down to 66",
+      "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD."
+    },
+    {
+      "id": "B38",
+      "title": "An executing agent can leave the plan describing a world that no longer exists, and nothing in verification notices",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Execute any real work order under SKILL.md rules in a consumer repo: commit code for steps without calling update-step.sh in the same turn; implement an unplanned requirement and describe it in prose instead of add-work-unit.sh; deliver a step through a path outside the planned files. Then bash planning/scripts/validate-plan.sh <plan> — it passes or fails only on unrelated structural grounds, while progress.md still reads 0% and the inventory omits shipped units.",
+      "observed": "Two health-app plans, cycle-15 era. order-split-api-attribute read 0% with all nine steps incomplete although the code was committed and REST-verified; EmployeeSplitSpecificationInterface and its model shipped with no unit; goal 05 of order-split-extended-rendering-v2 carried delivered work (order PDF, quote PDF) with no units at all. The executor listed every one of these as outstanding in its per-burst summaries, and the user caught the drift twice in one night.",
+      "expected": "Completing work and recording it are one act. Verification must make plan-versus-reality drift visible when it is created — at the turn where code lands without its plan mutation — rather than depending on the operator reading both sides and catching it.",
+      "mechanism": "The rules exist and are explicit: the progress-accuracy operating rule, §4.1.1 (dynamic scope additions are plan mutations), §2.5 (one step per unit). Nothing executes them. validate-plan checks structure before/during approval, never sync during execution; no gate connects target-repo changes to inventory, step or progress mutations; the executor summary ritual (reporting outstanding bookkeeping) made deferral feel like disclosure. Executor self-analysis names the habit: each burst optimised for visible code progress, treating the plan as a report written afterwards instead of live state mutated at the moment of discovery.",
+      "surfaces": [
+        "planning/SKILL.md",
+        "planning/EXECUTION.md",
+        "planning/scripts/validate-plan.sh",
+        "planning/scripts/validate-plan-propagation-lib.sh"
+      ],
+      "fix": "this session — the freshness pass makes code-after-record drift visible at validation time (see T44); the summary-contract half lives in the execution rule that outstanding lists are mutations to perform, not disclosures",
+      "verification": "test-plan-freshness: control silent, drift named with unit and dates, catch-up silent, outside-repo target skipped. Mutation inverted comparison fails the drift-named assertion.",
+      "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
+      "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative.",
+      "updated_at": "2026-08-24T18:08:32Z",
+      "created_at": "2026-08-24T15:00:31Z"
+    },
+    {
+      "id": "B39",
+      "title": "install.sh with no --target exits 1 printing nothing at all, so a headless install fails silently",
+      "severity": "major",
+      "priority": "high",
+      "status": "fixed",
+      "found_by": "installing the new git-worktrees skill without --target",
+      "created_at": "2026-08-24T16:30:16Z",
+      "updated_at": "2026-08-24T18:58:14Z",
+      "reproduce": "bash install.sh --skill git-worktrees --yes; echo \"exit $?\"   # exit 1, zero bytes\nbash install.sh --skill git-worktrees --target \"$HOME/.claude/skills\" --yes; echo \"exit $?\"   # exit 0, installs",
+      "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
+      "observed": "exit 1 with 0 bytes captured from 2>&1, both with stdout on a pipe and redirected to /dev/null. The same command with an explicit --target exits 0 and prints 400 bytes ending 'Installed: /home/mdibbets/.claude/skills/git-worktrees'.",
+      "mechanism": "Not the target logic. install.sh:3552 calls show_splash only when SKILL_SELECTION or TARGET_SELECTION is empty, which is why passing --target hides the bug. show_splash (install.sh:1077) starts with a bare 'return' guarded by a tty test on fd 3; with no tty the test fails and the bare return propagates status 1. show_splash is the last command in that then-branch, so under set -euo pipefail (install.sh:5) the script aborts there, before select_targets runs, printing nothing. Isolated proof: a function whose body is the same tty test plus bare return exits 1 and never reaches the next statement, while the same function with 'return 0' reaches it.",
+      "surfaces": [
+        "install.sh",
+        "installer/src (the show_splash source and its call site)",
+        "tests/test-install-ui.sh"
+      ],
+      "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
+      "parent": null,
+      "fix": "this session — show_splash says return 0 on every early exit, and a --yes run with no interactive channel takes the target menu default (first listed root) with a printed note instead of dying in ask",
+      "verification": "Sandboxed headless install without --target exits 0, prints the no-channel note and Installed: path. Regression pinned in test-installer-noninteractive.sh: exit must be 0, output non-empty."
+    },
+    {
+      "id": "B40",
+      "title": "add-work-unit silently destroys a goal progress record (statuses reset, plan row flips)",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B38",
+      "reproduce": "Goal with 01-step-one completed and 02-step-two in progress: bash planning/scripts/add-work-unit.sh $P W03 test t/CTest.php 'CTest::testThree()' N/A 'test three' W02 01-alpha 03-step-three; then cat $P/01-alpha/progress.md — both rows read incomplete",
+      "observed": "Both step statuses gone; on a fully-complete goal the plan-level row flipped completed to incomplete. No warning printed; git snapshot silently no-ops in a gitignored plans root so recovery is empty",
+      "expected": "Adding a unit amends the tracker: statuses carry across by step name; at minimum print the same rebuilt-progress note remove-work-unit.sh prints",
+      "mechanism": "add-work-unit.sh calls plan_rebuild_goal_progress which rm -f the progress file and recreates it via create-progress.sh before any status is read; plan_rebuild_plan_progress then recomputes the plan-level row from the wiped tracker",
+      "surfaces": [
+        "planning/scripts/plan-reconcile-lib.sh",
+        "planning/scripts/add-work-unit.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user session on health-app plans; long-form report in planning-skill-defects-report.md (Trap A)",
+      "notes": null,
+      "created_at": "2026-08-25T09:23:27Z",
+      "updated_at": "2026-08-25T09:23:27Z"
+    },
+    {
+      "id": "B41",
+      "title": "plan_git_snapshot silently no-ops when the plans root is a gitignored project .plans directory",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B40",
+      "reproduce": "In a repo with /.plans gitignored: run ~14 mutating planning helpers against one plan, then git -C .plans status --porcelain — every touched file is uncommitted; plan-document-lib.sh:61-68 guarded on [ -d \"$plan_dir/.git\" ] found no repo at plan level",
+      "observed": "Every snapshot silently no-ops; the skill guarantee that every mutating helper commits first is false in this layout",
+      "expected": "The snapshot resolves the enclosing plans-root repository (the same layout create-plan.sh documents) and commits there, or states plainly that snapshots are unavailable in this layout",
+      "mechanism": "The guard tests only for a repo inside plan_dir itself, so the documented plans-root-repo fallback (whole plans tree versioned) never engages when .plans is gitignored from the outer repo",
+      "surfaces": [
+        "planning/scripts/plan-document-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user session; proven independently via git -C .plans status after 14 mutations (report in planning-skill-defects-report.md, Trap A tail)",
+      "notes": null,
+      "created_at": "2026-08-25T09:24:00Z",
+      "updated_at": "2026-08-25T09:24:00Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -792,73 +904,91 @@
       "updated_at": "2026-08-24T09:24:39Z"
     },
     {
-      "id": "B37",
-      "title": "validate_requires_groups grew past the 40-line cap, so the ratchet gate is red on every leg",
-      "severity": "major",
+      "id": "B42",
+      "title": "Atomicity checkboxes are mandatory, unwritable by any helper, and byte-exact so honest annotations fail the gate",
+      "status": "confirmed",
+      "severity": "minor",
       "priority": "high",
-      "status": "fixed",
-      "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
-      "created_at": "2026-08-24T14:27:49Z",
-      "updated_at": "2026-08-24T14:44:04Z",
-      "reproduce": "bash planning/tests/test-function-length-ratchet.sh",
-      "expected": "exit 0: the over-cap count stays at or below CAP=67",
-      "observed": "exit 1: \"function-length-ratchet: 68 function(s) exceed the 40-line cap (cap 67). New over-cap code must be split or the cap lowered deliberately.\" — installer/build.sh:99 validate_requires_groups() is listed at 45 lines. Fails on all three CI legs (ubuntu-latest, macos-latest, macOS bash 3.2).",
-      "mechanism": "4befd4e (installer: the verification reds name themselves, and the gates accept the group tables) grew validate_requires_groups() from 24 to 45 lines. Confirmed: `git show 89ec358:installer/build.sh` measures the function at 24 lines, HEAD at 45. Crossing 40 adds a new over-cap site, taking the count 67 -> 68. test-function-length-ratchet pins CAP=67 and documents that the count may shrink but never grow, so the new site is a hard fail. The same commit fixed test-install-ui and test-portability-contract, which is why this is the only remaining new red.",
+      "parent": "B38",
+      "reproduce": "On any step: update-plan-content.sh -ss $P 01-alpha/01-step-one atomicity-check -p 8.1: x refuses (not a mutable section); tick a box with an appended NOTE about a multi-file commit and validate-plan fails has not confirmed target isolation via grep -Fqx",
+      "observed": "Boxes are written pre-ticked at creation, no helper can change them, and the validator requires all three byte-exact — every step in every valid plan asserts atomicity regardless of reality; plan-content.sh renders them to reviewers as if they were evidence",
+      "expected": "Either a writable step/atomicity-check section whose recorded violations FAIL validation honestly, or deletion of the three lines in favour of the mechanical checks; boxes should start unticked so a tick is an act",
+      "mechanism": "The three ticks have no plan_section_spec entry and no writer anywhere; validate-plan.sh:765-767 greps whole-line fixed strings, making the ticked trio a constant the suite certifies whether or not atomicity held (live case: AR-157, W50 ticked single-file while its commit changed seven files)",
       "surfaces": [
-        "installer/build.sh",
-        "planning/tests/test-function-length-ratchet.sh"
-      ],
-      "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
-      "parent": null,
-      "fix": "fa97d9f and follow-ups — validate_one_requires_manifest carries the per-skill checks (24 lines back under cap) and run_reviewer split into five helpers; cap follows the count down to 66",
-      "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD."
-    },
-    {
-      "id": "B38",
-      "title": "An executing agent can leave the plan describing a world that no longer exists, and nothing in verification notices",
-      "status": "fixed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "Execute any real work order under SKILL.md rules in a consumer repo: commit code for steps without calling update-step.sh in the same turn; implement an unplanned requirement and describe it in prose instead of add-work-unit.sh; deliver a step through a path outside the planned files. Then bash planning/scripts/validate-plan.sh <plan> — it passes or fails only on unrelated structural grounds, while progress.md still reads 0% and the inventory omits shipped units.",
-      "observed": "Two health-app plans, cycle-15 era. order-split-api-attribute read 0% with all nine steps incomplete although the code was committed and REST-verified; EmployeeSplitSpecificationInterface and its model shipped with no unit; goal 05 of order-split-extended-rendering-v2 carried delivered work (order PDF, quote PDF) with no units at all. The executor listed every one of these as outstanding in its per-burst summaries, and the user caught the drift twice in one night.",
-      "expected": "Completing work and recording it are one act. Verification must make plan-versus-reality drift visible when it is created — at the turn where code lands without its plan mutation — rather than depending on the operator reading both sides and catching it.",
-      "mechanism": "The rules exist and are explicit: the progress-accuracy operating rule, §4.1.1 (dynamic scope additions are plan mutations), §2.5 (one step per unit). Nothing executes them. validate-plan checks structure before/during approval, never sync during execution; no gate connects target-repo changes to inventory, step or progress mutations; the executor summary ritual (reporting outstanding bookkeeping) made deferral feel like disclosure. Executor self-analysis names the habit: each burst optimised for visible code progress, treating the plan as a report written afterwards instead of live state mutated at the moment of discovery.",
-      "surfaces": [
-        "planning/SKILL.md",
-        "planning/EXECUTION.md",
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/add-work-unit.sh",
         "planning/scripts/validate-plan.sh",
-        "planning/scripts/validate-plan-propagation-lib.sh"
+        "SKILL.md"
       ],
-      "fix": "this session — the freshness pass makes code-after-record drift visible at validation time (see T44); the summary-contract half lives in the execution rule that outstanding lists are mutations to perform, not disclosures",
-      "verification": "test-plan-freshness: control silent, drift named with unit and dates, catch-up silent, outside-repo target skipped. Mutation inverted comparison fails the drift-named assertion.",
-      "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
-      "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative.",
-      "updated_at": "2026-08-24T18:08:32Z",
-      "created_at": "2026-08-24T15:00:31Z"
+      "fix": null,
+      "verification": null,
+      "found_by": "user session during cycle-18 stale-phrase fixes (report in planning-skill-defects-report.md, Trap B)",
+      "notes": " Reported as medium on the four-point user scale; mapped to minor here (register enum has no medium).",
+      "created_at": "2026-08-25T09:24:44Z",
+      "updated_at": "2026-08-25T09:24:44Z"
     },
     {
-      "id": "B39",
-      "title": "install.sh with no --target exits 1 printing nothing at all, so a headless install fails silently",
+      "id": "B43",
+      "title": "update-adversarial-review consumes adversarial-review-incoming even when findings arrive via --file",
+      "status": "confirmed",
       "severity": "major",
       "priority": "high",
-      "status": "fixed",
-      "found_by": "installing the new git-worktrees skill without --target",
-      "created_at": "2026-08-24T16:30:16Z",
-      "updated_at": "2026-08-24T18:58:14Z",
-      "reproduce": "bash install.sh --skill git-worktrees --yes; echo \"exit $?\"   # exit 1, zero bytes\nbash install.sh --skill git-worktrees --target \"$HOME/.claude/skills\" --yes; echo \"exit $?\"   # exit 0, installs",
-      "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
-      "observed": "exit 1 with 0 bytes captured from 2>&1, both with stdout on a pipe and redirected to /dev/null. The same command with an explicit --target exits 0 and prints 400 bytes ending 'Installed: /home/mdibbets/.claude/skills/git-worktrees'.",
-      "mechanism": "Not the target logic. install.sh:3552 calls show_splash only when SKILL_SELECTION or TARGET_SELECTION is empty, which is why passing --target hides the bug. show_splash (install.sh:1077) starts with a bare 'return' guarded by a tty test on fd 3; with no tty the test fails and the bare return propagates status 1. show_splash is the last command in that then-branch, so under set -euo pipefail (install.sh:5) the script aborts there, before select_targets runs, printing nothing. Isolated proof: a function whose body is the same tty test plus bare return exits 1 and never reaches the next statement, while the same function with 'return 0' reaches it.",
-      "surfaces": [
-        "install.sh",
-        "installer/src (the show_splash source and its call site)",
-        "tests/test-install-ui.sh"
-      ],
-      "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
       "parent": null,
-      "fix": "this session — show_splash says return 0 on every early exit, and a --yes run with no interactive channel takes the target menu default (first listed root) with a printed note instead of dying in ask",
-      "verification": "Sandboxed headless install without --target exits 0, prints the no-channel note and Installed: path. Regression pinned in test-installer-noninteractive.sh: exit must be 0, output non-empty."
+      "reproduce": "Place ten un-consumed rows in adversarial-review-incoming.md, then run update-adversarial-review.sh $P --file other.csv; the incoming file is rm -fed unconditionally",
+      "observed": "The incoming file vanished; only a manual aside-and-restore saved the ten cycle-18 rows",
+      "expected": "--file means findings come from the named file; the incoming document must be left untouched unless it was the consumed source",
+      "mechanism": "The consumer removes the incoming document unconditionally at the end of a successful run without checking whether it was actually this run source",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C1)",
+      "notes": " Also re-mints fix-keys.json under a fresh session on every landing (collateral C2): stale keys, fresh claims required — by design but worth knowing.",
+      "created_at": "2026-08-25T09:26:12Z",
+      "updated_at": "2026-08-25T09:26:12Z"
+    },
+    {
+      "id": "B44",
+      "title": "Cycle numbering breaks after gaps: archived as Cycle 11 following Cycle 16",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With history containing cycles up to 16 but gaps in numbering, land findings via update-adversarial-review.sh; the prior table is archived under a heading numbered grep-count-plus-one",
+      "observed": "Prior table archived as Cycle 11 after Cycle 16; confirmed in adversarial-review-history.md",
+      "expected": "The new cycle number is one greater than the highest existing cycle number, not the count of headings",
+      "mechanism": "update-adversarial-review.sh computes the next cycle as grep -c of Cycle headings plus one; heading numbers are not contiguous once any historical gap exists",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C3)",
+      "notes": null,
+      "created_at": "2026-08-25T09:46:07Z",
+      "updated_at": "2026-08-25T09:46:07Z"
+    },
+    {
+      "id": "B45",
+      "title": "--file rejects CRLF CSVs with a misleading column-count message",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Feed a csv.writer-produced CRLF findings file via update-adversarial-review.sh --file; refusal says CSV table must have 5 columns",
+      "observed": "plan_render_csv_table exits 4 on the carriage return but the caller reuses the column/pipe message, so the reader debugs the wrong problem",
+      "expected": "The CRLF diagnosis (convert to LF) reaches the caller exactly as it does on stdin",
+      "mechanism": "The caller maps every nonzero renderer exit to its own generic message instead of passing the renderer-specific text through",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "user session (report in planning-skill-defects-report.md, collateral C4)",
+      "notes": null,
+      "created_at": "2026-08-25T09:46:07Z",
+      "updated_at": "2026-08-25T09:46:07Z"
     }
   ]
 }

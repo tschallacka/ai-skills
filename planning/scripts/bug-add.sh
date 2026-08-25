@@ -63,7 +63,15 @@ jq --arg id "$id" --arg title "$title" --arg now "$now" \
      found_by: $found_by, notes: null,
      created_at: $now, updated_at: $now }]
 ' "$file" > "$file.tmp"
-mv "$file.tmp" "$file"
 
-reg_write bug "$file"
+# Validate the RESULT before it lands: an entry that makes the register
+# unsound must never reach the file, even behind a later refusal.
+findings="$(reg_findings bug "$file.tmp")"
+if [ -n "$findings" ]; then
+    printf '%s\n' "$findings" >&2
+    rm -f "$file.tmp"
+    printf '%s: entry refused; nothing was written\n' "${0##*/}" >&2
+    exit 65
+fi
+mv "$file.tmp" "$file"
 printf 'Filed %s: %s\n' "$id" "$title"
