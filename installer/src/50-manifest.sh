@@ -53,6 +53,7 @@ references/ui-user-story-validation.md
 references/comment-discipline-contract.md
 telemetry-schema.json
 placeholders.json
+gate-caps.json
 state-change-registry.json
 never-executable-extensions.json
 goal-tables.json
@@ -304,6 +305,7 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-gate-caps.sh
 tests/test-overview-state.sh
 scripts/register-lib.sh
 scripts/todo-add.sh
