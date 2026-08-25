@@ -41,7 +41,7 @@ EOF
 done
 
 if [ "$count" -gt "$CAP" ]; then
-    note_fail "$count function(s) exceed the 40-line cap (cap $CAP). New over-cap code must be split or the cap lowered deliberately."
+    note_fail "$count function(s) exceed the 40-line cap (cap $CAP). New over-cap code must be split. Raising the cap requires human approval."
 fi
 if [ "$count" -lt "$CAP" ]; then
     note_fail "$count function(s) exceed the 40-line cap (cap $CAP): lower the cap in this commit"
