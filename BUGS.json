@@ -581,7 +581,7 @@
     {
       "id": "B41",
       "title": "plan_git_snapshot silently no-ops when the plans root is a gitignored project .plans directory",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "major",
       "priority": "high",
       "parent": "B40",
@@ -592,12 +592,12 @@
       "surfaces": [
         "planning/scripts/plan-document-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed on current HEAD: create-plan.sh correctly initializes a git repo at the plans root when .plans is gitignored, writes PLAN_SNAPSHOT_REPO to .env, and plan_git_snapshot resolves via plan_snapshot_repo (.env-based, not [ -d $plan_dir/.git ]). Empirically confirmed: a mutation after create-plan produces a snapshot commit in the plans-root repo.",
+      "verification": "Sandbox test: gitignored .plans inside an outer repo; create-plan + add-goal produced two commits in the plans-root git repo (initial + pre-mutation snapshot). The reporting session likely used an older installed skill version predating the PLAN_SNAPSHOT_REPO pin.",
       "found_by": "user session; proven independently via git -C .plans status after 14 mutations (report in planning-skill-defects-report.md, Trap A tail)",
       "notes": null,
       "created_at": "2026-08-25T09:24:00Z",
-      "updated_at": "2026-08-25T09:24:00Z"
+      "updated_at": "2026-08-25T10:06:45Z"
     },
     {
       "id": "B14",

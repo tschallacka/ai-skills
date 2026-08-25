@@ -111,6 +111,32 @@ normalize_flagged_paragraph() {
     printf '%s\n' "${paragraph_id%:}:"
 }
 
+# safe_normalize <paragraph-id>: calls normalize_flagged_paragraph in the
+# CURRENT shell, not a command substitution, so plan_die actually exits this
+# process instead of being swallowed by the $() boundary (B46). Also catches
+# the document-id-for-paragraph-id confusion (-dp goal:01-alpha "2.1: ...")
+# and names the flag the caller probably wanted.
+safe_normalize() {
+    local paragraph_id="$1" flag_form="$2"
+    case "$paragraph_id" in
+        plan|review|stories|coverage|inventory)
+            plan_die "'$paragraph_id' is a document id, not a paragraph number; use ${flag_form%p}s (section form) with --document $paragraph_id instead" ;;
+        goal:*|step:*|unit:*)
+            local wanted
+            case "$flag_form" in
+                -dp) wanted="-gp or -sp" ;;
+                -gp) wanted="-dp" ;;
+                -sp) wanted="-gp" ;;
+                -rp) wanted="a review form" ;;
+                *)   wanted="the correct document-specific form" ;;
+            esac
+            plan_die "'$paragraph_id' is a document id, not a paragraph number; you probably want $wanted instead of $flag_form" ;;
+        *)
+            normalize_flagged_paragraph "$paragraph_id"
+            ;;
+    esac
+}
+
 reject_swallowed_flags() {
     local content="$1" flag_form="$2" section_form
     case "$flag_form" in -ia|-ib) section_form='' ;; *) section_form="${flag_form%p}s" ;; esac
@@ -135,7 +161,8 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
             reject_swallowed_flags "$paragraph_content" "$command"
-            set -- "$plan_dir" plan -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
+            normalized="$(safe_normalize "$paragraph_id" -dp)" || exit $?
+            set -- "$plan_dir" plan -p "${normalized}${paragraph_content}"
             command=paragraph
             ;;
         -ds|--description-section)
@@ -149,7 +176,8 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; goal_name="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
             reject_swallowed_flags "$paragraph_content" "$command"
-            set -- "$plan_dir" "goal:$goal_name" -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
+            normalized="$(safe_normalize "$paragraph_id" -gp)" || exit $?
+            set -- "$plan_dir" "goal:$goal_name" -p "${normalized}${paragraph_content}"
             command=paragraph
             ;;
         -gs|--goal-section)
@@ -163,7 +191,8 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; step_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
             reject_swallowed_flags "$paragraph_content" "$command"
-            set -- "$plan_dir" "step:$step_id" -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
+            normalized="$(safe_normalize "$paragraph_id" -sp)" || exit $?
+            set -- "$plan_dir" "step:$step_id" -p "${normalized}${paragraph_content}"
             command=paragraph
             ;;
         -ss|--step-section)
@@ -177,7 +206,8 @@ if [[ "$command" == -* ]]; then
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
             reject_swallowed_flags "$paragraph_content" "$command"
-            set -- "$plan_dir" adversarial-review -p "$(normalize_flagged_paragraph "$paragraph_id")$paragraph_content"
+            normalized="$(safe_normalize "$paragraph_id" -rp)" || exit $?
+            set -- "$plan_dir" adversarial-review -p "${normalized}${paragraph_content}"
             command=paragraph
             ;;
         -rs|--review-section)
