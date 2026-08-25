@@ -308,8 +308,8 @@ build_step_details() {
         instr="$(sec "$sfile" 'Instructions' | head -8)"
         crit="$(sec "$sfile" 'Acceptance criteria' | head -6)"
         out="$out<details class=\"step-open\" id=\"step-$step_name'><summary>$(esc "$step_name")</summary><div class=\"sd-body\">"
-        [ -n "$instr" ] && out="$out<div class=\"sd-instr\"><b>Instructions:</b><pre>$(esc "$instr")</pre></div>"
-        [ -n "$crit" ] && out="$out<div class=\"sd-crit\"><b>Acceptance criteria:</b><pre>$(esc "$crit")</pre></div>"
+        if [ -n "$instr" ]; then out="$out<div class=\"sd-instr\"><b>Instructions:</b><pre>$(esc "$instr")</pre></div>"; fi
+        if [ -n "$crit" ]; then out="$out<div class=\"sd-crit\"><b>Acceptance criteria:</b><pre>$(esc "$crit")</pre></div>"; fi
         out="$out</div></details>"
     done < <(find "$pd" -mindepth 2 -path '*/steps/*.md' ! -name '*-testing.md' | sort)
     printf '%s' "$out"
@@ -405,66 +405,78 @@ plan_name="$(sed -n 's/^# Plan: //p' "$plan_dir/plan-description.md" 2>/dev/null
 [ -n "$plan_name" ] || plan_name="$(basename "$plan_dir")"
 footer="$(esc "$(basename "$plan_dir") · generated $generated · single-file html, no external assets")"
 
-# The substitution map: strict KEY<TAB>single-line-value records. Values are
-# built without raw newlines so one awk pass can splice them safely.
+# The substitution map: one JSON object carrying every panel's HTML.
+# jq encodes multi-line values as native JSON strings, so nothing is lost
+# across lines (the TSV+awk system dropped content after the first line).
 subs_file="$(mktemp "${TMPDIR:-/tmp}/overview-subs.XXXXXX")"
 out_tmp="$(mktemp "${TMPDIR:-/tmp}/overview-out.XXXXXX")"
 trap 'rm -f "$subs_file" "$out_tmp"' EXIT
-{
-    printf 'PLAN_NAME\t%s\n' "$(esc "$plan_name")"
-    printf 'STATE\t%s\n' "$state"
-    printf 'PHASE_LINE\t%s\n' "$(esc "$phase_line")"
-    printf 'REFRESH\t%s\n' "$refresh"
-    printf 'REFRESH_JS\t%s\n' "$refresh"
-    printf 'GENERATED\t%s\n' "$generated"
-    printf 'N_GOALS\t%s\n' "$goals_count"
-    printf 'N_STEPS\t%s\n' "$total_steps"
-    printf 'N_UNITS\t%s\n' "$n_units"
-    printf 'F_TOTAL\t%s\n' "$f_total"
-    printf 'F_OPEN\t%s\n' "$f_open"
-    printf 'F_RESOLVED\t%s\n' "$f_resolved"
-    printf 'F_RES_PCT\t%s\n' "$f_res_pct"
-    printf 'CYCLES\t%s\n' "$cycles"
-    printf 'REVIEW_TARGET\t%s\n' "$review_target"
-    printf 'REVIEW_DEPTH\t%s\n' "$review_depth"
-    printf 'PCT\t%s\n' "$pct"
-    printf 'CIRCUMFERENCE\t326.73\n'
-    printf 'DONUT_OFFSET\t%s\n' "$donut_offset"
-    printf 'RING_WORK\t%s\n' "$ring_work"
-    printf 'RING_FIND\t%s\n' "$ring_find"
-    printf 'RING_REVIEW\t%s\n' "$ring_review"
-    printf 'GOAL_BARS\t%s\n' "$goal_bars"
-    printf 'CYCLE_CHART\t%s\n' "$cycle_chart_svg"
-    printf 'NARRATION\t%s\n' "$narration"
-    printf 'STEP_LEDGER\t%s\n' "$ledger"
-    printf 'IDENTITY_PANEL\t%s\n' "$(build_identity_panel "$plan_dir")"
-    printf 'STEP_DETAILS\t%s\n' "$(build_step_details "$plan_dir")"
-    printf 'DEP_GRAPH\t%s\n' "$(build_dep_graph "$plan_dir")"
-    printf 'TESTS_PANEL\t%s\n' "$(build_tests_panel "$plan_dir")"
-    printf 'COVERAGE_PANEL\t%s\n' "$(build_coverage_panel "$plan_dir/work-unit-inventory.md")"
-    printf 'FINDINGS_PANEL\t%s\n' "$(build_findings_panel "$review_file")"
-    printf 'TICKER\t%s\n' "$ticker"
-    printf 'FOOTER\t%s\n' "$footer"
-} > "$subs_file"
 
-awk -F'\t' '
-    NR == FNR {
-        key = $1
-        val = substr($0, length($1) + 2)
-        map[key] = val
-        next
-    }
-    {
-        line = $0
-        while (match(line, /@[A-Z_]+@/)) {
-            key = substr(line, RSTART + 1, RLENGTH - 2)
-            gsub(/^_+|_+$/, "", key)
-            if (!(key in map)) { printf "%s: unresolved template token %s\n", ARGV[0], key > "/dev/stderr"; exit 70 }
-            line = substr(line, 1, RSTART - 1) map[key] substr(line, RSTART + RLENGTH)
-        }
-        print line
-    }
-' "$subs_file" "$template" > "$out_tmp"
+jq -n \
+    --arg plan_name "$(esc "$plan_name")" \
+    --arg state "$state" \
+    --arg phase_line "$(esc "$phase_line")" \
+    --arg refresh "$refresh" \
+    --arg generated "$generated" \
+    --arg n_goals "$goals_count" \
+    --arg n_steps "$total_steps" \
+    --arg n_units "$n_units" \
+    --arg f_total "$f_total" \
+    --arg f_open "$f_open" \
+    --arg f_resolved "$f_resolved" \
+    --arg f_res_pct "$f_res_pct" \
+    --arg cycles "$cycles" \
+    --arg review_target "$review_target" \
+    --arg review_depth "$review_depth" \
+    --arg pct "$pct" \
+    --arg donut_offset "$donut_offset" \
+    --arg ring_work "$ring_work" \
+    --arg ring_find "$ring_find" \
+    --arg ring_review "$ring_review" \
+    --arg goal_bars "$goal_bars" \
+    --arg cycle_chart "$cycle_chart_svg" \
+    --arg narration "$narration" \
+    --arg ledger "$ledger" \
+    --arg identity_panel "$(build_identity_panel "$plan_dir")" \
+    --arg step_details "$(build_step_details "$plan_dir")" \
+    --arg dep_graph "$(build_dep_graph "$plan_dir")" \
+    --arg tests_panel "$(build_tests_panel "$plan_dir")" \
+    --arg coverage_panel "$(build_coverage_panel "$plan_dir/work-unit-inventory.md")" \
+    --arg findings_panel "$(build_findings_panel "$review_file")" \
+    --arg ticker "$ticker" \
+    --arg footer "$footer" \
+    '{
+        PLAN_NAME: $plan_name, STATE: $state, PHASE_LINE: $phase_line,
+        REFRESH: $refresh, REFRESH_JS: $refresh, GENERATED: $generated,
+        N_GOALS: $n_goals, N_STEPS: $n_steps, N_UNITS: $n_units,
+        F_TOTAL: $f_total, F_OPEN: $f_open, F_RESOLVED: $f_resolved,
+        F_RES_PCT: $f_res_pct, CYCLES: $cycles,
+        REVIEW_TARGET: $review_target, REVIEW_DEPTH: $review_depth,
+        PCT: $pct, CIRCUMFERENCE: "326.73", DONUT_OFFSET: $donut_offset,
+        RING_WORK: $ring_work, RING_FIND: $ring_find, RING_REVIEW: $ring_review,
+        GOAL_BARS: $goal_bars, CYCLE_CHART: $cycle_chart, NARRATION: $narration,
+        STEP_LEDGER: $ledger, IDENTITY_PANEL: $identity_panel,
+        STEP_DETAILS: $step_details, DEP_GRAPH: $dep_graph,
+        TESTS_PANEL: $tests_panel, COVERAGE_PANEL: $coverage_panel,
+        FINDINGS_PANEL: $findings_panel, TICKER: $ticker, FOOTER: $footer
+    }' > "$subs_file"
+cp "$subs_file" /tmp/opencode/subs-dbg.json  # DEBUG
+
+# Single jq call substitutes all tokens. Multi-line values are native JSON
+# strings and survive intact — the old TSV+awk system dropped content after
+# the first line of any multi-line value.
+jq -rn --rawfile template "$template" --slurpfile s "$subs_file" '
+    $template |
+    reduce ($s[0] | to_entries[]) as $e (.; gsub("@_" + $e.key + "_@"; $e.value))
+' > "$out_tmp"
+
+# Unresolved tokens are a build failure.
+if grep -q '@[A-Z_][A-Z_]*@' "$out_tmp"; then
+    grep -o '@[A-Z_][A-Z_]*@' "$out_tmp" | sort -u | while IFS= read -r token; do
+        printf '%s: unresolved template token %s\n' "${0##*/}" "$token" >&2
+    done
+    exit 70
+fi
 
 render_once() {
     if plan_atomic_write "$out" < "$out_tmp"; then
