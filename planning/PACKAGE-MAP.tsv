@@ -40,6 +40,7 @@ planning/scripts/create-ui-story-run-cache.sh	scripts/create-ui-story-run-cache.
 planning/scripts/create-ui-validation.sh	scripts/create-ui-validation.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/create-work-unit-inventory.sh	scripts/create-work-unit-inventory.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-content.sh	scripts/plan-content.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/overview-state.sh	scripts/overview-state.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-content-diff-lib.sh	scripts/plan-content-diff-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-context-lib.sh	scripts/plan-context-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-context.sh	scripts/plan-context.sh	installer	review-approved	backup-then-replace	false

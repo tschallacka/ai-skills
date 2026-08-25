@@ -93,6 +93,7 @@ scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
+scripts/overview-state.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
@@ -300,6 +301,14 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-overview-state.sh
+scripts/register-lib.sh
+scripts/todo-add.sh
+scripts/todo-update.sh
+scripts/bug-add.sh
+scripts/bug-update.sh
+scripts/register-rebuild.sh
+tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
 tests/test-self-hosted-plan.sh

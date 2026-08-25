@@ -123,8 +123,9 @@ plan_rebuild_goal_progress() {
     if [ -f "$progress_file" ]; then
         local saved="$progress_file.pre-rebuild.$$"
         cp "$progress_file" "$saved"
+        rm -f "$progress_file"
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
-            { printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2; rm -f "$saved"; return; }
+            { printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2; mv "$saved" "$progress_file"; return; }
         # Carry each old status onto the matching new row by step name.
         awk -F'|' 'NR == FNR && /^\|/ && $0 !~ /---/ && $0 !~ /Goalname|Progress:/ {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $5); stat[$3] = $5
