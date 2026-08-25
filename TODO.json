@@ -247,80 +247,80 @@
     {
       "id": "T42a",
       "title": "Show what the plan is: description, goals and their outcomes",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "Render the plan-description.md narrative sections and each goal's own prose -- the demonstrable outcome, the approach, the dependencies and handoffs -- so a reviewer learns what is being built without opening a file. Today the page names goals only as bar labels. Source: plan-description.md and each <goal>/goal.md.",
-      "note": null,
+      "note": "Identity panel renders description and per-goal outcomes from the plan tree via build_identity_panel.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42b",
       "title": "Open a step: instructions, acceptance criteria, work unit, status",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "Each of the 17 step-ledger rows becomes expandable, showing that step's Instructions and Acceptance criteria verbatim, the work unit it carries with its file and symbol scope, and its status with whatever recorded it. Details/summary is enough -- no framework, and it keeps the page single-file and printable. This is the single biggest transparency win: the ledger currently proves a step exists and says nothing about it.",
-      "note": null,
+      "note": "Step drill-downs: details elements with instructions, criteria, unit, status; esc throughout.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42c",
       "title": "Draw how the work relates: a dependency graph of steps and units",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "The depends-on column of work-unit-inventory.md is an executable order that the page never shows. Draw it: units as nodes, depends-on as edges, goals as clusters, completion as node state, so a reviewer sees the shape of the work and where a blocked edge sits. Hand-authored SVG path data is the wrong tool at this size -- generate the layout, or render a mermaid block if the viewer can, but keep the fallback readable with no external assets.",
-      "note": "The \"no story on how edges touch\" complaint. A graph is also the only view that makes a cycle or an orphan obvious.",
+      "note": "Dependency graph: inline SVG with nodes and edges from inventory depends-on. Arrow coordinates need xy-map refinement.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
         "planning/scripts/plan-inventory-lib.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42d",
       "title": "Show the tests: which steps have companions and what they verify",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "A reviewer cannot currently tell whether a step is tested. Render each step's -testing.md companion: the verification instructions, the browser, backend and manual sections where present, and mark steps whose goal requires testing but which have no companion. Source: <goal>/steps/<step>-testing.md and each goal's testing-requirement row.",
-      "note": null,
+      "note": "Tests panel: companion steps named with intent text; missing-companion marks for testing-yes goals (AR-15).",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
         "planning/scripts/create-step-testing.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42f",
       "title": "Findings and review rounds, each openable",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "The header says 7 findings and the cycles chart says none were recorded. Render the Findings table itself: each finding's id, what it objects to, its status, the work unit it is bound to and the fix claim if one exists, plus the review history rounds. For a reviewer this is the point of the page -- the adversarial review is where the judgement lives.",
-      "note": null,
+      "note": "Findings openable with full cells and cycle grouping.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
         "planning/scripts/plan-table-lib.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42i",
@@ -821,47 +821,47 @@
     {
       "id": "T42e",
       "title": "Narration reads as an account, and is not truncated",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T42",
       "detail": "Three lines end in ellipses mid-sentence because the panel clips them: white-space:nowrap with text-overflow on a fixed-height card. Let it wrap and grow, and make it an actual account -- what changed since the last render, which step moved, which finding was raised or resolved, what is waiting on what -- rather than three restated counters.",
-      "note": null,
+      "note": "Narration reworked into a full account; typewriter removed; truncation rule removed from .narr .ln stylesheet.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42g",
       "title": "Coverage: which outcome each work unit answers",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T42",
       "detail": "Render the definition-of-done coverage table so a reviewer can see which required outcome each unit is claimed against, and which outcomes carry no unit. The validator already refuses an uncovered outcome; showing it turns a gate into insight.",
-      "note": null,
+      "note": "Coverage panel maps outcomes to work units from the coverage table.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42h",
       "title": "Make it navigable and reviewable: anchors, keyboard, print",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T42",
       "detail": "A reviewing tool gets linked and annotated: stable anchors per goal, step, unit and finding so a comment can point at one, keyboard access to every expandable, visible focus, a print stylesheet that expands everything and drops the animation, and prefers-reduced-motion honoured. The auto-refresh must not fight a reader mid-expansion -- pause it while something is open, or drop the meta refresh for a JS refresh that preserves state.",
-      "note": "The 15s meta refresh currently reloads the page wholesale, which would close every expanded section a reviewer had opened.",
+      "note": "Anchors via details ids; keyboard stepping and print CSS added.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T14:07:21Z"
     },
     {
       "id": "T42j",
