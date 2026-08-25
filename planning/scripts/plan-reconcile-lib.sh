@@ -134,8 +134,7 @@ plan_rebuild_goal_progress() {
             key = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
             if (key in stat) { gsub(/💤 incomplete/, stat[key]); }
             print
-        }' "$saved" "$progress_file" > "${progress_file}.tmp.$$"
-        mv "${progress_file}.tmp.$$" "$progress_file"
+        }' "$saved" "$progress_file" | plan_atomic_write "$progress_file"
         rm -f "$saved"
         printf 'note: goal progress was rebuilt from step files; existing statuses carried across where step names match\n' >&2
     elif [ -n "$(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' \

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # overview-serve-handler.sh — HTTP responses for the served overview.
 # Called by the runtime-specific server with:
 #   $1 = plan directory

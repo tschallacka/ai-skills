@@ -8,6 +8,8 @@
 # a throwaway git repository, with hand-built maps and pinned commit dates, so
 # the ordering under test is data rather than clock luck.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "planning/tests/lib-test.sh" 2>/dev/null || source "/home/tschallacka/git/ai-skills/planning/tests/lib-test.sh"
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

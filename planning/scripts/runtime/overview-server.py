@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Minimal localhost HTTP server for the plan overview.
 
+# MODE: PROD
 Serves / (rendered HTML) and /state.json (extractor output) from the given
 plan directory. Runs until killed; prints the bound port on startup.
 """

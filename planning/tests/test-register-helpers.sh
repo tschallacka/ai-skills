@@ -20,10 +20,10 @@ bugs="$work/BUGS.json"
 cp "$repo_root_tests/TODO.json" "$todo"
 cp "$repo_root_tests/BUGS.json" "$bugs"
 
-run_todo() { TODO_JSON="$todo" bash "$scripts/todo-add.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_todoup() { TODO_JSON="$todo" bash "$scripts/todo-update.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_bugadd() { BUGS_JSON="$bugs" bash "$scripts/bug-add.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_bugup() { BUGS_JSON="$bugs" bash "$scripts/bug-update.sh" "$@" 2>&1 || echo "rc=$?"; }
+run_todo() { TODO_JSON="$todo" "$BASH" "$scripts/todo-add.sh" "$@" 2>&1 || echo "rc=$?"; }
+run_todoup() { TODO_JSON="$todo" "$BASH" "$scripts/todo-update.sh" "$@" 2>&1 || echo "rc=$?"; }
+run_bugadd() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-add.sh" "$@" 2>&1 || echo "rc=$?"; }
+run_bugup() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-update.sh" "$@" 2>&1 || echo "rc=$?"; }
 
 # ---- add a task: it lands with stamps and sorts into place ------------------
 out="$(run_todo_add() { :; }; run_todo --id T9999 --title 'Helper probe' --priority high)"
@@ -88,7 +88,7 @@ case "$out" in
 esac
 
 # ---- the rebuild repairs what stamps can and refuses what it cannot ---------
-out="$(bash "$scripts/register-rebuild.sh" bugs "$bugs" 2>&1 || true)"
+out="$("$BASH" "$scripts/register-rebuild.sh" bugs "$bugs" 2>&1 || true)"
 case "$out" in
     *'no reproduction'*) : ;;
     *) fail "the rebuild stayed silent about damage it cannot invent: $out" ;;
@@ -99,7 +99,7 @@ esac
 # a file carrying the earlier semantic damage must stay refused.
 jq '{skill, skill_version, comment, bugs: [.bugs[] | .created_at = "" | .updated_at = ""]}' \
     "$repo_root_tests/BUGS.json" > "$work/stamps.json"
-out="$(bash "$scripts/register-rebuild.sh" bugs "$work/stamps.json" 2>&1 || true)"
+out="$("$BASH" "$scripts/register-rebuild.sh" bugs "$work/stamps.json" 2>&1 || true)"
 case "$out" in
     *'rebuilt'*'sound') : ;;
     *) fail "the rebuild refused a stamp-only repair: $out" ;;

@@ -62,6 +62,8 @@ in_allowlist() {
         # verify or hint (chat's any-of group, T39). Naming is not requiring:
         # strength still decides, and chat's members are soft.
         ./install.sh:python3-shipped) return 0 ;;
+        ./planning/tests/test-register-helpers.sh:bash-by-path-lookup) return 0 ;;
+        ./planning/tests/test-overview-state.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;
@@ -72,6 +74,10 @@ in_allowlist() {
         # chat probes its optional server-runtime chain, so the fallback order
         # must name each runtime it may pick (chat/requires.tsv).
         ./chat/scripts/chat-server.sh:python3-shipped) return 0 ;;
+        # The overview serve script names its runtime chain (T43a); the
+        # generated installer tables name optional runtimes for verify/hint.
+        ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
+        ./install.sh:python3-shipped) return 0 ;;
         ./chat/tests/test-chat.sh:python3-shipped) return 0 ;;
     esac
     return 1

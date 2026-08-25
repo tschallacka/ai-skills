@@ -89,6 +89,14 @@ check_pair update-work-unit - update-work-unit.sh W01 --scope 'a rescoped symbol
 check_pair remove-work-unit - remove-work-unit.sh W08
 check_pair update-plan-progress - update-plan-progress.sh 01-plan-dir-synonym in-progress
 check_pair rebuild-plan-progress - rebuild-plan-progress.sh
+# overview-state is read-only: check_pair requires mutation, which never happens.
+# Verify --plan-dir output matches positional directly.
+a="$(bash "$scripts/overview-state.sh" "$work/a/plan")"
+b="$(bash "$scripts/overview-state.sh" --plan-dir "$work/b/plan")"
+[ "$a" = "$b" ] || t_fail 'overview-state: --plan-dir output differs from positional'
+[ -n "$a" ] || t_fail 'overview-state produced no output'
+# overview-serve starts a server and never exits: cannot use check_pair.
+# The --plan-dir flag is verified by test-overview-serve.sh instead.
 check_pair render-plan-overview - render-plan-overview.sh
 check_pair create-plan-progress 'rm -f progress.md' create-plan-progress.sh
 check_pair register-command - register-command.sh probe-key 'ls -la' 'while probing'
@@ -200,6 +208,10 @@ exempt_from_pairs() { # <script>
         # A library defines the hoister or is compiled from the file that does;
         # it is the mechanism, not a caller with an argument list of its own.
         *-lib.sh) return 0 ;;
+        # overview-state is read-only (no tree mutation to verify) and
+        # overview-serve starts a server that never exits; both are covered
+        # by dedicated checks elsewhere in this file or in their own tests.
+        overview-state.sh|overview-serve.sh) return 0 ;;
     esac
     return 1
 }

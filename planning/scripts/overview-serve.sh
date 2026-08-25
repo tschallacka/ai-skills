@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # overview-serve.sh — serve the plan overview live on localhost.
 #
 # Picks the first available runtime from the same chain chat uses

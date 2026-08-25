@@ -93,3 +93,4 @@ planning/scripts/supervision-frame.sh	scripts/supervision-frame.sh	installer	rev
 planning/scripts/overview-serve.sh	scripts/overview-serve.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/runtime/overview-serve-handler.sh	scripts/runtime/overview-serve-handler.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/runtime/overview-server.py	scripts/runtime/overview-server.py	installer	review-approved	backup-then-replace	false
+planning/gate-caps.json	gate-caps.json	installer	review-approved	backup-then-replace	false
