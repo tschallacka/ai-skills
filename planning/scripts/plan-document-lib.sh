@@ -467,7 +467,7 @@ plan_unknown_section() {
     case "$kind" in
         plan) valid="current-state desired-outcome approach approach-decisions scope affected-areas constraints-and-decisions risks-and-open-questions environment-facts" ;;
         goal) valid="current-state-and-prior-goal-handoffs outcome-and-definition-of-done why-this-goal-is-needed scope affected-areas dependencies-and-handoffs implementation-approach-risks-and-edge-cases owned-work-units goal-size-exception" ;;
-        step) valid="objective instructions acceptance-criteria handoff" ;;
+        step) valid="objective instructions acceptance-criteria handoff atomicity-check" ;;
         testing) valid="automated-tests browser-verification backend-verification manual-verification" ;;
         # A review has no narrative section: Review scope and Verdict hold
         # fields (-f writes them, one label at a time) and Findings is a table

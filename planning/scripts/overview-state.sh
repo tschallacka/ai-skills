@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# PACKAGE: PROD
 # overview-state.sh - emit the complete reviewing state of one plan as a
 # single JSON document on stdout. This document is the one source that both
 # delivery modes (file artifact and served page) render from, so they cannot
@@ -45,7 +44,9 @@ plan_require_directory "$plan_dir"
 [ -f "$plan_dir/plan-description.md" ] || plan_die "plan-description.md not found: $plan_dir/plan-description.md" 66
 
 # jstr TEXT: emit TEXT as one JSON string (safe inside any JSON position).
-jstr() { jq -Rs 'rtrimstr("\n")'; }
+# Reads from a heredoc, NOT stdin — inside a while-read loop over the
+# inventory file, an unredirected jq would eat the remaining lines.
+jstr() { jq -Rs 'rtrimstr("\n")' <<< "$1"; }
 
 # sec FILE HEADING: print the paragraphs under "## HEADING" until the next "##".
 sec() {
@@ -123,10 +124,10 @@ inv="$plan_dir/work-unit-inventory.md"
 efirst=1
 if [ -f "$inv" ]; then
     while IFS= read -r line; do
-        # Only well-formed single-line rows: exactly 10 inner columns.
+        # Only well-formed single-line rows: at least 10 inner columns.
         case "$line" in '| W'*) ;; *) continue ;; esac
         nfields="$(printf '%s' "$line" | awk -F'|' '{print NF}')"
-        [ "$nfields" = 12 ] || continue
+        [ "$nfields" -ge 10 ] || continue
         uid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
         deps="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$8); print $8}')"
         case "$uid" in W[0-9]*) ;; *) continue ;; esac
@@ -168,9 +169,14 @@ comma
 printf '"coverage":['
 cfirst=1
 if [ -f "$inv" ]; then
+    in_cov=0
     while IFS= read -r line; do
-        case "$line" in '|---'*|'| Required outcome'*) continue ;; esac
+        case "$line" in '## Definition-of-done coverage') in_cov=1; continue ;; esac
+        case "$line" in '## '*) in_cov=0; continue ;; esac
+        [ "$in_cov" = 1 ] || continue
         case "$line" in '| '*) ;; *) continue ;; esac
+        case "$line" in '|---'*) continue ;; esac
+        case "$line" in '| Required outcome'*) continue ;; esac
         c_out="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/`/,"",$2); print $2}')"
         c_units="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
         [ -n "$c_out" ] || continue

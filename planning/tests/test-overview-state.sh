@@ -44,9 +44,10 @@ jq -e '.identity.uiAffected | startswith("yes") or startswith("no")' <<<"$out" >
 
 # ---- goals carry id, outcome, testing requirement -----------------------------
 jq -e '.goals | length == 1' <<<"$out" >/dev/null || fail "expected exactly one goal"
-jq -e '.goals[0].id == "01-build" and .goals[0].outcome | length > 0' <<<"$out" >/dev/null \
+jq -e '.goals[0].id == "01-build"' <<<"$out" >/dev/null || fail "goal id wrong"
+jq -e '(.goals[0].outcome | length) > 0' <<<"$out" >/dev/null \
     || fail "goal outcome missing"
-jq -e '.goals[0].testingRequirement | contains("W01: yes") or contains("yes")' <<<"$out" >/dev/null \
+jq -e '.goals[0].testingRequirement | contains("yes")' <<<"$out" >/dev/null \
     || fail "per-goal testing requirement missing (AR-15)"
 
 # ---- steps carry instructions, criteria, status, unit, companion --------------
@@ -59,8 +60,9 @@ jq -e '.steps[0].instructions | length > 0' <<<"$out" >/dev/null || fail "instru
 jq -e '.steps[0].criteria | length > 0' <<<"$out" >/dev/null || fail "acceptance criteria missing"
 
 # ---- dependency edges reference existing units --------------------------------
-jq -e '.edges | length == 1 and .edges[0].from == "W02" and .edges[0].to == "W01"' <<<"$out" >/dev/null \
-    || fail "dependency edge W02->W01 missing"
+jq -e '.edges | length == 1' <<<"$out" >/dev/null || fail "expected one edge"
+jq -e '.edges[0].from == "W02"' <<<"$out" >/dev/null || fail "edge from wrong"
+jq -e '.edges[0].to == "W01"' <<<"$out" >/dev/null || fail "edge to wrong"
 
 # ---- coverage rows present -----------------------------------------------------
 jq -e '.coverage | length >= 1' <<<"$out" >/dev/null || fail "coverage rows missing"
