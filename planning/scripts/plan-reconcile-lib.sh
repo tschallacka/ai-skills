@@ -114,16 +114,29 @@ plan_rewrite_owned_work_units() {
     trap - RETURN
 }
 
-# Rebuild a goal progress tracker from its step files (overwrites). Created when
-# absent: a goal added after the plan was created has no tracker, and the
-# validator's completion gate then has nothing to read.
+# Rebuild a goal progress tracker from its step files. Existing statuses carry
+# across by step name so an add never resets completed work (B40); new rows
+# start incomplete; rows for removed steps are dropped.
 plan_rebuild_goal_progress() {
     local script_dir="$1" goal_dir="$2" goal="$3" progress_file
     progress_file="$goal_dir/progress.md"
     if [ -f "$progress_file" ]; then
-        rm -f "$progress_file"
+        local saved="$progress_file.pre-rebuild.$$"
+        cp "$progress_file" "$saved"
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
-            printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2
+            { printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2; rm -f "$saved"; return; }
+        # Carry each old status onto the matching new row by step name.
+        awk -F'|' 'NR == FNR && /^\|/ && $0 !~ /---/ && $0 !~ /Goalname|Progress:/ {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $5); stat[$3] = $5
+        }
+        NR != FNR && /^\|/ && $0 !~ /---/ && $0 !~ /Goalname|Progress:/ {
+            key = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+            if (key in stat) { gsub(/💤 incomplete/, stat[key]); }
+            print
+        }' "$saved" "$progress_file" > "${progress_file}.tmp.$$"
+        mv "${progress_file}.tmp.$$" "$progress_file"
+        rm -f "$saved"
+        printf 'note: goal progress was rebuilt from step files; existing statuses carried across where step names match\n' >&2
     elif [ -n "$(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' \
         ! -name '*-testing.md' -print -quit 2>/dev/null || true)" ]; then
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \

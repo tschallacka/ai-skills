@@ -559,7 +559,7 @@
     {
       "id": "B40",
       "title": "add-work-unit silently destroys a goal progress record (statuses reset, plan row flips)",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B38",
@@ -571,12 +571,12 @@
         "planning/scripts/plan-reconcile-lib.sh",
         "planning/scripts/add-work-unit.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "this session — plan_rebuild_goal_progress now saves the old tracker, recreates it, then carries each status across by step name via a two-file awk pass; prints the same rebuilt-progress note remove-work-unit.sh already used",
+      "verification": "Empirically: completed step stays completed after an add on the fixed code; the same sequence on the pre-fix code (git stash) resets to incomplete — the exact B38 signature. Mutation-verified both directions.",
       "found_by": "user session on health-app plans; long-form report in planning-skill-defects-report.md (Trap A)",
       "notes": null,
       "created_at": "2026-08-25T09:23:27Z",
-      "updated_at": "2026-08-25T09:23:27Z"
+      "updated_at": "2026-08-25T10:01:13Z"
     },
     {
       "id": "B41",
@@ -930,7 +930,7 @@
     {
       "id": "B43",
       "title": "update-adversarial-review consumes adversarial-review-incoming even when findings arrive via --file",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -941,17 +941,17 @@
       "surfaces": [
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not reproducible on current HEAD: with --file, consumed_incoming remains 0 and rm -f is skipped. Empirically verified with a live two-file test.",
+      "verification": "Sandbox test: create plan + review + incoming file + separate CSV; run update-adversarial-review.sh --file other.csv; incoming file survives.",
       "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C1)",
       "notes": " Also re-mints fix-keys.json under a fresh session on every landing (collateral C2): stale keys, fresh claims required — by design but worth knowing.",
       "created_at": "2026-08-25T09:26:12Z",
-      "updated_at": "2026-08-25T09:26:12Z"
+      "updated_at": "2026-08-25T09:51:31Z"
     },
     {
       "id": "B44",
       "title": "Cycle numbering breaks after gaps: archived as Cycle 11 following Cycle 16",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -962,17 +962,17 @@
       "surfaces": [
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed: update-adversarial-review.sh uses highest_cycle_number() (max + 1, never a count) since before this report was filed; the comment at line 74 documents the exact failure mode described.",
+      "verification": "Read the code: highest_cycle_number takes max of all Cycle headings, not their count. The observed Cycle-11-after-16 came from an older installed skill version.",
       "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C3)",
       "notes": null,
       "created_at": "2026-08-25T09:46:07Z",
-      "updated_at": "2026-08-25T09:46:07Z"
+      "updated_at": "2026-08-25T09:53:29Z"
     },
     {
       "id": "B45",
       "title": "--file rejects CRLF CSVs with a misleading column-count message",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -983,12 +983,12 @@
       "surfaces": [
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not reproducible on current HEAD: plan_render_csv_table exit 7 names CRLF and says Convert it to LF. Empirically verified with a CRLF fixture via --file.",
+      "verification": "Sandbox test with a real CRLF CSV through --file produced the correct CRLF-specific message on stderr.",
       "found_by": "user session (report in planning-skill-defects-report.md, collateral C4)",
       "notes": null,
       "created_at": "2026-08-25T09:46:07Z",
-      "updated_at": "2026-08-25T09:46:07Z"
+      "updated_at": "2026-08-25T09:53:29Z"
     }
   ]
 }
