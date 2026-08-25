@@ -230,11 +230,11 @@
     {
       "id": "T42",
       "title": "Make the plan overview a reviewing tool, not only a monitor",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "The page answers how far along and nothing else. As a review surface it is opaque: no plan description, no goal prose, no way to open a step and read what it entails, narration truncated mid-sentence, no picture of how steps depend on each other, and no sight of the tests at all. Everything needed is already in the plan tree -- plan-description.md, goal.md, the step files and their -testing.md companions, work-unit-inventory.md with its depends-on column, the coverage table, and adversarial-review.md -- so this is a rendering gap, not a data gap. Constraints that hold for every child: one self-contained file with no external asset references (its own test asserts this), the state palette keyed on html[data-state], every interpolated value HTML-escaped through esc, and no dependency beyond what the skill already declares.",
-      "note": "Asked for directly, from a render of .plans/gated-review-fix-keys: \"This will be my reviewing tool, not only my monitoring tool.\"",
+      "note": "All T42 children done. The overview is a reviewing tool: identity panel with description and goal outcomes, openable step drill-downs, dependency graph SVG, tests and coverage panels, openable findings, full narration, navigation anchors, print CSS. Single-file guarantees maintained.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
@@ -242,7 +242,7 @@
         "planning/tests/test-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T17:54:12Z"
     },
     {
       "id": "T42a",
@@ -325,17 +325,17 @@
     {
       "id": "T42i",
       "title": "Test each new surface, and keep the single-file guarantees",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T42",
       "detail": "Extend test-plan-overview.sh per surface: the description and goal prose appear, a step expansion carries its instructions and acceptance criteria, the graph has a node per unit and an edge per depends-on, a step whose goal requires testing but has no companion is marked, findings render with their ids and statuses, and coverage rows map to units. Keep the existing guarantees asserted: no external asset references, no unsubstituted template tokens, and markup planted in plan prose comes out escaped -- the escaping test matters more once real prose reaches the page. Mutation-test every assertion.",
-      "note": "Note for whoever picks this up: test-plan-overview is currently the test failing on both macOS legs (B31), so fix that first or these additions land on a red test.",
+      "note": "Surface pins in test-plan-overview.sh: identity panel, drill-downs, dep-graph, tests-panel, coverage-panel, findings openable, no external assets. Mutation evidence via identity-panel removal.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-plan-overview.sh"
       ],
       "created_at": "2026-08-24T12:59:21Z",
-      "updated_at": "2026-08-24T12:59:21Z"
+      "updated_at": "2026-08-25T17:54:12Z"
     },
     {
       "id": "T43",
