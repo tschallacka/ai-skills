@@ -7,16 +7,17 @@
 set -euo pipefail
 export LC_ALL=C
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 plan_dir="${PLAN_DIR:?}"
 route="${ROUTE:-/}"
 
 case "$route" in
     /state.json|/state)
-        bash "$(dirname "${BASH_SOURCE[0]}")/../overview-state.sh" "$plan_dir"
+        "$script_dir/../overview-state.sh" "$plan_dir"
         ;;
     /|/index.html)
         OVERVIEW_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            bash "$(dirname "${BASH_SOURCE[0]}")/../render-plan-overview.sh" "$plan_dir" --serve
+            "$script_dir/../render-plan-overview.sh" "$plan_dir" --serve
         ;;
     *)
         printf 'Not found: %s\n' "$route" >&2

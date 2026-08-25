@@ -11,6 +11,8 @@
 # update gate-caps.json to match. Raising requires justification in the
 # commit message AND a matching gate-caps.json entry.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

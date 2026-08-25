@@ -63,6 +63,9 @@ in_allowlist() {
         # strength still decides, and chat's members are soft.
         ./install.sh:python3-shipped) return 0 ;;
         ./planning/tests/test-register-helpers.sh:bash-by-path-lookup) return 0 ;;
+        ./planning/tests/test-installer-noninteractive.sh:bash-by-path-lookup) return 0 ;;
+        ./planning/tests/test-plan-dir-synonym.sh:bash-by-path-lookup) return 0 ;;
+        ./planning/scripts/runtime/overview-serve-handler.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-overview-state.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
