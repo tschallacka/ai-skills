@@ -242,6 +242,31 @@ h1 .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60
     </div>
   </section>
 
+  <section class="card" id="identity-panel">
+    <h2>Plan identity <span class="tag">what and why</span></h2>
+@_IDENTITY_PANEL_@
+  </section>
+
+  <section class="card" id="dep-graph">
+    <h2>Dependencies <span class="tag">who blocks whom</span></h2>
+@_DEP_GRAPH_@
+  </section>
+
+  <section class="card" id="tests-panel">
+    <h2>Tests <span class="tag">verification surfaces</span></h2>
+@_TESTS_PANEL_@
+  </section>
+
+  <section class="card" id="coverage-panel">
+    <h2>Coverage <span class="tag">definition of done</span></h2>
+@_COVERAGE_PANEL_@
+  </section>
+
+  <section class="card" id="findings-panel">
+    <h2>Findings <span class="tag">@_F_TOTAL_@ total, @_F_OPEN_@ open</span></h2>
+@_FINDINGS_PANEL_@
+  </section>
+
   <section class="card">
     <h2>Narration <span class="tag">what happened</span></h2>
     <div class="narr" id="narr">
@@ -253,6 +278,9 @@ h1 .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60
     <h2>Step ledger <span class="tag">@_N_STEPS_@ rows</span></h2>
     <div class="log">
 @_STEP_LEDGER_@
+    </div>
+    <div id="step-details">
+@_STEP_DETAILS_@
     </div>
   </section>
 

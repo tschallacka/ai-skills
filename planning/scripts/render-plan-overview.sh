@@ -73,6 +73,11 @@ template="$script_dir/../templates/plan-overview.html.tmpl"
 [ -f "$template" ] || plan_die "overview template not found: $template (broken install)" 66
 
 # esc TEXT — HTML-escape the punctuation that survives plan table cells.
+# sec FILE HEADING: extract paragraphs under a section heading.
+sec() {
+    awk -v h="$2" ' $0 == "## " h { f = 1; next } /^## / && f { exit } f { print } ' "$1"
+}
+
 esc() {
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
@@ -274,6 +279,124 @@ narr2="Work: $done_steps of $total_steps steps complete ($pct%); next up $(esc "
 narr3="Feedback: $cycles review round(s) raised $f_total finding(s); $f_resolved resolved, $f_open open."
 narr4="Scope: $n_units work units across $goals_count goal(s)."
 narration="<span class=\"ln\">$narr1</span><span class=\"ln\">$narr2</span><span class=\"ln\">$narr3</span><span class=\"ln\">$narr4</span>"
+
+# ---- T42 review surfaces -----------------------------------------------------
+# Each builder reads the plan tree directly and produces escaped HTML for its
+# template section. Every builder is self-contained: no cross-references.
+
+# build_identity_panel <plan-dir>: description summary and per-goal outcomes.
+build_identity_panel() {
+    local pd="$1/plan-description.md" gdir out="" gname outcome_text
+    out="<div class='id-desc'><h3>What this plan does</h3><p>$(esc "$(awk '/^## Current state/{f=1;next}/^## /&&f{exit}f' "$pd" | head -5 | tr '\n' ' ')")</p></div>"
+    out="$out<div class='id-goals'><h3>Goals and outcomes</h3>"
+    while IFS= read -r gdir; do
+        [ -f "$gdir/goal.md" ] || continue
+        gname="$(basename "$gdir")"
+        outcome_text="$(awk '/^## Outcome and definition of done/{f=1;next}/^## /&&f{exit}f' "$gdir/goal.md" | head -3 | tr '\n' ' ')"
+        [ -n "$outcome_text" ] || outcome_text="See goal.md"
+        out="$out<div class='goal-outcome'><b>$(esc "$gname")</b>: $(esc "$outcome_text")</div>"
+    done < <(find "$1" -mindepth 1 -maxdepth 1 -type d | sort)
+    printf '%s' "$out</div>"
+}
+
+# build_step_details <plan-dir>: openable drill-down per step.
+build_step_details() {
+    local pd="$1" out="" sfile goal_name step_name instr crit
+    while IFS= read -r sfile; do
+        goal_name="$(basename "$(dirname "$sfile")")"
+        step_name="$(basename "$sfile" .md)"
+        instr="$(sec "$sfile" 'Instructions' | head -8)"
+        crit="$(sec "$sfile" 'Acceptance criteria' | head -6)"
+        out="$out<details class='step-open' id='step-$step_name'><summary>$(esc "$step_name")</summary><div class='sd-body'>"
+        [ -n "$instr" ] && out="$out<div class='sd-instr'><b>Instructions:</b><pre>$(esc "$instr")</pre></div>"
+        [ -n "$crit" ] && out="$out<div class='sd-crit'><b>Acceptance criteria:</b><pre>$(esc "$crit")</pre></div>"
+        out="$out</div></details>"
+    done < <(find "$pd" -mindepth 2 -path '*/steps/*.md' ! -name '*-testing.md' | sort)
+    printf '%s' "$out"
+}
+
+# build_dep_graph <plan-dir>: inline SVG dependency graph from inventory edges.
+build_dep_graph() {
+    local inv="$1/work-unit-inventory.md" out="" nodes="" arrows=""
+    local uid deps d x=30 y=30 nw=0
+    declare -A node_xy 2>/dev/null || true
+    # bash 3.2 fallback: string-indexed pseudo-map
+    local xy_keys="" xy_vals=""
+    if [ -f "$inv" ]; then
+        while IFS= read -r line; do
+            case "$line" in '| W'*) ;; *) continue ;; esac
+            local nf; nf=$(printf '%s' "$line" | awk -F'|' '{print NF}')
+            [ "$nf" -ge 10 ] || continue
+            uid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
+            case "$uid" in W[0-9]*) ;; *) continue ;; esac
+            nw=$((nw + 1))
+            x=$((30 + (nw % 5) * 90))
+            y=$((30 + (nw / 5) * 55))
+            nodes="$nodes<rect x='$x' y='$y' width='70' height='28' rx='4' class='dep-node'/><text x='$((x+35))' y='$((y+17))' text-anchor='middle' class='dep-label'>$uid</text>"
+            xy_keys="$xy_keys|$uid|"
+            xy_vals="$xy_vals|$((x+35)),$((y))|"
+            deps="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$8); print $8}')"
+            case "$deps" in ''|"—") continue ;; esac
+            local oldIFS="$IFS"; IFS=','
+            for d in $deps; do
+                IFS="$oldIFS"
+                d="$(printf '%s' "$d" | sed 's/^ *//; s/ *$//')"
+                case "$d" in W[0-9]*) ;; *) continue ;; esac
+                arrows="$arrows<line class='dep-edge' data-from='$d' data-to='$uid'/>"
+            done
+            IFS="$oldIFS"
+        done < "$inv"
+    fi
+    out="<svg viewBox='0 0 480 $((60 + (nw / 5) * 55))' class='dep-svg'>$nodes$arrows</svg>"
+    printf '%s' "$out"
+}
+
+# build_tests_panel <plan-dir>: companion steps and their verification intent.
+build_tests_panel() {
+    local pd="$1" out="" sfile base intent
+    while IFS= read -r sfile; do
+        base="$(basename "$sfile" .md)"
+        intent="$(sed -n 's/^§ 2.1 //p' "$sfile" | head -1)"
+        [ -n "$intent" ] || intent="(see companion for details)"
+        out="$out<div class='test-row'><span class='tn'>$(esc "${base%-testing}")</span><span class='ti'>$(esc "$intent")</span></div>"
+    done < <(find "$pd" -mindepth 2 -name '*-testing.md' | sort)
+    printf '%s' "$out"
+}
+
+# build_coverage_panel <inv>: coverage rows as a table.
+build_coverage_panel() {
+    local inv="$1" out="" row c_out c_units
+    [ -f "$inv" ] || { printf '<p>No coverage table found.</p>'; return; }
+    in_cov=0
+    while IFS= read -r line; do
+        case "$line" in '## Definition-of-done coverage') in_cov=1; continue ;; esac
+        case "$line" in '## '*) in_cov=0; continue ;; esac
+        [ "$in_cov" = 1 ] || continue
+        case "$line" in '| '*) ;; *) continue ;; esac
+        case "$line" in '|---'*|'| Required outcome'*) continue ;; esac
+        c_out="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/`/,"",$2); print $2}')"
+        c_units="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
+        [ -n "$c_out" ] || continue
+        out="$out<tr><td>$(esc "$c_out")</td><td>$(esc "$c_units")</td></tr>"
+    done < "$inv"
+    printf '<table class="cov-table"><tr><th>Outcome</th><th>Work units</th></tr>%s</table>' "$out"
+}
+
+# build_findings_panel <rev>: openable findings grouped by status.
+build_findings_panel() {
+    local rev="$1" out="" line fid item change status wu
+    [ -f "$rev" ] || { printf '<p>No findings.</p>'; return; }
+    while IFS= read -r line; do
+        case "$line" in '| AR'*) ;; *) continue ;; esac
+        fid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
+        item="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
+        change="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$4); print $4}')"
+        status="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$5); print $5}')"
+        wu="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$6); gsub(/`/,"",$6); print $6}')"
+        out="$out<details class='finding' id='$fid'><summary><span class='fs'>$status</span> <b>$fid</b> — $(esc "$item")</summary><div class='fd'><p><b>Change:</b> $(esc "$change")</p><p><b>Unit:</b> $wu</p></div></details>"
+    done < <(awk '/^## Findings$/{f=1;next} /^## Verdict$/{f=0} f' "$rev")
+    printf '%s' "$out"
+}
 ticker_plain="$(printf '%s %s %s %s' "$narr1" "$narr2" "$narr3" "$narr4" | sed -e 's/<[^>]*>//g')"
 ticker="${ticker_plain}<b>◆</b>auto-reloads every ${refresh}s<b>◆</b>rendered by render-plan-overview.sh<b>◆</b>self-contained html"
 
@@ -314,6 +437,12 @@ trap 'rm -f "$subs_file" "$out_tmp"' EXIT
     printf 'CYCLE_CHART\t%s\n' "$cycle_chart_svg"
     printf 'NARRATION\t%s\n' "$narration"
     printf 'STEP_LEDGER\t%s\n' "$ledger"
+    printf 'IDENTITY_PANEL\t%s\n' "$(build_identity_panel "$plan_dir")"
+    printf 'STEP_DETAILS\t%s\n' "$(build_step_details "$plan_dir")"
+    printf 'DEP_GRAPH\t%s\n' "$(build_dep_graph "$plan_dir")"
+    printf 'TESTS_PANEL\t%s\n' "$(build_tests_panel "$plan_dir")"
+    printf 'COVERAGE_PANEL\t%s\n' "$(build_coverage_panel "$inv")"
+    printf 'FINDINGS_PANEL\t%s\n' "$(build_findings_panel "$review_file")"
     printf 'TICKER\t%s\n' "$ticker"
     printf 'FOOTER\t%s\n' "$footer"
 } > "$subs_file"
