@@ -90,3 +90,6 @@ planning/roles/cleanup.md	roles/cleanup.md	installer	review-approved	backup-then
 planning/roles/VOICES.md	roles/VOICES.md	installer	review-approved	backup-then-replace	false
 planning/scripts/monitor-read.sh	scripts/monitor-read.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/supervision-frame.sh	scripts/supervision-frame.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/overview-serve.sh	scripts/overview-serve.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/runtime/overview-serve-handler.sh	scripts/runtime/overview-serve-handler.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/runtime/overview-server.py	scripts/runtime/overview-server.py	installer	review-approved	backup-then-replace	false

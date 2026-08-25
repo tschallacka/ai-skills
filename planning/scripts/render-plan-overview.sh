@@ -45,12 +45,13 @@ USAGE
     exit "$rc"
 }
 
-plan_dir="" out="" refresh=15 watch=false watch_every=5
+plan_dir="" out="" refresh=15 watch=false watch_every=5 serve=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
         --out) [ "$#" -ge 2 ] || usage; out="$2"; shift 2 ;;
         --refresh) [ "$#" -ge 2 ] || usage; refresh="$2"; shift 2 ;;
+        --serve) serve=true; shift ;;
         --watch)
             watch=true
             if [ "$#" -ge 2 ]; then
@@ -254,7 +255,7 @@ if [ "$state" = "implementation" ] && [ "$total_steps" -gt 0 ] && [ "$done_steps
 fi
 
 f_res_pct=0; [ "$f_total" -gt 0 ] && f_res_pct=$(( (f_resolved * 100 + f_total / 2) / f_total ))
-review_target=3; review_depth=$(( cycles * 100 / review_target )); [ "$review_depth" -gt 100 ] && review_depth=100
+review_target=2; review_depth=$(( cycles * 100 / review_target )); [ "$review_depth" -gt 100 ] && review_depth=100
 donut_offset="$(awk -v p="$pct" 'BEGIN{printf "%.2f", 326.73*(1-p/100)}')"
 ring_work="$(awk -v p="$pct" 'BEGIN{printf "%.2f", 100.53*(1-p/100)}')"
 ring_find="$(awk -v p="$f_res_pct" 'BEGIN{printf "%.2f", 100.53*(1-p/100)}')"

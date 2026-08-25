@@ -94,6 +94,9 @@ scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
+scripts/overview-serve.sh
+scripts/runtime/overview-server.py
+scripts/runtime/overview-serve-handler.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh

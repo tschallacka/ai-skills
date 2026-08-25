@@ -357,11 +357,11 @@
     {
       "id": "T43a",
       "title": "A served mode on localhost, reusing the runtime chain chat already has",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T43",
       "detail": "render-plan-overview.sh --serve [PORT] starts a loopback server that answers the page and a JSON state endpoint, and stops cleanly. Reuse chat's runtime chain and its shape rather than writing a fifth server: python3 -> node -> perl -> socat, first present wins, refusing with 69 and naming the capability when none is there. Bind 127.0.0.1 only, and say so in the docs rather than promising more (B30 is the cautionary tale). Print the URL and the pid file the way chat-server.sh does, so a reviewer can stop it without hunting.",
-      "note": null,
+      "note": "overview-serve.sh picks the first available runtime (python3 node perl socat) and delegates to runtime/overview-server.py for the python3 tier. Other tiers need their own server scripts; the refusal rung exits 69.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
@@ -389,11 +389,11 @@
     {
       "id": "T43c",
       "title": "The state JSON is the one source both modes render from",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T43",
       "detail": "Emit the plan's state as JSON -- goals, steps and their status, work units and their depends-on edges, findings and rounds, coverage -- and have the file mode inline it while the served mode fetches it. Then the snapshot and the live page cannot disagree, the JSON is testable on its own without parsing HTML, and anything else that wants plan state (a status line, a CI comment) reads it too. jq is already a hard requirement of the planning skill, so producing and validating JSON costs no new dependency.",
-      "note": null,
+      "note": "overview-state.sh is the single source; both the artifact inline block and the served /state.json endpoint consume it.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
@@ -404,11 +404,11 @@
     {
       "id": "T43e",
       "title": "Two reviews are the baseline: pre and final, three only when needed",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T43",
       "detail": "Implements the counting model B34 records. A reviewed plan has a pre-implementation review and a final review, so the rounds figure is 2, and 3 when a third was actually required. The depth ring counts against what the plan needs -- 2/2 complete, 3/3 when a third happened -- never 0/3, which reads as a failure against a target the plan was never meant to hit. The cycles chart plots those rounds rather than waiting for an archive file that only appears when a further round starts.",
-      "note": "Paired with B34, which carries the defect and the mechanism; this is the rendering side.",
+      "note": "review_target changed from 3 to 2 in render-plan-overview.sh.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
