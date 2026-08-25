@@ -128,8 +128,8 @@ if [ -f "$inv" ]; then
         case "$line" in '| W'*) ;; *) continue ;; esac
         nfields="$(printf '%s' "$line" | awk -F'|' '{print NF}')"
         [ "$nfields" -ge 10 ] || continue
-        uid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
-        deps="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$8); print $8}')"
+uid="$(plan_table_cell "$line" 2)"
+deps="$(plan_table_cell "$line" 8)"
         case "$uid" in W[0-9]*) ;; *) continue ;; esac
         case "$deps" in ''|—) continue ;; esac
         dep_i=0
@@ -177,8 +177,8 @@ if [ -f "$inv" ]; then
         case "$line" in '| '*) ;; *) continue ;; esac
         case "$line" in '|---'*) continue ;; esac
         case "$line" in '| Required outcome'*) continue ;; esac
-        c_out="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/`/,"",$2); print $2}')"
-        c_units="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
+c_out="$(plan_table_cell "$line" 2)"
+c_units="$(plan_table_cell "$line" 3)"
         [ -n "$c_out" ] || continue
         [ $cfirst = 1 ] && cfirst=0 || printf ','
         printf '{"outcome":%s,"units":%s}' "$(jstr "$c_out")" "$(jstr "$c_units")"
@@ -194,11 +194,11 @@ rev="$plan_dir/adversarial-review.md"
 if [ -f "$rev" ]; then
     while IFS= read -r line; do
         case "$line" in '| AR'*) ;; *) continue ;; esac
-        fid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
-        item="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
-        change="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$4); print $4}')"
-        status="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$5); print $5}')"
-        wu="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$6); gsub(/`/,"",$6); print $6}')"
+fid="$(plan_table_cell "$line" 2)"
+item="$(plan_table_cell "$line" 3)"
+change="$(plan_table_cell "$line" 4)"
+status="$(plan_table_cell "$line" 5)"
+wu="$(plan_table_cell "$line" 6)"
         cycle="$(sed -n '/^## Cycle [0-9]/,$p' "$plan_dir/adversarial-review-history.md" 2>/dev/null | grep -qF "| $fid |" && echo archived || echo current)"
         [ $ffirst = 1 ] && ffirst=0 || printf ','
         printf '{"id":%s,"item":%s,"change":%s,"status":%s,"workUnit":%s,"cycle":%s}' \

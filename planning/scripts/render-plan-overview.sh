@@ -320,7 +320,7 @@ build_step_details() {
 build_dep_graph() {
     local inv="$1/work-unit-inventory.md" out="" nodes="" arrows=""
     local uid deps d x=30 y=30 nw=0
-    declare -A node_xy 2>/dev/null || true
+    # bash 3.2: no associative arrays; using string-indexed pseudo-map
     # bash 3.2 fallback: string-indexed pseudo-map
     local xy_keys="" xy_vals=""
     if [ -f "$inv" ]; then
@@ -328,7 +328,7 @@ build_dep_graph() {
             case "$line" in '| W'*) ;; *) continue ;; esac
             local nf; nf=$(printf '%s' "$line" | awk -F'|' '{print NF}')
             [ "$nf" -ge 10 ] || continue
-            uid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
+            uid="$(plan_table_cell $line 2)"
             case "$uid" in W[0-9]*) ;; *) continue ;; esac
             nw=$((nw + 1))
             x=$((30 + (nw % 5) * 90))
@@ -336,7 +336,7 @@ build_dep_graph() {
             nodes="$nodes<rect x='$x' y='$y' width='70' height='28' rx='4' class='dep-node'/><text x='$((x+35))' y='$((y+17))' text-anchor='middle' class='dep-label'>$uid</text>"
             xy_keys="$xy_keys|$uid|"
             xy_vals="$xy_vals|$((x+35)),$((y))|"
-            deps="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$8); print $8}')"
+            deps="$(plan_table_cell $line 8)"
             case "$deps" in ''|"—") continue ;; esac
             local oldIFS="$IFS"; IFS=','
             for d in $deps; do
@@ -375,8 +375,8 @@ build_coverage_panel() {
         [ "$in_cov" = 1 ] || continue
         case "$line" in '| '*) ;; *) continue ;; esac
         case "$line" in '|---'*|'| Required outcome'*) continue ;; esac
-        c_out="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/`/,"",$2); print $2}')"
-        c_units="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
+        c_out="$(plan_table_cell "$line" 2)"
+        c_units="$(plan_table_cell $line 3)"
         [ -n "$c_out" ] || continue
         out="$out<tr><td>$(esc "$c_out")</td><td>$(esc "$c_units")</td></tr>"
     done < "$inv"
@@ -389,11 +389,11 @@ build_findings_panel() {
     [ -f "$rev" ] || { printf '<p>No findings.</p>'; return; }
     while IFS= read -r line; do
         case "$line" in '| AR'*) ;; *) continue ;; esac
-        fid="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2}')"
-        item="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3}')"
-        change="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$4); print $4}')"
-        status="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$5); print $5}')"
-        wu="$(printf '%s' "$line" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$6); gsub(/`/,"",$6); print $6}')"
+        fid="$(plan_table_cell $line 2)"
+        item="$(plan_table_cell $line 3)"
+        change="$(plan_table_cell $line 4)"
+        status="$(plan_table_cell $line 5)"
+        wu="$(plan_table_cell "$line" 6)"
         out="$out<details class='finding' id='$fid'><summary><span class='fs'>$status</span> <b>$fid</b> — $(esc "$item")</summary><div class='fd'><p><b>Change:</b> $(esc "$change")</p><p><b>Unit:</b> $wu</p></div></details>"
     done < <(awk '/^## Findings$/{f=1;next} /^## Verdict$/{f=0} f' "$rev")
     printf '%s' "$out"

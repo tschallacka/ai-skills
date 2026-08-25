@@ -4,6 +4,8 @@
 # delivery modes render from (T43c). The fixture is synthesised through the
 # sanctioned helpers into a temp dir, never read from gitignored .plans.
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "planning/tests/lib-test.sh" 2>/dev/null || source "/home/tschallacka/git/ai-skills/planning/tests/lib-test.sh"
 export LC_ALL=C
 
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,14 +21,14 @@ FAILED=0
 # ---- synthesise a complete fixture plan --------------------------------------
 plan="$work/fixture"
 export PLANS_ROOT="$work/plans-root"
-bash "$scripts/create-plan.sh" "$plan" 'State extraction fixture' >/dev/null
-bash "$scripts/add-goal.sh" "$plan" 01-build 'Build the widget' 'The widget exists and works.' >/dev/null
-bash "$scripts/add-work-unit.sh" "$plan" W01 source src/widget.php 'Widget::render()' N/A 'Render the widget' '—' 01-build 01-step-render >/dev/null
-bash "$scripts/add-work-unit.sh" "$plan" W02 verification N/A 'verify-widget' N/A 'Verify the widget renders' 'W01' 01-build 02-step-verify >/dev/null
-bash "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-build yes 'verification unit present' >/dev/null
+"$BASH" "$scripts/create-plan.sh" "$plan" 'State extraction fixture' >/dev/null
+"$BASH" "$scripts/add-goal.sh" "$plan" 01-build 'Build the widget' 'The widget exists and works.' >/dev/null
+"$BASH" "$scripts/add-work-unit.sh" "$plan" W01 source src/widget.php 'Widget::render()' N/A 'Render the widget' '—' 01-build 01-step-render >/dev/null
+"$BASH" "$scripts/add-work-unit.sh" "$plan" W02 verification N/A 'verify-widget' N/A 'Verify the widget renders' 'W01' 01-build 02-step-verify >/dev/null
+"$BASH" "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-build yes 'verification unit present' >/dev/null
 printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/01-step-render-testing.md"
-bash "$scripts/add-coverage.sh" "$plan" 'The widget renders' W01,W02 'covered by render plus verify' >/dev/null
-bash "$scripts/create-adversarial-review.sh" "$plan" >/dev/null
+"$BASH" "$scripts/add-coverage.sh" "$plan" 'The widget renders' W01,W02 'covered by render plus verify' >/dev/null
+"$BASH" "$scripts/create-adversarial-review.sh" "$plan" >/dev/null
 
 out="$(OVERVIEW_NOW=2026-08-22T1200Z bash "$state" --plan-dir "$plan")"
 
@@ -75,7 +77,7 @@ jq -e '.findings | type == "array"' <<<"$out" >/dev/null || fail "findings array
 jq -e '.reviewTarget == 2' <<<"$out" >/dev/null || fail "review target must be 2"
 
 # ---- escaping: angle brackets survive as data, never break the JSON -----------
-bash "$scripts/add-adversarial-finding.sh" "$plan" AR-05 '<script>alert(1)</script>' 'escape it' resolved --work-unit W01 >/dev/null 2>&1 || true
+"$BASH" "$scripts/add-adversarial-finding.sh" "$plan" AR-05 '<script>alert(1)</script>' 'escape it' resolved --work-unit W01 >/dev/null 2>&1 || true
 out="$(OVERVIEW_NOW=2026-08-22T1200Z bash "$state" --plan-dir "$plan")"
 jq -e '.findings | length >= 1' <<<"$out" >/dev/null || fail "finding not extracted after landing"
 if jq -e . <<<"$out" >/dev/null 2>&1; then :; else fail "state JSON broken after adversarial content landed"; fi
