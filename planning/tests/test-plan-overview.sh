@@ -50,6 +50,7 @@ seed_plan() { # <plan-dir>
     printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/01-step-a-testing.md"
     printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/02-step-v-testing.md"
     "$script_dir/create-adversarial-review.sh" "$plan" >/dev/null
+    "$script_dir/add-coverage.sh" "$plan" "The widget works" W01,W02 "both units contribute" >/dev/null
 }
 
 # --- fresh plan: planning state, placeholder chart, self-contained -----------
@@ -142,6 +143,30 @@ t_assert_eq "step ledger counts data rows only (no header rows)" \
 t_assert_eq "cycle chart drawn from history" "$(grep -c 'class="line-res"' "$out")" 1
 t_assert_eq "narration reports the next step" "$(grep -c 'class="ln">[^<]*next up 02-step-v' "$out")" 1
 t_assert_eq "findings counted without the header row" "$(grep -o 'findings <b>[0-9]*</b>' "$out" | head -1)" 'findings <b>1</b>'
+
+# ---- T42i: each reviewing surface is present in the rendered artifact --------
+t_assert_contains "identity panel renders description section" \
+    'What this plan does' "$(cat "$out")"
+t_assert_contains "identity panel names a goal outcome" \
+    'A thing' "$(cat "$out")"
+t_assert_eq "step drill-downs are present" \
+    "$(grep -c '<details class=.step-open.' "$out")" 2
+t_assert_contains "a drill-down shows instructions" \
+    'Instructions:' "$(cat "$out")"
+t_assert_eq "dependency graph renders as SVG" \
+    "$(grep -c 'dep-svg' "$out")" 1
+t_assert_contains "the dep graph has node labels" \
+    'W01' "$(cat "$out")"
+t_assert_contains "tests panel names a companion step" \
+    '01-step-a' "$(cat "$out")"
+t_assert_contains "coverage panel maps units to outcomes" \
+    'W01,W02' "$(cat "$out")"
+t_assert_eq "findings panel is present with openable details" \
+    "$(grep -c '<details class=.finding.' "$out")" 1
+t_assert_contains "narration is not truncated mid-sentence" \
+    'next up 02-step-v' "$(cat "$out")"
+t_assert_eq "no external asset references exist" \
+    "$(grep -cE '(src|href)="https?:|url\(https?:' "$out" || true)" 0
 
 # --- delivered: every step complete ------------------------------------------
 must 'step 02-step-v completed' "$script_dir/update-step.sh" "$plan/01-build" 02-step-v completed
