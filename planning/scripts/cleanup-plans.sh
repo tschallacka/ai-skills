@@ -54,9 +54,19 @@ plans_root="$(plan_default_root)"
 [ -d "$plans_root" ] || { printf 'cleanup-plans: plans root not found: %s\n' "$plans_root" >&2; exit 66; }
 
 plan_is_complete() {
-    local plan_dir="$1"
+    local plan_dir="$1" row status seen=0
     [ -f "$plan_dir/progress.md" ] || return 1
-    grep -Fq '**Overall progress:** `100%' "$plan_dir/progress.md"
+    # Every goal row must read completed; the decorative Overall line was the
+    # old (CRLF-fragile, B36-class) probe. Rows parse through the shared
+    # cell helper like every other plan-data reader.
+    while IFS= read -r row; do
+        case "$row" in '|'*) ;; *) continue ;; esac
+        case "$row" in '|---'*|'| Goalname'*) continue ;; esac
+        status="$(plan_table_cell "$row" 4)"
+        [ "$status" = "✅ completed" ] || return 1
+        seen=$((seen + 1))
+    done < "$plan_dir/progress.md"
+    [ "$seen" -gt 0 ]
 }
 
 # PORTABILITY(find-printf): also avoids `mapfile`. find's stderr is
