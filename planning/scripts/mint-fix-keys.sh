@@ -25,6 +25,37 @@ source "$script_dir/plan-document-lib.sh"
 # refused here.
 eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
+# mint_scan_gated FILE count|warn — one pass over the Findings table:
+# counts gated rows (and non-conforming ones), or warns about each
+# non-conforming row. Cells parse through the shared table helper.
+mint_scan_gated() {
+    local mfile="$1" mode="$2" in_f=0 line fid wu gated=0 skipped=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            '## Findings') in_f=1; continue ;;
+        esac
+        [ "$in_f" = 1 ] || continue
+        case "$line" in '## Verdict'*) break ;; esac
+        case "$line" in '|'*) ;; *) continue ;; esac
+        fid="$(plan_table_cell "$line" 2)"
+        wu="$(plan_table_cell "$line" 6)"
+        case "$fid" in ID|---) continue ;; esac
+        case "$wu" in ---) continue ;; esac
+        case "$wu" in ''|N/A|—) continue ;; esac
+        gated=$((gated + 1))
+        if [[ $fid =~ ^AR-[0-9]+$ && $wu =~ ^W[0-9]+$ ]]; then
+            :
+        else
+            skipped=$((skipped + 1))
+            if [ "$mode" = warn ]; then
+                printf 'mint-fix-keys: WARN skipping gated row with non-conforming id: finding id "%s" work unit "%s" (expect ^AR-[0-9]+$ and ^W[0-9]+$)\n' "$fid" "$wu" >&2
+            fi
+        fi
+    done < "$mfile"
+    [ "$mode" = count ] && printf '%d\t%d\n' "$gated" "$skipped"
+    return 0
+}
+
 export LC_ALL=C
 
 
@@ -149,40 +180,11 @@ mint_fix_keys() {
     # derive keys for the conforming pairs.
     count_file="$(mktemp "${TMPDIR:-/tmp}/mint-fix-keys-count.XXXXXX")"
     tmp_files+=("$count_file")
-    awk -F'|' '
-        /^## Findings$/ { in_findings = 1; next }
-        in_findings && /^## Verdict$/ { exit }
-        in_findings && /^\|/ {
-            fid = $2; wu = $6
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
-            # Skip header and separator rows (ID column is a marker or ---).
-            if (fid ~ /^(ID|---)$/ || wu ~ /^---$/) next
-            if (wu == "" || wu == "N/A" || wu == "—") next
-            gated_rows++
-            if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) mintable++
-            else skipped_rows++
-        }
-        END {
-            printf "%d\t%d\n", gated_rows + 0, skipped_rows + 0
-        }
-    ' "$review_file" > "$count_file"
+    mint_scan_gated "$review_file" count > "$count_file"
     IFS=$'\t' read -r gated_rows skipped_rows < "$count_file"
 
     if [ "$skipped_rows" -gt 0 ]; then
-        awk -F'|' -v seen=0 '
-            /^## Findings$/ { in_findings = 1; next }
-            in_findings && /^## Verdict$/ { exit }
-            in_findings && /^\|/ {
-                fid = $2; wu = $6
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", fid)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", wu)
-                if (fid ~ /^(ID|---)$/ || wu ~ /^---$/) next
-                if (wu == "" || wu == "N/A" || wu == "—") next
-                if (fid ~ /^AR-[0-9]+$/ && wu ~ /^W[0-9]+$/) next
-                printf "mint-fix-keys: WARN skipping gated row with non-conforming id: finding id \"%s\" work unit \"%s\" (expect ^AR-[0-9]+$ and ^W[0-9]+$)\n", fid, wu > "/dev/stderr"
-            }
-        ' "$review_file"
+        mint_scan_gated "$review_file" warn
         plan_die "mint-fix-keys: $skipped_rows gated row(s) could not be minted; fix the finding/work-unit ids so the fix-key gate is not silently disabled"
     fi
 
