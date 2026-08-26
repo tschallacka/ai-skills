@@ -46,7 +46,7 @@ t_assert_contains "add-work-unit emits unticked boxes" \
 
 run_complete() { # runs the completion flow against the current tree
     "$scripts/update-step.sh" "$tmp/pl/01-evidence" 01-step-one completed \
-        --repo-root "$tmp" --unit W01 >/dev/null 2>"$tmp/err"
+        --repo-root "$tmp" --unit W01 --since HEAD >/dev/null 2>"$tmp/err"
 }
 make_extra() { printf 'noise\n' >> "$tmp/src/other.txt"; }
 

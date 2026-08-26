@@ -17,6 +17,14 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/register-lib.sh
 source "$script_dir/register-lib.sh"
 
+# jq is the ceiling of the required runtime: refuse with 69 rather than
+# half-emitting when it is missing (mirrors validate-plan.sh).
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+        "${0##*/}" >&2
+    exit 69
+fi
+
 root="$(cd "$script_dir/.." && pwd)"
 kind="${1:-}"
 case "$kind" in

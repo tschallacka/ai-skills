@@ -29,6 +29,7 @@ usage() {
     cat <<USAGE
 Usage: ${0##*/} [--plan-dir] <plan-directory> [--out FILE] [--refresh N]
        ${0##*/} [--plan-dir] <plan-directory> --watch [N]
+       ${0##*/} [--plan-dir] <plan-directory> --serve
        ${0##*/} --help
 
 Renders <plan-directory> into a single overview HTML (default
@@ -38,6 +39,8 @@ Renders <plan-directory> into a single overview HTML (default
   --out FILE     write to FILE instead of <plan>/overview.html
   --refresh N    page auto-reload seconds (default 15, minimum 5)
   --watch [N]    stay running; poll every N s (default 5) and re-render on change
+  --serve        render for served mode: no meta refresh; the served page
+                 polls /state.json instead (see overview-serve.sh)
 
 OVERVIEW_NOW=<utc-timestamp> pins the embedded timestamp for deterministic
 output (tests).
@@ -64,6 +67,14 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ -n "$plan_dir" ] || usage
+
+# jq is the ceiling of the required runtime: refuse with 69 rather than
+# half-rendering when it is missing (mirrors validate-plan.sh).
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+        "${0##*/}" >&2
+    exit 69
+fi
 case "$refresh" in ''|*[!0-9]*) usage ;; esac
 [ "$refresh" -ge 5 ] || refresh=5
 case "$watch_every" in ''|*[!0-9]*|0*) usage ;; esac

@@ -108,5 +108,33 @@ stamped="$(jq '[.bugs[] | select(.created_at != "" and .updated_at != "")] | len
 total="$(jq '.bugs | length' "$work/stamps.json")"
 [ "$stamped" -eq "$total" ] || fail "the rebuild left empty timestamps behind"
 
+# ---- every accepted flag is exercised at least once (flag coverage) -------
+# The damage-repair section above leaves the fixture deliberately scarred, so
+# the flag probes start from fresh copies of the real registers.
+cp "$repo_root_tests/TODO.json" "$todo"
+cp "$repo_root_tests/BUGS.json" "$bugs"
+run_todo --id T9999 --title 'Flag probe parent' >/dev/null 2>&1
+out="$(run_todo --id T8888 --title 'Flag probe' --parent T9999 --priority low \
+    --blocked-on T9999 --detail 'flag detail' --ref planning/scripts/todo-add.sh)"
+case "$out" in *'Added T8888'*) : ;; *) fail "flag-rich todo-add refused: $out" ;; esac
+jq -e --arg id T8888 '.tasks[] | select(.id == $id
+    and .parent == "T9999" and .blocked_on == "T9999"
+    and .detail == "flag detail"
+    and (.refs | index("planning/scripts/todo-add.sh") != null))' "$todo" >/dev/null \
+    || fail "todo-add flags (--parent/--blocked-on/--detail/--ref) did not all land"
+out="$(run_todoup T8888 --detail 'detail two' --blocked-on —)"
+case "$out" in *Updated*) : ;; *) fail "todo-update --detail/--blocked-on refused: $out" ;; esac
+
+out="$(run_bugadd --title 'Flag probe defect' --reproduce 'bash x' --observed o \
+    --expected e --severity minor --mechanism 'off-by-one loop' \
+    --parent B2 --surfaces 'planning/scripts/a.sh')"
+bid="$(printf '%s' "$out" | grep -oE 'B[0-9]+' | head -1)"
+case "$out" in *'Filed '"$bid"*) : ;; *) fail "flag-rich bug-add refused: $out" ;; esac
+jq -e --arg id "$bid" '.bugs[] | select(.id == $id
+    and .mechanism == "off-by-one loop" and .parent == "B2")' "$bugs" >/dev/null \
+    || fail "bug-add flags (--mechanism/--parent) did not all land"
+out="$(run_bugup "$bid" --reason 'probe reason' --mechanism 'second mechanism' --append-note 'appended')"
+case "$out" in *Updated*) : ;; *) fail "bug-update --reason/--mechanism/--append-note refused: $out" ;; esac
+
 [ "$FAILED" -eq 0 ] || exit 1
 printf '%s\n' 'test-register-helpers: PASS'

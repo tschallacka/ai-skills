@@ -179,4 +179,19 @@ t_assert_eq "missing plan refuses with 66" "$rc" 66
 rc=0; OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --bogus >/dev/null 2>&1 || rc=$?
 t_assert_eq "unknown option refuses with 64" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
 
+# --serve renders the served flavor: no meta refresh tag, IS_SERVE true, and
+# overview-serve.sh --port prints its chosen port for the served entry point.
+rc=0; OVERVIEW_NOW=$NOW "$script_dir/render-plan-overview.sh" "$plan" --serve \
+    --out "$temporary_root/serve.html" >/dev/null 2>&1 || rc=$?
+t_assert_eq "serve render succeeds" "$rc" 0
+t_assert_eq "serve page drops the meta refresh" \
+  "$(grep -c 'http-equiv="refresh"' "$temporary_root/serve.html")" 0
+[ "$(grep -c 'data-serve="true"\|IS_SERVE' "$temporary_root/serve.html")" -gt 0 ] \
+  || t_fail "serve page never sets IS_SERVE"
+serve_help="$("$script_dir/overview-serve.sh" --help 2>&1)"
+case "$serve_help" in
+    *--port*) : ;;
+    *) t_fail "overview-serve --help does not document --port" ;;
+esac
+
 t_end

@@ -8,6 +8,8 @@
 #                      --verification "how proven, including the mutation"
 #   bug-update.sh <id> --status wont-fix --reason "why, for the record"
 #   bug-update.sh <id> --priority high | --note "extra finding"
+#   bug-update.sh <id> --mechanism "root cause" | --reason "why" \
+#                      | --append-note "appended"
 #   bug-update.sh --help
 #
 # Closing as fixed requires --fix and --verification; wont-fix/not-a-defect/
@@ -21,6 +23,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/register-lib.sh"
 
 file="${BUGS_JSON:-$(cd "$script_dir/.." && pwd)/BUGS.json}"
+# --help answers before anything touches the filesystem: a missing register
+# is a hard error for writes but must not hide usage.
+case "${1:-}" in
+    -h|--help) sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
 [ -f "$file" ] || { printf '%s: register not found: %s\n' "${0##*/}" "$file" >&2; exit 66; }
 
 id="${1:-}"; [ -n "$id" ] && shift || {
@@ -29,6 +37,14 @@ id="${1:-}"; [ -n "$id" ] && shift || {
 }
 
 status_val="" fix_val="" ver_val="" reason_val="" pri_val="" mech_val="" note_val=""
+# jq is the ceiling of the required runtime: refuse with 69 rather than
+# half-running when it is missing (mirrors validate-plan.sh).
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+        "${0##*/}" >&2
+    exit 69
+fi
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --status) [ "$#" -ge 2 ] || exit 64; status_val="$2"; shift 2 ;;

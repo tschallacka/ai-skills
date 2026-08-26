@@ -19,13 +19,27 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/register-lib.sh"
 
 file="${BUGS_JSON:-$(cd "$script_dir/.." && pwd)/BUGS.json}"
+# --help answers before anything touches the filesystem: a missing register
+# is a hard error for writes but must not hide usage.
+case "${1:-}" in
+    -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
 [ -f "$file" ] || { printf '%s: register not found: %s\n' "${0##*/}" "$file" >&2; exit 66; }
 
 title="" reproduce="" observed="" expected="" severity="major" priority="normal"
 status="reported" mechanism="null" parent="null" found_by="register writer" surfaces=""
+# jq is the ceiling of the required runtime: refuse with 69 rather than
+# half-running when it is missing (mirrors validate-plan.sh).
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+        "${0##*/}" >&2
+    exit 69
+fi
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --title) [ "$#" -ge 2 ] || exit 64; title="$2"; shift 2 ;;
         --reproduce) [ "$#" -ge 2 ] || exit 64; reproduce="$2"; shift 2 ;;
         --observed) [ "$#" -ge 2 ] || exit 64; observed="$2"; shift 2 ;;

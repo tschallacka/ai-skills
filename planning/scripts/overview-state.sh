@@ -19,6 +19,14 @@ eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
 export LC_ALL=C
 
+# jq is the ceiling of the required runtime: refuse with 69 rather than
+# half-emitting when it is missing (mirrors validate-plan.sh).
+if ! command -v jq >/dev/null 2>&1; then
+    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+        "${0##*/}" >&2
+    exit 69
+fi
+
 usage() {
     local rc="${1:-64}"
     cat <<USAGE

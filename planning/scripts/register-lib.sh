@@ -8,7 +8,18 @@
 
 # reg_findings <kind> <file>: print every structural finding as one line.
 # kind is "bug" or "todo". Empty output means the register is sound.
+
+# jq is the ceiling of the required runtime; every public helper refuses with
+# 69 rather than half-writing a register when it is missing.
+reg_require_jq() {
+    command -v jq >/dev/null 2>&1 || {
+        printf 'register: jq is required (it reads and writes the JSON registers); install jq and re-run\n' >&2
+        exit 69
+    }
+}
+
 reg_findings() {
+    reg_require_jq
     local kind="$1" file="$2"
     jq -r --arg kind "$kind" '
         def st_enum:
