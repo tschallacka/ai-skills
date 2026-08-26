@@ -5,14 +5,13 @@
 Serves / (rendered HTML) and /state.json (extractor output) from the given
 plan directory. Runs until killed; prints the bound port on startup.
 """
-import sys
-sys.stderr.write("stage: argv\n"); sys.stderr.flush()
 import http.server
 import os
 import signal
+import socketserver
 import subprocess
+import sys
 import tempfile
-sys.stderr.write("stage: imports\n"); sys.stderr.flush()
 
 plan_dir = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 0
@@ -84,9 +83,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-sys.stderr.write("stage: pre-bind\n"); sys.stderr.flush()
-server = http.server.HTTPServer(("127.0.0.1", port), Handler)
-sys.stderr.write("stage: bound\n"); sys.stderr.flush()
+class Server(http.server.HTTPServer):
+    # HTTPServer.server_bind resolves socket.getfqdn("127.0.0.1") — a
+    # reverse-DNS lookup that mDNSResponder can stall for tens of seconds on
+    # macOS, which reads as "never reported a port". The name is only used in
+    # error pages; a literal keeps the bind immediate everywhere.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, sport = self.server_address[:2]
+        self.server_name = "localhost"
+        self.server_port = sport
+
+
+server = Server(("127.0.0.1", port), Handler)
 # os.write bypasses every io layer: the invoker polls this line to learn the
 # port, so no buffering subtlety may delay it.
 os.write(1, f"{server.server_address[1]}\n".encode())

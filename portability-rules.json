@@ -276,6 +276,13 @@
       "symptom": "syntax error near unexpected token `;;' \u2014 3.2's parser cannot pair a case-pattern `)` with the substitution's closing paren; bash 4+ accepts it, so local runs and ubuntu CI stay green while the macOS 3.2 leg fails",
       "replacement": "call a top-level library helper and keep only its invocation inside the substitution: read -r a b < <(plan_count_progress_rows \"$file\" 5) (planning/scripts/lib/progress/plan_count_progress_rows.sh). The shared libraries define the pattern once, so call sites stay OS-agnostic by construction.",
       "note": "no line-regex can see substitution containment; the detector is the bash32 -n sweep over every tracked script (flake target bash32-run-tests runs it against the whole suite). Found the hard way in update-progress/update-plan-progress/validate-plan-inventory-lib during the plan-data-parsing migration."
+    },
+    {
+      "id": "httpserver-getfqdn-stall",
+      "construct": "http.server.HTTPServer binding on 127.0.0.1 (server_bind -> socket.getfqdn)",
+      "breaks": "macOS runners (mDNSResponder reverse-DNS stall)",
+      "symptom": "the server prints its bound port late or never; the process is alive but blocked in gethostbyaddr, so there is no traceback and a port poll times out while the same code binds instantly on Linux (getfqdn answers from /etc/hosts)",
+      "replacement": "subclass and set server_name yourself: class Server(http.server.HTTPServer):\\n    def server_bind(self):\\n        socketserver.TCPServer.server_bind(self)\\n        self.server_name = \"localhost\"\\n        self.server_port = self.server_address[1]\\nThe name only feeds error pages, so a literal is safe. Found when the python served-overview rung passed everywhere except both macOS CI legs."
     }
   ]
 }
