@@ -82,5 +82,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 server = http.server.HTTPServer(("127.0.0.1", port), Handler)
-print(server.server_address[1], flush=True)
+# os.write bypasses every io layer: the invoker polls this line to learn the
+# port, so no buffering subtlety may delay it.
+os.write(1, f"{server.server_address[1]}\n".encode())
 server.serve_forever()

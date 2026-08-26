@@ -57,6 +57,19 @@ start_bg() { # NAME CMD... -> pid file + port file polled for 6s
     done
 }
 
+stop_bg() { # NAME — TERM, short grace, KILL
+    local name="$1" pid i
+    [ -f "$work/pid.$name" ] || return 0
+    pid="$(cat "$work/pid.$name")"
+    kill "$pid" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.2
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$work/pid.$name"
+}
+
 rung_port=""
 
 serve_checks() { # NAME PORT — the identical-route contract every rung meets
@@ -86,7 +99,7 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
 
 # ---- python3 rung ----------------------------------------------------------
 if command -v python3 >/dev/null 2>&1; then
-    start_bg python3 python3 "$scripts/runtime/overview-server.py" "$plan_dir"
+    start_bg python3 python3 -u "$scripts/runtime/overview-server.py" "$plan_dir"
     rung_port="$(head -1 "$work/port.python3")"
     serve_checks python3 "$rung_port"
     stop_bg python3
