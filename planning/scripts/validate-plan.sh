@@ -140,6 +140,8 @@ source "$script_dir/plan-map-lib.sh"
 # For plan_duplicate_step_numbers. The core library carries no load-time
 # initialisation and no trap, so sourcing it here adds definitions only.
 source "$script_dir/plan-core-lib.sh"
+# Relaxed atomicity reads progress rows through the shared table helpers.
+source "$script_dir/plan-table-lib.sh"
 source "$script_dir/validate-plan-common-lib.sh"
 source "$script_dir/validate-plan-docs-lib.sh"
 source "$script_dir/validate-plan-placeholders-lib.sh"

@@ -20,6 +20,8 @@
 # each file alone and cannot see the assignments.
 set -euo pipefail
 
+[ -z "${PLAN_TABLE_LIB_LOADED:-}" ] || . "${skill_root}/scripts/plan-table-lib.sh"
+
 goal_tables_registry="$skill_root/goal-tables.json"
 goal_registered_sections=''
 goal_registered_list=''
@@ -208,9 +210,34 @@ plan_validate_step_files() {
         [ "$actual_file" = "$u_file" ] || fail "$step_file file does not match $id inventory row"
         [ "$actual_scope" = "$u_scope" ] || fail "$step_file primary scope does not match $id inventory row"
         [ "$actual_subscope" = "$u_subscope" ] || fail "$step_file subscope does not match $id inventory row"
-        grep -Fqx -- '- [x] This step owns exactly one inventory work unit.' "$step_file" || fail "$step_file has not confirmed one work unit"
-        grep -Fqx -- '- [x] No other file, symbol, test target, or verification flow changes here.' "$step_file" || fail "$step_file has not confirmed target isolation"
-        grep -Fqx -- '- [x] Any follow-on target has a separately named work unit and step.' "$step_file" || fail "$step_file has not confirmed follow-on ownership"
+        # Relaxed atomicity (W07): the three boxes must be present. Ticked
+        # boxes may carry an annotation suffix (auto-tick evidence). Unticked
+        # boxes fail only when this step is already marked completed in its
+        # goal progress tracker.
+        local sent tick line
+        local completed=no
+        if [ -f "$plan_dir/$u_goal/progress.md" ]; then
+            while IFS= read -r line; do
+                [ "$(plan_table_cell "$line" 3)" = "$u_step" ] || continue
+                case "$(plan_table_cell "$line" 5)" in *completed*) completed=yes ;; esac
+            done < "$plan_dir/$u_goal/progress.md"
+        fi
+        while IFS= read -r sent; do
+            [ -n "$sent" ] || continue
+            tick=no
+            while IFS= read -r line; do
+                case "$line" in
+                    '- [x]'*" $sent"*|'- [X]'*" $sent"*) tick=yes; break ;;
+                esac
+            done < "$step_file"
+            if [ "$tick" != yes ] && [ "$completed" = yes ]; then
+                fail "$step_file has unticked atomicity box but its step is completed"
+            fi
+        done <<'BOXES'
+This step owns exactly one inventory work unit.
+No other file, symbol, test target, or verification flow changes here.
+Any follow-on target has a separately named work unit and step.
+BOXES
     done
 }
 

@@ -187,7 +187,7 @@ awk -v row="| $unit_id | $unit_type | \`$unit_file\` | \`$scope\` | \`$subscope\
     printf '## Instructions\n\n§ 5.1\n<direct action on this one target>\n\n'
     printf '## Acceptance criteria\n\n§ 6.1\n<observable result for this target>\n\n'
     printf '## Handoff\n\n§ 7.1\n<what the next named work unit can rely on>\n\n'
-    printf '## Atomicity check\n\n- [x] This step owns exactly one inventory work unit.\n- [x] No other file, symbol, test target, or verification flow changes here.\n- [x] Any follow-on target has a separately named work unit and step.\n'
+    printf '## Atomicity check\n\n- [ ] This step owns exactly one inventory work unit.\n- [ ] No other file, symbol, test target, or verification flow changes here.\n- [ ] Any follow-on target has a separately named work unit and step.\n'
 } > "$step_tmp"
 
 # The goal edit is staged while the other two writes are still temps, so a
