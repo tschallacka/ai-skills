@@ -49,7 +49,9 @@ start_bg() { # NAME CMD... -> pid file + port file polled for 6s
     local name="$1"; shift
     ("$@" >"$work/port.$name" 2>"$work/err.$name" & echo $! >"$work/pid.$name")
     local i
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    # 15s: a cold interpreter start on a shared macOS runner can be slow,
+    # and a premature give-up reads as "never reported a port".
+    for i in $(seq 1 50); do
         [ -s "$work/port.$name" ] && break
         sleep 0.3
     done
@@ -59,7 +61,11 @@ rung_port=""
 
 serve_checks() { # NAME PORT — the identical-route contract every rung meets
     local name="$1" port="$2"
-    [ -n "$port" ] || { t_fail "$name never reported a port"; return; }
+    if [ -z "$port" ]; then
+        t_fail "$name never reported a port"
+        sed -n '1,8p' "$work/err.$name" >&2 || true
+        return
+    fi
     local got html sec
     got="$(fetch "http://127.0.0.1:$port/state.json" | norm_state)"
     t_assert_eq "$name /state.json equals the extractor" "$got" "$want_state"
