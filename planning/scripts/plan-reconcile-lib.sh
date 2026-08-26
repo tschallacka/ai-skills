@@ -21,6 +21,24 @@ fi
 # Prune a work-unit id from the inventory: drop its W row, remove it from
 # coverage rows (deleting a row only when it empties), and strip it from every
 # remaining "Depends on" column so no dangling dependency remains.
+# plan_prune_csv_cell LIST REMOVE — print LIST with the REMOVE entry cut out
+# of the comma set (entries whitespace-trimmed, order preserved). The output
+# equals the input when REMOVE is absent, so callers detect change by diff.
+plan_prune_csv_cell() {
+    local raw="$1" drop="$2" out="" p
+    local -a parts=()
+    IFS=',' read -r -a parts <<< "$raw"
+    for p in ${parts[@]+"${parts[@]}"}; do
+        p="${p#"${p%%[![:space:]]*}"}"
+        p="${p%"${p##*[![:space:]]}"}"
+        if [ "$p" = "$drop" ]; then continue
+        fi
+        [ -n "$out" ] && out="$out,"
+        out="$out$p"
+    done
+    printf '%s' "$out"
+}
+
 plan_prune_work_unit() {
     local inventory="$1" unit="$2" temporary
     [ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory" 66
@@ -36,35 +54,15 @@ plan_prune_work_unit() {
                     continue
                 fi
                 deps_raw="$(plan_table_cell "$rline" 8)"
-                out=""; changed=0
-                IFS=',' read -r -a dparts <<< "$deps_raw"
-                for p in ${dparts[@]+"${dparts[@]}"}; do
-                    p="${p#"${p%%[![:space:]]*}"}"
-                    p="${p%"${p##*[![:space:]]}"}"
-                    if [ "$p" = "$unit" ]; then changed=1
-                    else
-                        [ -n "$out" ] && out="$out,"
-                        out="$out$p"
-                    fi
-                done
-                if [ "$changed" = 1 ]; then
+                out="$(plan_prune_csv_cell "$deps_raw" "$unit")"
+                if [ "$out" != "$deps_raw" ]; then
                     [ -n "$out" ] || out="—"
                     rline="$(plan_table_set_cell "$rline" 8 "$out")"
                 fi
             elif [[ $rline == \|* ]]; then
                 ids_raw="$(plan_table_cell "$rline" 3)"
-                out=""; found=0
-                IFS=',' read -r -a iparts <<< "$ids_raw"
-                for p in ${iparts[@]+"${iparts[@]}"}; do
-                    p="${p#"${p%%[![:space:]]*}"}"
-                    p="${p%"${p##*[![:space:]]}"}"
-                    if [ "$p" = "$unit" ]; then found=1
-                    else
-                        [ -n "$out" ] && out="$out,"
-                        out="$out$p"
-                    fi
-                done
-                if [ "$found" = 1 ]; then
+                out="$(plan_prune_csv_cell "$ids_raw" "$unit")"
+                if [ "$out" != "$ids_raw" ]; then
                     if [ -z "$out" ]; then
                         printf 'plan: coverage row has no remaining ids after removing %s; row dropped\n' "$unit" >&2
                         continue
@@ -95,18 +93,12 @@ plan_goal_units() {
 # Re-derive a goal's Owned work units section from the inventory. The template
 # interleaves the "## Testing requirement" heading with the owned paragraphs, so
 # rebuild the whole region up to "## Goal-size exception", not just the blocks.
-plan_rewrite_owned_work_units() {
-    local goal_file="$1" inventory="$2" goal="$3" body_file idx id ch region
-    local testing_row testing_heading separator
-    [ -f "$goal_file" ] || plan_die "goal file not found: $goal_file" 66
-    # Preserve the current testing-requirement row (e.g. "| yes | reason |").
-    testing_row="$(plan_testing_requirement_row "$goal_file")"
-    [ -n "$testing_row" ] || testing_row='| no | <rationale> |'
-    testing_heading='## Testing requirement'
-    separator='|---|---|'
-    body_file="$(mktemp "${TMPDIR:-/tmp}/plan-owned.XXXXXX")"
-    trap 'rm -f "$body_file"' RETURN
-    idx=0
+# plan_owned_units_body BODY_FILE INVENTORY GOAL HEADING SEP ROW — write the
+# re-derived Owned-work-units body (§ 9.x entries, emptied-roster placeholder,
+# testing-requirement tail) for plan_rewrite_owned_work_units.
+plan_owned_units_body() {
+    local bfile="$1" inventory="$2" goal="$3" heading="$4" sep="$5" row="$6"
+    local idx=0 id ch
     {
         while IFS=$'\t' read -r id ch; do
             [ -n "$id" ] || continue
@@ -120,9 +112,24 @@ plan_rewrite_owned_work_units() {
         if [ "$idx" -eq 0 ]; then
             printf '§ 9.1\n<add work units with add-work-unit.sh>\n\n'
         fi
-        printf '%s\n\n' "$testing_heading"
-        printf '| Test required | Rationale |\n%s\n%s\n' "$separator" "$testing_row"
-    } > "$body_file"
+        printf '%s\n\n' "$heading"
+        printf '| Test required | Rationale |\n%s\n%s\n' "$sep" "$row"
+    } > "$bfile"
+}
+
+plan_rewrite_owned_work_units() {
+    local goal_file="$1" inventory="$2" goal="$3" body_file idx id ch region
+    local testing_row testing_heading separator
+    [ -f "$goal_file" ] || plan_die "goal file not found: $goal_file" 66
+    # Preserve the current testing-requirement row (e.g. "| yes | reason |").
+    testing_row="$(plan_testing_requirement_row "$goal_file")"
+    [ -n "$testing_row" ] || testing_row='| no | <rationale> |'
+    testing_heading='## Testing requirement'
+    separator='|---|---|'
+    body_file="$(mktemp "${TMPDIR:-/tmp}/plan-owned.XXXXXX")"
+    trap 'rm -f "$body_file"' RETURN
+    plan_owned_units_body "$body_file" "$inventory" "$goal" \
+        "$testing_heading" "$separator" "$testing_row"
     # Rebuild the region in one pass: print the "## Owned work units" heading,
     # then the re-derived body, then skip the old region until Goal-size
     # exception. The body intentionally omits the heading to avoid duplicating it.

@@ -95,6 +95,114 @@ validate_goal_testing_requirement() {
     plan_map_set goal_testing_required "$goal_name" "$required"
 }
 
+# plan_require_ticked_atomicity STEP_FILE PLAN_DIR GOAL STEP — relaxed
+# atomicity gate (W07): the three boxes must be present; ticked boxes may
+# carry an annotation suffix (auto-tick evidence); unticked boxes fail only
+# when the step is already completed in its goal progress tracker.
+plan_require_ticked_atomicity() {
+    local step_file="$1" plan_dir="$2" u_goal="$3" u_step="$4"
+    local sent tick line completed=no
+    if [ -f "$plan_dir/$u_goal/progress.md" ]; then
+        while IFS= read -r line; do
+            [ "$(plan_table_cell "$line" 3)" = "$u_step" ] || continue
+            case "$(plan_table_cell "$line" 5)" in *completed*) completed=yes ;; esac
+        done < "$plan_dir/$u_goal/progress.md"
+    fi
+    while IFS= read -r sent; do
+        [ -n "$sent" ] || continue
+        tick=no
+        while IFS= read -r line; do
+            case "$line" in
+                '- [x]'*" $sent"*|'- [X]'*" $sent"*) tick=yes; break ;;
+            esac
+        done < "$step_file"
+        if [ "$tick" != yes ] && [ "$completed" = yes ]; then
+            fail "$step_file has unticked atomicity box but its step is completed"
+        fi
+    done <<'BOXES'
+This step owns exactly one inventory work unit.
+No other file, symbol, test target, or verification flow changes here.
+Any follow-on target has a separately named work unit and step.
+BOXES
+}
+
+# validate_goal_testing_band PLAN_DIR GOAL UNIT_IDS — the test-unit tally and
+# companion-file requirement for one goal: testing required needs at least one
+# test/verification unit, a test unit needs the requirement, and non-docs
+# units in a testing goal need their -testing.md companion.
+validate_goal_testing_band() {
+    local plan_dir="$1" goal_name="$2" goal_unit_ids="$3"
+    local id test_units=0 goal_required companion
+    for id in $goal_unit_ids; do
+        plan_map_load unit_type "$id" || plan_map_value=""
+        case "$plan_map_value" in
+            test|verification) test_units=$((test_units + 1)) ;;
+        esac
+    done
+    plan_map_load goal_testing_required "$goal_name" || plan_map_value=""
+    goal_required="$plan_map_value"
+    if [ "$goal_required" = yes ] && [ "$test_units" -eq 0 ]; then
+        fail "$goal_name declares testing is required but has no test or verification work unit"
+    elif [ "$test_units" -gt 0 ] && [ "$goal_required" != yes ]; then
+        fail "$goal_name has a test or verification work unit but its testing requirement is not yes"
+    fi
+    if [ "$goal_required" = yes ]; then
+        for id in $goal_unit_ids; do
+            plan_map_load unit_type "$id" || plan_map_value=""
+            [ "$plan_map_value" = docs ] && continue
+            plan_map_load unit_step "$id" || plan_map_value=""
+            companion="$plan_dir/$goal_name/steps/$plan_map_value-testing.md"
+            [ -f "$companion" ] || fail "$id requires testing instructions at $companion"
+        done
+    fi
+}
+
+# require_goal_headings GOAL_FILE — every mandated narrative heading present.
+require_goal_headings() {
+    local goal_file="$1" heading
+    for heading in \
+        '## Current state and prior-goal handoffs' \
+        '## Outcome and definition of done' \
+        '## Why this goal is needed' \
+        '## Scope' \
+        '## Affected files, systems, data, and interfaces' \
+        '## Dependencies and handoffs' \
+        '## Implementation approach, risks, and edge cases' \
+        '## Owned work units' \
+        '## Testing requirement'; do
+        require_heading "$goal_file" "$heading"
+    done
+}
+
+# validate_goal_size_band GOAL_FILE GOAL_NAME COUNT UNIT_IDS — the one-unit
+# exception shape and the ten-unit split ceiling.
+validate_goal_size_band() {
+    local goal_file="$1" goal_name="$2" count="$3" goal_unit_ids="$4"
+    local only_id only_type
+    if [ "$count" -eq 1 ]; then
+        only_id="${goal_unit_ids# }"
+        plan_map_load unit_type "$only_id" || plan_map_value=""
+        only_type="$plan_map_value"
+        case "$only_type" in
+            docs|config|discovery|verification) ;;
+            *) fail "$goal_name has one $only_type work unit; add its test/proof or merge it into its demonstrable outcome" ;;
+        esac
+        require_heading "$goal_file" '## Goal-size exception'
+    elif [ "$count" -gt 10 ]; then
+        fail "$goal_name has $count work units; split it at a stable outcome boundary"
+    fi
+}
+
+# require_step_headings STEP_FILE — the seven mandated step sections present.
+require_step_headings() {
+    local step_file="$1" heading
+    for heading in '## Ownership' '## Change target' '## Objective' \
+        '## Instructions' '## Acceptance criteria' '## Handoff' \
+        '## Atomicity check'; do
+        require_heading "$step_file" "$heading"
+    done
+}
+
 plan_validate_goals() {
     load_goal_table_registry
     for goal_dir in "$plan_dir"/[0-9][0-9]-*/; do
@@ -105,18 +213,7 @@ plan_validate_goals() {
             fail "Missing goal.md for $goal_name"
             continue
         fi
-        for heading in \
-            '## Current state and prior-goal handoffs' \
-            '## Outcome and definition of done' \
-            '## Why this goal is needed' \
-            '## Scope' \
-            '## Affected files, systems, data, and interfaces' \
-            '## Dependencies and handoffs' \
-            '## Implementation approach, risks, and edge cases' \
-            '## Owned work units' \
-            '## Testing requirement'; do
-            require_heading "$goal_file" "$heading"
-        done
+        require_goal_headings "$goal_file"
         validate_goal_testing_requirement "$goal_name" "$goal_file"
         validate_goal_yes_no_tables "$goal_file"
         if grep -Fq '<required only when this goal has one permitted work unit>' "$goal_file"; then
@@ -132,41 +229,8 @@ plan_validate_goals() {
         if [ "$count" -eq 0 ]; then
             fail "$goal_name has no assigned work units"
         fi
-        if [ "$count" -eq 1 ]; then
-            only_id="${goal_unit_ids# }"
-            plan_map_load unit_type "$only_id" || plan_map_value=""
-            only_type="$plan_map_value"
-            case "$only_type" in
-                docs|config|discovery|verification) ;;
-                *) fail "$goal_name has one $only_type work unit; add its test/proof or merge it into its demonstrable outcome" ;;
-            esac
-            require_heading "$goal_file" '## Goal-size exception'
-        elif [ "$count" -gt 10 ]; then
-            fail "$goal_name has $count work units; split it at a stable outcome boundary"
-        fi
-        test_units=0
-        for id in $goal_unit_ids; do
-            plan_map_load unit_type "$id" || plan_map_value=""
-            case "$plan_map_value" in
-                test|verification) test_units=$((test_units + 1)) ;;
-            esac
-        done
-        plan_map_load goal_testing_required "$goal_name" || plan_map_value=""
-        goal_required="$plan_map_value"
-        if [ "$goal_required" = yes ] && [ "$test_units" -eq 0 ]; then
-            fail "$goal_name declares testing is required but has no test or verification work unit"
-        elif [ "$test_units" -gt 0 ] && [ "$goal_required" != yes ]; then
-            fail "$goal_name has a test or verification work unit but its testing requirement is not yes"
-        fi
-        if [ "$goal_required" = yes ]; then
-            for id in $goal_unit_ids; do
-                plan_map_load unit_type "$id" || plan_map_value=""
-                [ "$plan_map_value" = docs ] && continue
-                plan_map_load unit_step "$id" || plan_map_value=""
-                companion="$plan_dir/$goal_name/steps/$plan_map_value-testing.md"
-                [ -f "$companion" ] || fail "$id requires testing instructions at $companion"
-            done
-        fi
+        validate_goal_size_band "$goal_file" "$goal_name" "$count" "$goal_unit_ids"
+        validate_goal_testing_band "$plan_dir" "$goal_name" "$goal_unit_ids"
     done
 }
 
@@ -194,13 +258,7 @@ plan_validate_step_files() {
             fail "$id references missing step file $step_file"
             continue
         fi
-        require_heading "$step_file" '## Ownership'
-        require_heading "$step_file" '## Change target'
-        require_heading "$step_file" '## Objective'
-        require_heading "$step_file" '## Instructions'
-        require_heading "$step_file" '## Acceptance criteria'
-        require_heading "$step_file" '## Handoff'
-        require_heading "$step_file" '## Atomicity check'
+        require_step_headings "$step_file"
         grep -Fqx -- "- Goal: \`$u_goal\`" "$step_file" || fail "$step_file has wrong owning goal for $id"
         grep -Fqx -- "- Work unit: \`$id\`" "$step_file" || fail "$step_file has wrong work-unit ID"
         grep -Fqx -- "- Type: \`$u_type\`" "$step_file" || fail "$step_file has wrong type for $id"
@@ -210,34 +268,7 @@ plan_validate_step_files() {
         [ "$actual_file" = "$u_file" ] || fail "$step_file file does not match $id inventory row"
         [ "$actual_scope" = "$u_scope" ] || fail "$step_file primary scope does not match $id inventory row"
         [ "$actual_subscope" = "$u_subscope" ] || fail "$step_file subscope does not match $id inventory row"
-        # Relaxed atomicity (W07): the three boxes must be present. Ticked
-        # boxes may carry an annotation suffix (auto-tick evidence). Unticked
-        # boxes fail only when this step is already marked completed in its
-        # goal progress tracker.
-        local sent tick line
-        local completed=no
-        if [ -f "$plan_dir/$u_goal/progress.md" ]; then
-            while IFS= read -r line; do
-                [ "$(plan_table_cell "$line" 3)" = "$u_step" ] || continue
-                case "$(plan_table_cell "$line" 5)" in *completed*) completed=yes ;; esac
-            done < "$plan_dir/$u_goal/progress.md"
-        fi
-        while IFS= read -r sent; do
-            [ -n "$sent" ] || continue
-            tick=no
-            while IFS= read -r line; do
-                case "$line" in
-                    '- [x]'*" $sent"*|'- [X]'*" $sent"*) tick=yes; break ;;
-                esac
-            done < "$step_file"
-            if [ "$tick" != yes ] && [ "$completed" = yes ]; then
-                fail "$step_file has unticked atomicity box but its step is completed"
-            fi
-        done <<'BOXES'
-This step owns exactly one inventory work unit.
-No other file, symbol, test target, or verification flow changes here.
-Any follow-on target has a separately named work unit and step.
-BOXES
+        plan_require_ticked_atomicity "$step_file" "$plan_dir" "$u_goal" "$u_step"
     done
 }
 
