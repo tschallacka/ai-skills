@@ -78,9 +78,6 @@ jq -e --arg id "$bid" '.bugs[] | select(.id == $id)
 
 # ---- a damaged register is refused, naming the rebuild ----------------------
 jq '.bugs[-1].reproduce = ""' "$bugs" > "$work/dmg.json" && mv "$work/dmg.json" "$bugs"
-cp "$bugs" /tmp/opencode/dbg-bugs.json
-source "$scripts/register-lib.sh"
-reg_findings bug /tmp/opencode/dbg-bugs.json > /tmp/opencode/dbg-find.txt 2>&1
 out="$(run_bugup "$bid" --priority high)"
 case "$out" in
     *'register-rebuild.sh'*) : ;;

@@ -80,20 +80,7 @@ awk -v wanted_goal="$goal_name" -v replacement="$status" '
 }
 mv "$temporary_file" "$progress_file"
 
-read -r completed total < <(
-    completed=0; total=0
-    while IFS= read -r prow || [ -n "$prow" ]; do
-        case "$prow" in '|'*) ;; *) continue ;; esac
-        pgoal="$(plan_table_cell "$prow" 2)"
-        pstatus="$(plan_table_cell "$prow" 4)"
-        case "$pgoal" in Goalname) continue ;; esac
-        [[ $pgoal =~ ^-+$ ]] && continue
-        [[ $pstatus =~ ^-+$ ]] && continue
-        total=$((total + 1))
-        case "$pstatus" in *completed*) completed=$((completed + 1)) ;; esac
-    done < "$progress_file"
-    printf '%s %s\n' "$completed" "$total"
-)
+read -r completed total < <(plan_count_progress_rows "$progress_file" 4)
 
 width=20
 percent=0

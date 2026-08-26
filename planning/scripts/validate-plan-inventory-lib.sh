@@ -26,6 +26,23 @@ set -euo pipefail
 # on the floor. Keys are work-unit ids and goal directory names.
 unit_ids=()
 
+
+# plan_emit_coverage_id_cells INVENTORY — the third cell of every DoD-coverage
+# data row, stopping at the Work units heading. Top-level because bash 3.2
+# cannot parse `case` inside a command substitution (see PORTABILITY.md).
+plan_emit_coverage_id_cells() {
+    local cline ckey
+    while IFS= read -r cline || [ -n "$cline" ]; do
+        case "$cline" in
+            '## Work units'*) return 0 ;;
+        esac
+        case "$cline" in '|'*) ;; *) continue ;; esac
+        ckey="$(plan_table_cell "$cline" 2)"
+        case "$ckey" in 'Required outcome'*|'---'|---*|*---) continue ;; esac
+        plan_table_cell "$cline" 3
+    done < "$1"
+}
+
 plan_validate_inventory() {
     while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
         [ -n "$id" ] || continue
@@ -120,21 +137,7 @@ plan_validate_inventory() {
 
     while IFS= read -r coverage_id; do
         [ -n "$coverage_id" ] && plan_map_set coverage_ids "$coverage_id" 1
-    done < <(
-        emit_coverage_ids() {
-            local cline cin_table=0 ckey
-            while IFS= read -r cline || [ -n "$cline" ]; do
-                case "$cline" in
-                    '## Work units'*) return 0 ;;
-                esac
-                case "$cline" in '|'*) ;; *) continue ;; esac
-                ckey="$(plan_table_cell "$cline" 2)"
-                case "$ckey" in 'Required outcome'*|'---'|---*|*---) continue ;; esac
-                plan_table_cell "$cline" 3
-            done < "$inventory"
-        }
-        emit_coverage_ids | grep -oE 'W[0-9][0-9]+' || true
-    )
+    done < <(plan_emit_coverage_id_cells "$inventory" | grep -oE 'W[0-9][0-9]+' || true)
     if [ "$(plan_map_count coverage_ids)" -eq 0 ]; then
         fail "Definition-of-done coverage has no work-unit references"
     fi

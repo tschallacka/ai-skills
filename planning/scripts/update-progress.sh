@@ -44,20 +44,7 @@ progress_file="$goal_dir/progress.md"
 [ -f "$progress_file" ] || plan_die "Progress file not found: $progress_file" 66
 plan_git_snapshot "$(dirname "$goal_dir")"
 
-read -r completed total < <(
-    completed=0; total=0
-    while IFS= read -r prow || [ -n "$prow" ]; do
-        case "$prow" in '|'*) ;; *) continue ;; esac
-        pgoal="$(plan_table_cell "$prow" 2)"
-        pstatus="$(plan_table_cell "$prow" 5)"
-        case "$pgoal" in Goalname) continue ;; esac
-        [[ $pgoal =~ ^-+$ ]] && continue
-        [[ $pstatus =~ ^-+$ ]] && continue
-        total=$((total + 1))
-        case "$pstatus" in *completed*) completed=$((completed + 1)) ;; esac
-    done < "$progress_file"
-    printf '%s %s\n' "$completed" "$total"
-)
+read -r completed total < <(plan_count_progress_rows "$progress_file" 5)
 
 # Canonical percent/bar/icon derivation. Half-up rounding (+ total / 2) and the
 # 20-column width are the on-disk contract.
