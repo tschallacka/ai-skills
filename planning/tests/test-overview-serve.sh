@@ -63,7 +63,10 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
     local name="$1" port="$2"
     if [ -z "$port" ]; then
         t_fail "$name never reported a port"
-        sed -n '1,8p' "$work/err.$name" >&2 || true
+        printf 'stderr:\n' >&2
+        cat "$work/err.$name" >&2 || true
+        printf 'port-file:\n' >&2
+        cat "$work/port.$name" >&2 || true
         return
     fi
     local got html sec
@@ -80,8 +83,8 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
 
 # ---- python3 rung ----------------------------------------------------------
 if command -v python3 >/dev/null 2>&1; then
-    start_bg py python3 "$scripts/runtime/overview-server.py" "$plan_dir"
-    rung_port="$(head -1 "$work/port.py")"
+    start_bg python3 python3 "$scripts/runtime/overview-server.py" "$plan_dir"
+    rung_port="$(head -1 "$work/port.python3")"
     serve_checks python3 "$rung_port"
     kill "$(cat "$work/pid.py")" 2>/dev/null || true; rm -f "$work/pid.py"
     sleep 0.4
