@@ -81,7 +81,24 @@ while IFS= read -r gdir; do
     [ -f "$gdir/goal.md" ] || continue
     gid="$(basename "$gdir")"
     outcome="$(sec "$gdir/goal.md" 'Outcome and definition of done' | head -3)"
-    treq="$(awk '/Testing requirement|Testing-requirement/ { f = 1; next } /^## / && f { exit } f && /^\|/ && $0 !~ /Goal|---/' "$gdir/goal.md" | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $2 ": " $3 }')"
+    treq=""
+    trq_in=0
+    while IFS= read -r trq_line || [ -n "$trq_line" ]; do
+        case "$trq_line" in
+            *'Testing requirement'*|*'Testing-requirement'*) trq_in=1; continue ;;
+        esac
+        [ "$trq_in" = 1 ] || continue
+        case "$trq_line" in '## '*) break ;; esac
+        case "$trq_line" in '|'*) ;; *) continue ;; esac
+        # Row filter and cell spacing replicate the awk this replaced: the
+        # raw line gate (Goal or dash marker skips), the key cell UNTRIMMED,
+        # the value cell trimmed only.
+        case "$trq_line" in *Goal*|*---*) continue ;; esac
+        trq_raw2="$(printf '%s\n' "$trq_line" | tr '|' '\n' | sed -n 2p)"
+        trq_val3="$(printf '%s\n' "$trq_line" | tr '|' '\n' | sed -n 3p | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [ -n "$treq" ] && treq="$treq"$'\n'
+        treq="$treq$trq_raw2: $trq_val3"
+    done < "$gdir/goal.md"
     [ $gfirst = 1 ] && gfirst=0 || printf ','
     printf '{"id":%s,"outcome":%s,"testingRequirement":%s}' \
         "$(jstr "$gid")" "$(jstr "$outcome")" "$(jstr "$treq")"
@@ -126,7 +143,7 @@ if [ -f "$inv" ]; then
     while IFS= read -r line; do
         # Only well-formed single-line rows: at least 10 inner columns.
         case "$line" in '| W'*) ;; *) continue ;; esac
-        nfields="$(printf '%s' "$line" | awk -F'|' '{print NF}')"
+        nfields=$(( $(printf '%s' "$line" | tr -cd '|' | wc -c) + 1 ))
         [ "$nfields" -ge 10 ] || continue
 uid="$(plan_table_cell "$line" 2)"
 deps="$(plan_table_cell "$line" 8)"
