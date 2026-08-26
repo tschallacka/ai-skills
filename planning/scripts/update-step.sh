@@ -75,22 +75,30 @@ plan_git_snapshot "$(dirname "$goal_dir")"
 temporary_file="${progress_file}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT
 
-awk -F'|' -v wanted_step="$step_name" -v replacement="$status" '
-    BEGIN { found = 0 }
-    /^\|/ {
-        step = $3
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", step)
-        if (step == wanted_step) {
-            sub(/\|[[:space:]]*[^|]*[[:space:]]*\|[[:space:]]*$/, "| " replacement " |")
-            found++
-        }
-    }
-    { print }
-    END { if (found != 1) exit 1 }
-' "$progress_file" > "$temporary_file" || {
+# Trailing-status rewrite through the shared cell convention (cell 2 is the
+# first data cell, so the step name lives in cell 3 exactly as the awk -F
+# reader assumed; the status is the last data cell).
+found=0
+: > "$temporary_file"
+while IFS= read -r row || [ -n "$row" ]; do
+    case "$row" in
+        '|'*)
+            if [ "$(plan_table_cell "$row" 3)" = "$step_name" ]; then
+                row_parts=()
+                while IFS= read -r cell; do row_parts+=("$cell"); done \
+                    < <(printf '%s\n' "$row" | tr '|' '\n')
+                row_parts[$(( ${#row_parts[@]} - 2 ))]=" $status "
+                row="$(IFS='|'; printf '%s' "${row_parts[*]}")"
+                found=$((found + 1))
+            fi
+            ;;
+    esac
+    printf '%s\n' "$row" >> "$temporary_file"
+done < "$progress_file"
+if [ "$found" -ne 1 ]; then
     printf 'Step row not found exactly once: %s\n' "$step_name" >&2
     exit 1
-}
+fi
 
 mv "$temporary_file" "$progress_file"
 
