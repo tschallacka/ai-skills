@@ -49,7 +49,7 @@ check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
 # Counted with grep -L over planning/tests, not the scripts directory the other
 # rows use. `fail() { t_fail "$*"; }` shims are deliberate and must not count:
 # 32 tests have one, and they are how the call sites stayed unchanged.
-check_cap 'tests not sourcing lib-test.sh' 8 \
+check_cap 'tests not sourcing lib-test.sh' 7 \
     "$( { grep -L 'lib-test\.sh' "$root"/tests/test-*.sh || true; } | wc -l | tr -d ' ')"
 
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
@@ -61,7 +61,7 @@ check_cap 'tests not sourcing lib-test.sh' 8 \
 # 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
 # a new distinct table, admitted on the same terms as the 29th. The shared
 # reader that would absorb both remains future work tracked in MAINTAINER §3.
-check_cap "inline awk -F'|' parsers" 35 \
+check_cap "inline awk -F'|' parsers" 30 \
     "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a

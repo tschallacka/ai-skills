@@ -35,16 +35,17 @@ if [ "$fl_cap" -gt "$approved_fl" ]; then
 fi
 
 if [ "$fl_cap" -lt "$approved_fl" ]; then
-    printf 'gate-caps: function-length cap lowered from %s to %s; update gate-caps.json\n' \
-        "$approved_fl" "$fl_cap" >&2
+    printf 'gate-caps: function-length cap lowered from %s to %s but gate-caps.json still records %s; update gate-caps.json in the same commit\n' \
+        "$approved_fl" "$fl_cap" "$approved_fl" >&2
+    fail "function-length cap diverged from gate-caps.json"
 fi
 
 # ---- duplication caps ----------------------------------------------------------
 dup_script="$repo_root/planning/tests/test-duplication-ratchet.sh"
 dup_failed=0
 while IFS= read -r line; do
-    label="$(printf '%s' "$line" | sed "s/^check_cap '//; s/'.*//")"
-    cap="$(printf '%s' "$line" | sed "s/^check_cap '[^']*' \([0-9]*\).*/\1/")"
+    label="$(printf '%s' "$line" | sed -E "s/^check_cap (['\"])(.*)\\1 [0-9]*.*$/\\2/")"
+    cap="$(printf '%s' "$line" | sed -E "s/^check_cap (['\"]).*\\1 ([0-9]*).*$/\\2/")"
     [ -n "$label" ] && [ -n "$cap" ] || continue
     approved="$(jq -r --arg k "$label" '.duplication_caps[$k] // ""' "$caps_file")"
     if [ -z "$approved" ] || [ "$approved" = "null" ]; then
@@ -58,10 +59,11 @@ while IFS= read -r line; do
         dup_failed=1
     fi
     if [ "$cap" -lt "$approved" ]; then
-        printf 'gate-caps: duplication cap '"'"'%s'"'"' lowered from %s to %s; update gate-caps.json\n' \
-            "$label" "$approved" "$cap" >&2
+        printf 'gate-caps: duplication cap '"'"'%s'"'"' lowered from %s to %s but gate-caps.json still records %s; update gate-caps.json in the same commit\n' \
+            "$label" "$approved" "$cap" "$approved" >&2
+        dup_failed=1
     fi
-done < <(grep "^check_cap '" "$dup_script")
+done < <(grep -E '^check_cap (["'"'"'])' "$dup_script")
 
 if [ "$dup_failed" -ne 0 ]; then
     fail "duplication ratchet caps diverged from gate-caps.json"
