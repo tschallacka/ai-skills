@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # MODE: DEV
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+t_begin
+
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-progress-test.XXXXXX")"
@@ -47,4 +51,4 @@ fi
 
 "$script_dir/plan-mutate.sh" validate "$temporary_root" >/dev/null 2>&1 || true
 
-printf 'Progress helper regression test passed.\n'
+t_end
