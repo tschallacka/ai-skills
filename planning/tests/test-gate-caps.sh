@@ -35,14 +35,20 @@ if [ "${1:-}" = "--clamp" ]; then
     dup_out="$("$BASH" "$dup_test" 2>&1 || true)"
     while IFS= read -r msg; do
         [ -n "$msg" ] || continue
-        line="$(printf '%s' "$msg" | sed -E 's/^.*ratchet: (.*) is down to ([0-9]+) \(cap ([0-9]+)\).*$/\1|->\2|->\3/')"
-        case "$line" in
-            *'|->'*) : ;;
+        # BSD sed -E has no backreferences; parse the ratchet message in bash.
+        rest="${msg#*ratchet: }"
+        case "$rest" in
+            *" is down to "*) : ;;
             *) continue ;;
         esac
-        label="${line%%|->*}"
-        rest="${line#*|->}"
-        new="${rest%%|->*}"; old="${rest#*|->}"
+        label="${rest%% is down to *}"
+        rest="${rest#* is down to }"
+        new="${rest%% *}"
+        rest="${rest#*(cap }"
+        old="${rest%%)*}"
+        case "$old" in
+            ''|*[!0-9]*) continue ;;
+        esac
         ln="$(grep -nF -- "$label" "$dup_test" | head -1 | cut -d: -f1)"
         [ -n "$ln" ] || fail "clamp: cannot find check_cap line for '$label'"
         sed_line="$(sed -n "${ln}p" "$dup_test")"
@@ -100,8 +106,17 @@ fi
 
 dup_failed=0
 while IFS= read -r line; do
-    label="$(printf '%s' "$line" | sed -E "s/^check_cap (['\"])(.*)\\1 [0-9]*.*$/\\2/")"
-    cap="$(printf '%s' "$line" | sed -E "s/^check_cap (['\"]).*\\1 ([0-9]*).*$/\\2/")"
+    # BSD sed -E has no backreferences, so parse in bash: strip the command
+    # word, the opening quote ends the label, the first number token after
+    # the closing quote is the cap.
+    rest="${line#check_cap }"
+    q="${rest%"${rest#?}"}"
+    rest="${rest#"$q"}"
+    label="${rest%%"$q"*}"
+    after="${rest#*"$q"}"
+    cap="${after%%[!0-9]*}"
+    [ -n "$cap" ] || cap="${after#*[!0-9]}"
+    cap="${cap%%[!0-9]*}"
     [ -n "$label" ] && [ -n "$cap" ] || continue
     approved="$(jq -r --arg k "$label" '.duplication_caps[$k] // ""' "$caps_file")"
     if [ -z "$approved" ] || [ "$approved" = "null" ]; then

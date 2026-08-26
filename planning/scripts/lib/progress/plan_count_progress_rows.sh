@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+# MODE: DEV
+# PACKAGE: PROD
 # plan_count_progress_rows FILE STATUS_CELL — print "completed total" for a
 # progress tracker table: every data row counts, rows whose status cell
 # contains "completed" count twice. Header (Goalname) and dash separator rows

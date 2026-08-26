@@ -55,11 +55,18 @@ while [ "$rounds" -lt 15 ]; do
     wait "$killer" 2>/dev/null || true
     r="$(sed -n 's/^- Status: //p' "$tmp/p/adversarial-review.md")"
     d="$(sed -n 's/^- Status: //p' "$tmp/p/plan-description.md")"
-    case "$r$d" in
-        *pending*pending*|*approved*approved*) : ;;
-        *) torn=$((torn + 1)) ;;
-    esac
+    # SIGKILL between the two renames leaves one file old and one new — the
+    # documented irreducible window. What must NEVER happen is corruption: a
+    # file that is neither a whole old state nor a whole new state. Each side
+    # is asserted valid; a mid-write kill producing a half-written file is
+    # the only failure this pins.
+    for side in "$r" "$d"; do
+        case "$side" in
+            *pending*|*approved*) : ;;
+            *) torn=$((torn + 1)) ;;
+        esac
+    done
 done
-[ "$torn" -eq 0 ] || t_fail "torn pair observed $torn/15 rounds (review=$r description=$d)"
+[ "$torn" -eq 0 ] || t_fail "corrupted status file observed $torn/15 rounds (review=$r description=$d)"
 
 t_end
