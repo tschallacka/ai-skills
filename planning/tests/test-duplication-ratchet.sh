@@ -30,7 +30,7 @@ check_cap() {
     if [ "$actual" -gt "$cap" ]; then
         note_fail "$label grew to $actual (cap $cap): use the helper in MAINTAINER.md section 3 instead of adding a copy"
     elif [ "$actual" -lt "$cap" ]; then
-        note_fail "$label is down to $actual (cap $cap): lower the cap and update MAINTAINER.md section 3 in this commit"
+        note_fail "$label is down to $actual (cap $cap): lower the cap and update MAINTAINER.md section 3 in this commit (tests/test-gate-caps.sh --clamp applies the low mechanically)"
     fi
 }
 
