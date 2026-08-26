@@ -8,11 +8,21 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 t_begin
 
 scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
-plan_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.plans/harden-plan-data-parsing"
-[ -d "$plan_dir" ] || plan_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.plans/overview-review-and-live-serve"
-[ -d "$plan_dir" ] || t_fail "no self-hosted plan fixture under .plans/"
 work="$(mktemp -d "${TMPDIR:-/tmp}/overview-serve.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
+
+# Self-contained fixture: .plans/ is gitignored, so the test builds a real
+# (small) plan with the sanctioned creators — a served page needs goals,
+# units and a review to render every panel.
+plan_dir="$work/plan"
+mkdir -p "$work/src" && printf 'probe target\n' > "$work/src/probe.sh"
+PLANS_ROOT="$work" "$scripts/create-plan.sh" "$plan_dir" 'Serve probe' >/dev/null
+"$scripts/add-goal.sh" "$plan_dir" 01-probe 'Probe goal' 'Probe outcome' >/dev/null
+"$scripts/add-work-unit.sh" --plan-dir "$plan_dir" --repo-root "$work" \
+    --id W01 --type source --file src/probe.sh --scope probe \
+    --subscope N/A --change 'Probe unit' --depends-on - \
+    --goal 01-probe --step 01-step-probe >/dev/null
+"$scripts/add-adversarial-finding.sh" "$plan_dir" AR-1 'Probe finding.' 'None.' resolved >/dev/null 2>&1 || true
 
 fetch() { # URL -> body on stdout (curl when present, python3 otherwise)
     if command -v curl >/dev/null 2>&1; then

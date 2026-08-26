@@ -69,6 +69,10 @@ exempt() { # <path> → prints the reason, or nothing
             printf 'a fixture; its bytes are the test input\n' ;;
         *.json | *.jsonl | *.pub | */FIXTURE-VERSION)
             printf 'the format has no comment syntax\n' ;;
+        # Interpreter payloads whose comment syntax the marker reader does
+        # not speak; the manifest is the registration that ships them.
+        planning/scripts/runtime/*.py | planning/scripts/runtime/*.js | planning/scripts/runtime/*.pl)
+            printf 'a runtime payload in its own language; registered by manifest\n' ;;
         planning/PACKAGE-MANIFEST.tsv | planning/PACKAGE-MAP.tsv)
             printf 'structured data with its own cross-check\n' ;;
         *.gitignore)
