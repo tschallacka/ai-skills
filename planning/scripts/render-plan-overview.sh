@@ -413,11 +413,15 @@ subs_file="$(mktemp "${TMPDIR:-/tmp}/overview-subs.XXXXXX")"
 out_tmp="$(mktemp "${TMPDIR:-/tmp}/overview-out.XXXXXX")"
 trap 'rm -f "$subs_file" "$out_tmp"' EXIT
 
+# Serve mode disables the refresh timer: the page polls /state.json instead.
+effective_refresh="$refresh"
+if [ "$serve" = true ]; then effective_refresh=0; fi
+
 jq -n \
     --arg plan_name "$(esc "$plan_name")" \
     --arg state "$state" \
     --arg phase_line "$(esc "$phase_line")" \
-    --arg refresh "$refresh" \
+    --arg refresh "$effective_refresh" \
     --arg generated "$generated" \
     --arg n_goals "$goals_count" \
     --arg n_steps "$total_steps" \
@@ -446,6 +450,8 @@ jq -n \
     --arg findings_panel "$(build_findings_panel "$review_file")" \
     --arg ticker "$ticker" \
     --arg footer "$footer" \
+    --arg meta_refresh_tag "$(if [ "$serve" = true ]; then printf ''; else printf '<meta http-equiv="refresh" content="%s">' "$effective_refresh"; fi)" \
+    --arg is_serve "$([ "$serve" = true ] && echo true || echo false)" \
     '{
         PLAN_NAME: $plan_name, STATE: $state, PHASE_LINE: $phase_line,
         REFRESH: $refresh, REFRESH_JS: $refresh, GENERATED: $generated,
@@ -459,7 +465,10 @@ jq -n \
         STEP_LEDGER: $ledger, IDENTITY_PANEL: $identity_panel,
         STEP_DETAILS: $step_details, DEP_GRAPH: $dep_graph,
         TESTS_PANEL: $tests_panel, COVERAGE_PANEL: $coverage_panel,
-        FINDINGS_PANEL: $findings_panel, TICKER: $ticker, FOOTER: $footer
+        FINDINGS_PANEL: $findings_panel,
+        META_REFRESH_TAG: $meta_refresh_tag,
+        IS_SERVE: $is_serve,
+        TICKER: $ticker, FOOTER: $footer
     }' > "$subs_file"
 
 # Single jq call substitutes all tokens. Multi-line values are native JSON
