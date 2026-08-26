@@ -2804,6 +2804,9 @@ tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
 tests/test-gate-caps.sh
+tests/test-atomicity-flow.sh
+tests/test-plan-data-lib.sh
+tests/test-writer-hardening.sh
 tests/test-overview-state.sh
 scripts/register-lib.sh
 scripts/todo-add.sh

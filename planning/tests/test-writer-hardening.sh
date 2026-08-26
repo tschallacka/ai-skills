@@ -44,8 +44,8 @@ rounds=0; torn=0
 while [ "$rounds" -lt 15 ]; do
     rounds=$((rounds + 1))
     # reset to approved-able pending state
-    sed -i 's/Status: `✅ approved`/Status: `💤 pending`/' "$tmp/p/adversarial-review.md" 2>/dev/null || true
-    sed -i 's/Status: ✅ approved/Status: 💤 pending/' "$tmp/p/plan-description.md" 2>/dev/null || true
+    t_sed_i 's/Status: `✅ approved`/Status: `💤 pending`/' "$tmp/p/adversarial-review.md" 2>/dev/null || true
+    t_sed_i 's/Status: ✅ approved/Status: 💤 pending/' "$tmp/p/plan-description.md" 2>/dev/null || true
     "$scripts/update-plan-content.sh" -rv "$tmp/p" pending >/dev/null 2>&1 || true
     "$scripts/update-plan-content.sh" -rv "$tmp/p" approved >/dev/null 2>&1 &
     killer=$!

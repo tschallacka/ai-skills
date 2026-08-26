@@ -130,28 +130,31 @@ fi
 changed="$(git -C "$repo_root" diff --name-only "$since_ref" \
     | grep -v "^$(printf '%s' "${plan_dir_root#"$repo_root"/}")/" | sort -u)"
 extra="$(printf '%s\n' "$changed" | grep -Fxv "$declared_target" || true)"
+violation=""
+[ -z "$extra" ] || violation=" VIOLATION: also touched $(printf '%s' "$extra" | paste -s -d, -)"
 step_file="$goal_dir/steps/$step_name.md"
 [ -f "$step_file" ] || { printf 'atomicity: step file missing: %s\n' "$step_file" >&2; exit 0; }
-python3 - "$step_file" <<PYATOMIC
-import re, sys
-path = sys.argv[1]
-text = open(path).read()
-extras = """$extra""".strip()
-violation = (" VIOLATION: also touched " + ", ".join(sorted(extras.splitlines()))) if extras else ""
-boxes = [
-    "This step owns exactly one inventory work unit.",
-    "No other file, symbol, test target, or verification flow changes here.",
-    "Any follow-on target has a separately named work unit and step.",
-]
-out = text
-for i, sent in enumerate(boxes):
-    pat = re.compile(r"- \[ \] (" + re.escape(sent) + r")( VIOLATION:[^\n]*)?")
-    repl = "- [x] " + sent + (violation if i == 2 else "")
-    out, n = pat.subn(repl, out, count=1)
-    if n == 0:
-        print("atomicity: box not found: " + sent, file=sys.stderr)
-open(path, "w").write(out)
-PYATOMIC
+awk -v violation="$violation" '
+    BEGIN {
+        n = split("This step owns exactly one inventory work unit.\nNo other file, symbol, test target, or verification flow changes here.\nAny follow-on target has a separately named work unit and step.", want, "\n")
+    }
+    {
+        line = $0
+        for (i = 1; i <= n; i++) {
+            prefix = "- [ ] " want[i]
+            if (index(line, prefix) == 1) {
+                suffix = (i == 3 && violation != "") ? violation : ""
+                line = "- [x] " want[i] suffix
+                found[i] = 1
+            }
+        }
+        print line
+    }
+    END {
+        for (i = 1; i <= n; i++)
+            if (!found[i]) printf "atomicity: box not found: %s\n", want[i] > "/dev/stderr"
+    }
+' "$step_file" > "$step_file.tmp.$$" && mv "$step_file.tmp.$$" "$step_file"
 if [ -n "$extra" ]; then
     printf 'atomicity: VIOLATION — also touched: %s\n' "$(printf '%s' "$extra" | tr '\n' ' ')" >&2
 else

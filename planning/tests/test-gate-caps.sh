@@ -32,7 +32,7 @@ fail() { printf 'gate-caps: %s\n' "$1" >&2; exit 1; }
 # ---- --clamp: apply observed lows ---------------------------------------------
 if [ "${1:-}" = "--clamp" ]; then
     lowered=0; growth=0
-    dup_out="$(bash "$dup_test" 2>&1 || true)"
+    dup_out="$("$BASH" "$dup_test" 2>&1 || true)"
     while IFS= read -r msg; do
         [ -n "$msg" ] || continue
         line="$(printf '%s' "$msg" | sed -E 's/^.*ratchet: (.*) is down to ([0-9]+) \(cap ([0-9]+)\).*$/\1|->\2|->\3/')"
@@ -56,13 +56,14 @@ if [ "${1:-}" = "--clamp" ]; then
         printf 'gate-caps: lowered %s %s -> %s\n' "$label" "$old" "$new"
         lowered=1
     done <<< "$(printf '%s\n' "$dup_out" | grep 'is down to')"
-    if printf '%s\n' "$dup_out" | grep -q 'grew to'; then
+    case "$dup_out" in *'grew to'*) dup_grew=1 ;; *) dup_grew=0 ;; esac
+    if [ "$dup_grew" = 1 ]; then
         printf 'gate-caps: counts GREW above their caps — clamp applied the lowerings above but the growth needs the duplication removed:\n' >&2
         printf '%s\n' "$dup_out" | grep 'grew to' >&2
         growth=1
     fi
 
-    fl_out="$(bash "$fl_test" 2>&1 || true)"
+    fl_out="$("$BASH" "$fl_test" 2>&1 || true)"
     fl_line="$(printf '%s\n' "$fl_out" | sed -n 's/^\([0-9][0-9]*\) function(s) exceed the 40-line cap (cap \([0-9][0-9]*\)): lower the cap in this commit.*$/\1|->\2/p' | head -1)"
     if [ -n "$fl_line" ]; then
         new="${fl_line%%|->*}"; old="${fl_line#*|->}"
@@ -73,14 +74,15 @@ if [ "${1:-}" = "--clamp" ]; then
         printf 'gate-caps: lowered function_length_cap %s -> %s\n' "$old" "$new"
         lowered=1
     fi
-    if printf '%s\n' "$fl_out" | grep -q 'New over-cap code must be split'; then
+    case "$fl_out" in *'New over-cap code must be split'*) fl_grew=1 ;; *) fl_grew=0 ;; esac
+    if [ "$fl_grew" = 1 ]; then
         printf 'gate-caps: over-cap functions GREW above the cap — clamp applied any lowerings above but the growth needs the code split\n' >&2
         growth=1
     fi
 
     [ "$lowered" = 1 ] && printf '%s\n' 'gate-caps: reminder — update MAINTAINER.md section 3 rows in the SAME commit'
     [ "$growth" = 0 ] || exit 1
-    exec bash "$0"
+    exec "$BASH" "$0"
 fi
 
 # ---- property 1: test caps == json --------------------------------------------
