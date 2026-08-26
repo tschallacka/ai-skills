@@ -60,6 +60,29 @@ plan_cleanup() {
     fi
 }
 
+# plan_count_units INVENTORY_FILE — count work-unit rows (| WNN | ...) in a
+# work-unit inventory, ignoring DoD coverage rows and separators. Parity with
+# the historical awk census is pinned by test-plan-data-lib.sh.
+plan_count_units() {
+    [ -n "${1:-}" ] || { printf 'plan_count_units: inventory required\n' >&2; return 1; }
+    [ -f "$1" ] || { printf 'plan_count_units: no such file: %s\n' "$1" >&2; return 1; }
+    local n=0 line id
+    while IFS= read -r line; do
+        case "$line" in '| W'[0-9]*) ;; *) continue ;; esac
+        id=$(plan_table_cell "$line" 2)
+        case "$id" in W[0-9][0-9]) n=$((n + 1));; esac
+    done < "$1"
+    printf '%s\n' "$n"
+}
+
+# plan_cycle_count DOC_FILE — count '## Cycle N' review-round headings.
+# CRLF is normalised before counting; an empty or missing document yields 0.
+plan_cycle_count() {
+    [ -n "${1:-}" ] || { printf 'plan_cycle_count: document required\n' >&2; return 1; }
+    [ -f "$1" ] || { printf '%s\n' 0; return 0; }
+    tr -d '\r' < "$1" | grep -c '^## Cycle [0-9]' || true
+}
+
 plan_decode_escaped_newlines() {
     local value="$1"
     printf '%s' "${value//\\n/$'\n'}"
@@ -209,6 +232,24 @@ plan_hoist_plan_dir() {
     # PORTABILITY(empty-array-setu)
     for arg in ${rest[@]+"${rest[@]}"}; do printf '%q ' "$arg"; done
     printf '\n'
+}
+
+# plan_progress_is_complete PROGRESS_FILE — succeed only when every goal row
+# in a plan progress table reads 100%. An empty roster is not complete.
+plan_progress_is_complete() {
+    [ -n "${1:-}" ] || { printf 'plan_progress_is_complete: progress file required\n' >&2; return 1; }
+    [ -f "$1" ] || { printf 'plan_progress_is_complete: no such file: %s\n' "$1" >&2; return 1; }
+    local rows=0
+    local line pct
+    while IFS= read -r line; do
+        case "$line" in '|'*'%'*'|') ;; *) continue ;; esac
+        case "$line" in '|'---*'|'|'|required'*|'Required'*) continue ;; esac
+        pct=$(plan_table_cell "$line" 3)
+        case "$pct" in *%) ;; *) continue ;; esac
+        rows=$((rows + 1))
+        [ "$pct" = "100%" ] || return 1
+    done < "$1"
+    [ "$rows" -gt 0 ]
 }
 
 plan_refuse_existing() {
