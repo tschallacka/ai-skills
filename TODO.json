@@ -1077,8 +1077,8 @@
     {
       "id": "T47",
       "title": "Execute harden-plan-data-parsing goals 03-05",
-      "status": "partly",
-      "notes": "Goals 01-04 DONE+pushed. Goal-05 partial: W22,W25,W26 DONE (awk cap now 21). REMAINING: W19 render-plan-overview (2 awk sites), W21 overview-state (2), W23 update-progress (2), W24 update-plan-progress (2) \u2014 each: port to plan_table_cell/read-loops, byte-parity vs git-show HEAD snapshot on real plan probes, commit + same-commit cap lowering (expect final ~13); then lib-test row 8->7 (convert ONE of test-coverage-gaps/flag-coverage/installer-manifest/planning-context-contract/progress-derivation/progress-helpers/register-helpers/voice-artifact-drift to source lib-test.sh); then W17: full ./run-tests.sh, mark 17-step-suite-parity complete (N/A target -> manual tick), function-length row 68 vs 66 still open (goal-05 scope note: splits pending). Harness recipe proven: git archive HEAD planning/scripts | tar -x -C \\$R --strip-components=1 for old-side parity."
+      "status": "done",
+      "notes": "COMPLETE. All 26 units done; strict gate (validate-plan --complete) passes. Goals: 01 readers (12fec21), 02 atomicity (ce8600f), 03 migrations (3b66163..c0fef97), 04 writer hardening, 05 remaining parsers + parity. Ratchets: awk 30->15, lib-test 8->7, FL 68->66 all via clamp with same-commit MAINTAINER/gate-caps sync; guard enforces never-up vs git history. Remaining suite reds are PRE-EXISTING (verified red at baseline 00ecc69): test-flag-coverage criticals (undocumented/untested flags in bug/todo/overview scripts) and test-runtime-dependencies jq-guard gaps (9 scripts call jq unguarded). Both queued as next work."
     }
   ]
 }
