@@ -67,6 +67,9 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
         cat "$work/err.$name" >&2 || true
         printf 'port-file:\n' >&2
         cat "$work/port.$name" >&2 || true
+        printf 'interp: %s\n' "$(command -v python3 || echo none)" >&2
+        python3 -V >&2 2>&1 || true
+        printf 'interp-echo: %s\n' "$(python3 -c 'print("ok")' 2>&1 || true)" >&2
         return
     fi
     local got html sec
@@ -86,7 +89,7 @@ if command -v python3 >/dev/null 2>&1; then
     start_bg python3 python3 "$scripts/runtime/overview-server.py" "$plan_dir"
     rung_port="$(head -1 "$work/port.python3")"
     serve_checks python3 "$rung_port"
-    kill "$(cat "$work/pid.py")" 2>/dev/null || true; rm -f "$work/pid.py"
+    stop_bg python3
     sleep 0.4
     # Exit status carries the verdict: 0 = still accepting (bad), 3 = refused.
     if python3 - "$rung_port" <<'PYEOF'
