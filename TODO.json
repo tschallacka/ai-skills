@@ -4,6 +4,110 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T43",
+      "title": "Serve the overview live, and let the artifact stay a snapshot",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "One renderer, two delivery modes. Served: a localhost HTTP endpoint a reviewer keeps open, updating in place without disturbing what they are reading. File: the single self-contained HTML that exists today, which is what a snapshot, a print or a published artifact needs. The two must not fork into separate renderers -- the state each mode shows has to come from one place, or they will disagree and the disagreement is what a reviewer would trust least. Feasibility is settled ground here: the chat skill already ships a portable local server as a fallback chain (python3 -> node -> perl -> socat driving a bash handler), so the mechanism exists in this repo and does not need inventing.",
+      "note": "Asked for: render to a local port or artifact, both, with updating that is less jarring while reading.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "chat/scripts/chat-server.sh",
+        "chat/runtime/bash-handler.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-24T13:10:59Z"
+    },
+    {
+      "id": "T43b",
+      "title": "Update in place from a JSON endpoint, never a whole-page reload",
+      "status": "open",
+      "priority": "high",
+      "parent": "T43",
+      "detail": "The page currently carries <meta http-equiv=\"refresh\" content=\"15\">, which throws away scroll position, every expanded section and any text selection -- unusable while reading. Served mode instead fetches a JSON state document and patches only what changed: counts, bars, ledger rows, findings. Two rules make it non-jarring rather than merely faster: never move what the reader is looking at, and never animate a value that is only being corrected. A visible, quiet marker that an update landed is worth more than a redraw -- and if a section is open, patch its contents rather than collapsing it.",
+      "note": "T42j already says the figures must be right at rest; this is the other half -- they must also stay right without the page jumping.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/templates/plan-overview.html.tmpl"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-24T13:10:59Z"
+    },
+    {
+      "id": "T43f",
+      "title": "Test both modes, and the fallbacks",
+      "status": "open",
+      "priority": "high",
+      "parent": "T43",
+      "detail": "Served mode: the endpoint answers on loopback, the JSON validates against the state shape, a step completing changes the JSON without the HTML being re-fetched, and stop leaves no process or pid file. Fallbacks: with every runtime shimmed away the serve request refuses with 69 and names what is missing, and the file mode still renders. File mode keeps its current guarantees -- single file, no external asset references, no unsubstituted tokens, prose escaped. And the rounds figure reads 2 for a plan with a pre and a final review, 3 when a third exists. Mutation-test each: the refusals and the two-review baseline are the assertions most likely to rot.",
+      "note": "test-plan-overview is the test currently failing on both macOS legs (B31), so that comes first or these land on a red test.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-24T13:10:59Z"
+    },
+    {
+      "id": "T45",
+      "title": "Fix remaining CI test failures from overview/T42/T43 additions",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "test-mode-markers PACKAGE/MODE on runtime files; test-duplication-ratchet awk/lib-test caps; test-flag-coverage new flags; test-function-length-ratchet cap 67 vs actual; test-installer-noninteractive B39 regression; test-plan-dir-synonym overview-state/serve exemptions; test-portability-contract bash-by-path allowlist rows; test-register-helpers set-status fixture ordering; test-runtime-dependencies new deps",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-08-26T09:07:49Z",
+      "updated_at": "2026-08-26T09:07:49Z"
+    },
+    {
+      "id": "T43d",
+      "title": "Graceful fallback, stated rung by rung",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T43",
+      "detail": "Every rung has to be honest about what it gives up. With a runtime present: served, live, in-place updates. Without any runtime: the file mode, a snapshot, and no refresh at all rather than a meta refresh that reloads while being read -- a footer saying when it was generated and how to re-render beats a page that silently jumps. With JS unavailable or blocked: the file mode still renders fully, because the values are in the markup (T42j). Published as an artifact: a snapshot by necessity, since an artifact page is served from claude.ai and its CSP blocks requests to any other host, localhost included -- live updates are impossible there and the page should not pretend otherwise.",
+      "note": "The artifact constraint is measured, not assumed: the current render was published by unwrapping it, and any fetch to a local port from that origin is refused by the CSP.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-24T13:10:59Z"
+    },
+    {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "decided",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "normal",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T14:53:12Z"
+    },
+    {
+      "id": "T38",
+      "title": "Review record: what was checked on the -ox merge, and what was not",
+      "status": "decided",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
+      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/ai-skills/pull/3"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
       "id": "T7",
       "title": "Push the branch and read the two macOS legs",
       "status": "done",
@@ -41,19 +145,6 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T17:17:38Z"
-    },
-    {
-      "id": "T12",
-      "title": "This register is gitignored",
-      "status": "obsolete",
-      "parent": null,
-      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
-      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "high",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T16:32:43Z"
     },
     {
       "id": "T18",
@@ -338,23 +429,6 @@
       "updated_at": "2026-08-25T17:54:12Z"
     },
     {
-      "id": "T43",
-      "title": "Serve the overview live, and let the artifact stay a snapshot",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "One renderer, two delivery modes. Served: a localhost HTTP endpoint a reviewer keeps open, updating in place without disturbing what they are reading. File: the single self-contained HTML that exists today, which is what a snapshot, a print or a published artifact needs. The two must not fork into separate renderers -- the state each mode shows has to come from one place, or they will disagree and the disagreement is what a reviewer would trust least. Feasibility is settled ground here: the chat skill already ships a portable local server as a fallback chain (python3 -> node -> perl -> socat driving a bash handler), so the mechanism exists in this repo and does not need inventing.",
-      "note": "Asked for: render to a local port or artifact, both, with updating that is less jarring while reading.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/render-plan-overview.sh",
-        "chat/scripts/chat-server.sh",
-        "chat/runtime/bash-handler.sh"
-      ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
-    },
-    {
       "id": "T43a",
       "title": "A served mode on localhost, reusing the runtime chain chat already has",
       "status": "done",
@@ -366,22 +440,6 @@
       "refs": [
         "planning/scripts/render-plan-overview.sh",
         "chat/scripts/chat-server.sh"
-      ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
-    },
-    {
-      "id": "T43b",
-      "title": "Update in place from a JSON endpoint, never a whole-page reload",
-      "status": "open",
-      "priority": "high",
-      "parent": "T43",
-      "detail": "The page currently carries <meta http-equiv=\"refresh\" content=\"15\">, which throws away scroll position, every expanded section and any text selection -- unusable while reading. Served mode instead fetches a JSON state document and patches only what changed: counts, bars, ledger rows, findings. Two rules make it non-jarring rather than merely faster: never move what the reader is looking at, and never animate a value that is only being corrected. A visible, quiet marker that an update landed is worth more than a redraw -- and if a section is open, patch its contents rather than collapsing it.",
-      "note": "T42j already says the figures must be right at rest; this is the other half -- they must also stay right without the page jumping.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/render-plan-overview.sh",
-        "planning/templates/plan-overview.html.tmpl"
       ],
       "created_at": "2026-08-24T13:10:59Z",
       "updated_at": "2026-08-24T13:10:59Z"
@@ -418,19 +476,21 @@
       "updated_at": "2026-08-24T13:10:59Z"
     },
     {
-      "id": "T43f",
-      "title": "Test both modes, and the fallbacks",
-      "status": "open",
+      "id": "T44",
+      "title": "Verification must surface plan-versus-reality drift at execution time, not after a human reads both sides",
+      "status": "done",
       "priority": "high",
-      "parent": "T43",
-      "detail": "Served mode: the endpoint answers on loopback, the JSON validates against the state shape, a step completing changes the JSON without the HTML being re-fetched, and stop leaves no process or pid file. Fallbacks: with every runtime shimmed away the serve request refuses with 69 and names what is missing, and the file mode still renders. File mode keeps its current guarantees -- single file, no external asset references, no unsubstituted tokens, prose escaped. And the rounds figure reads 2 for a plan with a pre and a final review, 3 when a third exists. Mutation-test each: the refusals and the two-review baseline are the assertions most likely to rot.",
-      "note": "test-plan-overview is the test currently failing on both macOS legs (B31), so that comes first or these land on a red test.",
+      "parent": null,
+      "detail": "B38: rules requiring same-turn plan mutation exist but nothing executes them, so an executor can ship code while progress reads 0% and shipped units stay out of the inventory. Candidate mechanisms, cheapest first. (a) A freshness section in validate-plan output: for each step, compare the newest commit timestamp touching its change-target paths against the step status record, and WARN when code moved after the status was set without a matching update — needs the consumer repo as --repo input, which verify-target.sh already takes. (b) An end-of-burst gate helper the executor runs before reporting: replays (a) plus inventory-vs-git path coverage, exits non-zero when any shipped path has no owning unit or any completed step whose target changed since completion. (c) The summary template may not print an outstanding list; anything it would have listed becomes either a mutation performed now or a recorded non-goal. Whichever ships, its own test drives a fixture repo whose commits move a target after completion.",
+      "note": "Mechanism (a) shipped: plan_validate_propagation_freshness runs under the propagation block whenever --repo-root points at a git repository containing the plan; a unit whose target newest commit postdates the plans newest commit earns a WARN naming unit, target and both dates, capped at three plus a tally. Skips silently without repo-root/git/outside-plan. Pinned by test-plan-freshness.sh over pinned-date commits; mutation inverting the comparison fails the drift assertion.",
       "blocked_on": null,
       "refs": [
-        "planning/tests/test-plan-overview.sh"
+        "planning/scripts/validate-plan.sh",
+        "planning/scripts/verify-target.sh",
+        "BUGS.json"
       ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
+      "created_at": "2026-08-24T14:59:42Z",
+      "updated_at": "2026-08-24T18:08:32Z"
     },
     {
       "id": "T1",
@@ -493,19 +553,6 @@
       "parent": "T1",
       "detail": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
       "note": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "normal",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
-    },
-    {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "decided",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
@@ -787,21 +834,6 @@
       "updated_at": "2026-08-24T09:38:24Z"
     },
     {
-      "id": "T38",
-      "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "decided",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
-      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/ai-skills/pull/3"
-      ],
-      "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
-    },
-    {
       "id": "T40",
       "title": "The python3-shipped rule, its gate and the tree now disagree",
       "status": "done",
@@ -878,21 +910,6 @@
       ],
       "created_at": "2026-08-24T13:00:54Z",
       "updated_at": "2026-08-24T18:48:01Z"
-    },
-    {
-      "id": "T43d",
-      "title": "Graceful fallback, stated rung by rung",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T43",
-      "detail": "Every rung has to be honest about what it gives up. With a runtime present: served, live, in-place updates. Without any runtime: the file mode, a snapshot, and no refresh at all rather than a meta refresh that reloads while being read -- a footer saying when it was generated and how to re-render beats a page that silently jumps. With JS unavailable or blocked: the file mode still renders fully, because the values are in the markup (T42j). Published as an artifact: a snapshot by necessity, since an artifact page is served from claude.ai and its CSP blocks requests to any other host, localhost included -- live updates are impossible there and the page should not pretend otherwise.",
-      "note": "The artifact constraint is measured, not assumed: the current render was published by unwrapping it, and any fetch to a local port from that origin is refused by the CSP.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/render-plan-overview.sh"
-      ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
     },
     {
       "id": "T8",
@@ -1029,21 +1046,31 @@
       "updated_at": "2026-08-24T08:47:35Z"
     },
     {
-      "id": "T44",
-      "title": "Verification must surface plan-versus-reality drift at execution time, not after a human reads both sides",
-      "status": "done",
+      "id": "T12",
+      "title": "This register is gitignored",
+      "status": "obsolete",
+      "parent": null,
+      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
+      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "high",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T16:32:43Z"
+    },
+    {
+      "id": "T46",
+      "title": "Harden plan-data parsing: eliminate awk/grep fragility, add atomicity verification",
+      "status": "open",
       "priority": "high",
       "parent": null,
-      "detail": "B38: rules requiring same-turn plan mutation exist but nothing executes them, so an executor can ship code while progress reads 0% and shipped units stay out of the inventory. Candidate mechanisms, cheapest first. (a) A freshness section in validate-plan output: for each step, compare the newest commit timestamp touching its change-target paths against the step status record, and WARN when code moved after the status was set without a matching update — needs the consumer repo as --repo input, which verify-target.sh already takes. (b) An end-of-burst gate helper the executor runs before reporting: replays (a) plus inventory-vs-git path coverage, exits non-zero when any shipped path has no owning unit or any completed step whose target changed since completion. (c) The summary template may not print an outstanding list; anything it would have listed becomes either a mutation performed now or a recorded non-goal. Whichever ships, its own test drives a fixture repo whose commits move a target after completion.",
-      "note": "Mechanism (a) shipped: plan_validate_propagation_freshness runs under the propagation block whenever --repo-root points at a git repository containing the plan; a unit whose target newest commit postdates the plans newest commit earns a WARN naming unit, target and both dates, capped at three plus a tally. Skips silently without repo-root/git/outside-plan. Pinned by test-plan-freshness.sh over pinned-date commits; mutation inverting the comparison fails the drift assertion.",
+      "detail": "Approved plan at .plans/harden-plan-data-parsing/ (4 goals, 22 work units). Goal 01: guarded library functions for progress/cycle/unit counting. Goal 02: atomicity auto-tick via git-diff comparison at completion time. Goal 03: migrate all inline awk -F| table parsing to shared helpers. Goal 04: update-plan-content.sh hardening (non-atomic dual-file write, trap overwrites, document-id validation). Constraint: existing unit tests pass unchanged; code red if any test needs modification.",
       "blocked_on": null,
       "refs": [
-        "planning/scripts/validate-plan.sh",
-        "planning/scripts/verify-target.sh",
-        "BUGS.json"
+        ".plans/harden-plan-data-parsing"
       ],
-      "created_at": "2026-08-24T14:59:42Z",
-      "updated_at": "2026-08-24T18:08:32Z"
+      "created_at": "2026-08-26T09:57:54Z",
+      "updated_at": "2026-08-26T09:57:54Z"
     }
   ]
 }
