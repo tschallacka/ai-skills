@@ -1,6 +1,6 @@
 ---
 name: todo
-description: Use when work is queued that outlives the conversation and needs to survive a restart, a handoff, or a compaction, so tasks and their sub-tasks live in one JSON file read with jq. Do not use for a short in-chat checklist, for the steps of a task already in progress, for defects (use the bug-report skill), or where a planning skill's plan documents are the right home.
+description: Use when work is queued that outlives the conversation and needs to survive a restart, a handoff, or a compaction, so tasks and their sub-tasks live in one JSON file read with jq. Also, when juggling three or more separate work items in sequence, ask the user whether to file them here before starting; never auto-file without asking. Do not use for a short in-chat checklist, for the steps of a task already in progress, for defects (use the bug-report skill), or where a planning skill's plan documents are the right home.
 ---
 <!-- MODE: PROD -->
 
