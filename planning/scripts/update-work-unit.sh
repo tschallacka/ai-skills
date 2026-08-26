@@ -108,17 +108,51 @@ previous_scope="$plan_inventory_scope"
 previous_depends="$plan_inventory_depends"
 previous_change="$plan_inventory_change"
 
+# inventory_rewrite_row FILE TMP WANTED-ID [COL=VAL]... — rewrite the named
+# unit row's cells; untouched rows and rows where every VAL is empty stay
+# verbatim (the awk OFS rebuild applied only to genuinely edited rows).
+inventory_rewrite_row() {
+    local rfile="$1" rtmp="$2" wanted="$3"; shift 3
+    local line id kv col val touched
+    local -a parts=()
+    : > "$rtmp"
+    while IFS= read -r line || [ -n "$line" ]; do
+        touched=0
+        if [[ $line =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]]; then
+            id="$(plan_table_cell "$line" 2)"
+            if [ "$id" = "$wanted" ]; then
+                parts=()
+                while IFS= read -r c; do parts+=("$c"); done \
+                    < <(printf '%s\n' "$line" | tr '|' '\n')
+                for kv in "$@"; do
+                    val="${kv#*=}"
+                    [ -n "$val" ] || continue
+                    # Cell numbers follow the awk -F convention the inventory
+                    # was built on (cell 1 empty, cell 2 = ID), matching
+                    # plan_table_cell exactly.
+                    col=$(( ${kv%%=*} - 1 ))
+                    parts[$col]=" $val "
+                    touched=1
+                done
+                [ "$touched" = 1 ] && { local IFS='|'; line="${parts[*]}"; }
+            fi
+        fi
+        printf '%s\n' "$line" >> "$rtmp"
+    done < "$rfile"
+}
+
 # One trap covers every temp: installed before the first write and never
 # released with `trap - EXIT`, which would discard the library's handler (§8).
 inventory_tmp="${inventory}.tmp.$$"; step_tmp="${step_file}.tmp.$$"
 trap 'rm -f "$inventory_tmp" "$step_tmp"' EXIT
-awk -F'|' -v wanted="$unit" -v replacement="$new_scope" -v newfile="$new_file" -v newtype="$new_type" -v newdeps="$new_depends" 'BEGIN{OFS="|"} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id); if(id==wanted){if(replacement != ""){$5=" " replacement " "}; if(newfile != ""){$4=" " newfile " "}; if(newtype != ""){$3=" " newtype " "}; if(newdeps != ""){$8=" " newdeps " "}}} {print}' "$inventory" > "$inventory_tmp"
+inventory_rewrite_row "$inventory" "$inventory_tmp" "$unit" \
+    "5=$new_scope" "4=$new_file" "3=$new_type" "8=$new_depends"
 awk -v replacement="$new_scope" -v newfile="$new_file" -v newtype="$new_type" '/^- Primary symbol or file scope:/ {if (replacement != "") {print "- Primary symbol or file scope: " replacement; next}} /^- File:/ {if (newfile != "") {print "- File: " newfile; next}} /^- Type:/ {if (newtype != "") {print "- Type: `" newtype "`"; next}} {print}' "$step_file" > "$step_tmp"
 mv "$inventory_tmp" "$inventory"
 mv "$step_tmp" "$step_file"
 if [ -n "$new_description" ]; then
     plan_replace_paragraph "$step_file" '§ 4.1' "$new_description"
-    awk -F'|' -v wanted="$unit" -v desc="$new_description" 'BEGIN{OFS="|"} /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id); if(id==wanted){$7=" " desc " "}} {print}' "$inventory" > "$inventory_tmp"
+    inventory_rewrite_row "$inventory" "$inventory_tmp" "$unit" "7=$new_description"
     mv "$inventory_tmp" "$inventory"
 
     # The goal's owned-unit blurb is surface 5 of the seven SKILL.md lists under
