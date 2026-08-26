@@ -1077,8 +1077,8 @@
     {
       "id": "T47",
       "title": "Execute harden-plan-data-parsing goals 03-05",
-      "status": "open",
-      "notes": "Plan approved (26 units, approval.json). Goals 01-02 DONE+committed (12fec21 core readers W01-W04; ce8600f atomicity flow W05-W08 incl test-atomicity-flow.sh). Remaining: goal03 W09-W13+W27 (W09 census=38 raw/35 call-sites; migrate plan-content.sh 3 sites L266/L347/L361 then update-work-unit/update-step/reconcile/propagation libs, byte-parity per batch); goal04 W14-W16+W18 update-plan-content.sh dual-write+traps+docid; goal05 W17,W19-W26 remaining parsers then LOWER ratchet caps by exact deltas same-commit (awk 30, lib-test 7, FL 66) with MAINTAINER.md sec3 rows. Constraint: existing tests unchanged. Known pre-existing reds NOT ours: test-register-helpers, test-installer-noninteractive(line78 out unbound)."
+      "status": "partly",
+      "notes": "Goals 01-04 DONE+pushed. Goal-05 partial: W22,W25,W26 DONE (awk cap now 21). REMAINING: W19 render-plan-overview (2 awk sites), W21 overview-state (2), W23 update-progress (2), W24 update-plan-progress (2) \u2014 each: port to plan_table_cell/read-loops, byte-parity vs git-show HEAD snapshot on real plan probes, commit + same-commit cap lowering (expect final ~13); then lib-test row 8->7 (convert ONE of test-coverage-gaps/flag-coverage/installer-manifest/planning-context-contract/progress-derivation/progress-helpers/register-helpers/voice-artifact-drift to source lib-test.sh); then W17: full ./run-tests.sh, mark 17-step-suite-parity complete (N/A target -> manual tick), function-length row 68 vs 66 still open (goal-05 scope note: splits pending). Harness recipe proven: git archive HEAD planning/scripts | tar -x -C \\$R --strip-components=1 for old-side parity."
     }
   ]
 }
