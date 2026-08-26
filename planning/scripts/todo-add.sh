@@ -37,6 +37,15 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$id" ] && [ -n "$title" ] || { printf '%s: --id and --title are required\n' "${0##*/}" >&2; exit 64; }
 
+# Duplicate ids are refused before anything is written: appending first and
+# validating after left a poisoned register behind every refused add.
+items_key="tasks"
+jq -e --arg id "$id" --arg k "$items_key" \
+    '.tasks[] | select(.id == $id)' "$file" >/dev/null 2>&1 && {
+    printf '%s: duplicate ids\n' "${0##*/}" >&2
+    exit 65
+}
+
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 refs_json="[]"
 if [ "${#refs[@]}" -gt 0 ]; then

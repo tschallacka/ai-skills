@@ -42,6 +42,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$title" ] && [ -n "$reproduce" ] && [ -n "$observed" ] && [ -n "$expected" ] || { printf '%s: --title --reproduce --observed --expected are required\n' "${0##*/}" >&2; exit 64; }
 
+
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 id="B$(reg_next_id bug "$file")"
 surfaces_json="[]"

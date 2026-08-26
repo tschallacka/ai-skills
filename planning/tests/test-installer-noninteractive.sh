@@ -75,9 +75,6 @@ no_target_out="$work/notarget.out"
 rc=0
 HOME="$no_target_home" AI_SKILLS_NO_SPLASH="" bash "$installer" --skill git-worktrees \
     --yes >"$no_target_out" 2>&1 </dev/null || rc=$?
-case "$rc:$out" in
-    *"$(cat /dev/null)"*) : ;;
-esac
 if [ "$rc" -ne 0 ]; then
     t_fail "headless install without --target exited $rc"
 fi
