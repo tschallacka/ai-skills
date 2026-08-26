@@ -87,22 +87,27 @@ esc() {
 # skips the separator row and any header row (a header carries one of the
 # fixed header labels in a cell, whichever column HEADER_WORD names).
 cells() {
-    awk -F'|' -v hdr="$2" '
-        /^\|/ && $0 !~ /^\|[[:space:]]*-+/ {
-            skip = 0
-            for (i = 2; i < NF; i++) {
-                c = $i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", c)
-                if (c == hdr || c == "Completion status" || c == "Status") skip = 1
-            }
-            if (skip) next
-            out = ""
-            for (i = 2; i < NF; i++) {
-                c = $i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", c)
-                out = out (out == "" ? "" : "\t") c
-            }
-            if (out != "") print out
-        }
-    ' "$1"
+    # Shared-helper port of the generic canonical-table reader: skips the
+    # separator row and any header row (a fixed header label anywhere in the
+    # row), emits tab-joined body cells, one row per line.
+    local cfile="$1" chdr="$2" cline ccell first skip out
+    while IFS= read -r cline || [ -n "$cline" ]; do
+        case "$cline" in '|'*) ;; *) continue ;; esac
+        # Separator rows are pipes, dashes and spaces only.
+        [ -n "$(printf '%s' "$cline" | tr -d '[:space:]|-')" ] || continue
+        skip=0; out=""
+        first=1
+        while IFS= read -r ccell; do
+            [ -n "$ccell" ] || continue
+            if [ "$ccell" = "$chdr" ] || [ "$ccell" = "Completion status" ] \
+                || [ "$ccell" = "Status" ]; then
+                skip=1
+            fi
+            if [ "$first" = 1 ]; then out="$ccell"; first=0
+            else out="$out"$'\t'"$ccell"; fi
+        done < <(plan_table_cells "$cline")
+        [ "$skip" = 1 ] || { [ -n "$out" ] && printf '%s\n' "$out"; }
+    done < "$cfile"
 }
 
 status_glyph() {
@@ -326,7 +331,7 @@ build_dep_graph() {
     if [ -f "$inv" ]; then
         while IFS= read -r line; do
             case "$line" in '| W'*) ;; *) continue ;; esac
-            local nf; nf=$(printf '%s' "$line" | awk -F'|' '{print NF}')
+            local nf; nf=$(( $(printf '%s' "$line" | tr -cd '|' | wc -c) + 1 ))
             [ "$nf" -ge 10 ] || continue
             uid="$(plan_table_cell "$line" 2)"
             case "$uid" in W[0-9]*) ;; *) continue ;; esac
