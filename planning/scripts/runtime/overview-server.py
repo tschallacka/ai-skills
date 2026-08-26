@@ -5,11 +5,14 @@
 Serves / (rendered HTML) and /state.json (extractor output) from the given
 plan directory. Runs until killed; prints the bound port on startup.
 """
+import sys
+sys.stderr.write("stage: argv\n"); sys.stderr.flush()
 import http.server
 import os
+import signal
 import subprocess
-import sys
 import tempfile
+sys.stderr.write("stage: imports\n"); sys.stderr.flush()
 
 plan_dir = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 0
@@ -81,8 +84,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+sys.stderr.write("stage: pre-bind\n"); sys.stderr.flush()
 server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+sys.stderr.write("stage: bound\n"); sys.stderr.flush()
 # os.write bypasses every io layer: the invoker polls this line to learn the
 # port, so no buffering subtlety may delay it.
 os.write(1, f"{server.server_address[1]}\n".encode())
+# Blocked-in-accept processes can miss a plain TERM on some platforms; make
+# the disposition explicit so a clean stop is immediate.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
 server.serve_forever()
