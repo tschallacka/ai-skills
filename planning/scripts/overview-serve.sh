@@ -24,9 +24,11 @@ usage() {
 Usage: ${0##*/} [--plan-dir] <plan-directory> [--port N]
        ${0##*/} --help
 
-Serves the plan overview on localhost. Updates in place when the plan tree
-changes. Requires python3, node, perl, or socat (any one suffices); without
-any of them use render-plan-overview.sh for a static snapshot instead.
+Serves the plan overview on localhost via the first available runtime
+(python3, node, perl, or socat driving the bash handler). The page updates
+in place from /state.json and /sections/<id> without reloading. Without any
+runtime, exit 69 names the missing capability; use
+render-plan-overview.sh for a static snapshot instead.
 USAGE
     exit "$rc"
 }
@@ -61,9 +63,21 @@ case "$runtime" in
     python3)
         exec python3 "$script_dir/runtime/overview-server.py" "$plan_dir" ${want_port:+"$want_port"}
         ;;
-    *)
-        printf '%s: runtime %s is not yet supported for served mode; use python3\n' \
-            "${0##*/}" "$runtime" >&2
-        exit 69
+    node)
+        exec node "$script_dir/runtime/overview-server.js" "$plan_dir" ${want_port:+"$want_port"}
+        ;;
+    perl)
+        exec perl "$script_dir/runtime/overview-server.pl" "$plan_dir" ${want_port:+"$want_port"}
+        ;;
+    socat)
+        # socat drives the bash handler per connection; an explicit port is
+        # required because socat cannot report a chosen one back to us.
+        if [ -z "$want_port" ]; then
+            printf '%s: the socat rung needs an explicit --port N (it cannot report a chosen port)\n' \
+                "${0##*/}" >&2
+            exit 64
+        fi
+        exec socat "TCP-LISTEN:${want_port},fork,reuseaddr,bind=127.0.0.1" \
+            "SYSTEM:$script_dir/runtime/overview-serve-handler.sh,stderr"
         ;;
 esac

@@ -2595,6 +2595,8 @@ scripts/plan-content.sh
 scripts/overview-state.sh
 scripts/overview-serve.sh
 scripts/runtime/overview-server.py
+scripts/runtime/overview-server.js
+scripts/runtime/overview-server.pl
 scripts/runtime/overview-serve-handler.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
@@ -2808,6 +2810,7 @@ tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
 tests/test-writer-hardening.sh
 tests/test-overview-state.sh
+tests/test-overview-serve.sh
 scripts/register-lib.sh
 scripts/todo-add.sh
 scripts/todo-update.sh

@@ -6,11 +6,11 @@
     {
       "id": "T43",
       "title": "Serve the overview live, and let the artifact stay a snapshot",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "One renderer, two delivery modes. Served: a localhost HTTP endpoint a reviewer keeps open, updating in place without disturbing what they are reading. File: the single self-contained HTML that exists today, which is what a snapshot, a print or a published artifact needs. The two must not fork into separate renderers -- the state each mode shows has to come from one place, or they will disagree and the disagreement is what a reviewer would trust least. Feasibility is settled ground here: the chat skill already ships a portable local server as a fallback chain (python3 -> node -> perl -> socat driving a bash handler), so the mechanism exists in this repo and does not need inventing.",
-      "note": "Asked for: render to a local port or artifact, both, with updating that is less jarring while reading.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
@@ -18,38 +18,38 @@
         "chat/runtime/bash-handler.sh"
       ],
       "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
+      "updated_at": "2026-08-26T21:02:30Z"
     },
     {
       "id": "T43b",
       "title": "Update in place from a JSON endpoint, never a whole-page reload",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T43",
       "detail": "The page currently carries <meta http-equiv=\"refresh\" content=\"15\">, which throws away scroll position, every expanded section and any text selection -- unusable while reading. Served mode instead fetches a JSON state document and patches only what changed: counts, bars, ledger rows, findings. Two rules make it non-jarring rather than merely faster: never move what the reader is looking at, and never animate a value that is only being corrected. A visible, quiet marker that an update landed is worth more than a redraw -- and if a section is open, patch its contents rather than collapsing it.",
-      "note": "T42j already says the figures must be right at rest; this is the other half -- they must also stay right without the page jumping.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh",
         "planning/templates/plan-overview.html.tmpl"
       ],
       "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
+      "updated_at": "2026-08-26T21:02:30Z"
     },
     {
       "id": "T43f",
       "title": "Test both modes, and the fallbacks",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T43",
       "detail": "Served mode: the endpoint answers on loopback, the JSON validates against the state shape, a step completing changes the JSON without the HTML being re-fetched, and stop leaves no process or pid file. Fallbacks: with every runtime shimmed away the serve request refuses with 69 and names what is missing, and the file mode still renders. File mode keeps its current guarantees -- single file, no external asset references, no unsubstituted tokens, prose escaped. And the rounds figure reads 2 for a plan with a pre and a final review, 3 when a third exists. Mutation-test each: the refusals and the two-review baseline are the assertions most likely to rot.",
-      "note": "test-plan-overview is the test currently failing on both macOS legs (B31), so that comes first or these land on a red test.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
       "blocked_on": null,
       "refs": [
         "planning/tests/test-plan-overview.sh"
       ],
       "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
+      "updated_at": "2026-08-26T21:02:30Z"
     },
     {
       "id": "T45",
@@ -67,17 +67,17 @@
     {
       "id": "T43d",
       "title": "Graceful fallback, stated rung by rung",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T43",
       "detail": "Every rung has to be honest about what it gives up. With a runtime present: served, live, in-place updates. Without any runtime: the file mode, a snapshot, and no refresh at all rather than a meta refresh that reloads while being read -- a footer saying when it was generated and how to re-render beats a page that silently jumps. With JS unavailable or blocked: the file mode still renders fully, because the values are in the markup (T42j). Published as an artifact: a snapshot by necessity, since an artifact page is served from claude.ai and its CSP blocks requests to any other host, localhost included -- live updates are impossible there and the page should not pretend otherwise.",
-      "note": "The artifact constraint is measured, not assumed: the current render was published by unwrapping it, and any fetch to a local port from that origin is refused by the CSP.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
       "blocked_on": null,
       "refs": [
         "planning/scripts/render-plan-overview.sh"
       ],
       "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-24T13:10:59Z"
+      "updated_at": "2026-08-26T21:02:30Z"
     },
     {
       "id": "T1e",

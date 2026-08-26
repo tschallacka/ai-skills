@@ -319,24 +319,36 @@ var lines=[].slice.call(document.querySelectorAll("#narr .ln"));
 lines.forEach(function(el){el.classList.remove("typeline");});
 /* refresh ring */
 var C=157.08,left=REFRESH,lab=document.getElementById("rlab"),fg=document.getElementById("rfg");
-if(REFRESH>0&&!IS_SERVE){
-lab&&(lab.textContent=left+"s");
-var iv=setInterval(function(){
-  left--;if(left<0)left=REFRESH;
-  if(lab)lab.textContent=left+"s";
-  if(fg)fg.setAttribute("stroke-dashoffset",(C*(left/REFRESH)).toFixed(1));
-},1000);
-setTimeout(function(){location.reload();},REFRESH*1000+400);
-}
+@_RELOAD_BLOCK_@
 if(IS_SERVE){
-  setInterval(function(){
-    fetch("/state.json").then(function(r){return r.json()}).then(function(s){
+  /* in-place refresh (T43b): state.json drives the scalar counters and
+     /sections/<id> swaps whole panels by revision stamp; the page NEVER
+     reloads — location.reload is absent from the served flavor (W19) */
+  var SECTIONS=["identity-panel","step-details","tests-panel","coverage-panel","findings-panel","dep-graph","narr"];
+  var rev=0;
+  function poll(){
+    fetch("/state.json?rev="+rev,{cache:"no-store"}).then(function(r){return r.json()}).then(function(s){
       document.querySelectorAll("[data-state-key]").forEach(function(el){
         var k=el.getAttribute("data-state-key");
         if(s[k]!==undefined)el.textContent=s[k];
       });
+      if(s.generatedAt&&s.generatedAt!==rev){
+        rev=s.generatedAt;
+        SECTIONS.forEach(function(id){
+          fetch("/sections/"+id+"?rev="+rev,{cache:"no-store"}).then(function(r){return r.ok?r.text():null;}).then(function(html){
+            if(!html)return;
+            var el=document.getElementById(id);
+            if(!el)return;
+            var tmp=document.createElement("div");
+            tmp.innerHTML=html;
+            var fresh=tmp.querySelector("#"+id)||tmp.firstElementChild;
+            if(fresh){el.setAttribute("data-rev",rev);el.innerHTML=fresh.innerHTML;}
+          }).catch(function(){});
+        });
+      }
     }).catch(function(){});
-  },5000);
+  }
+  setInterval(poll,5000);
 }
 })();
 </script>

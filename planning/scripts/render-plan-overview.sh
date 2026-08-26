@@ -468,6 +468,18 @@ jq -n \
     --arg footer "$footer" \
     --arg meta_refresh_tag "$(if [ "$serve" = true ]; then printf ''; else printf '<meta http-equiv="refresh" content="%s">' "$effective_refresh"; fi)" \
     --arg is_serve "$([ "$serve" = true ] && echo true || echo false)" \
+    --arg reload_block "$(if [ "$serve" = true ]; then printf ''; else cat <<'JS'
+if(REFRESH>0){
+lab&&(lab.textContent=left+"s");
+var iv=setInterval(function(){
+  left--;if(left<0)left=REFRESH;
+  if(lab)lab.textContent=left+"s";
+  if(fg)fg.setAttribute("stroke-dashoffset",(C*(left/REFRESH)).toFixed(1));
+},1000);
+setTimeout(function(){location.reload();},REFRESH*1000+400);
+}
+JS
+    fi)" \
     '{
         PLAN_NAME: $plan_name, STATE: $state, PHASE_LINE: $phase_line,
         REFRESH: $refresh, REFRESH_JS: $refresh, GENERATED: $generated,
@@ -484,6 +496,7 @@ jq -n \
         FINDINGS_PANEL: $findings_panel,
         META_REFRESH_TAG: $meta_refresh_tag,
         IS_SERVE: $is_serve,
+        RELOAD_BLOCK: $reload_block,
         TICKER: $ticker, FOOTER: $footer
     }' > "$subs_file"
 

@@ -235,6 +235,9 @@ printf ']'
 cycles=0
 [ -f "$plan_dir/adversarial-review-history.md" ] && cycles="$(grep -c '^## Cycle [0-9]' "$plan_dir/adversarial-review-history.md" || true)"
 comma
-printf '"cycles":%s,"reviewTarget":2,"generatedBy":"overview-state.sh"' "$cycles"
+# generatedAt is the revision stamp the served page swaps /sections by
+# (T43b); OVERVIEW_NOW pins it for deterministic tests, like the renderer.
+printf '"cycles":%s,"reviewTarget":2,"generatedAt":"%s","generatedBy":"overview-state.sh"' \
+    "$cycles" "${OVERVIEW_NOW:-serve-live}"
 
 printf '}'
