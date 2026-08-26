@@ -561,8 +561,22 @@ case "$command" in
             /^- Status:/ { if (found++) exit 2; print "- Status: " replacement; next }
             { print } END { if (found != 1) exit 2 }
         ' "$description" > "$description_tmp" || plan_die "Plan description must contain exactly one Status field"
-        mv "$review_tmp" "$review"
-        mv "$description_tmp" "$description"
+        # Pair write (W14): both temps are complete before either rename.
+        # If the second rename fails the first is rolled back, so no torn
+        # pair survives an ordinary failure; the window between the two
+        # renames is irreducible without a journal.
+        review_backup="${review}.bak.$$"; description_backup="${description}.bak.$$"
+        cp "$review" "$review_backup"; cp "$description" "$description_backup"
+        if ! mv "$description_tmp" "$description"; then
+            rm -f "$review_tmp" "$review_backup" "$description_backup"
+            plan_die "could not install plan description status" 73
+        fi
+        if ! mv "$review_tmp" "$review"; then
+            mv "$description_backup" "$description"
+            rm -f "$review_backup" "$description_backup"
+            plan_die "could not install review status; description rolled back" 73
+        fi
+        rm -f "$review_backup" "$description_backup"
         # Invalidation is irreversible and only the fixer can re-mint, so it is
         # the branch's last act: a die after it leaves the plan not approved and
         # un-approvable.
