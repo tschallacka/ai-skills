@@ -30,9 +30,14 @@ plan_validate_completion() {
         else
             while IFS= read -r goal_name; do
                 [ -n "$goal_name" ] || continue
-                goal_status="$(awk -F'|' -v wanted="$goal_name" '
-                    /^\|/ { key=$2; status=$4; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", status); if (key == wanted) print status }
-                ' "$plan_progress")"
+                goal_status=""
+                while IFS= read -r prow || [ -n "$prow" ]; do
+                    case "$prow" in '|'*) ;; *) continue ;; esac
+                    if [ "$(plan_table_cell "$prow" 2)" = "$goal_name" ]; then
+                        goal_status="$(plan_table_cell "$prow" 4)"
+                        break
+                    fi
+                done < "$plan_progress"
                 [ "$goal_status" = '✅ completed' ] || fail "$goal_name is not completed in plan progress"
             done < <(plan_map_keys goal_units)
         fi
@@ -46,9 +51,14 @@ plan_validate_completion() {
                 fail "$id completion requires $goal_progress"
                 continue
             fi
-            step_status="$(awk -F'|' -v wanted="$u_step" '
-                /^\|/ { key=$3; status=$5; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", status); if (key == wanted) print status }
-            ' "$goal_progress")"
+            step_status=""
+            while IFS= read -r prow || [ -n "$prow" ]; do
+                case "$prow" in '|'*) ;; *) continue ;; esac
+                if [ "$(plan_table_cell "$prow" 3)" = "$u_step" ]; then
+                    step_status="$(plan_table_cell "$prow" 5)"
+                    break
+                fi
+            done < "$goal_progress"
             [ "$step_status" = '✅ completed' ] || fail "$id is not completed in $u_goal progress"
         done
     fi

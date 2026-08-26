@@ -99,16 +99,19 @@ plan_validate_inventory() {
         plan_map_load goal_units "$goal" || plan_map_value=""
         plan_map_set goal_units "$goal" "$plan_map_value $id"
     done < <(
-        awk -F'|' '
-            /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-                for (i = 2; i <= 10; i++) {
-                    value = $i
-                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-                    gsub(/^`|`$/, "", value)
-                    printf "%s%s", value, (i == 10 ? ORS : "\t")
-                }
-            }
-        ' "$inventory"
+        emit_unit_cells() {
+            local uline ujoined upart
+            while IFS= read -r uline || [ -n "$uline" ]; do
+                [[ $uline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]] || continue
+                ujoined=""
+                while IFS= read -r upart; do
+                    [ -n "$upart" ] || continue
+                    ujoined="$ujoined$upart"$'\t'
+                done < <(plan_table_cells "$uline")
+                printf '%s\n' "${ujoined%$'\t'}"
+            done < "$inventory"
+        }
+        emit_unit_cells
     )
 
     if [ "${#unit_ids[@]}" -eq 0 ]; then
@@ -118,12 +121,19 @@ plan_validate_inventory() {
     while IFS= read -r coverage_id; do
         [ -n "$coverage_id" ] && plan_map_set coverage_ids "$coverage_id" 1
     done < <(
-        awk -F'|' '
-            /^## Work units/ { exit }
-            /^\|/ && $2 !~ /Required outcome/ && $2 !~ /^-+$/ {
-                print $3
-            }
-        ' "$inventory" | grep -oE 'W[0-9][0-9]+' || true
+        emit_coverage_ids() {
+            local cline cin_table=0 ckey
+            while IFS= read -r cline || [ -n "$cline" ]; do
+                case "$cline" in
+                    '## Work units'*) return 0 ;;
+                esac
+                case "$cline" in '|'*) ;; *) continue ;; esac
+                ckey="$(plan_table_cell "$cline" 2)"
+                case "$ckey" in 'Required outcome'*|'---'|---*|*---) continue ;; esac
+                plan_table_cell "$cline" 3
+            done < "$inventory"
+        }
+        emit_coverage_ids | grep -oE 'W[0-9][0-9]+' || true
     )
     if [ "$(plan_map_count coverage_ids)" -eq 0 ]; then
         fail "Definition-of-done coverage has no work-unit references"

@@ -26,31 +26,55 @@ plan_prune_work_unit() {
     [ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory" 66
     temporary="${inventory}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
-    if ! awk -F'|' -v wanted="$unit" '
-        BEGIN { OFS="|" }
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-            if (id == wanted) next
-            # prune from Depends on ($8)
-            deps=$8; gsub(/^[[:space:]]+|[[:space:]]+$/, "", deps)
-            nd = split(deps, dp, ","); out = ""; changed = 0
-            for (i = 1; i <= nd; i++) { p = dp[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) changed = 1; else { if (out != "") out = out ","; out = out p } }
-            if (changed) $8 = (out == "" ? "—" : out)
-            print; next
-        }
-        /^\|/ {
-            ids=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", ids)
-            n = split(ids, parts, ",")
-            out = ""; found = 0
-            for (i = 1; i <= n; i++) { p = parts[i]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == wanted) found = 1; else { if (out != "") out = out ","; out = out p } }
-            if (!found) { print; next }
-            if (out == "") { printf "plan: coverage row has no remaining ids after removing %s; row dropped\n", wanted > "/dev/stderr"; next }
-            $3 = out
-            print
-            next
-        }
-        { print }
-    ' "$inventory" > "$temporary"; then
+    if ! (
+        # Unit rows: drop the removed unit, prune it from Depends (cell 8).
+        # Other table rows: prune from the comma list in cell 3; a row whose
+        # list empties is dropped with a stderr note, exactly as before.
+        while IFS= read -r rline || [ -n "$rline" ]; do
+            if [[ $rline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]]; then
+                if [ "$(plan_table_cell "$rline" 2)" = "$unit" ]; then
+                    continue
+                fi
+                deps_raw="$(plan_table_cell "$rline" 8)"
+                out=""; changed=0
+                IFS=',' read -r -a dparts <<< "$deps_raw"
+                for p in ${dparts[@]+"${dparts[@]}"}; do
+                    p="${p#"${p%%[![:space:]]*}"}"
+                    p="${p%"${p##*[![:space:]]}"}"
+                    if [ "$p" = "$unit" ]; then changed=1
+                    else
+                        [ -n "$out" ] && out="$out,"
+                        out="$out$p"
+                    fi
+                done
+                if [ "$changed" = 1 ]; then
+                    [ -n "$out" ] || out="—"
+                    rline="$(plan_table_set_cell "$rline" 8 "$out")"
+                fi
+            elif [[ $rline == \|* ]]; then
+                ids_raw="$(plan_table_cell "$rline" 3)"
+                out=""; found=0
+                IFS=',' read -r -a iparts <<< "$ids_raw"
+                for p in ${iparts[@]+"${iparts[@]}"}; do
+                    p="${p#"${p%%[![:space:]]*}"}"
+                    p="${p%"${p##*[![:space:]]}"}"
+                    if [ "$p" = "$unit" ]; then found=1
+                    else
+                        [ -n "$out" ] && out="$out,"
+                        out="$out$p"
+                    fi
+                done
+                if [ "$found" = 1 ]; then
+                    if [ -z "$out" ]; then
+                        printf 'plan: coverage row has no remaining ids after removing %s; row dropped\n' "$unit" >&2
+                        continue
+                    fi
+                    rline="$(plan_table_set_cell "$rline" 3 "$out")"
+                fi
+            fi
+            printf '%s\n' "$rline"
+        done < "$inventory"
+    ) > "$temporary"; then
         rm -f "$temporary"
         plan_die "could not prune $unit from $inventory (malformed inventory?)" 65
     fi
@@ -127,14 +151,26 @@ plan_rebuild_goal_progress() {
         "$script_dir/create-progress.sh" "$goal_dir" "$goal" >/dev/null 2>&1 || \
             { printf 'plan: could not rebuild goal progress for %s\n' "$goal" >&2; mv "$saved" "$progress_file"; return; }
         # Carry each old status onto the matching new row by step name.
-        awk -F'|' 'NR == FNR && /^\|/ && $0 !~ /---/ && $0 !~ /Goalname|Progress:/ {
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $5); stat[$3] = $5
-        }
-        NR != FNR && /^\|/ && $0 !~ /---/ && $0 !~ /Goalname|Progress:/ {
-            key = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-            if (key in stat) { gsub(/💤 incomplete/, stat[key]); }
-            print
-        }' "$saved" "$progress_file" | plan_atomic_write "$progress_file"
+        status_pairs=""
+        while IFS= read -r orow || [ -n "$orow" ]; do
+            case "$orow" in '|'*) ;; *) continue ;; esac
+            case "$orow" in *'---'*|*Goalname*|*'Progress:'*) continue ;; esac
+            status_pairs="$status_pairs$(plan_table_cell "$orow" 3)"$'\t'"$(plan_table_cell "$orow" 5)"$'\n'
+        done < "$saved"
+        while IFS= read -r nrow || [ -n "$nrow" ]; do
+            case "$nrow" in '|'*)
+                case "$nrow" in *'---'*|*Goalname*|*'Progress:'*) ;; *)
+                    nkey="$(plan_table_cell "$nrow" 3)"
+                    while IFS=$'\t' read -r skey sstat; do
+                        [ "$skey" = "$nkey" ] || continue
+                        nrow="${nrow//💤 incomplete/$sstat}"
+                        break
+                    done <<< "$status_pairs"
+                    ;;
+                esac ;;
+            esac
+            printf '%s\n' "$nrow"
+        done < "$progress_file" | plan_atomic_write "$progress_file"
         rm -f "$saved"
         printf 'note: goal progress was rebuilt from step files; existing statuses carried across where step names match\n' >&2
     elif [ -n "$(find "$goal_dir/steps" -maxdepth 1 -type f -name '*.md' \

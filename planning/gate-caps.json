@@ -3,7 +3,7 @@
   "duplication_caps": {
     "hand-rolled .tmp.$$ temp sites": 43,
     "tests not sourcing lib-test.sh": 7,
-    "inline awk -F'|' parsers": 30,
+    "inline awk -F'|' parsers": 23,
     "seed progress-bar literal copies": 3,
     "percent/bar/icon derivation copies": 3
   }

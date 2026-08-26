@@ -36,3 +36,15 @@ plan_table_row_json() {
     done
     printf '{%s}' "$out"
 }
+
+# plan_table_set_cell LINE COLUMN VALUE — print LINE with cell COLUMN
+# (same awk -F convention as plan_table_cell: column 2 is the first data
+# cell) replaced by VALUE verbatim; callers choose their own spacing.
+plan_table_set_cell() {
+    local line="$1" idx=$(( ${2:-2} - 1 )) val="$3"
+    local -a parts=()
+    while IFS= read -r c; do parts+=("$c"); done \
+        < <(printf '%s\n' "$line" | tr '|' '\n')
+    parts[$idx]="$val"
+    (IFS='|'; printf '%s\n' "${parts[*]}")
+}
