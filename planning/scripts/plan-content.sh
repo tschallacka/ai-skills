@@ -239,6 +239,42 @@ case "$command" in
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
         # Literal scan of one document (used by both --document and the scoped
         # branches below; defined here so --document can call it).
+        # Row emitters for table-bearing documents: bash read-loops over the
+        # shared cell helper keep every consumer on one parsing contract.
+        emit_row() { # DOCID LINE FULL — outer pipes stripped, 120-char excerpt
+            local docid="$1" line="$2" row
+            row="$(printf '%s\n' "$line" | sed -e 's/^[[:space:]]*|[[:space:]]*//' -e 's/[[:space:]]*|[[:space:]]*$//')"
+            if [ "$full" != true ] && [ "${#row}" -gt 120 ]; then
+                row="${row:0:120}..."
+            fi
+            printf '%s\t%s\t%s\n' "$docid" "$row" "$row"
+        }
+        scan_coverage_rows() { # FILE DOCID PATTERN FULL — DoD coverage section
+            local cfile="$1" cdocid="$2" cpat="$3" cfull="$4" in_cov=0 cline
+            while IFS= read -r cline || [ -n "$cline" ]; do
+                case "$cline" in
+                    '## Definition-of-done coverage'*) in_cov=1; continue ;;
+                esac
+                [ "$in_cov" = 1 ] || continue
+                case "$cline" in '## '*) break ;; esac
+                case "$cline" in
+                    '|'*)
+                        if [ -z "$cpat" ] || [[ $cline == *"$cpat"* ]]; then
+                            emit_row "$cdocid" "$cline" "$cfull"
+                        fi
+                        ;;
+                esac
+            done < "$cfile"
+        }
+        scan_unit_rows() { # FILE PATTERN FULL — | WNN | rows in the inventory
+            local ufile="$1" upat="$2" ufull="$3" uline uid
+            while IFS= read -r uline || [ -n "$uline" ]; do
+                [[ $uline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]] || continue
+                [ -z "$upat" ] || [[ $uline == *"$upat"* ]] || continue
+                uid="$(plan_table_cell "$uline" 2)"
+                emit_row "unit:$uid" "$uline" "$ufull"
+            done < "$ufile"
+        }
         scan_file() {
             local docid="$1" file="$2" maxlen="$3"
             [ -f "$file" ] || return 0
@@ -263,16 +299,8 @@ case "$command" in
             matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
             trap 'rm -f "$matches_file"' EXIT
             case "$document" in
-                coverage) awk -F'|' -v pattern="$pattern" -v full="$full" '
-                        /^## Definition-of-done coverage/ { in_coverage = 1; next }
-                        in_coverage && /^## / { exit }
-                        in_coverage && /^\|/ && index($0, pattern) {
-                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                            print "coverage\t" row "\t" row
-                        }
-                    ' "$doc_file" >> "$matches_file"
-                    ;;
+                coverage) scan_coverage_rows "$doc_file" coverage "$pattern" "$full" >> "$matches_file" ;;
+
                 *) scan_file "$document" "$doc_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file" ;;
             esac
             if [ "$format" = json ]; then
@@ -344,29 +372,14 @@ case "$command" in
         esac
         case "$scope" in
             units|inventory|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
-                    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-                        id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-                        if (index($0, pattern)) {
-                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                            print "unit:" id "\t" row "\t" row
-                        }
-                    }
-                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                [ -f "$plan_dir/work-unit-inventory.md" ] \
+                    && scan_unit_rows "$plan_dir/work-unit-inventory.md" "$pattern" "$full" >> "$matches_file"
                 ;;
         esac
         case "$scope" in
             coverage|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
-                    /^## Definition-of-done coverage/ { in_coverage = 1; next }
-                    in_coverage && /^## / { exit }
-                    in_coverage && /^\|/ && index($0, pattern) {
-                        row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                        if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                        print "coverage\t" row "\t" row
-                    }
-                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                [ -f "$plan_dir/work-unit-inventory.md" ] \
+                    && scan_coverage_rows "$plan_dir/work-unit-inventory.md" coverage "$pattern" "$full" >> "$matches_file"
                 ;;
         esac
         case "$scope" in
