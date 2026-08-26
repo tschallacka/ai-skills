@@ -565,7 +565,9 @@ case "$command" in
         # If the second rename fails the first is rolled back, so no torn
         # pair survives an ordinary failure; the window between the two
         # renames is irreducible without a journal.
-        review_backup="${review}.bak.$$"; description_backup="${description}.bak.$$"
+        review_backup="$(mktemp "${review}.XXXXXX")"
+        description_backup="$(mktemp "${description}.XXXXXX")"
+        trap 'rm -f "$review_tmp" "$description_tmp" "$review_backup" "$description_backup"' EXIT
         cp "$review" "$review_backup"; cp "$description" "$description_backup"
         if ! mv "$description_tmp" "$description"; then
             rm -f "$review_tmp" "$review_backup" "$description_backup"

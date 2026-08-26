@@ -154,7 +154,7 @@ awk -v violation="$violation" '
         for (i = 1; i <= n; i++)
             if (!found[i]) printf "atomicity: box not found: %s\n", want[i] > "/dev/stderr"
     }
-' "$step_file" > "$step_file.tmp.$$" && mv "$step_file.tmp.$$" "$step_file"
+' "$step_file" > "$temporary_file" && mv "$temporary_file" "$step_file"
 if [ -n "$extra" ]; then
     printf 'atomicity: VIOLATION — also touched: %s\n' "$(printf '%s' "$extra" | tr '\n' ' ')" >&2
 else
