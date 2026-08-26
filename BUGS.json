@@ -600,6 +600,27 @@
       "updated_at": "2026-08-25T10:06:45Z"
     },
     {
+      "id": "B43",
+      "title": "update-adversarial-review consumes adversarial-review-incoming even when findings arrive via --file",
+      "status": "not-a-defect",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Place ten un-consumed rows in adversarial-review-incoming.md, then run update-adversarial-review.sh $P --file other.csv; the incoming file is rm -fed unconditionally",
+      "observed": "The incoming file vanished; only a manual aside-and-restore saved the ten cycle-18 rows",
+      "expected": "--file means findings come from the named file; the incoming document must be left untouched unless it was the consumed source",
+      "mechanism": "The consumer removes the incoming document unconditionally at the end of a successful run without checking whether it was actually this run source",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": "Not reproducible on current HEAD: with --file, consumed_incoming remains 0 and rm -f is skipped. Empirically verified with a live two-file test.",
+      "verification": "Sandbox test: create plan + review + incoming file + separate CSV; run update-adversarial-review.sh --file other.csv; incoming file survives.",
+      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C1)",
+      "notes": " Also re-mints fix-keys.json under a fresh session on every landing (collateral C2): stale keys, fresh claims required — by design but worth knowing.",
+      "created_at": "2026-08-25T09:26:12Z",
+      "updated_at": "2026-08-25T09:51:31Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -664,6 +685,30 @@
       "notes": "One character of fix -- \"$BASH\" for bash -- and it is worth doing separately from B33 so the portability gate goes green in two identifiable steps rather than one ambiguous one. Worth flagging alongside it: 6f8f426 closes T39 in the register while the suite is red on B32, B33 and this, so the queue now says done for work whose gates do not pass. The register entry is not wrong about the feature landing; it is that a closure and a green suite have come apart, which is the state a reviewer would want named rather than discovered.",
       "created_at": "2026-08-24T13:13:39Z",
       "updated_at": "2026-08-24T14:14:22Z"
+    },
+    {
+      "id": "B42",
+      "title": "Atomicity checkboxes are mandatory, unwritable by any helper, and byte-exact so honest annotations fail the gate",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "high",
+      "parent": "B38",
+      "reproduce": "On any step: update-plan-content.sh -ss $P 01-alpha/01-step-one atomicity-check -p 8.1: x refuses (not a mutable section); tick a box with an appended NOTE about a multi-file commit and validate-plan fails has not confirmed target isolation via grep -Fqx",
+      "observed": "Boxes are written pre-ticked at creation, no helper can change them, and the validator requires all three byte-exact — every step in every valid plan asserts atomicity regardless of reality; plan-content.sh renders them to reviewers as if they were evidence",
+      "expected": "Either a writable step/atomicity-check section whose recorded violations FAIL validation honestly, or deletion of the three lines in favour of the mechanical checks; boxes should start unticked so a tick is an act",
+      "mechanism": "The three ticks have no plan_section_spec entry and no writer anywhere; validate-plan.sh:765-767 greps whole-line fixed strings, making the ticked trio a constant the suite certifies whether or not atomicity held (live case: AR-157, W50 ticked single-file while its commit changed seven files)",
+      "surfaces": [
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/add-work-unit.sh",
+        "planning/scripts/validate-plan.sh",
+        "SKILL.md"
+      ],
+      "fix": "Goal 02 of harden-plan-data-parsing (ce8600f): unticked default at creation, update-step auto-tick from git-diff evidence with VIOLATION annotations, validator accepts annotated ticks and fails unticked-on-completed only",
+      "verification": "test-atomicity-flow.sh end-to-end pins on a real git fixture (unticked default, exact-match tick, violation annotation); suite 104/104; all CI legs green",
+      "found_by": "user session during cycle-18 stale-phrase fixes (report in planning-skill-defects-report.md, Trap B)",
+      "notes": " Reported as medium on the four-point user scale; mapped to minor here (register enum has no medium).",
+      "created_at": "2026-08-25T09:24:44Z",
+      "updated_at": "2026-08-26T20:16:45Z"
     },
     {
       "id": "B1",
@@ -882,6 +927,27 @@
       "updated_at": "2026-08-22T21:35:54Z"
     },
     {
+      "id": "B44",
+      "title": "Cycle numbering breaks after gaps: archived as Cycle 11 following Cycle 16",
+      "status": "not-a-defect",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With history containing cycles up to 16 but gaps in numbering, land findings via update-adversarial-review.sh; the prior table is archived under a heading numbered grep-count-plus-one",
+      "observed": "Prior table archived as Cycle 11 after Cycle 16; confirmed in adversarial-review-history.md",
+      "expected": "The new cycle number is one greater than the highest existing cycle number, not the count of headings",
+      "mechanism": "update-adversarial-review.sh computes the next cycle as grep -c of Cycle headings plus one; heading numbers are not contiguous once any historical gap exists",
+      "surfaces": [
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "fix": "Already fixed: update-adversarial-review.sh uses highest_cycle_number() (max + 1, never a count) since before this report was filed; the comment at line 74 documents the exact failure mode described.",
+      "verification": "Read the code: highest_cycle_number takes max of all Cycle headings, not their count. The observed Cycle-11-after-16 came from an older installed skill version.",
+      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C3)",
+      "notes": null,
+      "created_at": "2026-08-25T09:46:07Z",
+      "updated_at": "2026-08-25T09:53:29Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -902,72 +968,6 @@
       "notes": "Recorded so it is not lost; needs a small design decision (add an escape to the shared renderer vs authoring guidance) before fixing. The CRLF half of the same note is already covered: LF-only is documented and the refusal names the conversion.",
       "created_at": "2026-08-22T20:49:54Z",
       "updated_at": "2026-08-24T09:24:39Z"
-    },
-    {
-      "id": "B42",
-      "title": "Atomicity checkboxes are mandatory, unwritable by any helper, and byte-exact so honest annotations fail the gate",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "high",
-      "parent": "B38",
-      "reproduce": "On any step: update-plan-content.sh -ss $P 01-alpha/01-step-one atomicity-check -p 8.1: x refuses (not a mutable section); tick a box with an appended NOTE about a multi-file commit and validate-plan fails has not confirmed target isolation via grep -Fqx",
-      "observed": "Boxes are written pre-ticked at creation, no helper can change them, and the validator requires all three byte-exact — every step in every valid plan asserts atomicity regardless of reality; plan-content.sh renders them to reviewers as if they were evidence",
-      "expected": "Either a writable step/atomicity-check section whose recorded violations FAIL validation honestly, or deletion of the three lines in favour of the mechanical checks; boxes should start unticked so a tick is an act",
-      "mechanism": "The three ticks have no plan_section_spec entry and no writer anywhere; validate-plan.sh:765-767 greps whole-line fixed strings, making the ticked trio a constant the suite certifies whether or not atomicity held (live case: AR-157, W50 ticked single-file while its commit changed seven files)",
-      "surfaces": [
-        "planning/scripts/plan-document-lib.sh",
-        "planning/scripts/add-work-unit.sh",
-        "planning/scripts/validate-plan.sh",
-        "SKILL.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "user session during cycle-18 stale-phrase fixes (report in planning-skill-defects-report.md, Trap B)",
-      "notes": " Reported as medium on the four-point user scale; mapped to minor here (register enum has no medium).",
-      "created_at": "2026-08-25T09:24:44Z",
-      "updated_at": "2026-08-25T09:24:44Z"
-    },
-    {
-      "id": "B43",
-      "title": "update-adversarial-review consumes adversarial-review-incoming even when findings arrive via --file",
-      "status": "not-a-defect",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "Place ten un-consumed rows in adversarial-review-incoming.md, then run update-adversarial-review.sh $P --file other.csv; the incoming file is rm -fed unconditionally",
-      "observed": "The incoming file vanished; only a manual aside-and-restore saved the ten cycle-18 rows",
-      "expected": "--file means findings come from the named file; the incoming document must be left untouched unless it was the consumed source",
-      "mechanism": "The consumer removes the incoming document unconditionally at the end of a successful run without checking whether it was actually this run source",
-      "surfaces": [
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "fix": "Not reproducible on current HEAD: with --file, consumed_incoming remains 0 and rm -f is skipped. Empirically verified with a live two-file test.",
-      "verification": "Sandbox test: create plan + review + incoming file + separate CSV; run update-adversarial-review.sh --file other.csv; incoming file survives.",
-      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C1)",
-      "notes": " Also re-mints fix-keys.json under a fresh session on every landing (collateral C2): stale keys, fresh claims required — by design but worth knowing.",
-      "created_at": "2026-08-25T09:26:12Z",
-      "updated_at": "2026-08-25T09:51:31Z"
-    },
-    {
-      "id": "B44",
-      "title": "Cycle numbering breaks after gaps: archived as Cycle 11 following Cycle 16",
-      "status": "not-a-defect",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "With history containing cycles up to 16 but gaps in numbering, land findings via update-adversarial-review.sh; the prior table is archived under a heading numbered grep-count-plus-one",
-      "observed": "Prior table archived as Cycle 11 after Cycle 16; confirmed in adversarial-review-history.md",
-      "expected": "The new cycle number is one greater than the highest existing cycle number, not the count of headings",
-      "mechanism": "update-adversarial-review.sh computes the next cycle as grep -c of Cycle headings plus one; heading numbers are not contiguous once any historical gap exists",
-      "surfaces": [
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "fix": "Already fixed: update-adversarial-review.sh uses highest_cycle_number() (max + 1, never a count) since before this report was filed; the comment at line 74 documents the exact failure mode described.",
-      "verification": "Read the code: highest_cycle_number takes max of all Cycle headings, not their count. The observed Cycle-11-after-16 came from an older installed skill version.",
-      "found_by": "user session during cycle-18 landing (report in planning-skill-defects-report.md, collateral C3)",
-      "notes": null,
-      "created_at": "2026-08-25T09:46:07Z",
-      "updated_at": "2026-08-25T09:53:29Z"
     },
     {
       "id": "B45",
