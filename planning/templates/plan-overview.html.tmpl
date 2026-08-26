@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="@_REFRESH_@">
+@_META_REFRESH_TAG_@
 <title>@_PLAN_NAME_@ — plan overview</title>
 <style>
 :root{
@@ -304,6 +304,7 @@ h1 .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60
 (function(){
 "use strict";
 var REFRESH=@_REFRESH_JS_@;
+var IS_SERVE=@_IS_SERVE_@;
 /* numbers are readable at rest: no count-up animation on a review surface
    (T42j) — the final value is written once, synchronously */
 document.querySelectorAll(".count").forEach(function(el){
@@ -318,6 +319,7 @@ var lines=[].slice.call(document.querySelectorAll("#narr .ln"));
 lines.forEach(function(el){el.classList.remove("typeline");});
 /* refresh ring */
 var C=157.08,left=REFRESH,lab=document.getElementById("rlab"),fg=document.getElementById("rfg");
+if(REFRESH>0&&!IS_SERVE){
 lab&&(lab.textContent=left+"s");
 var iv=setInterval(function(){
   left--;if(left<0)left=REFRESH;
@@ -325,6 +327,17 @@ var iv=setInterval(function(){
   if(fg)fg.setAttribute("stroke-dashoffset",(C*(left/REFRESH)).toFixed(1));
 },1000);
 setTimeout(function(){location.reload();},REFRESH*1000+400);
+}
+if(IS_SERVE){
+  setInterval(function(){
+    fetch("/state.json").then(function(r){return r.json()}).then(function(s){
+      document.querySelectorAll("[data-state-key]").forEach(function(el){
+        var k=el.getAttribute("data-state-key");
+        if(s[k]!==undefined)el.textContent=s[k];
+      });
+    }).catch(function(){});
+  },5000);
+}
 })();
 </script>
 </body>

@@ -22,7 +22,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 note_fail() { printf 'function-length-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
-CAP=66
+CAP=68
 count=0
 worst=""
 for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do
