@@ -4,21 +4,35 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
-      "id": "T49",
-      "title": "Declare bash as a hard requirement for the skills that ship scripts, once B49 is fixed",
-      "status": "done",
-      "priority": "normal",
+      "id": "T50",
+      "title": "Finish dropping the positional argument form from add-work-unit.sh",
+      "status": "open",
+      "priority": "high",
       "parent": null,
-      "detail": "Attempted in 628dcbb and reverted in cd21339 because it reddened three CI legs. The declaration itself is right: planning ships 226 .sh files, chat 7, resource-limited-testing 1, and without bash none of them run. Two blockers, both now recorded. (1) B49: giving resource-limited-testing its first unconditional requirement makes the UI call runtime_requirement_met/label where they are not defined, and test-install-ui exits 1 on the resulting stderr. (2) test-limited-run-contract pins the exact requirement set per platform — 'Intel macOS requires nothing' and 'arm64 requires exactly memlimit' — so a bash row breaks both assertions and those expectations must be updated deliberately, not patched away. The tools.tsv rows from the reverted commit are worth keeping verbatim, including the MINGW/MSYS/CYGWIN hint pointing at Git for Windows, and note that build.sh rejects an apostrophe in a why line because it generates single-quoted shell strings. Worth deciding first whether the declaration is actionable at all: install.sh is itself bash, so a machine without bash cannot run the installer, which makes the requirement unfalsifiable on that path and useful mainly for the npm distribution and as documentation.",
+      "detail": "A worker converted the call sites but a session restart killed it before verification, so 17 files sit modified and uncommitted in the working tree: planning/scripts/add-work-unit.sh, planning/scripts/plan-mutate.sh, planning/SKILL.md, CODE-STYLE.md and 13 planning/tests files. The edits are on disk so nothing is lost, but none of it is verified. To finish: confirm the positional branch and the positional array plumbing that only served it are gone; confirm every converted call preserves its argument values byte-for-byte, including the em-dash that means no dependencies; check what became of the deliberately malformed call at test-plan-commands.sh line 730 and of test-flag-form-equivalence.sh, whose premise is void now that only one form exists; run bash run-tests.sh; and prove the new refusal test bites by temporarily reinstating a positional fallback and observing the failure. Regenerate install.sh with installer/build.sh if the shipped file set changed, and commit only the files that changed.",
       "blocked_on": null,
       "refs": [
-        "planning/requires.tsv",
-        "installer/tools.tsv",
-        "planning/tests/test-limited-run-contract.sh"
+        "planning/scripts/add-work-unit.sh",
+        "planning/tests/test-flag-form-equivalence.sh"
       ],
-      "note": "Landed after B49 was fixed. The pinned expectations in test-limited-run-contract were updated deliberately rather than patched away: they now assert 'Intel requires bash alone' and 'arm64 requires bash and memlimit', which keeps the arch-conditional difference — the actual point of those assertions — while admitting the unconditional row. Mutation-checked both ways: removing the bash row makes the test exit 1, restoring it exits 0. The question of whether the declaration is actionable stands answered as 'partly': install.sh is bash so it cannot fail there, but the npm distribution and the Git for Windows hint make it worth stating.",
-      "created_at": "2026-08-27T09:26:09Z",
-      "updated_at": "2026-08-27T09:36:22Z"
+      "note": null,
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-08-27T12:37:03Z"
+    },
+    {
+      "id": "T51",
+      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
+      "blocked_on": null,
+      "refs": [
+        ".plans/plan-overview-rebuild/adversarial-review.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-08-27T12:37:03Z"
     },
     {
       "id": "T1e",
@@ -992,6 +1006,23 @@
       "note": "Build-time gate in installer/build.sh, wired ahead of validate_requires_groups in gen_dependency_block. Mutations: delete socat row -> build exits 65 naming overview-serve.sh's probe; undeclared jq probe in chat-server.sh -> exit 65; allowlist row -> passes; clean tree -> rc 0. Two structural traps fixed en route: the loop was dying in a pipeline subshell (missing flag lost) and grep-exit-1 under pipefail aborted the scan before the rung-loop grep — both now documented in the code.",
       "created_at": "2026-08-27T08:00:07Z",
       "updated_at": "2026-08-27T08:49:24Z"
+    },
+    {
+      "id": "T49",
+      "title": "Declare bash as a hard requirement for the skills that ship scripts, once B49 is fixed",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Attempted in 628dcbb and reverted in cd21339 because it reddened three CI legs. The declaration itself is right: planning ships 226 .sh files, chat 7, resource-limited-testing 1, and without bash none of them run. Two blockers, both now recorded. (1) B49: giving resource-limited-testing its first unconditional requirement makes the UI call runtime_requirement_met/label where they are not defined, and test-install-ui exits 1 on the resulting stderr. (2) test-limited-run-contract pins the exact requirement set per platform — 'Intel macOS requires nothing' and 'arm64 requires exactly memlimit' — so a bash row breaks both assertions and those expectations must be updated deliberately, not patched away. The tools.tsv rows from the reverted commit are worth keeping verbatim, including the MINGW/MSYS/CYGWIN hint pointing at Git for Windows, and note that build.sh rejects an apostrophe in a why line because it generates single-quoted shell strings. Worth deciding first whether the declaration is actionable at all: install.sh is itself bash, so a machine without bash cannot run the installer, which makes the requirement unfalsifiable on that path and useful mainly for the npm distribution and as documentation.",
+      "blocked_on": null,
+      "refs": [
+        "planning/requires.tsv",
+        "installer/tools.tsv",
+        "planning/tests/test-limited-run-contract.sh"
+      ],
+      "note": "Landed after B49 was fixed. The pinned expectations in test-limited-run-contract were updated deliberately rather than patched away: they now assert 'Intel requires bash alone' and 'arm64 requires bash and memlimit', which keeps the arch-conditional difference — the actual point of those assertions — while admitting the unconditional row. Mutation-checked both ways: removing the bash row makes the test exit 1, restoring it exits 0. The question of whether the declaration is actionable stands answered as 'partly': install.sh is bash so it cannot fail there, but the npm distribution and the Git for Windows hint make it worth stating.",
+      "created_at": "2026-08-27T09:26:09Z",
+      "updated_at": "2026-08-27T09:36:22Z"
     },
     {
       "id": "T8",
