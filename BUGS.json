@@ -621,6 +621,30 @@
       "updated_at": "2026-08-25T09:51:31Z"
     },
     {
+      "id": "B47",
+      "title": "The socat rung of the served overview answers nothing, and CI cannot see it because the runners have no socat",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash planning/tests/test-overview-serve.sh   # requires socat on PATH; exit 1 with 3 failures",
+      "observed": "Three assertions fail identically on bash 5.3 and bash 3.2: 'socat /state.json equals the extractor' (state JSON did not match), 'socat / serves the artifact' (output did not contain '<!DOCTYPE html>'), 'socat /sections slices identity-panel' (output did not contain 'id=\"identity-panel\"'). The other three rungs pass, so serve mode works via python3, node and perl and fails only on its last-resort rung.",
+      "expected": "Every rung serves identical routes — that is what T43f asserts — so the socat rung must return the same artifact, state JSON and section slices as the interpreter rungs, or the test must skip it honestly rather than the rung shipping broken.",
+      "mechanism": "Not established. Two facts are measured. (1) The failure is not shell-version dependent: identical on bash 5.3 and 3.2, in the two-shell harness and directly at HEAD, on a machine where socat is /usr/bin/socat. (2) CI is structurally blind to it: the green run 33041380671 ran test-overview-serve but its log mentions socat zero times, so the runners lack socat and those three assertions never execute — six green legs say nothing about this rung. A weak signal, not proof: overview-serve-handler.sh invoked directly with ROUTE=/ and an EMPTY plan dir exits 0 with zero bytes, which is consistent with the '<!DOCTYPE html>' failure but was not run against a real plan tree, so it may be correct behaviour for an empty directory.",
+      "surfaces": [
+        "planning/scripts/overview-serve.sh",
+        "planning/scripts/runtime/overview-serve-handler.sh",
+        "planning/tests/test-overview-serve.sh",
+        ".github/workflows"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "local ./verify-both-shells.sh on 704484d, reproduced at 06b3c30",
+      "notes": "CI blindness is the second half of this: installing socat on the runners, or making the test declare a skip when socat is absent, is what stops a green suite from overstating its reach. Separately, the home worker reported fixing a macOS loopback-port timeout on this branch; that fix is included in 704484d, and this failure is on Linux with all four rungs available, so the two are not the same problem.",
+      "created_at": "2026-08-27T07:44:28Z",
+      "updated_at": "2026-08-27T07:44:38Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
