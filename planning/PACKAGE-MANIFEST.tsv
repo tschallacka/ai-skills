@@ -51,6 +51,7 @@ planning/scripts/plan-root.sh	scripts/plan-root.sh	installer	review-approved	bac
 planning/scripts/plan-reconcile-lib.sh	scripts/plan-reconcile-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/role-context.sh	scripts/role-context.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/update-work-unit.sh	scripts/update-work-unit.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/update-ui-story.sh	scripts/update-ui-story.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/remove-work-unit.sh	scripts/remove-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	review-approved	backup-then-replace	false
 planning/scripts/plan-core-lib.sh	scripts/plan-core-lib.sh	installer	review-approved	backup-then-replace	false

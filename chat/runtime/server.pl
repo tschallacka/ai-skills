@@ -91,7 +91,9 @@ sub do_fetch {
 sub drop_client {
     my ($s) = @_;
     $select->remove($s);
-    delete $_{$s} for (\%NICK, \%INBUF);
+    # B53: the element form $_{$s} names the punctuation hash, not the
+    # topic; the arrow dereference actually frees per-connection state.
+    delete $_->{$s} for (\%NICK, \%INBUF);
     close $s;
 }
 

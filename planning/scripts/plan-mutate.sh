@@ -18,11 +18,9 @@ export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage() {
-    local rc="${1:-64}"
-    cat <<USAGE
-Usage:
-  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
+# The verb list is data, not a hand-maintained heredoc: one place, read by
+# usage(), matching the dispatcher arms below.
+verb_catalogue='''  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
   ${0##*/} add-work-unit <plan> --id <WNN> --type <type> --file <file|N/A> --scope <scope>
       --subscope <subscope|N/A> --change <change> --depends-on <depends-on|—>
       --goal <goal> --step <step>
@@ -31,7 +29,11 @@ Usage:
   ${0##*/} rebuild-progress <goal-directory>
   ${0##*/} add-coverage <plan> <outcome-or-proof> <WNN[,WNN...]> <notes>
   ${0##*/} add-finding <plan> <AR-NN> <finding> <resolution> [open|in-progress|resolved]
+  ${0##*/} update-work-unit <plan> <WNN> [<new-primary-scope>] [<new-file>]
+      [--scope <text>] [--file <path>] [--type <type>]
+      [--depends-on <WNN[,WNN...]|—>] [--description <text>]
   ${0##*/} set-unit-scope <plan> <WNN> <new-primary-scope>
+      (alias of update-work-unit --scope; kept for existing callers)
   ${0##*/} remove-work-unit <plan> <WNN>
   ${0##*/} remove-plan <plan-directory>
   ${0##*/} cleanup-plans [--list] [<plan-name> ...] [--yes]
@@ -41,8 +43,24 @@ Usage:
   ${0##*/} set-decomposition <plan> <incomplete|completed>
   ${0##*/} update-adversarial-review <plan> [--file CSV]
   ${0##*/} rebuild-plan-progress <plan>
-  ${0##*/} validate <plan>
+  ${0##*/} content <update-plan-content.sh flags...>
+      narrative and table edits: -dp/-ds/-gp/-gs/-sp/-ss/-rp/-rs paragraphs
+      and sections, -ap append, -tp table, -ia/-ib insert, --delete-paragraph,
+      -t title, -f field, -tr testing requirement
+  ${0##*/} add-ui-story <plan> <story args...>
+  ${0##*/} add-ui-story-links <plan> <link args...>
+  ${0##*/} add-fix-claim <plan> <claim args...>
+  ${0##*/} mint-fix-keys <plan> <session-id>
+  ${0##*/} verify-fix-keys <plan> [--claimed-by <session>]
+  ${0##*/} create-adversarial-review <plan>
+  ${0##*/} register-command <plan> <key> <command> <when>
+  ${0##*/} validate <plan>'''
 
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage:
+${verb_catalogue}
 All durable plan mutations must use this dispatcher or the named helper it
 dispatches. Direct edits to .plans are prohibited by the planning protocol.
 USAGE
@@ -108,7 +126,15 @@ case "$command" in
     add-progress) add_progress_step "$@" ;;
     add-coverage) exec "$script_dir/add-coverage.sh" "$@" ;;
     add-finding) exec "$script_dir/add-adversarial-finding.sh" "$@" ;;
-    set-unit-scope) exec "$script_dir/update-work-unit.sh" "$@" ;;
+    update-work-unit|set-unit-scope) exec "$script_dir/update-work-unit.sh" "$@" ;;
+    content) exec "$script_dir/update-plan-content.sh" "$@" ;;
+    add-ui-story) exec "$script_dir/add-ui-story.sh" "$@" ;;
+    add-ui-story-links) exec "$script_dir/add-ui-story-links.sh" "$@" ;;
+    add-fix-claim) exec "$script_dir/add-fix-claim.sh" "$@" ;;
+    mint-fix-keys) exec "$script_dir/mint-fix-keys.sh" "$@" ;;
+    verify-fix-keys) exec "$script_dir/verify-fix-keys.sh" "$@" ;;
+    create-adversarial-review) exec "$script_dir/create-adversarial-review.sh" "$@" ;;
+    register-command) exec "$script_dir/register-command.sh" "$@" ;;
     remove-work-unit) exec "$script_dir/remove-work-unit.sh" "$@" ;;
     remove-plan) exec "$script_dir/remove-plan.sh" "$@" ;;
     cleanup-plans) exec "$script_dir/cleanup-plans.sh" "$@" ;;

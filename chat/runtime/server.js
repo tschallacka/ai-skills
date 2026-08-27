@@ -47,7 +47,8 @@ function append(chan, nick, text) {
       raw = fs.readFileSync(chanPath(chan), "utf8");
     } catch (e) {}
     for (const line of raw.split("\n")) {
-      if (line.startsWith("MSG ")) last = parseInt(line.split(" ")[2], 10) || last;
+      // B56: highest, not the final line's — restored logs may be unordered.
+      if (line.startsWith("MSG ")) { const id = parseInt(line.split(" ")[2], 10); if (id > last) last = id; }
     }
     const line =
       "MSG " + chan + " " + (last + 1) + " " + Math.floor(Date.now() / 1000) +
@@ -129,7 +130,8 @@ function handle(sock, nickOf, line) {
       if (sep < 0) return say("ERR usage: PRIVMSG #chan :text");
       const chan = arg.slice(0, sep);
       const text = arg.slice(sep + 2).replace(/\n/g, " ");
-      if (!validChan(chan) || !text) return say("ERR usage: PRIVMSG #chan :text");
+      if (!validChan(chan)) return say("ERR invalid channel: " + chan);
+      if (!text) return say("ERR usage: PRIVMSG #chan :text");
       const stored = append(chan, nickOf(), text);
       say(stored);
       broadcast(stored, chan, sock);

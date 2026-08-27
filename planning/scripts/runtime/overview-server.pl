@@ -53,14 +53,21 @@ while (my $c = $srv->accept) {
     } elsif ($path =~ m{^/sections/([a-z-]+)$}) {
         my $id = $1;
         my $html = render_to_temp();
-        if (defined($html) && $html =~ m{(<[^>]*id="\Q$id\E"[^>]*>[\s\S]*?)(?=<[^>]*id="(?:identity-panel|step-details|tests-panel|coverage-panel|findings-panel|dep-graph|narr)"|</main>|</body>)}) {
+        if (!defined($html) || length($html) == 0) {
+            $code = 500; $ctype = 'text/plain'; $body = "render failed\n";
+        } elsif ($html =~ m{(<[^>]*id="\Q$id\E"[^>]*>[\s\S]*?)(?=<[^>]*id="(?:identity-panel|step-details|tests-panel|coverage-panel|findings-panel|dep-graph|narr)"|</main>|</body>)}) {
             $code = 200; $ctype = 'text/html; charset=utf-8'; $body = $1;
         } else {
             $code = 404; $ctype = 'text/plain'; $body = "Not found\n";
         }
     } else {
-        $code = 200; $ctype = 'text/html; charset=utf-8';
-        $body = render_to_temp() // "";
+        # B51 class: a failed render is a 500, never a 200 with an empty body.
+        $body = render_to_temp();
+        if (defined($body) && length($body) > 0) {
+            $code = 200; $ctype = 'text/html; charset=utf-8';
+        } else {
+            $code = 500; $ctype = 'text/plain'; $body = "render failed\n";
+        }
     }
     binmode $c, ':raw';
     print $c "HTTP/1.0 $code @{[$code == 200 ? 'OK' : 'Not Found']}\r\n",

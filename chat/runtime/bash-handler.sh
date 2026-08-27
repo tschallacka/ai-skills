@@ -44,8 +44,10 @@ with_lock() {
         [ "$tries" -lt "$LOCK_TRIES" ] || bail "lock timeout"
         sleep 0.05
     done
-    "$@"
-    rc=$?
+    # B52: set -e would exit at a failing "$@" and leave the lock directory
+    # behind, wedging every later connection on that channel; capture instead.
+    rc=0
+    "$@" || rc=$?
     rmdir "$(chan_path "$chan").lock"
     return "$rc"
 }

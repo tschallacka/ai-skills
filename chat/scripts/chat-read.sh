@@ -38,6 +38,11 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$chan" ] || usage
 case "$chan" in '#'[a-z0-9_-]*) ;; *) printf '%s: channel must be #lowercase\n' "${0##*/}" >&2; exit 64 ;; esac
+
+    # B58: every server tier caps the name at 32 chars after the #; clients
+    # must refuse the same, or a channel is writable locally and unreachable
+    # over the socket.
+    [ "${#chan}" -le 33 ] || { printf '%s: channel name too long (max 32 after #): %s\n' "${0##*/}" "$chan" >&2; exit 64; }
 [ -z "$port" ] && [ -n "$host" ] && port=7717
 
 if [ -n "$host" ]; then

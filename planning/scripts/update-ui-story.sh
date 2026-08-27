@@ -82,12 +82,8 @@ row="$(awk -v wanted="$story_id" '
 [ -n "$row" ] || plan_die "Story ID not found: $story_id" 66
 
 # The row's current values, so an unspecified column keeps what it had.
-current() { # <field-number>
-    printf '%s' "$row" | awk -F'|' -v n="$1" '{
-        v = $n
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-        print v
-    }'
+current() { # <column> — cell value through the shared table helper
+    plan_table_cell "$row" "$1"
 }
 [ -n "$persona" ] || persona="$(current 3)"
 [ -n "$actions" ] || actions="$(current 4)"

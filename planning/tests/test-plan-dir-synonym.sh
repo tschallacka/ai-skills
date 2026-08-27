@@ -113,6 +113,10 @@ check_pair configure-ui-story-cache "$story_ready" configure-ui-story-cache.sh -
     --readiness 'the header appears' --max-wait '10s'
 check_pair create-ui-story-run-cache - create-ui-story-run-cache.sh US-01
 check_pair remove-plan - remove-plan.sh
+# update-ui-story carries the same --plan-dir pair: it rewrites an existing
+# story row (B61/B62 landed it; this pair keeps its hoisting covered).
+check_pair update-ui-story "$story_ready" update-ui-story.sh US-01 --persona 'an editor' \
+    --actions 'edits the story' --interaction 'types' --expected 'row updated'
 
 # update-plan-content.sh takes its subcommand before the plan directory, so the
 # hoist sits after that shift and the pair harness above cannot express it.

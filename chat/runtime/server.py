@@ -59,11 +59,25 @@ class Hub:
 
     def append(self, chan, nick, text):
         with Lock(os.path.join(CHAN_DIR, chan + ".lock")):
+            # B56/B57: only well-formed MSG lines count, and the next id is
+            # highest+1 — a restored or hand-edited log may be out of order,
+            # and an id below one already stored would be invisible to any
+            # --since cursor past it.
             last = 0
             try:
                 with open(chan_path(chan), "rb") as fh:
                     for line in fh:
-                        last = int(line.split(b" ")[2])
+                        if not line.startswith(b"MSG "):
+                            continue
+                        parts = line.split(b" ")
+                        if len(parts) < 4:
+                            continue
+                        try:
+                            mid = int(parts[2])
+                        except ValueError:
+                            continue
+                        if mid > last:
+                            last = mid
             except FileNotFoundError:
                 pass
             mid = last + 1
@@ -140,7 +154,11 @@ class Handler(socketserver.StreamRequestHandler):
                     self.reply("OK leave %s" % arg)
                 elif verb == "PRIVMSG":
                     chan, _, text = arg.partition(" :")
-                    if not valid_chan(chan) or not text:
+                    # B59: name the argument that was wrong, not a generic
+                    # usage hint — perl and the bash handler already do.
+                    if not valid_chan(chan):
+                        self.reply("ERR invalid channel: %s" % chan)
+                    elif not text:
                         self.reply("ERR usage: PRIVMSG #chan :text")
                         continue
                     stored = HUB.append(chan, nick, text.replace("\n", " "))

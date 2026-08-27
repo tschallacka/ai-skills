@@ -47,27 +47,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not re.fullmatch(r"[a-z-]+", section_id):
                 self._send(404, "text/plain", "Not found\n")
                 return
-            body = section_of(self._render(), section_id)
+            body = self._render()
+            if body is None:
+                self._send(500, "text/plain", "render failed\n")
+                return
+            body = section_of(body, section_id)
             if body is None:
                 self._send(404, "text/plain", "Not found\n")
             else:
                 self._send(200, "text/html", body)
         else:
             body = self._render()
-            self._send(200, "text/html", body)
+            if body is None:
+                self._send(500, "text/plain", "render failed\n")
+            else:
+                self._send(200, "text/html", body)
 
     def _render(self):
         # The renderer writes a file and prints its path; render to a temp
-        # and read it back so the response is exactly the artifact.
+        # and read it back so the response is exactly the artifact. A failed
+        # render must surface as 500, never a 200 with an empty body (B51).
         fd, path = tempfile.mkstemp(suffix=".html")
         os.close(fd)
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["bash", render_script, "--serve", plan_dir, "--out", path],
                 capture_output=True, text=True,
             )
+            if result.returncode != 0:
+                sys.stderr.write("render failed (%d): %s\n"
+                                 % (result.returncode, result.stderr[:500]))
+                return None
             with open(path, encoding="utf-8") as fh:
-                return fh.read()
+                return fh.read() or None
         finally:
             os.unlink(path)
 

@@ -692,7 +692,7 @@
     {
       "id": "B52",
       "title": "chat bash-handler with_lock leaves the channel lock directory behind when the locked command fails",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -703,17 +703,17 @@
       "surfaces": [
         "chat/runtime/bash-handler.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "with_lock captures rc via \"$@ || rc=$?\" so set -e cannot abort before the rmdir; the lock directory is removed on failure paths",
+      "verification": "repro verbatim: rc=3 propagates AND the lock dir is absent afterwards; chat suite green",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:05:41Z",
-      "updated_at": "2026-08-27T13:05:41Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B56",
       "title": "chat python3 and node tiers allocate the next message id from the last log line instead of the highest, so a new message can take an id below one already stored",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -725,17 +725,17 @@
         "chat/runtime/server.py",
         "chat/runtime/server.js"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "server.py parses only well-formed MSG lines and keeps a running max; server.js takes max instead of the last line's id",
+      "verification": "seeded out-of-order log (ids 1,7,3): next send takes id 8 through the python3 tier; local helper already agreed",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:08:08Z",
-      "updated_at": "2026-08-27T13:08:08Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B57",
       "title": "chat server.py append dies on a log line it cannot parse, dropping the client connection with no error reply",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -746,12 +746,12 @@
       "surfaces": [
         "chat/runtime/server.py"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "append skips non-MSG and malformed lines instead of raising; handler no longer dies on hostile logs",
+      "verification": "log with '# hand-added note': full dialogue returns (nick, MSG, PONG, OK bye) where it previously dropped after NICK",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
-      "updated_at": "2026-08-27T13:08:33Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B14",
@@ -934,7 +934,7 @@
     {
       "id": "B51",
       "title": "overview-server.py sends HTTP 200 with an empty body when the renderer fails, because it never checks the subprocess exit status",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -946,12 +946,12 @@
         "planning/scripts/runtime/overview-server.py",
         "planning/scripts/render-plan-overview.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "_render checks subprocess returncode; a failed render is a 500 on every route, never a 200 with an empty body (the perl server's identical // ''-fallback fixed in the same commit)",
+      "verification": "served an unrenderable plan dir: page route returns http=500 (was 200 bytes=0); suite 105/105",
       "found_by": "adversarial review AR-09, cause reproduced and corrected during verification",
       "notes": null,
       "created_at": "2026-08-27T12:26:23Z",
-      "updated_at": "2026-08-27T12:26:23Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B60",
@@ -1171,7 +1171,7 @@
     {
       "id": "B53",
       "title": "chat server.pl drop_client deletes from the hash %_ instead of %NICK and %INBUF, so per-connection state is never freed",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -1182,17 +1182,17 @@
       "surfaces": [
         "chat/runtime/server.pl"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "drop_client deletes through the arrow dereference $_->{$s} instead of the punctuation hash %_",
+      "verification": "perl -c clean; chat suite green",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:05:41Z",
-      "updated_at": "2026-08-27T13:05:41Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B54",
       "title": "chat-server.sh accepts any --runtime value and executes it as the server",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -1203,17 +1203,17 @@
       "surfaces": [
         "chat/scripts/chat-server.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "--runtime is validated against the four tiers at parse time; anything else is a usage error naming the valid set (exit 64)",
+      "verification": "'--runtime bash' and '--runtime nosuchrt' both refuse 64 with the membership message",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:05:41Z",
-      "updated_at": "2026-08-27T13:05:41Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B58",
       "title": "chat client helpers enforce no channel-name length cap while every server tier caps it at 32, so a long channel is writable locally and unreachable over the socket",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -1225,12 +1225,55 @@
         "chat/scripts/chat-register.sh",
         "chat/scripts/chat-send.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "all four client helpers cap the channel name at 32 after the #, matching every server tier",
+      "verification": "41-char channel refused at the client with the too-long message before any write",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
-      "updated_at": "2026-08-27T13:08:33Z"
+      "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B61",
+      "title": "plan-mutate.sh set-unit-scope hides every other field update-work-unit.sh can change",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
+      "observed": "The usage block prints 'set-unit-scope <plan> <WNN> <new-primary-scope>' and nothing else about work-unit fields, although the arm is 'set-unit-scope) exec update-work-unit.sh \"$@\"' — the target accepts --file, --type, --depends-on and --description as well.",
+      "expected": "The dispatcher names what it actually dispatches, so a reader who needs to retarget a unit's file finds the route instead of concluding no helper exists and writing one.",
+      "mechanism": "The verb was named for the first field it supported and never renamed when update-work-unit.sh grew the other flags; the usage string is hand-maintained beside the case arm rather than derived from it.",
+      "surfaces": [
+        "planning/scripts/plan-mutate.sh",
+        "planning/SKILL.md"
+      ],
+      "fix": "update-work-unit is the verb, documenting every field update-work-unit.sh changes; set-unit-scope stays as a documented alias",
+      "verification": "plan-mutate --help shows the full flag surface and the alias",
+      "found_by": "main session, while re-rooting 54 crate paths in plan-overview-rebuild",
+      "notes": null,
+      "created_at": "2026-08-27T20:22:41Z",
+      "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B62",
+      "title": "plan-mutate.sh claims to be the mandatory route for durable mutations but has no verb for several of them",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
+      "observed": "The closing line reads 'All durable plan mutations must use this dispatcher or the named helper it dispatches', yet the verb list has nothing for update-plan-content.sh, add-ui-story.sh, add-ui-story-links.sh, update-ui-story.sh, register-command.sh, mint-fix-keys.sh, add-fix-claim.sh or update-step.sh, all of which write durably into a plan.",
+      "expected": "Either every durable mutation has a verb, or the closing line says which helpers are reached directly, so the statement and the verb list agree.",
+      "mechanism": "The verb list is hand-maintained and was written when the dispatcher covered the inventory and progress helpers; the narrative, content and story helpers were added later directly, and nothing cross-checks the case arms against the scripts directory.",
+      "surfaces": [
+        "planning/scripts/plan-mutate.sh"
+      ],
+      "fix": "the verb list is now data read by usage() (one place), and verbs exist for content (update-plan-content flags), add-ui-story, add-ui-story-links, add-fix-claim, mint/verify-fix-keys, create-adversarial-review and register-command",
+      "verification": "register-command round-trip through the dispatcher verified; usage renders all new verbs",
+      "found_by": "main session",
+      "notes": null,
+      "created_at": "2026-08-27T20:22:48Z",
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B25",
@@ -1278,7 +1321,7 @@
     {
       "id": "B55",
       "title": "chat-server.sh documents exit 66 for a missing runtime but a pinned absent runtime exits 69 with a message naming all four",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -1289,17 +1332,17 @@
       "surfaces": [
         "chat/scripts/chat-server.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "a pinned-but-absent runtime is its own failure: exit 66 naming THAT runtime; 69 with the four-tier message remains the no-pinning case only",
+      "verification": "'--runtime node' with node hidden: 'runtime node is not installed', rc=66",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:05:41Z",
-      "updated_at": "2026-08-27T13:05:41Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     },
     {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -1311,55 +1354,12 @@
         "chat/runtime/server.py",
         "chat/runtime/server.js"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "server.py and server.js answer an invalid channel with 'ERR invalid channel: <name>' separately from the empty-text usage message, matching perl and the bash handler",
+      "verification": "parse checks; chat suite green",
       "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
-      "updated_at": "2026-08-27T13:08:33Z"
-    },
-    {
-      "id": "B61",
-      "title": "plan-mutate.sh set-unit-scope hides every other field update-work-unit.sh can change",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
-      "observed": "The usage block prints 'set-unit-scope <plan> <WNN> <new-primary-scope>' and nothing else about work-unit fields, although the arm is 'set-unit-scope) exec update-work-unit.sh \"$@\"' — the target accepts --file, --type, --depends-on and --description as well.",
-      "expected": "The dispatcher names what it actually dispatches, so a reader who needs to retarget a unit's file finds the route instead of concluding no helper exists and writing one.",
-      "mechanism": "The verb was named for the first field it supported and never renamed when update-work-unit.sh grew the other flags; the usage string is hand-maintained beside the case arm rather than derived from it.",
-      "surfaces": [
-        "planning/scripts/plan-mutate.sh",
-        "planning/SKILL.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, while re-rooting 54 crate paths in plan-overview-rebuild",
-      "notes": null,
-      "created_at": "2026-08-27T20:22:41Z",
-      "updated_at": "2026-08-27T20:22:41Z"
-    },
-    {
-      "id": "B62",
-      "title": "plan-mutate.sh claims to be the mandatory route for durable mutations but has no verb for several of them",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
-      "observed": "The closing line reads 'All durable plan mutations must use this dispatcher or the named helper it dispatches', yet the verb list has nothing for update-plan-content.sh, add-ui-story.sh, add-ui-story-links.sh, update-ui-story.sh, register-command.sh, mint-fix-keys.sh, add-fix-claim.sh or update-step.sh, all of which write durably into a plan.",
-      "expected": "Either every durable mutation has a verb, or the closing line says which helpers are reached directly, so the statement and the verb list agree.",
-      "mechanism": "The verb list is hand-maintained and was written when the dispatcher covered the inventory and progress helpers; the narrative, content and story helpers were added later directly, and nothing cross-checks the case arms against the scripts directory.",
-      "surfaces": [
-        "planning/scripts/plan-mutate.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session",
-      "notes": null,
-      "created_at": "2026-08-27T20:22:48Z",
-      "updated_at": "2026-08-27T20:22:48Z"
+      "updated_at": "2026-08-27T20:56:51Z"
     }
   ]
 }

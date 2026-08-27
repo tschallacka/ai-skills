@@ -41,7 +41,16 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
         start|stop|status) [ -z "$cmd" ] || usage; cmd="$1"; shift ;;
-        --runtime) [ "$#" -ge 2 ] || usage; want_runtime="$2"; shift 2 ;;
+        --runtime)
+            [ "$#" -ge 2 ] || usage
+            # B54: an unvalidated value is executed below; only the four
+            # tiers exist, and anything else must be a usage error.
+            case "$2" in
+                python3|node|perl|socat) ;;
+                *) printf '%s: unknown runtime: %s (python3, node, perl, socat)\n' "${0##*/}" "$2" >&2
+                   exit 64 ;;
+            esac
+            want_runtime="$2"; shift 2 ;;
         --port) [ "$#" -ge 2 ] || usage; want_port="$2"; shift 2 ;;
         --bind) [ "$#" -ge 2 ] || usage; want_bind="$2"; shift 2 ;;
         --home) [ "$#" -ge 2 ] || usage; HOME_DIR="$2"; shift 2 ;;
@@ -85,6 +94,10 @@ do_start() {
     mkdir -p "$CHAN_DIR" "$RUN_DIR"
     local runtime
     runtime="$(pick_runtime)" || {
+        if [ -n "$want_runtime" ]; then
+            printf '%s: runtime %s is not installed\n' "${0##*/}" "$want_runtime" >&2
+            exit 66
+        fi
         printf '%s: no chat server runtime found; need one of python3, node, perl, or socat\n' "${0##*/}" >&2
         printf 'client helpers still work against existing logs without a server\n' >&2
         exit 69
