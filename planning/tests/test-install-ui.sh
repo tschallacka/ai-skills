@@ -308,9 +308,18 @@ tool_row_re='jq  *hard  *missing'
     || note_fail 'the info pane must show the tool, its strength and its state'
 IUI_CURSOR=2
 frame="$(iui_render_frame)"
-degraded_re='install *allowed, degraded \(memlimit'
+# The verdict may wrap: at 80 columns the list takes its content width (37) and
+# the detail pane gets 40, so this phrase no longer fits on one line. An earlier
+# version of this assertion required it unwrapped, which pinned a pane width
+# rather than the contract. What must hold is that a degraded skill still reads
+# as installable and still names the tool, wrapped or not.
+degraded_re='install *allowed, degraded'
 [[ "$frame" =~ $degraded_re ]] \
     || note_fail 'a degraded skill must still read as installable'
+case "$frame" in
+    *memlimit*|*memlim-*) ;;
+    *) note_fail 'a degraded verdict must name the tool that degraded it' ;;
+esac
 case "$frame" in
     *'memory cap not enforced'*) ;;
     *) note_fail 'a soft requirement must say what capability is lost' ;;
@@ -348,12 +357,74 @@ iui_layout
 COLOR_MODE=truecolor
 iui_layout
 [ "$IUI_HEAD_ON" -eq 1 ] || note_fail 'the sprite must appear when there is colour and room'
-[ "$IUI_HEAD_SCALE" -ge 2 ] || note_fail "expected scale >= 2 at 200x60, got $IUI_HEAD_SCALE"
+# The sprite is an accent, not the subject: it may take at most a third of the
+# body rows and two fifths of the detail pane, and the text keeps its floor.
+# Measured before this contract existed, it took 48 of 60 rows at 200x60 and
+# left the skill's own information 8 rows, which is the defect being pinned.
+[ "$IUI_HEAD_H" -le $((IUI_BODY_ROWS / 3)) ] \
+    || note_fail "sprite must not exceed a third of the body rows: $IUI_HEAD_H of $IUI_BODY_ROWS"
+[ $((IUI_HEAD_SCALE * 32)) -le $((IUI_RIGHT_W * 2 / 5)) ] \
+    || note_fail "sprite must not exceed two fifths of the detail pane: $((IUI_HEAD_SCALE * 32)) of $IUI_RIGHT_W"
+[ $((IUI_BODY_ROWS - IUI_HEAD_H)) -ge "$IUI_HEAD_MIN_TEXT_ROWS" ] \
+    || note_fail "text left $((IUI_BODY_ROWS - IUI_HEAD_H)) rows, floor is $IUI_HEAD_MIN_TEXT_ROWS"
 IUI_ROWS=24
 iui_layout
 [ "$IUI_HEAD_ON" -eq 0 ] \
     || note_fail 'the sprite must be dropped when it would starve the info text'
 note_pass 'the ASCII/no-colour fallback is clean and drops the sprite'
+
+# ── 7a. Wrapping breaks words, and marks the break when it cannot ────────────
+# A token wider than the pane used to be cut with no mark, so a reader could not
+# tell a break from the end of a word.
+iui_wrap "the terminator wraps here" 12
+[ "${IUI_WRAP_LINES[0]}" = "the" ] \
+    || note_fail "expected a word break, got '${IUI_WRAP_LINES[0]}'"
+case "${IUI_WRAP_LINES[*]}" in
+    *-*) note_fail "text that fits on word boundaries must not be hyphenated: ${IUI_WRAP_LINES[*]}" ;;
+esac
+iui_wrap "supercalifragilisticexpialidocious" 12
+[ "${IUI_WRAP_LINES[0]}" = "supercalifr-" ] \
+    || note_fail "an unbreakable token must continue with a hyphen, got '${IUI_WRAP_LINES[0]}'"
+for wrapped_line in "${IUI_WRAP_LINES[@]}"; do
+    [ "${#wrapped_line}" -le 12 ] \
+        || note_fail "a wrapped line ran past the pane: '$wrapped_line' is ${#wrapped_line} of 12"
+done
+# The hyphen replaces a character rather than being inserted beside it, so no
+# character of the source may be lost or repeated across the joined lines.
+rejoined=""
+for wrapped_line in "${IUI_WRAP_LINES[@]}"; do
+    rejoined="$rejoined${wrapped_line%-}"
+done
+[ "$rejoined" = "supercalifragilisticexpialidocious" ] \
+    || note_fail "hyphenation lost or duplicated characters: '$rejoined'"
+note_pass 'wrapping prefers word boundaries and marks a mid-word break'
+
+# ── 7b. The list fits its longest name ───────────────────────────────────────
+# A row is cursor(1) + checkbox(3) + space(1) + name + state tag(6). The width
+# was a third of the terminal capped at 34, which truncated
+# post-implementation-review (26 chars, needing 37) at every terminal size.
+iui_longest_name_width() {
+    local i longest=0 length
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        length="${#IUI_SKILL_NAMES[$i]}"
+        [ "$length" -le "$longest" ] || longest="$length"
+    done
+    printf '%s' $((longest + 11))
+}
+for size in "80 24" "120 40" "200 60" "300 100"; do
+    set -- $size
+    IUI_COLS="$1"
+    IUI_ROWS="$2"
+    iui_layout
+    needed="$(iui_longest_name_width)"
+    if [ "$IUI_NARROW" -eq 0 ] && [ "$((IUI_COLS - 3 - IUI_DETAIL_MIN_W))" -ge "$needed" ]; then
+        [ "$IUI_LEFT_W" -ge "$needed" ] \
+            || note_fail "at ${1}x${2} the list is $IUI_LEFT_W columns, needs $needed for its longest name"
+        [ "$IUI_RIGHT_W" -ge "$IUI_DETAIL_MIN_W" ] \
+            || note_fail "at ${1}x${2} the detail pane is $IUI_RIGHT_W columns, floor is $IUI_DETAIL_MIN_W"
+    fi
+done
+note_pass 'the list is sized to its longest skill name, so nothing truncates'
 
 # ── 8. Only the eye rows animate ─────────────────────────────────────────────
 "$BASH" "$ui" --render --width 100 --height 40 --color truecolor --eye front > "$scratch/front"

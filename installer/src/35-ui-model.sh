@@ -143,19 +143,32 @@ iui_pad() {
     printf -v IUI_PAD '%s%*s' "$t" "$((w - ${#t}))" ''
 }
 
+# Wraps to whole words where it can and hyphenates where it cannot, so a token
+# longer than the pane continues on the next line as `term-` / `inator` rather
+# than being cut without a mark. `consume` is tracked separately from the emitted
+# line because the hyphen is added by this function and is not part of the source
+# text: consuming ${#line} would swallow the character the hyphen replaced.
 iui_wrap() {
-    local text="$1" width="$2" line split
+    local text="$1" width="$2" line split consume
     IUI_WRAP_LINES=()
     [ "$width" -ge 8 ] || width=8
     while [ -n "$text" ]; do
         line="$text"
+        consume="${#text}"
         if [ "${#line}" -gt "$width" ]; then
             line="${text:0:width}"
             split="${line% *}"
-            [ -n "$split" ] && [ "$split" != "$line" ] && line="$split"
+            if [ -n "$split" ] && [ "$split" != "$line" ]; then
+                line="$split"
+                consume="${#line}"
+            else
+                # One unbroken token wider than the pane: break it and say so.
+                consume=$((width - 1))
+                line="${text:0:consume}-"
+            fi
         fi
         IUI_WRAP_LINES+=("$line")
-        text="${text:${#line}}"
+        text="${text:consume}"
         text="${text# }"
     done
     [ "${#IUI_WRAP_LINES[@]}" -gt 0 ] || IUI_WRAP_LINES=('')
@@ -337,17 +350,38 @@ iui_layout() {
         iui_head_geometry
         return
     fi
-    IUI_LEFT_W=$((IUI_COLS / 3))
-    [ "$IUI_LEFT_W" -le 34 ] || IUI_LEFT_W=34
-    [ "$IUI_LEFT_W" -ge 22 ] || IUI_LEFT_W=22
+    iui_list_width
     IUI_RIGHT_W=$((IUI_COLS - IUI_LEFT_W - 3))
     iui_head_geometry
+}
+
+# The list is sized to its content, not to a fraction of the terminal: a row is
+# cursor(1) + checkbox(3) + space(1) + name + state tag(6), so the longest skill
+# name decides the width and nothing truncates. A third of the terminal was the
+# earlier rule and it capped at 34 columns, which cut
+# post-implementation-review (26 chars, needing 37) on every screen size.
+IUI_LIST_MIN_W=22
+IUI_LIST_MAX_W=46
+IUI_DETAIL_MIN_W=30
+iui_list_width() {
+    local i longest=0 length
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        length="${#IUI_SKILL_NAMES[$i]}"
+        [ "$length" -le "$longest" ] || longest="$length"
+    done
+    IUI_LEFT_W=$((longest + 11))
+    [ "$IUI_LEFT_W" -ge "$IUI_LIST_MIN_W" ] || IUI_LEFT_W="$IUI_LIST_MIN_W"
+    [ "$IUI_LEFT_W" -le "$IUI_LIST_MAX_W" ] || IUI_LEFT_W="$IUI_LIST_MAX_W"
+    # The detail pane is the reason the picker exists; it wins a narrow screen.
+    local ceiling=$((IUI_COLS - 3 - IUI_DETAIL_MIN_W))
+    [ "$IUI_LEFT_W" -le "$ceiling" ] || IUI_LEFT_W="$ceiling"
+    [ "$IUI_LEFT_W" -ge 8 ] || IUI_LEFT_W=8
 }
 
 # The sprite costs scale*32 columns and scale*16 rows, and is dropped rather than
 # shrunk when it does not fit: with no colour it would paint blank, and in the
 # narrow layout or under IUI_HEAD_MIN_TEXT_ROWS it would starve the info text.
-IUI_HEAD_MIN_TEXT_ROWS=6
+IUI_HEAD_MIN_TEXT_ROWS=12
 iui_head_geometry() {
     IUI_HEAD_ON=0
     IUI_HEAD_SCALE=0
@@ -355,10 +389,26 @@ iui_head_geometry() {
     [ "$IUI_NARROW" -eq 0 ] || return 0
     [ -n "$COLOR_MODE" ] || detect_color_mode
     [ "$COLOR_MODE" != "none" ] || return 0
+    # An accent, never the subject. Three caps, all of which must hold: the
+    # sprite takes at most a third of the body rows and two fifths of the detail
+    # pane, and the text keeps IUI_HEAD_MIN_TEXT_ROWS whatever is left over.
+    # Without the first two the sprite grew to fill the pane -- measured at
+    # 200x60 it took 48 of 60 rows and left the skill's own information 8.
+    # Scale 1 is the floor: the sprite is 32x16 and cannot shrink, so the only
+    # question at that size is whether the text still gets its floor. The
+    # proportional caps govern GROWTH beyond scale 1 -- without them the sprite
+    # expanded to fill the pane, measured at 200x60 as 48 of 60 rows with 8 left
+    # for the skill's own information. Capping scale 1 proportionally instead
+    # deleted the mascot outright on a 100x40 terminal, which is not an accent,
+    # it is an absence.
     local s
     for s in 1 2 3; do
-        [ $((s * 32)) -le "$IUI_RIGHT_W" ] || break
         [ $((IUI_BODY_ROWS - s * 16)) -ge "$IUI_HEAD_MIN_TEXT_ROWS" ] || break
+        [ $((s * 32)) -le "$IUI_RIGHT_W" ] || break
+        if [ "$s" -gt 1 ]; then
+            [ $((s * 32)) -le $((IUI_RIGHT_W * 2 / 5)) ] || break
+            [ $((s * 16)) -le $((IUI_BODY_ROWS / 3)) ] || break
+        fi
         IUI_HEAD_SCALE="$s"
     done
     [ "$IUI_HEAD_SCALE" -ge 1 ] || return 0

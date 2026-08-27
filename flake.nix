@@ -122,11 +122,13 @@
               pkgs.actionlint
               pkgs.jq
               pkgs.git
-              # Development-only, like the mermaid renderer below: nothing shipped
-              # is written in Rust, and nothing in the suite needs a compiler.
-              # It is here for the tools built alongside these skills that cannot
-              # be shell — a hook that must run where no interpreter is
-              # guaranteed, which on Windows means no bash at all.
+              # The build toolchain for the crates under src/ (CODE-STYLE 1b).
+              # This was development-only while nothing shipped was Rust; that
+              # stopped being true when src/tony-the-pony and src/chat landed, so
+              # cargo now builds artifacts a release carries. It stays a DEV
+              # dependency all the same: a shipped binary asks nothing of the
+              # target box, which is why shipping one lowers the runtime budget
+              # in CODE-STYLE section 1 rather than widening it.
               pkgs.cargo
               pkgs.rustc
               pkgs.clippy
@@ -144,7 +146,7 @@
               echo "  bash32-run       run one script under bash 3.2, children included"
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
               echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
-              echo "  cargo            $(cargo --version | cut -d' ' -f2)  (dev-only: nothing shipped is Rust)"
+              echo "  cargo            $(cargo --version | cut -d' ' -f2)  (builds the crates under src/)"
               echo
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"
