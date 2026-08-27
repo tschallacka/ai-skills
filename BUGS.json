@@ -1317,6 +1317,49 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T13:08:33Z"
+    },
+    {
+      "id": "B61",
+      "title": "plan-mutate.sh set-unit-scope hides every other field update-work-unit.sh can change",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
+      "observed": "The usage block prints 'set-unit-scope <plan> <WNN> <new-primary-scope>' and nothing else about work-unit fields, although the arm is 'set-unit-scope) exec update-work-unit.sh \"$@\"' — the target accepts --file, --type, --depends-on and --description as well.",
+      "expected": "The dispatcher names what it actually dispatches, so a reader who needs to retarget a unit's file finds the route instead of concluding no helper exists and writing one.",
+      "mechanism": "The verb was named for the first field it supported and never renamed when update-work-unit.sh grew the other flags; the usage string is hand-maintained beside the case arm rather than derived from it.",
+      "surfaces": [
+        "planning/scripts/plan-mutate.sh",
+        "planning/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, while re-rooting 54 crate paths in plan-overview-rebuild",
+      "notes": null,
+      "created_at": "2026-08-27T20:22:41Z",
+      "updated_at": "2026-08-27T20:22:41Z"
+    },
+    {
+      "id": "B62",
+      "title": "plan-mutate.sh claims to be the mandatory route for durable mutations but has no verb for several of them",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/plan-mutate.sh --help",
+      "observed": "The closing line reads 'All durable plan mutations must use this dispatcher or the named helper it dispatches', yet the verb list has nothing for update-plan-content.sh, add-ui-story.sh, add-ui-story-links.sh, update-ui-story.sh, register-command.sh, mint-fix-keys.sh, add-fix-claim.sh or update-step.sh, all of which write durably into a plan.",
+      "expected": "Either every durable mutation has a verb, or the closing line says which helpers are reached directly, so the statement and the verb list agree.",
+      "mechanism": "The verb list is hand-maintained and was written when the dispatcher covered the inventory and progress helpers; the narrative, content and story helpers were added later directly, and nothing cross-checks the case arms against the scripts directory.",
+      "surfaces": [
+        "planning/scripts/plan-mutate.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session",
+      "notes": null,
+      "created_at": "2026-08-27T20:22:48Z",
+      "updated_at": "2026-08-27T20:22:48Z"
     }
   ]
 }
