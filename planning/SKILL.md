@@ -1261,6 +1261,7 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/create-ui-validation.sh" <plan-directory> "<browser target or discovery method>"
 "$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
 "$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
+"$PLANNING_SKILL_DIR/scripts/update-ui-story.sh" <plan-directory> US-01 --expected "<corrected expectation>"   # correct a story that turned out to contradict the plan; re-checks the interaction rule against the resulting row
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
 "$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> --id W01 --type <type> --file <file|N/A> --scope <scope> --subscope <subscope|N/A> --change "<change>" --depends-on <dependencies|—> --goal 01-<goal> --step 01-step-<slug>
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place; retargeting lists the verification units that grade it

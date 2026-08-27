@@ -81,6 +81,7 @@ scripts/add-goal.sh
 scripts/add-planning-bug.sh
 scripts/add-ui-story.sh
 scripts/add-ui-story-links.sh
+scripts/update-ui-story.sh
 scripts/add-work-unit.sh
 scripts/configure-ui-story-cache.sh
 scripts/create-adversarial-review.sh
