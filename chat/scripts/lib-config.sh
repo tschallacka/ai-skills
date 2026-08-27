@@ -66,6 +66,17 @@ chat_config_load() {
     CHAT_CFG_SOCKET=""
     [ -f "$file" ] || return 0
     chat_config_read_keys "$file"
+    chat_config_defaults "$home"
+    return 0
+}
+
+# chat_config_defaults <home>
+#
+# Fill in what a partial entry leaves out, and refuse to guess at a transport we
+# do not recognise. Shared by the config and the registry, so a file written by
+# either is read the same way.
+chat_config_defaults() {
+    local home="$1"
     case "$CHAT_TRANSPORT" in
         tcp)
             [ -n "$CHAT_CFG_BIND" ] || CHAT_CFG_BIND="$CHAT_DEFAULT_BIND"
@@ -112,6 +123,56 @@ chat_can_connect() {
     ( exec 3<> "/dev/tcp/$1/$2" ) 2>/dev/null
 }
 
+# chat_registry_dir
+#
+# Where running servers register. $XDG_RUNTIME_DIR/chat when set - per-user,
+# tmpfs, cleared on logout - else <temp>/chat-<uid>.
+#
+# The per-uid suffix is not cosmetic: /tmp is world-writable, so a fixed shared
+# path would let another user plant an entry naming their own socket and every
+# client on the machine would talk to them, with no authentication in the
+# protocol to notice. This mirrors Registry::open in src/chat/src/registry.rs.
+#
+# Note also what is NOT claimed here: "cleared at reboot" is a Linux tmpfs
+# property. macOS /private/tmp survives reboots and is pruned only after three
+# days, so a stale entry must be survivable - which it is, because liveness is
+# decided by dialling.
+chat_registry_dir() {
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        printf '%s\n' "$XDG_RUNTIME_DIR/chat"
+        return 0
+    fi
+    printf '%s/chat-%s\n' "${TMPDIR:-/tmp}" "$(id -u)"
+}
+
+# chat_registry_find <home>
+#
+# Sets CHAT_TRANSPORT/CHAT_CFG_* from the registered server for <home>, if one is
+# registered. Returns 1 when there is none.
+#
+# An entry is NOT proof of life - a crashed server leaves one behind - so the
+# caller dials before trusting it. The helpers do not evict a dead entry the way
+# the binary does: removing another process's file from a shared directory is a
+# bigger claim than a read-only helper should make, and the binary cleans up on
+# its next look.
+chat_registry_find() {
+    local home="$1" dir entry
+    dir="$(chat_registry_dir)"
+    [ -d "$dir" ] || return 1
+    # Newest last, so the most recent registration wins if two ever coexist.
+    for entry in $(ls -1 "$dir"/*.server 2>/dev/null | sort); do
+        [ -f "$entry" ] || continue
+        case "$(sed -n 's/^home=//p' "$entry" | sed -n '1p')" in
+            "$home") ;;
+            *) continue ;;
+        esac
+        chat_config_read_keys "$entry"
+        chat_config_defaults "$home"
+        [ "$CHAT_TRANSPORT" = none ] || return 0
+    done
+    return 1
+}
+
 # chat_config_target <home> <helper-name>
 #
 # Apply the config to an invocation that named no --host. Sets CHAT_USE_HOST and
@@ -128,24 +189,33 @@ chat_config_target() {
     local home="$1" me="$2"
     CHAT_USE_HOST=""
     CHAT_USE_PORT=""
-    chat_config_load "$home"
+    # Discovery before convention: a registered server's endpoint is a fact,
+    # whereas the config says how a bus SHOULD be exposed and a recorded endpoint
+    # with nothing registered means no server is running. The registry is
+    # therefore consulted first, and the config only fills in a transport for a
+    # bus that registered a partial entry.
+    if ! chat_registry_find "$home"; then
+        chat_config_load "$home"
+    fi
     case "$CHAT_TRANSPORT" in
         tcp)
             CHAT_USE_HOST="$(chat_dial_host "$CHAT_CFG_BIND")"
             CHAT_USE_PORT="$CHAT_CFG_PORT"
-            # Only on the CONFIG path, never for an explicit --host: the user who
-            # named a server wants that server, and quietly writing somewhere
-            # else instead would be worse than an error. Here nobody named
-            # anything, so the log is the right answer and the note says so.
+            # An entry is not proof of life, and neither is a config. Only on this
+            # path, never for an explicit --host: the user who named a server wants
+            # that server, and quietly writing somewhere else would be worse than
+            # an error. Here nobody named anything, so the log is right.
             if ! chat_can_connect "$CHAT_USE_HOST" "$CHAT_USE_PORT"; then
-                printf '%s: nothing answers at %s:%s (the recorded transport); using the log directly\n' \
+                printf '%s: nothing answers at %s:%s; using the log directly\n' \
                     "$me" "$CHAT_USE_HOST" "$CHAT_USE_PORT" >&2
+                printf '%s: `chat serve` (or chat-server.sh start) starts one; a helper does not, because it cannot know which runtime you want\n' \
+                    "$me" >&2
                 CHAT_USE_HOST=""
                 CHAT_USE_PORT=""
             fi
             ;;
         socket)
-            printf '%s: the recorded transport is a unix socket (%s), which bash cannot open; using the log directly\n' \
+            printf '%s: the server is on a unix socket (%s), which bash cannot open; using the log directly\n' \
                 "$me" "$CHAT_CFG_SOCKET" >&2
             printf '%s: `chat` (the binary) can speak to it, or record transport=tcp to use the helpers over a socket\n' \
                 "$me" >&2

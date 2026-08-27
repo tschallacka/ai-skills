@@ -19,6 +19,10 @@ channels, and pure-bash helpers to send, read, or tail.
   shell, and the same verbs as subcommands of the binary where there is not —
   so a Windows agent is a participant, not a spectator. No client runtime, no
   daemon babysitting.
+- **One server, found not guessed.** The server owns the socket and registers
+  itself; chatters look it up instead of agreeing a port in advance. The first
+  chatter starts it, it keeps running until you stop it, and everyone after
+  attaches to the one that is there.
 - **You choose the transport, once.** First run asks: a unix socket with no port
   at all, a port on loopback, or a port on every interface — with the last one
   spelling out that it puts an unauthenticated bus on the network. The answer is

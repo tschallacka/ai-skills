@@ -49,31 +49,44 @@ pub struct Instance {
     /// a unix socket has no port and pretending otherwise puts a 0 in a message
     /// that a reader would take for a kernel-assigned port.
     pub transport: Transport,
-    /// True when the operator named the endpoint, which makes this a debug
-    /// instance living in its own run directory.
-    pub explicit: bool,
+    /// False for a debug instance: it claims no registry entry and no default
+    /// run files, and lives in its own run directory.
+    pub registers: bool,
     run_dir: PathBuf,
 }
 
 impl Instance {
-    /// The default bus for a home: run files where clients look for them.
+    /// The bus that claims this home: run files where clients look for them, and
+    /// a registry entry so clients can find it without assuming a port.
+    ///
+    /// **Registering, not the endpoint, is what makes a server "the" bus.** That
+    /// distinction used to ride on whether an endpoint was given explicitly,
+    /// which is why `chat-server.sh --port N` and `chat serve --port N` meant
+    /// different things and could not be reconciled. With a registry the endpoint
+    /// is just an endpoint — advertised in the entry, discovered rather than
+    /// assumed — and the real axis is whether this process claims the home.
     ///
     /// The transport comes from the caller, because deciding it involves asking
     /// the user, and this module must stay usable in a test with no terminal.
-    pub fn default_with(home: &Path, transport: Transport) -> Self {
+    pub fn registered(home: &Path, transport: Transport) -> Self {
         Instance {
             transport,
-            explicit: false,
+            registers: true,
             run_dir: home.to_path_buf(),
         }
     }
 
-    /// An explicit debug instance.
+    /// A debug instance: serves, but claims nothing.
+    ///
+    /// No registry entry, no default run files, no config write. So a client
+    /// discovering through the registry cannot land on it, and bringing one up
+    /// cannot disturb the bus in use — which is the requirement this exists for.
+    /// Reaching it takes an explicit `--host`/`--port` or `--socket`, every time.
     ///
     /// A TCP port must be concrete: a kernel-assigned port could not be handed
     /// to a client deliberately, which is the whole point of requiring the
     /// override to be explicit on both sides.
-    pub fn explicit_with(home: &Path, transport: Transport) -> Result<Self, String> {
+    pub fn unregistered(home: &Path, transport: Transport) -> Result<Self, String> {
         if let Transport::Tcp { port: 0, .. } = &transport {
             return Err(
                 "an explicit instance needs a concrete --port: port 0 is kernel-assigned, \
@@ -86,7 +99,7 @@ impl Instance {
             // default location that default clients read.
             run_dir: home.join("instances").join(endpoint_tag(&transport)),
             transport,
-            explicit: true,
+            registers: false,
         })
     }
 
@@ -351,10 +364,10 @@ mod tests {
     #[test]
     fn the_default_instance_advertises_in_the_home_root() {
         let home = tmp("default");
-        let i = Instance::default_with(&home, Transport::loopback());
+        let i = Instance::registered(&home, Transport::loopback());
         assert_eq!(i.port_file(), home.join("server.port"));
         assert_eq!(i.transport, Transport::loopback());
-        assert!(!i.explicit);
+        assert!(i.registers);
     }
 
     /// The default run directory is the home, whatever the transport: a home has
@@ -363,8 +376,8 @@ mod tests {
     #[test]
     fn the_default_run_directory_does_not_depend_on_the_transport() {
         let home = tmp("default-transport");
-        let tcp = Instance::default_with(&home, Transport::loopback());
-        let sock = Instance::default_with(&home, Transport::socket_in(&home));
+        let tcp = Instance::registered(&home, Transport::loopback());
+        let sock = Instance::registered(&home, Transport::socket_in(&home));
         assert_eq!(tcp.run_dir(), sock.run_dir());
         assert_eq!(tcp.lock_file(), sock.lock_file());
     }
@@ -372,33 +385,33 @@ mod tests {
     #[test]
     fn explicit_instance_never_touches_the_default_run_files() {
         let home = tmp("explicit");
-        let d = Instance::explicit_with(&home, dbg_tcp(19999)).unwrap();
+        let d = Instance::unregistered(&home, dbg_tcp(19999)).unwrap();
         // The requirement: no discovery path from a default client to a debug
         // instance. Distinct directory, so distinct port/pid/bind files.
         assert_ne!(d.port_file(), home.join("server.port"));
         assert_ne!(d.pid_file(), home.join("server.pid"));
         assert_ne!(d.socket_file(), home.join("server.socket"));
         assert!(d.run_dir().starts_with(home.join("instances")));
-        assert!(d.explicit);
+        assert!(!d.registers);
     }
 
     #[test]
     fn an_explicit_tcp_instance_must_name_a_concrete_port() {
         let home = tmp("port0");
-        let err = Instance::explicit_with(&home, dbg_tcp(0)).unwrap_err();
+        let err = Instance::unregistered(&home, dbg_tcp(0)).unwrap_err();
         assert!(err.contains("concrete --port"), "unhelpful error: {}", err);
     }
 
     #[test]
     fn a_second_default_instance_is_refused_while_the_first_lives() {
         let home = tmp("singleton");
-        let live = Instance::default_with(&home, Transport::loopback());
+        let live = Instance::registered(&home, Transport::loopback());
         // The guard is bound, not dropped: releasing it would release the bus
         // and the second acquire below would legitimately succeed.
         let held = live.acquire().expect("first should win");
         live.publish(&held, Some(45123)).unwrap();
 
-        match Instance::default_with(&home, Transport::loopback()).acquire() {
+        match Instance::registered(&home, Transport::loopback()).acquire() {
             Err(Busy::Held { advertised }) => {
                 assert_eq!(
                     advertised.as_deref(),
@@ -416,14 +429,14 @@ mod tests {
     #[test]
     fn a_socket_instance_advertises_its_path_not_a_port() {
         let home = tmp("sockadv");
-        let live = Instance::default_with(&home, Transport::socket_in(&home));
+        let live = Instance::registered(&home, Transport::socket_in(&home));
         let held = live.acquire().expect("first");
         live.publish(&held, None).unwrap();
         assert!(
             !home.join("server.port").exists(),
             "a socket bus must not write a port file: a reader would dial it"
         );
-        match Instance::default_with(&home, Transport::socket_in(&home)).acquire() {
+        match Instance::registered(&home, Transport::socket_in(&home)).acquire() {
             Err(Busy::Held { advertised }) => {
                 let said = advertised.expect("should name the socket");
                 assert!(said.starts_with("socket "), "got: {said}");
@@ -438,11 +451,11 @@ mod tests {
     fn releasing_the_lock_lets_a_fresh_instance_start() {
         let home = tmp("release");
         {
-            let _g = Instance::default_with(&home, Transport::loopback())
+            let _g = Instance::registered(&home, Transport::loopback())
                 .acquire()
                 .expect("first");
         } // dropped: the kernel releases the lock
-        Instance::default_with(&home, Transport::loopback())
+        Instance::registered(&home, Transport::loopback())
             .acquire()
             .expect("a released bus must be startable again");
     }
@@ -456,7 +469,7 @@ mod tests {
         let home = tmp("stale");
         fs::write(home.join("server.pid"), "2941095\n").unwrap();
         fs::write(home.join("server.port"), "45477\n").unwrap();
-        Instance::default_with(&home, Transport::loopback())
+        Instance::registered(&home, Transport::loopback())
             .acquire()
             .expect("a stale pid file must not make a fresh start refuse");
     }
@@ -464,10 +477,10 @@ mod tests {
     #[test]
     fn a_debug_instance_starts_alongside_the_default_one() {
         let home = tmp("alongside");
-        let _default = Instance::default_with(&home, Transport::loopback())
+        let _default = Instance::registered(&home, Transport::loopback())
             .acquire()
             .expect("default");
-        let d = Instance::explicit_with(&home, dbg_tcp(19998)).unwrap();
+        let d = Instance::unregistered(&home, dbg_tcp(19998)).unwrap();
         let _dbg_guard = d
             .acquire()
             .expect("a debug instance must not contend with the default bus");
@@ -476,9 +489,9 @@ mod tests {
     #[test]
     fn two_debug_instances_on_one_endpoint_still_exclude_each_other() {
         let home = tmp("dbgdup");
-        let a = Instance::explicit_with(&home, dbg_tcp(19997)).unwrap();
+        let a = Instance::unregistered(&home, dbg_tcp(19997)).unwrap();
         let _held = a.acquire().expect("first debug instance");
-        let b = Instance::explicit_with(&home, dbg_tcp(19997)).unwrap();
+        let b = Instance::unregistered(&home, dbg_tcp(19997)).unwrap();
         assert!(
             matches!(b.acquire(), Err(Busy::Held { .. })),
             "the same explicit endpoint is still a singleton"
@@ -488,7 +501,7 @@ mod tests {
     #[test]
     fn ipv6_bind_addresses_reach_a_usable_directory_name() {
         let home = tmp("v6");
-        let i = Instance::explicit_with(
+        let i = Instance::unregistered(
             &home,
             Transport::Tcp {
                 bind: "::1".to_string(),
@@ -519,7 +532,7 @@ mod tests {
     #[test]
     fn a_socket_path_reaches_a_single_directory_name() {
         let home = tmp("sockdir");
-        let i = Instance::explicit_with(&home, Transport::Socket(PathBuf::from("/tmp/a/b.sock")))
+        let i = Instance::unregistered(&home, Transport::Socket(PathBuf::from("/tmp/a/b.sock")))
             .unwrap();
         let name = i
             .run_dir()
@@ -539,8 +552,8 @@ mod tests {
     #[test]
     fn two_debug_sockets_in_one_home_are_distinct_instances() {
         let home = tmp("twosock");
-        let a = Instance::explicit_with(&home, Transport::Socket(home.join("a.sock"))).unwrap();
-        let b = Instance::explicit_with(&home, Transport::Socket(home.join("b.sock"))).unwrap();
+        let a = Instance::unregistered(&home, Transport::Socket(home.join("a.sock"))).unwrap();
+        let b = Instance::unregistered(&home, Transport::Socket(home.join("b.sock"))).unwrap();
         assert_ne!(a.run_dir(), b.run_dir());
         let _held = a.acquire().expect("first socket instance");
         b.acquire().expect("a different socket is a different bus");

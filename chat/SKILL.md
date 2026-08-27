@@ -1,6 +1,6 @@
 ---
 name: chat
-description: IRC-basis chat for AI agents - one persistent server on a transport you choose once (unix socket, loopback port, or every interface), recorded in a config the server and clients both read; a compiled `chat serve` or a runtime falling back through python3/node/perl/socat+bash; channels agents register, join, and leave; and clients to send, read a delta since an id, or tail a constant stream, as pure-bash helpers and as subcommands of the same binary for hosts without bash. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
+description: IRC-basis chat for AI agents - one detached server per store that owns the socket, registers itself under $XDG_RUNTIME_DIR so chatters discover it instead of guessing a port, starts on first use and keeps running until stopped, on a transport you choose once (unix socket, loopback port, or every interface); channels agents register, join, and leave; and clients to send, read a delta since an id, or tail a constant stream, as pure-bash helpers and as subcommands of the same binary for hosts without bash. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
 ---
 
 # Chat
@@ -25,8 +25,8 @@ see "Not IRC compatible" below for exactly what is missing.
 - `server.pid`, `server.port`, `server.bind`, `server.socket`, `server.log` —
   the running server. A TCP instance writes `server.port`/`server.bind`; a
   socket instance writes `server.socket` and no port file
-- `instances/<endpoint>/` — a debug instance's adverts, deliberately nowhere a
-  default client looks
+- `instances/<endpoint>/` — a `--no-register` instance's adverts, deliberately
+  nowhere a discovering client looks
 - `run/server.{py,js,pl}` — the chosen runtime, copied here at start
 
 `server.pid` is not self-cleaning: if the server dies, the file remains and
@@ -142,27 +142,94 @@ transport is recorded (see "The transport is your decision" below). A second one
 from `server.pid`, because a pid file outlives its process and trusting one would
 make a *fresh* start refuse while reporting the bus is up.
 
-To run a **debug** server without disturbing one in use, name its endpoint:
+To run a **debug** server without disturbing one in use, serve without claiming
+the home:
 
-    chat serve --home /tmp/dbg --bind 127.0.0.1 --port 17717
-    chat serve --home /tmp/dbg --socket /tmp/dbg/debug.sock
+    chat serve --home /tmp/dbg --bind 127.0.0.1 --port 17717 --no-register
+    chat serve --home /tmp/dbg --socket /tmp/dbg/debug.sock --no-register
 
-`--bind` and `--port` come as a pair — either alone is exit `64`, because an
-instance that silently inherited half the default endpoint is the collision the
-pair exists to prevent. `--socket` names an endpoint on its own.
+**Registration, not the endpoint, is what makes a server "the" bus.** That
+distinction used to ride on whether an endpoint was given explicitly, which is
+why `chat-server.sh --port N` and `chat serve --port N` meant different things
+and could not be reconciled. Now an endpoint is just an endpoint — advertised in
+the registry entry, discovered rather than assumed — and `--no-register` is the
+axis that matters.
 
-A debug instance publishes under `<home>/instances/<endpoint>/` and **never
-writes the default run files, nor the config**, so nothing a default client
-reads can point at it. Reaching it takes an explicit flag on the client, every
-time. That is the whole mechanism: the override is explicit on both sides, so no
-discovery path leads a default client to a debug bus — and bringing up a debug
-server on `0.0.0.0` cannot re-point the clients of a bus in use.
+A `--no-register` instance writes no registry entry, no default run files and no
+config, so discovery cannot land on it and bringing one up on `0.0.0.0` cannot
+re-point the clients of a bus in use. Reaching it takes an explicit flag on the
+client, every time. `--bind` and `--port` still come as a pair — either alone is
+exit `64` — and `--socket` names an endpoint on its own.
 
 `server.pid` is still written, as a diagnostic. Nothing reads it to decide
 whether a server is running — `chat status` takes the lock to find out. A TCP
 instance advertises `server.port` and `server.bind`; a socket instance
 advertises `server.socket` and no port file at all, so nothing can dial a bus
 that has no port.
+
+### Servers are registered, not assumed
+
+**A server owns the socket; nothing else creates one.** It registers itself, and
+clients discover it there rather than agreeing a port in advance.
+
+    $XDG_RUNTIME_DIR/chat/<timestamp>-<pid>.server     when XDG_RUNTIME_DIR is set
+    <temp>/chat-<uid>/<timestamp>-<pid>.server         otherwise
+
+`chat servers` lists what is registered and whether it answers. An entry is
+`key=value` like the config, and records `home=`, `pid=`, `started=` and the
+transport.
+
+**An entry is not proof of life.** This is the pid-file lesson in a new place: a
+crashed server leaves its entry behind, and a client that trusted the file would
+dial a socket nothing is listening on. So liveness is decided by *connecting*,
+and a failed dial **evicts** the entry — the caller then behaves as though the
+crashed server had never registered, with no error to interpret and no need to
+know the file exists. `chat servers` reports a stale entry rather than deleting
+it, because a listing that removes what it describes is hard to look at twice.
+
+**The directory is per-uid and `0700`, and that is a security property.** `/tmp`
+is world-writable, so a fixed shared path would let another user plant an entry
+naming their own socket, and every client on the machine would talk to them —
+the protocol has no authentication, so nothing would notice. A directory whose
+owner is not you, or which is a symlink, is **refused**. The timestamp gives
+uniqueness; it gives no ownership.
+
+**The reboot claim, precisely.** On Linux `/tmp` is usually tmpfs and does vanish
+at reboot. On **macOS** `/private/tmp` is on disk, survives reboots, and is only
+pruned after three days. `XDG_RUNTIME_DIR` is preferred where present because it
+is per-user, tmpfs and cleared on logout. Nothing depends on any of this: a stale
+entry is survivable by design, which is the real defence.
+
+### A server keeps running until it is stopped
+
+`chat serve` **detaches** — new session via `setsid`, standard streams off the
+terminal, `SIGHUP` ignored — so closing the shell that started it does not take
+it down. It prints the endpoint once the server has registered, then exits.
+
+    chat serve            # start it, or report the one already running
+    chat stop             # end it, and evict its entry
+    chat servers          # what is registered, and whether it answers
+    chat serve --foreground   # run it in this process, for a supervisor
+
+`chat stop` evicts the entry itself rather than leaving it for the next client's
+liveness check. Discovering a corpse works, but it is not the same as tidying up
+after yourself, and the window in between is one where `chat servers` lies.
+
+**A chatter that finds no server starts one.** The first participant stands the
+daemon up and adopts it; everyone after attaches to what is registered. It says
+so on stderr, naming what it started and where — a client that quietly spawns a
+daemon is baffling when something later goes wrong.
+
+Auto-start **never asks the transport question**. The prompt only makes sense on
+a first interactive `chat serve`; a chatter may be a client in a pipeline, and
+answering it there would record a transport decision as a side effect of sending
+a message. So auto-start always takes the no-terminal path: safe default, said
+out loud, recorded nowhere.
+
+**Two chatters starting at once produce one server.** Both spawn a candidate;
+one takes the home lock and registers, the other exits. Both are waiting for
+"a live entry exists" rather than "my child won", so the loser attaches to the
+winner without needing to know it lost — and reports attaching, not starting.
 
 ### The transport is your decision
 
@@ -228,9 +295,17 @@ means a debug instance and the config is left alone. For a client:
 |---|---|
 | `--local` | the log, never a socket |
 | `--socket P` | that socket |
-| `--host H` (`--port N`) | that server; without `--port`, the recorded port, else 7717 |
-| no flags, config recorded | the recorded transport |
-| no flags, nothing recorded | the log |
+| `--host H` (`--port N`) | that server; without `--port`, the registered port, else the recorded one, else 7717 |
+| no flags, a server registered | that server |
+| no flags, none registered | one is started and adopted, then that server |
+| no flags, and starting one failed | the log |
+
+**The config no longer decides where a client connects; the registry does.** The
+config is policy — how a bus should be exposed, your decision, outliving a
+reboot. The registry is presence — where a bus actually is, expected to vanish.
+A recorded transport with nothing registered means "no server is running", not
+"connect here": dialling an endpoint nothing published is how a client ends up
+talking to whatever else took that port.
 
 A client never prompts. It may be in a pipeline, a hook or a CI step, and a
 client that can block on a question is a client that can hang a build — so with
@@ -288,8 +363,10 @@ kernel-assigned port and do not read the config. Against one of those, read the
 real port from `$AI_CHAT_HOME/server.port` or start it with an explicit
 `--port`.
 
-With no `--host` the helpers now follow the recorded transport, and fall back to
-the log with a note when nothing answers there. `--local` forces the log.
+With no `--host` the helpers consult the **registry** first and the config only
+as a fallback, then fall back to the log with a note when nothing answers.
+`--local` forces the log. The helpers do **not** auto-start a server: a helper
+cannot know which runtime you want, so it names `chat serve` and moves on.
 
 Exit codes: `64` bad invocation, `66` missing channel log or runtime, `69` no
 server runtime at all, `70` internal or protocol failure. `chat-server.sh

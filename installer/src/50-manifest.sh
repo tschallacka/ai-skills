@@ -383,6 +383,7 @@ CHATEOF
 tests/test-chat.sh
 tests/test-chat-binary.sh
 tests/test-chat-config.sh
+tests/test-chat-registry.sh
 CHATEOF
             ;;
     esac
