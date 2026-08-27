@@ -194,9 +194,7 @@ impl Store {
         for _ in 0..LOCK_TRIES {
             match fs::create_dir(&path) {
                 Ok(()) => return Ok(LockGuard { path }),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    thread::sleep(LOCK_WAIT)
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => thread::sleep(LOCK_WAIT),
                 Err(e) => return Err(format!("cannot lock {}: {e}", chan.as_str())),
             }
         }
@@ -327,7 +325,11 @@ mod tests {
         let c = chan("#t");
         s.register(&c).unwrap();
         let log = home.join("channels/#t.log");
-        fs::write(&log, "MSG #t notanumber 100 a :junk\nMSG #t 3 101 b :real\n").unwrap();
+        fs::write(
+            &log,
+            "MSG #t notanumber 100 a :junk\nMSG #t 3 101 b :real\n",
+        )
+        .unwrap();
         let line = s
             .append(&c, "a", "after")
             .expect("a corrupt line must not make the channel unwritable");

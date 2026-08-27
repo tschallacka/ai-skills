@@ -115,7 +115,11 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             c if COMMANDS.contains(&c) && a.command.is_empty() && a.positional.is_empty() => {
                 // `start` is accepted because chat-server.sh says start, and a
                 // wrapper's vocabulary should not be a trap.
-                a.command = if c == "start" { "serve".into() } else { c.into() };
+                a.command = if c == "start" {
+                    "serve".into()
+                } else {
+                    c.into()
+                };
             }
             "--home" => a.home = PathBuf::from(it.next().ok_or("--home needs a directory")?),
             "--bind" => a.bind = Some(it.next().ok_or("--bind needs an address")?),
@@ -212,9 +216,11 @@ fn main() -> ExitCode {
             Ok(i) => status(&i),
             Err(e) => die_usage(&e),
         },
-        "register" => run(channel(&args).and_then(|c| {
-            client::register(&c, &resolve_target(&args)).map(|r| vec![r])
-        }), &mut out),
+        "register" => run(
+            channel(&args)
+                .and_then(|c| client::register(&c, &resolve_target(&args)).map(|r| vec![r])),
+            &mut out,
+        ),
         "send" => {
             let text = match args.positional.get(1) {
                 Some(t) => t.clone(),
@@ -240,15 +246,14 @@ fn main() -> ExitCode {
             // would disagree with chat-read.sh.
             if let (Target::Local(home), Ok(c)) = (&target, channel(&args)) {
                 if !log_exists(home, &c) {
-                    eprintln!(
-                        "chat: no log for {} under {}",
-                        c.as_str(),
-                        home.display()
-                    );
+                    eprintln!("chat: no log for {} under {}", c.as_str(), home.display());
                     return ExitCode::from(EX_NOINPUT);
                 }
             }
-            run(channel(&args).and_then(|c| client::read(&c, &range, &target)), &mut out)
+            run(
+                channel(&args).and_then(|c| client::read(&c, &range, &target)),
+                &mut out,
+            )
         }
         "tail" => {
             let target = resolve_target(&args);
@@ -482,7 +487,13 @@ mod tests {
     #[test]
     fn both_flags_together_make_an_explicit_instance() {
         let a = parse(args(&[
-            "serve", "--home", "/tmp/x", "--bind", "127.0.0.1", "--port", "9999",
+            "serve",
+            "--home",
+            "/tmp/x",
+            "--bind",
+            "127.0.0.1",
+            "--port",
+            "9999",
         ]))
         .unwrap();
         let i = resolve_instance(&a).unwrap();
@@ -515,7 +526,15 @@ mod tests {
             }
             Target::Local(_) => panic!("--host should mean remote"),
         }
-        let b = parse(args(&["read", "#t", "--host", "127.0.0.1", "--port", "19999"])).unwrap();
+        let b = parse(args(&[
+            "read",
+            "#t",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19999",
+        ]))
+        .unwrap();
         match resolve_target(&b) {
             Target::Remote { port, .. } => assert_eq!(port, 19999),
             Target::Local(_) => panic!("--host should mean remote"),

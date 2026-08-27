@@ -166,13 +166,7 @@ impl Hub {
     /// B59: the two ways this can be malformed get two different messages. The
     /// python tier answers a bad channel with the empty-text usage line, which
     /// sends the caller looking at the wrong argument.
-    fn privmsg(
-        &self,
-        id: u64,
-        nick: &str,
-        arg: &str,
-        out: &mut TcpStream,
-    ) -> Result<bool, ()> {
+    fn privmsg(&self, id: u64, nick: &str, arg: &str, out: &mut TcpStream) -> Result<bool, ()> {
         let (chan_raw, text) = match arg.split_once(" :") {
             Some((c, t)) => (c, t),
             None => return reply(out, "ERR usage: PRIVMSG #chan :text"),

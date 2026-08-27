@@ -54,7 +54,8 @@ pub const CLIENT_DEFAULT_PORT: u16 = crate::instance::DEFAULT_PORT;
 /// seconds is far longer than a loopback exchange and far shorter than a stuck
 /// agent being noticed.
 fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
-    let s = TcpStream::connect((host, port)).map_err(|e| format!("cannot reach {host}:{port}: {e}"))?;
+    let s =
+        TcpStream::connect((host, port)).map_err(|e| format!("cannot reach {host}:{port}: {e}"))?;
     let t = Some(Duration::from_secs(10));
     s.set_read_timeout(t).map_err(|e| e.to_string())?;
     s.set_write_timeout(t).map_err(|e| e.to_string())?;
@@ -62,7 +63,11 @@ fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
 }
 
 /// Send `lines` and hand back a reader over the replies.
-fn exchange(host: &str, port: u16, lines: &[String]) -> Result<(TcpStream, BufReader<TcpStream>), String> {
+fn exchange(
+    host: &str,
+    port: u16,
+    lines: &[String],
+) -> Result<(TcpStream, BufReader<TcpStream>), String> {
     let mut sock = connect(host, port)?;
     let reader = sock
         .try_clone()
@@ -183,7 +188,12 @@ pub fn read(chan: &Channel, range: &Range, target: &Target) -> Result<Vec<String
 /// The two are not equivalent and the difference is visible: a message appended
 /// locally by another process is not pushed to a socket subscriber (see
 /// `wire.rs`), so a remote tail can lag a local writer until the next read.
-pub fn tail(chan: &Channel, since: u64, target: &Target, out: &mut dyn Write) -> Result<(), String> {
+pub fn tail(
+    chan: &Channel,
+    since: u64,
+    target: &Target,
+    out: &mut dyn Write,
+) -> Result<(), String> {
     match target {
         Target::Local(home) => {
             let store = Store::new(home).map_err(|e| e.to_string())?;
@@ -309,11 +319,24 @@ mod tests {
         for t in ["a", "b", "c"] {
             send(&c, "n", t, &Target::Local(&h)).unwrap();
         }
-        assert_eq!(read(&c, &Range::Since(1), &Target::Local(&h)).unwrap().len(), 2);
-        assert_eq!(read(&c, &Range::Last(2), &Target::Local(&h)).unwrap().len(), 2);
+        assert_eq!(
+            read(&c, &Range::Since(1), &Target::Local(&h))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            read(&c, &Range::Last(2), &Target::Local(&h)).unwrap().len(),
+            2
+        );
         assert_eq!(read(&c, &Range::All, &Target::Local(&h)).unwrap().len(), 3);
         // --last beyond the log is the whole log, not an error.
-        assert_eq!(read(&c, &Range::Last(99), &Target::Local(&h)).unwrap().len(), 3);
+        assert_eq!(
+            read(&c, &Range::Last(99), &Target::Local(&h))
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]
