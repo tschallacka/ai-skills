@@ -666,6 +666,30 @@
       "updated_at": "2026-08-27T08:10:02Z"
     },
     {
+      "id": "B49",
+      "title": "A skill gaining its first requirement on a platform makes the UI call runtime_requirement_met where it is not defined",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Add a row 'bash\\t*:*\\thard\\tany reason' to resource-limited-testing/requires.tsv, run bash installer/build.sh, then bash planning/tests/test-install-ui.sh",
+      "observed": "test-install-ui exits 1 with 30 PASS and 0 FAIL: it fails on stderr alone. The noise is 'installer/src/35-ui-model.sh: line 278: runtime_requirement_met: command not found' and four repeats of 'installer/src/36-ui-render.sh: line 174: runtime_requirement_label: command not found'.",
+      "expected": "Either the UI parts resolve those functions wherever they run, or the test names the missing function as a failure instead of passing 30 assertions and exiting on stderr.",
+      "mechanism": "Both functions are defined in installer/src/20-runtime-tools.sh, and 35-ui-model.sh redefines runtime_requirement_met, but neither UI part sources the definitions. The path was unreachable for skills with no requirements on the running platform: resource-limited-testing declares only memlimit, Darwin/arm64-only, so on Linux the requirement loop had nothing to iterate and the calls never happened. Giving it any unconditional requirement makes the loop run and the calls fail. This is the same class as B32, at a call site B32 did not cover.",
+      "surfaces": [
+        "installer/src/35-ui-model.sh",
+        "installer/src/36-ui-render.sh",
+        "installer/src/20-runtime-tools.sh",
+        "planning/tests/test-install-ui.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "declaring bash for resource-limited-testing, which previously required nothing on Linux",
+      "notes": "Related: B50 — the reason this took a while to read is that test-install-ui exits 1 while printing 30 PASS and no failure line. B49 is the missing function, B50 the silent reporting; fixing either leaves the other open.",
+      "created_at": "2026-08-27T09:25:39Z",
+      "updated_at": "2026-08-27T09:25:54Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1015,6 +1039,27 @@
       "parent": null,
       "fix": "this session — planning/requires.tsv gained four soft rows (python3, node, perl, socat) sharing one any-of group, and install.sh was regenerated so runtime_requirements/planning emits @overview-server-runtimes, runtime_requirement_strength/why carry the soft strength and the serve-mode why, and runtime_requirement_members resolves the group to the four runtimes. The group id is overview-server-runtimes, NOT chat's server-runtimes: installer/build.sh:128 validate_requires_groups refuses a group id declared by more than one skill (the generated members table is keyed by the id alone), so reusing the name fails the build with exit 65 — verified.",
       "verification": "Generated tables shown to name planning: @overview-server-runtimes in runtime_requirements, planning:@overview-server-runtimes in both field tables, @overview-server-runtimes -> python3 node perl socat in runtime_requirement_members. Green after the change (exit 0 each): planning/tests/test-runtime-dependencies.sh, test-installer-any-of.sh, test-installer-build.sh, test-portability-contract.sh, tests/test-mode-markers.sh, tests/test-skill-files-manifest.sh. NO TEST COVERS THE DECLARATION ITSELF: deleting the socat row and regenerating, and deleting all four rows and regenerating (an exact revert of the fix), both leave all six tests at exit 0. The only mutations that bite are freshness and uniqueness, not correctness: editing planning/requires.tsv without regenerating fails test-installer-build.sh test_check_mode_clean (rc=1, \"install.sh is stale\"), and setting the group id to chat's server-runtimes fails test_check_mode_clean and test_check_mode_detects_edit (rc=2, build.sh exit 65). So this fix is unenforced against silent removal — see notes."
+    },
+    {
+      "id": "B50",
+      "title": "test-install-ui exits non-zero on stderr while reporting 30 PASS and no failure",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Make any installer part write to stderr during the UI run, then bash planning/tests/test-install-ui.sh",
+      "observed": "exit 1 with '30 PASS, 0 FAIL' and no line naming a problem; the only clue is unstructured stderr from the code under test.",
+      "expected": "A test that fails should name what failed. Either promote unexpected stderr to a named failure, or assert on it explicitly.",
+      "mechanism": "The runner treats any stderr from the UI under test as a failure but does not report it as an assertion, so the summary and the exit code disagree and a reader has to scroll past 30 PASS lines to find raw shell noise.",
+      "surfaces": [
+        "planning/tests/test-install-ui.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the same experiment that found B49",
+      "notes": "Related: B49 — the defect whose diagnosis this obscured.",
+      "created_at": "2026-08-27T09:25:54Z",
+      "updated_at": "2026-08-27T09:25:54Z"
     },
     {
       "id": "B25",
