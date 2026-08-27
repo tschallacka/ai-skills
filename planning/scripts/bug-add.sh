@@ -47,7 +47,7 @@ while [ "$#" -gt 0 ]; do
         --severity) [ "$#" -ge 2 ] || exit 64; severity="$2"; shift 2 ;;
         --priority) [ "$#" -ge 2 ] || exit 64; priority="$2"; shift 2 ;;
         --status) [ "$#" -ge 2 ] || exit 64; status="$2"; shift 2 ;;
-        --mechanism) [ "$#" -ge 2 ] || exit 64; mechanism="\"$2\""; shift 2 ;;
+        --mechanism) [ "$#" -ge 2 ] || exit 64; mechanism="$(printf '%s' "$2" | jq -Rs .)"; shift 2 ;;
         --parent) [ "$#" -ge 2 ] || exit 64; parent="\"$2\""; shift 2 ;;
         --found-by) [ "$#" -ge 2 ] || exit 64; found_by="$2"; shift 2 ;;
         --surfaces) [ "$#" -ge 2 ] || exit 64; surfaces="$2"; shift 2 ;;
