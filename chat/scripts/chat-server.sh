@@ -128,6 +128,11 @@ do_start() {
     esac
 
     : > "$HOME_DIR/server.log"
+    # B63: a port file left behind by an unclean death (SIGKILL, crash) makes
+    # the startup poll succeed instantly with a stale port, so start announces
+    # a port nothing is listening on. The child rewrites it once bound; drop
+    # the stale one first so the poll can only see THIS run's answer.
+    rm -f "$portfile"
     printf '%s\n' "$AI_CHAT_BIND" > "$HOME_DIR/server.bind"
     if [ "$runtime" = socat ]; then
         handler="$(dirname "${BASH_SOURCE[0]}")/../runtime/bash-handler.sh"
