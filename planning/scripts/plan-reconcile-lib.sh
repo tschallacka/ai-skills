@@ -133,8 +133,16 @@ plan_rewrite_owned_work_units() {
     # Rebuild the region in one pass: print the "## Owned work units" heading,
     # then the re-derived body, then skip the old region until Goal-size
     # exception. The body intentionally omits the heading to avoid duplicating it.
+    # The rebuilt body carries the goal's one Testing requirement section, so
+    # every ORIGINAL such section is dropped wherever it sits — goals differ on
+    # whether it lives between Owned work units and Goal-size exception or
+    # after it (found when the B68 move duplicated it; the old skip-only
+    # region assumed one order and emitted two sections on the other).
     awk -v body_file="$body_file" '
         BEGIN { while ((getline line < body_file) > 0) body = body line "\n" }
+        /^## Testing requirement/ { in_testing = 1; next }
+        in_testing && /^## / { in_testing = 0 }
+        in_testing { next }
         /^## Owned work units/ { print; printf "\n%s", body; in_region = 1; next }
         in_region && /^## Goal-size exception/ { in_region = 0 }
         in_region { next }

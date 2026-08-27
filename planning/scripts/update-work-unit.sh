@@ -26,6 +26,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"
+# plan_rebuild_goal_progress (B68 move) carries statuses across tracker rebuilds.
+# shellcheck source=planning/scripts/plan-reconcile-lib.sh
+source "$script_dir/plan-reconcile-lib.sh"
 # Accept --plan-dir as a synonym for the positional plan directory: the
 # bounded reader takes the flag, so a reader who learned it there is not
 # refused here.
@@ -38,7 +41,13 @@ usage() {
     local rc="${1:-64}"
     cat <<USAGE
 Usage: ${0##*/} [--plan-dir] <plan-directory> <WNN> [<new-primary-scope>] [<new-file>] [--scope <text>] [--file <path>] [--type <type>] [--depends-on <WNN[,WNN...]|—>] [--description <text>]
+       ${0##*/} [--plan-dir] <plan-directory> <WNN> --goal <goal> --step <step-name>
        ${0##*/} --help
+
+A move (--goal/--step) relocates the unit between goals in one atomic edit:
+row cells, step file, its testing twin, both goals' progress trackers and
+the goal rosters move together, and every dependency edge and coverage link
+survives untouched — the remove-and-readd dance loses them (B68).
 USAGE
     exit "$rc"
 }
@@ -49,7 +58,7 @@ case "${1:-}" in
 esac
 [ "$#" -ge 2 ] || usage
 plan_dir="$1" unit="$2"; shift 2
-new_scope='' new_file='' new_type='' new_depends='' new_description=''
+new_scope='' new_file='' new_type='' new_depends='' new_description='' new_goal='' new_step=''
 positional=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -58,6 +67,8 @@ while [ "$#" -gt 0 ]; do
         --type) [ "$#" -ge 2 ] || usage; new_type="$2"; shift 2 ;;
         --depends-on) [ "$#" -ge 2 ] || usage; new_depends="$2"; shift 2 ;;
         --description) [ "$#" -ge 2 ] || usage; new_description="$2"; shift 2 ;;
+        --goal) [ "$#" -ge 2 ] || usage; new_goal="$2"; shift 2 ;;
+        --step) [ "$#" -ge 2 ] || usage; new_step="$2"; shift 2 ;;
         -h|--help) usage 0 ;;
         -*) usage ;;
         *)
@@ -74,7 +85,15 @@ while [ "$#" -gt 0 ]; do
             shift ;;
     esac
 done
-if [ -z "$new_scope" ] && [ -z "$new_file" ] && [ -z "$new_type" ] && [ -z "$new_depends" ] && [ -z "$new_description" ]; then
+if [ -n "$new_goal" ] || [ -n "$new_step" ]; then
+    # A move is its own operation: mixing it with field edits would blur the
+    # atomicity the move exists to guarantee (B68).
+    [ -z "$new_scope" ] && [ -z "$new_file" ] && [ -z "$new_type" ] \
+        && [ -z "$new_depends" ] && [ -z "$new_description" ] \
+        || plan_die "a move (--goal/--step) cannot be combined with field edits"
+    [ -n "$new_goal" ] && [ -n "$new_step" ] \
+        || plan_die "a move needs both --goal and --step"
+elif [ -z "$new_scope" ] && [ -z "$new_file" ] && [ -z "$new_type" ] && [ -z "$new_depends" ] && [ -z "$new_description" ]; then
     usage
 fi
 
@@ -98,6 +117,7 @@ if plan_inventory_row "$inventory" "$unit"; then
 fi
 [ -n "$step_file" ] && [ -f "$step_file" ] || plan_die "Work unit not found: $unit"
 
+inventory_tmp="${inventory}.tmp.$$"; step_tmp="${step_file}.tmp.$$"
 # The values about to be overwritten. Reporting only which fields changed named
 # the loss without describing it: a reader could not tell that `source` became
 # `docs`, and nothing anywhere held the value it replaced. See CODE-CONTRACTS.md
@@ -143,8 +163,43 @@ inventory_rewrite_row() {
 
 # One trap covers every temp: installed before the first write and never
 # released with `trap - EXIT`, which would discard the library's handler (§8).
-inventory_tmp="${inventory}.tmp.$$"; step_tmp="${step_file}.tmp.$$"
 trap 'rm -f "$inventory_tmp" "$step_tmp"' EXIT
+# ---- move (B68): relocate between goals without losing a single edge ----
+if [ -n "$new_goal" ]; then
+    new_goal_dir="$plan_dir/$new_goal"
+    [ -d "$new_goal_dir" ] || plan_die "goal not found: $new_goal"
+    [[ "$new_step" =~ ^[0-9][0-9]-step-[a-z0-9-]+$ ]] || plan_die "step name must use NN-step-kebab-case"
+    [ "$new_goal" = "$plan_inventory_goal" ] && [ "$new_step" = "$plan_inventory_step" ] \
+        && plan_die "that is already this unit's goal and step"
+    [ -e "$new_goal_dir/steps/$new_step.md" ] && plan_die "target step already exists: $new_goal/steps/$new_step.md"
+
+    # Row cells move; Depends-on and every coverage row stay untouched — that
+    # is the entire point of the operation.
+    inventory_rewrite_row "$inventory" "$inventory_tmp" "$unit" \
+        "9=$new_goal" "10=$new_step"
+    mv "$inventory_tmp" "$inventory"
+
+    # The step file and its testing twin relocate with rewritten Ownership.
+    for reloc in "$plan_inventory_step.md" "$plan_inventory_step-testing.md"; do
+        [ -f "$plan_dir/$plan_inventory_goal/steps/$reloc" ] || continue
+        sed "s/^- Goal: \`$plan_inventory_goal\`/- Goal: \`$new_goal\`/" \
+            "$plan_dir/$plan_inventory_goal/steps/$reloc" \
+            > "$new_goal_dir/steps/${reloc/$plan_inventory_step/$new_step}"
+        rm -f "$plan_dir/$plan_inventory_goal/steps/$reloc"
+    done
+
+    # Both goals' trackers rebuild from step files; the shared carry keeps
+    # any status the moved step had earned.
+    plan_rebuild_goal_progress "$script_dir" "$plan_dir/$plan_inventory_goal" "$plan_inventory_goal" >&2
+    plan_rebuild_goal_progress "$script_dir" "$new_goal_dir" "$new_goal" >&2
+    plan_rewrite_owned_work_units "$plan_dir/$plan_inventory_goal/goal.md" "$inventory" "$plan_inventory_goal"
+    plan_rewrite_owned_work_units "$new_goal_dir/goal.md" "$inventory" "$new_goal"
+
+    printf 'Moved %s: %s/%s -> %s/%s (edges and coverage untouched)\n' \
+        "$unit" "$plan_inventory_goal" "$plan_inventory_step" "$new_goal" "$new_step"
+    exit 0
+fi
+
 inventory_rewrite_row "$inventory" "$inventory_tmp" "$unit" \
     "5=$new_scope" "4=$new_file" "3=$new_type" "8=$new_depends"
 awk -v replacement="$new_scope" -v newfile="$new_file" -v newtype="$new_type" '/^- Primary symbol or file scope:/ {if (replacement != "") {print "- Primary symbol or file scope: " replacement; next}} /^- File:/ {if (newfile != "") {print "- File: " newfile; next}} /^- Type:/ {if (newtype != "") {print "- Type: `" newtype "`"; next}} {print}' "$step_file" > "$step_tmp"

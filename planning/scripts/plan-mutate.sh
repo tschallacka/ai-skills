@@ -32,6 +32,8 @@ verb_catalogue='''  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
   ${0##*/} update-work-unit <plan> <WNN> [<new-primary-scope>] [<new-file>]
       [--scope <text>] [--file <path>] [--type <type>]
       [--depends-on <WNN[,WNN...]|—>] [--description <text>]
+  ${0##*/} update-work-unit <plan> <WNN> --goal <goal> --step <step-name>
+      (move between goals: edges and coverage links survive untouched)
   ${0##*/} set-unit-scope <plan> <WNN> <new-primary-scope>
       (alias of update-work-unit --scope; kept for existing callers)
   ${0##*/} remove-work-unit <plan> <WNN>
