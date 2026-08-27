@@ -1360,6 +1360,27 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B63",
+      "title": "chat-server.sh start prints a port the server is not listening on",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-server.sh start --bind 0.0.0.0 --port 7717; bash chat/scripts/chat-server.sh status; ss -ltnp | awk '/<pid>/'",
+      "observed": "start printed 'chat-server up: pid 1117766, port 45477, runtime python3'; status printed 'running: pid 1117766, port 7717, bind 0.0.0.0'; ss showed LISTEN 0.0.0.0:7717 for that pid. The requested port was honoured, so the start line's number is wrong, not the bind.",
+      "expected": "The start line reports the port the process is actually listening on, since that is the number an operator copies to configure a client.",
+      "mechanism": null,
+      "surfaces": [
+        "chat/scripts/chat-server.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, starting the server for the aiskills channel",
+      "notes": null,
+      "created_at": "2026-08-27T21:05:15Z",
+      "updated_at": "2026-08-27T21:05:15Z"
     }
   ]
 }
