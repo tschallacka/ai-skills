@@ -75,6 +75,12 @@ exercised=""
 
 serve_checks() { # NAME PORT — the identical-route contract every rung meets
     local name="$1" port="$2"
+    # B67: a failing assertion dumps the rung's stderr (req/exec diagnostics)
+    # so a host-specific failure names its cause in the CI log.
+    dump_rung_log() {
+        printf 'rung %s stderr:\n' "$name" >&2
+        cat "$work/err.$name" >&2 2>/dev/null || true
+    }
     if [ -z "$port" ]; then
         t_fail "$name never reported a port"
         printf 'stderr:\n' >&2
@@ -86,7 +92,8 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
         printf 'interp-echo: %s\n' "$(python3 -c 'print("ok")' 2>&1 || true)" >&2
         return
     fi
-    local got html sec
+    local got html sec fails_before
+    fails_before="$(t_failures)"
     got="$(fetch "http://127.0.0.1:$port/state.json" | norm_state)"
     t_assert_eq "$name /state.json equals the extractor" "$got" "$want_state"
     html="$(fetch "http://127.0.0.1:$port/")"
@@ -96,6 +103,7 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
     t_assert_contains "$name /sections slices identity-panel" 'id="identity-panel"' "$sec"
     sec="$(fetch "http://127.0.0.1:$port/sections/no-such-panel")"
     case "$sec" in *identity-panel*|*tests-panel*) t_fail "$name served a bogus section id" ;; esac
+    [ "$(t_failures)" -eq "$fails_before" ] || dump_rung_log
 }
 
 # ---- python3 rung ----------------------------------------------------------

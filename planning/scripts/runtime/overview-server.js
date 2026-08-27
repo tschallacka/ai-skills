@@ -17,7 +17,16 @@ var renderScript = scriptDir + "/../render-plan-overview.sh";
 
 function bash(script, args, cb) {
     child.execFile("bash", [script].concat(args), { maxBuffer: 32 * 1024 * 1024 },
-        function (err, stdout, stderr) { cb(err, stdout, stderr); });
+        function (err, stdout, stderr) {
+            if (err) {
+                // B67 diagnostics: a spawn/exit failure must say so on stderr
+                // (empty responses on one host and not another gave nothing
+                // to diff); the 500 body carries the cause for the client.
+                process.stderr.write("exec " + script + " failed: " + err.message +
+                    (stderr ? " | " + String(stderr).slice(0, 300) : "") + "\n");
+            }
+            cb(err, stdout, stderr);
+        });
 }
 
 function sectionOf(html, id) {
@@ -42,9 +51,10 @@ function render(cb) {
 
 var server = http.createServer(function (req, res) {
     var urlPath = req.url.split("?")[0];
+    process.stderr.write("req " + urlPath + "\n");
     if (urlPath === "/state.json" || urlPath === "/state") {
         bash(stateScript, [planDir], function (err, out) {
-            if (err) { res.writeHead(500); return res.end(); }
+            if (err) { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("state failed: " + err.message + "\n"); }
             res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
             res.end(out);
         });
@@ -64,6 +74,8 @@ var server = http.createServer(function (req, res) {
         });
     }
 });
+process.on("SIGTERM", function () { process.exit(0); });
+process.on("SIGINT", function () { process.exit(0); });
 server.listen(port, "127.0.0.1", function () {
     console.log(server.address().port);
 });
