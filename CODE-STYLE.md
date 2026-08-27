@@ -113,11 +113,12 @@ those rows go away and chat's runtime requirement drops to `bash` for the
 helpers.
 
 The build toolchain for such a binary (Rust, `cargo`) is a **dev** dependency
-like `shellcheck` or `bash32`: contributors need it, users never do. Source for
-a shipped binary is `MODE: DEV` so it stays out of the package; the compiled
-artifact under `<skill>/bin/<target triple>/` is what ships, and it is exempt
-from the marker rule for the obvious reason that a Mach-O, ELF or PE file has
-no comment syntax.
+like `shellcheck` or `bash32`: contributors need it, users never do. The crate
+lives under `src/<binary>/` and its sources carry `MODE: DEV` **and**
+`PACKAGE: PROD` — see section 1b, which is the authority on the layout and the
+markers. What ships is the compiled artifact under
+`<skill>/bin/<target triple>/`, exempt from the marker rule for the obvious
+reason that a Mach-O, ELF or PE file has no comment syntax.
 
 The `memlimit` exception is narrow on purpose. It buys a capability that cannot
 be had otherwise — macOS has no cgroups and rejects `setrlimit(RLIMIT_AS)` on
