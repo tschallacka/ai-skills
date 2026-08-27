@@ -281,6 +281,14 @@ the array changes, so a diff shows only movement.
 
 ## Rules that keep it honest
 
+**One defect per entry.** If an entry needs the word "and" to state what is
+wrong, it is two entries. A bundled report cannot be closed: fixing one half
+leaves the id open with no way to say which half, and the verification then covers
+less than the title claims. Split it, and have the halves name each other in
+`notes` — "B47 is the rung answering nothing; B48 is CI being unable to see it;
+fixing either leaves the other open". Use `parent` only when one genuinely
+contains the other, not for two peers.
+
 **Reproduce before recording.** An entry written from an impression sends the
 next reader chasing something that may not exist. If it cannot be reproduced, say
 so in `observed` and set `status` to `reported` rather than `confirmed`.
