@@ -4,22 +4,6 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
-      "id": "T50",
-      "title": "Finish dropping the positional argument form from add-work-unit.sh",
-      "status": "done",
-      "priority": "high",
-      "parent": null,
-      "detail": "A worker converted the call sites but a session restart killed it before verification, so 17 files sit modified and uncommitted in the working tree: planning/scripts/add-work-unit.sh, planning/scripts/plan-mutate.sh, planning/SKILL.md, CODE-STYLE.md and 13 planning/tests files. The edits are on disk so nothing is lost, but none of it is verified. To finish: confirm the positional branch and the positional array plumbing that only served it are gone; confirm every converted call preserves its argument values byte-for-byte, including the em-dash that means no dependencies; check what became of the deliberately malformed call at test-plan-commands.sh line 730 and of test-flag-form-equivalence.sh, whose premise is void now that only one form exists; run bash run-tests.sh; and prove the new refusal test bites by temporarily reinstating a positional fallback and observing the failure. Regenerate install.sh with installer/build.sh if the shipped file set changed, and commit only the files that changed.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/add-work-unit.sh",
-        "planning/tests/test-flag-form-equivalence.sh"
-      ],
-      "note": "Committed as 3ceb234, 18 files. Verified rather than assumed: a positional call exits 64 and creates no inventory row, no step file and no roster entry, while the flag form exits 0. The mutation that proves the test bites is reinstating the ten-positional assignment in add-work-unit.sh — test-flag-form-equivalence.sh then fails with 4 failures where it otherwise passes. Full suite 105 passed, 0 failed, 2 unconfigured. Two earlier mutation attempts silently failed to apply because the worker had restructured the guard, and both produced a meaningless PASS; the applied mutation was confirmed live by checking a positional call exited 0 before running the test.",
-      "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-08-27T14:18:12Z"
-    },
-    {
       "id": "T51",
       "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
       "status": "open",
@@ -33,6 +17,119 @@
       "note": null,
       "created_at": "2026-08-27T12:37:03Z",
       "updated_at": "2026-08-27T12:37:03Z"
+    },
+    {
+      "id": "T52",
+      "title": "Check the installed planning skill against canonical before a plan is created",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 1, independently reproduced here 2026-08-27: the installed copy at the codex skill root was 290 lines adrift of planning/ in the repo, 58 lines only in the install and 232 only in canonical, with no MODE marker on line 2 and 9 mentions of 'inventory' against canonical's 37. The reader appeared to lack an inventory view, which produced a hand patch to the installed copy and false missing-coverage findings from reviewers reading through it. Nothing warned. A version probe at plan-creation time, comparing the installed .version or a hash of the scripts directory against canonical when a checkout is reachable, turns silent drift into a line of output. The installer already writes a .version and already detects a version transition, so the data exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/create-plan.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-27T22:38:19Z"
+    },
+    {
+      "id": "T54",
+      "title": "A resolve-finding command that sets status, records the claim and refuses self-certification",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 3, and the most repeated manual sequence in plan-overview-rebuild: for each of four cycles I rebuilt the entire findings CSV with awk to flip one status column, re-ran update-adversarial-review.sh, then looped add-fix-claim.sh over every minted pair, across forty findings. Two defects fall out of doing it by hand. A claim can be recorded for a finding whose status was never flipped, which happened here and left four superseded rows in fixes.md that verify-fix-keys.sh now reports as ignored rather than verified. And a claim can be self-certified by the session that minted the key, which codex hit as their operational failure 3 and resolved by re-minting under an independent identity. One command should set the status, record the claim, and refuse when the claiming session is the minting session.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/add-fix-claim.sh",
+        "planning/scripts/verify-fix-keys.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-27T22:38:19Z"
+    },
+    {
+      "id": "T55",
+      "title": "Report the three gates separately: structurally valid, adversarially approved, implementation complete",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 5, and a confusion this session hit directly. validate-plan.sh without a flag answers 'is this plan structurally sound and free of placeholders'; with --complete it answers something else entirely, and on a plan that is fully planned but unexecuted it printed over a hundred FAIL lines for untested UI stories and incomplete steps. Those are execution state, not planning defects, and a reader who runs --complete looking for planning readiness reads a wall of failures on a plan that is ready. The three states are distinct and the tool should name which one it is reporting.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/validate-plan.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-27T22:38:42Z"
+    },
+    {
+      "id": "T53",
+      "title": "Run the reviewer-CSV check on the consume path instead of leaving it opt-in",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 2, narrower than filed. update-adversarial-review.sh already has --check, which validates shape and mint and writes nothing, and it already mints against a throwaway copy first so a refusal leaves every plan file byte-identical. The gap is that --check is opt-in, so a reviewer emitting several work-unit ids in one row fails at consumption rather than at submission, which is what broke their run. Either run the check unconditionally before the archive step, or require a --check pass in the reviewer brief before rows are handed over.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-27T22:38:19Z"
+    },
+    {
+      "id": "T56",
+      "title": "Mark a review rationale superseded when a later cycle replaces it",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-27T22:38:42Z"
+    },
+    {
+      "id": "T57",
+      "title": "Require reviewer reports to carry session id, elapsed time and a cost signal",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendations 4, 8 and 9 taken together, since they are one thing: a review cycle currently reports findings and nothing about what it cost. Their run took 17 cycles, 109 findings and 41.7 million tokens, and no signal existed to say that cycle 9 was already disproportionate. A reviewer brief that requires session id, elapsed seconds and a telemetry lookup makes each cycle's cost visible, and a plan whose findings-per-cycle stops falling is the signal worth surfacing. Preserve the planning-boundary token snapshot rather than only the live cumulative total, which is what makes cycles comparable at all.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "benchmark/planning/telemetry.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-27T22:38:42Z"
+    },
+    {
+      "id": "T58",
+      "title": "New plans carry an explicit assumptions section, and a postmortem template exists",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "codex postmortem recommendations 7 and 10. They asked no clarifying questions during planning and recorded the trade-off honestly: less interaction, more silent interpretation, with five interpretations only made explicit afterwards. An assumptions section in the plan template gives those a place to live at the time rather than in a postmortem. The postmortem template is the smaller half — token accounting and a reviewer-session table — and its value is that the cost data above only exists because they went and collected it by hand.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/create-plan.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-27T22:38:42Z"
     },
     {
       "id": "T1e",
@@ -555,6 +652,22 @@
       "note": "test-installer-any-of now installs --skill planning with all four runtimes hidden and asserts the warning names the member set (python3, node, perl, socat), the soft strength (exit 0, install proceeds) and the lost serve capability. Mutation-proven: deleting planning's socat row and regenerating makes this test fail; restored it passes.",
       "created_at": "2026-08-27T08:00:07Z",
       "updated_at": "2026-08-27T08:49:24Z"
+    },
+    {
+      "id": "T50",
+      "title": "Finish dropping the positional argument form from add-work-unit.sh",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "A worker converted the call sites but a session restart killed it before verification, so 17 files sit modified and uncommitted in the working tree: planning/scripts/add-work-unit.sh, planning/scripts/plan-mutate.sh, planning/SKILL.md, CODE-STYLE.md and 13 planning/tests files. The edits are on disk so nothing is lost, but none of it is verified. To finish: confirm the positional branch and the positional array plumbing that only served it are gone; confirm every converted call preserves its argument values byte-for-byte, including the em-dash that means no dependencies; check what became of the deliberately malformed call at test-plan-commands.sh line 730 and of test-flag-form-equivalence.sh, whose premise is void now that only one form exists; run bash run-tests.sh; and prove the new refusal test bites by temporarily reinstating a positional fallback and observing the failure. Regenerate install.sh with installer/build.sh if the shipped file set changed, and commit only the files that changed.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/add-work-unit.sh",
+        "planning/tests/test-flag-form-equivalence.sh"
+      ],
+      "note": "Committed as 3ceb234, 18 files. Verified rather than assumed: a positional call exits 64 and creates no inventory row, no step file and no roster entry, while the flag form exits 0. The mutation that proves the test bites is reinstating the ten-positional assignment in add-work-unit.sh — test-flag-form-equivalence.sh then fails with 4 failures where it otherwise passes. Full suite 105 passed, 0 failed, 2 unconfigured. Two earlier mutation attempts silently failed to apply because the worker had restructured the guard, and both produced a meaningless PASS; the applied mutation was confirmed live by checking a positional call exited 0 before running the test.",
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-08-27T14:18:12Z"
     },
     {
       "id": "T1",
