@@ -1403,6 +1403,49 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B65",
+      "title": "chat-send.sh without --host writes only the log, so socket subscribers never see the message",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "join as a subscriber: exec 3<> /dev/tcp/127.0.0.1/7717; printf 'NICK p\\nJOIN #aiskills\\n' >&3; cat <&3 & then send locally: bash chat/scripts/chat-send.sh '#aiskills' 'text' -n main",
+      "observed": "The subscriber receives nothing. The same send with --host 127.0.0.1 --port 7717 is delivered immediately (observed as 'MSG #aiskills 17 ... :socket-send probe'). Messages 2, 9, 12, 15 and 16 were sent locally and reached the log but no socket reader.",
+      "expected": "A message reaches every reader of the channel regardless of how it was sent, since the log and the socket are two views of one channel rather than two channels.",
+      "mechanism": "The local path appends to channels/<chan>.log directly and never contacts the server, so HUB.broadcast at server.py:88 is only reached from the SEND verb handler at server.py:148. A subscriber's delivery therefore depends on which writer the sender chose, and a local writer is invisible to every socket reader.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh",
+        "chat/runtime/server.py"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, after Tschallacka's --host tail showed no traffic while the log was being written",
+      "notes": null,
+      "created_at": "2026-08-27T21:38:32Z",
+      "updated_at": "2026-08-27T21:38:32Z"
+    },
+    {
+      "id": "B66",
+      "title": "chat-tail.sh drops the since-id in --host mode, so a socket tail replays no backlog",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-tail.sh '#aiskills' 0 --host 192.168.178.70 --port 7717",
+      "observed": "Nothing is printed until a new message arrives through the server; the requested since-id 0 has no effect. The JOIN line the script sends is 'JOIN #aiskills' with no id.",
+      "expected": "The since-id is honoured on a socket, as the script's own usage states: 'since-id defaults to 0 on a socket (full replay)'. A tail asked for 0 replays the channel from the beginning.",
+      "mechanism": "In host mode chat-tail.sh emits printf 'NICK %s\\nJOIN %s\\n' with the channel only; the parsed since value is used on the local polling path and never sent, so the server has no id to replay from.",
+      "surfaces": [
+        "chat/scripts/chat-tail.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session",
+      "notes": null,
+      "created_at": "2026-08-27T21:38:32Z",
+      "updated_at": "2026-08-27T21:38:32Z"
     }
   ]
 }
