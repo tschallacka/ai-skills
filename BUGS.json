@@ -776,6 +776,28 @@
       "updated_at": "2026-08-27T21:38:32Z"
     },
     {
+      "id": "B67",
+      "title": "the node rung of overview-serve serves nothing: page, state and sections routes all return empty",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash planning/tests/test-overview-serve.sh",
+      "observed": "Three failures, all on the node rung: '/state.json equals the extractor' got '' against a full expected document; '/ serves the artifact' output did not contain '<!DOCTYPE html>'; '/sections slices identity-panel' output did not contain 'id=\"identity-panel\"'. The python3, perl and socat rungs pass in the same run. Reproduced at commit 54ee970, before the B51-B59 batch and before any change of mine, so it is pre-existing rather than a regression from either.",
+      "expected": "The node rung serves the same three routes as the other rungs, which is what makes it a rung: the test asserts identical output across all four.",
+      "mechanism": "overview-server.js prints the port with console.log(port) where port is a NUMBER. Node applies util.inspect colouring to a non-string argument whenever colour is forced, so with FORCE_COLOR set in the environment (FORCE_COLOR=3 here, alongside COLORTERM=truecolor) the port line is written as ESC[33m35115ESC[39m even though stdout is a file, not a TTY. test-overview-serve.sh reads it with head -1 into the URL, so every request goes to a malformed host and all three routes return nothing. Proven: node -e 'console.log(8080)' emits ESC[33m8080ESC[39m here, while env -u FORCE_COLOR node -e 'console.log(8080)' and node -e 'console.log(String(8080))' both emit a bare 8080. Invoking the server directly and reading the port by eye serves all three routes correctly (page 200 with 181335 bytes, state 200 with 172956), so the rung itself works and only the port line is unparseable. Environment-specific in trigger; the defect is a server printing a number through a colourising API on a machine-read channel.",
+      "surfaces": [
+        "planning/scripts/runtime/overview-server.js",
+        "planning/tests/test-overview-serve.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, from the full suite: 106 ran, 104 passed",
+      "notes": "ox does not reproduce on node v22.16.0 with no FORCE_COLOR set, which is consistent: the colouring is forced by the environment rather than the node version. Fix is String(port) or process.stdout.write, so the port line cannot be decorated whatever the environment says.",
+      "created_at": "2026-08-27T21:40:06Z",
+      "updated_at": "2026-08-27T21:52:10Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1446,28 +1468,6 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
-    },
-    {
-      "id": "B67",
-      "title": "the node rung of overview-serve serves nothing: page, state and sections routes all return empty",
-      "status": "reported",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "bash planning/tests/test-overview-serve.sh",
-      "observed": "Three failures, all on the node rung: '/state.json equals the extractor' got '' against a full expected document; '/ serves the artifact' output did not contain '<!DOCTYPE html>'; '/sections slices identity-panel' output did not contain 'id=\"identity-panel\"'. The python3, perl and socat rungs pass in the same run. Reproduced at commit 54ee970, before the B51-B59 batch and before any change of mine, so it is pre-existing rather than a regression from either.",
-      "expected": "The node rung serves the same three routes as the other rungs, which is what makes it a rung: the test asserts identical output across all four.",
-      "mechanism": null,
-      "surfaces": [
-        "planning/scripts/runtime/overview-server.js",
-        "planning/tests/test-overview-serve.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, from the full suite: 106 ran, 104 passed",
-      "notes": null,
-      "created_at": "2026-08-27T21:40:06Z",
-      "updated_at": "2026-08-27T21:40:06Z"
     }
   ]
 }
