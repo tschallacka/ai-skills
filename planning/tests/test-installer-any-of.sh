@@ -133,6 +133,39 @@ restore_python3() {
 }
 restore_python3
 
+# ── T48a: planning's own group is asserted, not only chat's ──────────────────
+# Deleting one of planning's four runtime rows (and regenerating) must fail
+# HERE, on the reported members and capability, not only via group-id
+# uniqueness elsewhere. The group is soft: serve mode degrades, the file
+# overview still ships.
+plan_none_bin="$temporary_root/bin-plan-none"
+build_hidden_path "$plan_none_bin" python3 node perl socat
+if PATH="$plan_none_bin" command -v python3 >/dev/null 2>&1 ||
+    PATH="$plan_none_bin" command -v perl >/dev/null 2>&1; then
+    printf 'installer-anyof: UNCONFIGURED (a planning runtime could not be hidden)\n' >&2
+else
+    target_plan="$temporary_root/target-plan"
+    mkdir -p "$target_plan"
+    set +e
+    PATH="$plan_none_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
+        --skill planning --target "$target_plan" --yes \
+        >"$temporary_root/out-plan" 2>"$temporary_root/err-plan" </dev/null
+    plan_rc=$?
+    set -e
+    [ "$plan_rc" -eq 0 ] || note_fail "planning soft group miss changed the exit status: rc=$plan_rc"
+    plan_err="$(cat "$temporary_root/err-plan")"
+    case "$plan_err" in
+        *'any of python3, node, perl, socat (soft requirement of planning)'*) ;;
+        *) note_fail "planning's warning did not name its member set: $plan_err" ;;
+    esac
+    case "$plan_err" in
+        *'serve mode'*|*'listening socket'*) ;;
+        *) note_fail "planning's warning did not name the lost serve capability: $plan_err" ;;
+    esac
+    [ -f "$target_plan/planning/SKILL.md" ] \
+        || note_fail 'a soft group miss blocked the planning install'
+fi
+
 # ── single-tool strengths are untouched: jq hard blocks, openssl soft warns ──
 jqless_bin="$temporary_root/bin-jqless"
 build_hidden_path "$jqless_bin" jq

@@ -6,7 +6,7 @@
     {
       "id": "T48",
       "title": "Make requires.tsv a contract rather than documentation: nothing currently fails when a declaration is deleted",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "Measured, not suspected. B46 added four soft rows to planning/requires.tsv declaring the serve-mode runtimes as the any-of group overview-server-runtimes. Four mutations were then run against that fix, each restored by copy-back with an empty git diff afterwards: (1) delete the socat row and regenerate install.sh — all six relevant tests exit 0; (2) delete ALL FOUR rows and regenerate, an exact revert of the fix — all six still exit 0, nothing fails; (3) delete a row WITHOUT regenerating — test-installer-build.sh rc=1, 'install.sh is stale'; (4) rename the group to chat's existing id — test-installer-build.sh rc=2 via validate_requires_groups refusing a group declared by two skills. So the only things that bite are generated-artifact freshness and group-id uniqueness, both properties of the build rather than of the declaration. Someone can delete a skill's entire dependency declaration, rebuild, and the suite stays green — which is exactly how planning shipped a four-rung server with no declared runtimes in the first place. Two children below: one closes the coverage hole for the existing group, the other prevents the whole class.",
@@ -16,14 +16,14 @@
         "installer/build.sh",
         "planning/tests/test-installer-any-of.sh"
       ],
-      "note": null,
+      "note": "Gate ships in installer/build.sh (validate_probes_declared + probe_universe_hits + probe_is_declared): every runtime a skill's shipped scripts probe (command -v literals and 'for r in' rung loops, against a known-runtime universe) must be declared in that skill's requires.tsv or carry an allowlist row with a reason (installer/probe-allowlist.tsv). Build-time refusal, exit 65, so an undeclared runtime cannot reach a commit.",
       "created_at": "2026-08-27T07:59:50Z",
-      "updated_at": "2026-08-27T07:59:50Z"
+      "updated_at": "2026-08-27T08:49:24Z"
     },
     {
       "id": "T48a",
       "title": "test-installer-any-of must assert planning's group, not only chat's",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "T48",
       "detail": "planning/tests/test-installer-any-of.sh hardcodes --skill chat and asserts on the string 'soft requirement of chat'; planning appears only in the single-tool jq/openssl arms. That is why mutation 2 above passes. Add coverage that installs --skill planning and asserts the group is reported: its members are python3/node/perl/socat, its strength is soft, and the reported why names serve mode. Verification must name the mutation: deleting one of planning's four rows and regenerating has to make this test fail. Do not assert on the group id string alone — that is what mutation 4 already catches via uniqueness; assert the reported members and strength, which is what a user actually sees.",
@@ -32,14 +32,14 @@
         "planning/tests/test-installer-any-of.sh",
         "planning/requires.tsv"
       ],
-      "note": null,
+      "note": "test-installer-any-of now installs --skill planning with all four runtimes hidden and asserts the warning names the member set (python3, node, perl, socat), the soft strength (exit 0, install proceeds) and the lost serve capability. Mutation-proven: deleting planning's socat row and regenerating makes this test fail; restored it passes.",
       "created_at": "2026-08-27T08:00:07Z",
-      "updated_at": "2026-08-27T08:00:07Z"
+      "updated_at": "2026-08-27T08:49:24Z"
     },
     {
       "id": "T48b",
       "title": "A gate that every runtime a skill probes with command -v has a row in that skill's requires.tsv",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T48",
       "detail": "T48a fixes one instance; this prevents the class. Scan each skill's shipped scripts for the runtimes they probe — 'command -v <tool>' and the 'for r in python3 node perl socat' rung loops — and require a matching requires.tsv row for that skill, or an explicit allowlist entry saying why the tool needs no declaration. This is the check B46's own notes asked for and nobody built: without it, the next skill to grow a runtime dependency ships it undeclared and silently, exactly as planning did. Expect false positives to design around: a probe inside a test rather than shipped code, a tool probed only to decide a diagnostic message, and jq itself which is already declared hard nearly everywhere. Prefer refusing at build time in installer/build.sh over a test, so the omission cannot reach a commit — but a test is acceptable if the build hook proves awkward.",
@@ -49,9 +49,9 @@
         "planning/requires.tsv",
         "chat/requires.tsv"
       ],
-      "note": null,
+      "note": "Build-time gate in installer/build.sh, wired ahead of validate_requires_groups in gen_dependency_block. Mutations: delete socat row -> build exits 65 naming overview-serve.sh's probe; undeclared jq probe in chat-server.sh -> exit 65; allowlist row -> passes; clean tree -> rc 0. Two structural traps fixed en route: the loop was dying in a pipeline subshell (missing flag lost) and grep-exit-1 under pipefail aborted the scan before the rung-loop grep — both now documented in the code.",
       "created_at": "2026-08-27T08:00:07Z",
-      "updated_at": "2026-08-27T08:00:07Z"
+      "updated_at": "2026-08-27T08:49:24Z"
     },
     {
       "id": "T1e",

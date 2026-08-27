@@ -50,6 +50,10 @@ in_allowlist() {
         ./planning/tests/lib-test.sh:sha256-tool) return 0 ;;
         # This test forces each branch of the chain, so it has to name all three.
         ./planning/tests/test-sha256-fallbacks.sh:sha256-tool) return 0 ;;
+        # The T48b gate's known-runtime universe is a word LIST the build
+        # compares declarations against; naming a tool is not requiring it.
+        ./installer/build.sh:python3-shipped) return 0 ;;
+        ./installer/build.sh:sha256-tool) return 0 ;;
         ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
         ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
         # Fix keys probe the same sha256sum->shasum->openssl chain (T16): the

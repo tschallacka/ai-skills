@@ -149,6 +149,90 @@ validate_requires_groups() {
     done < <(skill_manifests)
 }
 
+# T48b: every runtime a skill's shipped scripts probe with command -v (or a
+# rung loop "for r in a b c") is declared in that skill's requires.tsv, or
+# carries an allowlist row with a reason. Without this gate the next skill to
+# grow a runtime dependency ships it silently — exactly how planning shipped a
+# four-rung server with no declarations (B46/T48). The known-runtime universe
+# is deliberate: an unknown tool name in a probe is not silently skipped, it
+# simply needs a universe row when a skill adopts it.
+probe_allowlist='installer/probe-allowlist.tsv'
+probe_universe='python3 python node nodejs perl socat jq openssl sha256sum shasum git'
+
+shipped_scripts_of() { # <skill> — the prod arm of skill_files from the manifest part
+    # Sourced fresh in a subshell so this build's own state is untouched;
+    # sourcing parts is exactly what this builder does anyway.
+    (
+        # shellcheck source=installer/src/05-config.sh
+        . "$src_dir/05-config.sh"
+        # shellcheck source=installer/src/50-manifest.sh
+        . "$src_dir/50-manifest.sh"
+        skill_files "$1" prod
+    ) 2>/dev/null || true
+}
+
+# probe_is_declared SKILL TOOL — requires.tsv row, else an allowlist row with
+# a reason; exit status carries the verdict.
+probe_is_declared() {
+    local skill="$1" tool="$2"
+    awk -F '\t' -v t="$tool" '
+        /^[[:space:]]*#/ { next }
+        $1 == t { found = 1 }
+        END { exit (found ? 0 : 1) }
+    ' "$repo_root/$skill/requires.tsv" 2>/dev/null && return 0
+    awk -F '\t' -v s="$skill" -v t="$tool" '
+        $1 == s && $2 == t { ok = 1 }
+        END { exit (ok ? 0 : 1) }
+    ' "$repo_root/$probe_allowlist"
+}
+
+# probe_universe_hits FILE — the known runtimes FILE probes, via literal
+# command -v arms or a "for r in a b c" rung loop. grep exits 1 on zero
+# matches, which under set -e + pipefail would abort a caller mid-scan (the
+# PORTABILITY.md pipefail-grep trap), so every grep arm carries || true.
+probe_universe_hits() {
+    local pfile="$1"
+    {
+        { grep -oE 'command -v [a-z0-9_]+' "$pfile" 2>/dev/null || true; } \
+            | awk '{print $3}'
+        { grep -oE 'for r in [a-z0-9_ ]+' "$pfile" 2>/dev/null || true; } \
+            | sed 's/for r in //' | tr ' ' '\n'
+    } | awk -v u=" $probe_universe " 'index(u, " " $0 " ") > 0' | LC_ALL=C sort -u
+}
+
+validate_probes_declared() {
+    [ -f "$repo_root/$probe_allowlist" ] || return 0
+    local skill script tool declared missing=0
+    local skill_dir
+    while IFS= read -r skill_dir; do
+        [ -n "$skill_dir" ] || continue
+        skill="${skill_dir#"$repo_root/"}"
+        [ -f "$repo_root/$skill/requires.tsv" ] || continue
+        while IFS= read -r script; do
+            case "$script" in
+                *.sh|*.py|*.js|*.pl) ;;
+                *) continue ;;
+            esac
+            [ -f "$repo_root/$skill/$script" ] || continue
+            while IFS= read -r tool; do
+                [ -n "$tool" ] || continue
+                if probe_is_declared "$skill" "$tool"; then
+                    continue
+                fi
+                printf '%s: %s probes runtime %s but its requires.tsv does not declare it and no allowlist row explains it\n' \
+                    "${0##*/}" "$skill/$script" "$tool" >&2
+                missing=1
+            # The universe filter lives INSIDE the process substitution: a
+            # pipe after `done` would put the loop itself in a subshell, and
+            # its exit and missing-flag would die there (found the hard way).
+            done < <(probe_universe_hits "$repo_root/$skill/$script")
+        done < <(shipped_scripts_of "$skill")
+    done < <(for skill_dir in "$repo_root"/*/; do
+        [ -f "$skill_dir/requires.tsv" ] && printf '%s\n' "${skill_dir%/}"
+    done)
+    [ "$missing" -eq 0 ] || exit 65
+}
+
 # Manifest rows with group membership collapsed: the first row of a group stands
 # for all of them as a requirement named @<group>, later members dropped after
 # their condition/strength/why were checked against the first.
@@ -327,6 +411,8 @@ gen_install_hint() {
 }
 
 gen_dependency_block() {
+    validate_probes_declared || printf "GATE-RC=%s
+" "$?" >&2
     validate_requires_groups
     gen_requirements
     printf '\n'
