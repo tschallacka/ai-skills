@@ -71,6 +71,7 @@ stop_bg() { # NAME — TERM, short grace, KILL
 }
 
 rung_port=""
+exercised=""
 
 serve_checks() { # NAME PORT — the identical-route contract every rung meets
     local name="$1" port="$2"
@@ -102,6 +103,7 @@ if command -v python3 >/dev/null 2>&1; then
     start_bg python3 python3 -u "$scripts/runtime/overview-server.py" "$plan_dir"
     rung_port="$(head -1 "$work/port.python3")"
     serve_checks python3 "$rung_port"
+exercised="$exercised python3"
     stop_bg python3
     sleep 0.4
     # Exit status carries the verdict: 0 = still accepting (bad), 3 = refused.
@@ -118,7 +120,7 @@ finally:
 PYEOF
     then t_fail "python3 listener survived the stop"; fi
 else
-    printf 'overview-serve: python3 absent; rung skipped\n' >&2
+    printf 'SKIP overview-serve: python3 absent on this host - its assertions did not run\n' >&2
 fi
 
 # ---- node rung ---------------------------------------------------------------
@@ -129,9 +131,10 @@ if [ -n "$NODE_BIN" ]; then
     start_bg node "$NODE_BIN" "$scripts/runtime/overview-server.js" "$plan_dir"
     rung_port="$(head -1 "$work/port.node")"
     serve_checks node "$rung_port"
+exercised="$exercised node"
     kill "$(cat "$work/pid.node")" 2>/dev/null || true; rm -f "$work/pid.node"
 else
-    printf 'overview-serve: node absent; rung skipped\n' >&2
+    printf 'SKIP overview-serve: node absent on this host - its assertions did not run\n' >&2
 fi
 
 # ---- perl rung (core modules only) -------------------------------------------
@@ -139,9 +142,10 @@ if command -v perl >/dev/null 2>&1; then
     start_bg pl perl "$scripts/runtime/overview-server.pl" "$plan_dir"
     rung_port="$(head -1 "$work/port.pl")"
     serve_checks perl "$rung_port"
+exercised="$exercised perl"
     kill "$(cat "$work/pid.pl")" 2>/dev/null || true; rm -f "$work/pid.pl"
 else
-    printf 'overview-serve: perl absent; rung skipped\n' >&2
+    printf 'SKIP overview-serve: perl absent on this host - its assertions did not run\n' >&2
 fi
 
 # ---- socat rung (explicit port; bash handler) --------------------------------
@@ -152,9 +156,10 @@ if command -v socat >/dev/null 2>&1; then
         >"$work/socat.log" 2>&1 & echo $! >"$work/pid.socat")
     sleep 1
     serve_checks socat "$sport"
+exercised="$exercised socat"
     kill "$(cat "$work/pid.socat")" 2>/dev/null || true; rm -f "$work/pid.socat"
 else
-    printf 'overview-serve: socat absent; rung skipped\n' >&2
+    printf 'SKIP overview-serve: socat absent on this host - its assertions did not run\n' >&2
 fi
 
 # ---- no-runtime rung: exit 69 naming the capability ---------------------------
@@ -194,5 +199,13 @@ if grep -q 'location.reload(' "$work/served.html"; then
 fi
 t_assert_contains "served flavor polls sections" 'fetch("/sections/"' "$(cat "$work/served.html")"
 t_assert_contains "served flavor carries the revision swap" 'data-rev' "$(cat "$work/served.html")"
+
+# Reach summary: what this run actually exercised (B48 — a green suite must
+# not silently mean "attempted less").
+printf 'overview-serve: rungs exercised ->%s\n' "$exercised" >&2
+case "$exercised" in
+    *python3*node*perl*socat*) : ;;
+    *) printf 'overview-serve: INCOMPLETE RUNG COVERAGE this run:%s\n' "$exercised" >&2 ;;
+esac
 
 t_end

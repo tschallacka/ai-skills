@@ -77,7 +77,10 @@ case "$runtime" in
                 "${0##*/}" >&2
             exit 64
         fi
-        exec socat "TCP-LISTEN:${want_port},fork,reuseaddr,bind=127.0.0.1" \
+        # SYSTEM: starts a fresh shell per connection; nothing is inherited
+        # implicitly, so the plan dir rides the environment explicitly.
+        PLAN_DIR="$plan_dir" exec socat \
+            "TCP-LISTEN:${want_port},fork,reuseaddr,bind=127.0.0.1" \
             "SYSTEM:$script_dir/runtime/overview-serve-handler.sh,stderr"
         ;;
 esac

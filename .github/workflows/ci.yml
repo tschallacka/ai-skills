@@ -35,6 +35,15 @@ jobs:
       - name: Record the bash under test
         run: bash --version
 
+      - name: Install socat so the served-overview rung is exercised (B48)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y -qq socat
+          elif command -v brew >/dev/null 2>&1; then
+            brew install socat
+          fi
+          command -v socat || echo "socat still absent; its rung will SKIP loudly"
+
       - name: Run the full deterministic test suite
         run: ./run-tests.sh
 
@@ -84,6 +93,15 @@ jobs:
           command -v bash
           bash --version
           /bin/bash --version
+
+      - name: Install socat so the served-overview rung is exercised (B48)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y -qq socat
+          elif command -v brew >/dev/null 2>&1; then
+            brew install socat
+          fi
+          command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
       - name: Run the full deterministic test suite under /bin/bash
         run: /bin/bash ./run-tests.sh

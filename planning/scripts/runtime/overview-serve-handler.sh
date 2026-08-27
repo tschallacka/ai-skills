@@ -7,7 +7,11 @@
 set -euo pipefail
 export LC_ALL=C
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# runtime/ sits two levels below the skill root (planning/scripts/runtime in
+# the tree, <skill>/scripts/runtime when installed); resolve the root once and
+# descend, so both layouts find the sibling scripts.
+skill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+scripts_dir="$skill_root/scripts"
 plan_dir="${PLAN_DIR:?}"
 route="${ROUTE:-/}"
 
@@ -16,7 +20,7 @@ read -r method route http_version || exit 0
 route="${route%%\?*}"
 
 render_to_temp() { # PATH_OUT — render once; the renderer writes a file
-    "$script_dir/../render-plan-overview.sh" "$plan_dir" --serve \
+    "$scripts_dir/render-plan-overview.sh" "$plan_dir" --serve \
         --out "$1" >/dev/null 2>&1
 }
 
@@ -29,30 +33,51 @@ section_of() { # ID — the id="ID" element's HTML from a fresh render,
     rm -f "$fresh_file"
 }
 
+respond() { # STATUS TYPE [BODY_FILE] — one honest HTTP/1.0 response
+    local status="$1" ctype="$2" body_file="${3:-}" len=0
+    [ -n "$body_file" ] && [ -f "$body_file" ] && len="$(wc -c < "$body_file")"
+    printf 'HTTP/1.0 %s\r\nContent-Type: %s\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' \
+        "$status" "$ctype" "$len"
+    [ -n "$body_file" ] && cat "$body_file"
+}
+
 case "$route" in
     /state.json|/state)
-        printf 'Content-Type: application/json; charset=utf-8\r\n\r\n'
-        "$script_dir/../overview-state.sh" "$plan_dir"
+        body="$(mktemp "${TMPDIR:-/tmp}/ovh-state.XXXXXX")"
+        if "$scripts_dir/overview-state.sh" "$plan_dir" > "$body"; then
+            respond "200 OK" "application/json; charset=utf-8" "$body"
+        else
+            respond "500 Internal Server Error" "text/plain"
+        fi
+        rm -f "$body"
         ;;
     /sections/*)
         sec="${route#/sections/}"
+        body="$(mktemp "${TMPDIR:-/tmp}/ovh-sec.XXXXXX")"
+        ok=0
         case "$sec" in
-            identity-panel|step-details|tests-panel|coverage-panel|findings-panel|dep-graph|narr) ;;
-            *) printf 'Status: 404\r\nContent-Type: text/plain\r\n\r\nNot found\n'; exit 0 ;;
+            identity-panel|step-details|tests-panel|coverage-panel|findings-panel|dep-graph|narr)
+                section_of "$sec" > "$body" && [ -s "$body" ] && ok=1 ;;
         esac
-        body="$(section_of "$sec")"
-        [ -n "$body" ] || { printf 'Status: 404\r\nContent-Type: text/plain\r\n\r\nNot found\n'; exit 0; }
-        printf 'Content-Type: text/html; charset=utf-8\r\n\r\n'
-        printf '%s\n' "$body"
+        if [ "$ok" = 1 ]; then
+            respond "200 OK" "text/html; charset=utf-8" "$body"
+        else
+            respond "404 Not Found" "text/plain"
+            printf 'Not found\n'
+        fi
+        rm -f "$body"
         ;;
     /|/index.html)
         page="$(mktemp "${TMPDIR:-/tmp}/overview-page.XXXXXX")"
-        render_to_temp "$page" || { rm -f "$page"; printf 'Status: 500\r\n\r\n'; exit 0; }
-        printf 'Content-Type: text/html; charset=utf-8\r\n\r\n'
-        cat "$page"
+        if render_to_temp "$page"; then
+            respond "200 OK" "text/html; charset=utf-8" "$page"
+        else
+            respond "500 Internal Server Error" "text/plain"
+        fi
         rm -f "$page"
         ;;
     *)
-        printf 'Status: 404\r\nContent-Type: text/plain\r\n\r\nNot found: %s\n' "$route"
+        respond "404 Not Found" "text/plain"
+        printf 'Not found: %s\n' "$route"
         ;;
 esac
