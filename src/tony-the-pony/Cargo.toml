@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "tony-the-pony"
+version = "0.1.0"
+edition = "2021"
+description = "A tool-call gate that interrupts the text-search reflex, for agents whose hooks are external commands"
+license = "MIT"
+
+[dependencies]
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+panic = "abort"

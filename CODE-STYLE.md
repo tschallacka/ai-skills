@@ -158,6 +158,38 @@ pass. A rule in this file without a CI leg or a regression test in
 
 ---
 
+## 1b. Where compiled tools live
+
+A shipped binary gets **one directory per binary under `src/`**, sitting beside
+the skill directories rather than inside one:
+
+```
+src/tony-the-pony/      Cargo.toml, rust-toolchain.toml, src/*.rs
+src/<next-binary>/      likewise
+```
+
+One binary, one crate, one directory. A binary does not live inside the skill
+that happens to use it: several skills may consume one tool, and a skill
+directory is what the installer copies, while a crate is what CI builds.
+
+**Markers.** Crate sources are `MODE: DEV` **and** `PACKAGE: PROD` — the same
+pair used for the library sources under `planning/scripts/lib/`, and for the
+same reason: the file itself is never delivered, but its content ends up inside
+something that is. Put both markers on the **first two lines**, before any `//!`
+module documentation. `marker_of` reads only the head of a file, so a marker
+placed after a long doc comment silently falls out of the window and the file
+reads as unmarked. `rust-toolchain.toml` is `MODE: DEV` alone: it configures the
+build and is compiled into nothing. `Cargo.lock` is generated and exempt.
+
+**This does not widen the dependency budget in section 1.** That budget governs
+what the *target machine must already have*; a static binary asks it for
+nothing, so shipping one lowers the requirement rather than raising it. What
+ships is declared per target in the skill's own `binaries.tsv`, validated by
+`tests/test-shipped-binaries.sh`. The compiler is a dev dependency and lives in
+the flake.
+
+---
+
 ## 2. File skeleton
 
 Every script, in this order, no exceptions:
