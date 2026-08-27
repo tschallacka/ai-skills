@@ -17,33 +17,32 @@
 CHAT_DEFAULT_PORT=7717
 CHAT_DEFAULT_BIND=127.0.0.1
 
-# chat_config_load <home>
+# chat_config_trim <text>
 #
-# Sets CHAT_TRANSPORT to tcp, socket, or none, plus CHAT_CFG_BIND/CHAT_CFG_PORT
-# for tcp and CHAT_CFG_SOCKET for a socket. Never fails: an unreadable or absent
-# config is 'none', which leaves the caller in local mode — the mode that needs
-# no server at all.
-chat_config_load() {
-    local home="$1" file="$1/config" key value
-    CHAT_TRANSPORT=none
-    CHAT_CFG_BIND=""
-    CHAT_CFG_PORT=""
-    CHAT_CFG_SOCKET=""
-    [ -f "$file" ] || return 0
-    # No `read -r line` splitting on '=': a socket path may contain one, and
+# Strip leading and trailing whitespace. The config file invites hand-editing, so
+# `transport = tcp` has to work as well as `transport=tcp`.
+chat_config_trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    printf '%s\n' "$v"
+}
+
+# chat_config_read_keys <file>
+#
+# Read the raw keys into CHAT_TRANSPORT/CHAT_CFG_*. Split out from
+# chat_config_load only to stay under the repository's function-length cap; the
+# two are one operation and chat_config_load is the entry point.
+chat_config_read_keys() {
+    local file="$1" line key value
+    # No `read -r key value` with IFS='=': a socket path may contain '=', and
     # only the FIRST '=' separates key from value.
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             ''|'#'*) continue ;;
         esac
-        key="${line%%=*}"
-        value="${line#*=}"
-        # Trim the spaces a hand-edit leaves behind. The file invites editing,
-        # so `transport = tcp` has to work.
-        key="${key#"${key%%[![:space:]]*}"}"
-        key="${key%"${key##*[![:space:]]}"}"
-        value="${value#"${value%%[![:space:]]*}"}"
-        value="${value%"${value##*[![:space:]]}"}"
+        key="$(chat_config_trim "${line%%=*}")"
+        value="$(chat_config_trim "${line#*=}")"
         case "$key" in
             transport) CHAT_TRANSPORT="$value" ;;
             bind) CHAT_CFG_BIND="$value" ;;
@@ -51,6 +50,22 @@ chat_config_load() {
             socket) CHAT_CFG_SOCKET="$value" ;;
         esac
     done < "$file"
+}
+
+# chat_config_load <home>
+#
+# Sets CHAT_TRANSPORT to tcp, socket, or none, plus CHAT_CFG_BIND/CHAT_CFG_PORT
+# for tcp and CHAT_CFG_SOCKET for a socket. Never fails: an unreadable or absent
+# config is 'none', which leaves the caller in local mode — the mode that needs
+# no server at all.
+chat_config_load() {
+    local home="$1" file="$1/config"
+    CHAT_TRANSPORT=none
+    CHAT_CFG_BIND=""
+    CHAT_CFG_PORT=""
+    CHAT_CFG_SOCKET=""
+    [ -f "$file" ] || return 0
+    chat_config_read_keys "$file"
     case "$CHAT_TRANSPORT" in
         tcp)
             [ -n "$CHAT_CFG_BIND" ] || CHAT_CFG_BIND="$CHAT_DEFAULT_BIND"
