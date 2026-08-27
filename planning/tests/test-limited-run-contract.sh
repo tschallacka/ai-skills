@@ -266,13 +266,23 @@ requires_for_arch() {
         "$BASH" -c '. "$1"; runtime_requirements resource-limited-testing' _ "$requirements_fn"
 }
 
+# bash is required on every platform (the wrapper is a bash script); memlimit is
+# additionally required on Apple Silicon only. The point of these two assertions
+# is the arch-conditional row, so they pin the difference between the arches
+# rather than the whole set.
 intel_requires="$(requires_for_arch x86_64)"
-[ -z "$intel_requires" ] \
-    || note_fail "Intel macOS still requires '$intel_requires' (memlimit is arm64-only)"
+[ "$intel_requires" = bash ] \
+    || note_fail "Intel macOS should require bash alone, got '$intel_requires' (memlimit is arm64-only)"
 
 arm_requires="$(requires_for_arch arm64)"
-[ "$arm_requires" = memlimit ] \
-    || note_fail "Apple Silicon macOS should require memlimit, got '$arm_requires'"
+case "$arm_requires" in
+    *memlimit*) ;;
+    *) note_fail "Apple Silicon macOS should also require memlimit, got '$arm_requires'" ;;
+esac
+case "$arm_requires" in
+    *bash*) ;;
+    *) note_fail "Apple Silicon macOS should still require bash, got '$arm_requires'" ;;
+esac
 
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-limited-run-contract: PASS'

@@ -22,6 +22,7 @@
 # format that needed jq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
 tool	condition	strength	why	group
+bash	*:*	hard	every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine
 jq	*:*	hard	reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it
 openssl	*:*	soft	derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69
 python3	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes

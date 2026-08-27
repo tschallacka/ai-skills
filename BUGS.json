@@ -668,7 +668,7 @@
     {
       "id": "B49",
       "title": "A skill gaining its first requirement on a platform makes the UI call runtime_requirement_met where it is not defined",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -682,12 +682,12 @@
         "installer/src/20-runtime-tools.sh",
         "planning/tests/test-install-ui.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "install-ui.sh sources 20-runtime-tools alongside the UI parts. The mechanism recorded when filing was wrong: it blamed 35-ui-model.sh and 36-ui-render.sh for not sourcing the definitions, but the shipped install.sh concatenates every part so both functions always exist there — a real headless install with the requirement declared exits 0. The only caller missing them was the standalone preview install-ui.sh, whose part list omitted 20-runtime-tools.",
+      "verification": "With resource-limited-testing declaring bash unconditionally, test-install-ui exits 0 with empty stderr; before the fix the same state exited 1 with 'runtime_requirement_met: command not found' from 35-ui-model.sh:278 and four repeats of 'runtime_requirement_label: command not found' from 36-ui-render.sh:174. Mutation: removing 20-runtime-tools from the part list in install-ui.sh reproduces those lines.",
       "found_by": "declaring bash for resource-limited-testing, which previously required nothing on Linux",
       "notes": "Related: B50 — the reason this took a while to read is that test-install-ui exits 1 while printing 30 PASS and no failure line. B49 is the missing function, B50 the silent reporting; fixing either leaves the other open.",
       "created_at": "2026-08-27T09:25:39Z",
-      "updated_at": "2026-08-27T09:25:54Z"
+      "updated_at": "2026-08-27T09:36:11Z"
     },
     {
       "id": "B14",
@@ -1043,7 +1043,7 @@
     {
       "id": "B50",
       "title": "test-install-ui exits non-zero on stderr while reporting 30 PASS and no failure",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -1057,9 +1057,9 @@
       "fix": null,
       "verification": null,
       "found_by": "the same experiment that found B49",
-      "notes": "Related: B49 — the defect whose diagnosis this obscured.",
+      "notes": "Related: B49 — the defect whose diagnosis this obscured. My reading error, not a defect. The test does name its failure: note_fail prints the assertion text, and the exit is driven by t_failures. I grepped the output for 'FAIL' and 'expected', and the message that fired — 'the default selection must skip a skill whose hard requirement is missing' — contains neither, so I concluded nothing was reported. Verified by re-running with stdout and stderr separated.",
       "created_at": "2026-08-27T09:25:54Z",
-      "updated_at": "2026-08-27T09:25:54Z"
+      "updated_at": "2026-08-27T09:36:12Z"
     },
     {
       "id": "B25",

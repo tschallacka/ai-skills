@@ -30,6 +30,17 @@
 # The verify column holds a command rather than a tool name so a tool that exists
 # but is the wrong build can grow a functional probe here without a code change.
 kind	tool	condition	group	probe	text
+# bash is the interpreter every shipped script is written for, not a tool a
+# script probes. It is declared so an install on a machine without it says so
+# up front rather than failing per script. CODE-STYLE.md sets 3.2 as the floor,
+# so the verify only asks whether bash exists at all.
+verify	bash	*:*	1	-	command -v bash
+hint	bash	Darwin:*	1	-	  bash ships with macOS (3.2 at /bin/bash); nothing to install
+hint	bash	Linux:*	1	apt-get	  sudo apt-get install -y bash
+hint	bash	Linux:*	1	dnf	  sudo dnf install -y bash
+hint	bash	Linux:*	1	pacman	  sudo pacman -S --noconfirm bash
+hint	bash	MINGW*|MSYS*|CYGWIN*:*	1	-	  install Git for Windows (https://git-scm.com/download/win); its Git Bash provides bash
+hint	bash	*:*	1	-	  install bash from your package manager, or Git for Windows on Windows
 verify	jq	*:*	1	-	command -v jq
 verify	memlimit	*:*	1	-	command -v memlimit
 verify	openssl	*:*	1	-	command -v openssl

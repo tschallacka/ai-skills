@@ -29,7 +29,11 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Every part is required; a missing one is a broken checkout, so no [ -f ] guard.
-for iui_part in 05-config 30-render 35-ui-model 36-ui-render 37-ui-input; do
+# 20-runtime-tools defines runtime_requirement_met and runtime_requirement_label,
+# which 35-ui-model and 36-ui-render call for any skill that has a requirement on
+# the running platform. Omitting it worked only while every previewed skill
+# happened to require nothing here (B49).
+for iui_part in 05-config 20-runtime-tools 30-render 35-ui-model 36-ui-render 37-ui-input; do
     # shellcheck source=/dev/null
     . "$script_dir/installer/src/$iui_part.sh"
 done

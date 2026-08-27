@@ -365,11 +365,13 @@ runtime_requirements() {
             case "$platform" in *:*) printf '%s\n' jq ;; esac
             ;;
         chat)
+            case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in *:*) printf '%s\n' @server-runtimes ;; esac
             ;;
         git-worktrees)
             ;;
         planning)
+            case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in *:*) printf '%s\n' jq ;; esac
             case "$platform" in *:*) printf '%s\n' openssl ;; esac
             case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
@@ -379,6 +381,7 @@ runtime_requirements() {
         project-specificies)
             ;;
         resource-limited-testing)
+            case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
             ;;
         todo)
@@ -392,10 +395,13 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        chat:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
     esac
@@ -406,10 +412,13 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a jq call, and a register that cannot be read is worse than none' ;; esac ;;
+        chat:bash) case "$platform" in *:*) printf '%s\n' 'the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler' ;; esac ;;
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working' ;; esac ;;
+        planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
+        resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a jq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
     esac
@@ -426,6 +435,7 @@ runtime_requirement_members() {
 
 runtime_tool_verify() {
     case "$1" in
+        bash) command -v bash >/dev/null 2>&1 ;;
         jq) command -v jq >/dev/null 2>&1 ;;
         memlimit) command -v memlimit >/dev/null 2>&1 ;;
         openssl) command -v openssl >/dev/null 2>&1 ;;
@@ -441,6 +451,28 @@ runtime_tool_install_hint() {
     local tool="$1" platform
     platform="$(uname -s):$(uname -m)"
     case "$tool" in
+        bash)
+            case "$platform" in
+                Darwin:*)
+                    printf '%s\n' '  bash ships with macOS (3.2 at /bin/bash); nothing to install'
+                    ;;
+                Linux:*)
+                    if command -v apt-get >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apt-get install -y bash'
+                    elif command -v dnf >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo dnf install -y bash'
+                    elif command -v pacman >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo pacman -S --noconfirm bash'
+                    fi
+                    ;;
+                MINGW*|MSYS*|CYGWIN*:*)
+                    printf '%s\n' '  install Git for Windows (https://git-scm.com/download/win); its Git Bash provides bash'
+                    ;;
+                *:*)
+                    printf '%s\n' '  install bash from your package manager, or Git for Windows on Windows'
+                    ;;
+            esac
+            ;;
         python3)
             case "$platform" in
                 Darwin:*)

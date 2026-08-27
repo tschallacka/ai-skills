@@ -6,7 +6,7 @@
     {
       "id": "T49",
       "title": "Declare bash as a hard requirement for the skills that ship scripts, once B49 is fixed",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "Attempted in 628dcbb and reverted in cd21339 because it reddened three CI legs. The declaration itself is right: planning ships 226 .sh files, chat 7, resource-limited-testing 1, and without bash none of them run. Two blockers, both now recorded. (1) B49: giving resource-limited-testing its first unconditional requirement makes the UI call runtime_requirement_met/label where they are not defined, and test-install-ui exits 1 on the resulting stderr. (2) test-limited-run-contract pins the exact requirement set per platform — 'Intel macOS requires nothing' and 'arm64 requires exactly memlimit' — so a bash row breaks both assertions and those expectations must be updated deliberately, not patched away. The tools.tsv rows from the reverted commit are worth keeping verbatim, including the MINGW/MSYS/CYGWIN hint pointing at Git for Windows, and note that build.sh rejects an apostrophe in a why line because it generates single-quoted shell strings. Worth deciding first whether the declaration is actionable at all: install.sh is itself bash, so a machine without bash cannot run the installer, which makes the requirement unfalsifiable on that path and useful mainly for the npm distribution and as documentation.",
@@ -16,9 +16,9 @@
         "installer/tools.tsv",
         "planning/tests/test-limited-run-contract.sh"
       ],
-      "note": null,
+      "note": "Landed after B49 was fixed. The pinned expectations in test-limited-run-contract were updated deliberately rather than patched away: they now assert 'Intel requires bash alone' and 'arm64 requires bash and memlimit', which keeps the arch-conditional difference — the actual point of those assertions — while admitting the unconditional row. Mutation-checked both ways: removing the bash row makes the test exit 1, restoring it exits 0. The question of whether the declaration is actionable stands answered as 'partly': install.sh is bash so it cannot fail there, but the npm distribution and the Git for Windows hint make it worth stating.",
       "created_at": "2026-08-27T09:26:09Z",
-      "updated_at": "2026-08-27T09:26:09Z"
+      "updated_at": "2026-08-27T09:36:22Z"
     },
     {
       "id": "T1e",
