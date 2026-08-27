@@ -798,6 +798,29 @@
       "updated_at": "2026-08-27T22:25:50Z"
     },
     {
+      "id": "B68",
+      "title": "moving a work unit between goals silently deletes every edge and coverage link naming it",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "There is no move operation, so a move is remove-work-unit.sh --confirm-cascade followed by add-work-unit.sh. Do that for three units and diff work-unit-inventory.md before and after.",
+      "observed": "In plan-overview-rebuild, moving W103, W107 and W112 from goal 16 to goal 17 dropped two dependency edges (W108 lost W107, leaving W74,W109; W106 lost W103 and W112, leaving W104,W105) and three coverage links (one row went from W112,W75,W103,W107 to W75 alone; another from W103,W104,W105,W106 to W104,W105,W106; a third from W107,W108,W109,W76 to W108,W109,W76). Every Notes column still names the dropped units by id, so the row reads 'W112 installs the pinned toolchain in CI' while listing only W75. Cell padding is lost too: the rewritten cells read |W75| rather than | W75 |. An adversarial reviewer found it by diffing the inventory, not by reading the plan.",
+      "expected": "A unit that moves between goals keeps its dependency edges and its coverage links, because nothing about its identity or its relationships changed — only which goal owns it.",
+      "mechanism": "remove-work-unit.sh prunes the removed id from every other row's Depends-on column and from every coverage row's ID list, which is correct for a genuine removal. add-work-unit.sh restores only the row itself, so the pruning is one-way. Since update-work-unit.sh has no --goal or --step flag, remove-and-re-add is the only available move, and it inherits the destructive half of a removal with no restoring half.",
+      "surfaces": [
+        "planning/scripts/remove-work-unit.sh",
+        "planning/scripts/update-work-unit.sh",
+        "planning/scripts/plan-mutate.sh"
+      ],
+      "fix": "9372f5a: update-work-unit --goal/--step is a real move — row cells, step file + testing twin with rewritten Ownership, both goals' trackers (statuses carried) and rosters relocate in one atomic edit; dependency edges and coverage links untouched by construction; refuses mixing with field edits and same-goal no-ops. Latent plan_rewrite_owned_work_units order-assumption fixed the same commit (order-agnostic Testing section handling)",
+      "verification": "fixture move W22 between goals: W17's W09,W10,W22 edge intact, coverage count identical, files relocated, ownership + tracker rows correct, validate-plan passes before and after; second layout proven via cascade remove; focused batteries + FL/dup ratchets green; full suite background-verified in its own worktree",
+      "found_by": "cycle-4 adversarial reviewer, from git diff of work-unit-inventory.md",
+      "notes": null,
+      "created_at": "2026-08-27T22:24:21Z",
+      "updated_at": "2026-08-27T22:39:53Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1468,29 +1491,6 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
-    },
-    {
-      "id": "B68",
-      "title": "moving a work unit between goals silently deletes every edge and coverage link naming it",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "There is no move operation, so a move is remove-work-unit.sh --confirm-cascade followed by add-work-unit.sh. Do that for three units and diff work-unit-inventory.md before and after.",
-      "observed": "In plan-overview-rebuild, moving W103, W107 and W112 from goal 16 to goal 17 dropped two dependency edges (W108 lost W107, leaving W74,W109; W106 lost W103 and W112, leaving W104,W105) and three coverage links (one row went from W112,W75,W103,W107 to W75 alone; another from W103,W104,W105,W106 to W104,W105,W106; a third from W107,W108,W109,W76 to W108,W109,W76). Every Notes column still names the dropped units by id, so the row reads 'W112 installs the pinned toolchain in CI' while listing only W75. Cell padding is lost too: the rewritten cells read |W75| rather than | W75 |. An adversarial reviewer found it by diffing the inventory, not by reading the plan.",
-      "expected": "A unit that moves between goals keeps its dependency edges and its coverage links, because nothing about its identity or its relationships changed — only which goal owns it.",
-      "mechanism": "remove-work-unit.sh prunes the removed id from every other row's Depends-on column and from every coverage row's ID list, which is correct for a genuine removal. add-work-unit.sh restores only the row itself, so the pruning is one-way. Since update-work-unit.sh has no --goal or --step flag, remove-and-re-add is the only available move, and it inherits the destructive half of a removal with no restoring half.",
-      "surfaces": [
-        "planning/scripts/remove-work-unit.sh",
-        "planning/scripts/update-work-unit.sh",
-        "planning/scripts/plan-mutate.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "cycle-4 adversarial reviewer, from git diff of work-unit-inventory.md",
-      "notes": null,
-      "created_at": "2026-08-27T22:24:21Z",
-      "updated_at": "2026-08-27T22:24:21Z"
     }
   ]
 }
