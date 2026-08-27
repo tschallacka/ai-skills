@@ -116,6 +116,22 @@
       "updated_at": "2026-08-27T22:38:42Z"
     },
     {
+      "id": "T59",
+      "title": "remove-work-unit.sh should name every edge and coverage id it prunes",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T54",
+      "detail": "The other half of B68, which fixed the move but not the removal. update-work-unit.sh --goal/--step is now a real move that keeps edges and coverage links by construction, so the common case is safe. But remove-work-unit.sh --confirm-cascade still prunes the removed id from every other row's Depends-on column and from every coverage row's ID list without saying which ones it touched. That pruning is correct for a genuine removal — the links really are gone — and it is exactly what made the loss invisible when the removal was half of a hand-rolled move: nothing in the output named W103, W107 or W112 as having been stripped from W106's and W108's dependencies and from three coverage rows, and the Notes columns went on naming them, so the rows read 'W112 installs the pinned toolchain in CI' while listing only W75. Anyone who reaches for remove-and-re-add out of habit rather than the new flags gets the old silent loss. One line per pruned edge and per pruned coverage id, on the way out, closes it: a caller doing a genuine removal sees what it cost, and a caller doing a move sees exactly what to restore. Cheap, and it needs no new state.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/remove-work-unit.sh",
+        "planning/scripts/plan-reconcile-lib.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T22:45:25Z",
+      "updated_at": "2026-08-27T22:45:25Z"
+    },
+    {
       "id": "T58",
       "title": "New plans carry an explicit assumptions section, and a postmortem template exists",
       "status": "open",
