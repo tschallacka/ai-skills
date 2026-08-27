@@ -18,9 +18,18 @@
 
 # Keys come from fd 3 (open on /dev/tty, so prompts survive `curl … | bash`) and
 # escapes go to stdout. A bare ESC blocks for one more byte; `q` is the quit key.
+# The continuation bytes of an escape sequence, with a timeout, because a bare
+# Escape has none. Without it `read` blocked forever waiting for a second byte
+# that a lone Escape never sends: the picker hung in raw mode on the alternate
+# screen with the cursor hidden, so the terminal came back unusable and the only
+# way out was to kill the shell.
+#
+# One second rather than the ~100ms a terminal usually allows: bash 3.2, the
+# floor, refuses a fractional `read -t` outright. An arrow key's bytes arrive at
+# once and pay nothing; only a lone Escape waits, and it waits once.
 iui_read_byte() {
     IUI_BYTE=''
-    IFS= read -r -n 1 -u 3 IUI_BYTE || return 1
+    IFS= read -r -n 1 -t 1 -u 3 IUI_BYTE || return 1
     [ -n "$IUI_BYTE" ] || IUI_BYTE=$'\n'
     return 0
 }
@@ -154,9 +163,37 @@ iui_term_leave() {
     IUI_TERM_ACTIVE=0
     # Every enable from iui_term_enter, disabled in reverse order.
     printf '\033[?1006l\033[?1000l\033[?25h\033[?1049l'
+    # The drain and the restore are one block on purpose. Split, the drain could
+    # leave the terminal non-canonical with `min 0 time 0` while the restore was
+    # skipped because no state had been saved -- the shell then came back with an
+    # unusable tty, which is worse than the stray mouse bytes being drained.
     if [ -n "$IUI_STTY_SAVED" ] && [ "${IUI_NO_STTY:-0}" -ne 1 ]; then
+        iui_drain_input
         stty "$IUI_STTY_SAVED" <&3 2>/dev/null || true
     fi
+}
+
+# Discard input the terminal queued but nobody read -- typically an SGR mouse
+# report, which the shell then prints as `[<0;79;20M` at its next prompt.
+# Disabling mouse mode does not help: those bytes are already in the tty queue.
+#
+# Every read here carries a timeout, and that is not belt-and-braces. The first
+# version used `stty min 0 time 0` and then an untimed `read -n 256`, reasoning
+# that non-canonical mode makes read(2) return immediately. When the stty did not
+# take effect the read blocked for 256 bytes that never came -- after the restore
+# sequences had already been emitted, so the terminal was left in raw mode with
+# no prompt and no way out but killing the shell. A cosmetic tidy-up must never
+# be able to do that.
+#
+# PORTABILITY(read-timeout-floor): the timeout is a whole second because bash 3.2
+# refuses a fractional one. One second on exit is acceptable; the loop is gone so
+# it is paid at most once.
+iui_drain_input() {
+    local discard
+    [ -n "$IUI_STTY_SAVED" ] || return 0
+    stty min 0 time 0 <&3 2>/dev/null || return 0
+    IFS= read -r -t 1 -n 256 discard <&3 2>/dev/null || true
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,17 +262,34 @@ iui_handle_mouse() {
     iui_toggle "$index"
 }
 
+# Movement follows focus. Previously Up/Down always moved the skill cursor, so
+# tabbing to the detail pane highlighted it and then scrolled the wrong thing --
+# the detail text below the fold could not be reached at all.
+iui_move() {
+    local delta="$1" count="${#IUI_SKILL_NAMES[@]}"
+    if [ "$IUI_FOCUS" = "info" ]; then
+        IUI_INFO_SCROLL=$((IUI_INFO_SCROLL + delta))
+        return 0
+    fi
+    IUI_CURSOR=$((IUI_CURSOR + delta))
+    # A new skill has its own detail of its own length, so the old offset would
+    # leave the pane scrolled into blank rows.
+    IUI_INFO_SCROLL=0
+    [ "$count" -ge 0 ] || return 0
+}
+
 iui_handle_key() {
     local count="${#IUI_SKILL_NAMES[@]}" i
     case "$1" in
-        UP|k) IUI_CURSOR=$((IUI_CURSOR - 1)) ;;
-        DOWN|j) IUI_CURSOR=$((IUI_CURSOR + 1)) ;;
-        PGUP) IUI_CURSOR=$((IUI_CURSOR - IUI_BODY_ROWS)) ;;
-        PGDN) IUI_CURSOR=$((IUI_CURSOR + IUI_BODY_ROWS)) ;;
-        HOME) IUI_CURSOR=0 ;;
-        END) IUI_CURSOR=$((count - 1)) ;;
+        UP|k) iui_move -1 ;;
+        DOWN|j) iui_move 1 ;;
+        PGUP) iui_move -"$IUI_BODY_ROWS" ;;
+        PGDN) iui_move "$IUI_BODY_ROWS" ;;
+        HOME) if [ "$IUI_FOCUS" = "info" ]; then IUI_INFO_SCROLL=0; else IUI_CURSOR=0; IUI_INFO_SCROLL=0; fi ;;
+        END) if [ "$IUI_FOCUS" = "info" ]; then IUI_INFO_SCROLL="$IUI_INFO_MAX_SCROLL"; else IUI_CURSOR=$((count - 1)); IUI_INFO_SCROLL=0; fi ;;
         ENTER|SPACE) iui_toggle "$IUI_CURSOR" ;;
-        $'\t') if [ "$IUI_FOCUS" = "list" ]; then IUI_FOCUS=info; else IUI_FOCUS=list; fi ;;
+        $'\t') if [ "$IUI_FOCUS" = "list" ]; then IUI_FOCUS=info; else IUI_FOCUS=list; fi
+              IUI_INFO_SCROLL=0 ;;
         SHIFTTAB) if [ "$IUI_FOCUS" = "info" ]; then IUI_FOCUS=list; else IUI_FOCUS=info; fi ;;
         a) for ((i = 0; i < count; i++)); do
                IUI_SKILL_SEL[$i]=0
@@ -272,7 +326,15 @@ iui_run() {
         iui_read_key
         if [ "$IUI_KEY" = "TICK" ]; then
             iui_advance_eye
-            iui_redraw_eyes
+            iui_advance_hints
+            # A hint page turn changes rows the eye redraw does not touch, so it
+            # asks for a full frame instead of leaving half the band stale.
+            if [ "$IUI_HINT_DIRTY" -eq 1 ]; then
+                IUI_HINT_DIRTY=0
+                need_full=1
+            else
+                iui_redraw_eyes
+            fi
             continue
         fi
         iui_handle_key "$IUI_KEY"
@@ -301,11 +363,17 @@ iui_selected_names() {
 iui_installed_marker() {
     local skill="$1" root marker
     IUI_MARKER=''
+    IUI_MARKER_PACKAGE=''
     for root in ${TARGET_SELECTION:+"$TARGET_SELECTION"} "${TARGET_PATHS[@]}"; do
         marker="$root/$skill/.version"
         [ -f "$marker" ] || continue
         IUI_MARKER="$(awk '/^source_version=/ {
             sub(/^source_version=/, "")
+            print
+            exit
+        }' "$marker")"
+        IUI_MARKER_PACKAGE="$(awk '/^package_version=/ {
+            sub(/^package_version=/, "")
             print
             exit
         }' "$marker")"
@@ -321,7 +389,9 @@ iui_load_installer_skills() {
     local i
     IUI_SKILL_NAMES=("${SKILL_NAMES[@]}")
     IUI_SKILL_DESCS=("${SKILL_DESCRIPTIONS[@]}")
+    IUI_SKILL_DETAILS=("${SKILL_DETAILS[@]}")
     IUI_SKILL_INSTALLED=(); IUI_SKILL_HAVE=(); IUI_SKILL_WANT=(); IUI_SKILL_SEL=()
+    IUI_SKILL_HAVE_PKG=()
     for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
         iui_installed_marker "${IUI_SKILL_NAMES[$i]}"
         if [ -n "$IUI_MARKER" ]; then
@@ -330,6 +400,7 @@ iui_load_installer_skills() {
             IUI_SKILL_INSTALLED+=(no)
         fi
         IUI_SKILL_HAVE+=("$IUI_MARKER")
+        IUI_SKILL_HAVE_PKG+=("$IUI_MARKER_PACKAGE")
         IUI_SKILL_WANT+=("$SOURCE_VERSION")
         IUI_SKILL_SEL+=(0)
     done

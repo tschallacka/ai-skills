@@ -86,6 +86,55 @@ SKILL_DESCRIPTIONS=(
     'A nested queue of work in one JSON file, read with jq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
+    'Separate checkouts so parallel work and long verifications cannot collide.'
+)
+
+# The detail pane's body: a summary sentence, then what it actually does. Kept
+# here rather than read from each skill's SKILL.md because select_skills() runs
+# before download_source() -- under `curl … | bash` no skill directory exists
+# yet, so anything the picker shows must be baked in at build time.
+#
+# Index-parallel with SKILL_NAMES, which test-installer-skill-selection.sh
+# enforces: git-worktrees was added to SKILL_NAMES without a description, and
+# moving the cursor onto it killed the picker with an unbound variable.
+SKILL_DETAILS=(
+    'Turns an initiative into a directory of files another agent can resume without reconstructing context.
+Goals own one outcome each and hold 2-10 work units; a work unit is one file and one symbol, so every change is separately reviewable.
+Steps carry instructions, acceptance criteria and the handoff the next unit relies on.
+Validation refuses a plan whose units nothing verifies, and a fresh adversarial reviewer must approve it before execution.
+Where a plan touches a UI, browser stories with real interaction are mandatory rather than optional.'
+    'Records what a project does differently, so the next session does not rediscover it.
+Load the matching note when a convention, environment quirk or tooling deviation could change how you implement, debug or test.
+Newly confirmed deviations are written back, which is what keeps the note worth reading.
+Not for documentation that follows the ecosystem defaults -- only the surprises.'
+    'Runs a command under a CPU and memory cap, so a heavy test, build or analyzer cannot take the machine with it.
+Wraps the command rather than the tool: no configuration inside the thing being limited.
+On Apple Silicon macOS it uses memlimit, the one documented exception to this repository dependency ceiling, because macOS offers no other way to cap memory.
+Without memlimit it says so and still limits CPU through nice and cpulimit, rather than pretending the cap is in force.'
+    'A short recorded back-and-forth that settles what to build before anything is planned or written.
+Use it when a request could branch in materially different directions and the wrong branch is expensive.
+The output is an agreed picture, not a plan: it feeds the planning skill rather than replacing it.
+Skip it for small or fully specified changes, where the discussion costs more than the work.'
+    'Reviews an implementation after the fact, from three angles that disagree on purpose.
+The implementer analyses its own work, an independent agent proposes alternatives, and a critical agent attacks both.
+It ends in concrete proposed fixes rather than a verdict.
+Not a substitute for the pre-implementation adversarial review, which asks a different question: this one sees the code that exists.'
+    'A nested queue of work in one JSON file, read and written with jq.
+For work that outlives the conversation and must survive a restart, a handoff or a compaction.
+Every task carries its status and its detail, so a cold reader knows what was intended and what is left.
+Not for the steps of a task already in progress, and not for defects -- those belong in the bug register.'
+    'Defects recorded with the reproduction, the observed output, the mechanism once established, and the verification that closes them.
+One defect per entry: if stating it needs the word "and", it is two entries that reference each other.
+An entry closes only with a fix and a verification naming the mutation that fails without it, so a closure cannot be a claim.
+Written only through its helpers -- an out-of-enum value makes the register unsound and every later write refuses.'
+    'An IRC-basis message bus for agents: channels they register, join and leave, with deltas since an id and live tails.
+Two agents in different sessions or on different machines exchange messages without either knowing about the other.
+The log is the source of truth and the server is optional: local mode appends under a lock and needs no runtime at all.
+Reading takes a cursor rather than the whole channel, so a long conversation does not flood a context window.'
+    'Gives a task its own checkout, so several agents can work at once without seeing each other half-finished edits.
+Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
+Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
+And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -1204,6 +1253,10 @@ show_splash() {
 # PORTABILITY(assoc-array): the skill table and the dependency cache both want a
 # map; index-parallel arrays plus a linear lookup are the bash 3.2 shape of one.
 IUI_SKILL_NAMES=()
+IUI_SKILL_DETAILS=()
+IUI_INFO_SCROLL=0
+IUI_INFO_ROWS=0
+IUI_INFO_MAX_SCROLL=0
 IUI_SKILL_DESCS=()
 IUI_SKILL_INSTALLED=()
 IUI_SKILL_HAVE=()
@@ -1249,6 +1302,20 @@ iui_seg() {
         redstone) rgb='217;58;43' ;;
         diamond) rgb='74;237;217' ;;
         obsidian) rgb='21;12;28' ;;
+        # Body text. Named explicitly rather than left to the fallback below: at
+        # 127;127;127 it measured 4.2:1 against a #1e1e1e terminal, which reads as
+        # dark grey and is under the 4.5:1 needed for body text. 205;207;212 is
+        # 11:1 on the same ground, with a faint cool bias so it belongs to the
+        # palette instead of being pure grey.
+        stone) rgb='205;207;212' ;;
+        # The focused pane's label. Reverse video rather than another hue: the
+        # only previous cue was [BRACKETS] versus spaces, which is invisible at
+        # a glance and vanishes entirely in the no-colour mode.
+        focus) rgb='252;238;75'; attr='1;7;' ;;
+        # Secondary text that should recede without becoming unreadable.
+        slate) rgb='150;154;163' ;;
+        # Deliberately left as mid grey: a role nobody named should look wrong
+        # rather than quietly inheriting body-text contrast.
         *) rgb='127;127;127' ;;
     esac
     if [ "$COLOR_MODE" = "none" ]; then
@@ -1275,11 +1342,16 @@ iui_set_glyphs() {
     if [ "$IUI_GLYPHS" = "ascii" ]; then
         IUI_G_TOP='='; IUI_G_BOT='='; IUI_G_V='|'
         IUI_G_TL='+'; IUI_G_TR='+'; IUI_G_BL='+'; IUI_G_BR='+'
+        IUI_G_TJ='+'; IUI_G_BJ='+'
         IUI_G_RULE='-'; IUI_G_FILL='#'
         return
     fi
     IUI_G_TOP='▀'; IUI_G_BOT='▄'; IUI_G_V='▌'
     IUI_G_TL='▛'; IUI_G_TR='▜'; IUI_G_BL='▙'; IUI_G_BR='▟'
+    # Where the pane divider meets the top and bottom borders. Without these the
+    # border drew a plain horizontal at the divider column, so the vertical line
+    # below it looked disconnected from the frame.
+    IUI_G_TJ='▛'; IUI_G_BJ='▙'
     IUI_G_RULE='─'; IUI_G_FILL='█'
 }
 
@@ -1311,6 +1383,90 @@ iui_repeat() {
 # PORTABILITY(bytes-vs-characters): the pad/truncate arithmetic is in display
 # cells and the text it measures is ASCII, so ${#t} is both the byte and the
 # cell count. Never hand this a glyph — glyphs are placed by count, not measured.
+# A 5x7 pixel font, as data rather than a case statement: bash 3.2 has no
+# associative arrays, and forty case arms would breach the function-length cap.
+# One entry per character, `CHAR:row|row|...` with seven rows of five bits.
+#
+# The splash already drew mmh-mhh in this shape at two columns per pixel
+# (pixel_message). The hints reuse the shape at one column per pixel, which is
+# the "tad bit smaller" that keeps a whole hint on one line.
+IUI_PIXEL_FONT=(
+    '_:00000|00000|00000|00000|00000|00000|00000'
+    '-:00000|00000|00000|11111|00000|00000|00000'
+    '.:00000|00000|00000|00000|00000|00100|00100'
+    '/:00001|00010|00010|00100|01000|01000|10000'
+    '0:01110|10001|10011|10101|11001|10001|01110'
+    '1:00100|01100|00100|00100|00100|00100|01110'
+    '2:01110|10001|00001|00010|00100|01000|11111'
+    '3:11110|00001|00001|01110|00001|00001|11110'
+    '4:00010|00110|01010|10010|11111|00010|00010'
+    '5:11111|10000|11110|00001|00001|10001|01110'
+    '6:00110|01000|10000|11110|10001|10001|01110'
+    '7:11111|00001|00010|00100|01000|01000|01000'
+    '8:01110|10001|10001|01110|10001|10001|01110'
+    '9:01110|10001|10001|01111|00001|00010|01100'
+    '::00000|00100|00000|00000|00000|00100|00000'
+    'A:01110|10001|10001|11111|10001|10001|10001'
+    'B:11110|10001|10001|11110|10001|10001|11110'
+    'C:01110|10001|10000|10000|10000|10001|01110'
+    'D:11110|10001|10001|10001|10001|10001|11110'
+    'E:11111|10000|10000|11110|10000|10000|11111'
+    'F:11111|10000|10000|11110|10000|10000|10000'
+    'G:01110|10001|10000|10111|10001|10001|01110'
+    'H:10001|10001|10001|11111|10001|10001|10001'
+    'I:11111|00100|00100|00100|00100|00100|11111'
+    'J:00111|00010|00010|00010|00010|10010|01100'
+    'K:10001|10010|10100|11000|10100|10010|10001'
+    'L:10000|10000|10000|10000|10000|10000|11111'
+    'M:10001|11011|10101|10101|10001|10001|10001'
+    'N:10001|11001|10101|10011|10001|10001|10001'
+    'O:01110|10001|10001|10001|10001|10001|01110'
+    'P:11110|10001|10001|11110|10000|10000|10000'
+    'Q:01110|10001|10001|10001|10101|10011|01111'
+    'R:11110|10001|10001|11110|10100|10010|10001'
+    'S:01111|10000|10000|01110|00001|00001|11110'
+    'T:11111|00100|00100|00100|00100|00100|00100'
+    'U:10001|10001|10001|10001|10001|10001|01110'
+    'V:10001|10001|10001|10001|10001|01010|00100'
+    'W:10001|10001|10001|10101|10101|11011|10001'
+    'X:10001|01010|00100|00100|00100|01010|10001'
+    'Y:10001|10001|01010|00100|00100|00100|00100'
+    'Z:11111|00001|00010|00100|01000|10000|11111'
+)
+
+# One pixel row of one character. Unknown characters render blank rather than
+# failing: a hint is decoration, and a missing glyph must not take the frame down.
+iui_pixel_rows() {
+    local want="$1" entry
+    [ "$want" != ' ' ] || want='_'
+    IUI_PIXEL_ROWS=''
+    for entry in "${IUI_PIXEL_FONT[@]}"; do
+        if [ "${entry%%:*}" = "$want" ]; then
+            IUI_PIXEL_ROWS="${entry#*:}"
+            return 0
+        fi
+    done
+    IUI_PIXEL_ROWS='00000|00000|00000|00000|00000|00000|00000'
+}
+
+# Row `row` (0-6) of `text` rendered in the pixel font, padded to `cols`.
+iui_big_line() {
+    local text="$1" row="$2" cols="$3" i char out='' bits
+    local -a rows
+    for ((i = 0; i < ${#text}; i++)); do
+        char="${text:$i:1}"
+        iui_pixel_rows "$char"
+        IFS='|' read -r -a rows <<< "$IUI_PIXEL_ROWS"
+        bits="${rows[$row]}"
+        bits="${bits//1/$IUI_G_FILL}"
+        bits="${bits// /_}"
+        bits="${bits//0/ }"
+        out="$out$bits "
+    done
+    iui_pad "$out" "$cols"
+    IUI_BIG_LINE="$IUI_PAD"
+}
+
 iui_pad() {
     local t="$1" w="$2"
     [ "$w" -ge 0 ] || w=0
@@ -1509,6 +1665,34 @@ iui_skill_state() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# The published release, for the "latest release" row
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Asked once per run and cached: the picker redraws on every keypress, so a
+# per-render fetch would be one HTTP request per arrow key.
+#
+# raw.githubusercontent rather than the GitHub API: raw needs no token and has no
+# 60-per-hour unauthenticated rate limit, and the repository is public. The cost
+# is a CDN cache of a few minutes, so a version pushed seconds ago can still read
+# as the old one -- which is why this row says "latest release" and not "HEAD".
+IUI_RELEASE_URL="https://raw.githubusercontent.com/tschallacka/ai-skills/master/package.json"
+IUI_RELEASE_VERSION=''
+IUI_RELEASE_CHECKED=0
+iui_release_version() {
+    [ "$IUI_RELEASE_CHECKED" -eq 0 ] || return 0
+    IUI_RELEASE_CHECKED=1
+    # IUI_NO_NETWORK=1 is how a test pins the offline path.
+    [ "${IUI_NO_NETWORK:-0}" -eq 0 ] || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    # A picker that hangs on a dead network is worse than one that cannot answer,
+    # so the timeout is short and a failure leaves the answer empty rather than
+    # reporting a version nobody fetched.
+    IUI_RELEASE_VERSION="$(curl -fsSL --max-time 3 "$IUI_RELEASE_URL" 2>/dev/null \
+        | awk -F'"' '/"version"/ { print $4; exit }')"
+    return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Layout arithmetic
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1558,43 +1742,61 @@ iui_list_width() {
 # The sprite costs scale*32 columns and scale*16 rows, and is dropped rather than
 # shrunk when it does not fit: with no colour it would paint blank, and in the
 # narrow layout or under IUI_HEAD_MIN_TEXT_ROWS it would starve the info text.
-IUI_HEAD_MIN_TEXT_ROWS=12
+# Where the sprite goes depends on how much room there is, and there are three
+# answers rather than two:
+#
+#   right-top    a tall, wide terminal. The sprite sits at the top of the detail
+#                pane and the empty space beside it -- which was blank before --
+#                carries the hints.
+#   left-bottom  an ordinary terminal. The sprite sits at the bottom of the list
+#                pane, in the rows the list does not use, alone and with nothing
+#                animating beside it. The detail pane keeps its full height.
+#   none         no colour, a narrow layout, or not enough rows to spare.
+#
+# The deciding measurement is rows: the detail text must keep a real floor after
+# the sprite has taken its band, or the hints would be bought with the content a
+# reader came for.
+IUI_HEAD_MIN_LIST_ROWS=6
+IUI_HEAD_DETAIL_FLOOR=30
+# The hints are drawn in the pixel font at six columns per character, so the
+# space beside the sprite has to be wide enough for the longest of them. 34 was
+# the figure for plain text and would have truncated every hint into nonsense.
+IUI_HINT_MIN_COLS=108
 iui_head_geometry() {
     IUI_HEAD_ON=0
     IUI_HEAD_SCALE=0
     IUI_HEAD_H=0
+    IUI_HINT_ROWS=0
+    IUI_HEAD_PLACE=none
+    IUI_LIST_ROWS="$IUI_BODY_ROWS"
     [ "$IUI_NARROW" -eq 0 ] || return 0
     [ -n "$COLOR_MODE" ] || detect_color_mode
     [ "$COLOR_MODE" != "none" ] || return 0
-    # An accent, never the subject. Three caps, all of which must hold: the
-    # sprite takes at most a third of the body rows and two fifths of the detail
-    # pane, and the text keeps IUI_HEAD_MIN_TEXT_ROWS whatever is left over.
-    # Without the first two the sprite grew to fill the pane -- measured at
-    # 200x60 it took 48 of 60 rows and left the skill's own information 8.
-    # Scale 1 is the floor: the sprite is 32x16 and cannot shrink, so the only
-    # question at that size is whether the text still gets its floor. The
-    # proportional caps govern GROWTH beyond scale 1 -- without them the sprite
-    # expanded to fill the pane, measured at 200x60 as 48 of 60 rows with 8 left
-    # for the skill's own information. Capping scale 1 proportionally instead
-    # deleted the mascot outright on a 100x40 terminal, which is not an accent,
-    # it is an absence.
-    local s
-    for s in 1 2 3; do
-        [ $((IUI_BODY_ROWS - s * 16)) -ge "$IUI_HEAD_MIN_TEXT_ROWS" ] || break
-        [ $((s * 32)) -le "$IUI_RIGHT_W" ] || break
-        if [ "$s" -gt 1 ]; then
-            [ $((s * 32)) -le $((IUI_RIGHT_W * 2 / 5)) ] || break
-            [ $((s * 16)) -le $((IUI_BODY_ROWS / 3)) ] || break
-        fi
-        IUI_HEAD_SCALE="$s"
-    done
-    [ "$IUI_HEAD_SCALE" -ge 1 ] || return 0
+    # One size, always: 32x16. The sprite cannot shrink below it, and growing it
+    # bought nothing while costing the detail pane its floor -- at 200x60 a
+    # doubled sprite pushed the whole layout back into the small-screen case.
+    IUI_HEAD_SCALE=1
+    IUI_HEAD_H=16
+    [ "$IUI_LEFT_W" -ge 32 ] || [ "$IUI_RIGHT_W" -ge $((32 + IUI_HINT_MIN_COLS)) ] || return 0
     IUI_HEAD_ON=1
-    IUI_HEAD_H=$((IUI_HEAD_SCALE * 16))
+    if [ $((IUI_BODY_ROWS - IUI_HEAD_H)) -ge "$IUI_HEAD_DETAIL_FLOOR" ] \
+        && [ $((IUI_RIGHT_W - IUI_HEAD_SCALE * 32)) -ge "$IUI_HINT_MIN_COLS" ]; then
+        IUI_HEAD_PLACE=right-top
+        IUI_HINT_ROWS="$IUI_HEAD_H"
+        return 0
+    fi
+    if [ $((IUI_BODY_ROWS - IUI_HEAD_H - 1)) -ge "$IUI_HEAD_MIN_LIST_ROWS" ]; then
+        IUI_HEAD_PLACE=left-bottom
+        IUI_LIST_ROWS=$((IUI_BODY_ROWS - IUI_HEAD_H - 1))
+        return 0
+    fi
+    IUI_HEAD_ON=0
+    IUI_HEAD_H=0
+    return 0
 }
 
 iui_clamp_scroll() {
-    local count="${#IUI_SKILL_NAMES[@]}" rows="$IUI_BODY_ROWS"
+    local count="${#IUI_SKILL_NAMES[@]}" rows="$IUI_LIST_ROWS"
     [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0
     [ "$IUI_CURSOR" -lt "$count" ] || IUI_CURSOR=$((count - 1))
     [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0
@@ -1608,6 +1810,18 @@ iui_clamp_scroll() {
         IUI_SCROLL=$((count - rows))
     fi
     [ "$IUI_SCROLL" -ge 0 ] || IUI_SCROLL=0
+}
+
+# The info pane scrolls independently of the list. Without this the pane was
+# fixed: tabbing to it highlighted it, but Up/Down still moved the skill cursor,
+# so anything past the visible rows -- the whole detail block -- was unreachable.
+iui_clamp_info_scroll() {
+    IUI_INFO_ROWS=$((IUI_BODY_ROWS - IUI_HEAD_H))
+    [ "$IUI_INFO_ROWS" -ge 1 ] || IUI_INFO_ROWS=1
+    IUI_INFO_MAX_SCROLL=$(( ${#IUI_INFO_TEXT[@]} - IUI_INFO_ROWS ))
+    [ "$IUI_INFO_MAX_SCROLL" -ge 0 ] || IUI_INFO_MAX_SCROLL=0
+    [ "$IUI_INFO_SCROLL" -le "$IUI_INFO_MAX_SCROLL" ] || IUI_INFO_SCROLL="$IUI_INFO_MAX_SCROLL"
+    [ "$IUI_INFO_SCROLL" -ge 0 ] || IUI_INFO_SCROLL=0
 }
 
 iui_measure() {
@@ -1638,16 +1852,30 @@ iui_measure() {
 # The animated head
 # ─────────────────────────────────────────────────────────────────────────────
 
-IUI_EYE_CYCLE='front right front left'
+# One entry per tick, and a tick is one second: iui_read_first_byte's timeout is
+# `read -t 1`, and bash 3.2 -- the macOS floor -- rejects a fractional timeout
+# outright, so one second is the shortest frame available. That is why the shake
+# at the end is two held beats rather than a flutter.
+#
+# The dwell at the front is deliberate: the sprite sat still for one second and
+# then moved, which reads as a glitch rather than as the start of something. Six
+# still frames give the movement a beginning.
+IUI_EYE_FRAMES=(
+    front front front front front front
+    right right
+    front
+    left left
+    front
+    left right front
+)
+IUI_EYE_INDEX=0
+# Advances by index, not by searching for the current state. The search version
+# matched the FIRST entry equal to IUI_EYE, and `front` appears more than once,
+# so the sequence collapsed to front/right/front/right and `left` was never
+# reached at all -- measured, not suspected.
 iui_advance_eye() {
-    local first='' seen=0 state next=''
-    for state in $IUI_EYE_CYCLE; do
-        [ -n "$first" ] || first="$state"
-        if [ "$seen" -eq 1 ]; then next="$state"; break; fi
-        [ "$state" = "$IUI_EYE" ] && seen=1
-    done
-    [ -n "$next" ] || next="$first"
-    IUI_EYE="$next"
+    IUI_EYE_INDEX=$(( (IUI_EYE_INDEX + 1) % ${#IUI_EYE_FRAMES[@]} ))
+    IUI_EYE="${IUI_EYE_FRAMES[$IUI_EYE_INDEX]}"
 }
 
 # One sprite row as a string of exactly $3 display cells: 16 pixels of
@@ -1684,11 +1912,18 @@ iui_head_line() {
 iui_redraw_eyes() {
     [ "$IUI_HEAD_ON" -eq 1 ] || return 0
     [ "$IUI_POSITION" -eq 1 ] || return 0
-    local scale="$IUI_HEAD_SCALE" col=$((IUI_LEFT_W + 3)) art_y r row
+    local scale="$IUI_HEAD_SCALE" col art_y r row top
+    if [ "$IUI_HEAD_PLACE" = right-top ]; then
+        col=$((IUI_LEFT_W + 3))
+        top=3
+    else
+        col=2
+        top=$((3 + IUI_LIST_ROWS + 1))
+    fi
     for art_y in 8 9; do
         iui_head_line "$art_y" "$scale" $((scale * 32)) "$IUI_EYE"
         for ((r = 0; r < scale; r++)); do
-            row=$((3 + art_y * scale + r))
+            row=$((top + art_y * scale + r))
             printf '\033[%d;%dH%s' "$row" "$col" "$IUI_HEAD_LINE"
         done
     done
@@ -1716,7 +1951,11 @@ iui_header_seg() {
     if [ "$focused" -eq 1 ]; then text="[$label]"; else text=" $label "; fi
     [ "${#text}" -le $((width - 2)) ] || text="${text:0:$((width - 2))}"
     iui_repeat "$IUI_G_TOP" 1
-    iui_seg gold "$text"
+    if [ "$focused" -eq 1 ]; then
+        iui_seg focus "$text"
+    else
+        iui_seg dirt "$text"
+    fi
     head="$IUI_REPEAT$IUI_SEG"
     iui_repeat "$IUI_G_TOP" $((width - 1 - ${#text}))
     iui_seg dirt "$IUI_REPEAT"
@@ -1753,16 +1992,23 @@ iui_list_cell() {
 # Builds the info text into IUI_INFO_TEXT (padded cells), IUI_INFO_ROLE and
 # IUI_INFO_TAG, index-parallel. IUI_INFO_TAG marks the two action lines so a
 # mouse click can be mapped back to an action after the frame is drawn.
-iui_info_lines() {
-    local width="$1" index="$IUI_CURSOR" tool line state up
-    IUI_INFO_TEXT=(); IUI_INFO_ROLE=(); IUI_INFO_TAG=()
+# The pane's head: name, one-line summary, and the rule above them.
+iui_info_head() {
+    local width="$1" index="$2" line
     iui_repeat "$IUI_G_RULE" "$width"
     IUI_INFO_TEXT+=("$IUI_REPEAT"); IUI_INFO_ROLE+=(dirt); IUI_INFO_TAG+=(rule)
     iui_info_push gold "${IUI_SKILL_NAMES[$index]}" name "$width"
     iui_wrap "${IUI_SKILL_DESCS[$index]}" "$width"
     for line in "${IUI_WRAP_LINES[@]}"; do
-        iui_info_push stone "$line" body "$width"
+        iui_info_push gold "$line" body "$width"
     done
+    iui_info_push stone '' body "$width"
+}
+
+# Dependencies and status: the rows a reader decides on, so they come before the
+# prose and stay on screen when it scrolls off.
+iui_info_status() {
+    local width="$1" index="$2" line state up
     iui_info_push diamond 'DEPENDENCIES' body "$width"
     iui_info_requirements "$index" "$width"
     iui_info_push diamond 'STATUS' body "$width"
@@ -1772,10 +2018,40 @@ iui_info_lines() {
     printf -v line '  %-14s %s' 'installed' "${IUI_SKILL_INSTALLED[$index]}"
     iui_info_push stone "$line" body "$width"
     up="$(iui_uptodate_text "$index")"
-    printf -v line '  %-14s %s' 'up to date' "$up"
-    state=redstone
-    [ "$up" = "yes" ] && state=diamond
+    printf -v line '  %-14s %s' 'latest release' "$up"
+    # Red is for something wrong. An earlier version painted this row redstone
+    # whenever the answer was not literally "yes", so a skill that is simply not
+    # installed yet read as a warning. An available update is an invitation.
+    case "$up" in
+        yes) state=diamond ;;
+        'no ('*) state=gold ;;
+        *) state=stone ;;
+    esac
     iui_info_push "$state" "$line" body "$width"
+}
+
+# The README-style body: one source paragraph per line, each wrapped. A skill
+# with no detail recorded degrades to its summary rather than failing, which is
+# what an index-parallel array does when someone extends only one of them.
+iui_info_detail() {
+    local width="$1" index="$2" paragraph line
+    [ "$index" -lt "${#IUI_SKILL_DETAILS[@]}" ] || return 0
+    iui_info_push stone '' body "$width"
+    while IFS= read -r paragraph; do
+        [ -n "$paragraph" ] || continue
+        iui_wrap "$paragraph" "$width"
+        for line in "${IUI_WRAP_LINES[@]}"; do
+            iui_info_push stone "$line" body "$width"
+        done
+    done <<< "${IUI_SKILL_DETAILS[$index]}"
+}
+
+iui_info_lines() {
+    local width="$1" index="$IUI_CURSOR"
+    IUI_INFO_TEXT=(); IUI_INFO_ROLE=(); IUI_INFO_TAG=()
+    iui_info_head "$width" "$index"
+    iui_info_status "$width" "$index"
+    iui_info_detail "$width" "$index"
     iui_info_actions "$width"
     iui_info_message "$width"
 }
@@ -1824,16 +2100,28 @@ iui_install_verdict() {
 
 # The wanted version is SOURCE_VERSION, which download_source() only sets after
 # the selection is made, so during the picker it is legitimately empty.
+# Answers "is a newer release published", by comparing the release this copy was
+# installed from against master's package.json. The earlier version compared the
+# installed marker against the local checkout's own commit, which under
+# `curl … | bash` is not known yet -- hence its "unknown until the source is
+# fetched", the commonest answer and the least useful one.
 iui_uptodate_text() {
-    local index="$1"
+    local index="$1" have
     if [ "${IUI_SKILL_INSTALLED[$index]}" != "yes" ]; then
         printf 'not installed'
-    elif [ -z "${IUI_SKILL_WANT[$index]}" ]; then
-        printf 'unknown until the source is fetched'
-    elif [ "${IUI_SKILL_HAVE[$index]}" = "${IUI_SKILL_WANT[$index]}" ]; then
+        return
+    fi
+    iui_release_version
+    have="${IUI_SKILL_HAVE_PKG[$index]:-}"
+    if [ -z "$IUI_RELEASE_VERSION" ]; then
+        # Offline, no curl, or a fetch that failed. Never guess a version.
+        printf 'unknown (could not reach the release)'
+    elif [ -z "$have" ]; then
+        printf 'unknown (installed copy records no release)'
+    elif [ "$have" = "$IUI_RELEASE_VERSION" ]; then
         printf 'yes'
     else
-        printf 'no (%s -> %s)' "${IUI_SKILL_HAVE[$index]}" "${IUI_SKILL_WANT[$index]}"
+        printf 'no (%s -> %s)' "$have" "$IUI_RELEASE_VERSION"
     fi
 }
 
@@ -1864,13 +2152,43 @@ iui_info_message() {
     done
 }
 
+# What a reader wants from the title is the state of the machine, not the state
+# of the checkboxes: how many skills are installed, and how many of those have a
+# newer release. "9/9 selected" said only that everything installable was ticked,
+# which is the default and so carries no information.
 iui_title_bar() {
-    local text
-    printf -v text ' %s  %d/%d selected ' 'TSCHALLACKA SKILL SHOP' \
-        "$(iui_selected_count)" "${#IUI_SKILL_NAMES[@]}"
+    local text total="${#IUI_SKILL_NAMES[@]}"
+    iui_count_states
+    if [ "$IUI_COUNT_UPGRADE" -gt 0 ]; then
+        printf -v text ' %s  %d/%d installed  %d upgradeable  %d selected ' \
+            'TSCHALLACKA SKILL SHOP' "$IUI_COUNT_INSTALLED" "$total" \
+            "$IUI_COUNT_UPGRADE" "$(iui_selected_count)"
+    else
+        printf -v text ' %s  %d/%d installed  %d selected ' \
+            'TSCHALLACKA SKILL SHOP' "$IUI_COUNT_INSTALLED" "$total" \
+            "$(iui_selected_count)"
+    fi
     iui_pad "$text" "$IUI_COLS"
     iui_seg gold "$IUI_PAD"
     iui_out_line 1 "$IUI_SEG"
+}
+
+# Installed, and how many of those are behind the published release. Upgradeable
+# is only ever counted when the release is known: offline it stays 0 and the
+# title says nothing about upgrades rather than implying everything is current.
+iui_count_states() {
+    local i
+    IUI_COUNT_INSTALLED=0
+    IUI_COUNT_UPGRADE=0
+    iui_release_version
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        [ "${IUI_SKILL_INSTALLED[$i]}" = yes ] || continue
+        IUI_COUNT_INSTALLED=$((IUI_COUNT_INSTALLED + 1))
+        [ -n "$IUI_RELEASE_VERSION" ] || continue
+        [ -n "${IUI_SKILL_HAVE_PKG[$i]:-}" ] || continue
+        [ "${IUI_SKILL_HAVE_PKG[$i]}" != "$IUI_RELEASE_VERSION" ] || continue
+        IUI_COUNT_UPGRADE=$((IUI_COUNT_UPGRADE + 1))
+    done
 }
 
 iui_hint_bar() {
@@ -1913,30 +2231,129 @@ iui_top_border() {
     iui_header_seg DETAILS "$IUI_RIGHT_W" "$focus_info"
     right="$IUI_HEADER_SEG"
     iui_seg dirt "$IUI_G_TL"; tl="$IUI_SEG"
-    iui_seg dirt "$IUI_G_TOP"; td="$IUI_SEG"
+    iui_seg dirt "$IUI_G_TJ"; td="$IUI_SEG"
     iui_seg dirt "$IUI_G_TR"; tr="$IUI_SEG"
     iui_out_line 2 "$tl$left$td$right$tr"
 }
 
+# The divider gets a junction here too, so the frame closes on the same column
+# the body rows divide at rather than running a plain line under it.
 iui_bottom_border() {
-    local bl bm br
-    iui_repeat "$IUI_G_BOT" $((IUI_COLS - 3))
+    local bl bj br left right
     iui_seg dirt "$IUI_G_BL"; bl="$IUI_SEG"
-    iui_seg dirt "$IUI_REPEAT$IUI_G_BOT"; bm="$IUI_SEG"
+    iui_repeat "$IUI_G_BOT" "$IUI_LEFT_W"
+    iui_seg dirt "$IUI_REPEAT"; left="$IUI_SEG"
+    iui_seg dirt "$IUI_G_BJ"; bj="$IUI_SEG"
+    iui_repeat "$IUI_G_BOT" "$IUI_RIGHT_W"
+    iui_seg dirt "$IUI_REPEAT"; right="$IUI_SEG"
     iui_seg dirt "$IUI_G_BR"; br="$IUI_SEG"
-    iui_out_line $((IUI_ROWS - 1)) "$bl$bm$br"
+    iui_out_line $((IUI_ROWS - 1)) "$bl$left$bj$right$br"
 }
 
 # The right cell is the sprite for its first IUI_HEAD_H rows and info text after
 # that, so the head and the text share one row budget and neither can overflow.
 iui_right_cell() {
     local body="$1" row="$2"
-    if [ "$IUI_HEAD_ON" -eq 1 ] && [ "$body" -lt "$IUI_HEAD_H" ]; then
-        iui_head_line $((body / IUI_HEAD_SCALE)) "$IUI_HEAD_SCALE" "$IUI_RIGHT_W" "$IUI_EYE"
-        IUI_INFO_CELL="$IUI_HEAD_LINE"
+    if [ "$IUI_HEAD_PLACE" = right-top ] && [ "$body" -lt "$IUI_HEAD_H" ]; then
+        iui_head_beside_hint "$body"
         return
     fi
-    iui_info_cell $((body - IUI_HEAD_H)) "$row"
+    local offset=0
+    [ "$IUI_HEAD_PLACE" != right-top ] || offset="$IUI_HEAD_H"
+    iui_info_cell $((body - offset + IUI_INFO_SCROLL)) "$row"
+}
+
+# One band row: the sprite, then the hint that belongs beside it. The space to
+# the right of the sprite was blank before -- on a wide terminal that is most of
+# the pane -- so the hints cost no rows that content was using.
+iui_head_beside_hint() {
+    local body="$1" cols slot glyph_row at text=''
+    iui_head_line $((body / IUI_HEAD_SCALE)) "$IUI_HEAD_SCALE" \
+        $((IUI_HEAD_SCALE * 32)) "$IUI_EYE"
+    cols=$((IUI_RIGHT_W - IUI_HEAD_SCALE * 32))
+    slot=$((body / 8))
+    glyph_row=$((body % 8))
+    if [ "$glyph_row" -lt 7 ]; then
+        at=$(( (IUI_HINT_PAGE * IUI_HINT_PER_PAGE + slot) % ${#IUI_HINTS[@]} ))
+        text="${IUI_HINTS[$at]}"
+        iui_big_line " $text" "$glyph_row" "$cols"
+    else
+        iui_pad '' "$cols"
+        IUI_BIG_LINE="$IUI_PAD"
+    fi
+    iui_seg gold "$IUI_BIG_LINE"
+    IUI_INFO_CELL="$IUI_HEAD_LINE$IUI_SEG"
+}
+
+# Hints for the keys a reader would otherwise have to guess at. Shown only on a
+# tall terminal, beside nothing and above the sprite, so a small screen keeps the
+# sprite alone in its block. Kept to one line each and phrased as actions.
+# Kept inside the pane width on purpose: a hint that truncates with a tilde is
+# worse than no hint. Installing over an existing copy is how an update happens,
+# so the install line says both rather than implying a separate command.
+IUI_HINTS=(
+    'PRESS A: ALL'
+    'PRESS I: INSTALL'
+    'PRESS N: NONE'
+    'PRESS D: FIX DEPS'
+    'TAB: DETAILS'
+    'CLICK: TOGGLE'
+)
+# Two hints fit beside a 16-row sprite at seven pixel rows each plus a gap, so
+# the rest cycle. IUI_HINT_DIRTY tells the event loop that a tick changed more
+# than the eyes and the whole frame has to be repainted.
+IUI_HINT_PER_PAGE=2
+IUI_HINT_PAGE=0
+IUI_HINT_TICKS=0
+IUI_HINT_TICKS_PER_PAGE=4
+IUI_HINT_DIRTY=0
+iui_advance_hints() {
+    [ "$IUI_HINT_ROWS" -gt 0 ] || return 0
+    [ "${#IUI_HINTS[@]}" -gt "$IUI_HINT_PER_PAGE" ] || return 0
+    IUI_HINT_TICKS=$((IUI_HINT_TICKS + 1))
+    [ "$IUI_HINT_TICKS" -ge "$IUI_HINT_TICKS_PER_PAGE" ] || return 0
+    IUI_HINT_TICKS=0
+    IUI_HINT_PAGE=$((IUI_HINT_PAGE + 1))
+    IUI_HINT_DIRTY=1
+}
+iui_hint_cell() {
+    local at="$1" text=''
+    [ "$at" -lt "${#IUI_HINTS[@]}" ] && text=" ${IUI_HINTS[$at]}"
+    iui_pad "$text" "$IUI_LEFT_W"
+    iui_seg slate "$IUI_PAD"
+    IUI_LIST_CELL="$IUI_SEG"
+}
+
+# The left pane, top to bottom: the skill list, a separator, optional hint rows,
+# then the sprite pinned to the bottom in its own block.
+iui_left_cell() {
+    local body="$1" index hint_at
+    if [ "$body" -lt "$IUI_LIST_ROWS" ]; then
+        index=$((IUI_SCROLL + body))
+        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
+            iui_list_cell "$index" "$IUI_LEFT_W"
+        else
+            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        fi
+        return
+    fi
+    if [ "$IUI_HEAD_PLACE" != left-bottom ]; then
+        iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        return
+    fi
+    if [ "$body" -eq "$IUI_LIST_ROWS" ]; then
+        iui_repeat "$IUI_G_RULE" "$IUI_LEFT_W"
+        iui_seg dirt "$IUI_REPEAT"; IUI_LIST_CELL="$IUI_SEG"
+        return
+    fi
+    hint_at=$((body - IUI_LIST_ROWS - 1))
+    if [ "$hint_at" -lt "$IUI_HINT_ROWS" ]; then
+        iui_hint_cell "$hint_at"
+        return
+    fi
+    iui_head_line $(( (body - IUI_LIST_ROWS - 1 - IUI_HINT_ROWS) / IUI_HEAD_SCALE )) \
+        "$IUI_HEAD_SCALE" "$IUI_LEFT_W" "$IUI_EYE"
+    IUI_LIST_CELL="$IUI_HEAD_LINE"
 }
 
 iui_render_wide() {
@@ -1944,14 +2361,10 @@ iui_render_wide() {
     iui_top_border
     iui_seg dirt "$IUI_G_V"; v="$IUI_SEG"
     iui_info_lines "$IUI_RIGHT_W"
+    iui_clamp_info_scroll
     for ((body = 0; body < IUI_BODY_ROWS; body++)); do
         row=$((body + 3))
-        index=$((IUI_SCROLL + body))
-        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
-            iui_list_cell "$index" "$IUI_LEFT_W"
-        else
-            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
-        fi
+        iui_left_cell "$body"
         iui_right_cell "$body" "$row"
         iui_out_line "$row" "$v$IUI_LIST_CELL$v$IUI_INFO_CELL$v"
     done
@@ -2026,9 +2439,18 @@ iui_render_narrow() {
 
 # Keys come from fd 3 (open on /dev/tty, so prompts survive `curl … | bash`) and
 # escapes go to stdout. A bare ESC blocks for one more byte; `q` is the quit key.
+# The continuation bytes of an escape sequence, with a timeout, because a bare
+# Escape has none. Without it `read` blocked forever waiting for a second byte
+# that a lone Escape never sends: the picker hung in raw mode on the alternate
+# screen with the cursor hidden, so the terminal came back unusable and the only
+# way out was to kill the shell.
+#
+# One second rather than the ~100ms a terminal usually allows: bash 3.2, the
+# floor, refuses a fractional `read -t` outright. An arrow key's bytes arrive at
+# once and pay nothing; only a lone Escape waits, and it waits once.
 iui_read_byte() {
     IUI_BYTE=''
-    IFS= read -r -n 1 -u 3 IUI_BYTE || return 1
+    IFS= read -r -n 1 -t 1 -u 3 IUI_BYTE || return 1
     [ -n "$IUI_BYTE" ] || IUI_BYTE=$'\n'
     return 0
 }
@@ -2162,9 +2584,37 @@ iui_term_leave() {
     IUI_TERM_ACTIVE=0
     # Every enable from iui_term_enter, disabled in reverse order.
     printf '\033[?1006l\033[?1000l\033[?25h\033[?1049l'
+    # The drain and the restore are one block on purpose. Split, the drain could
+    # leave the terminal non-canonical with `min 0 time 0` while the restore was
+    # skipped because no state had been saved -- the shell then came back with an
+    # unusable tty, which is worse than the stray mouse bytes being drained.
     if [ -n "$IUI_STTY_SAVED" ] && [ "${IUI_NO_STTY:-0}" -ne 1 ]; then
+        iui_drain_input
         stty "$IUI_STTY_SAVED" <&3 2>/dev/null || true
     fi
+}
+
+# Discard input the terminal queued but nobody read -- typically an SGR mouse
+# report, which the shell then prints as `[<0;79;20M` at its next prompt.
+# Disabling mouse mode does not help: those bytes are already in the tty queue.
+#
+# Every read here carries a timeout, and that is not belt-and-braces. The first
+# version used `stty min 0 time 0` and then an untimed `read -n 256`, reasoning
+# that non-canonical mode makes read(2) return immediately. When the stty did not
+# take effect the read blocked for 256 bytes that never came -- after the restore
+# sequences had already been emitted, so the terminal was left in raw mode with
+# no prompt and no way out but killing the shell. A cosmetic tidy-up must never
+# be able to do that.
+#
+# PORTABILITY(read-timeout-floor): the timeout is a whole second because bash 3.2
+# refuses a fractional one. One second on exit is acceptable; the loop is gone so
+# it is paid at most once.
+iui_drain_input() {
+    local discard
+    [ -n "$IUI_STTY_SAVED" ] || return 0
+    stty min 0 time 0 <&3 2>/dev/null || return 0
+    IFS= read -r -t 1 -n 256 discard <&3 2>/dev/null || true
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2233,17 +2683,34 @@ iui_handle_mouse() {
     iui_toggle "$index"
 }
 
+# Movement follows focus. Previously Up/Down always moved the skill cursor, so
+# tabbing to the detail pane highlighted it and then scrolled the wrong thing --
+# the detail text below the fold could not be reached at all.
+iui_move() {
+    local delta="$1" count="${#IUI_SKILL_NAMES[@]}"
+    if [ "$IUI_FOCUS" = "info" ]; then
+        IUI_INFO_SCROLL=$((IUI_INFO_SCROLL + delta))
+        return 0
+    fi
+    IUI_CURSOR=$((IUI_CURSOR + delta))
+    # A new skill has its own detail of its own length, so the old offset would
+    # leave the pane scrolled into blank rows.
+    IUI_INFO_SCROLL=0
+    [ "$count" -ge 0 ] || return 0
+}
+
 iui_handle_key() {
     local count="${#IUI_SKILL_NAMES[@]}" i
     case "$1" in
-        UP|k) IUI_CURSOR=$((IUI_CURSOR - 1)) ;;
-        DOWN|j) IUI_CURSOR=$((IUI_CURSOR + 1)) ;;
-        PGUP) IUI_CURSOR=$((IUI_CURSOR - IUI_BODY_ROWS)) ;;
-        PGDN) IUI_CURSOR=$((IUI_CURSOR + IUI_BODY_ROWS)) ;;
-        HOME) IUI_CURSOR=0 ;;
-        END) IUI_CURSOR=$((count - 1)) ;;
+        UP|k) iui_move -1 ;;
+        DOWN|j) iui_move 1 ;;
+        PGUP) iui_move -"$IUI_BODY_ROWS" ;;
+        PGDN) iui_move "$IUI_BODY_ROWS" ;;
+        HOME) if [ "$IUI_FOCUS" = "info" ]; then IUI_INFO_SCROLL=0; else IUI_CURSOR=0; IUI_INFO_SCROLL=0; fi ;;
+        END) if [ "$IUI_FOCUS" = "info" ]; then IUI_INFO_SCROLL="$IUI_INFO_MAX_SCROLL"; else IUI_CURSOR=$((count - 1)); IUI_INFO_SCROLL=0; fi ;;
         ENTER|SPACE) iui_toggle "$IUI_CURSOR" ;;
-        $'\t') if [ "$IUI_FOCUS" = "list" ]; then IUI_FOCUS=info; else IUI_FOCUS=list; fi ;;
+        $'\t') if [ "$IUI_FOCUS" = "list" ]; then IUI_FOCUS=info; else IUI_FOCUS=list; fi
+              IUI_INFO_SCROLL=0 ;;
         SHIFTTAB) if [ "$IUI_FOCUS" = "info" ]; then IUI_FOCUS=list; else IUI_FOCUS=info; fi ;;
         a) for ((i = 0; i < count; i++)); do
                IUI_SKILL_SEL[$i]=0
@@ -2280,7 +2747,15 @@ iui_run() {
         iui_read_key
         if [ "$IUI_KEY" = "TICK" ]; then
             iui_advance_eye
-            iui_redraw_eyes
+            iui_advance_hints
+            # A hint page turn changes rows the eye redraw does not touch, so it
+            # asks for a full frame instead of leaving half the band stale.
+            if [ "$IUI_HINT_DIRTY" -eq 1 ]; then
+                IUI_HINT_DIRTY=0
+                need_full=1
+            else
+                iui_redraw_eyes
+            fi
             continue
         fi
         iui_handle_key "$IUI_KEY"
@@ -2309,11 +2784,17 @@ iui_selected_names() {
 iui_installed_marker() {
     local skill="$1" root marker
     IUI_MARKER=''
+    IUI_MARKER_PACKAGE=''
     for root in ${TARGET_SELECTION:+"$TARGET_SELECTION"} "${TARGET_PATHS[@]}"; do
         marker="$root/$skill/.version"
         [ -f "$marker" ] || continue
         IUI_MARKER="$(awk '/^source_version=/ {
             sub(/^source_version=/, "")
+            print
+            exit
+        }' "$marker")"
+        IUI_MARKER_PACKAGE="$(awk '/^package_version=/ {
+            sub(/^package_version=/, "")
             print
             exit
         }' "$marker")"
@@ -2329,7 +2810,9 @@ iui_load_installer_skills() {
     local i
     IUI_SKILL_NAMES=("${SKILL_NAMES[@]}")
     IUI_SKILL_DESCS=("${SKILL_DESCRIPTIONS[@]}")
+    IUI_SKILL_DETAILS=("${SKILL_DETAILS[@]}")
     IUI_SKILL_INSTALLED=(); IUI_SKILL_HAVE=(); IUI_SKILL_WANT=(); IUI_SKILL_SEL=()
+    IUI_SKILL_HAVE_PKG=()
     for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
         iui_installed_marker "${IUI_SKILL_NAMES[$i]}"
         if [ -n "$IUI_MARKER" ]; then
@@ -2338,6 +2821,7 @@ iui_load_installer_skills() {
             IUI_SKILL_INSTALLED+=(no)
         fi
         IUI_SKILL_HAVE+=("$IUI_MARKER")
+        IUI_SKILL_HAVE_PKG+=("$IUI_MARKER_PACKAGE")
         IUI_SKILL_WANT+=("$SOURCE_VERSION")
         IUI_SKILL_SEL+=(0)
     done
@@ -2665,6 +3149,7 @@ scripts/add-goal.sh
 scripts/add-planning-bug.sh
 scripts/add-ui-story.sh
 scripts/add-ui-story-links.sh
+scripts/update-ui-story.sh
 scripts/add-work-unit.sh
 scripts/configure-ui-story-cache.sh
 scripts/create-adversarial-review.sh

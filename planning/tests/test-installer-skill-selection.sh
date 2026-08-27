@@ -74,4 +74,19 @@ rc=0
 "$BASH" "$installer" --skill --target "$work/none3" --yes >/dev/null 2>&1 || rc=$?
 t_assert_eq 'a --skill with no value is refused' "$([ "$rc" -ne 0 ] && printf refused)" 'refused'
 
+# The registry's parallel arrays must stay the same length. git-worktrees was
+# added to SKILL_NAMES with no SKILL_DESCRIPTIONS entry, and moving the picker's
+# cursor onto the last skill died with "IUI_SKILL_DESCS[$index]: unbound
+# variable" under set -u. A registry that can go out of step silently is the
+# defect; the crash was only its first symptom.
+registry_lengths="$(
+    # shellcheck disable=SC1090
+    source "$repo_root/installer/src/05-config.sh"
+    printf '%s %s %s' \
+        "${#SKILL_NAMES[@]}" "${#SKILL_DESCRIPTIONS[@]}" "${#SKILL_DETAILS[@]}"
+)"
+skill_count="${registry_lengths%% *}"
+t_assert_eq 'every skill has a one-line summary' \
+    "$registry_lengths" "$skill_count $skill_count $skill_count"
+
 t_end

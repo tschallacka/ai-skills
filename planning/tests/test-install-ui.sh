@@ -24,6 +24,12 @@
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
+# The release row probes the network. A test must not: the answer would vary with
+# connectivity, and a 3-second timeout per call would be paid on every assertion
+# that renders a frame. Pinned off for the whole file; the release assertions set
+# IUI_RELEASE_VERSION themselves.
+IUI_NO_NETWORK=1
+
 t_begin
 
 export LC_ALL=C
@@ -357,21 +363,291 @@ iui_layout
 COLOR_MODE=truecolor
 iui_layout
 [ "$IUI_HEAD_ON" -eq 1 ] || note_fail 'the sprite must appear when there is colour and room'
-# The sprite is an accent, not the subject: it may take at most a third of the
-# body rows and two fifths of the detail pane, and the text keeps its floor.
-# Measured before this contract existed, it took 48 of 60 rows at 200x60 and
-# left the skill's own information 8 rows, which is the defect being pinned.
-[ "$IUI_HEAD_H" -le $((IUI_BODY_ROWS / 3)) ] \
-    || note_fail "sprite must not exceed a third of the body rows: $IUI_HEAD_H of $IUI_BODY_ROWS"
-[ $((IUI_HEAD_SCALE * 32)) -le $((IUI_RIGHT_W * 2 / 5)) ] \
-    || note_fail "sprite must not exceed two fifths of the detail pane: $((IUI_HEAD_SCALE * 32)) of $IUI_RIGHT_W"
-[ $((IUI_BODY_ROWS - IUI_HEAD_H)) -ge "$IUI_HEAD_MIN_TEXT_ROWS" ] \
-    || note_fail "text left $((IUI_BODY_ROWS - IUI_HEAD_H)) rows, floor is $IUI_HEAD_MIN_TEXT_ROWS"
-IUI_ROWS=24
+# The sprite lives at the bottom of the LEFT pane now, in the space the list does
+# not use, so it costs the detail pane nothing. Before this it sat in the detail
+# pane and grew to fill it: measured at 200x60 it took 48 of 60 rows and left the
+# skill's own information 8.
+[ "$IUI_HEAD_H" -gt 0 ] \
+    || note_fail 'the sprite must have a height when it is on'
+[ $((IUI_HEAD_SCALE * 32)) -le "$IUI_LEFT_W" ] \
+    || note_fail "the sprite must fit the left pane: $((IUI_HEAD_SCALE * 32)) of $IUI_LEFT_W"
+# The two placements have different invariants, so each is checked in its own
+# right rather than by one arithmetic that happens to hold for both.
+case "$IUI_HEAD_PLACE" in
+    left-bottom)
+        [ $((IUI_LIST_ROWS + 1 + IUI_HEAD_H)) -eq "$IUI_BODY_ROWS" ] \
+            || note_fail "left-bottom sections must fill the body: list $IUI_LIST_ROWS + sep 1 + sprite $IUI_HEAD_H against $IUI_BODY_ROWS"
+        [ "$IUI_LIST_ROWS" -ge "$IUI_HEAD_MIN_LIST_ROWS" ] \
+            || note_fail "the list keeps its floor: $IUI_LIST_ROWS against $IUI_HEAD_MIN_LIST_ROWS"
+        ;;
+    right-top)
+        [ "$IUI_LIST_ROWS" -eq "$IUI_BODY_ROWS" ] \
+            || note_fail 'with the sprite in the detail pane the list keeps every row'
+        [ $((IUI_BODY_ROWS - IUI_HEAD_H)) -ge "$IUI_HEAD_DETAIL_FLOOR" ] \
+            || note_fail "the detail text keeps its floor: $((IUI_BODY_ROWS - IUI_HEAD_H)) against $IUI_HEAD_DETAIL_FLOOR"
+        [ $((IUI_RIGHT_W - IUI_HEAD_SCALE * 32)) -ge "$IUI_HINT_MIN_COLS" ] \
+            || note_fail 'the hints must have room beside the sprite'
+        ;;
+    *) note_fail "expected a placement at this size, got '$IUI_HEAD_PLACE'" ;;
+esac
+
+# An ordinary 40-row terminal puts the sprite bottom-left, alone: no hints beside
+# it, and the detail pane keeps every row it had.
+IUI_ROWS=40
+iui_layout
+[ "$IUI_HEAD_PLACE" = left-bottom ] \
+    || note_fail "a 40-row terminal must place the sprite bottom-left; got '$IUI_HEAD_PLACE'"
+# A tall terminal moves it beside the hints, in space that was blank before.
+IUI_ROWS=60
+iui_layout
+[ "$IUI_HEAD_PLACE" = right-top ] \
+    || note_fail "a 60-row terminal must place the sprite beside the hints; got '$IUI_HEAD_PLACE'"
+# Pixel text costs six columns per character, so a hint that fits as plain text
+# can still overflow here. Checked against the space beside the sprite.
+hint_index=0
+while [ "$hint_index" -lt "${#IUI_HINTS[@]}" ]; do
+    [ $(( (${#IUI_HINTS[$hint_index]} + 1) * 6 )) -le $((IUI_RIGHT_W - IUI_HEAD_SCALE * 32)) ] \
+        || note_fail "hint '${IUI_HINTS[$hint_index]}' needs $(( (${#IUI_HINTS[$hint_index]} + 1) * 6 )) columns of pixel text, pane has $((IUI_RIGHT_W - IUI_HEAD_SCALE * 32))"
+    hint_index=$((hint_index + 1))
+done
+IUI_ROWS=20
 iui_layout
 [ "$IUI_HEAD_ON" -eq 0 ] \
-    || note_fail 'the sprite must be dropped when it would starve the info text'
+    || note_fail 'the sprite must be dropped when the list would lose its floor'
 note_pass 'the ASCII/no-colour fallback is clean and drops the sprite'
+
+# ── 6c. The release row, its states and their colours ────────────────────────
+# Red is for something wrong. This row read redstone for every answer that was
+# not literally "yes", so a skill that was simply not installed looked like a
+# fault. And the comparison itself was against the local checkout's commit,
+# unknowable under `curl … | bash`; it is now against the published release.
+IUI_NO_NETWORK=1
+IUI_RELEASE_CHECKED=0
+IUI_RELEASE_VERSION=''
+IUI_SKILL_INSTALLED[0]=yes
+IUI_SKILL_HAVE_PKG[0]=1.4.2
+release_text="$(iui_uptodate_text 0)"
+case "$release_text" in
+    'unknown ('*) ;;
+    *) note_fail "offline must say it could not reach the release, got '$release_text'" ;;
+esac
+[ "$IUI_RELEASE_VERSION" = '' ] \
+    || note_fail 'the offline path must not invent a version'
+
+# Probed once per run, not once per redraw: the picker renders on every keypress.
+IUI_RELEASE_CHECKED=0
+iui_release_version
+first_state="$IUI_RELEASE_CHECKED"
+iui_release_version
+[ "$first_state" = 1 ] && [ "$IUI_RELEASE_CHECKED" = 1 ] \
+    || note_fail 'the release probe must latch after the first call'
+
+# The row must trigger the probe itself. Stubbed rather than fetched: if
+# iui_uptodate_text stops calling it, the version stays empty and every row reads
+# "unknown" forever -- silently, since offline looks identical.
+iui_release_version() { IUI_RELEASE_VERSION=9.9.9; IUI_RELEASE_CHECKED=1; }
+IUI_RELEASE_VERSION=''
+IUI_RELEASE_CHECKED=0
+IUI_SKILL_INSTALLED[0]=yes
+IUI_SKILL_HAVE_PKG[0]=1.0.0
+case "$(iui_uptodate_text 0)" in
+    *'-> 9.9.9'*) ;;
+    *) note_fail "the release row must ask for the version itself, got '$(iui_uptodate_text 0)'" ;;
+esac
+# Replaced with a no-op rather than re-sourced: sourcing 35-ui-model.sh again
+# reinitialises every IUI_ global, so the skill arrays this file set up are wiped
+# and iui_uptodate_text reads unbound values. Every assertion below sets
+# IUI_RELEASE_VERSION itself, so a probe that does nothing is exactly right.
+iui_release_version() { :; }
+
+# The three answers and the role each gets. Each sets every input it depends on:
+# inheriting state from the block above is how this test passed standalone and
+# failed in the suite, reading a version an earlier assertion had left behind.
+IUI_RELEASE_VERSION=1.4.2
+IUI_RELEASE_CHECKED=1
+IUI_SKILL_INSTALLED[0]=yes
+IUI_SKILL_HAVE_PKG[0]=1.4.2
+[ "$(iui_uptodate_text 0)" = 'yes' ] \
+    || note_fail "matching versions must read yes, got '$(iui_uptodate_text 0)'"
+IUI_SKILL_HAVE_PKG[0]=1.4.1
+case "$(iui_uptodate_text 0)" in
+    'no (1.4.1 -> 1.4.2)') ;;
+    *) note_fail "a newer release must name both versions, got '$(iui_uptodate_text 0)'" ;;
+esac
+IUI_SKILL_INSTALLED[0]=no
+[ "$(iui_uptodate_text 0)" = 'not installed' ] \
+    || note_fail "an uninstalled skill must say so, got '$(iui_uptodate_text 0)'"
+
+# Body text must not fall through to the palette default, which measured 4.2:1
+# against a dark terminal and reads as dark grey.
+iui_seg stone x
+case "$IUI_SEG" in
+    *'205;207;212'*) ;;
+    *) note_fail 'stone must be the named high-contrast body colour' ;;
+esac
+
+# The row's colour, not just its words: redstone here reads as a fault.
+release_role_of() {
+    local i
+    iui_info_lines 60
+    for ((i = 0; i < ${#IUI_INFO_TEXT[@]}; i++)); do
+        case "${IUI_INFO_TEXT[$i]}" in
+            *'latest release'*) printf '%s' "${IUI_INFO_ROLE[$i]}"; return ;;
+        esac
+    done
+    printf 'not-found'
+}
+IUI_CURSOR=0
+IUI_SKILL_INSTALLED[0]=no
+[ "$(release_role_of)" != redstone ] \
+    || note_fail 'an uninstalled skill must not paint the release row red'
+IUI_SKILL_INSTALLED[0]=yes
+IUI_SKILL_HAVE_PKG[0]=1.4.1
+IUI_RELEASE_VERSION=1.4.2
+IUI_RELEASE_CHECKED=1
+[ "$(release_role_of)" != redstone ] \
+    || note_fail 'an available update must not paint the release row red'
+note_pass 'the release row compares against the published release and reserves red'
+
+# ── 6b1. Nothing on the exit path may block ──────────────────────────────────
+# Two defects met here and left the terminal unusable: a lone Escape blocked
+# forever waiting for a continuation byte it never gets, and the input drain
+# blocked for 256 bytes that never came -- after the restore sequences had been
+# emitted, so the tty stayed raw with no prompt. Both are bounded now, and both
+# are checked against an fd that never sends a byte and never closes, because an
+# EOF would rescue an unbounded read and hide the defect.
+escape_probe="$scratch/escape-probe.sh"
+cat > "$escape_probe" <<'PROBE'
+set -uo pipefail
+cd "$1"
+for f in installer/src/05-config.sh installer/src/30-render.sh installer/src/35-ui-model.sh \
+         installer/src/36-ui-render.sh installer/src/37-ui-input.sh; do
+    # shellcheck disable=SC1090
+    source "$f" 2>/dev/null || true
+done
+case "$2" in
+    escape)
+        exec 3< <(printf '\033'; sleep 8)
+        iui_read_key
+        printf '%s' "$IUI_KEY"
+        ;;
+    drain)
+        exec 3< <(sleep 8)
+        IUI_STTY_SAVED='pretend-saved'
+        # stty reports success and changes nothing -- exactly the case that hung
+        # a real terminal. Without this the guard returns early on a pipe and the
+        # read is never reached, so the assertion would prove nothing.
+        stty() { return 0; }
+        iui_drain_input
+        printf 'returned'
+        ;;
+esac
+PROBE
+escape_result="$("$BASH" "$escape_probe" "$repo_root" escape 2>/dev/null &
+                 probe_pid=$!
+                 ( sleep 5; kill -9 "$probe_pid" 2>/dev/null ) >/dev/null 2>&1 &
+                 wait "$probe_pid" 2>/dev/null)"
+[ "$escape_result" = ESC ] \
+    || note_fail "a lone Escape must resolve to ESC without blocking; got '$escape_result'"
+drain_result="$("$BASH" "$escape_probe" "$repo_root" drain 2>/dev/null &
+                probe_pid=$!
+                ( sleep 5; kill -9 "$probe_pid" 2>/dev/null ) >/dev/null 2>&1 &
+                wait "$probe_pid" 2>/dev/null)"
+[ "$drain_result" = returned ] \
+    || note_fail "the input drain must return without blocking; got '$drain_result'"
+note_pass 'a lone Escape and the input drain are both bounded'
+
+# ── 6b2. Every eye state in the cycle is reachable ────────────────────────────
+# iui_advance_eye searched the cycle for the current state and took the next one.
+# `front` appears more than once, so the search always matched the first and the
+# sequence collapsed to front/right/front/right: `left` was never reached, on any
+# terminal, ever. Index-based advance fixes it; this asserts the property rather
+# than the implementation.
+eye_seen_left=no
+eye_seen_right=no
+eye_seen_front=no
+IUI_EYE_INDEX=0
+for eye_tick in $(seq 1 "${#IUI_EYE_FRAMES[@]}"); do
+    iui_advance_eye
+    case "$IUI_EYE" in
+        left) eye_seen_left=yes ;;
+        right) eye_seen_right=yes ;;
+        front) eye_seen_front=yes ;;
+        *) note_fail "unknown eye state in the cycle: $IUI_EYE" ;;
+    esac
+done
+[ "$eye_seen_left" = yes ] || note_fail 'the eye cycle never looks left'
+[ "$eye_seen_right" = yes ] || note_fail 'the eye cycle never looks right'
+[ "$eye_seen_front" = yes ] || note_fail 'the eye cycle never returns to centre'
+
+# The dwell is what makes the movement read as deliberate: without several still
+# frames first, the sprite twitches one second after the frame is drawn.
+eye_lead=0
+for eye_tick in 0 1 2 3 4 5 6 7; do
+    [ "${IUI_EYE_FRAMES[$eye_tick]}" = front ] || break
+    eye_lead=$((eye_lead + 1))
+done
+[ "$eye_lead" -ge 3 ] \
+    || note_fail "the cycle must open with a still dwell; got $eye_lead frame(s)"
+IUI_EYE_INDEX=0
+IUI_EYE=front
+note_pass 'the eye cycle reaches every state and opens with a dwell'
+
+# ── 6d. The detail pane scrolls, and the frame lines up ───────────────────────
+# Tabbing to the detail pane highlighted it but Up/Down still moved the skill
+# cursor, so every line of the detail block below the fold was unreachable.
+IUI_COLS=110
+IUI_ROWS=24
+# The pane must have more content than rows, and this test supplies it rather
+# than relying on the demo fixture carrying a long enough detail block.
+IUI_SKILL_DETAILS[0]='One paragraph of detail that occupies a line.
+A second paragraph, so the block is taller than a couple of rows.
+A third, because the pane is twenty rows and the status section takes some.
+A fourth to be sure there is something below the fold to scroll to.
+A fifth, since the whole point is that it was unreachable before.
+A sixth paragraph, past any plausible pane height for this fixture.
+A seventh, so the assertion below cannot pass by accident.
+An eighth paragraph closing the block.'
+iui_layout
+iui_info_lines "$IUI_RIGHT_W"
+iui_clamp_info_scroll
+[ "$IUI_INFO_MAX_SCROLL" -gt 0 ] \
+    || note_fail "the fixture must have more detail than rows to test scrolling"
+IUI_FOCUS=list
+IUI_INFO_SCROLL=0
+cursor_before="$IUI_CURSOR"
+iui_handle_key DOWN
+[ "$IUI_CURSOR" -ne "$cursor_before" ] \
+    || note_fail 'with the list focused, Down must move the skill cursor'
+[ "$IUI_INFO_SCROLL" -eq 0 ] \
+    || note_fail 'moving the skill cursor must reset the detail scroll'
+IUI_FOCUS=info
+cursor_before="$IUI_CURSOR"
+iui_handle_key DOWN
+iui_handle_key DOWN
+[ "$IUI_INFO_SCROLL" -eq 2 ] \
+    || note_fail "with the detail focused, Down must scroll it; got $IUI_INFO_SCROLL"
+[ "$IUI_CURSOR" -eq "$cursor_before" ] \
+    || note_fail 'scrolling the detail pane must not move the skill cursor'
+iui_handle_key END
+[ "$IUI_INFO_SCROLL" -eq "$IUI_INFO_MAX_SCROLL" ] \
+    || note_fail 'End must reach the bottom of the detail pane'
+iui_clamp_info_scroll
+[ "$IUI_INFO_SCROLL" -le "$IUI_INFO_MAX_SCROLL" ] \
+    || note_fail 'the detail scroll must never pass its own end'
+IUI_FOCUS=list
+IUI_INFO_SCROLL=0
+IUI_CURSOR=0
+
+# The focused pane must be marked by something other than brackets, which are
+# invisible at a glance and vanish in the no-colour mode.
+iui_header_seg SKILLS 20 1
+focused_seg="$IUI_HEADER_SEG"
+iui_header_seg SKILLS 20 0
+[ "$focused_seg" != "$IUI_HEADER_SEG" ] \
+    || note_fail 'a focused pane header must render differently from an unfocused one'
+
+note_pass 'the detail pane scrolls under focus and the focused pane is marked'
 
 # ── 7a. Wrapping breaks words, and marks the break when it cannot ────────────
 # A token wider than the pane used to be cut with no mark, so a reader could not
@@ -433,8 +709,16 @@ note_pass 'the list is sized to its longest skill name, so nothing truncates'
 # a test crash, and its line-format long options are not portable.
 changed="$(awk 'NR==FNR { a[FNR]=$0; next } a[FNR] != $0 { printf "%d ", FNR }' \
     "$scratch/front" "$scratch/left")"
-[ "$changed" = "11 12 " ] \
-    || note_fail "the eye states differ on lines [$changed], want 11 and 12"
+# Derived, not hardcoded: the sprite moved from the top of the detail pane to the
+# bottom of the list pane, and a literal row number silently encodes wherever it
+# happened to sit. What matters is that exactly the two eye rows change.
+IUI_COLS=100
+IUI_ROWS=40
+iui_layout
+eye_top=$((3 + IUI_LIST_ROWS + 1 + IUI_HINT_ROWS))
+want_eyes="$((eye_top + 8 * IUI_HEAD_SCALE)) $((eye_top + 9 * IUI_HEAD_SCALE)) "
+[ "$changed" = "$want_eyes" ] \
+    || note_fail "the eye states differ on lines [$changed], want [$want_eyes]"
 note_pass 'an eye-state change touches only the two sprite eye rows'
 
 # ── 9. Terminal restoration on abort ─────────────────────────────────────────

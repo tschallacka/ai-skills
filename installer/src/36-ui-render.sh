@@ -15,16 +15,30 @@
 # The animated head
 # ─────────────────────────────────────────────────────────────────────────────
 
-IUI_EYE_CYCLE='front right front left'
+# One entry per tick, and a tick is one second: iui_read_first_byte's timeout is
+# `read -t 1`, and bash 3.2 -- the macOS floor -- rejects a fractional timeout
+# outright, so one second is the shortest frame available. That is why the shake
+# at the end is two held beats rather than a flutter.
+#
+# The dwell at the front is deliberate: the sprite sat still for one second and
+# then moved, which reads as a glitch rather than as the start of something. Six
+# still frames give the movement a beginning.
+IUI_EYE_FRAMES=(
+    front front front front front front
+    right right
+    front
+    left left
+    front
+    left right front
+)
+IUI_EYE_INDEX=0
+# Advances by index, not by searching for the current state. The search version
+# matched the FIRST entry equal to IUI_EYE, and `front` appears more than once,
+# so the sequence collapsed to front/right/front/right and `left` was never
+# reached at all -- measured, not suspected.
 iui_advance_eye() {
-    local first='' seen=0 state next=''
-    for state in $IUI_EYE_CYCLE; do
-        [ -n "$first" ] || first="$state"
-        if [ "$seen" -eq 1 ]; then next="$state"; break; fi
-        [ "$state" = "$IUI_EYE" ] && seen=1
-    done
-    [ -n "$next" ] || next="$first"
-    IUI_EYE="$next"
+    IUI_EYE_INDEX=$(( (IUI_EYE_INDEX + 1) % ${#IUI_EYE_FRAMES[@]} ))
+    IUI_EYE="${IUI_EYE_FRAMES[$IUI_EYE_INDEX]}"
 }
 
 # One sprite row as a string of exactly $3 display cells: 16 pixels of
@@ -61,11 +75,18 @@ iui_head_line() {
 iui_redraw_eyes() {
     [ "$IUI_HEAD_ON" -eq 1 ] || return 0
     [ "$IUI_POSITION" -eq 1 ] || return 0
-    local scale="$IUI_HEAD_SCALE" col=$((IUI_LEFT_W + 3)) art_y r row
+    local scale="$IUI_HEAD_SCALE" col art_y r row top
+    if [ "$IUI_HEAD_PLACE" = right-top ]; then
+        col=$((IUI_LEFT_W + 3))
+        top=3
+    else
+        col=2
+        top=$((3 + IUI_LIST_ROWS + 1))
+    fi
     for art_y in 8 9; do
         iui_head_line "$art_y" "$scale" $((scale * 32)) "$IUI_EYE"
         for ((r = 0; r < scale; r++)); do
-            row=$((3 + art_y * scale + r))
+            row=$((top + art_y * scale + r))
             printf '\033[%d;%dH%s' "$row" "$col" "$IUI_HEAD_LINE"
         done
     done
@@ -93,7 +114,11 @@ iui_header_seg() {
     if [ "$focused" -eq 1 ]; then text="[$label]"; else text=" $label "; fi
     [ "${#text}" -le $((width - 2)) ] || text="${text:0:$((width - 2))}"
     iui_repeat "$IUI_G_TOP" 1
-    iui_seg gold "$text"
+    if [ "$focused" -eq 1 ]; then
+        iui_seg focus "$text"
+    else
+        iui_seg dirt "$text"
+    fi
     head="$IUI_REPEAT$IUI_SEG"
     iui_repeat "$IUI_G_TOP" $((width - 1 - ${#text}))
     iui_seg dirt "$IUI_REPEAT"
@@ -130,16 +155,23 @@ iui_list_cell() {
 # Builds the info text into IUI_INFO_TEXT (padded cells), IUI_INFO_ROLE and
 # IUI_INFO_TAG, index-parallel. IUI_INFO_TAG marks the two action lines so a
 # mouse click can be mapped back to an action after the frame is drawn.
-iui_info_lines() {
-    local width="$1" index="$IUI_CURSOR" tool line state up
-    IUI_INFO_TEXT=(); IUI_INFO_ROLE=(); IUI_INFO_TAG=()
+# The pane's head: name, one-line summary, and the rule above them.
+iui_info_head() {
+    local width="$1" index="$2" line
     iui_repeat "$IUI_G_RULE" "$width"
     IUI_INFO_TEXT+=("$IUI_REPEAT"); IUI_INFO_ROLE+=(dirt); IUI_INFO_TAG+=(rule)
     iui_info_push gold "${IUI_SKILL_NAMES[$index]}" name "$width"
     iui_wrap "${IUI_SKILL_DESCS[$index]}" "$width"
     for line in "${IUI_WRAP_LINES[@]}"; do
-        iui_info_push stone "$line" body "$width"
+        iui_info_push gold "$line" body "$width"
     done
+    iui_info_push stone '' body "$width"
+}
+
+# Dependencies and status: the rows a reader decides on, so they come before the
+# prose and stay on screen when it scrolls off.
+iui_info_status() {
+    local width="$1" index="$2" line state up
     iui_info_push diamond 'DEPENDENCIES' body "$width"
     iui_info_requirements "$index" "$width"
     iui_info_push diamond 'STATUS' body "$width"
@@ -149,10 +181,40 @@ iui_info_lines() {
     printf -v line '  %-14s %s' 'installed' "${IUI_SKILL_INSTALLED[$index]}"
     iui_info_push stone "$line" body "$width"
     up="$(iui_uptodate_text "$index")"
-    printf -v line '  %-14s %s' 'up to date' "$up"
-    state=redstone
-    [ "$up" = "yes" ] && state=diamond
+    printf -v line '  %-14s %s' 'latest release' "$up"
+    # Red is for something wrong. An earlier version painted this row redstone
+    # whenever the answer was not literally "yes", so a skill that is simply not
+    # installed yet read as a warning. An available update is an invitation.
+    case "$up" in
+        yes) state=diamond ;;
+        'no ('*) state=gold ;;
+        *) state=stone ;;
+    esac
     iui_info_push "$state" "$line" body "$width"
+}
+
+# The README-style body: one source paragraph per line, each wrapped. A skill
+# with no detail recorded degrades to its summary rather than failing, which is
+# what an index-parallel array does when someone extends only one of them.
+iui_info_detail() {
+    local width="$1" index="$2" paragraph line
+    [ "$index" -lt "${#IUI_SKILL_DETAILS[@]}" ] || return 0
+    iui_info_push stone '' body "$width"
+    while IFS= read -r paragraph; do
+        [ -n "$paragraph" ] || continue
+        iui_wrap "$paragraph" "$width"
+        for line in "${IUI_WRAP_LINES[@]}"; do
+            iui_info_push stone "$line" body "$width"
+        done
+    done <<< "${IUI_SKILL_DETAILS[$index]}"
+}
+
+iui_info_lines() {
+    local width="$1" index="$IUI_CURSOR"
+    IUI_INFO_TEXT=(); IUI_INFO_ROLE=(); IUI_INFO_TAG=()
+    iui_info_head "$width" "$index"
+    iui_info_status "$width" "$index"
+    iui_info_detail "$width" "$index"
     iui_info_actions "$width"
     iui_info_message "$width"
 }
@@ -201,16 +263,28 @@ iui_install_verdict() {
 
 # The wanted version is SOURCE_VERSION, which download_source() only sets after
 # the selection is made, so during the picker it is legitimately empty.
+# Answers "is a newer release published", by comparing the release this copy was
+# installed from against master's package.json. The earlier version compared the
+# installed marker against the local checkout's own commit, which under
+# `curl … | bash` is not known yet -- hence its "unknown until the source is
+# fetched", the commonest answer and the least useful one.
 iui_uptodate_text() {
-    local index="$1"
+    local index="$1" have
     if [ "${IUI_SKILL_INSTALLED[$index]}" != "yes" ]; then
         printf 'not installed'
-    elif [ -z "${IUI_SKILL_WANT[$index]}" ]; then
-        printf 'unknown until the source is fetched'
-    elif [ "${IUI_SKILL_HAVE[$index]}" = "${IUI_SKILL_WANT[$index]}" ]; then
+        return
+    fi
+    iui_release_version
+    have="${IUI_SKILL_HAVE_PKG[$index]:-}"
+    if [ -z "$IUI_RELEASE_VERSION" ]; then
+        # Offline, no curl, or a fetch that failed. Never guess a version.
+        printf 'unknown (could not reach the release)'
+    elif [ -z "$have" ]; then
+        printf 'unknown (installed copy records no release)'
+    elif [ "$have" = "$IUI_RELEASE_VERSION" ]; then
         printf 'yes'
     else
-        printf 'no (%s -> %s)' "${IUI_SKILL_HAVE[$index]}" "${IUI_SKILL_WANT[$index]}"
+        printf 'no (%s -> %s)' "$have" "$IUI_RELEASE_VERSION"
     fi
 }
 
@@ -241,13 +315,43 @@ iui_info_message() {
     done
 }
 
+# What a reader wants from the title is the state of the machine, not the state
+# of the checkboxes: how many skills are installed, and how many of those have a
+# newer release. "9/9 selected" said only that everything installable was ticked,
+# which is the default and so carries no information.
 iui_title_bar() {
-    local text
-    printf -v text ' %s  %d/%d selected ' 'TSCHALLACKA SKILL SHOP' \
-        "$(iui_selected_count)" "${#IUI_SKILL_NAMES[@]}"
+    local text total="${#IUI_SKILL_NAMES[@]}"
+    iui_count_states
+    if [ "$IUI_COUNT_UPGRADE" -gt 0 ]; then
+        printf -v text ' %s  %d/%d installed  %d upgradeable  %d selected ' \
+            'TSCHALLACKA SKILL SHOP' "$IUI_COUNT_INSTALLED" "$total" \
+            "$IUI_COUNT_UPGRADE" "$(iui_selected_count)"
+    else
+        printf -v text ' %s  %d/%d installed  %d selected ' \
+            'TSCHALLACKA SKILL SHOP' "$IUI_COUNT_INSTALLED" "$total" \
+            "$(iui_selected_count)"
+    fi
     iui_pad "$text" "$IUI_COLS"
     iui_seg gold "$IUI_PAD"
     iui_out_line 1 "$IUI_SEG"
+}
+
+# Installed, and how many of those are behind the published release. Upgradeable
+# is only ever counted when the release is known: offline it stays 0 and the
+# title says nothing about upgrades rather than implying everything is current.
+iui_count_states() {
+    local i
+    IUI_COUNT_INSTALLED=0
+    IUI_COUNT_UPGRADE=0
+    iui_release_version
+    for ((i = 0; i < ${#IUI_SKILL_NAMES[@]}; i++)); do
+        [ "${IUI_SKILL_INSTALLED[$i]}" = yes ] || continue
+        IUI_COUNT_INSTALLED=$((IUI_COUNT_INSTALLED + 1))
+        [ -n "$IUI_RELEASE_VERSION" ] || continue
+        [ -n "${IUI_SKILL_HAVE_PKG[$i]:-}" ] || continue
+        [ "${IUI_SKILL_HAVE_PKG[$i]}" != "$IUI_RELEASE_VERSION" ] || continue
+        IUI_COUNT_UPGRADE=$((IUI_COUNT_UPGRADE + 1))
+    done
 }
 
 iui_hint_bar() {
@@ -290,30 +394,129 @@ iui_top_border() {
     iui_header_seg DETAILS "$IUI_RIGHT_W" "$focus_info"
     right="$IUI_HEADER_SEG"
     iui_seg dirt "$IUI_G_TL"; tl="$IUI_SEG"
-    iui_seg dirt "$IUI_G_TOP"; td="$IUI_SEG"
+    iui_seg dirt "$IUI_G_TJ"; td="$IUI_SEG"
     iui_seg dirt "$IUI_G_TR"; tr="$IUI_SEG"
     iui_out_line 2 "$tl$left$td$right$tr"
 }
 
+# The divider gets a junction here too, so the frame closes on the same column
+# the body rows divide at rather than running a plain line under it.
 iui_bottom_border() {
-    local bl bm br
-    iui_repeat "$IUI_G_BOT" $((IUI_COLS - 3))
+    local bl bj br left right
     iui_seg dirt "$IUI_G_BL"; bl="$IUI_SEG"
-    iui_seg dirt "$IUI_REPEAT$IUI_G_BOT"; bm="$IUI_SEG"
+    iui_repeat "$IUI_G_BOT" "$IUI_LEFT_W"
+    iui_seg dirt "$IUI_REPEAT"; left="$IUI_SEG"
+    iui_seg dirt "$IUI_G_BJ"; bj="$IUI_SEG"
+    iui_repeat "$IUI_G_BOT" "$IUI_RIGHT_W"
+    iui_seg dirt "$IUI_REPEAT"; right="$IUI_SEG"
     iui_seg dirt "$IUI_G_BR"; br="$IUI_SEG"
-    iui_out_line $((IUI_ROWS - 1)) "$bl$bm$br"
+    iui_out_line $((IUI_ROWS - 1)) "$bl$left$bj$right$br"
 }
 
 # The right cell is the sprite for its first IUI_HEAD_H rows and info text after
 # that, so the head and the text share one row budget and neither can overflow.
 iui_right_cell() {
     local body="$1" row="$2"
-    if [ "$IUI_HEAD_ON" -eq 1 ] && [ "$body" -lt "$IUI_HEAD_H" ]; then
-        iui_head_line $((body / IUI_HEAD_SCALE)) "$IUI_HEAD_SCALE" "$IUI_RIGHT_W" "$IUI_EYE"
-        IUI_INFO_CELL="$IUI_HEAD_LINE"
+    if [ "$IUI_HEAD_PLACE" = right-top ] && [ "$body" -lt "$IUI_HEAD_H" ]; then
+        iui_head_beside_hint "$body"
         return
     fi
-    iui_info_cell $((body - IUI_HEAD_H)) "$row"
+    local offset=0
+    [ "$IUI_HEAD_PLACE" != right-top ] || offset="$IUI_HEAD_H"
+    iui_info_cell $((body - offset + IUI_INFO_SCROLL)) "$row"
+}
+
+# One band row: the sprite, then the hint that belongs beside it. The space to
+# the right of the sprite was blank before -- on a wide terminal that is most of
+# the pane -- so the hints cost no rows that content was using.
+iui_head_beside_hint() {
+    local body="$1" cols slot glyph_row at text=''
+    iui_head_line $((body / IUI_HEAD_SCALE)) "$IUI_HEAD_SCALE" \
+        $((IUI_HEAD_SCALE * 32)) "$IUI_EYE"
+    cols=$((IUI_RIGHT_W - IUI_HEAD_SCALE * 32))
+    slot=$((body / 8))
+    glyph_row=$((body % 8))
+    if [ "$glyph_row" -lt 7 ]; then
+        at=$(( (IUI_HINT_PAGE * IUI_HINT_PER_PAGE + slot) % ${#IUI_HINTS[@]} ))
+        text="${IUI_HINTS[$at]}"
+        iui_big_line " $text" "$glyph_row" "$cols"
+    else
+        iui_pad '' "$cols"
+        IUI_BIG_LINE="$IUI_PAD"
+    fi
+    iui_seg gold "$IUI_BIG_LINE"
+    IUI_INFO_CELL="$IUI_HEAD_LINE$IUI_SEG"
+}
+
+# Hints for the keys a reader would otherwise have to guess at. Shown only on a
+# tall terminal, beside nothing and above the sprite, so a small screen keeps the
+# sprite alone in its block. Kept to one line each and phrased as actions.
+# Kept inside the pane width on purpose: a hint that truncates with a tilde is
+# worse than no hint. Installing over an existing copy is how an update happens,
+# so the install line says both rather than implying a separate command.
+IUI_HINTS=(
+    'PRESS A: ALL'
+    'PRESS I: INSTALL'
+    'PRESS N: NONE'
+    'PRESS D: FIX DEPS'
+    'TAB: DETAILS'
+    'CLICK: TOGGLE'
+)
+# Two hints fit beside a 16-row sprite at seven pixel rows each plus a gap, so
+# the rest cycle. IUI_HINT_DIRTY tells the event loop that a tick changed more
+# than the eyes and the whole frame has to be repainted.
+IUI_HINT_PER_PAGE=2
+IUI_HINT_PAGE=0
+IUI_HINT_TICKS=0
+IUI_HINT_TICKS_PER_PAGE=4
+IUI_HINT_DIRTY=0
+iui_advance_hints() {
+    [ "$IUI_HINT_ROWS" -gt 0 ] || return 0
+    [ "${#IUI_HINTS[@]}" -gt "$IUI_HINT_PER_PAGE" ] || return 0
+    IUI_HINT_TICKS=$((IUI_HINT_TICKS + 1))
+    [ "$IUI_HINT_TICKS" -ge "$IUI_HINT_TICKS_PER_PAGE" ] || return 0
+    IUI_HINT_TICKS=0
+    IUI_HINT_PAGE=$((IUI_HINT_PAGE + 1))
+    IUI_HINT_DIRTY=1
+}
+iui_hint_cell() {
+    local at="$1" text=''
+    [ "$at" -lt "${#IUI_HINTS[@]}" ] && text=" ${IUI_HINTS[$at]}"
+    iui_pad "$text" "$IUI_LEFT_W"
+    iui_seg slate "$IUI_PAD"
+    IUI_LIST_CELL="$IUI_SEG"
+}
+
+# The left pane, top to bottom: the skill list, a separator, optional hint rows,
+# then the sprite pinned to the bottom in its own block.
+iui_left_cell() {
+    local body="$1" index hint_at
+    if [ "$body" -lt "$IUI_LIST_ROWS" ]; then
+        index=$((IUI_SCROLL + body))
+        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
+            iui_list_cell "$index" "$IUI_LEFT_W"
+        else
+            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        fi
+        return
+    fi
+    if [ "$IUI_HEAD_PLACE" != left-bottom ]; then
+        iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
+        return
+    fi
+    if [ "$body" -eq "$IUI_LIST_ROWS" ]; then
+        iui_repeat "$IUI_G_RULE" "$IUI_LEFT_W"
+        iui_seg dirt "$IUI_REPEAT"; IUI_LIST_CELL="$IUI_SEG"
+        return
+    fi
+    hint_at=$((body - IUI_LIST_ROWS - 1))
+    if [ "$hint_at" -lt "$IUI_HINT_ROWS" ]; then
+        iui_hint_cell "$hint_at"
+        return
+    fi
+    iui_head_line $(( (body - IUI_LIST_ROWS - 1 - IUI_HINT_ROWS) / IUI_HEAD_SCALE )) \
+        "$IUI_HEAD_SCALE" "$IUI_LEFT_W" "$IUI_EYE"
+    IUI_LIST_CELL="$IUI_HEAD_LINE"
 }
 
 iui_render_wide() {
@@ -321,14 +524,10 @@ iui_render_wide() {
     iui_top_border
     iui_seg dirt "$IUI_G_V"; v="$IUI_SEG"
     iui_info_lines "$IUI_RIGHT_W"
+    iui_clamp_info_scroll
     for ((body = 0; body < IUI_BODY_ROWS; body++)); do
         row=$((body + 3))
-        index=$((IUI_SCROLL + body))
-        if [ "$index" -lt "${#IUI_SKILL_NAMES[@]}" ]; then
-            iui_list_cell "$index" "$IUI_LEFT_W"
-        else
-            iui_pad '' "$IUI_LEFT_W"; iui_seg stone "$IUI_PAD"; IUI_LIST_CELL="$IUI_SEG"
-        fi
+        iui_left_cell "$body"
         iui_right_cell "$body" "$row"
         iui_out_line "$row" "$v$IUI_LIST_CELL$v$IUI_INFO_CELL$v"
     done

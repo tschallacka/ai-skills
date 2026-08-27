@@ -48,6 +48,55 @@ SKILL_DESCRIPTIONS=(
     'A nested queue of work in one JSON file, read with jq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
+    'Separate checkouts so parallel work and long verifications cannot collide.'
+)
+
+# The detail pane's body: a summary sentence, then what it actually does. Kept
+# here rather than read from each skill's SKILL.md because select_skills() runs
+# before download_source() -- under `curl … | bash` no skill directory exists
+# yet, so anything the picker shows must be baked in at build time.
+#
+# Index-parallel with SKILL_NAMES, which test-installer-skill-selection.sh
+# enforces: git-worktrees was added to SKILL_NAMES without a description, and
+# moving the cursor onto it killed the picker with an unbound variable.
+SKILL_DETAILS=(
+    'Turns an initiative into a directory of files another agent can resume without reconstructing context.
+Goals own one outcome each and hold 2-10 work units; a work unit is one file and one symbol, so every change is separately reviewable.
+Steps carry instructions, acceptance criteria and the handoff the next unit relies on.
+Validation refuses a plan whose units nothing verifies, and a fresh adversarial reviewer must approve it before execution.
+Where a plan touches a UI, browser stories with real interaction are mandatory rather than optional.'
+    'Records what a project does differently, so the next session does not rediscover it.
+Load the matching note when a convention, environment quirk or tooling deviation could change how you implement, debug or test.
+Newly confirmed deviations are written back, which is what keeps the note worth reading.
+Not for documentation that follows the ecosystem defaults -- only the surprises.'
+    'Runs a command under a CPU and memory cap, so a heavy test, build or analyzer cannot take the machine with it.
+Wraps the command rather than the tool: no configuration inside the thing being limited.
+On Apple Silicon macOS it uses memlimit, the one documented exception to this repository dependency ceiling, because macOS offers no other way to cap memory.
+Without memlimit it says so and still limits CPU through nice and cpulimit, rather than pretending the cap is in force.'
+    'A short recorded back-and-forth that settles what to build before anything is planned or written.
+Use it when a request could branch in materially different directions and the wrong branch is expensive.
+The output is an agreed picture, not a plan: it feeds the planning skill rather than replacing it.
+Skip it for small or fully specified changes, where the discussion costs more than the work.'
+    'Reviews an implementation after the fact, from three angles that disagree on purpose.
+The implementer analyses its own work, an independent agent proposes alternatives, and a critical agent attacks both.
+It ends in concrete proposed fixes rather than a verdict.
+Not a substitute for the pre-implementation adversarial review, which asks a different question: this one sees the code that exists.'
+    'A nested queue of work in one JSON file, read and written with jq.
+For work that outlives the conversation and must survive a restart, a handoff or a compaction.
+Every task carries its status and its detail, so a cold reader knows what was intended and what is left.
+Not for the steps of a task already in progress, and not for defects -- those belong in the bug register.'
+    'Defects recorded with the reproduction, the observed output, the mechanism once established, and the verification that closes them.
+One defect per entry: if stating it needs the word "and", it is two entries that reference each other.
+An entry closes only with a fix and a verification naming the mutation that fails without it, so a closure cannot be a claim.
+Written only through its helpers -- an out-of-enum value makes the register unsound and every later write refuses.'
+    'An IRC-basis message bus for agents: channels they register, join and leave, with deltas since an id and live tails.
+Two agents in different sessions or on different machines exchange messages without either knowing about the other.
+The log is the source of truth and the server is optional: local mode appends under a lock and needs no runtime at all.
+Reading takes a cursor rather than the whole channel, so a long conversation does not flood a context window.'
+    'Gives a task its own checkout, so several agents can work at once without seeing each other half-finished edits.
+Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
+Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
+And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
