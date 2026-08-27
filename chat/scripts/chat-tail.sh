@@ -54,7 +54,9 @@ case "$interval" in ''|*[!0-9]*|0*) interval=1 ;; esac
 
 if [ -n "$host" ]; then
     exec 3<> "/dev/tcp/$host/$port"
-    printf 'NICK %s\nJOIN %s\n' "${CHAT_NICK:-${USER:-agent}-tail}" "$chan" >&3
+    # B66: the since-id rides the JOIN so the server replays the backlog
+    # from the requested point (0 = full history) before live traffic.
+    printf 'NICK %s\nJOIN %s %s\n' "${CHAT_NICK:-${USER:-agent}-tail}" "$chan" "${since:-0}" >&3
     while IFS= read -r line <&3; do
         case "$line" in
             MSG\ *) printf '%s\n' "$line" ;;

@@ -116,11 +116,26 @@ function handle(sock, nickOf, line) {
       if (!validChan(arg)) return say("ERR invalid channel");
       say(register(arg));
       break;
-    case "JOIN":
-      if (!validChan(arg)) return say("ERR invalid channel");
-      subs.get(sock).add(arg);
-      say("OK join " + arg);
+    case "JOIN": {
+      // B66: JOIN may carry a since-id; the backlog from that id is
+      // replayed after subscribing. Subscribing first trades a possible
+      // duplicate for zero loss.
+      const parts = arg.split(/\s+/);
+      const chan = parts[0];
+      const since = (parts[1] && /^\d+$/.test(parts[1])) ? parseInt(parts[1], 10) : 0;
+      if (!validChan(chan)) return say("ERR invalid channel");
+      subs.get(sock).add(chan);
+      say("OK join " + chan);
+      let raw = "";
+      try { raw = fs.readFileSync(chanPath(chan), "utf8"); } catch (e) {}
+      for (const line of raw.split("\n")) {
+        if (!line.startsWith("MSG ")) continue;
+        const f = line.split(" ");
+        const id = parseInt(f[2], 10);
+        if (!isNaN(id) && id >= since && f[1] === chan) say(line);
+      }
       break;
+    }
     case "LEAVE":
       subs.get(sock).delete(arg);
       say("OK leave " + arg);

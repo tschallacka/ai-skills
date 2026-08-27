@@ -140,13 +140,39 @@ class Handler(socketserver.StreamRequestHandler):
                     ok, err = HUB.register(arg)
                     self.reply(err or ok)
                 elif verb == "JOIN":
-                    if not valid_chan(arg):
+                    # B66: JOIN may carry a since-id; the backlog from that id
+                    # is replayed after subscribing, so a socket tail starts
+                    # from the requested point instead of only new traffic.
+                    # Subscribing first trades a possible duplicate (a line
+                    # broadcast between snapshot and replay) for zero loss.
+                    parts = arg.split(None, 1)
+                    chan = parts[0]
+                    since = "0"
+                    if len(parts) > 1:
+                        since = parts[1]
+                    if not valid_chan(chan) or not since.isdigit():
                         self.reply("ERR invalid channel")
                         continue
                     HUB.mutex.acquire()
-                    HUB.subs[self.request].add(arg)
+                    HUB.subs[self.request].add(chan)
                     HUB.mutex.release()
-                    self.reply("OK join %s" % arg)
+                    self.reply("OK join %s" % chan)
+                    try:
+                        with open(chan_path(chan), "rb") as fh:
+                            for line in fh:
+                                if not line.startswith(b"MSG "):
+                                    continue
+                                fields = line.split(b" ", 3)
+                                if len(fields) < 4:
+                                    continue
+                                try:
+                                    mid = int(fields[2])
+                                except ValueError:
+                                    continue
+                                if mid >= int(since):
+                                    self.reply(line.decode().rstrip("\n")) 
+                    except FileNotFoundError:
+                        pass
                 elif verb == "LEAVE":
                     HUB.mutex.acquire()
                     HUB.subs[self.request].discard(arg)

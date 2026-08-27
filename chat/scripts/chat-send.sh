@@ -47,6 +47,21 @@ case "$nick" in *[!A-Za-z0-9_-]*) printf '%s: invalid nick\n' "${0##*/}" >&2; ex
 [ -n "$text" ] || { printf '%s: empty message\n' "${0##*/}" >&2; exit 64; }
 [ -z "$port" ] && [ -n "$host" ] && port=7717
 
+# B65: a local send with a server running must not bypass it — a direct log
+# append is invisible to every socket subscriber. When no --host was given
+# but this home has a live server, route through its socket and fall back to
+# the direct append only when the socket cannot be reached.
+if [ -z "$host" ] && [ -f "$HOME_DIR/server.pid" ] && [ -f "$HOME_DIR/server.port" ]; then
+    spid="$(cat "$HOME_DIR/server.pid" 2>/dev/null || true)"
+    sport="$(cat "$HOME_DIR/server.port" 2>/dev/null || true)"
+    case "$sport" in ''|*[!0-9]*) sport="" ;; esac
+    if [ -n "$spid" ] && [ -n "$sport" ] && kill -0 "$spid" 2>/dev/null         && (exec 3<> "/dev/tcp/127.0.0.1/$sport") 2>/dev/null; then
+        host=127.0.0.1
+        port="$sport"
+        printf '%s: local server on port %s; sending through it\n' "${0##*/}" "$sport" >&2
+    fi
+fi
+
 if [ -n "$host" ]; then
     exec 3<> "/dev/tcp/$host/$port"
     printf 'NICK %s\nPRIVMSG %s :%s\nQUIT\n' "$nick" "$chan" "$text" >&3

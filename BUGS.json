@@ -756,7 +756,7 @@
     {
       "id": "B65",
       "title": "chat-send.sh without --host writes only the log, so socket subscribers never see the message",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -768,12 +768,12 @@
         "chat/scripts/chat-send.sh",
         "chat/runtime/server.py"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat-send without --host checks this home for a live server (pid alive + port file + socket reachable); when found, the send routes through it so socket subscribers see it, with a stderr note naming the port; unreachable or no server keeps the direct offline append",
+      "verification": "live: subscriber on JOIN received 'local but visible' from a no---host send against a running server; with the server stopped the same command appended directly (log id 2). Chat suite green, full suite 106/106",
       "found_by": "main session, after Tschallacka's --host tail showed no traffic while the log was being written",
       "notes": null,
       "created_at": "2026-08-27T21:38:32Z",
-      "updated_at": "2026-08-27T21:38:32Z"
+      "updated_at": "2026-08-27T21:58:36Z"
     },
     {
       "id": "B67",
@@ -1064,7 +1064,7 @@
     {
       "id": "B66",
       "title": "chat-tail.sh drops the since-id in --host mode, so a socket tail replays no backlog",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -1075,12 +1075,12 @@
       "surfaces": [
         "chat/scripts/chat-tail.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat-tail sends 'JOIN #chan <since-id>' (default 0); server.py and server.js accept the optional id, subscribe first, then replay MSG lines with id >= since from the log — duplicate-possible, loss-free by construction; perl/socat tiers stay poll-mode by design",
+      "verification": "live against the python3 tier: tail --since 2 replayed id 2 then delivered live id 3; node --check and py parse clean; chat suite green",
       "found_by": "main session",
       "notes": null,
       "created_at": "2026-08-27T21:38:32Z",
-      "updated_at": "2026-08-27T21:38:32Z"
+      "updated_at": "2026-08-27T21:58:36Z"
     },
     {
       "id": "B6",
