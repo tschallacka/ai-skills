@@ -1103,6 +1103,28 @@
       "notes": null,
       "created_at": "2026-08-25T09:46:07Z",
       "updated_at": "2026-08-25T09:53:29Z"
+    },
+    {
+      "id": "B51",
+      "title": "overview-server.py sends HTTP 200 with an empty body when the renderer fails, because it never checks the subprocess exit status",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "python3 planning/scripts/runtime/overview-server.py ~/.plans/codegraph-bash-indexing-v2 8913 & sleep 3; curl -s -o /tmp/big.html -w 'page: http=%{http_code} bytes=%{size_download}\\n' http://127.0.0.1:8913/",
+      "observed": "page route returns http=200 bytes=0 while /state.json returns http=200 bytes=341088. Running the same command the server builds directly exits 126 with: jq: Argument list too long. On a small plan with a 1 KB state the same page route returns 20646 bytes, so the failure is size-dependent.",
+      "expected": "A failed render must not be reported as success. The server should return a 500 carrying the renderer stderr rather than an empty body under a 200.",
+      "mechanism": "_render() calls subprocess.run(...) with capture_output and never inspects returncode. When the render fails the temp file it created is still empty, and it reads that back and returns an empty string, which is transmitted as a 200. Not a second defect: the same jq argument-length limit as the exit-126 renderer failure, masked by the unchecked status.",
+      "surfaces": [
+        "planning/scripts/runtime/overview-server.py",
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "adversarial review AR-09, cause reproduced and corrected during verification",
+      "notes": null,
+      "created_at": "2026-08-27T12:26:23Z",
+      "updated_at": "2026-08-27T12:26:23Z"
     }
   ]
 }
