@@ -81,6 +81,13 @@ serve_checks() { # NAME PORT — the identical-route contract every rung meets
         printf 'rung %s stderr:\n' "$name" >&2
         cat "$work/err.$name" >&2 2>/dev/null || true
     }
+    case "$port" in
+        ''|*[!0-9]*)
+        t_fail "$name reported an unparseable port line: $(printf '%s' "$port" | cat -v)"
+        printf 'stderr:\n' >&2
+        cat "$work/err.$name" >&2 2>/dev/null || true
+        return ;;
+    esac
     if [ -z "$port" ]; then
         t_fail "$name never reported a port"
         printf 'stderr:\n' >&2

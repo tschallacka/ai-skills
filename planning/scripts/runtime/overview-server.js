@@ -77,5 +77,9 @@ var server = http.createServer(function (req, res) {
 process.on("SIGTERM", function () { process.exit(0); });
 process.on("SIGINT", function () { process.exit(0); });
 server.listen(port, "127.0.0.1", function () {
-    console.log(server.address().port);
+    // B67: a NUMBER argument gets util.inspect colouring when FORCE_COLOR
+    // is set (node 24 honours it even for a non-TTY stdout), so the port
+    // file would carry ANSI escapes and every URL built from it fails to
+    // connect. A string is never coloured.
+    console.log(String(server.address().port));
 });

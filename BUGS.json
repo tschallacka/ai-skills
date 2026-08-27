@@ -778,7 +778,7 @@
     {
       "id": "B67",
       "title": "the node rung of overview-serve serves nothing: page, state and sections routes all return empty",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -790,12 +790,12 @@
         "planning/scripts/runtime/overview-server.js",
         "planning/tests/test-overview-serve.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "console.log(String(port)): node applies util.inspect colouring to a NUMBER argument whenever FORCE_COLOR is set (main's box: v24.18.0 with FORCE_COLOR=3, honoured even for non-TTY stdout), so the port file carried ANSI escapes and every URL built from it failed to connect — status 000, no server-side error, which is why the rung looked empty on that host only. The test now also rejects a non-digit port line loudly with the raw bytes dumped",
+      "verification": "reproduced on node 22 with FORCE_COLOR=3: bare number prints ESC[33m8080ESC[39m, String() prints clean; served under FORCE_COLOR+COLORTERM the rung answers state 200; mutation (reverted String()) fails the test with 'unparseable port line: ESC[33m...' ",
       "found_by": "main session, from the full suite: 106 ran, 104 passed",
       "notes": "ox does not reproduce on node v22.16.0 with no FORCE_COLOR set, which is consistent: the colouring is forced by the environment rather than the node version. Fix is String(port) or process.stdout.write, so the port line cannot be decorated whatever the environment says.",
       "created_at": "2026-08-27T21:40:06Z",
-      "updated_at": "2026-08-27T21:52:10Z"
+      "updated_at": "2026-08-27T22:25:50Z"
     },
     {
       "id": "B14",
