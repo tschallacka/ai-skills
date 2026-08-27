@@ -372,6 +372,7 @@ runtime_requirements() {
         planning)
             case "$platform" in *:*) printf '%s\n' jq ;; esac
             case "$platform" in *:*) printf '%s\n' openssl ;; esac
+            case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
             ;;
         post-implementation-review)
             ;;
@@ -394,6 +395,7 @@ runtime_requirement_strength() {
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
     esac
@@ -407,6 +409,7 @@ runtime_requirement_why() {
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
+        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a jq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
     esac
@@ -417,6 +420,7 @@ runtime_requirement_members() {
     platform="$(uname -s):$(uname -m)"
     case "$1" in
         @server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
+        @overview-server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
     esac
 }
 
