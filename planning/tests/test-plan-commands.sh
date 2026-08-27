@@ -67,12 +67,13 @@ fi
 "$script_dir/update-plan-content.sh" --goal-section "$plan_dir" 01-sync scope \
     -p 5.1: 'Update only the synchronized status fields.'
 step_writer_output="$temporary_root/step-writer-output.log"
-"$script_dir/add-work-unit.sh" "$plan_dir" W01 source planning/scripts/update-plan-content.sh \
-    'review-status command' N/A 'Update both review status fields atomically.' '—' \
-    01-sync 01-step-update-status 2>"$step_writer_output"
+"$script_dir/add-work-unit.sh" "$plan_dir" --id W01 --type source --file planning/scripts/update-plan-content.sh \
+    --scope 'review-status command' --subscope N/A --change 'Update both review status fields atomically.' \
+    --depends-on '—' --goal 01-sync --step 01-step-update-status 2>"$step_writer_output"
 grep -Fq 'Reminder: goal 01-sync requires testing; continue with its test/proof step.' "$step_writer_output"
-"$script_dir/add-work-unit.sh" "$plan_dir" W02 verification N/A 'validate-plan.sh' N/A \
-    'Validate the status fields after synchronization.' W01 01-sync 02-step-validate-status
+"$script_dir/add-work-unit.sh" "$plan_dir" --id W02 --type verification --file N/A \
+    --scope 'validate-plan.sh' --subscope N/A --change 'Validate the status fields after synchronization.' \
+    --depends-on W01 --goal 01-sync --step 02-step-validate-status
 printf '# Verification: update status\n\n## Automated tests\n\nRun the status update command.\n' \
     > "$plan_dir/01-sync/steps/01-step-update-status-testing.md"
 printf '# Verification: validate status\n\n## Automated tests\n\nRun the validator.\n' \
@@ -200,9 +201,9 @@ mv "$missing_companion.missing" "$missing_companion"
 
 "$script_dir/add-goal.sh" "$plan_dir" 02-research 'Research only' \
     'Record an untestable research result.'
-"$script_dir/add-work-unit.sh" "$plan_dir" W03 discovery research-notes.md \
-    'research scope' N/A 'Record bounded research findings.' '—' \
-    02-research 01-step-research
+"$script_dir/add-work-unit.sh" "$plan_dir" --id W03 --type discovery --file research-notes.md \
+    --scope 'research scope' --subscope N/A --change 'Record bounded research findings.' \
+    --depends-on '—' --goal 02-research --step 01-step-research
 "$script_dir/add-coverage.sh" "$plan_dir" 'Research findings are recorded.' W03 \
     'The discovery work unit owns the research record.'
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 02-research no \
@@ -532,11 +533,12 @@ fi
 # W01/W02 are re-established here; the P2-2 cascade test removed the originals.
 "$script_dir/add-goal.sh" "$plan_dir" 03-wire 'Wire history' \
     'Wire the order history surface.' >/dev/null 2>&1
-"$script_dir/add-work-unit.sh" "$plan_dir" W10 markup \
-    app/design/frontend/FakeTheme/templates/order/history.phtml '#order_history' N/A \
-    'Render the order history block.' '—' 03-wire 01-step-history >/dev/null 2>&1
-"$script_dir/add-work-unit.sh" "$plan_dir" W11 verification N/A 'verify-history.sh' N/A \
-    'Verify the order history block renders.' W10 03-wire 02-step-verify >/dev/null 2>&1
+"$script_dir/add-work-unit.sh" "$plan_dir" --id W10 --type markup --file app/design/frontend/FakeTheme/templates/order/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'Render the order history block.' \
+    --depends-on '—' --goal 03-wire --step 01-step-history >/dev/null 2>&1
+"$script_dir/add-work-unit.sh" "$plan_dir" --id W11 --type verification --file N/A \
+    --scope 'verify-history.sh' --subscope N/A --change 'Verify the order history block renders.' \
+    --depends-on W10 --goal 03-wire --step 02-step-verify >/dev/null 2>&1
 "$script_dir/update-plan-content.sh" --testing-requirement "$plan_dir" 03-wire yes \
     'The render and its verification have observable output.' >/dev/null 2>&1
 printf '# Verification: history\n\n## Automated tests\n\nRun the render check.\n' \
@@ -727,7 +729,16 @@ git -C "$plan_dir" checkout -- progress.md 2>/dev/null || true
 fresh_plan="$temporary_root/fresh-plan"
 "$script_dir/create-plan.sh" "$fresh_plan" 'Fresh plan' >/dev/null
 "$script_dir/add-goal.sh" "$fresh_plan" 01-goal 'Fresh goal' 'Fresh outcome' >/dev/null
-"$script_dir/add-work-unit.sh" "$fresh_plan" 01-goal W01 code N/A 'scope' N/A 'change' '—' 01-goal 01-step-fresh >/dev/null 2>&1 || true
+# A stray bare argument where the flags belong is refused, so the fresh plan
+# keeps the authored placeholders the two checks below read.
+fresh_rc=0
+"$script_dir/add-work-unit.sh" "$fresh_plan" 01-goal --id W01 --type code --file N/A \
+    --scope 'scope' --subscope N/A --change 'change' --depends-on '—' \
+    --goal 01-goal --step 01-step-fresh >/dev/null 2>&1 || fresh_rc=$?
+if [ "$fresh_rc" -ne 64 ]; then
+    echo "a malformed add-work-unit call exited $fresh_rc, not 64." >&2
+    exit 1
+fi
 "$script_dir/validate-plan.sh" "$fresh_plan" >"$temporary_root/fresh-warn.log" 2>&1 || true
 if ! grep -q 'WARN: .* contains a registered placeholder (fill before completion)' "$temporary_root/fresh-warn.log"; then
     echo 'report 16: a fresh plan did not WARN on its emitted authored placeholders.' >&2

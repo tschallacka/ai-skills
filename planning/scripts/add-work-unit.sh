@@ -11,13 +11,7 @@
 #   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A> \
 #       --scope <scope> --subscope <subscope|N/A> --change <intended change> \
 #       --depends-on <WNN,…|—> --goal <NN-name> --step <NN-step-name>
-#   add-work-unit.sh [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> \
-#       <subscope|N/A> <intended-change> <depends-on|—> <goal-name> <step-name>
 #   add-work-unit.sh --help
-#
-# The second form is the deprecated positional spelling, kept working for
-# existing callers. Prefer the flags: ten unnamed arguments are unreadable at
-# the call site.
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,10 +30,8 @@ usage() {
 Usage: ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] --id <WNN> --type <type> --file <path|N/A>
            --scope <scope> --subscope <subscope|N/A> --change <intended change>
            --depends-on <WNN,...|--> --goal <NN-name> --step <NN-step-name>
-       ${0##*/} [--plan-dir] <plan-directory> [--repo-root DIR] <WNN> <type> <file|N/A> <scope> <subscope|N/A> <intended-change> <depends-on> <goal-name> <step-name>
        ${0##*/} --help
 
-The positional form is deprecated; it is kept working for existing callers.
 Types: source markup style test config docs data generated discovery verification
 USAGE
     exit "$rc"
@@ -54,42 +46,34 @@ intended=""
 depends_on=""
 goal_name=""
 step_name=""
-flags_used=false
 repo_root="${PLAN_REPO_ROOT:-}"
-positional=()
+plan_dir=""
+# The plan directory is the only bare argument. A second one means the caller is
+# still passing the nine values positionally, which this helper no longer reads.
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
-        --id) [ "$#" -ge 2 ] || usage; unit_id="$2"; flags_used=true; shift 2 ;;
-        --type) [ "$#" -ge 2 ] || usage; unit_type="$2"; flags_used=true; shift 2 ;;
-        --file) [ "$#" -ge 2 ] || usage; unit_file="$2"; flags_used=true; shift 2 ;;
-        --scope) [ "$#" -ge 2 ] || usage; scope="$2"; flags_used=true; shift 2 ;;
-        --subscope) [ "$#" -ge 2 ] || usage; subscope="$2"; flags_used=true; shift 2 ;;
-        --change) [ "$#" -ge 2 ] || usage; intended="$2"; flags_used=true; shift 2 ;;
-        --depends-on) [ "$#" -ge 2 ] || usage; depends_on="$2"; flags_used=true; shift 2 ;;
-        --goal) [ "$#" -ge 2 ] || usage; goal_name="$2"; flags_used=true; shift 2 ;;
-        --step) [ "$#" -ge 2 ] || usage; step_name="$2"; flags_used=true; shift 2 ;;
+        --id) [ "$#" -ge 2 ] || usage; unit_id="$2"; shift 2 ;;
+        --type) [ "$#" -ge 2 ] || usage; unit_type="$2"; shift 2 ;;
+        --file) [ "$#" -ge 2 ] || usage; unit_file="$2"; shift 2 ;;
+        --scope) [ "$#" -ge 2 ] || usage; scope="$2"; shift 2 ;;
+        --subscope) [ "$#" -ge 2 ] || usage; subscope="$2"; shift 2 ;;
+        --change) [ "$#" -ge 2 ] || usage; intended="$2"; shift 2 ;;
+        --depends-on) [ "$#" -ge 2 ] || usage; depends_on="$2"; shift 2 ;;
+        --goal) [ "$#" -ge 2 ] || usage; goal_name="$2"; shift 2 ;;
+        --step) [ "$#" -ge 2 ] || usage; step_name="$2"; shift 2 ;;
         --repo-root) [ "$#" -ge 2 ] || usage; repo_root="$2"; shift 2 ;;
         --) shift; break ;;
         -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
-        *) positional+=("$1"); shift ;;
+        *) [ -z "$plan_dir" ] || usage; plan_dir="$1"; shift ;;
     esac
 done
-while [ "$#" -gt 0 ]; do positional+=("$1"); shift; done
+while [ "$#" -gt 0 ]; do [ -z "$plan_dir" ] || usage; plan_dir="$1"; shift; done
 
-set -- ${positional[@]+"${positional[@]}"}
-if [ "$flags_used" = true ]; then
-    [ "$#" -eq 1 ] || usage
-    plan_dir="$1"
-    for required in unit_id unit_type unit_file scope subscope intended depends_on goal_name step_name; do
-        [ -n "${!required}" ] || usage
-    done
-else
-    # Deprecated positional form.
-    [ "$#" -eq 10 ] || usage
-    plan_dir="$1"; unit_id="$2"; unit_type="$3"; unit_file="$4"; scope="$5"; subscope="$6"
-    intended="$7"; depends_on="$8"; goal_name="$9"; step_name="${10}"
-fi
+[ -n "$plan_dir" ] || usage
+for required in unit_id unit_type unit_file scope subscope intended depends_on goal_name step_name; do
+    [ -n "${!required}" ] || usage
+done
 
 source "$script_dir/plan-reconcile-lib.sh"
 

@@ -35,9 +35,15 @@ build_goal_fixture() { # <plan-dir>
     local plan="$1"
     "$script_dir/create-plan.sh" "$plan" reach-memo >/dev/null
     "$script_dir/add-goal.sh" "$plan" 01-g 'G' 'an outcome' >/dev/null
-    "$script_dir/add-work-unit.sh" "$plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-    "$script_dir/add-work-unit.sh" "$plan" W02 verification N/A 'v-two.sh' N/A 'Baseline capture before W04.' '—' 01-g 02-step-v2 >/dev/null
-    "$script_dir/add-work-unit.sh" "$plan" W04 verification N/A 'v-four.sh' N/A 'Verify W02.' 'W02' 01-g 04-step-v4 >/dev/null
+    "$script_dir/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
+        --scope 'A::x' --subscope N/A --change 'change A' \
+        --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+    "$script_dir/add-work-unit.sh" "$plan" --id W02 --type verification --file N/A \
+        --scope 'v-two.sh' --subscope N/A --change 'Baseline capture before W04.' \
+        --depends-on '—' --goal 01-g --step 02-step-v2 >/dev/null
+    "$script_dir/add-work-unit.sh" "$plan" --id W04 --type verification --file N/A \
+        --scope 'v-four.sh' --subscope N/A --change 'Verify W02.' \
+        --depends-on 'W02' --goal 01-g --step 04-step-v4 >/dev/null
     "$script_dir/update-plan-content.sh" --testing-requirement "$plan" 01-g yes 'verification units present' >/dev/null
     printf '# V\n\n## Automated tests\n\nx\n' > "$plan/01-g/steps/01-step-a-testing.md"
     printf '# V\n\n## Automated tests\n\nx\n' > "$plan/01-g/steps/02-step-v2-testing.md"
@@ -60,8 +66,12 @@ t_assert_eq \
 control="$temporary_root/control"
 "$script_dir/create-plan.sh" "$control" reach-gap >/dev/null
 "$script_dir/add-goal.sh" "$control" 01-g 'G' 'an outcome' >/dev/null
-"$script_dir/add-work-unit.sh" "$control" W01 source b.php 'B::x' N/A 'change B' '—' 01-g 01-step-b >/dev/null
-"$script_dir/add-work-unit.sh" "$control" W02 verification N/A 'v-two.sh' N/A 'Verify W01.' '—' 01-g 02-step-v2 >/dev/null
+"$script_dir/add-work-unit.sh" "$control" --id W01 --type source --file b.php \
+    --scope 'B::x' --subscope N/A --change 'change B' \
+    --depends-on '—' --goal 01-g --step 01-step-b >/dev/null
+"$script_dir/add-work-unit.sh" "$control" --id W02 --type verification --file N/A \
+    --scope 'v-two.sh' --subscope N/A --change 'Verify W01.' \
+    --depends-on '—' --goal 01-g --step 02-step-v2 >/dev/null
 "$script_dir/update-plan-content.sh" --testing-requirement "$control" 01-g yes 'verification unit present' >/dev/null
 printf '# V\n\n## Automated tests\n\nx\n' > "$control/01-g/steps/01-step-b-testing.md"
 printf '# V\n\n## Automated tests\n\nx\n' > "$control/01-g/steps/02-step-v2-testing.md"

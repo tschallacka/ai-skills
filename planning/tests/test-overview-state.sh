@@ -23,8 +23,12 @@ plan="$work/fixture"
 export PLANS_ROOT="$work/plans-root"
 "$BASH" "$scripts/create-plan.sh" "$plan" 'State extraction fixture' >/dev/null
 "$BASH" "$scripts/add-goal.sh" "$plan" 01-build 'Build the widget' 'The widget exists and works.' >/dev/null
-"$BASH" "$scripts/add-work-unit.sh" "$plan" W01 source src/widget.php 'Widget::render()' N/A 'Render the widget' '—' 01-build 01-step-render >/dev/null
-"$BASH" "$scripts/add-work-unit.sh" "$plan" W02 verification N/A 'verify-widget' N/A 'Verify the widget renders' 'W01' 01-build 02-step-verify >/dev/null
+"$BASH" "$scripts/add-work-unit.sh" "$plan" --id W01 --type source --file src/widget.php \
+    --scope 'Widget::render()' --subscope N/A --change 'Render the widget' \
+    --depends-on '—' --goal 01-build --step 01-step-render >/dev/null
+"$BASH" "$scripts/add-work-unit.sh" "$plan" --id W02 --type verification --file N/A \
+    --scope 'verify-widget' --subscope N/A --change 'Verify the widget renders' \
+    --depends-on 'W01' --goal 01-build --step 02-step-verify >/dev/null
 "$BASH" "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-build yes 'verification unit present' >/dev/null
 printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/01-step-render-testing.md"
 "$BASH" "$scripts/add-coverage.sh" "$plan" 'The widget renders' W01,W02 'covered by render plus verify' >/dev/null

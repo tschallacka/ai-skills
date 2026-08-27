@@ -427,9 +427,10 @@ done
 
 **Two or fewer unambiguous inputs: positional**, with `[ "$#" -eq 2 ] || usage`.
 
-Ten positional arguments (`add-work-unit.sh`) is a defect: unnamed,
-order-dependent, unextendable, and impossible to read at a call site. Convert to
-flags when you touch such a script.
+Ten positional arguments is a defect: unnamed, order-dependent, unextendable,
+and impossible to read at a call site. `add-work-unit.sh` had such a form and it
+was removed outright rather than deprecated. Convert to flags when you touch
+such a script.
 
 Do not pre-scan `"$@"` into a `filtered_args` array to find `--help`. A flag loop
 handles `-h` in band, and the pre-scan trips `set -u` on bash 3.2 when the array

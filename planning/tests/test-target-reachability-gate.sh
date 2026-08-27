@@ -57,20 +57,21 @@ printf '<?php class Thing {}\n' > "$repo/app/code/Fake/Module/Model/Thing.php"
 # A template recorded as `source`, a discovery unit over the same template, a
 # unit with no target at all, and a plain PHP class: the shapes the type-gated
 # check waved through.
-"$script_dir/add-work-unit.sh" "$plan" W01 source \
-    app/code/Fake/Module/view/frontend/templates/history.phtml '#order_history' N/A \
-    'edit the template' '—' 01-goal 01-step-template >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W02 verification N/A 'reachability evidence' N/A \
-    'record the render route' '—' 01-goal 02-step-discovery >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W03 source \
-    app/code/Fake/Module/Model/Thing.php 'Thing::run()' N/A \
-    'edit the class' '—' 01-goal 03-step-class >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W04 source \
-    app/code/Fake/Module/view/frontend/templates/history.phtml N/A N/A \
-    'edit the template blind' '—' 01-goal 04-step-blind >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W05 discovery \
-    app/code/Fake/Module/view/frontend/templates/history.phtml '#order_history' N/A \
-    'record which route renders the template' '—' 01-goal 05-step-route >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W01 --type source --file app/code/Fake/Module/view/frontend/templates/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'edit the template' \
+    --depends-on '—' --goal 01-goal --step 01-step-template >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W02 --type verification --file N/A \
+    --scope 'reachability evidence' --subscope N/A --change 'record the render route' \
+    --depends-on '—' --goal 01-goal --step 02-step-discovery >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W03 --type source --file app/code/Fake/Module/Model/Thing.php \
+    --scope 'Thing::run()' --subscope N/A --change 'edit the class' \
+    --depends-on '—' --goal 01-goal --step 03-step-class >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W04 --type source --file app/code/Fake/Module/view/frontend/templates/history.phtml \
+    --scope N/A --subscope N/A --change 'edit the template blind' \
+    --depends-on '—' --goal 01-goal --step 04-step-blind >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W05 --type discovery --file app/code/Fake/Module/view/frontend/templates/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'record which route renders the template' \
+    --depends-on '—' --goal 01-goal --step 05-step-route >/dev/null
 
 log="$temporary_root/w01.log"
 assert_exit 0 'a source-typed template passes when nothing contradicts it' "$log" -- \

@@ -46,7 +46,9 @@ chmod +x "$tool" "$xml_leak" "$generated_php"
 plan="$repo/.plans/p"
 "$script_dir/create-plan.sh" "$plan" 'P1 rules' >/dev/null
 "$script_dir/add-goal.sh" "$plan" 01-goal 'G' 'an outcome' >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W01 source app/code/Foo/A.php 'A' N/A 'a' — 01-goal 01-step-x >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W01 --type source --file app/code/Foo/A.php \
+    --scope 'A' --subscope N/A --change 'a' \
+    --depends-on — --goal 01-goal --step 01-step-x >/dev/null
 add_para() {  # <paragraph-id> <content>
     "$script_dir/update-plan-content.sh" -sp "$plan" 01-goal/01-step-x "$1" "$2" >/dev/null 2>&1
 }

@@ -44,8 +44,12 @@ seed_plan() { # <plan-dir>
     local plan="$1"
     "$script_dir/create-plan.sh" "$plan" 'Overview fixture' >/dev/null
     "$script_dir/add-goal.sh" "$plan" 01-build 'Build' 'A thing' >/dev/null
-    "$script_dir/add-work-unit.sh" "$plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-build 01-step-a >/dev/null
-    "$script_dir/add-work-unit.sh" "$plan" W02 verification N/A v.sh N/A 'Verify A' 'W01' 01-build 02-step-v >/dev/null
+    "$script_dir/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
+        --scope 'A::x' --subscope N/A --change 'change A' \
+        --depends-on '—' --goal 01-build --step 01-step-a >/dev/null
+    "$script_dir/add-work-unit.sh" "$plan" --id W02 --type verification --file N/A \
+        --scope v.sh --subscope N/A --change 'Verify A' \
+        --depends-on 'W01' --goal 01-build --step 02-step-v >/dev/null
     "$script_dir/update-plan-content.sh" --testing-requirement "$plan" 01-build yes 'verification unit present' >/dev/null
     printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/01-step-a-testing.md"
     printf '# t\n\n## Automated tests\n\nx\n' > "$plan/01-build/steps/02-step-v-testing.md"

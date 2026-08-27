@@ -32,7 +32,9 @@ fail() { t_fail "$*"; }
 plan="$temporary_root/roster"
 "$script_dir/create-plan.sh" "$plan" scaffold >/dev/null
 "$script_dir/add-goal.sh" "$plan" 01-g 'G' 'an outcome' >/dev/null
-"$script_dir/add-work-unit.sh" "$plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$script_dir/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 
 # --- the B21 shape: removing the only unit leaves the scaffold ---------------
 rc=0
@@ -46,7 +48,9 @@ t_assert_eq "the add-scaffold placeholder survives an emptied roster" \
 
 # --- and the next add takes the normal path again -----------------------------
 rc=0
-"$script_dir/add-work-unit.sh" "$plan" W02 docs b.md 'B' N/A 'change B' '—' 01-g 02-step-b >/dev/null 2>&1 || rc=$?
+"$script_dir/add-work-unit.sh" "$plan" --id W02 --type docs --file b.md \
+    --scope 'B' --subscope N/A --change 'change B' \
+    --depends-on '—' --goal 01-g --step 02-step-b >/dev/null 2>&1 || rc=$?
 t_assert_eq "re-adding after an emptied roster exits 0" "$rc" 0
 t_assert_eq "inventory row present after re-add" \
     "$(grep -cF '| W02 |' "$plan/work-unit-inventory.md" || true)" 1
@@ -56,8 +60,12 @@ grep -qF '`W02` — change B' "$goal" || fail "roster entry missing after re-add
 plan_many="$temporary_root/many"
 "$script_dir/create-plan.sh" "$plan_many" many >/dev/null
 "$script_dir/add-goal.sh" "$plan_many" 01-g 'G' 'an outcome' >/dev/null
-"$script_dir/add-work-unit.sh" "$plan_many" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-"$script_dir/add-work-unit.sh" "$plan_many" W02 source b.php 'B::x' N/A 'change B' '—' 01-g 02-step-b >/dev/null
+"$script_dir/add-work-unit.sh" "$plan_many" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+"$script_dir/add-work-unit.sh" "$plan_many" --id W02 --type source --file b.php \
+    --scope 'B::x' --subscope N/A --change 'change B' \
+    --depends-on '—' --goal 01-g --step 02-step-b >/dev/null
 "$script_dir/remove-work-unit.sh" "$plan_many" W01 --confirm-cascade >/dev/null 2>&1
 many_goal="$plan_many/01-g/goal.md"
 t_assert_eq "surviving unit is relabelled §9.1" \

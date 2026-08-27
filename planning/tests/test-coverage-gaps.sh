@@ -34,8 +34,12 @@ expect_grep() {
 plan="$tmp/reconcile"
 "$scripts/create-plan.sh" "$plan" reconcile >/dev/null
 "$scripts/add-goal.sh" "$plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W02 source b.php 'B::x' N/A 'change B' W01 01-g 02-step-b >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W02 --type source --file b.php \
+    --scope 'B::x' --subscope N/A --change 'change B' \
+    --depends-on W01 --goal 01-g --step 02-step-b >/dev/null
 "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-g no 'research' >/dev/null
 goal_file="$plan/01-g/goal.md"
 # Directly exercise the reconcile lib (the shared engine) rather than only via add-work-unit.
@@ -105,8 +109,12 @@ PLANS_ROOT="$PLANS_ROOT" "$scripts/cleanup-plans.sh" epsilon -y >/dev/null 2>&1
 prop_plan="$tmp/prop"
 "$scripts/create-plan.sh" "$prop_plan" prop >/dev/null
 "$scripts/add-goal.sh" "$prop_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$prop_plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-"$scripts/add-work-unit.sh" "$prop_plan" W02 verification N/A 'v.sh' N/A 'Verify W01.' '—' 01-g 02-step-v >/dev/null
+"$scripts/add-work-unit.sh" "$prop_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$prop_plan" --id W02 --type verification --file N/A \
+    --scope 'v.sh' --subscope N/A --change 'Verify W01.' \
+    --depends-on '—' --goal 01-g --step 02-step-v >/dev/null
 "$scripts/update-plan-content.sh" --testing-requirement "$prop_plan" 01-g yes 'obs' >/dev/null
 printf '# V\n\n## Automated tests\n\nx\n' > "$prop_plan/01-g/steps/01-step-a-testing.md"
 printf '# V\n\n## Automated tests\n\nx\n' > "$prop_plan/01-g/steps/02-step-v-testing.md"
@@ -130,7 +138,9 @@ fi
 sum_plan="$tmp/sum"
 "$scripts/create-plan.sh" "$sum_plan" sum >/dev/null
 "$scripts/add-goal.sh" "$sum_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$sum_plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$sum_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 sum_md="$("$scripts/plan-content.sh" summary "$sum_plan" markdown 2>/dev/null)"
 expect_grep <(printf '%s' "$sum_md") 'Plan summary' 'summary markdown has title'
 expect_grep <(printf '%s' "$sum_md") 'W01' 'summary markdown lists unit'
@@ -160,7 +170,9 @@ expect_grep <(printf '%s' "$probe_out") 'spawn a fresh adversarial reviewer' 'ad
 mut="$tmp/mut"
 "$scripts/create-plan.sh" "$mut" mut >/dev/null
 "$scripts/add-goal.sh" "$mut" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$mut" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$mut" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 # remove the per-goal tracker so add-progress creates a fresh row for a
 # not-yet-tracked step (the append path), then rebuild rewrites from step files.
 rm -f "$mut/01-g/progress.md"
@@ -178,7 +190,9 @@ expect_grep "$mut/01-g/progress.md" '01-step-a' 'plan-mutate rebuild-progress re
 vt="$tmp/vt"
 "$scripts/create-plan.sh" "$vt" vt >/dev/null
 "$scripts/add-goal.sh" "$vt" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$vt" W01 markup app/design/frontend/Theme/templates/order/history.phtml '#order_history' N/A 'render history' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$vt" --id W01 --type markup --file app/design/frontend/Theme/templates/order/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'render history' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 repo="$tmp/vtrepo"
 mkdir -p "$repo/app/design/frontend/Theme/templates/order" "$repo/app/code/M/view/frontend/layout"
 printf 'template\n' > "$repo/app/design/frontend/Theme/templates/order/history.phtml"
@@ -191,7 +205,9 @@ expect_grep <(printf '%s' "$vt_out") 're-points block' 'verify-target flags setT
 vt2="$tmp/vt2"
 "$scripts/create-plan.sh" "$vt2" vt2 >/dev/null
 "$scripts/add-goal.sh" "$vt2" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$vt2" W01 markup app/code/M/view/frontend/templates/order/history.phtml '#order_history' N/A 'render history' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$vt2" --id W01 --type markup --file app/code/M/view/frontend/templates/order/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'render history' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 repo2="$tmp/vtrepo2"
 mkdir -p "$repo2/app/code/M/view/frontend/templates/order" "$repo2/app/design/frontend/Theme/templates/order"
 printf 'module\n' > "$repo2/app/code/M/view/frontend/templates/order/history.phtml"
@@ -256,7 +272,9 @@ chk "$rc_nonmain" 64 "role-context --paths non-maintainer refused"
 full_plan="$tmp/full"
 "$scripts/create-plan.sh" "$full_plan" full >/dev/null
 "$scripts/add-goal.sh" "$full_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$full_plan" W01 source a.php 'A::x' N/A "$(printf 'long%.0s' $(seq 1 60))" '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$full_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change "$(printf 'long%.0s' $(seq 1 60))" \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 full_out="$("$scripts/plan-content.sh" find "$full_plan" 'longlong' --in units --full 2>/dev/null || true)"
 truncated=false
 case "$full_out" in *'...'*) truncated=true ;; esac

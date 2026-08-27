@@ -79,8 +79,9 @@ fi
 plan_b="$temporary_root/p0-p1"
 "$script_dir/create-plan.sh" "$plan_b" 'P0 P1' >/dev/null
 "$script_dir/add-goal.sh" "$plan_b" 01-enable-module 'Enable module' 'Module enabled and site serves' >/dev/null
-"$script_dir/add-work-unit.sh" "$plan_b" W01 verification 'N/A' 'Config' 'N/A' \
-    'Enable the module; run setup:upgrade' 'none' 01-enable-module '01-step-x' >/dev/null
+"$script_dir/add-work-unit.sh" "$plan_b" --id W01 --type verification --file 'N/A' \
+    --scope 'Config' --subscope 'N/A' --change 'Enable the module; run setup:upgrade' \
+    --depends-on 'none' --goal 01-enable-module --step '01-step-x' >/dev/null
 "$script_dir/update-plan-content.sh" -sp "$plan_b" 01-enable-module/01-step-x 5.1 \
     'Edit etc/module.xml, etc/config.php, and db_schema.xml; run `setup:upgrade` then `bin/magento cache:flush`.' >/dev/null
 "$script_dir/create-step-testing.sh" "$plan_b/01-enable-module" 01-step-x \

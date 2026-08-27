@@ -24,10 +24,12 @@ plan="$work/plan"
 "$scripts/add-goal.sh" "$plan" 01-targets "Targets" "Validate concrete target rows." >/dev/null
 "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-targets yes \
     "The fixture includes a source unit and a verification unit." >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W01 source src/exists.sh target_symbol N/A \
-    "Touch the existing symbol." "—" 01-targets 01-step-existing >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W02 verification N/A verify-target N/A \
-    "Verify the existing symbol target." W01 01-targets 02-step-verify >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W01 --type source --file src/exists.sh \
+    --scope target_symbol --subscope N/A --change "Touch the existing symbol." \
+    --depends-on "—" --goal 01-targets --step 01-step-existing >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W02 --type verification --file N/A \
+    --scope verify-target --subscope N/A --change "Verify the existing symbol target." \
+    --depends-on W01 --goal 01-targets --step 02-step-verify >/dev/null
 "$scripts/add-coverage.sh" "$plan" "Existing target is covered." W01 "coverage" >/dev/null
 "$scripts/add-coverage.sh" "$plan" "Existing target is verified." W02 "coverage" >/dev/null
 "$scripts/create-step-testing.sh" "$plan/01-targets" 01-step-existing \
@@ -58,14 +60,16 @@ plan_writer="$work/writer-plan"
 "$scripts/create-plan.sh" "$plan_writer" "Writer target validation" >/dev/null
 "$scripts/add-goal.sh" "$plan_writer" 01-targets "Targets" "Validate writer targets." >/dev/null
 rc=0
-"$scripts/add-work-unit.sh" --repo-root "$subject" "$plan_writer" W01 source src/missing.sh target_symbol N/A \
-    "Touch a missing file." "—" 01-targets 01-step-missing >/dev/null 2>"$work/writer-missing.err" || rc=$?
+"$scripts/add-work-unit.sh" --repo-root "$subject" "$plan_writer" --id W01 --type source --file src/missing.sh \
+    --scope target_symbol --subscope N/A --change "Touch a missing file." \
+    --depends-on "—" --goal 01-targets --step 01-step-missing >/dev/null 2>"$work/writer-missing.err" || rc=$?
 [ "$rc" -ne 0 ] || t_fail "add-work-unit accepted a missing target under --repo-root"
 t_assert_contains "writer missing message" "Target file does not exist" "$(cat "$work/writer-missing.err")"
 
 rc=0
-"$scripts/add-work-unit.sh" --repo-root "$subject" "$plan_writer" W01 source src/exists.sh absent_symbol N/A \
-    "Touch a missing symbol." "—" 01-targets 01-step-missing-symbol >/dev/null 2>"$work/writer-symbol.err" || rc=$?
+"$scripts/add-work-unit.sh" --repo-root "$subject" "$plan_writer" --id W01 --type source --file src/exists.sh \
+    --scope absent_symbol --subscope N/A --change "Touch a missing symbol." \
+    --depends-on "—" --goal 01-targets --step 01-step-missing-symbol >/dev/null 2>"$work/writer-symbol.err" || rc=$?
 [ "$rc" -ne 0 ] || t_fail "add-work-unit accepted a missing symbol under --repo-root"
 t_assert_contains "writer symbol message" "Primary symbol or file scope was not found" "$(cat "$work/writer-symbol.err")"
 

@@ -46,13 +46,17 @@ seed_plan() { # <plan-dir>
 # --- the B20 shape: roster gone, add must refuse WITHOUT stranding ----------
 plan_broken="$temporary_root/broken"
 seed_plan "$plan_broken"
-"$script_dir/add-work-unit.sh" "$plan_broken" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$script_dir/add-work-unit.sh" "$plan_broken" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 strip_roster "$plan_broken/01-g/goal.md" > "$plan_broken/01-g/goal.md.new"
 mv "$plan_broken/01-g/goal.md.new" "$plan_broken/01-g/goal.md"
 
 rc=0
 out="$(mktemp "$temporary_root/refusal.XXXXXX")"
-"$script_dir/add-work-unit.sh" "$plan_broken" W02 docs b.md 'B' N/A 'change B' '—' 01-g 02-step-b >/dev/null 2>"$out" || rc=$?
+"$script_dir/add-work-unit.sh" "$plan_broken" --id W02 --type docs --file b.md \
+    --scope 'B' --subscope N/A --change 'change B' \
+    --depends-on '—' --goal 01-g --step 02-step-b >/dev/null 2>"$out" || rc=$?
 t_assert_eq "the call still refuses on an unusable roster" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
 grep -q 'no numbered Owned work units section' "$out" || fail "refusal message changed: $(cat "$out")"
 t_assert_eq "no inventory row was left behind" \
@@ -65,7 +69,9 @@ fi
 plan_ok="$temporary_root/ok"
 seed_plan "$plan_ok"
 rc=0
-"$script_dir/add-work-unit.sh" "$plan_ok" W03 source c.php 'C::x' N/A 'change C' '—' 01-g 03-step-c >/dev/null 2>&1 || rc=$?
+"$script_dir/add-work-unit.sh" "$plan_ok" --id W03 --type source --file c.php \
+    --scope 'C::x' --subscope N/A --change 'change C' \
+    --depends-on '—' --goal 01-g --step 03-step-c >/dev/null 2>&1 || rc=$?
 t_assert_eq "healthy-goal add exits 0" "$rc" 0
 t_assert_eq "inventory row present" "$(grep -cF '| W03 |' "$plan_ok/work-unit-inventory.md" || true)" 1
 if [ ! -f "$plan_ok/01-g/steps/03-step-c.md" ]; then

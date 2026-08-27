@@ -29,8 +29,10 @@ trap 'rm -rf "$temporary_root"' EXIT
 plan_units="$temporary_root/units"
 "$script_dir/create-plan.sh" "$plan_units" 'Unit labels' >/dev/null
 "$script_dir/add-goal.sh" "$plan_units" 00-g 'G' 'an outcome' >/dev/null
-add_unit() {
-    "$script_dir/add-work-unit.sh" "$plan_units" "$@" >/dev/null 2>&1
+add_unit() { # <id> <type> <file> <scope> <subscope> <change> <depends-on> <goal> <step>
+    "$script_dir/add-work-unit.sh" "$plan_units" --id "$1" --type "$2" --file "$3" \
+        --scope "$4" --subscope "$5" --change "$6" --depends-on "$7" \
+        --goal "$8" --step "$9" >/dev/null 2>&1
 }
 add_unit W01 source app/code/X/A.php 'A::run()' N/A 'a' — 00-g 01-step-a
 add_unit W02 test app/code/X/ATest.php 'ATest' N/A 'b' W01 00-g 02-step-b

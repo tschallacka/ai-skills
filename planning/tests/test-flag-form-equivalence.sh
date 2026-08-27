@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-flag-form-equivalence — the named-flag form of the helpers that used to
-# take many positional arguments must produce byte-identical documents to the
-# deprecated positional form.
+# test-flag-form-equivalence — the named-flag form of the helpers that also take
+# many positional arguments must produce byte-identical documents to the
+# positional form, and add-work-unit.sh, which no longer has one, must refuse a
+# positional call without writing anything.
 #
 # Usage: test-flag-form-equivalence.sh
 #
-# add-work-unit.sh took 10 positional arguments, add-ui-story.sh and
-# configure-ui-story-cache.sh took 7. They now accept named flags, and the
-# positional form is kept working for existing callers (plan-mutate.sh, SKILL.md
-# and the other tests all still use it). This test builds the same plan twice —
-# once each way — and diffs the trees, so the deprecated path cannot silently
-# drift away from the documented one. It also covers add-adversarial-finding.sh's
-# --status and --work-unit, the latter being the gated form that mints fix keys.
+# add-ui-story.sh and configure-ui-story-cache.sh take 7 positional arguments or
+# the named flags; this test builds the same plan twice — once each way — and
+# diffs the trees, so neither path can silently drift from the other.
+#
+# add-work-unit.sh takes the flags only. Its section asserts the refusal plus the
+# absence of all three writes it makes on success: a call that refuses after
+# landing one of them is the defect worth catching. It also covers
+# add-adversarial-finding.sh's --status and --work-unit, the latter being the
+# gated form that mints fix keys.
 set -euo pipefail
 export LC_ALL=C
 
@@ -37,25 +40,17 @@ build_plan() {
     "$script_dir/add-goal.sh" "$plan_dir" 01-render 'Render the control' \
         'The control renders and responds.' >/dev/null
 
-    if [ "$style" = flags ]; then
-        "$script_dir/add-work-unit.sh" "$plan_dir" \
-            --id W01 --type markup --file app/index.html \
-            --scope '#submit' --subscope N/A \
-            --change 'Add the submit control.' --depends-on '—' \
-            --goal 01-render --step 01-step-add-control >/dev/null 2>&1
-        "$script_dir/add-work-unit.sh" "$plan_dir" \
-            --id W02 --type verification --file N/A \
-            --scope 'validate-plan.sh' --subscope N/A \
-            --change 'Verify the control renders.' --depends-on W01 \
-            --goal 01-render --step 02-step-verify-control >/dev/null 2>&1
-    else
-        "$script_dir/add-work-unit.sh" "$plan_dir" W01 markup app/index.html \
-            '#submit' N/A 'Add the submit control.' '—' \
-            01-render 01-step-add-control >/dev/null 2>&1
-        "$script_dir/add-work-unit.sh" "$plan_dir" W02 verification N/A \
-            'validate-plan.sh' N/A 'Verify the control renders.' W01 \
-            01-render 02-step-verify-control >/dev/null 2>&1
-    fi
+    # add-work-unit.sh has one argument form, so it is outside the style branch.
+    "$script_dir/add-work-unit.sh" "$plan_dir" \
+        --id W01 --type markup --file app/index.html \
+        --scope '#submit' --subscope N/A \
+        --change 'Add the submit control.' --depends-on '—' \
+        --goal 01-render --step 01-step-add-control >/dev/null 2>&1
+    "$script_dir/add-work-unit.sh" "$plan_dir" \
+        --id W02 --type verification --file N/A \
+        --scope 'validate-plan.sh' --subscope N/A \
+        --change 'Verify the control renders.' --depends-on W01 \
+        --goal 01-render --step 02-step-verify-control >/dev/null 2>&1
 
     "$script_dir/create-ui-validation.sh" "$plan_dir" \
         'Serve index.html from a local static HTTP server.' >/dev/null
@@ -98,7 +93,23 @@ if ! diff -r -x '.git' -x '.env' "$positional_plan" "$flag_plan" >"$temporary_ro
     cat "$temporary_root/tree.diff" >&2
     exit 1
 fi
-printf '%s\n' 'flag-form: add-work-unit/add-ui-story/configure-ui-story-cache flag == positional'
+printf '%s\n' 'flag-form: add-ui-story/configure-ui-story-cache flag == positional'
+
+# --- add-work-unit.sh takes the flags and nothing else ------------------------
+set +e
+"$script_dir/add-work-unit.sh" "$flag_plan" W90 markup app/index.html \
+    '#legacy' N/A 'Add the legacy control.' '—' \
+    01-render 90-step-legacy >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 64 ] || fail "a positional add-work-unit call exited $rc, expected 64"
+! grep -Fq '| W90 |' "$flag_plan/work-unit-inventory.md" \
+    || fail 'the refused positional call left an inventory row'
+[ ! -e "$flag_plan/01-render/steps/90-step-legacy.md" ] \
+    || fail 'the refused positional call left a step file'
+! grep -Fq 'W90' "$flag_plan/01-render/goal.md" \
+    || fail 'the refused positional call left a goal roster entry'
+printf '%s\n' 'flag-form: add-work-unit refuses a positional call and writes nothing'
 
 # A flag form that omits a required value must fail with the usage code, not
 # silently write a half-populated row.

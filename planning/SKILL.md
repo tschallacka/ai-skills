@@ -471,9 +471,10 @@ the bundled commands instead of patching table rows:
 PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/add-coverage.sh" <plan-directory> \
   "<required outcome or proof>" W01,W02 "<why these units cover it>"
-"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 source \
-  path/to/file 'Class::method()' N/A "<one concrete change>" '—' \
-  01-<goal> 01-step-<slug>
+"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> \
+  --id W01 --type source --file path/to/file --scope 'Class::method()' \
+  --subscope N/A --change "<one concrete change>" --depends-on '—' \
+  --goal 01-<goal> --step 01-step-<slug>
 ```
 
 `add-work-unit.sh` creates both the inventory row and its matching atomic step
@@ -1261,7 +1262,7 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 "$PLANNING_SKILL_DIR/scripts/add-ui-story.sh" <plan-directory> US-01 "<persona>" "<browser actions>" "<direct interaction>" "<expected result>" W01,W02
 "$PLANNING_SKILL_DIR/scripts/configure-ui-story-cache.sh" <plan-directory> US-01 "<starting state>" "<direct UI input>" "<target/value>" "<readiness signal>" "<maximum wait>"
 "$PLANNING_SKILL_DIR/scripts/add-goal.sh" <plan-directory> 01-<goal> "<title>" "<outcome>"
-"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> W01 <type> <file|N/A> <scope> <subscope|N/A> "<change>" <dependencies|—> 01-<goal> 01-step-<slug>
+"$PLANNING_SKILL_DIR/scripts/add-work-unit.sh" <plan-directory> --id W01 --type <type> --file <file|N/A> --scope <scope> --subscope <subscope|N/A> --change "<change>" --depends-on <dependencies|—> --goal 01-<goal> --step 01-step-<slug>
 "$PLANNING_SKILL_DIR/scripts/update-work-unit.sh" <plan-directory> W01 --depends-on "W23,W24"   # change scope/file/type/depends-on/description in place; retargeting lists the verification units that grade it
 Ordering note: goals and steps only append (`NN-kebab-case` is enforced, no
 renumbering helper exists). Appending plus a prose "execution order differs

@@ -23,7 +23,9 @@ usage() {
     cat <<USAGE
 Usage:
   ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
-  ${0##*/} add-work-unit <plan> <WNN> <type> <file|N/A> <scope> <subscope|N/A> <change> <depends-on|—> <goal> <step>
+  ${0##*/} add-work-unit <plan> --id <WNN> --type <type> --file <file|N/A> --scope <scope>
+      --subscope <subscope|N/A> --change <change> --depends-on <depends-on|—>
+      --goal <goal> --step <step>
   ${0##*/} add-testing <goal-directory> <step-name> <verification-instructions>
   ${0##*/} add-progress <goal-directory> <step-name> <description>
   ${0##*/} rebuild-progress <goal-directory>
