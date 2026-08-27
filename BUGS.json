@@ -623,7 +623,7 @@
     {
       "id": "B47",
       "title": "The socat rung of the served overview answers nothing on any shell",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -636,17 +636,17 @@
         "planning/scripts/runtime/overview-serve-handler.sh",
         "planning/tests/test-overview-serve.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "aeb8c44: handler resolves siblings from the skill root (correct in-tree and installed), speaks full HTTP/1.0 with status line + Content-Length via one respond helper; overview-serve.sh exports PLAN_DIR into the socat SYSTEM shell",
+      "verification": "with socat on PATH, test-overview-serve exercises the socat rung and all its assertions pass (state.json equals extractor, / serves the artifact, /sections slices, bogus ids 404); verified under bash 5.3",
       "found_by": "local ./verify-both-shells.sh on 704484d, reproduced at 06b3c30",
       "notes": "CI blindness is the second half of this: installing socat on the runners, or making the test declare a skip when socat is absent, is what stops a green suite from overstating its reach. Separately, the home worker reported fixing a macOS loopback-port timeout on this branch; that fix is included in 704484d, and this failure is on Linux with all four rungs available, so the two are not the same problem. Related: B48 — the same rung's assertions never run in CI, so this defect could ship unnoticed. B47 is the rung answering nothing; B48 is CI being unable to see it. Fixing either leaves the other open.",
       "created_at": "2026-08-27T07:44:28Z",
-      "updated_at": "2026-08-27T07:47:15Z"
+      "updated_at": "2026-08-27T08:10:02Z"
     },
     {
       "id": "B48",
       "title": "CI has no socat, so the socat rung's assertions never run and a green suite overstates its reach",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -658,12 +658,12 @@
         "planning/tests/test-overview-serve.sh",
         ".github/workflows"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "aeb8c44: both suite legs install socat (apt/brew) so the rung runs on all three CI legs; absent runtimes print greppable SKIP lines and every run ends with a 'rungs exercised' reach summary plus an INCOMPLETE RUNG COVERAGE marker when coverage was partial — skips are visible, not silent, and not failures",
+      "verification": "locally: with socat the summary reads 'python3 perl socat'; stripped from PATH the log shows the SKIP line for socat and INCOMPLETE marker; CI legs now install socat before run-tests",
       "found_by": "splitting B47, which had bundled two defects",
       "notes": "Related: B47 — the concrete failure this blindness hides. B48 is the coverage gap; B47 is the broken rung. Fixing either leaves the other open.",
       "created_at": "2026-08-27T07:46:50Z",
-      "updated_at": "2026-08-27T07:47:06Z"
+      "updated_at": "2026-08-27T08:10:02Z"
     },
     {
       "id": "B14",
