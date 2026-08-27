@@ -19,14 +19,21 @@ channels, and pure-bash helpers to send, read, or tail.
   shell, and the same verbs as subcommands of the binary where there is not —
   so a Windows agent is a participant, not a spectator. No client runtime, no
   daemon babysitting.
-- **A debug server never disturbs a live one.** Name its port explicitly and it
-  advertises nowhere a normal client looks, so nothing wanders onto it.
+- **You choose the transport, once.** First run asks: a unix socket with no port
+  at all, a port on loopback, or a port on every interface — with the last one
+  spelling out that it puts an unauthenticated bus on the network. The answer is
+  recorded where the server and every client read it. No terminal, no question,
+  and nothing recorded.
+- **A debug server never disturbs a live one.** Name its endpoint explicitly and
+  it advertises nowhere a normal client looks, and never touches the recorded
+  transport, so nothing wanders onto it.
 
 ## Quick start
 
-> Start the chat server on the standard port.
+> Start the chat server. (It asks how it should listen, once.)
 > Send to #deploys: smoke tests green, promoting.
 > Read #deploys since the last id I saw.
+> Show me the chat transport that is configured.
 
 ## Good to know
 

@@ -24,17 +24,20 @@
 //! deliberately not papered over here: watching the log for outside appends is
 //! a design change, not a bug fix.
 
+use crate::net::Conn;
 use crate::store::{valid_nick, Channel, Joined, Store};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// A connected client, as seen by everyone else: somewhere to write, and the
 /// channels it wants pushes for.
+///
+/// Boxed rather than a concrete stream type, because the same hub serves a TCP
+/// port and a unix socket and the protocol above this line cannot tell which.
 struct Peer {
-    out: TcpStream,
+    out: Box<dyn Write + Send>,
     chans: Joined,
 }
 
@@ -57,22 +60,15 @@ impl Hub {
     /// Serve one connection to completion. Errors are reported to the client
     /// where the protocol has a reply for them and swallowed where it does not,
     /// because one client's broken pipe must not take the server down.
-    pub fn serve(self: &Arc<Self>, stream: TcpStream) {
+    pub fn serve(self: &Arc<Self>, conn: Conn) {
         let id = self.next_peer.fetch_add(1, Ordering::Relaxed);
-        let reader = match stream.try_clone() {
-            Ok(s) => BufReader::new(s),
-            Err(_) => return,
-        };
-        let writer = match stream.try_clone() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let reader = BufReader::new(conn.read);
         {
             let mut peers = self.peers.lock().unwrap_or_else(|e| e.into_inner());
             peers.insert(
                 id,
                 Peer {
-                    out: writer,
+                    out: conn.push,
                     chans: Joined::new(),
                 },
             );
@@ -80,7 +76,7 @@ impl Hub {
         // Documented default: anon-<n>, and it changes on every reconnect. It
         // is not unique — nick uniqueness is not enforced, by design.
         let mut nick = format!("anon-{id}");
-        let mut out = stream;
+        let mut out = conn.write;
         for raw in reader.lines() {
             let line = match raw {
                 Ok(l) => l,
@@ -90,7 +86,7 @@ impl Hub {
             if line.is_empty() {
                 continue;
             }
-            match self.dispatch(id, &mut nick, line, &mut out) {
+            match self.dispatch(id, &mut nick, line, out.as_mut()) {
                 Ok(true) => {}
                 Ok(false) => break, // QUIT
                 Err(()) => break,   // the socket is gone
@@ -106,7 +102,7 @@ impl Hub {
         id: u64,
         nick: &mut String,
         line: &str,
-        out: &mut TcpStream,
+        out: &mut dyn Write,
     ) -> Result<bool, ()> {
         let (verb, arg) = match line.split_once(' ') {
             Some((v, rest)) => (v, rest.trim()),
@@ -166,7 +162,7 @@ impl Hub {
     /// B59: the two ways this can be malformed get two different messages. The
     /// python tier answers a bad channel with the empty-text usage line, which
     /// sends the caller looking at the wrong argument.
-    fn privmsg(&self, id: u64, nick: &str, arg: &str, out: &mut TcpStream) -> Result<bool, ()> {
+    fn privmsg(&self, id: u64, nick: &str, arg: &str, out: &mut dyn Write) -> Result<bool, ()> {
         let (chan_raw, text) = match arg.split_once(" :") {
             Some((c, t)) => (c, t),
             None => return reply(out, "ERR usage: PRIVMSG #chan :text"),
@@ -190,7 +186,7 @@ impl Hub {
         }
     }
 
-    fn fetch(&self, arg: &str, out: &mut TcpStream) -> Result<bool, ()> {
+    fn fetch(&self, arg: &str, out: &mut dyn Write) -> Result<bool, ()> {
         let (chan_raw, since_raw) = match arg.split_once(' ') {
             Some((c, s)) => (c, s.trim()),
             None => (arg, "0"),
@@ -226,7 +222,7 @@ impl Hub {
 
 /// One reply line. A write failure means the client is gone, which is not an
 /// error worth logging once per line.
-fn reply(out: &mut TcpStream, text: &str) -> Result<bool, ()> {
+fn reply(out: &mut dyn Write, text: &str) -> Result<bool, ()> {
     writeln!(out, "{text}").map_err(|_| ())?;
     out.flush().map_err(|_| ())?;
     Ok(true)

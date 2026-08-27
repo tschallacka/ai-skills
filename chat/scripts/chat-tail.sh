@@ -45,7 +45,27 @@ done
 [ -n "$chan" ] || usage
 case "$chan" in '#'[a-z0-9_-]*) ;; *) printf '%s: channel must be #lowercase\n' "${0##*/}" >&2; exit 64 ;; esac
 case "$interval" in ''|*[!0-9]*|0*) interval=1 ;; esac
-[ -z "$port" ] && [ -n "$host" ] && port=7717
+# The transport, in precedence order: an explicit --host/--port wins, then the
+# recorded config, then the built-in default. Sourced rather than reimplemented
+# three times, because three copies of a precedence rule is three chances to
+# disagree with the binary about where the bus is.
+# shellcheck source=chat/scripts/lib-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-config.sh"
+if [ -z "$host" ]; then
+    chat_config_target "$HOME_DIR" "${0##*/}"
+    host="$CHAT_USE_HOST"
+    [ -n "$port" ] || port="$CHAT_USE_PORT"
+else
+    # --host with no --port takes the recorded port, so a bus moved off the
+    # default does not have to be spelled out twice.
+    if [ -z "$port" ]; then
+        chat_config_load "$HOME_DIR"
+        case "$CHAT_TRANSPORT" in
+            tcp) port="$CHAT_CFG_PORT" ;;
+            *) port="$CHAT_DEFAULT_PORT" ;;
+        esac
+    fi
+fi
 
 if [ -n "$host" ]; then
     exec 3<> "/dev/tcp/$host/$port"
