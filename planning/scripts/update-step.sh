@@ -109,6 +109,27 @@ mv "$temporary_file" "$progress_file"
 
 printf 'Updated %s (%s: %s)\n' "$progress_file" "$step_name" "$requested_status"
 
+# --- atomicity boxes follow the status -------------------------------------
+# Reverting to incomplete clears the boxes and any VIOLATION annotation: the
+# evidence that ticked them was a completion diff that no longer stands, and a
+# ticked box on an unexecuted step is an assertion nothing made (B64).
+if [ "$requested_status" = "incomplete" ]; then
+    step_file="$goal_dir/steps/$step_name.md"
+    if [ -f "$step_file" ]; then
+        awk '
+            BEGIN {
+                n = split("This step owns exactly one inventory work unit.\nNo other file, symbol, test target, or verification flow changes here.\nAny follow-on target has a separately named work unit and step.", want, "\n")
+            }
+            {
+                for (i = 1; i <= n; i++)
+                    if (index($0, "- [x] " want[i]) == 1 || index($0, "- [X] " want[i]) == 1)
+                        $0 = "- [ ] " want[i]
+                print
+            }
+        ' "$step_file" > "$temporary_file" && mv "$temporary_file" "$step_file"
+    fi
+fi
+
 # --- mechanical atomicity check (W05) --------------------------------------
 [ "$requested_status" = "completed" ] || exit 0
 [ -n "$repo_root" ] && [ -n "$unit_id" ] || exit 0

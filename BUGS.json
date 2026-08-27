@@ -975,6 +975,49 @@
       "updated_at": "2026-08-27T13:09:01Z"
     },
     {
+      "id": "B63",
+      "title": "chat-server.sh start prints a port the server is not listening on",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-server.sh start --bind 0.0.0.0 --port 7717; bash chat/scripts/chat-server.sh status; ss -ltnp | awk '/<pid>/'",
+      "observed": "start printed 'chat-server up: pid 1117766, port 45477, runtime python3'; status printed 'running: pid 1117766, port 7717, bind 0.0.0.0'; ss showed LISTEN 0.0.0.0:7717 for that pid. The requested port was honoured, so the start line's number is wrong, not the bind.",
+      "expected": "The start line reports the port the process is actually listening on, since that is the number an operator copies to configure a client.",
+      "mechanism": null,
+      "surfaces": [
+        "chat/scripts/chat-server.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, starting the server for the aiskills channel",
+      "notes": null,
+      "created_at": "2026-08-27T21:05:15Z",
+      "updated_at": "2026-08-27T21:05:15Z"
+    },
+    {
+      "id": "B64",
+      "title": "update-step.sh leaves the atomicity boxes ticked when a step returns to incomplete",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash planning/scripts/update-step.sh <plan>/<goal> <step> incomplete; awk '/^- \\[/' <plan>/<goal>/steps/<step>.md",
+      "observed": "The three atomicity lines still read '- [x]' after the step is set back to incomplete. In .plans/plan-overview-rebuild, 74 of 109 steps carry '- [x]' on all three lines while their progress rows read 'incomplete', so they assert a mechanical check that has never run.",
+      "expected": "Reverting a step to incomplete clears the boxes, because the evidence that ticked them is the git diff of a completion that no longer stands. A ticked box on an unexecuted step is an unearned assertion, and an adversarial reviewer reads it as one.",
+      "mechanism": "update-step.sh ticks the boxes only on the completion path, from the --unit and --repo-root evidence comparison; the incomplete and in-progress paths write the progress row and never touch the step file's checklist, so a tick is write-once.",
+      "surfaces": [
+        "planning/scripts/update-step.sh",
+        "planning/scripts/plan-progress-lib.sh"
+      ],
+      "fix": "update-step.sh: an incomplete revert now clears the three atomicity boxes and any VIOLATION annotation, leaving completion the only path that ticks them",
+      "verification": "planning/tests/test-step-atomicity-reset.sh, four assertions, proven against three mutations of the fix: removing the reset block leaves 3 of 3 boxes ticked and the annotation behind; widening the condition from incomplete to not-completed also resets on in-progress and fails assertion 3; unticking with a sub() that keeps the suffix fails the annotation assertion. The restored version passes. Assertion 4 completes the step with a matching git diff and requires all three boxes ticked, so the fix cannot be implemented by never ticking. Applied to plan-overview-rebuild: 73 steps that carried ticks while their progress rows read incomplete are now clear, and validate-plan still passes at 109 units across 16 goals.",
+      "found_by": "main session, after an adversarial reviewer filed the inverse reading of the same state",
+      "notes": null,
+      "created_at": "2026-08-27T21:10:44Z",
+      "updated_at": "2026-08-27T21:14:33Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -1360,27 +1403,6 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
-    },
-    {
-      "id": "B63",
-      "title": "chat-server.sh start prints a port the server is not listening on",
-      "status": "reported",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "bash chat/scripts/chat-server.sh start --bind 0.0.0.0 --port 7717; bash chat/scripts/chat-server.sh status; ss -ltnp | awk '/<pid>/'",
-      "observed": "start printed 'chat-server up: pid 1117766, port 45477, runtime python3'; status printed 'running: pid 1117766, port 7717, bind 0.0.0.0'; ss showed LISTEN 0.0.0.0:7717 for that pid. The requested port was honoured, so the start line's number is wrong, not the bind.",
-      "expected": "The start line reports the port the process is actually listening on, since that is the number an operator copies to configure a client.",
-      "mechanism": null,
-      "surfaces": [
-        "chat/scripts/chat-server.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, starting the server for the aiskills channel",
-      "notes": null,
-      "created_at": "2026-08-27T21:05:15Z",
-      "updated_at": "2026-08-27T21:05:15Z"
     }
   ]
 }
