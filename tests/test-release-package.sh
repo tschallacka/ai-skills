@@ -136,6 +136,6 @@ rc=0
 t_assert_eq 'the extracted package installs a skill' "$rc" '0'
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-    "SKILL.md requires.tsv schema.$version.json "
+    "SKILL.md docs requires.tsv schema.$version.json "
 
 t_end

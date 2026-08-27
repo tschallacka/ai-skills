@@ -47,6 +47,7 @@ skill_files() {
         planning)
             cat <<'EOF'
 SKILL.md
+docs/README.md
 REVIEWER.md
 references/plan-read-contract.md
 references/ui-user-story-validation.md
@@ -336,33 +337,34 @@ tests/test-voice-artifact-drift.sh
 EOF
             ;;
         project-specificies)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         resource-limited-testing)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
             local file
             for file in "$SOURCE_ROOT/resource-limited-testing/scripts/"*.sh; do
                 [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
             done
             ;;
         brainstorm)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         git-worktrees)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)
-            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
             ;;
         bug-report)
-            printf '%s\n' SKILL.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
             ;;
         post-implementation-review)
-            printf '%s\n' SKILL.md requires.tsv
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         chat)
             cat <<'CHATEOF'
 SKILL.md
+docs/README.md
 requires.tsv
 scripts/chat-server.sh
 scripts/chat-register.sh

@@ -8,15 +8,15 @@ compatible agent tools.
 
 | Skill | Purpose | Documentation |
 |---|---|---|
-| Planning | Creates durable plans with goals, steps, verification, progress tracking, and handoffs. | [planning/SKILL.md](planning/SKILL.md) |
-| Bug report | A defect register in one JSON file read with jq: every entry carries its reproduction, what was observed against what was expected, the mechanism, and the verification that fails without the fix. | [bug-report/SKILL.md](bug-report/SKILL.md) |
-| Todo | A queue of work that outlives the conversation, in one JSON file read with jq: items nest under items, every closed item carries its evidence, and the read recipes print user-ready output so nothing is reformatted by hand. | [todo/SKILL.md](todo/SKILL.md) |
-| Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [brainstorm/SKILL.md](brainstorm/SKILL.md) |
-| Post-implementation review | After-the-fact review of built code with proposed fixes, backed by implementer analysis, an independent solutions agent, and a critical-feedback agent. | [post-implementation-review/SKILL.md](post-implementation-review/SKILL.md) |
-| Project-specific deviations | Records confirmed project behavior and environment quirks that future agents should not rediscover. | [project-specificies/SKILL.md](project-specificies/SKILL.md) |
-| Resource-limited testing | Runs resource-intensive commands under platform-appropriate CPU and memory controls. | [resource-limited-testing/SKILL.md](resource-limited-testing/SKILL.md) |
-| Chat | IRC-basis message bus for agents: channels with send/read/delta/tail helpers; server falls back through python3/node/perl/socat. | [chat/SKILL.md](chat/SKILL.md) |
-| Git worktrees | Parallel agents in one repository: isolated worktree verification, per-agent trees, and merging back without trampling the main checkout. | [git-worktrees/SKILL.md](git-worktrees/SKILL.md) |
+| Planning | Durable, resumable plans: goals, ordered steps, verification, progress trackers, handoff notes — plus a single-file HTML overview of any plan, and a live served version that updates in place. Steps complete with git-diff atomicity evidence, not decorative checkboxes. | [docs](planning/docs/README.md) |
+| Bug report | A defect register in one JSON file: every entry carries its reproduction, observed vs expected, the mechanism, and the verification that fails without the fix. `bug-add`/`bug-update` write through shared validation; a closure without proof is refused. | [docs](bug-report/docs/README.md) |
+| Todo | A work queue that outlives the conversation, in one JSON file: nested tasks, every closed item carries its evidence. `todo-add`/`todo-update` keep the register sound; read recipes print user-ready output. | [docs](todo/docs/README.md) |
+| Brainstorm | Shapes an under-specified idea into a recorded, agreed picture (`brainstorm.md`) before planning, with an adversarial completion pass and a plan-vs-implement gate. | [docs](brainstorm/docs/README.md) |
+| Post-implementation review | After-the-fact review of built code with concrete proposed fixes, in three passes: implementer self-analysis, an independent solutions agent, and a critical-feedback agent that ranks every fix. | [docs](post-implementation-review/docs/README.md) |
+| Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specificies/docs/README.md) |
+| Resource-limited testing | Runs heavyweight commands (suites, builds, analyzers, browsers) under platform-appropriate CPU/memory caps, with honest degradation when a platform has no cap mechanism. | [docs](resource-limited-testing/docs/README.md) |
+| Chat | IRC-basis message bus for agents: one persistent server (runtime falls back through python3/node/perl/socat+bash), channels, and pure-bash helpers to send, read a delta since an id, or tail a stream. | [docs](chat/docs/README.md) |
+| Git worktrees | Parallel agents in one repository: isolated worktree verification, per-agent trees, and merging back in a conflict-aware order without trampling the main checkout. | [docs](git-worktrees/docs/README.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.
