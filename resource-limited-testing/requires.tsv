@@ -19,4 +19,5 @@
 # format that needed jq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
 tool	condition	strength	why
+bash	*:*	hard	the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command
 memlimit	Darwin:arm64	soft	enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only

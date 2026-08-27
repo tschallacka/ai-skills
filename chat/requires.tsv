@@ -12,6 +12,7 @@
 # send/read/tail against an existing log never needed a server and keep working.
 
 tool	condition	strength	why	group
+bash	*:*	hard	the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler
 python3	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
 node	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
 perl	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
