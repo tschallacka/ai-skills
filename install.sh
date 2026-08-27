@@ -2900,6 +2900,7 @@ EOF
 SKILL.md
 docs/README.md
 requires.tsv
+binaries.tsv
 scripts/chat-server.sh
 scripts/chat-register.sh
 scripts/chat-send.sh

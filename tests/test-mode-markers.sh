@@ -81,6 +81,11 @@ exempt() { # <path> → prints the reason, or nothing
             printf 'structured data with its own cross-check\n' ;;
         *.gitignore)
             printf 'read by git, not by the skill\n' ;;
+        # bin/<rust target triple>/<binary>: a compiled artifact has no comment
+        # syntax at all. The skill's binaries.tsv is the registration that
+        # ships it, and tests/test-shipped-binaries.sh cross-checks the two.
+        */bin/*-*-*/*)
+            printf 'a compiled artifact; declared by the skill binaries.tsv\n' ;;
     esac
 }
 
