@@ -159,16 +159,23 @@ pub enum Range {
 
 /// `chat read #chan` — the delta, the tail, or everything.
 pub fn read(chan: &Channel, range: &Range, target: &Target) -> Result<Vec<String>, String> {
+    // --since is the one range the wire understands, so ask for it rather than
+    // pulling the whole log across and discarding most of it. --last has no wire
+    // form, so it is still filtered here, over one FETCH from 0.
+    let ask_from = match range {
+        Range::Since(n) => *n,
+        _ => 0,
+    };
     let rows = match target {
         Target::Local(home) => {
             let store = Store::new(home).map_err(|e| e.to_string())?;
-            store.fetch(chan, 0)
+            store.fetch(chan, ask_from)
         }
-        Target::Remote { host, port } => fetch_remote(chan, 0, host, *port)?,
+        Target::Remote { host, port } => fetch_remote(chan, ask_from, host, *port)?,
     };
     Ok(match range {
-        // Filtering here rather than in the FETCH keeps one code path for both
-        // targets, and --last has no wire form to ask for anyway.
+        // Already filtered by ask_from; the filter stays as the belt to that
+        // braces, since a server is free to send more than was asked for.
         Range::Since(n) => rows
             .into_iter()
             .filter(|r| msg_id(r).is_some_and(|id| id > *n))
