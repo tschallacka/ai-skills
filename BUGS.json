@@ -690,6 +690,70 @@
       "updated_at": "2026-08-27T09:36:11Z"
     },
     {
+      "id": "B52",
+      "title": "chat bash-handler with_lock leaves the channel lock directory behind when the locked command fails",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Copy with_lock/bail/chan_path verbatim from chat/runtime/bash-handler.sh:38-51 into a script with set -euo pipefail, then call: with_lock '#x' failing_cmd, where failing_cmd() { return 3; }. Then ls the channel directory.",
+      "observed": "Script exits 3 at the \"$@\" line; the following 'AFTER with_lock returned normally' line never prints; ls shows the lock still present: drwxrwxr-x 2 mdibbets mdibbets 40 '#x.log.lock'.",
+      "expected": "The lock directory is removed whether the locked command succeeds or fails, as chat/scripts/chat-send.sh:70 achieves with a trap.",
+      "mechanism": "bash-handler.sh runs under set -euo pipefail. In with_lock the sequence is the expanded command, then rc=$?, then rmdir. A failing command is a simple command in no conditional context, so set -e exits the shell on that line and both the rc assignment and the rmdir are unreachable. On the socat tier each connection is its own process, so the process dies holding the lock and the directory persists. Every later connection to that channel then spins LOCK_TRIES=200 times 0.05s and answers ERR lock timeout until the directory is removed by hand. Contrast chat-send.sh:70, which uses a trap and is correct.",
+      "surfaces": [
+        "chat/runtime/bash-handler.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:05:41Z",
+      "updated_at": "2026-08-27T13:05:41Z"
+    },
+    {
+      "id": "B56",
+      "title": "chat python3 and node tiers allocate the next message id from the last log line instead of the highest, so a new message can take an id below one already stored",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Seed a channel log with out-of-order ids, then send through each tier: printf 'MSG #t 1 100 system :one\\nMSG #t 7 101 a :seven\\nMSG #t 3 102 b :three\\n' > $HOME/channels/'#t.log'; then chat-send.sh '#t' 'next id?' --host 127.0.0.1 --port $P against the python3 tier, the node tier, and locally with no --host.",
+      "observed": "python3 tier: MSG #t 4 ... probe :next id? -- node tier: MSG #t 4 ... probe :next id? -- local helper (awk max): MSG #t 8 ... probe :next id?. The two socket tiers produced id 4, which is lower than the id 7 already in the log.",
+      "expected": "All writers allocate max(id)+1, as chat-send.sh:71, bash-handler.sh:33 and server.pl:40 do, so ids stay monotonic and gap-free as SKILL.md guarantees.",
+      "mechanism": "server.py:66 is 'last = int(line.split(b\" \")[2])' and server.js:50 is 'last = parseInt(line.split(\" \")[2], 10) || last' - both assign the parsed id unconditionally rather than taking a maximum, so the value left in 'last' is the id of the final line, not the largest. server.pl:40 guards with '&& $1 > $last' and the awk in chat-send.sh:71 and bash-handler.sh:33 track a running max, so three of five writers are correct and two are not. Impact: SKILL.md promises the id is monotonic and gap-free and it is the cursor for every delta read, so an id below an existing one is invisible to any reader whose --since is already past it, and it collides on a second occurrence. Trigger is any log whose lines are not in ascending id order - a merged or restored log, or a hand edit.",
+      "surfaces": [
+        "chat/runtime/server.py",
+        "chat/runtime/server.js"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:08:08Z",
+      "updated_at": "2026-08-27T13:08:08Z"
+    },
+    {
+      "id": "B57",
+      "title": "chat server.py append dies on a log line it cannot parse, dropping the client connection with no error reply",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Put a non-MSG line in a channel log and send through the python3 tier: printf 'MSG #t 1 100 system :one\\n# hand-added note\\n' > $HOME/channels/'#t.log'; then on one connection send NICK probe, PRIVMSG #t :does this survive, PING, QUIT.",
+      "observed": "Only 'OK nick probe' comes back, then the connection ends - no stored MSG line, no PONG, no 'OK bye', and no ERR. server.log shows: File \"/tmp/pycrash/run/server.py\", line 66, in append / last = int(line.split(b\" \")[2]) / ValueError: invalid literal for int() with base 10: b'note\\n'. The node tier on the identical log answers MSG #t 2 ..., PONG and OK bye.",
+      "expected": "An unparseable log line is skipped (as server.js:50 does by testing startsWith('MSG ')), or at worst answered with an ERR line; the connection is not silently dropped.",
+      "mechanism": "server.py:64-68 iterates every line of the channel log and calls int() on the third space-separated field with no 'MSG ' prefix test and no try/except. Any line that is not a well-formed MSG raises ValueError, or IndexError if it has fewer than three fields. Handler.handle catches only ConnectionResetError and BrokenPipeError (server.py:164), so the exception escapes, the handler thread dies, and the socket closes without any reply. server.js:69 and :50 guard with a startsWith('MSG ') test and a '|| last' fallback, which is why node survives the same input. Note python3 is the first tier chat-server.sh selects, so this is the default runtime.",
+      "surfaces": [
+        "chat/runtime/server.py"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:08:33Z",
+      "updated_at": "2026-08-27T13:08:33Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -866,6 +930,49 @@
       "notes": "CI remains the syntax authority: it brings its own browser via npx and has always rendered these blocks. The local probes exist so the suite is green in the environment flake.nix declares without weakening rejection of real defects.",
       "created_at": "2026-08-24T08:47:14Z",
       "updated_at": "2026-08-24T08:47:14Z"
+    },
+    {
+      "id": "B51",
+      "title": "overview-server.py sends HTTP 200 with an empty body when the renderer fails, because it never checks the subprocess exit status",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "python3 planning/scripts/runtime/overview-server.py ~/.plans/codegraph-bash-indexing-v2 8913 & sleep 3; curl -s -o /tmp/big.html -w 'page: http=%{http_code} bytes=%{size_download}\\n' http://127.0.0.1:8913/",
+      "observed": "page route returns http=200 bytes=0 while /state.json returns http=200 bytes=341088. Running the same command the server builds directly exits 126 with: jq: Argument list too long. On a small plan with a 1 KB state the same page route returns 20646 bytes, so the failure is size-dependent.",
+      "expected": "A failed render must not be reported as success. The server should return a 500 carrying the renderer stderr rather than an empty body under a 200.",
+      "mechanism": "_render() calls subprocess.run(...) with capture_output and never inspects returncode. When the render fails the temp file it created is still empty, and it reads that back and returns an empty string, which is transmitted as a 200. Not a second defect: the same jq argument-length limit as the exit-126 renderer failure, masked by the unchecked status.",
+      "surfaces": [
+        "planning/scripts/runtime/overview-server.py",
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "adversarial review AR-09, cause reproduced and corrected during verification",
+      "notes": null,
+      "created_at": "2026-08-27T12:26:23Z",
+      "updated_at": "2026-08-27T12:26:23Z"
+    },
+    {
+      "id": "B60",
+      "title": "bug-add.sh --mechanism produces invalid JSON when the mechanism text contains a double quote",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "BUGS_JSON=/tmp/probe.json bash planning/scripts/bug-add.sh --title probe --reproduce probe --observed probe --expected probe --mechanism 'the value is \"quoted\" here'",
+      "observed": "jq: invalid JSON text passed to --argjson / Use jq --help for help with command-line options -- exit 2, nothing filed. Any mechanism text containing a double quote fails the same way; --observed, --reproduce and --expected are unaffected.",
+      "expected": "A mechanism containing a double quote (or a backslash) is stored verbatim and read back unchanged.",
+      "mechanism": "bug-add.sh:50 built the JSON string by hand as mechanism=\"\\\"$2\\\"\", wrapping the raw argument in literal quote characters, and passed the result through jq --argjson. --argjson parses its value as JSON, so an embedded double quote terminates the string early and the document is invalid; a backslash would corrupt it similarly. The hand-rolled wrapping existed so that omitting --mechanism could pass the bare literal null. Fixed by encoding the value with jq -Rs, which emits a properly escaped JSON string, while the default remains the literal null so the omitted case is unchanged. jq is verified present at bug-add.sh:34, before argument parsing, so using it during parsing is safe. --parent at :51 still uses the hand-rolled form; bug ids contain no quotes so it does not misbehave today, and it is left for a separate entry rather than widened into this one.",
+      "surfaces": [
+        "planning/scripts/bug-add.sh"
+      ],
+      "fix": "planning/scripts/bug-add.sh:50 — encode the --mechanism value with 'jq -Rs .' instead of wrapping it in literal quote characters; the default stays the bare literal null so the omitted-mechanism path is unchanged.",
+      "verification": "Mutation both ways against a temp register copy. With the original line 50, --mechanism 'the value is \"quoted\" here' fails: 'jq: invalid JSON text passed to --argjson', exit 2, nothing filed. With the fix, --mechanism 'value is \"quoted\" and has a \\backslash' files the entry and 'jq -r .bugs[-1].mechanism' reads back exactly 'value is \"quoted\" and has a \\backslash', with 'jq -e .bugs|length' confirming the register is still valid JSON. Omitting --mechanism still stores null. planning/tests/test-register-helpers.sh and planning/tests/test-add-planning-bug.sh both PASS, test-register-helpers.sh also PASSes under bash32-run (the 3.2 floor), and 'shellcheck -s bash --severity=error planning/scripts/bug-add.sh' is clean.",
+      "found_by": "chat-skill-developer agent (hit while filing the chat defects, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:08:50Z",
+      "updated_at": "2026-08-27T13:09:01Z"
     },
     {
       "id": "B6",
@@ -1062,6 +1169,70 @@
       "updated_at": "2026-08-27T09:36:12Z"
     },
     {
+      "id": "B53",
+      "title": "chat server.pl drop_client deletes from the hash %_ instead of %NICK and %INBUF, so per-connection state is never freed",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "perl -Mstrict -Mwarnings -e 'my (%NICK,%INBUF); $NICK{q(s1)}=q(n); $INBUF{q(s1)}=q(b); my $s=q(s1); delete $_{$s} for (\\%NICK, \\%INBUF); print join(q(,), keys %NICK), q(|), join(q(,), keys %INBUF), qq(\\n);'",
+      "observed": "Prints s1|s1 - both keys survive. Replacing the statement with 'delete $_->{$s} for (...)' prints | with both hashes empty. Perl emits no warning or error for the original form.",
+      "expected": "Closing a connection frees that connection's %NICK and %INBUF entries, so a long-lived perl-tier server does not grow with every connection served.",
+      "mechanism": "chat/runtime/server.pl:94 reads: delete the element keyed by the socket from a bare hash, for each of two hashrefs. The loop aliases the topic variable to each hashref, but the element syntax used means an element of the hash named by the punctuation variable, not a dereference of the topic variable. It therefore deletes from an unrelated and empty global hash. use strict does not catch this because that punctuation hash is exempt from strict vars, and use warnings is silent. The arrow dereference form is correct. Result: both hashes retain one entry per connection for the life of the process.",
+      "surfaces": [
+        "chat/runtime/server.pl"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:05:41Z",
+      "updated_at": "2026-08-27T13:05:41Z"
+    },
+    {
+      "id": "B54",
+      "title": "chat-server.sh accepts any --runtime value and executes it as the server",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-server.sh start --runtime bash --home /tmp/ch-a",
+      "observed": "chat-server.sh: server died during startup; log tail: bash: /tmp/ch-a/run/placeholder: No such file or directory -- exit 70.",
+      "expected": "An unrecognised --runtime value is rejected as a bad invocation (exit 64) naming the four accepted values, before anything is started.",
+      "mechanism": "chat-server.sh:44 stores the --runtime value verbatim with no membership check. pick_runtime at :71-77 uses that value as the candidate list for command -v, so any executable name on PATH resolves successfully. The two case blocks at :95-115 match only python3, node, perl and socat, so an unmatched name leaves the script variable at its default of RUN_DIR/placeholder set at :93, and the launcher runs the given executable against that non-existent path. The port file is therefore never written and the startup poll reports a misleading server-died-during-startup instead of a usage error. Shares a root cause with the exit-code defect filed immediately after this one.",
+      "surfaces": [
+        "chat/scripts/chat-server.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:05:41Z",
+      "updated_at": "2026-08-27T13:05:41Z"
+    },
+    {
+      "id": "B58",
+      "title": "chat client helpers enforce no channel-name length cap while every server tier caps it at 32, so a long channel is writable locally and unreachable over the socket",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "LONG=\"#$(printf 'a%.0s' $(seq 1 40))\"; chat-register.sh \"$LONG\" --home $H; chat-send.sh \"$LONG\" 'local accepts this' -n t --home $H; then start any server and retry with --host 127.0.0.1 --port $P.",
+      "observed": "Local path succeeds: 'Registered #aaaa...(40)' and 'MSG #aaaa...(40) 2 1787835628 t'. Over the socket the same channel fails: 'chat-send.sh: ERR usage: PRIVMSG #chan :text'.",
+      "expected": "The helpers apply the same 32-character cap the servers apply, so a channel that can be created can always be reached over the socket.",
+      "mechanism": "chat-register.sh:34 and chat-send.sh:40 validate with the glob '#'[a-z0-9_-]* which constrains the first character after the # and nothing else, imposing no length limit. Every server tier does cap it: server.py:22 with len(chan) <= 33, server.js:16 with /^#[a-z0-9_-]{1,32}$/, server.pl:16 with the same regex, bash-handler.sh:22 with a 32-character test. The result is a channel that exists on disk, accepts local appends and holds history, but cannot be sent to or fetched from over the socket - a split between the two access paths the skill offers for the same channel. The misleading wording of the socket-side refusal is filed as a separate defect.",
+      "surfaces": [
+        "chat/scripts/chat-register.sh",
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:08:33Z",
+      "updated_at": "2026-08-27T13:08:33Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -1105,26 +1276,47 @@
       "updated_at": "2026-08-25T09:53:29Z"
     },
     {
-      "id": "B51",
-      "title": "overview-server.py sends HTTP 200 with an empty body when the renderer fails, because it never checks the subprocess exit status",
+      "id": "B55",
+      "title": "chat-server.sh documents exit 66 for a missing runtime but a pinned absent runtime exits 69 with a message naming all four",
       "status": "confirmed",
-      "severity": "major",
-      "priority": "normal",
+      "severity": "minor",
+      "priority": "low",
       "parent": null,
-      "reproduce": "python3 planning/scripts/runtime/overview-server.py ~/.plans/codegraph-bash-indexing-v2 8913 & sleep 3; curl -s -o /tmp/big.html -w 'page: http=%{http_code} bytes=%{size_download}\\n' http://127.0.0.1:8913/",
-      "observed": "page route returns http=200 bytes=0 while /state.json returns http=200 bytes=341088. Running the same command the server builds directly exits 126 with: jq: Argument list too long. On a small plan with a 1 KB state the same page route returns 20646 bytes, so the failure is size-dependent.",
-      "expected": "A failed render must not be reported as success. The server should return a 500 carrying the renderer stderr rather than an empty body under a 200.",
-      "mechanism": "_render() calls subprocess.run(...) with capture_output and never inspects returncode. When the render fails the temp file it created is still empty, and it reads that back and returns an empty string, which is transmitted as a 200. Not a second defect: the same jq argument-length limit as the exit-126 renderer failure, masked by the unchecked status.",
+      "reproduce": "PATH=/usr/bin:/bin bash chat/scripts/chat-server.sh start --runtime nosuchrt --home /tmp/ch-b",
+      "observed": "chat-server.sh: no chat server runtime found; need one of python3, node, perl, or socat / client helpers still work against existing logs without a server -- exit 69.",
+      "expected": "Pinning a runtime that is absent exits 66 (runtime missing) as the header documents, with a message naming the runtime that was asked for rather than listing all four.",
+      "mechanism": "chat-server.sh:17 documents exit 66 as runtime missing. pick_runtime returns 1 both when no runtime exists at all and when a specifically pinned one is absent, and do_start's failure branch at :87-91 unconditionally prints the no-runtime-at-all message and exits 69. Exit 66 is emitted only by the socat arm at :105-108, so it is unreachable for python3, node and perl. A user who pinned a single runtime is told that none of four exists, which misdescribes the failure. Shares a root cause with the unvalidated --runtime defect filed immediately before this one.",
       "surfaces": [
-        "planning/scripts/runtime/overview-server.py",
-        "planning/scripts/render-plan-overview.sh"
+        "chat/scripts/chat-server.sh"
       ],
       "fix": null,
       "verification": null,
-      "found_by": "adversarial review AR-09, cause reproduced and corrected during verification",
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
-      "created_at": "2026-08-27T12:26:23Z",
-      "updated_at": "2026-08-27T12:26:23Z"
+      "created_at": "2026-08-27T13:05:41Z",
+      "updated_at": "2026-08-27T13:05:41Z"
+    },
+    {
+      "id": "B59",
+      "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Against the python3 tier send: PRIVMSG #CodeGraph :hello (an uppercase, therefore invalid, channel with valid text). Also: PRIVMSG <40-char channel> :text.",
+      "observed": "ERR usage: PRIVMSG #chan :text -- the same reply given for a genuinely empty text, with no indication that the channel name was the problem.",
+      "expected": "An invalid channel answers 'ERR invalid channel', as REGISTER and JOIN already do on the same server (server.py:126-130), leaving the usage message for a malformed or empty text.",
+      "mechanism": "server.py:143 tests 'if not valid_chan(chan) or not text:' and emits one message for both branches. server.js:132 has the identical fault. server.pl:63 gets this right, answering 'ERR invalid channel' separately from its usage message, and bash-handler.sh:88-89 also separates them. The practical cost is diagnostic: a caller given a usage hint for a channel-name problem looks at the wrong argument, which is how the over-long-channel defect filed immediately before this one presents to a user.",
+      "surfaces": [
+        "chat/runtime/server.py",
+        "chat/runtime/server.js"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
+      "notes": null,
+      "created_at": "2026-08-27T13:08:33Z",
+      "updated_at": "2026-08-27T13:08:33Z"
     }
   ]
 }
