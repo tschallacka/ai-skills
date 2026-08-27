@@ -989,6 +989,30 @@
       "notes": null,
       "created_at": "2026-08-25T09:46:07Z",
       "updated_at": "2026-08-25T09:53:29Z"
+    },
+    {
+      "id": "B46",
+      "title": "planning's serve mode needs one of four runtimes but declares none, so the installer never mentions them",
+      "severity": "minor",
+      "priority": "medium",
+      "status": "confirmed",
+      "found_by": "fresh review of the 72-commit pull",
+      "created_at": "2026-08-27T07:06:48Z",
+      "updated_at": "2026-08-27T07:06:48Z",
+      "reproduce": "awk -F'\\t' '!/^#/ && NF>2' planning/requires.tsv   # only jq (hard) and openssl (soft)\nawk -F'\\t' '!/^#/ && NF>2' chat/requires.tsv    # four runtimes, soft, group server-runtimes\nbash planning/scripts/overview-serve.sh --help   # names python3, node, perl, socat",
+      "expected": "planning declares the serve runtimes as a soft any-of group, the way chat does, so the installer's dependency table names them and warns which capability is lost",
+      "observed": "planning/requires.tsv declares only jq and openssl. overview-serve.sh:52 loops 'for r in python3 node perl socat' and refuses with 'no suitable runtime found' when none is present, but nothing in install.sh associates those tools with planning. A machine with none of the four installs planning silently and loses serve mode with no prior warning.",
+      "mechanism": "The any-of mechanism already exists and works: chat/requires.tsv lines 15-18 give each runtime a fifth column naming the group 'server-runtimes', and install.sh generates '@server-runtimes) ... printf python3 node perl socat' from it. planning gained the same four-rung server (overview-serve.sh, plus runtime/overview-server.{py,pl} and the socat bash handler) without gaining the matching rows, so the group is declared by exactly one skill while two skills depend on it.",
+      "surfaces": [
+        "planning/requires.tsv",
+        "planning/scripts/overview-serve.sh",
+        "install.sh (generated dependency tables)",
+        "planning/tests/test-runtime-dependencies.sh"
+      ],
+      "notes": "Fix is four rows in planning/requires.tsv mirroring chat's, with a why line naming serve mode rather than chat, then regenerate install.sh. Worth also asking whether a test should assert that every runtime a skill's scripts probe with 'command -v' has a row in that skill's requires.tsv — this class of omission is invisible until someone lacks the tool.",
+      "parent": null,
+      "fix": null,
+      "verification": null
     }
   ]
 }
