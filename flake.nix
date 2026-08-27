@@ -122,6 +122,15 @@
               pkgs.actionlint
               pkgs.jq
               pkgs.git
+              # Development-only, like the mermaid renderer below: nothing shipped
+              # is written in Rust, and nothing in the suite needs a compiler.
+              # It is here for the tools built alongside these skills that cannot
+              # be shell — a hook that must run where no interpreter is
+              # guaranteed, which on Windows means no bash at all.
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.clippy
+              pkgs.rustfmt
               # Renders the architecture diagrams. Development-only: the test
               # suite must still run without nix, so the render check reports
               # UNCONFIGURED when mmdc is absent rather than failing.
@@ -135,6 +144,7 @@
               echo "  bash32-run       run one script under bash 3.2, children included"
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
               echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
+              echo "  cargo            $(cargo --version | cut -d' ' -f2)  (dev-only: nothing shipped is Rust)"
               echo
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"
