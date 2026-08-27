@@ -63,10 +63,14 @@ plan_prune_work_unit() {
                 ids_raw="$(plan_table_cell "$rline" 3)"
                 out="$(plan_prune_csv_cell "$ids_raw" "$unit")"
                 if [ "$out" != "$ids_raw" ]; then
+                    # T59: a shrunk coverage row is named with what survives,
+                    # exactly like a dropped one — the silent one-way shrink
+                    # is what made remove+readd reads invisible (B68).
                     if [ -z "$out" ]; then
                         printf 'plan: coverage row has no remaining ids after removing %s; row dropped\n' "$unit" >&2
                         continue
                     fi
+                    printf 'plan: pruned coverage id %s; remaining in row: %s\n' "$unit" "$out" >&2
                     rline="$(plan_table_set_cell "$rline" 3 "$out")"
                 fi
             fi

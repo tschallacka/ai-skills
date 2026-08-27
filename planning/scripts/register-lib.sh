@@ -26,6 +26,8 @@ reg_findings() {
             if $kind == "bug"
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
             else ["open","done","blocked","partly","decided","obsolete"] end;
+        (if $kind == "todo" and has("todos")
+         then "register carries a .todos array - fold its entries into .tasks and drop the key" else empty end),
         ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
         | ($items | map(.id)) as $ids
         | [

@@ -137,7 +137,7 @@
     {
       "id": "T59",
       "title": "remove-work-unit.sh should name every edge and coverage id it prunes",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T54",
       "detail": "The other half of B68, which fixed the move but not the removal. update-work-unit.sh --goal/--step is now a real move that keeps edges and coverage links by construction, so the common case is safe. But remove-work-unit.sh --confirm-cascade still prunes the removed id from every other row's Depends-on column and from every coverage row's ID list without saying which ones it touched. That pruning is correct for a genuine removal — the links really are gone — and it is exactly what made the loss invisible when the removal was half of a hand-rolled move: nothing in the output named W103, W107 or W112 as having been stripped from W106's and W108's dependencies and from three coverage rows, and the Notes columns went on naming them, so the rows read 'W112 installs the pinned toolchain in CI' while listing only W75. Anyone who reaches for remove-and-re-add out of habit rather than the new flags gets the old silent loss. One line per pruned edge and per pruned coverage id, on the way out, closes it: a caller doing a genuine removal sees what it cost, and a caller doing a move sees exactly what to restore. Cheap, and it needs no new state.",
@@ -146,14 +146,14 @@
         "planning/scripts/remove-work-unit.sh",
         "planning/scripts/plan-reconcile-lib.sh"
       ],
-      "note": null,
+      "note": "Coverage-side pruning is now named per id: a row that shrinks prints 'pruned coverage id X; remaining in row: Y' alongside the existing dropped-row and per-edge Depends-on lines (the Depends-on half already existed). Verified: fixture row W03,W22 shrank with the line naming W03; cascade remove validates clean; main's scenario (4-id row to 1) now reads on stderr.",
       "created_at": "2026-08-27T22:45:25Z",
-      "updated_at": "2026-08-27T22:45:25Z"
+      "updated_at": "2026-08-27T22:51:29Z"
     },
     {
       "id": "T61",
       "title": "TODO.json holds two arrays, .tasks and .todos, and only one is checked for duplicate ids",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "T60",
       "detail": "Found while filing T60. The register has both a .tasks array, which holds the live entries including every open item, and a .todos array holding one done entry. todo-add.sh checks only .tasks when refusing a duplicate id, so an id already present in .todos would be accepted, and any reader that picks the wrong array sees a different register — which is exactly what happened here: reading .todos showed a single done entry and hid T51, open and assigned. Either the second array is a migration artifact that should be folded into the first and removed, or both are intentional and every helper and reader must treat them as one register. It cannot stay as it is, because the schema does not say which is authoritative and the helper's own duplicate check answers that question differently from the file.",
@@ -163,9 +163,9 @@
         "planning/scripts/register-lib.sh",
         "TODO.json"
       ],
-      "note": null,
+      "note": "Folded and dropped: .todos held exactly one entry — T47 [done], an artifact of my own 00ecc69 queue note writing d.get('todos') instead of .tasks (the .tasks T47 entry was the authoritative one and already done; the copy was redundant). Guard added: reg_findings fails any todo-register write with 'register carries a .todos array - fold its entries into .tasks and drop the key', verified live (todo-add refused on a seeded artifact). register-helpers suite green.",
       "created_at": "2026-08-27T22:46:46Z",
-      "updated_at": "2026-08-27T22:46:46Z"
+      "updated_at": "2026-08-27T22:51:29Z"
     },
     {
       "id": "T58",
@@ -1335,14 +1335,6 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T16:32:43Z"
-    }
-  ],
-  "todos": [
-    {
-      "id": "T47",
-      "title": "Execute harden-plan-data-parsing goals 03-05",
-      "status": "done",
-      "notes": "COMPLETE. All 26 units done; strict gate (validate-plan --complete) passes. Goals: 01 readers (12fec21), 02 atomicity (ce8600f), 03 migrations (3b66163..c0fef97), 04 writer hardening, 05 remaining parsers + parity. Ratchets: awk 30->15, lib-test 8->7, FL 68->66 all via clamp with same-commit MAINTAINER/gate-caps sync; guard enforces never-up vs git history. Remaining suite reds are PRE-EXISTING (verified red at baseline 00ecc69): test-flag-coverage criticals (undocumented/untested flags in bug/todo/overview scripts) and test-runtime-dependencies jq-guard gaps (9 scripts call jq unguarded). Both queued as next work."
     }
   ]
 }
