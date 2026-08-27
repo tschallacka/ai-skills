@@ -6,7 +6,7 @@
     {
       "id": "T50",
       "title": "Finish dropping the positional argument form from add-work-unit.sh",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "A worker converted the call sites but a session restart killed it before verification, so 17 files sit modified and uncommitted in the working tree: planning/scripts/add-work-unit.sh, planning/scripts/plan-mutate.sh, planning/SKILL.md, CODE-STYLE.md and 13 planning/tests files. The edits are on disk so nothing is lost, but none of it is verified. To finish: confirm the positional branch and the positional array plumbing that only served it are gone; confirm every converted call preserves its argument values byte-for-byte, including the em-dash that means no dependencies; check what became of the deliberately malformed call at test-plan-commands.sh line 730 and of test-flag-form-equivalence.sh, whose premise is void now that only one form exists; run bash run-tests.sh; and prove the new refusal test bites by temporarily reinstating a positional fallback and observing the failure. Regenerate install.sh with installer/build.sh if the shipped file set changed, and commit only the files that changed.",
@@ -15,9 +15,9 @@
         "planning/scripts/add-work-unit.sh",
         "planning/tests/test-flag-form-equivalence.sh"
       ],
-      "note": null,
+      "note": "Committed as 3ceb234, 18 files. Verified rather than assumed: a positional call exits 64 and creates no inventory row, no step file and no roster entry, while the flag form exits 0. The mutation that proves the test bites is reinstating the ten-positional assignment in add-work-unit.sh — test-flag-form-equivalence.sh then fails with 4 failures where it otherwise passes. Full suite 105 passed, 0 failed, 2 unconfigured. Two earlier mutation attempts silently failed to apply because the worker had restructured the guard, and both produced a meaningless PASS; the applied mutation was confirmed live by checking a positional call exited 0 before running the test.",
       "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-08-27T12:37:03Z"
+      "updated_at": "2026-08-27T14:18:12Z"
     },
     {
       "id": "T51",
