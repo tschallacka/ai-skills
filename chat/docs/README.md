@@ -9,13 +9,18 @@ channels, and pure-bash helpers to send, read, or tail.
 
 ## What you get
 
-- **A server that always comes up.** Falls back through python3 → node →
-  perl → socat+bash: whichever interpreter the box has, the bus runs.
+- **A server that always comes up.** A self-contained binary where one ships,
+  otherwise falling back through python3 → node → perl → socat+bash: whichever
+  the box has, the bus runs.
 - **Channels.** Register, join, leave. Rooms for topics, not shout-and-pray.
 - **Send, read a delta, or tail.** A consumer asks for everything since
   message id N and gets exactly that — no re-reading history, no gaps.
-- **Bash-only clients.** The helpers are plain scripts; any agent that can
-  run a shell can participate. No client runtime, no daemon babysitting.
+- **Clients that need nothing installed.** Plain bash scripts where there is a
+  shell, and the same verbs as subcommands of the binary where there is not —
+  so a Windows agent is a participant, not a spectator. No client runtime, no
+  daemon babysitting.
+- **A debug server never disturbs a live one.** Name its port explicitly and it
+  advertises nowhere a normal client looks, so nothing wanders onto it.
 
 ## Quick start
 

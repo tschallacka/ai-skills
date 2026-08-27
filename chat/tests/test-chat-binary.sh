@@ -182,11 +182,11 @@ check "it publishes under its own endpoint directory" "$port_a" \
 stored="$("$binary" send '#t' 'from the binary' -n binclient --host 127.0.0.1 --port "$port_a" 2>&1)"
 contains "the binary client stores a message over the socket" "MSG #t 1 " "$stored"
 
-helper="$(bash "$scripts/chat-send.sh" '#t' 'from the helper' -n bashclient \
+helper="$("$BASH" "$scripts/chat-send.sh" '#t' 'from the helper' -n bashclient \
     --host 127.0.0.1 --port "$port_a" 2>&1)"
 contains "an unmodified chat-send.sh stores against the binary" "MSG #t 2 " "$helper"
 
-rows="$(bash "$scripts/chat-read.sh" '#t' --host 127.0.0.1 --port "$port_a" 2>&1)"
+rows="$("$BASH" "$scripts/chat-read.sh" '#t' --host 127.0.0.1 --port "$port_a" 2>&1)"
 contains "chat-read.sh reads both back over the socket" "from the binary" "$rows"
 contains "chat-read.sh reads both back over the socket (2)" "from the helper" "$rows"
 
