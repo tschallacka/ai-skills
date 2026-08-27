@@ -4,80 +4,54 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
-      "id": "T43",
-      "title": "Serve the overview live, and let the artifact stay a snapshot",
-      "status": "done",
+      "id": "T48",
+      "title": "Make requires.tsv a contract rather than documentation: nothing currently fails when a declaration is deleted",
+      "status": "open",
       "priority": "high",
       "parent": null,
-      "detail": "One renderer, two delivery modes. Served: a localhost HTTP endpoint a reviewer keeps open, updating in place without disturbing what they are reading. File: the single self-contained HTML that exists today, which is what a snapshot, a print or a published artifact needs. The two must not fork into separate renderers -- the state each mode shows has to come from one place, or they will disagree and the disagreement is what a reviewer would trust least. Feasibility is settled ground here: the chat skill already ships a portable local server as a fallback chain (python3 -> node -> perl -> socat driving a bash handler), so the mechanism exists in this repo and does not need inventing.",
-      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "detail": "Measured, not suspected. B46 added four soft rows to planning/requires.tsv declaring the serve-mode runtimes as the any-of group overview-server-runtimes. Four mutations were then run against that fix, each restored by copy-back with an empty git diff afterwards: (1) delete the socat row and regenerate install.sh — all six relevant tests exit 0; (2) delete ALL FOUR rows and regenerate, an exact revert of the fix — all six still exit 0, nothing fails; (3) delete a row WITHOUT regenerating — test-installer-build.sh rc=1, 'install.sh is stale'; (4) rename the group to chat's existing id — test-installer-build.sh rc=2 via validate_requires_groups refusing a group declared by two skills. So the only things that bite are generated-artifact freshness and group-id uniqueness, both properties of the build rather than of the declaration. Someone can delete a skill's entire dependency declaration, rebuild, and the suite stays green — which is exactly how planning shipped a four-rung server with no declared runtimes in the first place. Two children below: one closes the coverage hole for the existing group, the other prevents the whole class.",
       "blocked_on": null,
       "refs": [
-        "planning/scripts/render-plan-overview.sh",
-        "chat/scripts/chat-server.sh",
-        "chat/runtime/bash-handler.sh"
+        "planning/requires.tsv",
+        "installer/build.sh",
+        "planning/tests/test-installer-any-of.sh"
       ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-26T21:02:30Z"
+      "note": null,
+      "created_at": "2026-08-27T07:59:50Z",
+      "updated_at": "2026-08-27T07:59:50Z"
     },
     {
-      "id": "T43b",
-      "title": "Update in place from a JSON endpoint, never a whole-page reload",
-      "status": "done",
+      "id": "T48a",
+      "title": "test-installer-any-of must assert planning's group, not only chat's",
+      "status": "open",
       "priority": "high",
-      "parent": "T43",
-      "detail": "The page currently carries <meta http-equiv=\"refresh\" content=\"15\">, which throws away scroll position, every expanded section and any text selection -- unusable while reading. Served mode instead fetches a JSON state document and patches only what changed: counts, bars, ledger rows, findings. Two rules make it non-jarring rather than merely faster: never move what the reader is looking at, and never animate a value that is only being corrected. A visible, quiet marker that an update landed is worth more than a redraw -- and if a section is open, patch its contents rather than collapsing it.",
-      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "parent": "T48",
+      "detail": "planning/tests/test-installer-any-of.sh hardcodes --skill chat and asserts on the string 'soft requirement of chat'; planning appears only in the single-tool jq/openssl arms. That is why mutation 2 above passes. Add coverage that installs --skill planning and asserts the group is reported: its members are python3/node/perl/socat, its strength is soft, and the reported why names serve mode. Verification must name the mutation: deleting one of planning's four rows and regenerating has to make this test fail. Do not assert on the group id string alone — that is what mutation 4 already catches via uniqueness; assert the reported members and strength, which is what a user actually sees.",
       "blocked_on": null,
       "refs": [
-        "planning/scripts/render-plan-overview.sh",
-        "planning/templates/plan-overview.html.tmpl"
+        "planning/tests/test-installer-any-of.sh",
+        "planning/requires.tsv"
       ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-26T21:02:30Z"
+      "note": null,
+      "created_at": "2026-08-27T08:00:07Z",
+      "updated_at": "2026-08-27T08:00:07Z"
     },
     {
-      "id": "T43f",
-      "title": "Test both modes, and the fallbacks",
-      "status": "done",
-      "priority": "high",
-      "parent": "T43",
-      "detail": "Served mode: the endpoint answers on loopback, the JSON validates against the state shape, a step completing changes the JSON without the HTML being re-fetched, and stop leaves no process or pid file. Fallbacks: with every runtime shimmed away the serve request refuses with 69 and names what is missing, and the file mode still renders. File mode keeps its current guarantees -- single file, no external asset references, no unsubstituted tokens, prose escaped. And the rounds figure reads 2 for a plan with a pre and a final review, 3 when a third exists. Mutation-test each: the refusals and the two-review baseline are the assertions most likely to rot.",
-      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
-      "blocked_on": null,
-      "refs": [
-        "planning/tests/test-plan-overview.sh"
-      ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-26T21:02:30Z"
-    },
-    {
-      "id": "T45",
-      "title": "Fix remaining CI test failures from overview/T42/T43 additions",
-      "status": "done",
-      "priority": "high",
-      "parent": null,
-      "detail": "test-mode-markers PACKAGE/MODE on runtime files; test-duplication-ratchet awk/lib-test caps; test-flag-coverage new flags; test-function-length-ratchet cap 67 vs actual; test-installer-noninteractive B39 regression; test-plan-dir-synonym overview-state/serve exemptions; test-portability-contract bash-by-path allowlist rows; test-register-helpers set-status fixture ordering; test-runtime-dependencies new deps",
-      "blocked_on": null,
-      "refs": [],
-      "note": "All named failures fixed: MODE markers; caps lowered by clamp (awk 30->15, lib-test 8->7, FL 68->66); flag-coverage 19->0; installer dead-code; bash-by-path fixed; register-helpers exposed real todo-add dup-poisoning (fixed); jq guards. Suite 104/104 + CI green.",
-      "created_at": "2026-08-26T09:07:49Z",
-      "updated_at": "2026-08-26T20:16:45Z"
-    },
-    {
-      "id": "T43d",
-      "title": "Graceful fallback, stated rung by rung",
-      "status": "done",
+      "id": "T48b",
+      "title": "A gate that every runtime a skill probes with command -v has a row in that skill's requires.tsv",
+      "status": "open",
       "priority": "normal",
-      "parent": "T43",
-      "detail": "Every rung has to be honest about what it gives up. With a runtime present: served, live, in-place updates. Without any runtime: the file mode, a snapshot, and no refresh at all rather than a meta refresh that reloads while being read -- a footer saying when it was generated and how to re-render beats a page that silently jumps. With JS unavailable or blocked: the file mode still renders fully, because the values are in the markup (T42j). Published as an artifact: a snapshot by necessity, since an artifact page is served from claude.ai and its CSP blocks requests to any other host, localhost included -- live updates are impossible there and the page should not pretend otherwise.",
-      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "parent": "T48",
+      "detail": "T48a fixes one instance; this prevents the class. Scan each skill's shipped scripts for the runtimes they probe — 'command -v <tool>' and the 'for r in python3 node perl socat' rung loops — and require a matching requires.tsv row for that skill, or an explicit allowlist entry saying why the tool needs no declaration. This is the check B46's own notes asked for and nobody built: without it, the next skill to grow a runtime dependency ships it undeclared and silently, exactly as planning did. Expect false positives to design around: a probe inside a test rather than shipped code, a tool probed only to decide a diagnostic message, and jq itself which is already declared hard nearly everywhere. Prefer refusing at build time in installer/build.sh over a test, so the omission cannot reach a commit — but a test is acceptable if the build hook proves awkward.",
       "blocked_on": null,
       "refs": [
-        "planning/scripts/render-plan-overview.sh"
+        "installer/build.sh",
+        "planning/requires.tsv",
+        "chat/requires.tsv"
       ],
-      "created_at": "2026-08-24T13:10:59Z",
-      "updated_at": "2026-08-26T21:02:30Z"
+      "note": null,
+      "created_at": "2026-08-27T08:00:07Z",
+      "updated_at": "2026-08-27T08:00:07Z"
     },
     {
       "id": "T1e",
@@ -429,6 +403,23 @@
       "updated_at": "2026-08-25T17:54:12Z"
     },
     {
+      "id": "T43",
+      "title": "Serve the overview live, and let the artifact stay a snapshot",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "One renderer, two delivery modes. Served: a localhost HTTP endpoint a reviewer keeps open, updating in place without disturbing what they are reading. File: the single self-contained HTML that exists today, which is what a snapshot, a print or a published artifact needs. The two must not fork into separate renderers -- the state each mode shows has to come from one place, or they will disagree and the disagreement is what a reviewer would trust least. Feasibility is settled ground here: the chat skill already ships a portable local server as a fallback chain (python3 -> node -> perl -> socat driving a bash handler), so the mechanism exists in this repo and does not need inventing.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "chat/scripts/chat-server.sh",
+        "chat/runtime/bash-handler.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-26T21:02:30Z"
+    },
+    {
       "id": "T43a",
       "title": "A served mode on localhost, reusing the runtime chain chat already has",
       "status": "done",
@@ -443,6 +434,22 @@
       ],
       "created_at": "2026-08-24T13:10:59Z",
       "updated_at": "2026-08-24T13:10:59Z"
+    },
+    {
+      "id": "T43b",
+      "title": "Update in place from a JSON endpoint, never a whole-page reload",
+      "status": "done",
+      "priority": "high",
+      "parent": "T43",
+      "detail": "The page currently carries <meta http-equiv=\"refresh\" content=\"15\">, which throws away scroll position, every expanded section and any text selection -- unusable while reading. Served mode instead fetches a JSON state document and patches only what changed: counts, bars, ledger rows, findings. Two rules make it non-jarring rather than merely faster: never move what the reader is looking at, and never animate a value that is only being corrected. A visible, quiet marker that an update landed is worth more than a redraw -- and if a section is open, patch its contents rather than collapsing it.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/templates/plan-overview.html.tmpl"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-26T21:02:30Z"
     },
     {
       "id": "T43c",
@@ -476,6 +483,21 @@
       "updated_at": "2026-08-24T13:10:59Z"
     },
     {
+      "id": "T43f",
+      "title": "Test both modes, and the fallbacks",
+      "status": "done",
+      "priority": "high",
+      "parent": "T43",
+      "detail": "Served mode: the endpoint answers on loopback, the JSON validates against the state shape, a step completing changes the JSON without the HTML being re-fetched, and stop leaves no process or pid file. Fallbacks: with every runtime shimmed away the serve request refuses with 69 and names what is missing, and the file mode still renders. File mode keeps its current guarantees -- single file, no external asset references, no unsubstituted tokens, prose escaped. And the rounds figure reads 2 for a plan with a pre and a final review, 3 when a third exists. Mutation-test each: the refusals and the two-review baseline are the assertions most likely to rot.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "blocked_on": null,
+      "refs": [
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-26T21:02:30Z"
+    },
+    {
       "id": "T44",
       "title": "Verification must surface plan-versus-reality drift at execution time, not after a human reads both sides",
       "status": "done",
@@ -491,6 +513,34 @@
       ],
       "created_at": "2026-08-24T14:59:42Z",
       "updated_at": "2026-08-24T18:08:32Z"
+    },
+    {
+      "id": "T45",
+      "title": "Fix remaining CI test failures from overview/T42/T43 additions",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "test-mode-markers PACKAGE/MODE on runtime files; test-duplication-ratchet awk/lib-test caps; test-flag-coverage new flags; test-function-length-ratchet cap 67 vs actual; test-installer-noninteractive B39 regression; test-plan-dir-synonym overview-state/serve exemptions; test-portability-contract bash-by-path allowlist rows; test-register-helpers set-status fixture ordering; test-runtime-dependencies new deps",
+      "blocked_on": null,
+      "refs": [],
+      "note": "All named failures fixed: MODE markers; caps lowered by clamp (awk 30->15, lib-test 8->7, FL 68->66); flag-coverage 19->0; installer dead-code; bash-by-path fixed; register-helpers exposed real todo-add dup-poisoning (fixed); jq guards. Suite 104/104 + CI green.",
+      "created_at": "2026-08-26T09:07:49Z",
+      "updated_at": "2026-08-26T20:16:45Z"
+    },
+    {
+      "id": "T46",
+      "title": "Harden plan-data parsing: eliminate awk/grep fragility, add atomicity verification",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Approved plan at .plans/harden-plan-data-parsing/ (4 goals, 22 work units). Goal 01: guarded library functions for progress/cycle/unit counting. Goal 02: atomicity auto-tick via git-diff comparison at completion time. Goal 03: migrate all inline awk -F| table parsing to shared helpers. Goal 04: update-plan-content.sh hardening (non-atomic dual-file write, trap overwrites, document-id validation). Constraint: existing unit tests pass unchanged; code red if any test needs modification.",
+      "blocked_on": null,
+      "refs": [
+        ".plans/harden-plan-data-parsing"
+      ],
+      "created_at": "2026-08-26T09:57:54Z",
+      "updated_at": "2026-08-26T20:16:45Z",
+      "note": "Plan executed to completion: 26/26 units, strict gate passes, CI green on all legs (run 33003885417). Execution tracked as T47."
     },
     {
       "id": "T1",
@@ -912,6 +962,21 @@
       "updated_at": "2026-08-24T18:48:01Z"
     },
     {
+      "id": "T43d",
+      "title": "Graceful fallback, stated rung by rung",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T43",
+      "detail": "Every rung has to be honest about what it gives up. With a runtime present: served, live, in-place updates. Without any runtime: the file mode, a snapshot, and no refresh at all rather than a meta refresh that reloads while being read -- a footer saying when it was generated and how to re-render beats a page that silently jumps. With JS unavailable or blocked: the file mode still renders fully, because the values are in the markup (T42j). Published as an artifact: a snapshot by necessity, since an artifact page is served from claude.ai and its CSP blocks requests to any other host, localhost included -- live updates are impossible there and the page should not pretend otherwise.",
+      "note": "Served mode complete: per-tier runtimes (python3/node/perl core-modules/socat+bash handler) all serve /, /state.json and /sections/<id>; page polls state.json + swaps panels by generatedAt revision with no reload call in the served flavor (template token strips it); explicit TERM handlers make clean stops immediate; test-overview-serve.sh pins every rung, the exit-69 no-runtime refusal, dual-mode agreement and artifact-served responses. Suite 105/105.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/render-plan-overview.sh"
+      ],
+      "created_at": "2026-08-24T13:10:59Z",
+      "updated_at": "2026-08-26T21:02:30Z"
+    },
+    {
       "id": "T8",
       "title": "A `--check` mode for a findings CSV",
       "status": "done",
@@ -1057,21 +1122,6 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T16:32:43Z"
-    },
-    {
-      "id": "T46",
-      "title": "Harden plan-data parsing: eliminate awk/grep fragility, add atomicity verification",
-      "status": "done",
-      "priority": "high",
-      "parent": null,
-      "detail": "Approved plan at .plans/harden-plan-data-parsing/ (4 goals, 22 work units). Goal 01: guarded library functions for progress/cycle/unit counting. Goal 02: atomicity auto-tick via git-diff comparison at completion time. Goal 03: migrate all inline awk -F| table parsing to shared helpers. Goal 04: update-plan-content.sh hardening (non-atomic dual-file write, trap overwrites, document-id validation). Constraint: existing unit tests pass unchanged; code red if any test needs modification.",
-      "blocked_on": null,
-      "refs": [
-        ".plans/harden-plan-data-parsing"
-      ],
-      "created_at": "2026-08-26T09:57:54Z",
-      "updated_at": "2026-08-26T20:16:45Z",
-      "note": "Plan executed to completion: 26/26 units, strict gate passes, CI green on all legs (run 33003885417). Execution tracked as T47."
     }
   ],
   "todos": [
