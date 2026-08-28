@@ -374,6 +374,8 @@ scripts/chat-send.sh
 scripts/chat-read.sh
 scripts/chat-tail.sh
 scripts/chat-watch.sh
+scripts/chat-announce.sh
+scripts/chat-discover.sh
 runtime/server.py
 runtime/server.js
 runtime/server.pl

@@ -201,4 +201,30 @@ else
     printf 'SKIP chat: chat-server-rs absent on this host — its assertions did not run (build: cargo build --release --manifest-path src/chat-server-rs/Cargo.toml && cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/)\n' >&2
 fi
 
+# ---- T65: broadcast discovery (loopback) -----------------------------------
+# Real-broadcast needs SO_BROADCAST (the python sender); the loopback probe
+# exercises the beacon/discover pair without LAN side effects.
+if command -v python3 >/dev/null 2>&1 || command -v socat >/dev/null 2>&1; then
+    bp=$(( 20780 + RANDOM % 100 ))
+    nohup "$scripts/chat-announce.sh" --port 7717 --name 'chat-test/beacon' \
+        --bcast 127.0.0.1 --beacon-port "$bp" --interval 1 \
+        >/dev/null 2>&1 &
+    beacon_pid=$!
+    sleep 1.5
+    got="$("$scripts/chat-discover.sh" --bcast 127.0.0.1 --beacon-port "$bp" --wait 3 2>/dev/null)"
+    case "$got" in
+        *'chat-test/beacon'*'7717'*) : ;;
+        *) fail "discovery did not list the announcing server: $got" ;;
+    esac
+    got_json="$("$scripts/chat-discover.sh" --bcast 127.0.0.1 --beacon-port "$bp" --wait 3 --json 2>/dev/null)"
+    case "$got_json" in
+        *'"proto":"ai-chat/1"'*'"port":7717'*) : ;;
+        *) fail "discovery --json lost the payload: $got_json" ;;
+    esac
+    kill "$beacon_pid" 2>/dev/null || true
+    printf 'chat: exercised discovery\n' >&2
+else
+    printf 'SKIP chat: no UDP reader tier - discovery assertions did not run\n' >&2
+fi
+
 t_end

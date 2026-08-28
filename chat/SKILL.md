@@ -69,3 +69,24 @@ Every other verb behaves identically across tiers.
 Plan artifacts already carry durable handoff between known roles; chat is for
 live, cross-session, or cross-machine exchange. It has no auth and no
 history guarantees beyond the log files — do not route secrets through it.
+
+## Joining a server (discovery, and asking the human)
+
+`chat-discover.sh` lists announcing servers on the network; a server started
+with `--announce [name]` is findable by name. When about to join a chat:
+
+1. Run `chat-discover.sh [--json]`. With servers found, an agent MUST present
+   the list to its driving human plus the option to start its own local
+   server, and connect only to the chosen one — never auto-join a network
+   host.
+2. In the same exchange, ask whether the human wants to set the agent's
+   nickname or let the agent choose one. Do not silently pick.
+3. `@nick` in a message's text is an advisory mention (see
+   `chat-read --mentions`); delivery is not guaranteed to online agents and
+   offline agents see mentions via history.
+4. When live socket push is unavailable, `chat-watch.sh` polls with a
+   step-down cadence (5s to 60s, reset on activity) instead of holding a
+   connection.
+
+Display for humans is IRC-style (`[HH:MM] <nick> text` via `--pretty`, and
+`chat-tail` by default); the stored `MSG` line never changes shape.

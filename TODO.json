@@ -176,15 +176,15 @@
     {
       "id": "T65",
       "title": "Server discovery via UDP broadcast + human-driven connect choice",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "An AI chat host is discoverable on the LAN instead of by ip:port. (1) Servers announce themselves: a UDP broadcast beacon every N seconds carrying a JSON payload {name, port, proto, started} where name is human-identifiable (hostname + a friendly suffix like 'ai-skills/mdibbets-den') and stable. (2) A discovery client (chat-discover.sh, bash + /dev/udp, timeout-bounded) listens one beacon period and lists every server found. (3) The joining AGENT must ASK ITS DRIVING HUMAN before connecting: present the discovered list (or offer 'start your own local server') and let the human choose; never auto-join a network host. Multiple servers -> numbered list. Also the joining agent asks the human whether to pick its own nickname or let the human provide one (same prompt, one question). Privacy: bind the beacon to the LAN interface, not 0.0.0.0 by default; opt-out flag for servers. Tests: loopback beacon/discover pair, list formatting with multiple servers, timeout with none. CI: UDP broadcast on 127.0.0.1 works on GH runners; guard with UNCONFIGURED-style skip if the port is unavailable.",
       "blocked_on": "T62",
       "refs": [],
-      "note": null,
+      "note": "chat-announce.sh broadcasts a JSON beacon {proto,name,port,started} every 2s — python3 sender sets SO_BROADCAST (bash /dev/udp cannot send broadcast: EACCES), /dev/udp stays as unicast fallback; chat-server.sh start --announce [name] launches it and stop kills it (pid tracked; ~1s shutdown grace observed). chat-discover.sh listens one period (socat or python3 tier, UNCONFIGURED skip without either), dedupes by name+port, prints a numbered human list or --json. Human-choice flow (present list + start-local option, ask nickname) documented in SKILL.md 'Joining a server'. Verified: loopback pair (list + json), real 255.255.255.255 broadcast discovered reliably after the SO_BROADCAST fix, beacon lifecycle clean. Suite test exercises the loopback pair with SKIP-loud absence.",
       "created_at": "2026-08-27T22:59:42Z",
-      "updated_at": "2026-08-27T22:59:42Z"
+      "updated_at": "2026-08-28T04:21:38Z"
     },
     {
       "id": "T58",

@@ -22,7 +22,9 @@ export LC_ALL=C
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} start [--runtime python3|node|perl|socat] [--port N] [--bind ADDR] [--home D]
+Usage: ${0##*/} start [--runtime python3|node|perl|socat|chat-server-rs]
+                     [--port N] [--bind ADDR] [--home D]
+                     [--announce [NAME]]  discoverable via chat-discover.sh
        ${0##*/} status [--home D]
        ${0##*/} stop   [--home D]
 
@@ -37,6 +39,7 @@ USAGE
 
 HOME_DIR="${AI_CHAT_HOME:-$HOME/.ai-chat}"
 cmd="" want_runtime="" want_port="" want_bind=""
+announce=false announce_name=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
@@ -54,6 +57,13 @@ while [ "$#" -gt 0 ]; do
         --port) [ "$#" -ge 2 ] || usage; want_port="$2"; shift 2 ;;
         --bind) [ "$#" -ge 2 ] || usage; want_bind="$2"; shift 2 ;;
         --home) [ "$#" -ge 2 ] || usage; HOME_DIR="$2"; shift 2 ;;
+        --announce)
+            announce=true
+            # optional human name: --announce my-name (a following --flag means unnamed)
+            if [ "$#" -ge 2 ] && case "$2" in --*) false ;; *) true ;; esac; then
+                announce_name="$2"; shift
+            fi
+            shift ;;
         *) usage ;;
     esac
 done
@@ -203,6 +213,18 @@ do_start() {
         fi
         printf '%s\n' "$p" > "$portfile"
     fi
+    if [ "$announce" = true ]; then
+        announce_args=(--port "$(cat "$portfile")" --home "$HOME_DIR")
+        if [ -n "$announce_name" ]; then
+            announce_args=(--name "$announce_name" "${announce_args[@]}")
+        fi
+        nohup "$(dirname "${BASH_SOURCE[0]}")/chat-announce.sh" "${announce_args[@]}" \
+            >> "$HOME_DIR/server.log" 2>&1 &
+        echo $! > "$HOME_DIR/announce.pid"
+        printf '%s: announcing as %s (chat-discover.sh finds it)\n' \
+            "${0##*/}" "${announce_name:-auto}" >&2
+    fi
+
     printf 'chat-server up: pid %s, port %s, runtime %s, home %s\n' \
         "$(cat "$pidfile")" "$(cat "$portfile")" "$runtime" "$HOME_DIR"
 }
@@ -214,9 +236,17 @@ do_stop() {
         kill "$pid" 2>/dev/null || true
         local tries=0
         while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+        if [ -f "$HOME_DIR/announce.pid" ]; then
+            kill "$(cat "$HOME_DIR/announce.pid")" 2>/dev/null || true
+            rm -f "$HOME_DIR/announce.pid"
+        fi
         rm -f "$pidfile" "$portfile"
         printf 'chat-server stopped\n'
     else
+        if [ -f "$HOME_DIR/announce.pid" ]; then
+            kill "$(cat "$HOME_DIR/announce.pid")" 2>/dev/null || true
+            rm -f "$HOME_DIR/announce.pid"
+        fi
         rm -f "$pidfile" "$portfile"
         printf 'chat-server not running\n'
     fi
