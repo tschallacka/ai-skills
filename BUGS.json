@@ -1491,6 +1491,28 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B69",
+      "title": "the .todos fold deleted T47 rather than folding it, on a stated reason that was false",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git show 5032227:TODO.json | jq '.todos[]' ; jq '[.tasks[]|select(.id==\"T47\")]|length' TODO.json",
+      "observed": "T47 existed only in .todos before commit 35f803d and does not exist in .tasks after it. Counts: .tasks 88 and .todos 1 before, .tasks 92 after, with T62 to T65 added in the same window, so 88+4=92 and the .todos entry was dropped rather than merged. 35f803d's message states 'folded (the .tasks T47 entry was authoritative)', but git show 5032227:TODO.json shows zero T47 entries in .tasks, so there was no authoritative copy to prefer. The lost record carried its completion notes: the commit refs for goals 01 to 05, three ratchet clamps, and the finding that test-flag-coverage and test-runtime-dependencies were already red at baseline 00ecc69 — which is the part someone will otherwise rediscover by bisecting.",
+      "expected": "A fold moves every entry the dropped array holds into the surviving one, or refuses when an id exists in only one of them and the operator has not said which wins. Deleting the sole copy of a record is not a fold.",
+      "mechanism": "The fold was written from the belief that .todos duplicated .tasks, so preferring .tasks was safe. That premise held for zero of the one entry involved. Nothing compared the two id sets before writing, and no count was asserted after, so a fold that removed a record and a fold that merged one produce the same silent success.",
+      "surfaces": [
+        "TODO.json",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, reviewing ox's landed work against the caution given before it started",
+      "notes": null,
+      "created_at": "2026-08-28T07:49:34Z",
+      "updated_at": "2026-08-28T07:49:34Z"
     }
   ]
 }

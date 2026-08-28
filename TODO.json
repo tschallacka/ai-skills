@@ -87,19 +87,6 @@
       "updated_at": "2026-08-27T22:46:31Z"
     },
     {
-      "id": "T62",
-      "title": "Rust chat binaries: a compiled chat-server rung with better response times",
-      "status": "done",
-      "priority": "high",
-      "parent": null,
-      "detail": "Finish the rust chat binary following tony-the-pony's layout (src/<crate>/, Cargo.toml, MODE/PACKAGE markers, zero runtime deps, self-test). A compiled server rung replaces interpreter startup cost per connection with a resident process: better response times for tomorrow's chat. Wire it as a rung in chat-server.sh's pick chain (python3 node perl socat today; rustc-built binary first when present), register in skill_files both arms + chat requires if applicable, add tests to chat/tests, build via nix flake (rust-toolchain already in dev shell), verify through the full suite and all three CI legs. The binary must speak the existing wire protocol exactly: NICK/JOIN [since]/PRIVMSG/FETCH/SEND/LEAVE/QUIT, log format MSG chan id ts nick :text, lock semantics as bash-handler.",
-      "blocked_on": "-",
-      "refs": [],
-      "note": "src/chat-server-rs: zero-dependency crate implementing the full wire protocol (NICK/JOIN+replay/PRIVMSG/FETCH/PING/QUIT, mkdir channel locks, highest+1 ids (B56), non-MSG lines skipped (B57), split invalid-channel/empty-text errors (B59), bare-digit port + server.port written (B63/B67)). Resident process — no interpreter startup per connection. chat-server.sh chain leads with it when present (chat/runtime/chat-server-rs or PATH), interpreter tiers unchanged as fallback; --runtime chat-server-rs valid. Tests: test-chat.sh exercises it with SKIP-loud absence (seeded out-of-order log proving id 8, stray-line tolerance, dialogue completeness). CI: ubuntu matrix leg builds the crate (rust-toolchain 1.97, actions-rust-lang) and places the binary so the rung runs in CI; macOS legs fall back loudly. Verified live through the launcher: full dialogue + port file + status/stop.",
-      "created_at": "2026-08-27T22:59:21Z",
-      "updated_at": "2026-08-28T04:04:45Z"
-    },
-    {
       "id": "T53",
       "title": "Run the reviewer-CSV check on the consume path instead of leaving it opt-in",
       "status": "open",
@@ -146,45 +133,6 @@
       "note": null,
       "created_at": "2026-08-27T22:38:42Z",
       "updated_at": "2026-08-27T22:38:42Z"
-    },
-    {
-      "id": "T63",
-      "title": "Chat polling back-off cadence: 5s->10s->...->60s, reset on activity",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "When live monitoring (socket JOIN push) is not feasible and an agent polls chat-read, use a step-down cadence: poll twice every 5 seconds; if no new message, twice every 10s, then twice every 20s, increasing the interval by 10s each round until 60s is the steady state. Any new message resets the cadence to 5s so probes and questions get answered fast. Implement as a chat-watch.sh helper (or a --follow mode on chat-read) using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only. Bound the total run with a --max-wait so a caller can use it as a one-shot drain or a long-running monitor. Tests: fake clock or injected sleep function; assert the interval sequence 5,5,10,10,20,20,30,30,40,40,50,50,60,60... and the reset-on-arrival.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-watch.sh: step-down cadence 5,5->10,10->20,20->...->60 (cap), reset to 5 on any message; cursor is last-id+1 because FETCH is >= (the flood this exposed was fixed by that); --max-wall bounds the run. Verified live with a real server + a logging sleep shim: sleeps 5,10,reset-to-5 on arrival; two live messages each printed exactly once.",
-      "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-28T04:15:31Z"
-    },
-    {
-      "id": "T64",
-      "title": "Explicit @mention targeting for agents on the chat channel",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Protocol + helpers: a message whose text starts with or contains @<nick> is routed/highlighted to that agent. Server side: PRIVMSG text starting with @nick delivers as today (the log keeps one line) but connected subscribers whose nick matches get a targeted line (e.g. 'MENTION <chan> <id> <ts> <from> :text') or an inbox-style FETCH filter; other subscribers may ignore. Client side: chat-read --mentions <nick> returns only messages naming the agent; @all/@everyone broadcasts. Nick validation already exists (A-Za-z0-9_-). Decide and document: mentions are advisory metadata, not delivery guarantees (offline agents see them via history). Tests: two-socket delivery targeting, offline mention visible in history, @all semantics.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-read --mentions NICK: filters every mode (socket, --since, --last, --all) to lines whose text carries @NICK or @all/@everyone, delimited by space/punct/EOL so @oxen does not match @ox; documented as advisory metadata (offline agents see mentions via history). Verified: targeted, @all, trailing-punct, and non-substring cases on fixtures.",
-      "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-28T04:15:31Z"
-    },
-    {
-      "id": "T65",
-      "title": "Server discovery via UDP broadcast + human-driven connect choice",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "An AI chat host is discoverable on the LAN instead of by ip:port. (1) Servers announce themselves: a UDP broadcast beacon every N seconds carrying a JSON payload {name, port, proto, started} where name is human-identifiable (hostname + a friendly suffix like 'ai-skills/mdibbets-den') and stable. (2) A discovery client (chat-discover.sh, bash + /dev/udp, timeout-bounded) listens one beacon period and lists every server found. (3) The joining AGENT must ASK ITS DRIVING HUMAN before connecting: present the discovered list (or offer 'start your own local server') and let the human choose; never auto-join a network host. Multiple servers -> numbered list. Also the joining agent asks the human whether to pick its own nickname or let the human provide one (same prompt, one question). Privacy: bind the beacon to the LAN interface, not 0.0.0.0 by default; opt-out flag for servers. Tests: loopback beacon/discover pair, list formatting with multiple servers, timeout with none. CI: UDP broadcast on 127.0.0.1 works on GH runners; guard with UNCONFIGURED-style skip if the port is unavailable.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-announce.sh broadcasts a JSON beacon {proto,name,port,started} every 2s — python3 sender sets SO_BROADCAST (bash /dev/udp cannot send broadcast: EACCES), /dev/udp stays as unicast fallback; chat-server.sh start --announce [name] launches it and stop kills it (pid tracked; ~1s shutdown grace observed). chat-discover.sh listens one period (socat or python3 tier, UNCONFIGURED skip without either), dedupes by name+port, prints a numbered human list or --json. Human-choice flow (present list + start-local option, ask nickname) documented in SKILL.md 'Joining a server'. Verified: loopback pair (list + json), real 255.255.255.255 broadcast discovered reliably after the SO_BROADCAST fix, beacon lifecycle clean. Suite test exercises the loopback pair with SKIP-loud absence.",
-      "created_at": "2026-08-27T22:59:42Z",
-      "updated_at": "2026-08-28T04:21:38Z"
     },
     {
       "id": "T58",
@@ -741,6 +689,19 @@
       "updated_at": "2026-08-27T14:18:12Z"
     },
     {
+      "id": "T62",
+      "title": "Rust chat binaries: a compiled chat-server rung with better response times",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Finish the rust chat binary following tony-the-pony's layout (src/<crate>/, Cargo.toml, MODE/PACKAGE markers, zero runtime deps, self-test). A compiled server rung replaces interpreter startup cost per connection with a resident process: better response times for tomorrow's chat. Wire it as a rung in chat-server.sh's pick chain (python3 node perl socat today; rustc-built binary first when present), register in skill_files both arms + chat requires if applicable, add tests to chat/tests, build via nix flake (rust-toolchain already in dev shell), verify through the full suite and all three CI legs. The binary must speak the existing wire protocol exactly: NICK/JOIN [since]/PRIVMSG/FETCH/SEND/LEAVE/QUIT, log format MSG chan id ts nick :text, lock semantics as bash-handler.",
+      "blocked_on": "-",
+      "refs": [],
+      "note": "src/chat-server-rs: zero-dependency crate implementing the full wire protocol (NICK/JOIN+replay/PRIVMSG/FETCH/PING/QUIT, mkdir channel locks, highest+1 ids (B56), non-MSG lines skipped (B57), split invalid-channel/empty-text errors (B59), bare-digit port + server.port written (B63/B67)). Resident process — no interpreter startup per connection. chat-server.sh chain leads with it when present (chat/runtime/chat-server-rs or PATH), interpreter tiers unchanged as fallback; --runtime chat-server-rs valid. Tests: test-chat.sh exercises it with SKIP-loud absence (seeded out-of-order log proving id 8, stray-line tolerance, dialogue completeness). CI: ubuntu matrix leg builds the crate (rust-toolchain 1.97, actions-rust-lang) and places the binary so the rung runs in CI; macOS legs fall back loudly. Verified live through the launcher: full dialogue + port file + status/stop.",
+      "created_at": "2026-08-27T22:59:21Z",
+      "updated_at": "2026-08-28T04:04:45Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -1175,6 +1136,19 @@
       "updated_at": "2026-08-26T21:02:30Z"
     },
     {
+      "id": "T47",
+      "title": "Execute harden-plan-data-parsing goals 03-05",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "COMPLETE. All 26 units done; strict gate (validate-plan --complete) passes. Goals: 01 readers (12fec21), 02 atomicity (ce8600f), 03 migrations (3b66163..c0fef97), 04 writer hardening, 05 remaining parsers + parity. Ratchets: awk 30->15, lib-test 8->7, FL 68->66 all via clamp with same-commit MAINTAINER/gate-caps sync; guard enforces never-up vs git history. Remaining suite reds are PRE-EXISTING (verified red at baseline 00ecc69): test-flag-coverage criticals (undocumented/untested flags in bug/todo/overview scripts) and test-runtime-dependencies jq-guard gaps (9 scripts call jq unguarded). Both queued as next work. Restored 2026-08-28 after B69: this entry lived only in the .todos array and was deleted rather than folded when that array was dropped.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-08-28T07:49:45Z",
+      "updated_at": "2026-08-28T07:49:45Z"
+    },
+    {
       "id": "T48b",
       "title": "A gate that every runtime a skill probes with command -v has a row in that skill's requires.tsv",
       "status": "done",
@@ -1240,6 +1214,45 @@
       "note": "Folded and dropped: .todos held exactly one entry — T47 [done], an artifact of my own 00ecc69 queue note writing d.get('todos') instead of .tasks (the .tasks T47 entry was the authoritative one and already done; the copy was redundant). Guard added: reg_findings fails any todo-register write with 'register carries a .todos array - fold its entries into .tasks and drop the key', verified live (todo-add refused on a seeded artifact). register-helpers suite green.",
       "created_at": "2026-08-27T22:46:46Z",
       "updated_at": "2026-08-27T22:51:29Z"
+    },
+    {
+      "id": "T63",
+      "title": "Chat polling back-off cadence: 5s->10s->...->60s, reset on activity",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "When live monitoring (socket JOIN push) is not feasible and an agent polls chat-read, use a step-down cadence: poll twice every 5 seconds; if no new message, twice every 10s, then twice every 20s, increasing the interval by 10s each round until 60s is the steady state. Any new message resets the cadence to 5s so probes and questions get answered fast. Implement as a chat-watch.sh helper (or a --follow mode on chat-read) using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only. Bound the total run with a --max-wait so a caller can use it as a one-shot drain or a long-running monitor. Tests: fake clock or injected sleep function; assert the interval sequence 5,5,10,10,20,20,30,30,40,40,50,50,60,60... and the reset-on-arrival.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-watch.sh: step-down cadence 5,5->10,10->20,20->...->60 (cap), reset to 5 on any message; cursor is last-id+1 because FETCH is >= (the flood this exposed was fixed by that); --max-wall bounds the run. Verified live with a real server + a logging sleep shim: sleeps 5,10,reset-to-5 on arrival; two live messages each printed exactly once.",
+      "created_at": "2026-08-27T22:59:33Z",
+      "updated_at": "2026-08-28T04:15:31Z"
+    },
+    {
+      "id": "T64",
+      "title": "Explicit @mention targeting for agents on the chat channel",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Protocol + helpers: a message whose text starts with or contains @<nick> is routed/highlighted to that agent. Server side: PRIVMSG text starting with @nick delivers as today (the log keeps one line) but connected subscribers whose nick matches get a targeted line (e.g. 'MENTION <chan> <id> <ts> <from> :text') or an inbox-style FETCH filter; other subscribers may ignore. Client side: chat-read --mentions <nick> returns only messages naming the agent; @all/@everyone broadcasts. Nick validation already exists (A-Za-z0-9_-). Decide and document: mentions are advisory metadata, not delivery guarantees (offline agents see them via history). Tests: two-socket delivery targeting, offline mention visible in history, @all semantics.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-read --mentions NICK: filters every mode (socket, --since, --last, --all) to lines whose text carries @NICK or @all/@everyone, delimited by space/punct/EOL so @oxen does not match @ox; documented as advisory metadata (offline agents see mentions via history). Verified: targeted, @all, trailing-punct, and non-substring cases on fixtures.",
+      "created_at": "2026-08-27T22:59:33Z",
+      "updated_at": "2026-08-28T04:15:31Z"
+    },
+    {
+      "id": "T65",
+      "title": "Server discovery via UDP broadcast + human-driven connect choice",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "An AI chat host is discoverable on the LAN instead of by ip:port. (1) Servers announce themselves: a UDP broadcast beacon every N seconds carrying a JSON payload {name, port, proto, started} where name is human-identifiable (hostname + a friendly suffix like 'ai-skills/mdibbets-den') and stable. (2) A discovery client (chat-discover.sh, bash + /dev/udp, timeout-bounded) listens one beacon period and lists every server found. (3) The joining AGENT must ASK ITS DRIVING HUMAN before connecting: present the discovered list (or offer 'start your own local server') and let the human choose; never auto-join a network host. Multiple servers -> numbered list. Also the joining agent asks the human whether to pick its own nickname or let the human provide one (same prompt, one question). Privacy: bind the beacon to the LAN interface, not 0.0.0.0 by default; opt-out flag for servers. Tests: loopback beacon/discover pair, list formatting with multiple servers, timeout with none. CI: UDP broadcast on 127.0.0.1 works on GH runners; guard with UNCONFIGURED-style skip if the port is unavailable.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-announce.sh broadcasts a JSON beacon {proto,name,port,started} every 2s — python3 sender sets SO_BROADCAST (bash /dev/udp cannot send broadcast: EACCES), /dev/udp stays as unicast fallback; chat-server.sh start --announce [name] launches it and stop kills it (pid tracked; ~1s shutdown grace observed). chat-discover.sh listens one period (socat or python3 tier, UNCONFIGURED skip without either), dedupes by name+port, prints a numbered human list or --json. Human-choice flow (present list + start-local option, ask nickname) documented in SKILL.md 'Joining a server'. Verified: loopback pair (list + json), real 255.255.255.255 broadcast discovered reliably after the SO_BROADCAST fix, beacon lifecycle clean. Suite test exercises the loopback pair with SKIP-loud absence.",
+      "created_at": "2026-08-27T22:59:42Z",
+      "updated_at": "2026-08-28T04:21:38Z"
     },
     {
       "id": "T8",
