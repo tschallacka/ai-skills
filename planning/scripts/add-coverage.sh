@@ -66,6 +66,20 @@ plan_git_snapshot "$plan_dir"
 
 temporary_file="${inventory}.tmp.$$"
 trap 'rm -f "$temporary_file"' EXIT
+# A --replace that matches nothing is an insert, not a replacement, and the usual
+# cause is that the outcome -- the match key -- was reworded in the same call that
+# corrected the ids. Deciding the verb before the write lets the caller be told,
+# rather than reading "Replaced" beside two rows disagreeing about one outcome (T68).
+replaced_existing=false
+if [ "$replace_mode" = true ]; then
+    while IFS= read -r existing_row; do
+        case "$existing_row" in '|'*) ;; *) continue ;; esac
+        [ "$(plan_table_cell "$existing_row" 2)" = "$outcome" ] || continue
+        replaced_existing=true
+        break
+    done < "$inventory"
+fi
+
 if [ "$replace_mode" = true ]; then
     # Replace the coverage row whose first cell matches the outcome; create it
     # (before the Work units heading) when no such row exists yet.
@@ -107,7 +121,12 @@ record_id="$(awk -v wanted="$outcome" '
     END { if (found > 0) printf "coverage:%02d\n", found; else exit 1 }
 ' "$inventory")" || plan_die "Coverage row was written but could not be located"
 if [ "$replace_mode" = true ]; then
-    printf 'Replaced coverage for %s (%s)\n' "$work_units" "$record_id"
+    if [ "$replaced_existing" = true ]; then
+        printf 'Replaced coverage for %s (%s)\n' "$work_units" "$record_id"
+    else
+        printf 'Added coverage for %s (%s) -- --replace matched no existing outcome, so this is a new row, not a replacement. If you meant to replace one, its wording differs; look for a stale row under the old outcome.\n' \
+            "$work_units" "$record_id"
+    fi
 else
     printf 'Added coverage for %s (%s)\n' "$work_units" "$record_id"
 fi

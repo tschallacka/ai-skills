@@ -82,7 +82,15 @@ step_update_output="$temporary_root/step-update-output.log"
 "$script_dir/update-plan-content.sh" --step-section "$plan_dir" \
     01-sync/01-step-update-status objective \
     -p 4.1: 'Update both status fields atomically.' 2>"$step_update_output"
-grep -Fq 'Reminder: testing instructions already exist at ' "$step_update_output"
+# The companion was written after the step's last change, so it is current and
+# the reminder stays silent. It used to fire whenever a companion merely existed,
+# which made it true on every step edit and useless for spotting the edit that
+# left one behind (T67); test-step-testing-reminder.sh covers both directions.
+[ ! -s "$step_update_output" ] || {
+    printf 'test-plan-commands.sh:%s: a current companion should not draw a reminder, got: %s\n' \
+        "$LINENO" "$(cat "$step_update_output")" >&2
+    exit 1
+}
 "$script_dir/add-coverage.sh" "$plan_dir" 'Status fields are synchronized.' W01 \
     'The update command owns the mutation.'
 "$script_dir/add-coverage.sh" "$plan_dir" 'The synchronized state is validated.' W02 \
