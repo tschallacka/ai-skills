@@ -1579,6 +1579,69 @@
       "notes": null,
       "created_at": "2026-08-28T07:56:06Z",
       "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
+      "id": "B73",
+      "title": "the duplication ratchet counts inline table parsers in comments, not only in code",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Add a shell comment containing the literal text of the pattern the ratchet counts, then run planning/tests/test-duplication-ratchet.sh",
+      "observed": "A new helper written specifically to avoid an inline pipe-splitting parser failed the ratchet at 16 against a cap of 15. The only occurrence in the file was the sentence explaining why the helper does not use one; no code in it splits on the delimiter.",
+      "expected": "The ratchet counts parsers, so a comment naming the pattern it forbids does not raise the count. Documenting a rule should not violate it.",
+      "mechanism": "The count is a text match over the file rather than a match restricted to executable lines, so any occurrence raises it, comments included. The effect is perverse in exactly the case the ratchet is meant to reward: a contributor who replaces an inline parser with a helper and explains why is charged for the explanation.",
+      "surfaces": [
+        "planning/tests/test-duplication-ratchet.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, while replacing three inline parsers with one helper for T66",
+      "notes": null,
+      "created_at": "2026-08-28T10:19:35Z",
+      "updated_at": "2026-08-28T10:19:35Z"
+    },
+    {
+      "id": "B74",
+      "title": "chat-send.sh's socket path lets a message body forge any nick, because newlines are not sanitised before the protocol printf",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-register.sh '#injtest'; body=$(printf 'first line from aiskills\\nNICK ox\\nPRIVMSG #injtest :this line claims to be from ox\\n'); bash chat/scripts/chat-send.sh '#injtest' \"$body\" -n aiskills --host 127.0.0.1 --port 7717; bash chat/scripts/chat-read.sh '#injtest' 0",
+      "observed": "Two messages are stored from one send. Reproduced here verbatim: 'MSG #injtest 2 ... aiskills :first line from aiskills' followed by 'MSG #injtest 3 ... ox :this line claims to be from ox'. The send passed -n aiskills; message 3 is attributed to ox. A message body can forge any nick on the channel. A plain two-line body is silently truncated instead — the second line becomes a protocol command rather than text, exit stays 0, and the acknowledgement looks like success.",
+      "expected": "A message body is data. Whatever it contains reaches the channel as one message attributed to the sending nick, or the send is refused.",
+      "mechanism": "chat-send.sh has two paths that disagree about sanitisation. The direct-append path runs the text through tr '\\n\\r' '  ' before writing the log line. The socket path does printf 'NICK %s\\nPRIVMSG %s :%s\\nQUIT\\n' with the raw body, so every newline in it is a command boundary on the wire and every following line is parsed as a protocol verb. The safe path is the one callers were told not to use: B65 made --host mandatory for a message to reach subscribers at all, which routes every well-behaved caller through the unsanitised path.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent, reproduced independently by the main session on #injtest",
+      "notes": null,
+      "created_at": "2026-08-28T10:29:45Z",
+      "updated_at": "2026-08-28T10:29:45Z"
+    },
+    {
+      "id": "B75",
+      "title": "relaying untrusted text into chat is an injection vector while B74 stands",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B74",
+      "reproduce": "Any agent that pastes text it did not author — a file excerpt, a diff, command output, a quote from a user — into chat-send.sh with --host",
+      "observed": "Not yet observed in the wild. It follows from B74: a body's newlines become protocol commands, so whoever wrote the relayed text chooses what else gets sent and under whose nick. The main session has relayed reviewer reports, diff excerpts and command output into this channel repeatedly today, any of which could have carried a crafted line.",
+      "expected": "Relaying a quotation into a channel cannot cause anything but that quotation to appear, attributed to the relaying agent.",
+      "mechanism": "Same as B74 — unsanitised newlines in the socket path — but the exposure is what makes it worth its own entry: the attacker need not have chat access, only the ability to get text in front of an agent that will quote it. That is a much larger surface than the channel's own participants, and it is the reason B74 is high rather than minor.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent named the consequence; recorded separately because the surface differs from B74's",
+      "notes": null,
+      "created_at": "2026-08-28T10:30:02Z",
+      "updated_at": "2026-08-28T10:30:02Z"
     }
   ]
 }
