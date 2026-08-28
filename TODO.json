@@ -37,7 +37,7 @@
     {
       "id": "T54",
       "title": "A resolve-finding command that sets status, records the claim and refuses self-certification",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": null,
       "detail": "codex postmortem recommendation 3, and the most repeated manual sequence in plan-overview-rebuild: for each of four cycles I rebuilt the entire findings CSV with awk to flip one status column, re-ran update-adversarial-review.sh, then looped add-fix-claim.sh over every minted pair, across forty findings. Two defects fall out of doing it by hand. A claim can be recorded for a finding whose status was never flipped, which happened here and left four superseded rows in fixes.md that verify-fix-keys.sh now reports as ignored rather than verified. And a claim can be self-certified by the session that minted the key, which codex hit as their operational failure 3 and resolved by re-minting under an independent identity. One command should set the status, record the claim, and refuse when the claiming session is the minting session.",
@@ -47,9 +47,9 @@
         "planning/scripts/add-fix-claim.sh",
         "planning/scripts/verify-fix-keys.sh"
       ],
-      "note": null,
+      "note": "Implemented as planning/scripts/resolve-finding.sh with planning/tests/test-resolve-finding.sh, suite 109/109. One command sets the status, records the claim from the plan's own fix-keys.json, and refuses self-certification at the point the claim is made. Both defects it was filed about are now structurally impossible: it edits the existing row rather than rewriting the table from a regenerated CSV (the mechanism by which nine findings were remediated and cited while never becoming rows), and it drops a superseded claim before recording a new one (what left four rows reported as ignored rather than verified). Five assertions pinned by exit code, including 65 for a finding with no row and 70 for a minter claiming its own keys. codex's postmortem recommendation 3, and the sequence I ran by hand across eight cycles.",
       "created_at": "2026-08-27T22:38:19Z",
-      "updated_at": "2026-08-27T22:38:19Z"
+      "updated_at": "2026-08-28T11:22:30Z"
     },
     {
       "id": "T55",
