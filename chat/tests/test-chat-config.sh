@@ -100,7 +100,11 @@ answer_prompt() { # <answer> <home> -> runs serve on a pty, briefly
     local answer="$1" home="$2"
     case "$pty_style" in
         gnu) printf '%s\n' "$answer" | "$timeout_cmd" 6 script -q -c "$binary serve --home $home" /dev/null >"$home/tty.out" 2>&1 ;;
-        bsd) printf '%s\n' "$answer" | "$timeout_cmd" 6 script -q /dev/null "$binary" serve --home "$home" >"$home/tty.out" 2>&1 ;;
+        bsd)
+            printf '#!/bin/sh\nexec "%s" serve --home "%s"\n' "$binary" "$home" >"$home/run.sh"
+            chmod +x "$home/run.sh"
+            printf '%s\n' "$answer" | "$timeout_cmd" 6 script -q /dev/null "$home/run.sh" >"$home/tty.out" 2>&1
+            ;;
     esac
     return 0
 }
