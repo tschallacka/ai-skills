@@ -3174,6 +3174,8 @@ scripts/register-command.sh
 scripts/register-read.sh
 scripts/resolve-finding.sh
 scripts/render-plan-overview.sh
+scripts/render-plans-board.sh
+scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
@@ -3363,6 +3365,7 @@ tests/test-limited-run-contract.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
+tests/test-plans-board.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh

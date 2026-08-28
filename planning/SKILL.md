@@ -1278,6 +1278,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
 "$PLANNING_SKILL_DIR/scripts/render-plan-overview.sh" <plan-directory> [--watch]   # one-file html dashboard: state, donut, goal bars, feedback cycles, narration
+"$PLANNING_SKILL_DIR/scripts/render-plans-board.sh" [--root <plans-root>] [--out FILE]   # one-file html board across EVERY plan in the root: lifecycle, steps, findings, review, last activity, and a link into each plan's own overview
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --title <plan-directory> plan "<title>"
