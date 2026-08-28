@@ -17,6 +17,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../planning/tests" && pwd)/lib-t
 t_begin
 
 export LC_ALL=C
+for coreutils_bin in /opt/homebrew/opt/coreutils/libexec/gnubin /usr/local/opt/coreutils/libexec/gnubin; do
+    [ -x "$coreutils_bin/timeout" ] && PATH="$coreutils_bin:$PATH"
+done
+export PATH
 timeout_cmd=timeout
 command -v "$timeout_cmd" >/dev/null 2>&1 || timeout_cmd=gtimeout
 
