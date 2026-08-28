@@ -100,7 +100,23 @@ while IFS= read -r script; do
     [ -n "$script" ] || continue
     name="$(basename "$script")"
     case " $guarded_by_entry_point " in *" $name "*) continue ;; esac
-    grep -q 'command -v jq' "$script" \
+    grep -q 'command -v jq' "$script" && continue
+    # Delegating to a shared guard is better than copying the probe, and the
+    # contract above already allows it -- "or be reachable only through an entry
+    # point that does". Accept a named guard helper, but verify the helper
+    # really guards rather than trusting the name: a guard that stopped probing
+    # would otherwise excuse every caller that delegates to it.
+    delegated=''
+    for guard in reg_require_jq; do
+        grep -q "$guard" "$script" || continue
+        guard_src="$(grep -rl "^$guard()" "$scripts" 2>/dev/null | head -1)"
+        [ -n "$guard_src" ] || continue
+        awk -v fn="$guard" '$0 ~ "^"fn"\\(\\)" {inside=1} inside && /command -v jq/ {found=1} inside && /^}/ {inside=0} END {exit !found}' \
+            "$guard_src" || continue
+        delegated=yes
+        break
+    done
+    [ -n "$delegated" ] \
         || note_fail "$name calls jq but neither guards it nor is covered by a guarded entry point"
 done < <(grep -lE '(^|[^A-Za-z0-9_])jq ' "$scripts"/*.sh 2>/dev/null || true)
 

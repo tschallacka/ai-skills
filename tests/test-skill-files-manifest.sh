@@ -68,6 +68,16 @@ for skill in "${SKILL_NAMES[@]}"; do
     skill_files "$skill" dev | sort > "$work/listed_dev"
     ( cd "$repo_root/$skill" && git ls-files | sort ) > "$work/tracked"
 
+    # Untracked files are the blind spot, not empty lists: git ls-files cannot
+    # see a file that has not been staged, so the accounting below excludes it
+    # and reports a clean PASS about a set that silently omits the very file
+    # someone just added. Naming them costs nothing and is not a failure --
+    # unstaged work in progress is legitimate -- but a PASS must not be silent
+    # about what it did not examine (T66).
+    untracked="$( cd "$repo_root/$skill" && git ls-files --others --exclude-standard | tr '\n' ' ' )"
+    [ -z "$untracked" ] || printf '%s: NOTE %s untracked file(s) not covered by this check: %s\n' \
+        "${0##*/}" "$skill" "${untracked% }" >&2
+
     listed_count="$(grep -c . < "$work/listed" || true)"
     tracked_count="$(grep -c . < "$work/tracked" || true)"
     # A positive control on the harness itself: an empty list would satisfy the
@@ -106,6 +116,10 @@ done
 # were it not for the guard, so pin the total the manifest is expected to carry.
 t_assert_eq 'the manifest lists the expected number of files in total' \
     "$([ "$total_listed" -ge 90 ] && printf 'at least 90')" 'at least 90'
+# What the run actually examined. A bare PASS reads the same whether it checked
+# a hundred files or none of the one you just added (T66).
+printf '%s: accounted for %s listed file(s) across %s skill(s)\n' \
+    "${0##*/}" "$total_listed" "${#SKILL_NAMES[@]}" >&2
 
 
 # ── the exemptions are exemptions, not a blanket ────────────────────────────

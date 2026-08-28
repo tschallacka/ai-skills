@@ -3171,6 +3171,7 @@ scripts/create-progress.sh
 scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
+scripts/register-read.sh
 scripts/render-plan-overview.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
@@ -3389,6 +3390,7 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-register-read.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
