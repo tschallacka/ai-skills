@@ -90,6 +90,10 @@ discover() {
 suites=(
     tests
     planning/tests
+    # chat/tests was never discovered here, so every chat assertion — including
+    # the rung CI builds cargo for specifically "so its assertions run" (T62) —
+    # was dead weight: a green suite proved nothing about the chat skill.
+    chat/tests
     benchmark/planning/tests
 )
 
