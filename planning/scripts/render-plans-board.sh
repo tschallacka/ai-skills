@@ -333,7 +333,15 @@ h1{font-size:clamp(22px,3vw,32px);letter-spacing:.4px}
    footers of a row agree even when one card's steps figure wraps to two lines.
    It belongs in THIS rule: declared in a second .go block of equal specificity
    it lost to this one silently, and the divider stepped by 15px between
-   neighbours — measured in the browser, invisible to every DOM assertion. */
+   neighbours — measured in the browser, invisible to every DOM assertion.
+
+   If you go measuring this: getComputedStyle reports the USED value of `auto`,
+   not the keyword, so a healthy row reads 15px on the cards whose steps figure
+   wrapped and 0px on the rest. That is auto absorbing the difference, which is
+   the rule working, NOT the override coming back. The numbers that prove
+   alignment are the ones that must be EQUAL across a row: each link's top
+   offset within its card, and the gap from its bottom to the card's bottom
+   (17px on every card when this is right). Do not "fix" the 15px. */
 .go{margin-top:auto;font-size:12px;color:var(--cyan);text-decoration:none;border-top:1px solid var(--line);
   padding-top:10px;display:block}
 .go:hover{text-decoration:underline}
