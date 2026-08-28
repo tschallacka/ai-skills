@@ -141,7 +141,7 @@ plan_fix_key() {
 # no "if neither, improvise" arm: the values this produces are the session id
 # and the session secret that key the adversarial-review fix-key gate, and the
 # arm it replaces was guessable from a process id, a clock truncated to a whole
-# second, and a 15-bit shell PRNG a reader can reseed (B77).
+# second, and a 15-bit shell PRNG a reader can reseed (B87).
 # Failing loudly is the only honest option; a caller that cannot get entropy
 # must refuse to mint, not mint something weak.
 #

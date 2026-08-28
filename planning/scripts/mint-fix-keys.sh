@@ -98,7 +98,7 @@ plan_session_id() {
 # Eight bytes of OS entropy, and nothing else: the id names the secret dir that
 # gates approval, so a guessable value is a hole. The fallback this replaced was
 # exactly that -- the process id, the clock truncated to a whole second, and two
-# draws of the shell's own 15-bit PRNG, joined by hyphens (B77). It is described
+# draws of the shell's own 15-bit PRNG, joined by hyphens (B87). It is described
 # rather than quoted because the ratchets match file text and would read a
 # quotation as a use.
 new_session_id() {

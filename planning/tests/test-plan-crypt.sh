@@ -175,8 +175,8 @@ fi
 # ---- 6. randomness ---------------------------------------------------------
 # The value keys the gate, so the properties that matter are: it is the right
 # width, two draws differ, and there is no guessable fallback arm left. The
-# retired arm was "$$-$(date +%s)-$RANDOM$RANDOM" (B77), which contains a
-# hyphen; a hex draw never does.
+# retired arm joined a process id, a whole-second clock and two draws of the
+# shell's own PRNG with hyphens (B87); a hex draw never contains one.
 id_a="$(plan_random_hex 8)"
 id_b="$(plan_random_hex 8)"
 t_assert_eq 'plan_random_hex 8 is 16 hex chars' "${#id_a}" '16'
@@ -203,7 +203,7 @@ t_assert_eq '64 draws are all distinct' "$(sort -u "$work/draws" | grep -c .)" '
 # assertion must not become the next instance of that.
 if awk '/^[[:space:]]*#/ { next } /\$RANDOM/ { found = 1 } END { exit !found }' \
         "$scripts/mint-fix-keys.sh"; then
-    t_fail 'mint-fix-keys.sh reads the bash PRNG again; its output must not key the gate (B77)'
+    t_fail 'mint-fix-keys.sh reads the bash PRNG again; its output must not key the gate (B87)'
 fi
 
 # ---- 7. the target triple ---------------------------------------------------

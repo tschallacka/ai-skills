@@ -194,7 +194,7 @@ library, and `test-plan-libs-build.sh` runs it.
   the secret come from `plan_random_hex`, which is the OS CSPRNG or a refusal
   — there is deliberately no improvised third arm. The one that existed built
   the id from the process id, the whole second and the shell's own weak PRNG,
-  and that value keys the gate (B77).
+  and that value keys the gate (B87).
 - `add-fix-claim.sh` is the only writer of `fixes.md`, which had five readers
   and none. It gates on the same Findings table `mint-fix-keys.sh` and
   `verify-fix-keys.sh` read, so a claim it accepts is a claim the verifier
