@@ -47,8 +47,6 @@ jobs:
       - name: Build the compiled chat rung so its assertions run (T62)
         if: runner.os == 'Linux'
         uses: dtolnay/rust-toolchain@1.97
-        with:
-          toolchain: "1.97"
 
       - name: Place the compiled chat rung
         if: runner.os == 'Linux'
@@ -182,11 +180,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/plan-crypt
 
       - name: Pin the toolchain the crate declares
         uses: dtolnay/rust-toolchain@1.97
         with:
-          toolchain: "1.97"
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
@@ -265,7 +264,7 @@ jobs:
           one="$("$bin" random-hex 8)"
           two="$("$bin" random-hex 8)"
           [ "${#one}" -eq 16 ] || { echo "::error::random-hex 8 gave ${#one} chars"; exit 1; }
-           [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
+          [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
           printf 'digest and entropy agree on %s\n' '${{ matrix.target }}'
 
   chat-binary:
@@ -288,11 +287,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/chat
 
       - name: Pin the toolchain the crate declares
         uses: dtolnay/rust-toolchain@1.97
         with:
-          toolchain: "1.97"
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 

@@ -107,15 +107,14 @@ while IFS= read -r script; do
     # really guards rather than trusting the name: a guard that stopped probing
     # would otherwise excuse every caller that delegates to it.
     delegated=''
-    for guard in reg_require_jq; do
-        grep -q "$guard" "$script" || continue
+    guard='reg_require_jq'
+    if grep -q "$guard" "$script"; then
         guard_src="$(grep -rl "^$guard()" "$scripts" 2>/dev/null | head -1)"
-        [ -n "$guard_src" ] || continue
-        awk -v fn="$guard" '$0 ~ "^"fn"\\(\\)" {inside=1} inside && /command -v jq/ {found=1} inside && /^}/ {inside=0} END {exit !found}' \
-            "$guard_src" || continue
-        delegated=yes
-        break
-    done
+        if [ -n "$guard_src" ] && awk -v fn="$guard" '$0 ~ "^"fn"\\(\\)" {inside=1} inside && /command -v jq/ {found=1} inside && /^}/ {inside=0} END {exit !found}' \
+            "$guard_src"; then
+            delegated=yes
+        fi
+    fi
     [ -n "$delegated" ] \
         || note_fail "$name calls jq but neither guards it nor is covered by a guarded entry point"
 done < <(grep -lE '(^|[^A-Za-z0-9_])jq ' "$scripts"/*.sh 2>/dev/null || true)
