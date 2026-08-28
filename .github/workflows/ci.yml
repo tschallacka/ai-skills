@@ -189,6 +189,9 @@ jobs:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
+      - name: Ensure the target standard library is installed
+        run: rustup target add "${{ matrix.target }}"
+
       - name: Format, lint and test
         working-directory: src/plan-crypt
         run: |
@@ -270,6 +273,8 @@ jobs:
   chat-binary:
     name: chat builds and runs on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    env:
+      HOME: ${{ runner.temp }}
     strategy:
       fail-fast: false
       matrix:
@@ -295,6 +300,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
+
+      - name: Ensure the target standard library is installed
+        run: rustup target add "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/chat
