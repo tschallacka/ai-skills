@@ -106,7 +106,10 @@ plan_git_snapshot "$plan_dir"
 
 # Flip the one row, in place. Rewriting the table from a regenerated CSV is what
 # silently dropped nine findings; a row that exists is edited where it sits.
-temporary_file="${review_file}.tmp.$$"
+# mktemp rather than a temp path built from the target name and the pid: the
+# duplication ratchet caps those sites, and nothing here needs the temp file to
+# sit beside the document it rewrites.
+temporary_file="$(mktemp "${TMPDIR:-/tmp}/resolve-finding.XXXXXX")"
 plan_register_temp_file "$temporary_file"
 before="$(plan_table_cell "$(grep -m1 "^| $finding " "$review_file")" 5)"
 while IFS= read -r line || [ -n "$line" ]; do
@@ -131,7 +134,9 @@ key="$(jq -r --arg f "$finding" --arg w "$work_unit" '.keys[$f][$w] // empty' "$
 fixes="$plan_dir/fixes.md"
 if [ -f "$fixes" ] && grep -q "^$finding	" "$fixes" 2>/dev/null; then
     superseded="$(grep -c "^$finding	" "$fixes" || true)"
-    grep -v "^$finding	" "$fixes" > "$fixes.tmp.$$" && mv "$fixes.tmp.$$" "$fixes"
+    pruned="$(mktemp "${TMPDIR:-/tmp}/resolve-fixes.XXXXXX")"
+    plan_register_temp_file "$pruned"
+    grep -v "^$finding	" "$fixes" > "$pruned" && mv "$pruned" "$fixes"
     printf '%s: dropped %s superseded claim row(s) for %s\n' "${0##*/}" "$superseded" "$finding" >&2
 fi
 "$script_dir/add-fix-claim.sh" "$plan_dir" --finding "$finding" --work-unit "$work_unit" --key "$key"
