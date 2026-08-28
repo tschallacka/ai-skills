@@ -25,6 +25,8 @@
 
 set -uo pipefail
 export LC_ALL=C
+timeout_cmd=timeout
+command -v "$timeout_cmd" >/dev/null 2>&1 || timeout_cmd=gtimeout
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../.." && pwd)"
@@ -91,15 +93,15 @@ fi
 answer_prompt() { # <answer> <home> -> runs serve on a pty, briefly
     local answer="$1" home="$2"
     case "$pty_style" in
-        gnu) printf '%s\n' "$answer" | timeout 6 script -q -c "'$binary' serve --home '$home'" /dev/null >"$home/tty.out" 2>&1 ;;
-        bsd) printf '%s\n' "$answer" | timeout 6 script -q /dev/null "$binary" serve --home "$home" >"$home/tty.out" 2>&1 ;;
+        gnu) printf '%s\n' "$answer" | "$timeout_cmd" 6 script -q -c "'$binary' serve --home '$home'" /dev/null >"$home/tty.out" 2>&1 ;;
+        bsd) printf '%s\n' "$answer" | "$timeout_cmd" 6 script -q /dev/null "$binary" serve --home "$home" >"$home/tty.out" 2>&1 ;;
     esac
     return 0
 }
 
 # --- 3: no tty neither asks nor writes --------------------------------------
 h="$root/notty"; mkdir -p "$h"
-timeout 4 "$binary" serve --home "$h" >"$h/out" 2>&1
+"$timeout_cmd" 4 "$binary" serve --home "$h" >"$h/out" 2>&1
 out="$(cat "$h/out")"
 contains "a run with no tty says there was no terminal to ask" "no terminal to ask" "$out"
 contains "and says nothing was recorded" "nothing has been recorded" "$out"

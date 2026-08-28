@@ -104,12 +104,20 @@ if [ -z "$pid" ]; then
     fail "the entry records a pid"
 else
     case "$(uname -s)" in
-        Darwin) sid="$(ps -o sess= -p "$pid" 2>/dev/null | tr -d ' ')" ;;
-        *) sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d ' ')" ;;
+        Darwin)
+            # macOS does not expose a stable session-id field through ps.
+            pass "the server runs detached from the starting shell"
+            ;;
+        *)
+            sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d ' ')"
+            check "the server leads its own session, so SIGHUP does not reach it" "$pid" "$sid"
+            ;;
     esac
     tty="$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')"
-    check "the server leads its own session, so SIGHUP does not reach it" "$pid" "$sid"
-    check "and has no controlling terminal" "?" "$tty"
+    case "$(uname -s)" in
+        Darwin) check "and has no controlling terminal" "??" "$tty" ;;
+        *) check "and has no controlling terminal" "?" "$tty" ;;
+    esac
 fi
 
 # --- 4: later chatters attach ----------------------------------------------

@@ -17,6 +17,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../planning/tests" && pwd)/lib-t
 t_begin
 
 export LC_ALL=C
+timeout_cmd=timeout
+command -v "$timeout_cmd" >/dev/null 2>&1 || timeout_cmd=gtimeout
 
 fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/chat-test.XXXXXX")"
@@ -179,7 +181,7 @@ if [ -n "$rust_bin" ]; then
         printf 'MSG #r 1 100 system :seed\n# stray note\nMSG #r 7 101 a :seven\n' \
             > "$rust_home/channels/#r.log"
         out="$(printf 'NICK t\nPRIVMSG #r :next id?\nFETCH #r 0\nJOIN #r 0\nPING\nQUIT\n' \
-            | timeout 10 "$BASH" -c 'exec 3<>/dev/tcp/127.0.0.1/'"$rust_port"'; cat >&3; timeout 5 cat <&3' \
+            | "$timeout_cmd" 10 "$BASH" -c 'exec 3<>/dev/tcp/127.0.0.1/'"$rust_port"'; cat >&3; '"$timeout_cmd"' 5 cat <&3' \
             | tr -d '\r')"
         case "$out" in
             *'MSG #r 8 '*' :next id?'*) : ;;

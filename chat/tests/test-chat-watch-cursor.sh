@@ -29,7 +29,9 @@ t_begin
 export LC_ALL=C
 fail() { t_fail "$*"; }
 
-command -v timeout >/dev/null 2>&1 || {
+timeout_cmd=timeout
+command -v "$timeout_cmd" >/dev/null 2>&1 || timeout_cmd=gtimeout
+command -v "$timeout_cmd" >/dev/null 2>&1 || {
     printf 'SKIP chat-watch-cursor: no timeout(1) - the watch assertions did not run\n' >&2
     t_end
 }
@@ -52,7 +54,7 @@ home="$temporary_root/home"
 "$scripts/chat-send.sh" '#watch' beta  -n w --home "$home" >/dev/null   # id 3
 
 # ---- local path: a quiet channel must not be re-read -----------------------
-out="$(timeout 13 "$scripts/chat-watch.sh" '#watch' --since 0 --home "$home" \
+    out="$("$timeout_cmd" 13 "$scripts/chat-watch.sh" '#watch' --since 0 --home "$home" \
         2>/dev/null | awk '$1 == "MSG" { print $3 }' || true)"
 assert_each_once "local watch" "$out" "1 2 3"
 
@@ -80,7 +82,7 @@ else
           "$scripts/chat-send.sh" '#watch' gamma -n w --host 127.0.0.1 --port "$port" >/dev/null 2>&1
         ) &
         writer=$!
-        out="$(timeout 16 "$scripts/chat-watch.sh" '#watch' --since 0 \
+        out="$("$timeout_cmd" 16 "$scripts/chat-watch.sh" '#watch' --since 0 \
                 --host 127.0.0.1 --port "$port" 2>/dev/null \
                 | awk '$1 == "MSG" { print $3 }' || true)"
         wait "$writer" 2>/dev/null || true
