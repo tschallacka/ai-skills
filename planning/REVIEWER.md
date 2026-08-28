@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `3763ee109f9cb891fd9cc1d81725e9f6e1a34755278db7565b2d320dcde892e5`
+> Source SHA-256: `e5873ef37a095826fc53b6f999d68957d79e4c17a485438ff6bda11cdb22ec2a`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -259,6 +259,21 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**A reviewer runs `--check` on its own rows before handing them over.** The shape
+gate and the mint preview already run on the write path, so a malformed row can
+never land — but it fails at *consumption*, which is after the reviewer has
+finished and left. The coordinator is then holding a refusal about rows it did
+not write, and the one session that could explain the intent is gone. One command
+before returning moves the refusal to where it can be answered:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --check
+```
+
+The commonest cause is a row naming more than one work unit in the Work unit
+cell, which the fix-key gate cannot mint. One primary unit per finding; if a
+finding genuinely spans two, it is two findings that cross-reference each other.
 
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys

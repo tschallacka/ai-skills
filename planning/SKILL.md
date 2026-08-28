@@ -896,6 +896,21 @@ it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
 
+**A reviewer runs `--check` on its own rows before handing them over.** The shape
+gate and the mint preview already run on the write path, so a malformed row can
+never land — but it fails at *consumption*, which is after the reviewer has
+finished and left. The coordinator is then holding a refusal about rows it did
+not write, and the one session that could explain the intent is gone. One command
+before returning moves the refusal to where it can be answered:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --check
+```
+
+The commonest cause is a row naming more than one work unit in the Work unit
+cell, which the fix-key gate cannot mint. One primary unit per finding; if a
+finding genuinely spans two, it is two findings that cross-reference each other.
+
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
