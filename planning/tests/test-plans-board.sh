@@ -189,6 +189,16 @@ t_assert_contains 'existing overview is linked' 'href="alpha-running/overview.ht
 # Refusals
 # ─────────────────────────────────────────────────────────────────────────────
 
+# --refresh is off by default and emits the meta tag when asked for. Mutation:
+# drop the `[ "$refresh" -gt 0 ]` guard and every page carries a refresh tag,
+# including the default one.
+case "$page" in
+    *'http-equiv="refresh"'*) t_fail 'the default page carries a refresh tag' ;;
+esac
+BOARD_NOW=$NOW "$script_dir/render-plans-board.sh" --root "$root" --out "$second" --refresh 30 >/dev/null
+t_assert_contains 'refresh tag emitted when asked' \
+    '<meta http-equiv="refresh" content="30">' "$(cat "$second")"
+
 t_expect_exit 66 'missing plans root refused' \
     "$script_dir/render-plans-board.sh" --root "$root/does-not-exist" --out "$second"
 t_expect_exit 64 'unknown flag refused' \
