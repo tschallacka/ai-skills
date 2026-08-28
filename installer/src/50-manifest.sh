@@ -328,6 +328,7 @@ tests/test-self-hosted-plan.sh
 tests/test-sha256-fallbacks.sh
 tests/test-stale-sweep.sh
 tests/test-step-atomicity-reset.sh
+tests/test-step-testing-reminder.sh
 tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
 tests/test-target-path-validation.sh
