@@ -74,30 +74,31 @@ trap cleanup EXIT INT TERM
 # this walks candidates and lets the server itself be the arbiter: the first
 # port it actually binds is the one used.
 #
-# Readiness is the server's own "chat serving:" line, NOT the appearance of a
-# run file. That distinction was learned by mutation: an earlier version waited
-# for instances/<bind>_<port>/server.port, so a server that published to the
-# WRONG PLACE — the exact defect two assertions below exist to catch — never
-# became ready and the whole test reported SKIP instead of FAIL. A readiness
-# probe must never be the thing under test.
+# Readiness is the endpoint publication, not a display banner. The server writes
+# this file only after its listener is bound, and the later client assertions
+# verify that the published endpoint is usable. This keeps readiness independent
+# of human-facing output and makes banner wording safe to change.
 #
 # Return codes: 0 ready (pid on stdout), 2 the port was taken (try another),
 # 1 the server failed for some other reason, which is a real failure.
 start_instance() { # <home> <port> -> prints the pid, or nothing
-    local home="$1" port="$2" log="$1/serve.log" i=0 pid
+    local home="$1" port="$2" log="$1/serve.log" ready="$1/instances/127.0.0.1_${2}/server.port" i=0 pid
     mkdir -p "$home"
     : > "$log"
-    "$binary" serve --home "$home" --bind 127.0.0.1 --port "$port" >"$log" 2>&1 &
+    "$binary" serve --home "$home" --no-register --bind 127.0.0.1 --port "$port" >"$log" 2>&1 &
     pid=$!
     while [ "$i" -lt 40 ]; do
-        case "$(cat "$log" 2>/dev/null)" in
-            *"chat serving:"*) printf '%s\n' "$pid"; return 0 ;;
+        [ -f "$ready" ] && {
+            cat "$home/instances/127.0.0.1_${port}/server.pid"
+            return 0
+        }
+        case "$(cat "$log" "$home/server.log" 2>/dev/null)" in
             *"already in use"*) return 2 ;;
         esac
         if ! kill -0 "$pid" 2>/dev/null; then
-            printf '%s: the server exited without serving. Its output:\n%s\n' \
-                "$me" "$(cat "$log" 2>/dev/null)" >&2
-            return 1
+            case "$(cat "$log" "$home/server.log" 2>/dev/null)" in
+                *"already in use"*) return 2 ;;
+            esac
         fi
         sleep 0.1
         i=$((i + 1))

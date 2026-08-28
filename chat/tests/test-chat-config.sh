@@ -150,7 +150,7 @@ echo "  -- with the configured server up --"
 "$binary" serve --home "$h" >"$h/serve.log" 2>&1 &
 pids="$pids $!"
 i=0; while [ "$i" -lt 40 ]; do
-    case "$(cat "$h/serve.log" 2>/dev/null)" in *"chat serving:"*) break ;; esac
+    [ -f "$h/server.port" ] && break
     sleep 0.1; i=$((i + 1))
 done
 contains "the server serves the configured endpoint" "127.0.0.1:18333" "$(cat "$h/serve.log")"
@@ -181,7 +181,7 @@ printf 'transport=socket\nsocket=%s/chat.sock\n' "$h" > "$h/config"
 "$binary" serve --home "$h" >"$h/serve.log" 2>&1 &
 pids="$pids $!"
 i=0; while [ "$i" -lt 40 ]; do
-    case "$(cat "$h/serve.log" 2>/dev/null)" in *"chat serving:"*) break ;; esac
+    [ -f "$h/server.socket" ] && break
     sleep 0.1; i=$((i + 1))
 done
 if [ ! -S "$h/chat.sock" ]; then

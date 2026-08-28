@@ -1,0 +1,8 @@
+# MODE: PROD
+# Prebuilt plan-crypt artifacts shipped with the planning skill.
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	plan-crypt	Static 64-bit x86 Linux binary for portable plan encryption and hashing
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	plan-crypt	Static 64-bit ARM Linux binary for portable plan encryption and hashing
+x86_64-apple-darwin	Darwin:x86_64	plan-crypt	Intel macOS binary for portable plan encryption and hashing
+aarch64-apple-darwin	Darwin:arm64	plan-crypt	Apple Silicon macOS binary for portable plan encryption and hashing
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	plan-crypt.exe	64-bit Windows and POSIX-layer binary for portable plan encryption and hashing

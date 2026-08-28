@@ -24,7 +24,7 @@ trap 'rm -rf "$work"' EXIT
 
 package_version="$(jq -r '.version' "$repo_root/package.json")"
 t_assert_eq 'package.json states a version' \
-    "$(printf '%s' "$package_version" | grep -c '^[0-9][0-9.]*[0-9]$')" '1'
+    "$(printf '%s' "$package_version" | grep -Ec '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$')" '1'
 
 # The first fenced json block in a SKILL.md is the worked example of the file the
 # skill writes. Checking it against the schema keeps the two from drifting: the

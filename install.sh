@@ -3121,11 +3121,12 @@ skill_files() {
         *) printf 'skill_files: unknown package: %s\n' "$package" >&2; return 64 ;;
     esac
     case "$1" in
-        planning)
+            planning)
             cat <<'EOF'
 SKILL.md
 docs/README.md
 REVIEWER.md
+binaries.tsv
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -3454,10 +3455,10 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         bug-report)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv

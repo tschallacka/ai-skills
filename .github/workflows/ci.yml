@@ -201,6 +201,15 @@ jobs:
         working-directory: src/plan-crypt
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-crypt-${{ matrix.target }}
+          path: |
+            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt
+            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt.exe
+          if-no-files-found: error
+
       - name: The musl build must actually be static
         if: contains(matrix.target, 'musl')
         working-directory: src/plan-crypt
@@ -256,9 +265,56 @@ jobs:
           one="$("$bin" random-hex 8)"
           two="$("$bin" random-hex 8)"
           [ "${#one}" -eq 16 ] || { echo "::error::random-hex 8 gave ${#one} chars"; exit 1; }
-          [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
+           [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
           printf 'digest and entropy agree on %s\n' '${{ matrix.target }}'
 
+  chat-binary:
+    name: chat builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          toolchain: "1.97"
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Format, lint and test
+        working-directory: src/chat
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/chat
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-${{ matrix.target }}
+          path: |
+            src/chat/target/${{ matrix.target }}/release/chat
+            src/chat/target/${{ matrix.target }}/release/chat.exe
+          if-no-files-found: error
   shellcheck:
     # Proves: no `error`-severity shellcheck finding exists in any tracked live
     # shell script, and reports the full finding count so it can be ratcheted.
