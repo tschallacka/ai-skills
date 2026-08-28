@@ -87,6 +87,23 @@
       "updated_at": "2026-08-27T22:46:31Z"
     },
     {
+      "id": "T66",
+      "title": "Every document- and register-writing helper reports its delta, not just the verb",
+      "status": "open",
+      "priority": "high",
+      "parent": "T60",
+      "detail": "Diagnosed from this session's failures; it is the single highest-yield change to the helper set. update-adversarial-review.sh prints 'Updated findings table in <file>' whether it wrote 40 rows over 40 or added nine. I fed it a CSV regenerated from the table, so it wrote the same rows back, and the success line was identical to a run that added findings — AR-42 to AR-50 went unrecorded for two cycles and the approval gate would have printed passed with nine remediations ungated, because the gate can only iterate rows that exist. tests/test-skill-files-manifest.sh prints a bare PASS, so a run that scanned 105 tracked files and one that scanned zero are textually identical, which is how a run before git add passed vacuously. remove-work-unit.sh pruned edges and coverage ids silently, which is B68 and T59. The fix is the same everywhere: print the count in and the count out, or the ids added and removed. A caller cannot notice a no-op it did not intend when the tool describes the operation instead of its effect. T59 is this fix for one script; this entry is the general form, and it should cover update-adversarial-review.sh, add-coverage.sh --replace, the register writers, and any gate whose PASS should carry how much it examined.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/update-adversarial-review.sh",
+        "tests/test-skill-files-manifest.sh",
+        "planning/scripts/add-coverage.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T10:06:57Z",
+      "updated_at": "2026-08-28T10:06:57Z"
+    },
+    {
       "id": "T53",
       "title": "Run the reviewer-CSV check on the consume path instead of leaving it opt-in",
       "status": "open",
@@ -135,6 +152,22 @@
       "updated_at": "2026-08-27T22:38:42Z"
     },
     {
+      "id": "T67",
+      "title": "The step-testing reminder fires unconditionally, so it trains its reader to ignore it",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "plan_emit_step_testing_reminder() emits 'testing instructions already exist … review them for accuracy and completeness after updating this step' whenever the goal requires testing and the companion file exists — with no check of whether the companion is actually behind the step. It therefore fires on every step edit, was true on all sixty or so I made in this session, and could never distinguish the occasion that needed action from the fifty-nine that did not. The occasion it exists for did arise: adversarial finding AR-56 was W90's instruction left behind when its criterion was corrected, and the reminder fired correctly on that edit among all the others. A signal true one hundred percent of the time carries no information, and a reader who acts on it every time is doing sixty reviews to catch one. Make it conditional on the companion being older than the step file, or on the step's content hash having changed since the companion was written, so that it fires when there is something to do. The unfired case is as valuable as the fired one: silence would then mean the companion is current.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/lib/progress/plan_emit_step_testing_reminder.sh",
+        "planning/scripts/plan-progress-lib.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T10:07:14Z",
+      "updated_at": "2026-08-28T10:07:14Z"
+    },
+    {
       "id": "T58",
       "title": "New plans carry an explicit assumptions section, and a postmortem template exists",
       "status": "open",
@@ -149,6 +182,21 @@
       "note": null,
       "created_at": "2026-08-27T22:38:42Z",
       "updated_at": "2026-08-27T22:38:42Z"
+    },
+    {
+      "id": "T68",
+      "title": "add-coverage --replace matches on the outcome text it is often asked to change",
+      "status": "open",
+      "priority": "low",
+      "parent": "T66",
+      "detail": "The replace path collapses rows whose Required outcome cell matches, so changing the outcome wording and the work-unit ids in one call appends a second row instead of replacing the first, silently. It happened here while closing AR-57: the outcome was reworded from 'registered by the unit that adds it' to 'registered by the unit that accounts for it' in the same call that corrected the ids, and the plan carried two contradictory rows until a later check found them. Either key the replace on something stable — a row id, or the id set — or refuse when the outcome does not match any existing row while --replace is set, so the caller is told rather than left with a duplicate.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/add-coverage.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T10:07:14Z",
+      "updated_at": "2026-08-28T10:07:14Z"
     },
     {
       "id": "T1e",
