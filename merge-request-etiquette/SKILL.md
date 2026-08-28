@@ -77,6 +77,46 @@ If the commit messages do not carry the reasoning, that is worth fixing at the s
 where the branch is still yours to rewrite. A description that explains what a commit
 message should have said leaves the explanation somewhere `git blame` will never find.
 
+Read them from the working branch, before you squash. The squashed commit is written
+from what you find here, so the order is: read the route, write the description, then
+cut the request branch and squash into it.
+
+## Open the request from its own branch, squashed
+
+A merge request gets a branch of its own, cut for the request and holding one commit.
+Do not open it from the working branch.
+
+```bash
+git checkout -b mr/<short-subject> origin/<target>
+git merge --squash <working-branch>
+git commit                       # one message: the TLDR, then what was fixed
+git push -u origin mr/<short-subject>
+```
+
+The reason is what a reviewer is asked to do. A working branch carries the route the
+work took — a fix, a correction to the fix, a test that failed, a rename, a revert of
+something tried and abandoned. That history is worth having while the work is live and
+is noise to someone deciding whether to approve the result. Squashing to one commit
+puts the change on the reviewer's screen as the thing it is, not as the sequence that
+produced it.
+
+Cutting a separate branch rather than squashing the working branch in place keeps the
+route intact where it is still useful: the working branch stays as it was, so the
+commits and their reasoning are still reachable if a question comes up mid-review, and
+you have not rewritten a branch a colleague may have pulled.
+
+The squashed commit's message is the description: the TLDR paragraph first, then what
+was fixed. Write it once and reuse it as the request body — if they disagree, one of
+them is wrong, and it is usually the one written second.
+
+Two cases where this changes:
+
+- **The project asks for something else.** A repository that rebases, or that wants
+  one commit per logical change, has decided already. Follow it.
+- **The commits are genuinely separate changes.** If squashing would fuse two unrelated
+  fixes into one commit, that is a sign the request should be two requests, not that
+  the squash is wrong.
+
 ## The collapsible section, and when it is allowed
 
 Some information genuinely cannot be derived from the commits: a captured upgrade log,

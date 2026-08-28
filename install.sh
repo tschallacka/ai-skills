@@ -87,7 +87,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
-    'Merge request descriptions in your voice: a one-paragraph TLDR, then the fix.'
+    'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept

@@ -23,6 +23,10 @@ single case where a collapsible block earns its place.
 - **No chat transcripts, anywhere.** Not in the body, not hidden in a collapsible
   block. A fact worth keeping gets stated plainly; the conversation around it does not
   travel.
+- **Its own branch, one commit.** The request is opened from an `mr/` branch cut for
+  it, with the working branch squashed into a single commit whose message is the
+  description. The route the work took stays on the working branch, where it is still
+  reachable; the reviewer sees the change rather than the sequence that produced it.
 - **One collapsible block, conditionally.** For evidence a reviewer needs that the
   commits cannot carry — a captured upgrade log, an external tool's diff summary.
   Three conditions, all required, and everything else stays out.
