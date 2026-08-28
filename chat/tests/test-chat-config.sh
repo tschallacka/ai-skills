@@ -88,7 +88,9 @@ trap cleanup EXIT INT TERM
 # failed where neither fits.
 pty_style=""
 if command -v script >/dev/null 2>&1; then
-    if script -q -c true /dev/null >/dev/null 2>&1; then
+    if [ "$(uname -s)" = Darwin ]; then
+        pty_style=bsd
+    elif script -q -c true /dev/null >/dev/null 2>&1; then
         pty_style=gnu
     elif script -q /dev/null true >/dev/null 2>&1; then
         pty_style=bsd
