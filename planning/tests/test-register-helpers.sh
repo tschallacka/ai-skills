@@ -37,8 +37,10 @@ out="$(run_todo --id T9999 --title 'Second of the same')"
 case "$out" in *'duplicate ids'*|*rc=65*) : ;; *) fail "a duplicate task id was accepted: $out" ;; esac
 
 # ---- set-status done without evidence is refused; with note it lands --------
-out="$(run_todoup T9999 --status done --note 'evidence: verified by suite')"
-case "$out" in *'without evidence'*|*rc=65*) fail "done with a note was refused: $out" ;; esac
+out="$(run_todoup T9999 --status "done" --note 'evidence: verified by suite')"
+case "$out" in
+        *'without evidence'*|*rc=65*) fail "done with a note was refused: $out" ;;
+    esac
 jq -e --arg id T9999 '.tasks[] | select(.id == $id) | .status == "done"' "$todo" >/dev/null \
     || fail "set-status did not take effect"
 

@@ -541,7 +541,7 @@ iui_head_geometry() {
     IUI_HEAD_SCALE=0
     IUI_HEAD_H=0
     IUI_HINT_ROWS=0
-    IUI_HEAD_PLACE=none
+    IUI_HEAD_PLACE="none"
     IUI_LIST_ROWS="$IUI_BODY_ROWS"
     [ "$IUI_NARROW" -eq 0 ] || return 0
     [ -n "$COLOR_MODE" ] || detect_color_mode
@@ -555,12 +555,12 @@ iui_head_geometry() {
     IUI_HEAD_ON=1
     if [ $((IUI_BODY_ROWS - IUI_HEAD_H)) -ge "$IUI_HEAD_DETAIL_FLOOR" ] \
         && [ $((IUI_RIGHT_W - IUI_HEAD_SCALE * 32)) -ge "$IUI_HINT_MIN_COLS" ]; then
-        IUI_HEAD_PLACE=right-top
+        IUI_HEAD_PLACE="right-top"
         IUI_HINT_ROWS="$IUI_HEAD_H"
         return 0
     fi
     if [ $((IUI_BODY_ROWS - IUI_HEAD_H - 1)) -ge "$IUI_HEAD_MIN_LIST_ROWS" ]; then
-        IUI_HEAD_PLACE=left-bottom
+        IUI_HEAD_PLACE="left-bottom"
         IUI_LIST_ROWS=$((IUI_BODY_ROWS - IUI_HEAD_H - 1))
         return 0
     fi
@@ -570,7 +570,9 @@ iui_head_geometry() {
 }
 
 iui_clamp_scroll() {
-    local count="${#IUI_SKILL_NAMES[@]}" rows="$IUI_LIST_ROWS"
+    local count rows
+    count="${#IUI_SKILL_NAMES[@]}"
+    rows="$IUI_LIST_ROWS"
     [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0
     [ "$IUI_CURSOR" -lt "$count" ] || IUI_CURSOR=$((count - 1))
     [ "$IUI_CURSOR" -ge 0 ] || IUI_CURSOR=0

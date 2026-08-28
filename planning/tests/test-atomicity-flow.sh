@@ -80,6 +80,7 @@ t_assert_contains "third box carries violation annotation" \
 #      on-completed (function-level against the real lib) -------------------
 common="$scripts/validate-plan-common-lib.sh"
 [ -f "$common" ] || t_fail "common lib missing"
+# shellcheck disable=SC1090  # non-constant by design: the path is the argument
 ( source "$common"
   source "$scripts/validate-plan-goals-lib.sh" ) >/dev/null 2>&1 || true
 

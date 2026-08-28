@@ -82,7 +82,7 @@ USAGE
 case "$1" in
     -h|--help) usage 0 ;;
 esac
-command="$1"; shift
+dispatch_mode="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
 
@@ -103,7 +103,7 @@ eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 # PACKAGE-MANIFEST.tsv and install.sh's skill_files(), so it is always present.
 source "$script_dir/plan-context-lib.sh"
 
-[[ "$command" == -* ]] || usage
+[[ "$dispatch_mode" == -* ]] || usage
 
 normalize_flagged_paragraph() {
     local paragraph_id="$1"
@@ -148,129 +148,129 @@ Section form requires sequential paragraphs starting at N.1."
 }
 
 # Flag translation: each arm rebuilds "$@" with `set --` into the one canonical
-# positional order the dispatch below expects and rewrites $command to the
+# positional order the dispatch below expects and rewrites $dispatch_mode to the
 # internal name, so no dispatch arm has to know a user-facing spelling.
 # ---- quoted: -gp translation ----
 # -gp <plan> <goal> 4.1 text
 # paragraph <plan> goal:<goal> -p 4.1:text
 # ---- end quoted ----
-if [[ "$command" == -* ]]; then
-    case "$command" in
+if [[ "$dispatch_mode" == -* ]]; then
+    case "$dispatch_mode" in
         -dp|--description-paragraph)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             normalized="$(safe_normalize "$paragraph_id" -dp)" || exit $?
             set -- "$plan_dir" plan -p "${normalized}${paragraph_content}"
-            command=paragraph
+            dispatch_mode="paragraph"
             ;;
         -ds|--description-section)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; section="$2"; shift 2
             set -- "$plan_dir" plan "$section" "$@"
-            command=section
+            dispatch_mode="section"
             ;;
         -gp|--goal-paragraph)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; goal_name="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             normalized="$(safe_normalize "$paragraph_id" -gp)" || exit $?
             set -- "$plan_dir" "goal:$goal_name" -p "${normalized}${paragraph_content}"
-            command=paragraph
+            dispatch_mode="paragraph"
             ;;
         -gs|--goal-section)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; goal_name="$2"; section="$3"; shift 3
             set -- "$plan_dir" "goal:$goal_name" "$section" "$@"
-            command=section
+            dispatch_mode="section"
             ;;
         -sp|--step-paragraph)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; step_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             normalized="$(safe_normalize "$paragraph_id" -sp)" || exit $?
             set -- "$plan_dir" "step:$step_id" -p "${normalized}${paragraph_content}"
-            command=paragraph
+            dispatch_mode="paragraph"
             ;;
         -ss|--step-section)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; step_id="$2"; section="$3"; shift 3
             set -- "$plan_dir" "step:$step_id" "$section" "$@"
-            command=section
+            dispatch_mode="section"
             ;;
         -rp|--review-paragraph)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; paragraph_id="$2"; shift 2
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             normalized="$(safe_normalize "$paragraph_id" -rp)" || exit $?
             set -- "$plan_dir" adversarial-review -p "${normalized}${paragraph_content}"
-            command=paragraph
+            dispatch_mode="paragraph"
             ;;
         -rs|--review-section)
             [ "$#" -ge 3 ] || usage
             plan_dir="$1"; section="$2"; shift 2
             set -- "$plan_dir" adversarial-review "$section" "$@"
-            command=section
+            dispatch_mode="section"
             ;;
         -ap|--append-paragraph)
             [ "$#" -eq 4 ] || usage
             set -- "$1" "$2" "$3" "$4"
-            command=append-paragraph
+            dispatch_mode="append-paragraph"
             ;;
         -tp|--table-paragraph)
             [ "$#" -eq 5 ] || { printf 'update-plan-content.sh: --table-paragraph requires exactly [--plan-dir] <plan-directory> <document-id> <N.N> <columns> <CSV>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3" "$4" "$5"
-            command=table-paragraph
+            dispatch_mode="table-paragraph"
             ;;
         -ia|--insert-after)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; document_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             set -- "$plan_dir" "$document_id" "${paragraph_id%:}" "$paragraph_content"
-            command=insert-after
+            dispatch_mode="insert-after"
             ;;
         -ib|--insert-before)
             [ "$#" -ge 4 ] || usage
             plan_dir="$1"; document_id="$2"; paragraph_id="$3"; shift 3
             paragraph_content="$*"
-            reject_swallowed_flags "$paragraph_content" "$command"
+            reject_swallowed_flags "$paragraph_content" "$dispatch_mode"
             set -- "$plan_dir" "$document_id" "${paragraph_id%:}" "$paragraph_content"
-            command=insert-before
+            dispatch_mode="insert-before"
             ;;
         --delete-paragraph)
             [ "$#" -eq 3 ] || usage
             set -- "$1" "$2" "$3"
-            command=delete-paragraph
+            dispatch_mode="delete-paragraph"
             ;;
         -t|--title)
             [ "$#" -eq 3 ] || { printf 'update-plan-content.sh: --title requires exactly [--plan-dir] <plan-directory> <document-id> <title>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3"
-            command=title
+            dispatch_mode="title"
             ;;
         -f|--field)
             [ "$#" -eq 4 ] || { printf 'update-plan-content.sh: --field requires exactly [--plan-dir] <plan-directory> <document-id> <field-label> <value>\n' >&2; exit 64; }
             set -- "$1" "$2" "$3" "$4"
-            command=field
+            dispatch_mode="field"
             ;;
         -tr|--testing-requirement)
             [ "$#" -eq 4 ] || usage
             set -- "$1" "$2" "$3" "$4"
-            command=testing-requirement
+            dispatch_mode="testing-requirement"
             ;;
         -rv|--review-status)
             [ "$#" -eq 2 ] || usage
             set -- "$1" "$2"
-            command=review-status
+            dispatch_mode="review-status"
             ;;
         -dr|--decomposition-review)
             [ "$#" -eq 2 ] || usage
             set -- "$1" "$2"
-            command=decomposition-review
+            dispatch_mode="decomposition-review"
             ;;
         *) usage ;;
     esac
@@ -330,7 +330,7 @@ render_paragraph_arguments() {
 # Command dispatch
 # ─────────────────────────────────────────────────────────────────────────────
 
-case "$command" in
+case "$dispatch_mode" in
     title)
         [ "$#" -eq 3 ] || usage
         plan_dir="$1"; document_id="$2"; title="$3"
@@ -482,7 +482,7 @@ case "$command" in
         insert_file="$(mktemp "${TMPDIR:-/tmp}/plan-insert-paragraph.XXXXXX")"
         trap 'rm -f "$insert_file"' EXIT
         printf '%s\n' "$paragraph_content" > "$insert_file"
-        plan_insert_paragraph "$file" "§ $paragraph_id" "${command#insert-}" "$insert_file"
+        plan_insert_paragraph "$file" "§ $paragraph_id" "${dispatch_mode#insert-}" "$insert_file"
         rm -f "$insert_file"
         plan_emit_step_testing_reminder "$plan_dir" "$document_id"
         ;;
@@ -605,4 +605,4 @@ esac
 if declare -F context_invalidate_after_mutation >/dev/null 2>&1 && [ -n "${plan_dir:-}" ] && [ -d "$plan_dir/context" ]; then
     context_invalidate_after_mutation "$plan_dir" "${document_id:-plan}"
 fi
-printf 'Updated %s\n' "$command"
+printf 'Updated %s\n' "$dispatch_mode"

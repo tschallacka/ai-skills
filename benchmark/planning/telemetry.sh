@@ -52,6 +52,7 @@ source_agent_lib() {
         printf 'telemetry_status=unavailable:agent driver unresolved\n'
         exit 0
     fi
+# shellcheck disable=SC1090  # non-constant by design: the path is the argument
     source "$lib"
 }
 source_agent_lib

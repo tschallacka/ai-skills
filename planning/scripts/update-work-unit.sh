@@ -21,6 +21,8 @@
 # the unit from its coverage rows and require manual repair).
 #
 # Exit codes: 64 bad invocation or malformed value, 66 plan directory missing.
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

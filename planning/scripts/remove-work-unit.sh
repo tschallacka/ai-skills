@@ -20,6 +20,8 @@
 #
 # Exit codes: 64 bad invocation, unknown id, or a refused cascade; 66 the plan
 # directory is missing.
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

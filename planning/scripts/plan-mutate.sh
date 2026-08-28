@@ -20,7 +20,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The verb list is data, not a hand-maintained heredoc: one place, read by
 # usage(), matching the dispatcher arms below.
-verb_catalogue='''  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
+verb_catalogue='  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
   ${0##*/} add-work-unit <plan> --id <WNN> --type <type> --file <file|N/A> --scope <scope>
       --subscope <subscope|N/A> --change <change> --depends-on <depends-on|—>
       --goal <goal> --step <step>
@@ -56,7 +56,7 @@ verb_catalogue='''  ${0##*/} add-goal <plan> <goal-name> <title> <outcome>
   ${0##*/} verify-fix-keys <plan> [--claimed-by <session>]
   ${0##*/} create-adversarial-review <plan>
   ${0##*/} register-command <plan> <key> <command> <when>
-  ${0##*/} validate <plan>'''
+  ${0##*/} validate <plan>'
 
 usage() {
     local rc="${1:-64}"

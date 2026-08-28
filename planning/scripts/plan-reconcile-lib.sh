@@ -6,6 +6,8 @@
 # when a work-unit mutates (add/remove), related artifacts — coverage rows, the
 # goal's Owned work units section, and progress trackers — are updated here so
 # agents do not have to issue follow-up calls.
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 

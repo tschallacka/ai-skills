@@ -10,6 +10,8 @@
 # on. plan_status_label's glyphs are the on-disk contract for progress tables.
 #
 # Usage: test-inventory-helpers.sh
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh

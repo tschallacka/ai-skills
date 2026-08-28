@@ -41,6 +41,7 @@ source "$RUNTIME_DIR/agent-env.sh"
 # 0 — which silently turned an unresolvable agent into a successful no-op run.
 # `|| exit "$?"` keeps agent-env.sh's real code (64).
 resolve_active_agent "$RUNTIME_DIR" || exit "$?"
+# shellcheck disable=SC1090  # non-constant by design: the path is the argument
 source "$RUNTIME_DIR/$AGENT_DRIVER/agent.sh"
 
 # agent_resolve_model(): print the resolved model for the active agent.

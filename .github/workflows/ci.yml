@@ -150,7 +150,7 @@ jobs:
     # exact file list (tracked *.sh minus archived benchmark output), the
     # severity gate, and the informational report under this workflow's control
     # and adds no third-party action to the supply chain.
-    name: No error-severity shellcheck findings in live shell scripts
+    name: No warning-level shellcheck findings in live shell scripts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -184,7 +184,7 @@ jobs:
           printf 'total:    %s\n' "$(wc -l < /tmp/shellcheck.txt)"
 
       - name: Fail on error-severity findings
-        run: xargs shellcheck -s bash --severity=error < /tmp/sh-files.txt
+        run: xargs shellcheck -s bash --severity=warning < /tmp/sh-files.txt
 
   installer-build:
     # Proves: the committed install.sh is exactly what installer/build.sh

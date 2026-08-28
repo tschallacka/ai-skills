@@ -122,7 +122,7 @@ plan_die() {
 # missing number is not a defect and warning about it would train the reader to
 # skip these lines.
 plan_duplicate_step_numbers() {
-    local plan_dir="$1" goal_dir goal steps_dir
+    local plan_dir="$1" goal_dir goal steps_dir __f
     [ -d "$plan_dir" ] || return 0
     for goal_dir in "$plan_dir"/*/; do
         [ -d "$goal_dir" ] || continue
@@ -131,17 +131,19 @@ plan_duplicate_step_numbers() {
         goal="$(basename "$goal_dir")"
         # The companion shares its step's number by design, so it is excluded
         # before counting rather than reported as a collision.
-        ls "$steps_dir" 2>/dev/null \
-            | grep -E '^[0-9][0-9]-step-.*\.md$' \
-            | grep -v -- '-testing\.md$' \
-            | awk -v goal="$goal" '
-                { number = substr($0, 1, 2); files[number] = files[number] " " $0; seen[number]++ }
-                END {
-                    for (number in seen) {
-                        if (seen[number] > 1) print goal " " number files[number]
-                    }
-                }' \
-            | LC_ALL=C sort
+        {
+            for __f in "$steps_dir"/[0-9][0-9]-step-*.md; do
+                [ -e "$__f" ] || continue
+                case "${__f##*/}" in *-testing.md) continue ;; esac
+                printf '%s\n' "${__f##*/}"
+            done
+        } | awk -v goal="$goal" '
+            { number = substr($0, 1, 2); files[number] = files[number] " " $0; seen[number]++ }
+            END {
+                for (number in seen) {
+                    if (seen[number] > 1) print goal " " number files[number]
+                }
+            }' | LC_ALL=C sort
     done
 }
 

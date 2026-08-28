@@ -88,7 +88,6 @@ in_allowlist() {
         # The overview serve script names its runtime chain (T43a); the
         # generated installer tables name optional runtimes for verify/hint.
         ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
-        ./install.sh:python3-shipped) return 0 ;;
         ./chat/tests/test-chat.sh:python3-shipped) return 0 ;;
     esac
     return 1

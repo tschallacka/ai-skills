@@ -15,6 +15,8 @@
 #
 # Exit codes: 1 zero or multiple `find` matches, 64 bad invocation, 66 missing
 # document.
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 export LC_ALL=C

@@ -336,7 +336,10 @@ grep -Fq '| Research findings are recorded. | W03 |' "$plan_dir/work-unit-invent
 blocked_root="$temporary_root/blocked-root"
 rm -rf "$blocked_root"; mkdir -p "$blocked_root"
 cp -R "$plan_dir" "$blocked_root/already-broken"
-broken_step="$(ls "$blocked_root/already-broken/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+for __s in "$blocked_root/already-broken/02-research/steps"/*.md; do
+        case "${__s##*/}" in *-testing.md) continue ;; esac
+        broken_step="${__s##*/}"; break
+    done
 cp "$blocked_root/already-broken/02-research/steps/$broken_step" \
    "$blocked_root/already-broken/02-research/steps/${broken_step%%-*}-step-collision.md"
 rc=0
@@ -375,7 +378,10 @@ esac
 dup_probe="$temporary_root/plan-dup-step"
 rm -rf "$dup_probe"
 cp -R "$plan_dir" "$dup_probe"
-existing_step="$(ls "$dup_probe/02-research/steps/" | grep -v -- '-testing\.md$' | head -1)"
+for __s in "$dup_probe/02-research/steps"/*.md; do
+        case "${__s##*/}" in *-testing.md) continue ;; esac
+        existing_step="${__s##*/}"; break
+    done
 [ -n "$existing_step" ] || { echo 'the probe goal has no step to collide with.' >&2; exit 1; }
 dup_number="${existing_step%%-*}"
 rc=0

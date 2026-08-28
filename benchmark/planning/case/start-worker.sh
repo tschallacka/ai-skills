@@ -387,7 +387,8 @@ PROMPT
 # recorded with the path it was expected at; exits 65 when it is missing or
 # invalid.
 reviewer_collect_approval() {
-    local capsule="$1" approval="$capsule/plan/approval.json"
+    local capsule="$1" approval
+    approval="$capsule/plan/approval.json"
     printf '%s\n' "$approval"
     # Reviewers write the handoff either beside their capsule plan or in
     # the plan directory; accept both, then archive the canonical copy.

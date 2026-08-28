@@ -52,7 +52,7 @@ unshipped_reason() { # <skill> <path> → prints the reason, or nothing
         # The per-function sources and the compiler that turns them into the
         # shipped plan-*-lib.sh. The compiled libraries are listed; their inputs
         # are not, or every install would carry both copies.
-        planning/scripts/lib/*.sh | planning/scripts/lib/*/*.sh | planning/scripts/build-plan-libs.sh)
+        planning/scripts/lib/* | planning/scripts/build-plan-libs.sh)
             printf 'a compiler input; the compiled library is what ships\n' ;;
         # Example deviation files. The skill teaches the format; the examples are
         # this repo's own projects and mean nothing on another machine.
