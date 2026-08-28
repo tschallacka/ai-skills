@@ -95,7 +95,7 @@
     },
     {
       "id": "B77",
-      "title": "subagent worktrees are still created from a stale commit, months after T35 was closed",
+      "title": "subagent worktrees are reused for new tasks, so a fresh worker inherits the previous task's stale base commit",
       "status": "confirmed",
       "severity": "major",
       "priority": "urgent",
@@ -103,16 +103,16 @@
       "reproduce": "Launch any subagent with isolation: worktree, then in its worktree run: git log --oneline -1; git rev-list --count HEAD..origin/refactor/portability-and-installer-ox",
       "observed": "Two subagents launched within one hour on 2026-08-28 both started behind the branch tip: the webview worker by 354 commits, based on de02b9f — a tree where planning/scripts/overview-*.sh and planning/templates/ do not exist at all — and the chatfix worker by 352. Both reported it themselves and reset to the tip before reading anything. T35 records the same defect and is marked done.",
       "expected": "A worktree created for a subagent starts at the commit the launching session is on, so the worker sees the files it was sent to change.",
-      "mechanism": "Not established here. T35 diagnosed it once and was closed; whatever was fixed either did not cover this path or has regressed. What is established is the consequence: the tree the worker lands on predates the feature it is briefed about, so the most likely failure is not an error but a confident report that the files are missing — a worker that is not explicitly told to check its base commit has no reason to suspect it is in the past.",
+      "mechanism": "Established by Tschallacka, who knows the harness: old worktrees are REUSED for new tasks rather than created fresh. A worktree left behind by a finished subagent is handed to the next one, so the new agent inherits whatever commit the previous task stopped at — which is why the three today started 354, 352 and 358 commits behind rather than at the tip, and why the distances differed. My entry recorded 'Not established here' and guessed at creation; the defect is in what happens at the END of a task, not the beginning. A worktree that is cleaned up after its merge cannot be inherited stale by anyone.",
       "surfaces": [
         "T35"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "git-worktrees/SKILL.md § Merging the work back: removal is stated as the task's last step, covering the no-merge case (abandoned work, a checkout only ever used to look at something) as well as the merged one, with the reuse consequence spelled out as the reason; docs/README.md carries the short form. Applied to this session's six worktrees, all confirmed clean and 0 commits ahead of HEAD before removal, and their five orphaned worktree-agent-* branches deleted.",
+      "verification": "Partial, and stated as such. Verified: 'git worktree list' now returns one line, the main checkout, so there is no worktree left for a next task to inherit; all six removals were preceded by a dirty/untracked count of 0 and 'git rev-list --count HEAD..<branch>' of 0, so nothing was discarded. NOT yet verified: that a subagent launched with isolation: worktree now starts at the tip. That observation needs a real launch and is the mutation that would fail without the fix — the next subagent this repo launches supplies it, and B77 stays confirmed until it does.",
       "found_by": "main session, from two independent subagent reports in one hour; both workers only noticed because their briefs told them to check",
-      "notes": "Third occurrence the same day: the plancrypt worker started 358 commits behind and reset to 9be8d1a. That is three of three subagent worktrees launched in this session — webview 354 behind, chatfix 352, plancrypt 358 — so the failure rate is not intermittent, it is universal. All three caught it only because their briefs carried an explicit instruction to check the base commit, which means the current mitigation is a sentence I have to remember to write into every brief. A worker launched without it reads a tree that predates the feature it was sent to change.",
+      "notes": "Third occurrence the same day: the plancrypt worker started 358 commits behind and reset to 9be8d1a. That is three of three subagent worktrees launched in this session — webview 354 behind, chatfix 352, plancrypt 358 — so the failure rate is not intermittent, it is universal. All three caught it only because their briefs carried an explicit instruction to check the base commit, which means the current mitigation is a sentence I have to remember to write into every brief. A worker launched without it reads a tree that predates the feature it was sent to change. The fix follows from the mechanism: when a subagent finishes and its worktree has no other purpose, remove it once its branch is merged — if a merge applies at all. That closes the reuse path at the point where the worktree becomes garbage, rather than trying to detect staleness at the point where it is handed out. Cleaning up is also the cheaper half: a stale-base check has to run in every brief and be remembered by every author, while a removal happens once, by whoever did the merge and is already looking at the branch. The title carried the disproven cause ('still created from a stale commit') and was corrected in place, since bug-update.sh has no --title; register-rebuild.sh bugs reports the file stamped, sorted and sound afterwards.",
       "created_at": "2026-08-28T10:35:34Z",
-      "updated_at": "2026-08-28T10:47:57Z"
+      "updated_at": "2026-08-28T16:52:20Z"
     },
     {
       "id": "B3",

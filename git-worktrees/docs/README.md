@@ -28,3 +28,8 @@ your main working tree — and then everything merges back in a sane order.
 
 Worktrees share the repository's objects and refs — cheap on disk, but they
 are one repo: branch discipline still applies.
+
+A finished task's worktree gets removed as part of finishing, not later. One
+left standing is handed to the next task, which then starts from wherever the
+previous one stopped rather than from the tip — and nothing at that end makes
+the staleness visible.

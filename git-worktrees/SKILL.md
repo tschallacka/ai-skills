@@ -90,10 +90,24 @@ the file, or on a closing bracket. Resolve by taking one side and re-adding the
 other's entries the normal way, rather than stitching the text together: that is how
 duplicate ids and half-merged entries get in.
 
-**After merging, remove the worktree**: `git worktree remove <path>`, then
-`git worktree prune` to clear records of directories already gone. A stale worktree
-holds a branch checked out, so the branch cannot be deleted and later runs may sweep
-the directory unexpectedly.
+**When a task is finished, remove its worktree**: `git worktree remove <path>`, then
+`git worktree prune` to clear records of directories already gone. Do this once the
+branch has merged, or — where no merge applies, because the work was abandoned or was
+only ever a place to look at something — as soon as the task ends. The only worktree
+that stays is one with a standing purpose of its own, and a finished task's scratch
+checkout is not that.
+
+Removal is the task's last step, not housekeeping to get to later. A worktree left
+behind is handed to the next task that needs one, and that task inherits the commit
+the previous one stopped at — so a fresh agent starts hundreds of commits behind the
+tip without anything telling it so, and builds against a base that predates the code
+it was sent to change. Nothing at the receiving end catches this: the checkout is
+clean, the branch is real, and the staleness is only visible if someone thinks to
+count. Cleaning up at the end is what closes it, because a worktree that no longer
+exists cannot be inherited stale.
+
+A worktree also holds its branch checked out, so the branch cannot be deleted while it
+stands; delete the branch too once its worktree is gone and its commits have landed.
 
 ## Staging changes from a worktree
 
