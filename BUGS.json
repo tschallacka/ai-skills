@@ -821,6 +821,50 @@
       "updated_at": "2026-08-27T22:39:53Z"
     },
     {
+      "id": "B70",
+      "title": "the committed plan-document-lib.sh does not match what build-plan-libs.sh generates",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "git checkout -- planning/scripts/plan-document-lib.sh; bash planning/scripts/build-plan-libs.sh; git diff --stat planning/scripts/plan-document-lib.sh",
+      "observed": "The rebuild produces a two-line difference every time: the 'shellcheck disable=SC2154' directive sits in the file header in the committed copy and immediately above plan_document_path() in the generated one. planning/tests/test-plan-libs-build.sh reports it as 'the committed libraries are up to date: expected 0, got 1' and the full suite failed on it, 106 ran 105 passed.",
+      "expected": "The committed generated library is byte-identical to what its generator produces, which is the whole contract test-plan-libs-build.sh exists to hold.",
+      "mechanism": "The directive lives in the source function file planning/scripts/lib/document/plan_document_path.sh at line 105, so the generator correctly emits it above that function. The committed copy has it in the header instead, which is where it would sit if the generated file had been edited by hand rather than regenerated. The shellcheck work in 4a35edb and 6e5d39f moved the directive to satisfy the linter and the generated artifact was not rebuilt and committed alongside it.",
+      "surfaces": [
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/lib/document/plan_document_path.sh",
+        "planning/scripts/build-plan-libs.sh"
+      ],
+      "fix": "0f4b001+1: regenerated planning/scripts/plan-document-lib.sh from build-plan-libs.sh and committed it, so the artifact matches its generator again",
+      "verification": "git checkout -- the file then rebuild produced a 2-line diff every time before the fix and none after. The full suite's only failure was this test (106 ran, 105 passed); the suite is the mutation, since the stale artifact is what reddened it. Note the check itself is unsound while B71 stands: the test rewrites the artifact when it fails, so a re-run passes regardless — which is why this had to be confirmed by rebuilding into a restored tree rather than by re-running the test.",
+      "found_by": "main session, from the full suite after ox's shellcheck commits landed",
+      "notes": null,
+      "created_at": "2026-08-28T07:55:19Z",
+      "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
+      "id": "B71",
+      "title": "test-plan-libs-build.sh regenerates the libraries when it fails, so a second run passes and the defect looks like a flake",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash run-tests.sh   # test-plan-libs-build FAILs; then immediately: bash planning/tests/test-plan-libs-build.sh   # PASSes; then: git status --short",
+      "observed": "The suite run failed the test; an immediate standalone re-run passed; git status then showed planning/scripts/plan-document-lib.sh modified in the working tree. The test had rewritten the committed artifact as a side effect of checking it, so the second run compared the file against itself.",
+      "expected": "A test that checks whether a committed artifact is up to date does not update it. The tree it ran in is unchanged afterwards, and a genuine staleness fails on every run rather than only the first.",
+      "mechanism": "The freshness check regenerates into the working tree rather than into a temporary directory and diffs in place, so the act of detecting staleness also removes it. The second run therefore sees a fresh file and passes, which reads as a flaky test rather than the real and reproducible staleness underneath it.",
+      "surfaces": [
+        "planning/tests/test-plan-libs-build.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session; the masking is what made B70 look intermittent",
+      "notes": null,
+      "created_at": "2026-08-28T07:55:19Z",
+      "updated_at": "2026-08-28T07:55:19Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1104,6 +1148,28 @@
       "notes": null,
       "created_at": "2026-08-27T21:38:32Z",
       "updated_at": "2026-08-27T21:58:36Z"
+    },
+    {
+      "id": "B69",
+      "title": "the .todos fold deleted T47 rather than folding it, on a stated reason that was false",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git show 5032227:TODO.json | jq '.todos[]' ; jq '[.tasks[]|select(.id==\"T47\")]|length' TODO.json",
+      "observed": "T47 existed only in .todos before commit 35f803d and does not exist in .tasks after it. Counts: .tasks 88 and .todos 1 before, .tasks 92 after, with T62 to T65 added in the same window, so 88+4=92 and the .todos entry was dropped rather than merged. 35f803d's message states 'folded (the .tasks T47 entry was authoritative)', but git show 5032227:TODO.json shows zero T47 entries in .tasks, so there was no authoritative copy to prefer. The lost record carried its completion notes: the commit refs for goals 01 to 05, three ratchet clamps, and the finding that test-flag-coverage and test-runtime-dependencies were already red at baseline 00ecc69 — which is the part someone will otherwise rediscover by bisecting.",
+      "expected": "A fold moves every entry the dropped array holds into the surviving one, or refuses when an id exists in only one of them and the operator has not said which wins. Deleting the sole copy of a record is not a fold.",
+      "mechanism": "The fold was written from the belief that .todos duplicated .tasks, so preferring .tasks was safe. That premise held for zero of the one entry involved. Nothing compared the two id sets before writing, and no count was asserted after, so a fold that removed a record and a fold that merged one produce the same silent success.",
+      "surfaces": [
+        "TODO.json",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, reviewing ox's landed work against the caution given before it started",
+      "notes": null,
+      "created_at": "2026-08-28T07:49:34Z",
+      "updated_at": "2026-08-28T07:49:34Z"
     },
     {
       "id": "B6",
@@ -1493,26 +1559,26 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
-      "id": "B69",
-      "title": "the .todos fold deleted T47 rather than folding it, on a stated reason that was false",
-      "status": "confirmed",
-      "severity": "major",
+      "id": "B72",
+      "title": "shellcheck directives were moved in a generated library without regenerating it",
+      "status": "reported",
+      "severity": "minor",
       "priority": "normal",
       "parent": null,
-      "reproduce": "git show 5032227:TODO.json | jq '.todos[]' ; jq '[.tasks[]|select(.id==\"T47\")]|length' TODO.json",
-      "observed": "T47 existed only in .todos before commit 35f803d and does not exist in .tasks after it. Counts: .tasks 88 and .todos 1 before, .tasks 92 after, with T62 to T65 added in the same window, so 88+4=92 and the .todos entry was dropped rather than merged. 35f803d's message states 'folded (the .tasks T47 entry was authoritative)', but git show 5032227:TODO.json shows zero T47 entries in .tasks, so there was no authoritative copy to prefer. The lost record carried its completion notes: the commit refs for goals 01 to 05, three ratchet clamps, and the finding that test-flag-coverage and test-runtime-dependencies were already red at baseline 00ecc69 — which is the part someone will otherwise rediscover by bisecting.",
-      "expected": "A fold moves every entry the dropped array holds into the surviving one, or refuses when an id exists in only one of them and the operator has not said which wins. Deleting the sole copy of a record is not a fold.",
-      "mechanism": "The fold was written from the belief that .todos duplicated .tasks, so preferring .tasks was safe. That premise held for zero of the one entry involved. Nothing compared the two id sets before writing, and no count was asserted after, so a fold that removed a record and a fold that merged one produce the same silent success.",
+      "reproduce": "git log --oneline -2 4a35edb 6e5d39f; git show 6e5d39f -- planning/scripts/lib/document/plan_document_path.sh planning/scripts/plan-document-lib.sh",
+      "observed": "The SC2154 directive was placed above plan_document_path in the source function file and left in the file header of the generated library, so the two disagreed from the moment the lint work landed.",
+      "expected": "A change to a generated library's source is followed by a rebuild and a commit of the artifact in the same change, which is what the freshness test asserts.",
+      "mechanism": "build-plan-libs.sh is not run by the lint workflow, and the generated file is editable by hand, so a linter-driven edit can be made in either place and only the source edit survives a rebuild. Nothing in the shellcheck path invokes the builder.",
       "surfaces": [
-        "TODO.json",
-        "planning/scripts/register-lib.sh"
+        "planning/scripts/build-plan-libs.sh",
+        ".github/workflows"
       ],
       "fix": null,
       "verification": null,
-      "found_by": "main session, reviewing ox's landed work against the caution given before it started",
+      "found_by": "main session, as the upstream cause of B70",
       "notes": null,
-      "created_at": "2026-08-28T07:49:34Z",
-      "updated_at": "2026-08-28T07:49:34Z"
+      "created_at": "2026-08-28T07:56:06Z",
+      "updated_at": "2026-08-28T07:56:06Z"
     }
   ]
 }

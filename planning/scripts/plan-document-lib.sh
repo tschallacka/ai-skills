@@ -6,8 +6,6 @@
 # Target: prod
 #
 # sections, paragraphs, titles and fields
-# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
-# sourced plan-inventory-lib row/split helpers
 
 set -euo pipefail
 
@@ -109,6 +107,8 @@ plan_document_kind() {
     esac
 }
 
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
 plan_document_path() {
     local plan_dir="$1" document_id="$2" unit goal step
     case "$document_id" in
