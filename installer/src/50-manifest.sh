@@ -380,6 +380,8 @@ EOF
 SKILL.md
 docs/README.md
 requires.tsv
+binaries.tsv
+scripts/lib-config.sh
 scripts/chat-server.sh
 scripts/chat-register.sh
 scripts/chat-send.sh
@@ -398,6 +400,9 @@ CHATEOF
 tests/test-chat.sh
 tests/test-chat-injection.sh
 tests/test-chat-watch-cursor.sh
+tests/test-chat-binary.sh
+tests/test-chat-config.sh
+tests/test-chat-registry.sh
 CHATEOF
             ;;
     esac

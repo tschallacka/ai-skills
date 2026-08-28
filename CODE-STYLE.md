@@ -102,6 +102,24 @@ in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
 | `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `jq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 
+This table governs what the target machine must already **have**. It does not
+govern what a skill **delivers**. A skill may ship prebuilt, self-contained
+binaries as artifacts, declared row by row in its own `binaries.tsv` and
+validated by `tests/test-shipped-binaries.sh`. That does not widen the budget
+above — it narrows it, because a static binary asks nothing of the box. The
+`chat` skill's `python3 → node → perl → socat` any-of group in
+`chat/requires.tsv` exists only because there is no binary yet; when one ships,
+those rows go away and chat's runtime requirement drops to `bash` for the
+helpers.
+
+The build toolchain for such a binary (Rust, `cargo`) is a **dev** dependency
+like `shellcheck` or `bash32`: contributors need it, users never do. The crate
+lives under `src/<binary>/` and its sources carry `MODE: DEV` **and**
+`PACKAGE: PROD` — see section 1b, which is the authority on the layout and the
+markers. What ships is the compiled artifact under
+`<skill>/bin/<target triple>/`, exempt from the marker rule for the obvious
+reason that a Mach-O, ELF or PE file has no comment syntax.
+
 The `memlimit` exception is narrow on purpose. It buys a capability that cannot
 be had otherwise — macOS has no cgroups and rejects `setrlimit(RLIMIT_AS)` on
 Apple Silicon — it is confined to one skill on one platform, and no other file

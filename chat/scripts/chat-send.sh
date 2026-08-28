@@ -57,6 +57,28 @@ text="$(printf '%s' "$text" | tr '\n\r' '  ')"
 
 [ -z "$port" ] && [ -n "$host" ] && port=7717
 
+# The transport, in precedence order: an explicit --host/--port wins, then the
+# recorded config, then the built-in default. Sourced rather than reimplemented
+# three times, because three copies of a precedence rule is three chances to
+# disagree with the binary about where the bus is.
+# shellcheck source=chat/scripts/lib-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-config.sh"
+if [ -z "$host" ]; then
+    chat_config_target "$HOME_DIR" "${0##*/}"
+    host="$CHAT_USE_HOST"
+    [ -n "$port" ] || port="$CHAT_USE_PORT"
+else
+    # --host with no --port takes the recorded port, so a bus moved off the
+    # default does not have to be spelled out twice.
+    if [ -z "$port" ]; then
+        chat_config_load "$HOME_DIR"
+        case "$CHAT_TRANSPORT" in
+            tcp) port="$CHAT_CFG_PORT" ;;
+            *) port="$CHAT_DEFAULT_PORT" ;;
+        esac
+    fi
+fi
+
 # B65: a local send with a server running must not bypass it — a direct log
 # append is invisible to every socket subscriber. When no --host was given
 # but this home has a live server, route through its socket and fall back to
