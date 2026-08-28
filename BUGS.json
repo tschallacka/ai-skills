@@ -1579,6 +1579,50 @@
       "notes": null,
       "created_at": "2026-08-28T07:56:06Z",
       "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
+      "id": "B80",
+      "title": "render-plan-overview.sh dies with jq: Argument list too long on a large plan and writes a zero-byte page",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "OVERVIEW_NOW=fixed bash planning/scripts/render-plan-overview.sh --plan-dir ~/.plans/codegraph-bash-indexing-v2 --out /tmp/big.html; echo $?",
+      "observed": "render-plan-overview.sh: line 436: /usr/bin/jq: Argument list too long, exit 126, and the output file is never written. The same tree reads fine through overview-state.sh, which emits all 341083 bytes of state in 9 seconds and exits 0, so the plan is readable and only the renderer fails. The 173 KB xcore-paymentmethod-code-aliases plan still renders, so this is a size threshold rather than a broken plan.",
+      "expected": "A plan renders, or the renderer refuses with a diagnosis naming the limit it hit. Neither a zero-byte page nor a bare exit 126 tells a reader which of the two happened.",
+      "mechanism": "Line 436 builds the substitution map by passing every panel of the page to one jq invocation as --arg values: goal_bars, ledger, identity_panel, step_details, dep_graph, tests_panel, coverage_panel, findings_panel and about thirty more. The whole rendered document therefore has to fit in argv, and ARG_MAX is the ceiling. A second jq call then rebuilds the 18 KB template once per key through reduce and gsub, which is the same design paying a second cost.",
+      "surfaces": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/runtime/overview-server.py"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "webview, reading the overview surface before proposing work on it",
+      "notes": "Recorded as paragraph 2.1 of the .plans/plan-overview-rebuild plan, whose Rust renderer removes the limit by reading from files and stdin (its paragraphs 3.6 and 4.1). Filed here anyway because the register records what is broken in the tree today while the plan records the intent: if the rebuild slips, this entry is the only thing that remembers. Not fixed in place, on instruction, because render-plan-overview.sh is that plan W15 change target and W15 deletes the file. B51, already fixed, is the adjacent defect where the server sent HTTP 200 with an empty body on this failure; it now returns HTTP 500 with a fourteen-byte body, so an operator must still read the server log to learn the cause.",
+      "created_at": "2026-08-28T10:45:00Z",
+      "updated_at": "2026-08-28T10:45:00Z"
+    },
+    {
+      "id": "B81",
+      "title": "the overview page emits every step drill-down with an unterminated id attribute, so 100 details elements are malformed",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "OVERVIEW_NOW=fixed bash planning/scripts/render-plan-overview.sh --plan-dir ~/.plans/xcore-paymentmethod-code-aliases --out /tmp/x.html; then print the first step element: tr '<' '\\n<' < /tmp/x.html | sed -n '/details class=\"step-open\"/{p;q;}'",
+      "observed": "details class=\"step-open\" id=\"step-01-step-module-scaffolding'> — the id attribute is opened with a double quote and closed with an apostrophe. All 100 step elements on that page carry it. The double quote never closes, so an HTML parser reads on to the next double quote in the document and swallows the summary text into the attribute value.",
+      "expected": "Each step drill-down is a well-formed details element whose id is addressable, since the id exists so that a reader can link to one step.",
+      "mechanism": "build_step_details in render-plan-overview.sh writes the opening tag with a double-quoted id whose closing quote was typed as an apostrophe. Nothing catches it: the unresolved-token check at the end of the renderer looks for template tokens, not for malformed markup, and no test parses the page as HTML.",
+      "surfaces": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "webview, reading the overview surface before proposing work on it",
+      "notes": "A one-character fix, deliberately not made: render-plan-overview.sh is the .plans/plan-overview-rebuild plan W15 change target and W15 deletes the file, so a fix here is thrown-away work in a file another plan owns. The wider point for that plan is that the current suite proves the page is self-contained and byte-deterministic without proving it is well-formed, which is how a defect present on every one of a hundred elements survived.",
+      "created_at": "2026-08-28T10:45:00Z",
+      "updated_at": "2026-08-28T10:45:00Z"
     }
   ]
 }
