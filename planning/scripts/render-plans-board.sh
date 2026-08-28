@@ -55,12 +55,23 @@ USAGE
     exit "$rc"
 }
 
-root="" out="" refresh=0
+# out_file, not out: the plan-dir hoisting helper in the sourced core library
+# builds its result in `local out=()`, so a scalar named `out` here is typed as
+# an array across the source boundary (SC2178, then SC2128 at every expansion).
+# That helper's copy is local and no clobber can actually happen, but sharing a
+# name with a global in a file we source is a collision waiting for the day it
+# stops being local.
+#
+# The helper is described rather than named on purpose: test-flag-coverage.sh
+# decides a script accepts --plan-dir by grepping the file for that function's
+# name, so a comment mentioning it makes the gate demand a flag this script does
+# not take. A board scans a plans ROOT; it has no single plan directory.
+root="" out_file="" refresh=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
         --root) [ "$#" -ge 2 ] || usage; root="$2"; shift 2 ;;
-        --out) [ "$#" -ge 2 ] || usage; out="$2"; shift 2 ;;
+        --out) [ "$#" -ge 2 ] || usage; out_file="$2"; shift 2 ;;
         --refresh) [ "$#" -ge 2 ] || usage; refresh="$2"; shift 2 ;;
         --) shift; break ;;
         -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
@@ -71,7 +82,7 @@ case "$refresh" in ''|*[!0-9]*) usage ;; esac
 [ -n "$root" ] || root="$(plan_default_root)"
 root="${root%/}"
 plan_require_directory "$root"
-[ -n "$out" ] || out="$root/board.html"
+[ -n "$out_file" ] || out_file="$root/board.html"
 
 # esc TEXT — HTML-escape the punctuation that survives plan titles and paths.
 esc() {
@@ -298,24 +309,32 @@ h1{font-size:clamp(22px,3vw,32px);letter-spacing:.4px}
 .card[data-life="complete"] .chip{background:var(--good)}
 .card[data-life="awaiting-work"] .chip{background:var(--warn)}
 .age{font-size:10px;color:var(--faint);letter-spacing:.6px}
+.card h3{font-size:15px;line-height:1.35;font-weight:600;overflow-wrap:anywhere}
 /* Three lines are reserved so the bar and the figures line up across a row.
    Reserved, not clamped: a longer title still grows and stays fully readable —
-   hiding text to win an alignment would be the defect, not the fix. */
-.card h3{font-size:15px;line-height:1.35;font-weight:600;overflow-wrap:anywhere;min-height:4.05em}
+   hiding text to win an alignment would be the defect, not the fix. Scoped to
+   the width where cards actually sit side by side: below it there is one card
+   per row, nothing to align, and the reservation is pure dead space under
+   every short title. */
+@media (min-width:640px){ .card h3{min-height:4.05em} }
 .path{font-size:10.5px;color:var(--faint);overflow-wrap:anywhere}
 /* .07 alpha measured as a near-invisible hairline on this ground: an empty
    track read as a divider rather than as an empty progress bar. */
 .track{display:flex;height:8px;border-radius:999px;overflow:hidden;
   background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
 .track i{display:block;height:100%}
-.go{margin-top:auto}
 .seg-done{background:var(--good)} .seg-skip{background:var(--faint)} .seg-wip{background:var(--warn)}
 .figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px 12px}
 .figs dt{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint)}
 .figs dd{font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .figs .good{color:var(--good)} .figs .bad{color:var(--bad)} .figs .dim{color:var(--faint)}
 .figs .sub{color:var(--warn);font-size:11px}
-.go{margin-top:2px;font-size:12px;color:var(--cyan);text-decoration:none;border-top:1px solid var(--line);
+/* margin-top:auto pushes the link and its divider to the card floor, so the
+   footers of a row agree even when one card's steps figure wraps to two lines.
+   It belongs in THIS rule: declared in a second .go block of equal specificity
+   it lost to this one silently, and the divider stepped by 15px between
+   neighbours — measured in the browser, invisible to every DOM assertion. */
+.go{margin-top:auto;font-size:12px;color:var(--cyan);text-decoration:none;border-top:1px solid var(--line);
   padding-top:10px;display:block}
 .go:hover{text-decoration:underline}
 .go.none{color:var(--faint)}
@@ -348,8 +367,8 @@ generated="${BOARD_NOW:-$(date -u '+%Y-%m-%dT%H:%MZ')}"
     printf '</div>\n</body>\n</html>\n'
 } > "$out_tmp"
 
-if plan_atomic_write "$out" < "$out_tmp"; then
-    printf 'Rendered %s\n' "$out"
+if plan_atomic_write "$out_file" < "$out_tmp"; then
+    printf 'Rendered %s\n' "$out_file"
 else
-    plan_die "could not write $out" 70
+    plan_die "could not write $out_file" 70
 fi
