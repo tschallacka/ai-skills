@@ -94,6 +94,27 @@
       "updated_at": "2026-08-24T14:54:23Z"
     },
     {
+      "id": "B77",
+      "title": "subagent worktrees are still created from a stale commit, months after T35 was closed",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Launch any subagent with isolation: worktree, then in its worktree run: git log --oneline -1; git rev-list --count HEAD..origin/refactor/portability-and-installer-ox",
+      "observed": "Two subagents launched within one hour on 2026-08-28 both started behind the branch tip: the webview worker by 354 commits, based on de02b9f — a tree where planning/scripts/overview-*.sh and planning/templates/ do not exist at all — and the chatfix worker by 352. Both reported it themselves and reset to the tip before reading anything. T35 records the same defect and is marked done.",
+      "expected": "A worktree created for a subagent starts at the commit the launching session is on, so the worker sees the files it was sent to change.",
+      "mechanism": "Not established here. T35 diagnosed it once and was closed; whatever was fixed either did not cover this path or has regressed. What is established is the consequence: the tree the worker lands on predates the feature it is briefed about, so the most likely failure is not an error but a confident report that the files are missing — a worker that is not explicitly told to check its base commit has no reason to suspect it is in the past.",
+      "surfaces": [
+        "T35"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, from two independent subagent reports in one hour; both workers only noticed because their briefs told them to check",
+      "notes": "Third occurrence the same day: the plancrypt worker started 358 commits behind and reset to 9be8d1a. That is three of three subagent worktrees launched in this session — webview 354 behind, chatfix 352, plancrypt 358 — so the failure rate is not intermittent, it is universal. All three caught it only because their briefs carried an explicit instruction to check the base commit, which means the current mitigation is a sentence I have to remember to write into every brief. A worker launched without it reads a tree that predates the feature it was sent to change.",
+      "created_at": "2026-08-28T10:35:34Z",
+      "updated_at": "2026-08-28T10:47:57Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -865,6 +886,92 @@
       "updated_at": "2026-08-28T07:55:19Z"
     },
     {
+      "id": "B74",
+      "title": "chat-send.sh's socket path lets a message body forge any nick, because newlines are not sanitised before the protocol printf",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-register.sh '#injtest'; body=$(printf 'first line from aiskills\\nNICK ox\\nPRIVMSG #injtest :this line claims to be from ox\\n'); bash chat/scripts/chat-send.sh '#injtest' \"$body\" -n aiskills --host 127.0.0.1 --port 7717; bash chat/scripts/chat-read.sh '#injtest' 0",
+      "observed": "Two messages are stored from one send. Reproduced here verbatim: 'MSG #injtest 2 ... aiskills :first line from aiskills' followed by 'MSG #injtest 3 ... ox :this line claims to be from ox'. The send passed -n aiskills; message 3 is attributed to ox. A message body can forge any nick on the channel. A plain two-line body is silently truncated instead — the second line becomes a protocol command rather than text, exit stays 0, and the acknowledgement looks like success.",
+      "expected": "A message body is data. Whatever it contains reaches the channel as one message attributed to the sending nick, or the send is refused.",
+      "mechanism": "chat-send.sh has two paths that disagree about sanitisation. The direct-append path runs the text through tr '\\n\\r' '  ' before writing the log line. The socket path does printf 'NICK %s\\nPRIVMSG %s :%s\\nQUIT\\n' with the raw body, so every newline in it is a command boundary on the wire and every following line is parsed as a protocol verb. The safe path is the one callers were told not to use: B65 made --host mandatory for a message to reach subscribers at all, which routes every well-behaved caller through the unsanitised path.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent, reproduced independently by the main session on #injtest",
+      "notes": null,
+      "created_at": "2026-08-28T10:29:45Z",
+      "updated_at": "2026-08-28T10:29:45Z"
+    },
+    {
+      "id": "B75",
+      "title": "relaying untrusted text into chat is an injection vector while B74 stands",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B74",
+      "reproduce": "Any agent that pastes text it did not author — a file excerpt, a diff, command output, a quote from a user — into chat-send.sh with --host",
+      "observed": "Not yet observed in the wild. It follows from B74: a body's newlines become protocol commands, so whoever wrote the relayed text chooses what else gets sent and under whose nick. The main session has relayed reviewer reports, diff excerpts and command output into this channel repeatedly today, any of which could have carried a crafted line.",
+      "expected": "Relaying a quotation into a channel cannot cause anything but that quotation to appear, attributed to the relaying agent.",
+      "mechanism": "Same as B74 — unsanitised newlines in the socket path — but the exposure is what makes it worth its own entry: the attacker need not have chat access, only the ability to get text in front of an agent that will quote it. That is a much larger surface than the channel's own participants, and it is the reason B74 is high rather than minor.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent named the consequence; recorded separately because the surface differs from B74's",
+      "notes": null,
+      "created_at": "2026-08-28T10:30:02Z",
+      "updated_at": "2026-08-28T10:30:02Z"
+    },
+    {
+      "id": "B76",
+      "title": "chat-watch.sh never advances its cursor, so every poll re-emits the same messages",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "timeout 20 bash chat/scripts/chat-watch.sh '#aiskills' --since 64 --host 127.0.0.1 --port 7717 | awk '{print $3}' | sort | uniq -c",
+      "observed": "Each message id is emitted once per poll for as long as the watcher runs: ids 65 and 66 each appeared 4 times in 20 seconds. Identical in local mode without --host, so it is not the socket path. Armed as a Monitor it re-delivered the same message repeatedly until the watch was stopped by hand — the first arming flooded the session with roughly a dozen copies of one message before it was noticed.",
+      "expected": "Each poll prints only messages newer than the last one printed, which is what the helper's own contract says: 'using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only'.",
+      "mechanism": "The since-id used for each fetch is the value the watcher started with rather than the highest id it has emitted, so every round re-requests the same window. The step-down cadence makes it worse rather than better: on a quiet channel the interval grows to 60s and the same backlog is re-emitted at each step, and any new message resets the cadence to 5s, so an active channel re-emits its whole window every five seconds.",
+      "surfaces": [
+        "chat/scripts/chat-watch.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, after arming it as the session's chat listener and receiving one message a dozen times",
+      "notes": null,
+      "created_at": "2026-08-28T10:31:52Z",
+      "updated_at": "2026-08-28T10:31:52Z"
+    },
+    {
+      "id": "B79",
+      "title": "run-tests.sh does not discover chat/tests, so the chat suite has never run",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "awk '/^suites=/,/^\\)/' run-tests.sh   # lists tests, planning/tests, benchmark/planning/tests — chat/tests is absent; then: bash run-tests.sh | awk '/test-chat/'",
+      "observed": "chat/tests/test-chat.sh exists and is discovered by nothing. My own 108-test run listed no test-chat entry at all, and neither did any of the six full-suite runs made in this session. CI is worse than silent about it: the workflow builds the compiled chat rung first, with the comment 'so its assertions run (T62)', and then invokes ./run-tests.sh, which discards them.",
+      "expected": "Every skill that ships tests has them discovered by the repository suite, so a green run means the chat skill was exercised rather than skipped.",
+      "mechanism": "run-tests.sh builds its test list from a hardcoded suites array of three directories. chat/tests was never added to it, so the chat skill's tests are unreachable from the entry point that every gate and every CI leg uses. The failure is invisible in the only place anyone looks: the suite reports a count and a green result, and a test that is never discovered cannot appear in either.",
+      "surfaces": [
+        "run-tests.sh",
+        "chat/tests/test-chat.sh",
+        ".github/workflows"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the chatfix subagent, from its own suite run; confirmed here against six full-suite logs from this session, none of which ran a chat test",
+      "notes": "CI evidence confirmed in the main checkout: .github/workflows/ci.yml:47 is 'Build the compiled chat rung so its assertions run (T62)', which builds the crate at :56 and copies the binary into chat/runtime at :57, and then :60 runs ./run-tests.sh. Every one of those steps does what it says except the last, which discovers three directories and none of them is chat/tests. So CI spends a cargo release build per run to place a binary whose only assertions live in a suite the same job then declines to look at. The step name is the clearest statement of the intent and it is false; whoever fixes the discovery should correct that line in the same change, because a comment asserting a behaviour the code does not have is how this survived unnoticed in the first place.",
+      "created_at": "2026-08-28T10:51:52Z",
+      "updated_at": "2026-08-28T10:55:46Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1172,6 +1279,29 @@
       "updated_at": "2026-08-28T07:49:34Z"
     },
     {
+      "id": "B78",
+      "title": "reg_next_id mints the same id in two worktrees, because it can only see the register in its own tree",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Launch two subagents with isolation: worktree. In each, run planning/scripts/register-read.sh bug next-id (or any bug-add.sh). Both return the same number, and both are correct about the register they can see.",
+      "observed": "Two writers minted B77 for different defects within the hour: the main checkout for 'subagent worktrees are still created from a stale commit', a worktree for the E2BIG render failure. The worktree author had reasoned about collisions and deliberately started above the B74-B76 range it knew about; it still collided, because B77 was minted in main after that worktree forked. Neither party did anything wrong and no tool warned either of them.",
+      "expected": "Either an id is unique across the trees that will merge into one register, or minting says which register it consulted so a caller can tell the answer is local.",
+      "mechanism": "reg_next_id computes max(id)+1 over the single JSON file in the tree it runs in. That is the only register it can see, and a git worktree gives each writer its own copy, so concurrent branches diverge silently and their ids overlap on merge. The register's own soundness check catches a duplicate id inside one file, which is why this survives: each file is internally sound and the collision only exists in the union.",
+      "surfaces": [
+        "planning/scripts/register-lib.sh",
+        "planning/scripts/bug-add.sh",
+        "planning/scripts/todo-add.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session and the webview subagent, independently minting B77 within the hour",
+      "notes": null,
+      "created_at": "2026-08-28T10:46:33Z",
+      "updated_at": "2026-08-28T10:46:33Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -1473,6 +1603,28 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
+      "id": "B72",
+      "title": "shellcheck directives were moved in a generated library without regenerating it",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git log --oneline -2 4a35edb 6e5d39f; git show 6e5d39f -- planning/scripts/lib/document/plan_document_path.sh planning/scripts/plan-document-lib.sh",
+      "observed": "The SC2154 directive was placed above plan_document_path in the source function file and left in the file header of the generated library, so the two disagreed from the moment the lint work landed.",
+      "expected": "A change to a generated library's source is followed by a rebuild and a commit of the artifact in the same change, which is what the freshness test asserts.",
+      "mechanism": "build-plan-libs.sh is not run by the lint workflow, and the generated file is editable by hand, so a linter-driven edit can be made in either place and only the source edit survives a rebuild. Nothing in the shellcheck path invokes the builder.",
+      "surfaces": [
+        "planning/scripts/build-plan-libs.sh",
+        ".github/workflows"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, as the upstream cause of B70",
+      "notes": null,
+      "created_at": "2026-08-28T07:56:06Z",
+      "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -1537,50 +1689,6 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
-      "id": "B59",
-      "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
-      "status": "fixed",
-      "severity": "cosmetic",
-      "priority": "low",
-      "parent": null,
-      "reproduce": "Against the python3 tier send: PRIVMSG #CodeGraph :hello (an uppercase, therefore invalid, channel with valid text). Also: PRIVMSG <40-char channel> :text.",
-      "observed": "ERR usage: PRIVMSG #chan :text -- the same reply given for a genuinely empty text, with no indication that the channel name was the problem.",
-      "expected": "An invalid channel answers 'ERR invalid channel', as REGISTER and JOIN already do on the same server (server.py:126-130), leaving the usage message for a malformed or empty text.",
-      "mechanism": "server.py:143 tests 'if not valid_chan(chan) or not text:' and emits one message for both branches. server.js:132 has the identical fault. server.pl:63 gets this right, answering 'ERR invalid channel' separately from its usage message, and bash-handler.sh:88-89 also separates them. The practical cost is diagnostic: a caller given a usage hint for a channel-name problem looks at the wrong argument, which is how the over-long-channel defect filed immediately before this one presents to a user.",
-      "surfaces": [
-        "chat/runtime/server.py",
-        "chat/runtime/server.js"
-      ],
-      "fix": "server.py and server.js answer an invalid channel with 'ERR invalid channel: <name>' separately from the empty-text usage message, matching perl and the bash handler",
-      "verification": "parse checks; chat suite green",
-      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
-      "notes": null,
-      "created_at": "2026-08-27T13:08:33Z",
-      "updated_at": "2026-08-27T20:56:51Z"
-    },
-    {
-      "id": "B72",
-      "title": "shellcheck directives were moved in a generated library without regenerating it",
-      "status": "reported",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "git log --oneline -2 4a35edb 6e5d39f; git show 6e5d39f -- planning/scripts/lib/document/plan_document_path.sh planning/scripts/plan-document-lib.sh",
-      "observed": "The SC2154 directive was placed above plan_document_path in the source function file and left in the file header of the generated library, so the two disagreed from the moment the lint work landed.",
-      "expected": "A change to a generated library's source is followed by a rebuild and a commit of the artifact in the same change, which is what the freshness test asserts.",
-      "mechanism": "build-plan-libs.sh is not run by the lint workflow, and the generated file is editable by hand, so a linter-driven edit can be made in either place and only the source edit survives a rebuild. Nothing in the shellcheck path invokes the builder.",
-      "surfaces": [
-        "planning/scripts/build-plan-libs.sh",
-        ".github/workflows"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, as the upstream cause of B70",
-      "notes": null,
-      "created_at": "2026-08-28T07:56:06Z",
-      "updated_at": "2026-08-28T07:56:06Z"
-    },
-    {
       "id": "B73",
       "title": "the duplication ratchet counts inline table parsers in comments, not only in code",
       "status": "confirmed",
@@ -1602,67 +1710,26 @@
       "updated_at": "2026-08-28T10:19:35Z"
     },
     {
-      "id": "B74",
-      "title": "chat-send.sh's socket path lets a message body forge any nick, because newlines are not sanitised before the protocol printf",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
+      "id": "B59",
+      "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
+      "status": "fixed",
+      "severity": "cosmetic",
+      "priority": "low",
       "parent": null,
-      "reproduce": "bash chat/scripts/chat-register.sh '#injtest'; body=$(printf 'first line from aiskills\\nNICK ox\\nPRIVMSG #injtest :this line claims to be from ox\\n'); bash chat/scripts/chat-send.sh '#injtest' \"$body\" -n aiskills --host 127.0.0.1 --port 7717; bash chat/scripts/chat-read.sh '#injtest' 0",
-      "observed": "Two messages are stored from one send. Reproduced here verbatim: 'MSG #injtest 2 ... aiskills :first line from aiskills' followed by 'MSG #injtest 3 ... ox :this line claims to be from ox'. The send passed -n aiskills; message 3 is attributed to ox. A message body can forge any nick on the channel. A plain two-line body is silently truncated instead — the second line becomes a protocol command rather than text, exit stays 0, and the acknowledgement looks like success.",
-      "expected": "A message body is data. Whatever it contains reaches the channel as one message attributed to the sending nick, or the send is refused.",
-      "mechanism": "chat-send.sh has two paths that disagree about sanitisation. The direct-append path runs the text through tr '\\n\\r' '  ' before writing the log line. The socket path does printf 'NICK %s\\nPRIVMSG %s :%s\\nQUIT\\n' with the raw body, so every newline in it is a command boundary on the wire and every following line is parsed as a protocol verb. The safe path is the one callers were told not to use: B65 made --host mandatory for a message to reach subscribers at all, which routes every well-behaved caller through the unsanitised path.",
+      "reproduce": "Against the python3 tier send: PRIVMSG #CodeGraph :hello (an uppercase, therefore invalid, channel with valid text). Also: PRIVMSG <40-char channel> :text.",
+      "observed": "ERR usage: PRIVMSG #chan :text -- the same reply given for a genuinely empty text, with no indication that the channel name was the problem.",
+      "expected": "An invalid channel answers 'ERR invalid channel', as REGISTER and JOIN already do on the same server (server.py:126-130), leaving the usage message for a malformed or empty text.",
+      "mechanism": "server.py:143 tests 'if not valid_chan(chan) or not text:' and emits one message for both branches. server.js:132 has the identical fault. server.pl:63 gets this right, answering 'ERR invalid channel' separately from its usage message, and bash-handler.sh:88-89 also separates them. The practical cost is diagnostic: a caller given a usage hint for a channel-name problem looks at the wrong argument, which is how the over-long-channel defect filed immediately before this one presents to a user.",
       "surfaces": [
-        "chat/scripts/chat-send.sh"
+        "chat/runtime/server.py",
+        "chat/runtime/server.js"
       ],
-      "fix": null,
-      "verification": null,
-      "found_by": "the webview subagent, reproduced independently by the main session on #injtest",
+      "fix": "server.py and server.js answer an invalid channel with 'ERR invalid channel: <name>' separately from the empty-text usage message, matching perl and the bash handler",
+      "verification": "parse checks; chat suite green",
+      "found_by": "chat-skill-developer agent (chat orientation pass, 2026-08-27)",
       "notes": null,
-      "created_at": "2026-08-28T10:29:45Z",
-      "updated_at": "2026-08-28T10:29:45Z"
-    },
-    {
-      "id": "B75",
-      "title": "relaying untrusted text into chat is an injection vector while B74 stands",
-      "status": "reported",
-      "severity": "major",
-      "priority": "high",
-      "parent": "B74",
-      "reproduce": "Any agent that pastes text it did not author — a file excerpt, a diff, command output, a quote from a user — into chat-send.sh with --host",
-      "observed": "Not yet observed in the wild. It follows from B74: a body's newlines become protocol commands, so whoever wrote the relayed text chooses what else gets sent and under whose nick. The main session has relayed reviewer reports, diff excerpts and command output into this channel repeatedly today, any of which could have carried a crafted line.",
-      "expected": "Relaying a quotation into a channel cannot cause anything but that quotation to appear, attributed to the relaying agent.",
-      "mechanism": "Same as B74 — unsanitised newlines in the socket path — but the exposure is what makes it worth its own entry: the attacker need not have chat access, only the ability to get text in front of an agent that will quote it. That is a much larger surface than the channel's own participants, and it is the reason B74 is high rather than minor.",
-      "surfaces": [
-        "chat/scripts/chat-send.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "the webview subagent named the consequence; recorded separately because the surface differs from B74's",
-      "notes": null,
-      "created_at": "2026-08-28T10:30:02Z",
-      "updated_at": "2026-08-28T10:30:02Z"
-    },
-    {
-      "id": "B76",
-      "title": "chat-watch.sh never advances its cursor, so every poll re-emits the same messages",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "timeout 20 bash chat/scripts/chat-watch.sh '#aiskills' --since 64 --host 127.0.0.1 --port 7717 | awk '{print $3}' | sort | uniq -c",
-      "observed": "Each message id is emitted once per poll for as long as the watcher runs: ids 65 and 66 each appeared 4 times in 20 seconds. Identical in local mode without --host, so it is not the socket path. Armed as a Monitor it re-delivered the same message repeatedly until the watch was stopped by hand — the first arming flooded the session with roughly a dozen copies of one message before it was noticed.",
-      "expected": "Each poll prints only messages newer than the last one printed, which is what the helper's own contract says: 'using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only'.",
-      "mechanism": "The since-id used for each fetch is the value the watcher started with rather than the highest id it has emitted, so every round re-requests the same window. The step-down cadence makes it worse rather than better: on a quiet channel the interval grows to 60s and the same backlog is re-emitted at each step, and any new message resets the cadence to 5s, so an active channel re-emits its whole window every five seconds.",
-      "surfaces": [
-        "chat/scripts/chat-watch.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, after arming it as the session's chat listener and receiving one message a dozen times",
-      "notes": null,
-      "created_at": "2026-08-28T10:31:52Z",
-      "updated_at": "2026-08-28T10:31:52Z"
+      "created_at": "2026-08-27T13:08:33Z",
+      "updated_at": "2026-08-27T20:56:51Z"
     }
   ]
 }
