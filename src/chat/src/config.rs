@@ -456,6 +456,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_saved_choice_reads_back_identically() {
         for t in [
             Transport::loopback(),
@@ -505,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn socket_with_no_path_falls_back_to_the_home_directory() {
         let h = home("nopath");
         let t = parse("transport=socket\n", &h).unwrap();
@@ -558,6 +560,7 @@ mod tests {
     /// where it surfaces as a message about SUN_LEN that says nothing about what
     /// to do. A per-session scratch AI_CHAT_HOME really did exceed it.
     #[test]
+    #[cfg(unix)]
     fn an_over_long_socket_path_is_refused_with_advice() {
         let long = PathBuf::from(format!("/tmp/{}/chat.sock", "d".repeat(MAX_SOCKET_PATH)));
         let e = Transport::Socket(long).check().unwrap_err();
@@ -569,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_workable_socket_path_passes_the_check() {
         assert!(Transport::Socket(PathBuf::from("/tmp/x/chat.sock"))
             .check()
@@ -578,6 +582,7 @@ mod tests {
     /// Reading is checked as well as writing, because a config can be edited by
     /// hand — the file itself invites it.
     #[test]
+    #[cfg(unix)]
     fn a_hand_edited_config_with_an_impossible_socket_is_an_error() {
         let h = home("longsock");
         let long = format!("/tmp/{}/chat.sock", "d".repeat(MAX_SOCKET_PATH));

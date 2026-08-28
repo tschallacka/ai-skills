@@ -426,6 +426,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn an_entry_records_a_socket_transport_the_same_way_the_config_does() {
         let r = reg("sockentry");
         let h = home("sockentry");
