@@ -39,7 +39,7 @@ plan="$work/p"
 
 # edit_step N TEXT -> the reminder text on stderr, empty when silent
 edit_step() {
-    "$scripts/update-plan-content.sh" -sp "$plan" 01-a/01-step-a "$1" "$2" 2>&1 >/dev/null
+    { "$scripts/update-plan-content.sh" -sp "$plan" 01-a/01-step-a "$1" "$2" >/dev/null; } 2>&1
 }
 
 # 1. No companion: the reminder names the gap, whatever the timestamps say.

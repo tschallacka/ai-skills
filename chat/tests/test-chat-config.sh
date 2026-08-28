@@ -69,9 +69,9 @@ root="$(mktemp -d /tmp/ch-cfg.XXXXXX)"
 pids=""
 cleanup() {
     for p in $pids; do kill "$p" 2>/dev/null; done
-    for pid_file in $(find "$root" -type f -name server.pid 2>/dev/null); do
+    while IFS= read -r pid_file; do
         kill "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null || true
-    done
+    done < <(find "$root" -type f -name server.pid 2>/dev/null)
     sleep 0.3
     rm -rf -- "$root"
 }
