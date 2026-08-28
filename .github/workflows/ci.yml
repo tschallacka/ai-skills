@@ -61,8 +61,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cargo build --release --manifest-path src/plan-crypt/Cargo.toml
-          mkdir -p planning/bin
-          cp src/plan-crypt/target/release/plan-crypt planning/bin/plan-crypt
+          mkdir -p planning/.ci-bin
+          cp src/plan-crypt/target/release/plan-crypt planning/.ci-bin/plan-crypt
+          echo "PLAN_CRYPT_BIN=$PWD/planning/.ci-bin/plan-crypt" >> "$GITHUB_ENV"
 
       - name: Run the full deterministic test suite
         run: ./run-tests.sh

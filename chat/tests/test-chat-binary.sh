@@ -195,7 +195,7 @@ rows="$("$binary" read '#t' --host 127.0.0.1 --port "$port_a" 2>&1)"
 check "the binary reads the same two rows remotely" 2 "$(printf '%s\n' "$rows" | wc -l | tr -d ' ')"
 
 # No --host: the client must not touch a socket at all, and must still work.
-rows="$("$binary" read '#t' --home "$root/a" 2>&1)"
+rows="$("$binary" read '#t' --local --home "$root/a" 2>&1)"
 check "a client with no --host reads the log directly" 2 \
     "$(printf '%s\n' "$rows" | wc -l | tr -d ' ')"
 contains "and a local send lands in the same log" "MSG #t 3 " \
