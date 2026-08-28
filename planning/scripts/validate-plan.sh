@@ -181,8 +181,48 @@ if [ "$propagation_mode" = true ]; then
     plan_validate_propagation_freshness
 fi
 
+# plan_report_gates -- which of the three questions this run answers. They are
+# different: a plan can be structurally sound, not yet adversarially approved,
+# and nowhere near executed, and a single pass/fail cannot say that. Running
+# --complete on a fully planned but unexecuted plan reported 218 errors, all of
+# them execution state, over a structure that was ready (T55).
+plan_report_gates() {
+    local structural approved complete
+    # Under --complete the error count mixes structural defects with execution
+    # state, and the two cannot be separated after the fact -- the checks
+    # interleave. Saying so beats inferring a structural verdict from a number
+    # that is answering a different question, which is the mistake this whole
+    # function exists to stop.
+    if [ "$complete_mode" = true ]; then
+        structural='not separable here (run without --complete)'
+        complete=yes
+        [ "${errors:-0}" -eq 0 ] || complete=no
+    else
+        structural=yes
+        [ "${placeholder_warnings:-0}" -eq 0 ] || structural='no (placeholders)'
+        [ "${errors:-0}" -eq 0 ] || structural='no (errors above)'
+        complete='not checked (pass --complete)'
+    fi
+    # Unset means no review file was read, which is not approval. Defaulting
+    # this to true reported a fresh plan with no adversarial review as approved.
+    if [ ! -f "$plan_dir/adversarial-review.md" ]; then
+        approved='no review file'
+    elif [ "${review_approved:-false}" = true ]; then
+        approved=yes
+    else
+        approved=no
+    fi
+    printf 'Gates: structurally valid=%s  adversarially approved=%s  implementation complete=%s\n' \
+        "$structural" "$approved" "$complete"
+}
+
 if [ "$errors" -gt 0 ]; then
     printf 'Plan validation failed with %d error(s).\n' "$errors" >&2
+    # Reported on the failing path too, and this is the path that needs it:
+    # --complete over a fully planned but unexecuted plan fails on execution
+    # state, and the count alone reads as "this plan is broken" when the
+    # structural gate is green (T55).
+    plan_report_gates >&2
     exit 1
 fi
 
@@ -202,3 +242,5 @@ else
     printf 'Plan validation passed: %d work units across %d goals.\n' \
         "${#unit_ids[@]}" "$(plan_map_count goal_units)"
 fi
+
+plan_report_gates

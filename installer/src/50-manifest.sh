@@ -313,6 +313,7 @@ tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
 tests/test-register-read.sh
 tests/test-resolve-finding.sh
+tests/test-validate-gates.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
