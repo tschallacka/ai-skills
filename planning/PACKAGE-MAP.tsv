@@ -35,6 +35,8 @@ planning/scripts/create-progress.sh	scripts/create-progress.sh	installer	review-
 planning/scripts/create-step-testing.sh	scripts/create-step-testing.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/rebuild-plan-progress.sh	scripts/rebuild-plan-progress.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/render-plan-overview.sh	scripts/render-plan-overview.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/render-plans-board.sh	scripts/render-plans-board.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/plans-board-lib.sh	scripts/plans-board-lib.sh	installer	review-approved	backup-then-replace	false
 planning/templates/plan-overview.html.tmpl	templates/plan-overview.html.tmpl	installer	review-approved	backup-then-replace	false
 planning/scripts/register-command.sh	scripts/register-command.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/create-ui-story-run-cache.sh	scripts/create-ui-story-run-cache.sh	installer	review-approved	backup-then-replace	false

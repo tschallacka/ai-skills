@@ -18,6 +18,11 @@ conversation.
 - **An overview worth reading.** `render-plan-overview.sh` produces a single
   file (open it, print it, archive it) — identity, step drill-downs, the
   dependency graph, test and coverage panels, findings.
+- **A board across every plan.** `render-plans-board.sh` answers the question
+  asked before you open any one plan: of the twenty directories under your
+  plans root, which are being worked, which wait on a review, which are done,
+  and which are not plans at all. One card per plan, linking into that plan's
+  own overview.
 - **A live version too.** `overview-serve.sh` serves the same page on
   localhost and updates it *in place* while you watch — no reload, no flicker,
   your scroll position survives. Works with python3, node, perl, or socat;
