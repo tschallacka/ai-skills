@@ -4,6 +4,24 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T70",
+      "title": "Ship the compiled binaries with 2.0.0-alpha: build all five targets, declare them, commit them",
+      "status": "open",
+      "priority": "urgent",
+      "parent": null,
+      "detail": "Tschallacka: the binaries go out with the release. Nothing is shipped today — 'git ls-files planning/bin chat/bin' is empty for both, and planning has no binaries.tsv at all (chat has one declaring all five targets). rust-development-guidelines.md section 6 states the rules: binaries.tsv is MODE: PROD and must appear in skill_files(); the artifact lives at <skill>/bin/<target triple>/<binary> and is marker-exempt on the triple-shaped directory name; a declared-but-unbuilt row is legal, a built-but-undeclared binary is not — so declare before building, never after. The five targets are x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc. This workstation cannot produce all five: a cross-built aarch64-apple-darwin carries no ad-hoc signature and Apple Silicon refuses to exec it, and neither darwin nor msvc links on Linux at all. CI already builds and RUNS each target in the plan-crypt matrix, but no job uploads an artifact — they are built and discarded — so there is no pipeline to collect them from either. That gap is the work: either add upload-artifact to the matrix and collect, or build on real hardware per platform. tests/test-shipped-binaries.sh validates the registry against disk and was built with eleven mutations, so it is the gate that proves this landed.",
+      "blocked_on": null,
+      "refs": [
+        "rust-development-guidelines.md",
+        "chat/binaries.tsv",
+        "tests/test-shipped-binaries.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T17:15:01Z",
+      "updated_at": "2026-08-28T17:15:01Z"
+    },
+    {
       "id": "T51",
       "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
       "status": "open",

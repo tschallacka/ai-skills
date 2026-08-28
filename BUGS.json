@@ -1930,6 +1930,28 @@
       "notes": null,
       "created_at": "2026-08-28T16:58:45Z",
       "updated_at": "2026-08-28T16:58:45Z"
+    },
+    {
+      "id": "B89",
+      "title": "The release-package gate rejects any prerelease version, so bumping package.json to 2.0.0-alpha turns the suite red",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "for v in 2.0.0 2.0.0-alpha 2.0.0-alpha.1; do printf '%-16s %s\\n' \"$v\" \"$(printf '%s' \"$v\" | grep -c '^[0-9][0-9.]*[0-9]$')\"; done",
+      "observed": "2.0.0 -> 1, 2.0.0-alpha -> 0, 2.0.0-alpha.1 -> 0. tests/test-release-package.sh:37-39 reads the version out of package.json and asserts that count is '1', so any version carrying a prerelease identifier fails 'package.json states a version' and the whole gate goes red.",
+      "expected": "The gate accepts the versions the project actually intends to publish, prerelease identifiers included, while still rejecting a missing or malformed one.",
+      "mechanism": "The pattern '^[0-9][0-9.]*[0-9]$' was written when every released version was numeric — the tag list is v1.0.0 through v1.4.2, none with a suffix — so nothing had ever exercised a prerelease. It anchors both ends and permits only digits and dots, which excludes the hyphen semver requires for a prerelease. This is a latent gate, not a regression: it has been correct for every version shipped so far and becomes wrong the first time an alpha is cut.",
+      "surfaces": [
+        "tests/test-release-package.sh",
+        "package.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
+      "notes": null,
+      "created_at": "2026-08-28T17:11:58Z",
+      "updated_at": "2026-08-28T17:11:58Z"
     }
   ]
 }
