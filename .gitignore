@@ -42,3 +42,7 @@ bugs-found-by-ox-alpha.md
 src/*/target/
 chat/runtime/chat-server-rs
 src/chat-server-rs/target/
+
+# Workstation-only: the per-project deviation notes the project-specificies
+# skill records. The skill ships; what it records about this machine does not.
+project-specificies/*-deviations.md
