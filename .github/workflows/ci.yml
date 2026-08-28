@@ -274,7 +274,7 @@ jobs:
     name: chat builds and runs on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     env:
-      HOME: ${{ runner.temp }}
+      HOME: ${{ github.workspace }}
     strategy:
       fail-fast: false
       matrix:
