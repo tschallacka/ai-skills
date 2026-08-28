@@ -46,7 +46,7 @@ while [ "$#" -gt 0 ]; do
             # B54: an unvalidated value is executed below; only the four
             # tiers exist, and anything else must be a usage error.
             case "$2" in
-                python3|node|perl|socat) ;;
+                python3|node|perl|socat|chat-server-rs) ;;
                 *) printf '%s: unknown runtime: %s (python3, node, perl, socat)\n' "${0##*/}" "$2" >&2
                    exit 64 ;;
             esac
@@ -77,7 +77,34 @@ is_running() {
     kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
 
+# The compiled rung lives beside the interpreter tiers when a build has put
+# it there (cargo build --release && cp src/chat-server-rs/target/release/
+# chat-server-rs chat/runtime/), or anywhere on PATH.
+rust_bin() {
+    if command -v chat-server-rs >/dev/null 2>&1; then
+        command -v chat-server-rs
+        return 0
+    fi
+    local cand
+    for cand in "$(dirname "${BASH_SOURCE[0]}")/../runtime/chat-server-rs"; do
+        if [ -x "$cand" ]; then
+            printf '%s\n' "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
 pick_runtime() {
+    # A resident compiled server answers without interpreter startup, so it
+    # leads the chain; absent it, the interpreter tiers follow unchanged.
+    if [ -z "$want_runtime" ] || [ "$want_runtime" = chat-server-rs ]; then
+        if [ -z "$want_runtime" ] && rust_bin >/dev/null; then
+            printf 'chat-server-rs\n'
+            return 0
+        fi
+        [ "$want_runtime" = chat-server-rs ] && { rust_bin; return $?; }
+    fi
     local order="${want_runtime:-python3 node perl socat}"
     for r in $order; do
         command -v "$r" >/dev/null 2>&1 && { printf '%s\n' "$r"; return 0; }
@@ -109,6 +136,7 @@ do_start() {
         python3) src=server.py ;;
         node) src=server.js ;;
         perl) src=server.pl ;;
+        chat-server-rs) src="" ;;
     esac
     case "$runtime" in
         python3|node|perl)
@@ -139,8 +167,13 @@ do_start() {
         AI_CHAT_HOME="$HOME_DIR" nohup socat "TCP-LISTEN:${want_port:-0},fork,reuseaddr,bind=$AI_CHAT_BIND" \
             "EXEC:$handler" >> "$HOME_DIR/server.log" 2>&1 &
     else
-        AI_CHAT_HOME="$HOME_DIR" nohup ${runtime} ${script:+$script} ${want_port:+$want_port} \
-            >> "$HOME_DIR/server.log" 2>&1 &
+        if [ "$runtime" = chat-server-rs ]; then
+            AI_CHAT_HOME="$HOME_DIR" nohup "$(rust_bin)" ${want_port:+$want_port} \
+                >> "$HOME_DIR/server.log" 2>&1 &
+        else
+            AI_CHAT_HOME="$HOME_DIR" nohup ${runtime} ${script:+$script} ${want_port:+$want_port} \
+                >> "$HOME_DIR/server.log" 2>&1 &
+        fi
     fi
     echo $! > "$pidfile"
     # socat names its port on the command line; the others report their bound

@@ -157,4 +157,48 @@ if "$scripts/chat-server.sh" start --runtime python3 --port 18471 --bind 127.0.0
     "$scripts/chat-server.sh" stop --home "$bind_home" >/dev/null 2>&1 || true
 fi
 
+# ---- the compiled rung: same wire contract, resident process (T62) ----------
+# SKIP-loud when no build has placed the binary; the assertions mirror the
+# interpreter tiers' so a regression shows identically on whichever rung
+# this host can run.
+rust_bin=""
+if command -v chat-server-rs >/dev/null 2>&1; then
+    rust_bin="$(command -v chat-server-rs)"
+elif [ -x "$root/runtime/chat-server-rs" ]; then
+    rust_bin="$root/runtime/chat-server-rs"
+fi
+if [ -n "$rust_bin" ]; then
+    rust_home="$temporary_root/rusthome"
+    if "$scripts/chat-server.sh" start --runtime chat-server-rs --port 18481 --home "$rust_home" >/dev/null 2>&1; then
+        rust_port="$(cat "$rust_home/server.port" 2>/dev/null)"
+        case "$rust_port" in
+            ''|*[!0-9]*) fail "compiled rung reported an unparseable port line" ;;
+        esac
+        # B56: highest+1, not last+1 — seed an out-of-order log first.
+        mkdir -p "$rust_home/channels"
+        printf 'MSG #r 1 100 system :seed\n# stray note\nMSG #r 7 101 a :seven\n' \
+            > "$rust_home/channels/#r.log"
+        out="$(printf 'NICK t\nPRIVMSG #r :next id?\nFETCH #r 0\nJOIN #r 0\nPING\nQUIT\n' \
+            | timeout 10 bash -c 'exec 3<>/dev/tcp/127.0.0.1/'"$rust_port"'; cat >&3; timeout 5 cat <&3' \
+            | tr -d '\r')"
+        case "$out" in
+            *'MSG #r 8 '*' :next id?'*) : ;;
+            *) fail "compiled rung id allocation is not highest+1: $out" ;;
+        esac
+        case "$out" in
+            *'OK fetch end'*|*'OK join #r'*|*'PONG'*) : ;;
+            *) fail "compiled rung dialogue incomplete: $out" ;;
+        esac
+        case "$out" in
+            *'stray note'*) fail "compiled rung leaked a non-MSG line into FETCH" ;;
+        esac
+        printf 'chat: exercised chat-server-rs (%s)\n' "$rust_bin" >&2
+        "$scripts/chat-server.sh" stop --home "$rust_home" >/dev/null 2>&1
+    else
+        fail "compiled rung present at $rust_bin but the launcher could not start it"
+    fi
+else
+    printf 'SKIP chat: chat-server-rs absent on this host — its assertions did not run (build: cargo build --release --manifest-path src/chat-server-rs/Cargo.toml && cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/)\n' >&2
+fi
+
 t_end
