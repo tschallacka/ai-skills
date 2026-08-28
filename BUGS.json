@@ -1642,6 +1642,27 @@
       "notes": null,
       "created_at": "2026-08-28T10:30:02Z",
       "updated_at": "2026-08-28T10:30:02Z"
+    },
+    {
+      "id": "B76",
+      "title": "chat-watch.sh never advances its cursor, so every poll re-emits the same messages",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "timeout 20 bash chat/scripts/chat-watch.sh '#aiskills' --since 64 --host 127.0.0.1 --port 7717 | awk '{print $3}' | sort | uniq -c",
+      "observed": "Each message id is emitted once per poll for as long as the watcher runs: ids 65 and 66 each appeared 4 times in 20 seconds. Identical in local mode without --host, so it is not the socket path. Armed as a Monitor it re-delivered the same message repeatedly until the watch was stopped by hand — the first arming flooded the session with roughly a dozen copies of one message before it was noticed.",
+      "expected": "Each poll prints only messages newer than the last one printed, which is what the helper's own contract says: 'using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only'.",
+      "mechanism": "The since-id used for each fetch is the value the watcher started with rather than the highest id it has emitted, so every round re-requests the same window. The step-down cadence makes it worse rather than better: on a quiet channel the interval grows to 60s and the same backlog is re-emitted at each step, and any new message resets the cadence to 5s, so an active channel re-emits its whole window every five seconds.",
+      "surfaces": [
+        "chat/scripts/chat-watch.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, after arming it as the session's chat listener and receiving one message a dozen times",
+      "notes": null,
+      "created_at": "2026-08-28T10:31:52Z",
+      "updated_at": "2026-08-28T10:31:52Z"
     }
   ]
 }
