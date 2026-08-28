@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# chat-tail.sh - the constant-output stream: print a channel's backlog since
+# chat-tail.sh - the constant-output stream (default display IRC-style
+# [HH:MM] <nick> text; --raw for stored MSG lines): print a channel's backlog since
 # an id, then keep printing new messages as they land, until killed. This is
 # how an agent "joins" a channel from a subshell.
 #
@@ -17,7 +18,7 @@ export LC_ALL=C
 usage() {
     local rc="${1:-64}"
     cat <<USAGE
-Usage: ${0##*/} #chan [since-id] [--interval N] [--host H] [--port N] [--home D]
+Usage: ${0##*/} #chan [since-id] [--interval N] [--raw] [--host H] [--port N] [--home D]
 
 since-id defaults to 0 on a socket (full replay) and to "end of log" locally
 (pass 0 to replay everything). Interval is the local poll seconds (default 1,
@@ -27,10 +28,11 @@ USAGE
 }
 
 HOME_DIR="${AI_CHAT_HOME:-$HOME/.ai-chat}"
-chan="" since="" interval=1 host="" port=""
+chan="" raw=false since="" interval=1 host="" port=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage 0 ;;
+        --raw) raw=true; shift ;;
         --interval) [ "$#" -ge 2 ] || usage; interval="$2"; shift 2 ;;
         --host) [ "$#" -ge 2 ] || usage; host="$2"; shift 2 ;;
         --port) [ "$#" -ge 2 ] || usage; port="$2"; shift 2 ;;
@@ -59,7 +61,15 @@ if [ -n "$host" ]; then
     printf 'NICK %s\nJOIN %s %s\n' "${CHAT_NICK:-${USER:-agent}-tail}" "$chan" "${since:-0}" >&3
     while IFS= read -r line <&3; do
         case "$line" in
-            MSG\ *) printf '%s\n' "$line" ;;
+            MSG\ *) if [ "$raw" = true ]; then
+                        printf '%s\n' "$line"
+                    else
+                        printf '%s\n' "$line" | awk '$1 == "MSG" {
+                            ts = $4; h = int(ts / 3600) % 24; mi = int(ts / 60) % 60
+                            sep = index($0, " :")
+                            printf "[%02d:%02d] <%s> %s\n", h, mi, $5, substr($0, sep + 2)
+                        }'
+                    fi ;;
             OK\ join*) : ;;
             ERR*) printf '%s: %s\n' "${0##*/}" "$line" >&2; exit 70 ;;
         esac
@@ -85,7 +95,15 @@ while :; do
     if [ -f "$log" ]; then
         awk -v s="$(cat "$tmp")" '$1 == "MSG" && ($3 + 0) > s' "$log" > "$out" || true
         if [ -s "$out" ]; then
-            cat "$out"
+            if [ "$raw" = true ]; then
+                cat "$out"
+            else
+                cat "$out" | awk '$1 == "MSG" {
+                    ts = $4; h = int(ts / 3600) % 24; mi = int(ts / 60) % 60
+                    sep = index($0, " :")
+                    printf "[%02d:%02d] <%s> %s\n", h, mi, $5, substr($0, sep + 2)
+                }'
+            fi
             lastid="$(awk '$1 == "MSG" && $3 + 0 > m { m = $3 + 0 } END { print m + 0 }' "$out")"
             printf '%s\n' "$lastid" > "$tmp"
         fi

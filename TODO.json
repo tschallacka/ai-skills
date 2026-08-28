@@ -150,28 +150,28 @@
     {
       "id": "T63",
       "title": "Chat polling back-off cadence: 5s->10s->...->60s, reset on activity",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "When live monitoring (socket JOIN push) is not feasible and an agent polls chat-read, use a step-down cadence: poll twice every 5 seconds; if no new message, twice every 10s, then twice every 20s, increasing the interval by 10s each round until 60s is the steady state. Any new message resets the cadence to 5s so probes and questions get answered fast. Implement as a chat-watch.sh helper (or a --follow mode on chat-read) using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only. Bound the total run with a --max-wait so a caller can use it as a one-shot drain or a long-running monitor. Tests: fake clock or injected sleep function; assert the interval sequence 5,5,10,10,20,20,30,30,40,40,50,50,60,60... and the reset-on-arrival.",
       "blocked_on": "T62",
       "refs": [],
-      "note": null,
+      "note": "chat-watch.sh: step-down cadence 5,5->10,10->20,20->...->60 (cap), reset to 5 on any message; cursor is last-id+1 because FETCH is >= (the flood this exposed was fixed by that); --max-wall bounds the run. Verified live with a real server + a logging sleep shim: sleeps 5,10,reset-to-5 on arrival; two live messages each printed exactly once.",
       "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-27T22:59:33Z"
+      "updated_at": "2026-08-28T04:15:31Z"
     },
     {
       "id": "T64",
       "title": "Explicit @mention targeting for agents on the chat channel",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": null,
       "detail": "Protocol + helpers: a message whose text starts with or contains @<nick> is routed/highlighted to that agent. Server side: PRIVMSG text starting with @nick delivers as today (the log keeps one line) but connected subscribers whose nick matches get a targeted line (e.g. 'MENTION <chan> <id> <ts> <from> :text') or an inbox-style FETCH filter; other subscribers may ignore. Client side: chat-read --mentions <nick> returns only messages naming the agent; @all/@everyone broadcasts. Nick validation already exists (A-Za-z0-9_-). Decide and document: mentions are advisory metadata, not delivery guarantees (offline agents see them via history). Tests: two-socket delivery targeting, offline mention visible in history, @all semantics.",
       "blocked_on": "T62",
       "refs": [],
-      "note": null,
+      "note": "chat-read --mentions NICK: filters every mode (socket, --since, --last, --all) to lines whose text carries @NICK or @all/@everyone, delimited by space/punct/EOL so @oxen does not match @ox; documented as advisory metadata (offline agents see mentions via history). Verified: targeted, @all, trailing-punct, and non-substring cases on fixtures.",
       "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-27T22:59:33Z"
+      "updated_at": "2026-08-28T04:15:31Z"
     },
     {
       "id": "T65",
