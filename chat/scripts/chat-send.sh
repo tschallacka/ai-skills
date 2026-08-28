@@ -95,20 +95,24 @@ if [ -z "$host" ] && [ -f "$HOME_DIR/server.pid" ] && [ -f "$HOME_DIR/server.por
 fi
 
 if [ -n "$host" ]; then
-    exec 3<> "/dev/tcp/$host/$port"
-    printf 'NICK %s\nPRIVMSG %s :%s\nQUIT\n' "$nick" "$chan" "$text" >&3
-    stored=""
-    while IFS= read -r line <&3; do
-        case "$line" in
-            MSG\ *"$chan"\ *) stored="$line"; break ;;
-            ERR*) printf '%s: %s\n' "${0##*/}" "$line" >&2; exit 70 ;;
-            OK\ bye*) break ;;
-        esac
-    done
+    if exec 3<> "/dev/tcp/$host/$port" 2>/dev/null; then
+        printf 'NICK %s\nPRIVMSG %s :%s\nQUIT\n' "$nick" "$chan" "$text" >&3
+        stored=""
+        while IFS= read -r line <&3; do
+            case "$line" in
+                MSG\ *"$chan"\ *) stored="$line"; break ;;
+                ERR*) printf '%s: %s\n' "${0##*/}" "$line" >&2; exit 70 ;;
+                OK\ bye*) break ;;
+            esac
+        done
+        exec 3>&- 3<&-
+        [ -n "$stored" ] || { printf '%s: no acknowledgement from %s:%s\n' "${0##*/}" "$host" "$port" >&2; exit 70; }
+        printf '%s\n' "$stored"
+        exit 0
+    fi
+    printf '%s: server %s:%s is unavailable; using the log directly\n' \
+        "${0##*/}" "$host" "$port" >&2
     exec 3>&- 3<&-
-    [ -n "$stored" ] || { printf '%s: no acknowledgement from %s:%s\n' "${0##*/}" "$host" "$port" >&2; exit 70; }
-    printf '%s\n' "$stored"
-    exit 0
 fi
 
 mkdir -p "$HOME_DIR/channels"

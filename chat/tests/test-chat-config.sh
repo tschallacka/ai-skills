@@ -69,6 +69,9 @@ root="$(mktemp -d /tmp/ch-cfg.XXXXXX)"
 pids=""
 cleanup() {
     for p in $pids; do kill "$p" 2>/dev/null; done
+    for pid_file in $(find "$root" -type f -name server.pid 2>/dev/null); do
+        kill "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null || true
+    done
     sleep 0.3
     rm -rf -- "$root"
 }
@@ -140,21 +143,23 @@ printf 'transport=tcp\nbind=127.0.0.1\nport=18333\n' > "$h/config"
 
 echo "  -- with the configured server down --"
 out="$("$binary" send '#t' 'down' -n a --home "$h" 2>&1)"
-contains "the binary client falls back to the log and says so" "falling back to the log" "$out"
+contains "the binary client starts the configured server" "was started" "$out"
 contains "and the message is still stored" "MSG #t 1 " "$out"
+"$binary" stop --home "$h" >/dev/null 2>&1 || true
 out="$("$BASH" "$scripts/chat-send.sh" '#t' 'down too' -n b --home "$h" 2>&1)"
 contains "a bash helper falls back to the log and says so" "using the log directly" "$out"
 contains "and its message is still stored" "MSG #t 2 " "$out"
 
 echo "  -- with the configured server up --"
+"$binary" stop --home "$h" >/dev/null 2>&1 || true
 "$binary" serve --home "$h" >"$h/serve.log" 2>&1 &
 pids="$pids $!"
 i=0; while [ "$i" -lt 40 ]; do
     [ -f "$h/server.port" ] && break
     sleep 0.1; i=$((i + 1))
 done
-contains "the server serves the configured endpoint" "127.0.0.1:18333" "$(cat "$h/serve.log")"
-contains "and says the transport came from the config" "from the recorded config" "$(cat "$h/serve.log")"
+contains "the server serves the configured endpoint" "127.0.0.1:18333" "$(cat "$h/server.log")"
+contains "and says the transport is registered" "registered bus" "$(cat "$h/server.log")"
 out="$("$binary" send '#t' 'via config' -n c --home "$h" 2>&1)"
 contains "a flagless binary client reaches it, with no fallback note" "MSG #t 3 " "$out"
 case "$out" in *"falling back"*) fail "it fell back although the server was up" ;; *) pass "no fallback while the server is up" ;; esac
@@ -168,10 +173,10 @@ contains "an explicit --host/--port overrides the config" "127.0.0.1:1" "$out"
 
 # --- 5: a debug instance leaves the config byte-identical ------------------
 before="$(cat "$h/config")"
-"$binary" serve --home "$h" --bind 127.0.0.1 --port 18334 >"$h/dbg.log" 2>&1 &
+"$binary" serve --home "$h" --no-register --bind 127.0.0.1 --port 18334 >"$h/dbg.log" 2>&1 &
 pids="$pids $!"
 sleep 1
-contains "a debug instance starts alongside the configured bus" "debug instance" "$(cat "$h/dbg.log")"
+contains "a debug instance starts alongside the configured bus" "unregistered" "$(cat "$h/dbg.log")"
 check "and leaves the config byte-identical" "$before" "$(cat "$h/config")"
 absent "and writes no default endpoint advert of its own" "$h/instances/127.0.0.1_18334/config"
 
