@@ -190,7 +190,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add "${{ matrix.target }}"
+        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/plan-crypt
@@ -302,7 +302,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add "${{ matrix.target }}"
+        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/chat
