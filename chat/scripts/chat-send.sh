@@ -45,6 +45,16 @@ case "$chan" in '#'[a-z0-9_-]*) ;; *) printf '%s: channel must be #lowercase\n' 
     [ "${#chan}" -le 33 ] || { printf '%s: channel name too long (max 32 after #): %s\n' "${0##*/}" "$chan" >&2; exit 64; }
 case "$nick" in *[!A-Za-z0-9_-]*) printf '%s: invalid nick\n' "${0##*/}" >&2; exit 64 ;; esac
 [ -n "$text" ] || { printf '%s: empty message\n' "${0##*/}" >&2; exit 64; }
+
+# B74: one message is one line, on the wire and in the log, so the body must
+# carry no line break on EITHER path. The socket path used to interpolate the
+# raw body into 'NICK %s\nPRIVMSG %s :%s\n', which made every newline in a
+# relayed diff, file excerpt or quotation a command boundary — a body could
+# forge a NICK and post as anyone. Sanitising here rather than refusing keeps
+# the socket path doing exactly what the direct append always did, and keeps
+# relaying multi-line text (B75's surface) working instead of erroring.
+text="$(printf '%s' "$text" | tr '\n\r' '  ')"
+
 [ -z "$port" ] && [ -n "$host" ] && port=7717
 
 # B65: a local send with a server running must not bypass it — a direct log
@@ -90,7 +100,7 @@ done
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 id=$(( $(awk '$1 == "MSG" && $3 + 0 > last { last = $3 + 0 } END { print last + 0 }' "$log" 2>/dev/null || echo 0) + 1 ))
 ts="$(date -u +%s)"
-line="$(printf 'MSG %s %d %d %s :%s' "$chan" "$id" "$ts" "$nick" "$(printf '%s' "$text" | tr '\n\r' '  ')")"
+line="$(printf 'MSG %s %d %d %s :%s' "$chan" "$id" "$ts" "$nick" "$text")"
 printf '%s\n' "$line" >> "$log"
 rmdir "$lock" 2>/dev/null || true
 trap - EXIT
