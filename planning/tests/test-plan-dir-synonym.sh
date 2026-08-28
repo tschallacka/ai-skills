@@ -101,6 +101,12 @@ check_pair render-plan-overview - render-plan-overview.sh
 check_pair create-plan-progress 'rm -f progress.md' create-plan-progress.sh
 check_pair register-command - register-command.sh probe-key 'ls -la' 'while probing'
 check_pair mint-fix-keys - mint-fix-keys.sh
+# resolve-finding needs a gated finding to close, and it must still be open
+# when each argument form runs -- check_pair requires the invocation to change
+# the tree, so a second run over an already-resolved finding would prove
+# nothing. The precondition seeds one and mints the key it claims.
+resolve_ready="$scripts/add-adversarial-finding.sh . AR-98 'A gated probe finding' 'Fix it' open --work-unit W01 >/dev/null 2>&1"
+check_pair resolve-finding "$resolve_ready" resolve-finding.sh AR-98
 check_pair add-adversarial-finding - add-adversarial-finding.sh AR-99 'A probe finding' 'Fix it somehow' open
 check_pair create-adversarial-review 'rm -f adversarial-review.md' create-adversarial-review.sh
 check_pair create-work-unit-inventory 'rm -f work-unit-inventory.md' create-work-unit-inventory.sh

@@ -1625,6 +1625,72 @@
       "updated_at": "2026-08-28T07:56:06Z"
     },
     {
+      "id": "B82",
+      "title": "test-flag-coverage decides a script accepts --plan-dir by grepping for a function name, so a comment mentioning it counts as a call",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Add a shell comment containing the text plan_hoist_plan_dir to a script that does not call it, then run planning/tests/test-flag-coverage.sh",
+      "observed": "Reported by the webview subagent: adding a comment that named plan_hoist_plan_dir took the gate from 191 flags and 0 critical to 192 flags and a CRITICAL for a --plan-dir flag the script neither accepts nor documents. The script had not changed behaviour; only a comment was added.",
+      "expected": "The gate distinguishes a call from a mention, so explaining why a helper is or is not used does not change what the gate believes the script accepts.",
+      "mechanism": "planning/tests/test-flag-coverage.sh:42 does grep -q 'plan_hoist_plan_dir' over the script text and treats a hit as evidence the script hoists --plan-dir. Comments are part of that text. Same class as B73, where the duplication ratchet counts the pattern it forbids inside comments: both gates match on file text rather than on code, and both therefore punish documenting the rule they enforce.",
+      "surfaces": [
+        "planning/tests/test-flag-coverage.sh",
+        "planning/tests/test-duplication-ratchet.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent, while renaming a variable and explaining the rename in a comment",
+      "notes": null,
+      "created_at": "2026-08-28T10:59:48Z",
+      "updated_at": "2026-08-28T10:59:48Z"
+    },
+    {
+      "id": "B83",
+      "title": "a library's local array leaks its type across the shellcheck source boundary, so any caller using the same variable name as a scalar is falsely flagged",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Write a script that sources planning/scripts/plan-document-lib.sh and assigns a plain string to a variable named 'out', then run shellcheck -x on it",
+      "observed": "SC2178 'variable was used as an array but is now assigned a string' at the assignment and SC2128 'expanding an array without an index only gives the first element' at every expansion, in scripts whose own 'out' is a scalar and never an array. Three different agents hit it in one session on three unrelated files — a board renderer, a crypt test, and it is the same shape the editor is reporting live. No clobber can actually occur, because the library's copy is 'local' to its own function.",
+      "expected": "A variable local to a library function does not type a same-named variable in a script that sources the library.",
+      "mechanism": "shellcheck -x follows the source directive and merges the sourced file's inferred types into the caller's namespace; it does not model 'local' as scoping that inference. plan_hoist_plan_dir declares 'local out=()' and is reached through plan-document-lib.sh, which nearly every helper sources, so 'out' is effectively a reserved name repo-wide for anything that sources the library. The cost is not the warning but the response to it: the obvious fix is to rename the caller's variable, which is correct but arbitrary-looking, and a contributor who instead adds a shellcheck disable silences a rule that is load-bearing elsewhere.",
+      "surfaces": [
+        "planning/scripts/lib/core/plan_hoist_plan_dir.sh",
+        "planning/scripts/plan-document-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent diagnosed the cause; the same warning then appeared in the plancrypt subagent's test file, and in a gate count I wrote myself",
+      "notes": null,
+      "created_at": "2026-08-28T11:01:56Z",
+      "updated_at": "2026-08-28T11:01:56Z"
+    },
+    {
+      "id": "B84",
+      "title": "chat-tail.sh interpolates CHAT_NICK into the protocol without the validation chat-send.sh applies",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CHAT_NICK=$'x\\nNICK impostor' bash chat/scripts/chat-tail.sh '#chan' --host 127.0.0.1 --port 7717",
+      "observed": "Not exercised as an attack here; identified by reading. chat/scripts/chat-tail.sh:61 builds printf 'NICK %s\\nJOIN %s %s\\n' from CHAT_NICK with no character check, while chat-send.sh guards the same field with a *[!A-Za-z0-9_-]* case test. A newline in CHAT_NICK becomes a command boundary on the wire, the same mechanism as B74.",
+      "expected": "Every path that interpolates a value into the wire protocol validates it the same way, so one hardened path does not imply the others are.",
+      "mechanism": "Same class as B74 and a separate instance: the validation lives in chat-send.sh rather than in a shared helper both clients call, so hardening one path left the other as it was. The exposure is narrower — CHAT_NICK is set by the operator, not by relayed text — which is why it is its own entry rather than folded into B74.",
+      "surfaces": [
+        "chat/scripts/chat-tail.sh",
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the chatfix subagent, reported rather than filed because BUGS.json is outside its scope",
+      "notes": "Filed first as B80, renumbered to B84: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "created_at": "2026-08-28T10:58:33Z",
+      "updated_at": "2026-08-28T10:58:33Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -1710,6 +1776,30 @@
       "updated_at": "2026-08-28T10:19:35Z"
     },
     {
+      "id": "B85",
+      "title": "the perl chat rung collapses all whitespace where the other three map newline to one space",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Send a body containing a tab or a run of spaces through each rung in turn and compare the stored log line",
+      "observed": "Not measured here; reported by the chatfix subagent from reading the four runtimes. perl does s/\\s+/ /g, collapsing every whitespace run to a single space; python3, node and the bash handler map each newline and CR to one space and leave other whitespace alone. The same message body therefore stores differently depending on which rung the host happened to pick.",
+      "expected": "A message body stores identically whichever rung is serving, since the rungs are meant to be interchangeable implementations of one protocol.",
+      "mechanism": "Each rung implements sanitisation independently rather than sharing a specification, so they drifted. Invisible in normal use because a host runs one rung, and only comparable across machines or after a rung falls back.",
+      "surfaces": [
+        "chat/runtime/server.pl",
+        "chat/runtime/server.py",
+        "chat/runtime/server.js",
+        "chat/runtime/bash-handler.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the chatfix subagent",
+      "notes": "Filed first as B81, renumbered to B85: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "created_at": "2026-08-28T10:58:33Z",
+      "updated_at": "2026-08-28T10:58:33Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
@@ -1730,6 +1820,28 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B86",
+      "title": "I minted ids that collided with ids I had just reserved for a worker, one hour after filing B78 about that hazard",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Instruct a worker to take B80 and B81; file two entries in the main checkout an hour later without re-reading what was reserved",
+      "observed": "webview was told to renumber its two findings to B80 and B81 and complied. I then filed the chat-tail and perl-rung defects as B80 and B81 in main. Two different pairs of entries carry the same two ids, and the register's own soundness check cannot see it because each file is internally consistent — the same mechanism as B78, which I had filed an hour earlier from the same failure.",
+      "expected": "An id reserved for another writer is not available to the reserver. Either the reservation is recorded where the next mint reads it, or the mint asks.",
+      "mechanism": "B78 is the tool half: reg_next_id sees only its own tree. This entry is the human half and is not fixed by fixing B78 — the reservation existed solely as a sentence in a chat message, so nothing I ran could have known about it. A verbal reservation with no artifact is not a reservation, and I proved that against my own instruction within the hour.",
+      "surfaces": [
+        "BUGS.json",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, on reading its own register after the worker reported its numbering",
+      "notes": null,
+      "created_at": "2026-08-28T11:08:56Z",
+      "updated_at": "2026-08-28T11:08:56Z"
     }
   ]
 }
