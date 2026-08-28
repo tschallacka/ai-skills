@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `e5873ef37a095826fc53b6f999d68957d79e4c17a485438ff6bda11cdb22ec2a`
+> Source SHA-256: `f41f9f3969d09d58fc82788f7e4f613de1d2b3c33d25db1a6a9cfd16da66ca22`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -259,6 +259,18 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**A reviewer report records what the cycle cost.** The review-scope block carries
+the reviewer's session id, the wall time, and the number of findings this cycle
+produced. The session id is what lets a claim be traced to the run that made it;
+the other two are the only signal anyone has that a review is converging.
+
+A falling findings count across cycles means the plan is improving. A flat one
+means the cycles are not finding less, and the plan may not be the thing at
+fault — one comparable run reached seventeen cycles and 41.7 million tokens
+before anyone asked that question, because no cycle recorded what it had cost.
+Nothing enforces a ceiling; the point is that the number is visible when someone
+decides whether to run another.
 
 **A reviewer runs `--check` on its own rows before handing them over.** The shape
 gate and the mint preview already run on the write path, so a malformed row can
