@@ -41,6 +41,8 @@ jobs:
             sudo apt-get install -y -qq socat
           elif command -v brew >/dev/null 2>&1; then
             brew install socat
+            brew install coreutils
+            echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
           command -v socat || echo "socat still absent; its rung will SKIP loudly"
 

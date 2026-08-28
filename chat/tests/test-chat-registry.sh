@@ -103,7 +103,10 @@ pid="$(sed -n 's/^pid=//p' "$regdir"/*.server | sed -n '1p')"
 if [ -z "$pid" ]; then
     fail "the entry records a pid"
 else
-    sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    case "$(uname -s)" in
+        Darwin) sid="$(ps -o sess= -p "$pid" 2>/dev/null | tr -d ' ')" ;;
+        *) sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d ' ')" ;;
+    esac
     tty="$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')"
     check "the server leads its own session, so SIGHUP does not reach it" "$pid" "$sid"
     check "and has no controlling terminal" "?" "$tty"
