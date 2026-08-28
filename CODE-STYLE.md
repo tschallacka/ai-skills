@@ -76,13 +76,13 @@ An exception needs a comment saying which platform it is for and a
 `command -v`-guarded fallback. The pattern:
 
 ```bash
-# Hash helper: GNU, BSD, and openssl-only boxes all appear in the wild.
+# Hash helper: GNU and BSD boxes both appear in the wild.
 if command -v sha256sum >/dev/null 2>&1; then
     hash_file() { sha256sum "$1" | cut -d' ' -f1; }
 elif command -v shasum >/dev/null 2>&1; then
     hash_file() { shasum -a 256 "$1" | cut -d' ' -f1; }
 else
-    plan_die 'need sha256sum, shasum, or openssl' 69
+    plan_die 'need sha256sum or shasum' 69
 fi
 ```
 
@@ -98,7 +98,7 @@ in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
 |---|---|
 | `bash`, POSIX `coreutils`, `awk`, `sed`, `grep`, `git` | assumed present |
 | `jq` | allowed — the furthest a runtime dependency may go. Declared `hard` in `planning/requires.tsv`, so the installer refuses to install *that skill* up front with a per-platform hint rather than failing halfway |
-| `openssl` | allowed only behind `command -v` with a fallback or a clear `plan_die … 69` |
+| `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `installer/build.sh` fails the build if one appears without it |
 | `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `jq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 

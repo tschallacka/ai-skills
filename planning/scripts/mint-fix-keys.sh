@@ -14,7 +14,8 @@
 #   mint-fix-keys.sh --help
 #
 # Exit codes: 65 = a gated findings row has non-conforming ids; 69 = no SHA-256
- # tool is available (sha256sum, shasum, or openssl).
+ # implementation (the plan-crypt binary, sha256sum or shasum) or no OS random
+ # source is available.
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,12 +79,13 @@ USAGE
     exit "$rc"
 }
 
-# No single SHA-256 tool is a hard requirement: the chain is sha256sum ->
-# shasum -> openssl. Refuse up front with 69 only when none of the three
-# exists, instead of minting keys that would never verify.
-command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || \
-    command -v openssl >/dev/null 2>&1 || \
-    plan_die 'no SHA-256 tool available (need sha256sum, shasum, or openssl) to derive fix keys' 69
+# No single SHA-256 tool is a hard requirement: the chain is the shipped
+# plan-crypt binary -> sha256sum -> shasum. Probing it on empty input is the
+# preflight, so this cannot drift from the chain plan_sha256_hex actually walks
+# the way a duplicated `command -v` list would. Refuse up front with 69 rather
+# than mint keys that would never verify.
+plan_sha256_hex < /dev/null > /dev/null 2>&1 || \
+    plan_die "no SHA-256 implementation available (need $(plan_sha256_chain)) to derive fix keys" 69
 
 # plan_session_id PLAN_DIR — the session id recorded in fix-keys.json, or empty.
 plan_session_id() {
@@ -93,11 +95,16 @@ plan_session_id() {
 }
 
 # new_session_id — a fresh session id for a newly created session secret.
+# Eight bytes of OS entropy, and nothing else: the id names the secret dir that
+# gates approval, so a guessable value is a hole. The fallback this replaced was
+# exactly that -- the process id, the clock truncated to a whole second, and two
+# draws of the shell's own 15-bit PRNG, joined by hyphens (B77). It is described
+# rather than quoted because the ratchets match file text and would read a
+# quotation as a use.
 new_session_id() {
     local id
-    # PORTABILITY(date-nanoseconds): a literal "N" is non-empty, so it would
-    # pass the check below while carrying no sub-second entropy.
-    id="$(openssl rand -hex 8 2>/dev/null || printf '%s-%s-%s' "$$" "$(date +%s)" "$RANDOM$RANDOM")"
+    id="$(plan_random_hex 8)" || \
+        plan_die 'cannot generate a session id: no OS random source (need the plan-crypt binary or a readable /dev/urandom)' 69
     [ -n "$id" ] || plan_die "cannot generate a session id"
     printf '%s\n' "$id"
 }
@@ -121,31 +128,18 @@ ensure_session_secret() {
     secret_file="$(session_secret_dir "$session_id")/secret"
     mkdir -p "$(dirname "$secret_file")"
     chmod 700 "$(dirname "$secret_file")"
-    if ! openssl rand -hex 32 > "$secret_file" 2>/dev/null; then
-        head -c 64 /dev/urandom | od -An -vtx1 | tr -d ' \n' > "$secret_file"
-    fi
+    # 32 bytes: 64 lowercase hex chars, which is what fix_key's "the secret has
+    # a fixed width so the concatenation has one split" argument depends on.
+    plan_random_hex 32 > "$secret_file" || \
+        plan_die 'cannot generate a session secret: no OS random source (need the plan-crypt binary or a readable /dev/urandom)' 69
     chmod 600 "$secret_file"
     printf '%s\n' "$session_id"
 }
 
-# fix_key SECRET MESSAGE — lowercase hex SHA-256 over SECRET||MESSAGE.
-# The secret is always 64 lowercase hex chars, so the concatenation has exactly
-# one split and needs no separator. HMAC was retired (T16): the gate exists to
-# stop accidental self-certification by an agent that can read the secret
-# anyway, so a plain keyed digest through the repo's standard SHA-256 chain
-# removes the last hard dependency without weakening what the gate is for.
-# Keys minted under the retired HMAC scheme do not verify and must be re-minted.
-# Must stay byte-identical to the derivation in verify-fix-keys.sh.
-fix_key() {
-    local secret="$1" message="$2"
-    if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s%s' "$secret" "$message" | sha256sum | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        printf '%s%s' "$secret" "$message" | shasum -a 256 | awk '{print $1}'
-    else
-        printf '%s%s' "$secret" "$message" | openssl dgst -sha256 | awk '{print $NF}'
-    fi
-}
+# The derivation itself is plan_fix_key in plan-crypt-lib.sh, shared with
+# verify-fix-keys.sh. It used to be a copy in each script under a comment
+# saying the two must stay byte-identical; one definition is the mechanism that
+# comment was asking for.
 
 # A gated row whose ids fail ^AR-[0-9]+$ / ^W[0-9]+$ must fail the whole run,
 # not be skipped: with no minted pairs left, verification reports "no gated
@@ -192,7 +186,7 @@ mint_fix_keys() {
 
     while IFS=$'\t' read -r fid wu; do
         [ -n "$fid" ] || continue
-        printf '%s\t%s\t%s\n' "$fid" "$wu" "$(fix_key "$secret" "$session_id|$fid|$wu")"
+        printf '%s\t%s\t%s\n' "$fid" "$wu" "$(plan_fix_key "$secret" "$session_id|$fid|$wu")"
     done < "$pairs_file" > "$tsv_file"
 
     # Record the identity that minted so the approval gate can detect a fixer

@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-crypt"
+version = "0.1.0"
+edition = "2021"
+description = "The planning skill's cryptographic helper: SHA-256 digests and OS-entropy hex for the adversarial-review fix-key gate"
+license = "MIT"
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

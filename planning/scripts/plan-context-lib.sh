@@ -18,6 +18,10 @@ export LC_ALL=C
 # so a second source is harmless.
 # shellcheck source=planning/scripts/plan-inventory-lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
+# context_hash_stdin and context_hash_file are plan_sha256_hex, so the digest
+# chain is sourced here rather than assumed to have arrived with the caller.
+# shellcheck source=planning/scripts/plan-crypt-lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-crypt-lib.sh"
 
 context_schema_version=1
 context_generator_version=1
@@ -27,31 +31,25 @@ context_result_schema_version=2
 
 context_die() { printf '%s\n' "$*" >&2; return 64; }
 
-# Same tool probe as context_hash_file, over stdin: a composite entry hash is
-# taken over its inputs' hashes, which never touch disk.
+# Both hashes go through plan_sha256_hex, which is the one SHA-256 chain in the
+# skill: the plan-crypt binary, then sha256sum, then shasum. openssl was a
+# fourth rung here and a third rung in the fix-key derivation; a static binary
+# covers the machine that has none of the others, so the openssl row left
+# planning/requires.tsv rather than being traded for a different one.
+#
+# The digests are unchanged — planning/tests/test-plan-crypt.sh pins the rungs
+# to each other byte for byte — so context snapshots taken before the switch
+# still compare equal after it.
+#
+# A composite entry hash is taken over its inputs' hashes, which never touch
+# disk, so the stdin form is the primitive and the file form redirects into it.
 context_hash_stdin() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        openssl dgst -sha256 | awk '{print $NF}'
-    else
-        context_die "No SHA-256 command available (sha256sum, shasum, or openssl)"
-    fi
+    plan_sha256_hex || context_die "No SHA-256 implementation available (need $(plan_sha256_chain))"
 }
 
 context_hash_file() {
-    local file="$1"
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        openssl dgst -sha256 "$file" | awk '{print $NF}'
-    else
-        context_die "No SHA-256 command available (sha256sum, shasum, or openssl)"
-    fi
+    plan_sha256_hex < "$1" \
+        || context_die "No SHA-256 implementation available (need $(plan_sha256_chain))"
 }
 
 context_plan_dir() { printf '%s\n' "$1"; }

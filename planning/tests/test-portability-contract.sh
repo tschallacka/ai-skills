@@ -58,12 +58,20 @@ in_allowlist() {
         ./chat/scripts/chat-announce.sh:python3-shipped) return 0 ;;
         ./chat/scripts/chat-discover.sh:python3-shipped) return 0 ;;
         ./installer/build.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
-        # Fix keys probe the same sha256sum->shasum->openssl chain (T16): the
-        # minter, the verifier and their key tests each name what they may use.
-        ./planning/scripts/mint-fix-keys.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/verify-fix-keys.sh:sha256-tool) return 0 ;;
+        # There is now one probe in the skill, and this is it: plan_sha256_hex
+        # chooses between the compiled plan-crypt binary, the GNU form and the
+        # BSD form, so it must name all three. It lives in one function file and
+        # is compiled into plan-crypt-lib.sh, so both spellings are exempt --
+        # the same arrangement plan_stat_probe.sh has above.
+        # mint-fix-keys.sh, verify-fix-keys.sh, plan-context-lib.sh and
+        # generate-reviewer.sh each held their own copy of the chain and were
+        # each exempt; they call plan_sha256_hex now and name no tool, so their
+        # exemptions went with the copies.
+        ./planning/scripts/lib/crypt/plan_sha256_hex.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/lib/crypt/plan_sha256_chain.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/plan-crypt-lib.sh:sha256-tool) return 0 ;;
+        # Pins the rungs to each other, so it has to name them.
+        ./planning/tests/test-plan-crypt.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-fix-keys.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-add-fix-claim.sh:sha256-tool) return 0 ;;
         # The generated dependency tables name every optional runtime they may

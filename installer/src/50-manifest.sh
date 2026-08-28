@@ -120,6 +120,7 @@ scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-core-lib.sh
+scripts/plan-crypt-lib.sh
 scripts/plan-progress-lib.sh
 scripts/plan-table-lib.sh
 scripts/plan-document-lib.sh
@@ -182,6 +183,13 @@ scripts/lib/core/plan_track_tmp.sh
 scripts/lib/core/plan_warn.sh
 scripts/lib/core/planning_ensure_tmpdir.sh
 scripts/lib/core/planning_tmpdir.sh
+scripts/lib/crypt/plan_crypt_bin.sh
+scripts/lib/crypt/plan_crypt_resolve.sh
+scripts/lib/crypt/plan_crypt_target_triple.sh
+scripts/lib/crypt/plan_fix_key.sh
+scripts/lib/crypt/plan_random_hex.sh
+scripts/lib/crypt/plan_sha256_chain.sh
+scripts/lib/crypt/plan_sha256_hex.sh
 scripts/lib/document/99-facade.sh
 scripts/lib/document/plan_delete_paragraph.sh
 scripts/lib/document/plan_document_kind.sh
@@ -329,6 +337,7 @@ scripts/todo-update.sh
 scripts/bug-add.sh
 scripts/bug-update.sh
 scripts/register-rebuild.sh
+tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
