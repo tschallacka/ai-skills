@@ -125,6 +125,7 @@ trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
     printf '## Risks and open questions\n\n§ 8.1\n<items that could affect execution>\n\n'
     printf '## Environment facts\n\n§ 9.1\n<host or URL to verify on, auth route, and the order in which steps verify against the running application>\n\n'
     printf '## Approach decisions\n\n§ 10.1\n<mechanism choices as prose: where each change lives and why, and alternatives considered and rejected>\n\n'
+    printf '## Assumptions\n\n§ 11.1\n<what was assumed rather than confirmed, and what would change if it is wrong>\n\n'
     printf '## UI classification\n\n- UI affected: no\n- Rationale: <why>\n\n'
     printf '## Adversarial review\n\n- Artifact: `adversarial-review.md`\n- Status: 💤 pending\n'
 } > "$temporary_file"

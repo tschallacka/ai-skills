@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `f41f9f3969d09d58fc82788f7e4f613de1d2b3c33d25db1a6a9cfd16da66ca22`
+> Source SHA-256: `8b968aedd9d239b5d889ed04baf37bde5fc6bd69da7bba9f65409e3f36e304c7`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -259,6 +259,17 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
+assumed rather than confirmed, and what would change if the assumption is wrong.
+It is not a place for open questions — those are § 8 — but for the choices made
+silently, where nobody was asked and the plan proceeded anyway.
+
+The value is at review time. An adversarial reviewer can attack a stated
+assumption; an unstated one is invisible until it turns out to be false, and then
+it reads as a defect in the work rather than a decision nobody recorded. One
+comparable run made five interpretations that were only written down afterwards,
+in a postmortem, once they had already shaped the plan.
 
 **A reviewer report records what the cycle cost.** The review-scope block carries
 the reviewer's session id, the wall time, and the number of findings this cycle
