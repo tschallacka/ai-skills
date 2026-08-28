@@ -51,6 +51,13 @@ Server → client: `OK ...`, `ERR <reason>`, `PONG`, and pushed/replayed
     scripts/chat-read.sh #chan [--since N | --last N | --all] [--host H ...]
     scripts/chat-tail.sh #chan [since-id]     # constant stream until killed
 
+One message is one line. `chat-send.sh` collapses any newline or carriage
+return in the body to a space on both paths, because on the wire a newline is
+the command boundary: an unsanitised body could otherwise forge a `NICK` and
+post as anyone (B74), which makes relaying a diff, a file excerpt or a
+quotation an injection surface (B75). Send multi-line content as several
+messages if the line structure matters.
+
 Without `--host`, helpers operate on `$AI_CHAT_HOME` directly under the same
 advisory lock the server uses, so a dead server never blocks writing history;
 live delivery is whatever tails the log (`chat-tail.sh`). With `--host`, they

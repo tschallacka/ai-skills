@@ -55,22 +55,28 @@ done
 [ -n "$port" ] && [ -z "$host" ] && { printf '%s: --port needs --host\n' "${0##*/}" >&2; exit 64; }
 [ -n "$host" ] && [ -z "$port" ] && port=7717
 
+# B76: read_args must NOT carry --since. chat-read's parser is last-wins, so
+# appending the ORIGINAL --since after the per-poll --since made every poll
+# re-request the window the watcher started with — the same ids emitted again
+# and again, on the socket path and the local one alike. The starting id lives
+# in the cursor and nowhere else.
 read_args=()
-[ -n "$since" ] && read_args=(--since "$since")
-[ -n "$host" ] && read_args=("${read_args[@]}" --host "$host" --port "$port")
+[ -n "$host" ] && read_args=(--host "$host" --port "$port")
 
-# chat-read prints MSG lines; the cursor is one PAST the highest id printed,
-# because FETCH semantics are >= since-id (python tier) — a cursor set to the
-# id itself would re-deliver that line forever.
+# chat-read prints MSG lines; the cursor is the HIGHEST id printed so far,
+# because both selections are strictly greater than since-id — the local awk
+# is '($3 + 0) > s' and every server tier's FETCH is '> since'. A cursor set
+# one past the id would silently skip the very next message.
 cursor="${since:-0}"
 poll() {
-    local out line id
+    local out id
     out="$("$script_dir/chat-read.sh" "$chan" --since "$cursor" "${read_args[@]+"${read_args[@]}"}" 2>/dev/null || true)"
     [ -n "$out" ] || return 1
     printf '%s\n' "$out"
-    # advance the cursor past the last printed id
-    id="$(printf '%s\n' "$out" | awk '$1 == "MSG" { c = $3 + 0 } END { print c + 0 }')"
-    [ "$id" -gt 0 ] && cursor=$(( id + 1 ))
+    # advance the cursor to the highest id printed; take the max rather than
+    # the last line, so an out-of-order log cannot rewind the cursor.
+    id="$(printf '%s\n' "$out" | awk '$1 == "MSG" && $3 + 0 > c { c = $3 + 0 } END { print c + 0 }')"
+    [ "$id" -gt "$cursor" ] && cursor="$id"
     return 0
 }
 

@@ -144,7 +144,9 @@ function handle(sock, nickOf, line) {
       const sep = arg.indexOf(" :");
       if (sep < 0) return say("ERR usage: PRIVMSG #chan :text");
       const chan = arg.slice(0, sep);
-      const text = arg.slice(sep + 2).replace(/\n/g, " ");
+      // B74: CR as well as LF — the newline is the frame delimiter so no
+      // command can be injected, but a bare CR would corrupt a stored line.
+      const text = arg.slice(sep + 2).replace(/[\n\r]/g, " ");
       if (!validChan(chan)) return say("ERR invalid channel: " + chan);
       if (!text) return say("ERR usage: PRIVMSG #chan :text");
       const stored = append(chan, nickOf(), text);

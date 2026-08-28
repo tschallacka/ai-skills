@@ -89,6 +89,11 @@ in_allowlist() {
         # generated installer tables name optional runtimes for verify/hint.
         ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
         ./chat/tests/test-chat.sh:python3-shipped) return 0 ;;
+        # B74/B76 regression tests: same reason as test-chat.sh — they name the
+        # optional runtime chain to pick a rung to exercise, and SKIP when none
+        # is present. Dev-only files; python3 stays out of the shipped budget.
+        ./chat/tests/test-chat-injection.sh:python3-shipped) return 0 ;;
+        ./chat/tests/test-chat-watch-cursor.sh:python3-shipped) return 0 ;;
     esac
     return 1
 }

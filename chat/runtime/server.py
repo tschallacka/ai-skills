@@ -187,7 +187,11 @@ class Handler(socketserver.StreamRequestHandler):
                     elif not text:
                         self.reply("ERR usage: PRIVMSG #chan :text")
                         continue
-                    stored = HUB.append(chan, nick, text.replace("\n", " "))
+                    # B74: the newline is the frame delimiter, so a handler
+                    # can never see an injected command — but a bare CR would
+                    # still reach the log and corrupt the stored line. Strip
+                    # both, as the bash rung and chat-send.sh do.
+                    stored = HUB.append(chan, nick, text.replace("\n", " ").replace("\r", " "))
                     self.reply(stored)
                     HUB.broadcast(stored, {chan}, origin=self.request)
                 elif verb == "FETCH":
