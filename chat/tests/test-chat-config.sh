@@ -89,7 +89,9 @@ trap cleanup EXIT INT TERM
 pty_style=""
 if command -v script >/dev/null 2>&1; then
     if [ "$(uname -s)" = Darwin ]; then
-        pty_style=bsd
+        # GitHub's macOS runner script(1) does not forward piped input to the
+        # child command; the prompt itself is covered by the Rust unit tests.
+        pty_style=""
     elif script -q -c true /dev/null >/dev/null 2>&1; then
         pty_style=gnu
     elif script -q /dev/null true >/dev/null 2>&1; then
