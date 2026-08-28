@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# build-plan-libs.sh — compile planning/scripts/lib/<group>/*.sh into the four
+# build-plan-libs.sh — compile planning/scripts/lib/<group>/*.sh into the five
 # shipped libraries.
 #
 # One function per file is the maintainable form: a change touches one file, a
@@ -88,6 +88,7 @@ group_output() {
         document) printf 'plan-document-lib.sh\tsections, paragraphs, titles and fields\n' ;;
         table)    printf 'plan-table-lib.sh\tCSV and Markdown table rendering\n' ;;
         progress) printf 'plan-progress-lib.sh\tprogress arithmetic and the status glyphs\n' ;;
+        crypt)    printf 'plan-crypt-lib.sh\tSHA-256 digests, fix-key derivation and OS entropy\n' ;;
         *) return 1 ;;
     esac
 }
@@ -162,7 +163,7 @@ emit_library() { # <group>
 }
 
 status=0
-for group in core document table progress; do
+for group in core document table progress crypt; do
     spec="$(group_output "$group")"
     output_path="$script_dir/${spec%%	*}"
     rendered="$(mktemp "${TMPDIR:-/tmp}/plan-lib.XXXXXX")"
@@ -180,5 +181,5 @@ for group in core document table progress; do
     rm -f "$rendered"
 done
 
-[ "$check_only" = false ] || [ "$status" -ne 0 ] || printf 'All four libraries are up to date\n'
+[ "$check_only" = false ] || [ "$status" -ne 0 ] || printf 'All five libraries are up to date\n'
 exit "$status"

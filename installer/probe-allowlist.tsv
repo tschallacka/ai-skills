@@ -2,6 +2,6 @@
 # T48b gate allowlist: skill <tab> tool <tab> reason. A row says why a probed
 # runtime needs no requires.tsv declaration. Keep rows specific and honest.
 planning	git	probed only to decorate diagnostics; every code path works without it
-planning	sha256sum	first of three interchangeable hash providers; openssl (declared soft) is the guaranteed fallback
-planning	shasum	second of three interchangeable hash providers; openssl (declared soft) is the guaranteed fallback
+planning	sha256sum	first shell rung of the SHA-256 chain, below the shipped plan-crypt binary; a static binary asks the target machine for nothing, so no requires.tsv row backs it
+planning	shasum	second shell rung of the SHA-256 chain, below the shipped plan-crypt binary; a static binary asks the target machine for nothing, so no requires.tsv row backs it
 chat	jq	probed only to decorate output; the skill works without it

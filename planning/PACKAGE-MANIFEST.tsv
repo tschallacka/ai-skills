@@ -59,6 +59,7 @@ planning/scripts/update-ui-story.sh	scripts/update-ui-story.sh	installer	review-
 planning/scripts/remove-work-unit.sh	scripts/remove-work-unit.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/generate-reviewer.sh	scripts/generate-reviewer.sh	reviewer	review-approved	backup-then-replace	false
 planning/scripts/plan-core-lib.sh	scripts/plan-core-lib.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/plan-crypt-lib.sh	scripts/plan-crypt-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-progress-lib.sh	scripts/plan-progress-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-table-lib.sh	scripts/plan-table-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/plan-document-lib.sh	scripts/plan-document-lib.sh	installer	review-approved	backup-then-replace	false

@@ -12,6 +12,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-table-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-progress-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-crypt-lib.sh"
 
 # ── Load-time initialisation ─────────────────────────────────────────────────
 # Guarded: this library is sourced more than once per process, and re-running it

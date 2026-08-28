@@ -56,6 +56,16 @@ jobs:
           cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
           cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/chat-server-rs
 
+      - name: Place the compiled plan-crypt rung so its assertions run
+        # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
+        # compiled branch loudly and check only the shell rungs, which is the
+        # half that already ran everywhere.
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release --manifest-path src/plan-crypt/Cargo.toml
+          mkdir -p planning/bin
+          cp src/plan-crypt/target/release/plan-crypt planning/bin/plan-crypt
+
       - name: Run the full deterministic test suite
         run: ./run-tests.sh
 
@@ -140,6 +150,114 @@ jobs:
   # fully cleared -- items 1-7 are enforced by tests, and blocker 8 was closed
   # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
   # macOS legs above are now blocking.
+
+  plan-crypt:
+    # Proves: the fix-key primitives are correct on every platform we ship to,
+    # by building the binary on that platform and RUNNING it there. A digest is
+    # the one thing in this repository that is silently wrong when it is wrong
+    # -- a corrupted round constant still yields a 64-character hex string --
+    # so the artifact is exercised rather than merely produced.
+    #
+    # Each target gets its own runner. Cross-building from Linux is deliberately
+    # not done here: an aarch64-apple-darwin binary cross-built on Linux carries
+    # no ad-hoc signature and Apple Silicon refuses to exec it
+    # (rust-development-guidelines.md section 4), and neither the darwin nor the
+    # msvc target links on a Linux runner at all.
+    name: plan-crypt builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          toolchain: "1.97"
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Format, lint and test
+        working-directory: src/plan-crypt
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/plan-crypt
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: The musl build must actually be static
+        if: contains(matrix.target, 'musl')
+        working-directory: src/plan-crypt
+        run: |
+          # The whole distribution claim is that the target machine needs
+          # nothing, so assert it rather than assume it. ldd prints either
+          # "not a dynamic executable" or "statically linked" for a static-pie.
+          out="$(ldd target/${{ matrix.target }}/release/plan-crypt 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::the musl build links against a shared library"; exit 1 ;;
+          esac
+
+      - name: Run the built binary and check it against this platform's own tool
+        shell: bash
+        working-directory: src/plan-crypt
+        run: |
+          # Run the artifact directly, never through `cargo run`: the claim is
+          # about the binary, not about a toolchain being present.
+          bin="target/${{ matrix.target }}/release/plan-crypt"
+          [ -x "$bin" ] || bin="$bin.exe"
+
+          # The canonical NIST vector first, so a platform that disagrees is
+          # named before anything else runs.
+          got="$(printf 'abc' | "$bin" sha256)"
+          want='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+          [ "$got" = "$want" ] || { echo "::error::abc digest is $got, want $want"; exit 1; }
+
+          # Then agreement with whatever digest tool this platform ships, which
+          # is what lets a key minted by the shell chain keep verifying. macOS
+          # has shasum and no sha256sum; the Windows runner's Git Bash has both.
+          if command -v sha256sum >/dev/null 2>&1; then
+            reference() { sha256sum | awk '{print $1}'; }
+          else
+            reference() { shasum -a 256 | awk '{print $1}'; }
+          fi
+          rc=0
+          for n in 0 1 55 56 63 64 65 1000 70000; do
+            input="$(awk -v n="$n" 'BEGIN { s = "x"; while (length(s) < n) s = s s; printf "%s", substr(s, 1, n) }')"
+            a="$(printf '%s' "$input" | "$bin" sha256)"
+            b="$(printf '%s' "$input" | reference)"
+            if [ "$a" != "$b" ]; then
+              echo "::error::$n bytes: plan-crypt $a, platform tool $b"
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] || exit 1
+
+          # And the CSPRNG answers on this platform: correct width, and two
+          # draws that differ. On Windows this is the only place
+          # BCryptGenRandom is ever executed.
+          one="$("$bin" random-hex 8)"
+          two="$("$bin" random-hex 8)"
+          [ "${#one}" -eq 16 ] || { echo "::error::random-hex 8 gave ${#one} chars"; exit 1; }
+          [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
+          printf 'digest and entropy agree on %s\n' '${{ matrix.target }}'
 
   shellcheck:
     # Proves: no `error`-severity shellcheck finding exists in any tracked live

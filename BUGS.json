@@ -972,6 +972,27 @@
       "updated_at": "2026-08-28T11:41:16Z"
     },
     {
+      "id": "B87",
+      "title": "the fix-key session id falls back to a guessable value built from the pid, the whole second and bash's $RANDOM",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "PATH=/usr/bin:/bin bash -c 'unset -f openssl; id=\"$(printf \"%s-%s-%s\" \"$$\" \"$(date +%s)\" \"$RANDOM$RANDOM\")\"; printf \"%s\\n\" \"$id\"'   # the arm mint-fix-keys.sh's new_session_id took whenever openssl was absent",
+      "observed": "The id is three guessable fields joined by hyphens: the process id, the current time truncated to a whole second, and two draws of bash's $RANDOM. On Linux the pid space is 4194304 by default and is usually far smaller in practice; the second is known to anyone who knows roughly when the review ran; $RANDOM is a 15-bit value from a PRNG seeded per shell, giving 30 bits across the two draws. A reader who can see the fixes.md timestamps can enumerate the space.",
+      "expected": "The session id comes from the OS CSPRNG or the helper refuses. It names the secret directory that gates approval, so it must not be derivable from information a claimant already has.",
+      "mechanism": "new_session_id ran 'openssl rand -hex 8' and, on any failure, fell through to 'printf %s-%s-%s \"$$\" \"$(date +%s)\" \"$RANDOM$RANDOM\"'. The guard after it only checked the result was non-empty, which the fallback always is, so the weak arm was indistinguishable from success. openssl was declared a soft requirement, so a machine without it took the weak arm silently on every mint. The same script's session secret had a matching pair — 'openssl rand -hex 32' with a '/dev/urandom | od' fallback — but that one degraded to another CSPRNG rather than to a guessable value, which is why only the id is this entry.",
+      "surfaces": [
+        "planning/scripts/mint-fix-keys.sh"
+      ],
+      "fix": "new_session_id calls plan_random_hex 8, which is the shipped plan-crypt binary (/dev/urandom on unix, BCryptGenRandom on Windows) or, without it, /dev/urandom read directly and length-checked. There is no third arm: without a CSPRNG the helper exits 69 and mints nothing. The session secret moved to plan_random_hex 32 in the same change, which also fixed a width inconsistency — 'openssl rand -hex 32' produced 64 hex chars but its 'head -c 64 /dev/urandom' fallback produced 128, against a comment in both scripts asserting the secret is always 64.",
+      "verification": "planning/tests/test-plan-crypt.sh section 6: two draws must differ, 64 consecutive draws must all be distinct, the width must be exactly 2 chars per byte, every character must be hex, and mint-fix-keys.sh must contain no $RANDOM expansion outside a comment. Mutation: replacing plan_random_hex's body with a constant ('printf ab' repeated) makes it report 'two session ids came out identical: abababababababab' and '64 draws are all distinct: expected 64, got 1'. A second mutation in the Rust source — random::fill returning a zeroed buffer instead of reading the OS — fails two cargo tests, draws_differ_and_are_not_zero and odd_lengths_are_filled. Starved-PATH run with no plan-crypt and no digest tool exits 69 rather than improvising.",
+      "found_by": "plancrypt, while replacing the openssl calls in the fix-key helpers with a compiled binary",
+      "notes": null,
+      "created_at": "2026-08-28T11:43:22Z",
+      "updated_at": "2026-08-28T11:43:29Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",

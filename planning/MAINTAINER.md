@@ -140,16 +140,22 @@ the maintainer must behave going forward.
 
 ### 2.8 The compiled libraries
 
-`plan-core-lib.sh`, `plan-document-lib.sh`, `plan-table-lib.sh` and
-`plan-progress-lib.sh` are compiled by `build-plan-libs.sh` from
-`scripts/lib/<group>/*.sh`, one function per file. Do not edit the compiled
+`plan-core-lib.sh`, `plan-document-lib.sh`, `plan-table-lib.sh`,
+`plan-progress-lib.sh` and `plan-crypt-lib.sh` are compiled by
+`build-plan-libs.sh` from `scripts/lib/<group>/*.sh`, one function per file. Do not edit the compiled
 files; edit the function file and re-run the build. `--check` reports a stale
 library, and `test-plan-libs-build.sh` runs it.
 
 - `plan-document-lib.sh` remains the façade. Its `99-facade.sh` sources the other
-  three plus `plan-map-lib.sh` and `plan-inventory-lib.sh`, so the 40-plus
-  scripts that source that one path keep getting all 66 symbols. Verified as a
+  four plus `plan-map-lib.sh` and `plan-inventory-lib.sh`, so the 40-plus
+  scripts that source that one path keep getting every symbol. Verified as a
   symbol-set comparison, not by inspection.
+- `crypt` is the fifth group and was cut out of `core`, not invented alongside
+  it. The digest chain, the fix-key derivation, the target-triple lookup and the
+  CSPRNG went in; what stayed in `core` is how a script fails, guards and writes.
+  The split happened because `core` reached 506 lines against the 500-line cap
+  CODE-STYLE.md section 3 sets, and the cap is a ratchet: raising one to fit new
+  work is the change that makes every later violation invisible.
 - Each compiled library begins with a `PLAN_<GROUP>_LIB_LOADED` guard, because
   the façade sources its siblings and a script may source both. Without it a
   second source would re-run `00-state.sh` and drop the registered temp files.
@@ -164,11 +170,31 @@ library, and `test-plan-libs-build.sh` runs it.
   derived as `SHA-256(secret || "<session_id>|<finding>|<work unit>")` with the
   64-hex-char secret first (T16 retired HMAC). Rows with no work unit carry no
   key. Keys minted under the retired HMAC scheme do not verify; re-mint.
-- No single hash tool is a hard requirement: derivation goes through the
-  repo's standard `sha256sum` → `shasum` → `openssl` chain, refusing with 69
-  only when none of the three exists.
+- The derivation itself is `plan_fix_key` in `plan-crypt-lib.sh`, called by both
+  the minter and the verifier. It used to be a copy in each script under a
+  comment saying the two must stay byte-identical, and `test-duplication-ratchet.sh`
+  held them to it; one definition is the mechanism that comment was asking for.
+- No single hash tool is a hard requirement. `plan_sha256_hex` walks the shipped
+  `plan-crypt` binary first, then the GNU tool, then the BSD one, refusing with
+  69 only when none exists. `openssl` was the last rung and is gone from the
+  chain and from `requires.tsv`: a static binary asks the target machine for
+  nothing, so shipping one *lowered* the declared requirement. The binary is
+  opportunistic, found the way `chat-server.sh`'s `rust_bin()` finds its own —
+  `PLAN_CRYPT_BIN`, then `PATH`, then `planning/bin/<target triple>/plan-crypt`
+  and `planning/bin/plan-crypt`. A pin naming a file that does not exist is a
+  refusal rather than a fall-through, which is how a test takes the compiled
+  rung out of the picture.
+- Two implementations of one algorithm can disagree, so they are pinned to each
+  other rather than trusted: `tests/test-plan-crypt.sh` asserts the compiled and
+  shell rungs produce identical hex across the empty string, the 55/56/64-byte
+  padding boundary and the exact strings fix keys are derived over. That
+  equivalence is what lets a key minted before the binary existed keep verifying.
 - `ensure_session_secret` is the production creation path for the session
-  secret; tests seed the secret directory themselves.
+  secret; tests seed the secret directory themselves. Both the session id and
+  the secret come from `plan_random_hex`, which is the OS CSPRNG or a refusal
+  — there is deliberately no improvised third arm. The one that existed built
+  the id from the process id, the whole second and the shell's own weak PRNG,
+  and that value keys the gate (B87).
 - `add-fix-claim.sh` is the only writer of `fixes.md`, which had five readers
   and none. It gates on the same Findings table `mint-fix-keys.sh` and
   `verify-fix-keys.sh` read, so a claim it accepts is a claim the verifier

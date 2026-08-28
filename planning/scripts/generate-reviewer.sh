@@ -16,12 +16,17 @@
 # <skill-directory>/REVIEWER.md.
 #
 # Exit codes: 65 = a reviewer section is missing, duplicated, or empty;
-# 66 = the source skill is absent; 69 = no SHA-256 implementation.
+# 66 = the source skill is absent; 69 = no SHA-256 implementation (the
+# plan-crypt binary, sha256sum, or shasum).
 
 set -euo pipefail
 export LC_ALL=C
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Only for plan_sha256_hex: the recorded source digest goes through the one
+# SHA-256 chain in the skill rather than a fourth private copy of the probe.
+# shellcheck source=planning/scripts/plan-crypt-lib.sh
+source "$script_dir/plan-crypt-lib.sh"
 
 usage() {
     local rc="${1:-64}"
@@ -52,22 +57,10 @@ if [ ! -f "$source_file" ]; then
     exit 66
 fi
 
-# Hash helper: GNU, BSD, and openssl-only boxes all appear in the wild.
-sha256_file() {
-    local file="$1"
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        openssl dgst -sha256 "$file" | awk '{print $NF}'
-    else
-        printf 'no SHA-256 implementation available\n' >&2
-        exit 69
-    fi
+source_hash="$(plan_sha256_hex < "$source_file")" || {
+    printf 'no SHA-256 implementation available (need %s)\n' "$(plan_sha256_chain)" >&2
+    exit 69
 }
-
-source_hash="$(sha256_file "$source_file")"
 temp_output="$(mktemp "${TMPDIR:-/tmp}/reviewer.XXXXXX")"
 temp_section="$(mktemp "${TMPDIR:-/tmp}/reviewer-section.XXXXXX")"
 trap 'rm -f "$temp_output" "$temp_section"' EXIT

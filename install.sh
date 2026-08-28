@@ -430,7 +430,6 @@ runtime_requirements() {
         planning)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in *:*) printf '%s\n' jq ;; esac
-            case "$platform" in *:*) printf '%s\n' openssl ;; esac
             case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
             ;;
         post-implementation-review)
@@ -457,7 +456,6 @@ runtime_requirement_strength() {
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
@@ -475,7 +473,6 @@ runtime_requirement_why() {
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
-        planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
@@ -3200,6 +3197,7 @@ scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-core-lib.sh
+scripts/plan-crypt-lib.sh
 scripts/plan-progress-lib.sh
 scripts/plan-table-lib.sh
 scripts/plan-document-lib.sh
@@ -3262,6 +3260,13 @@ scripts/lib/core/plan_track_tmp.sh
 scripts/lib/core/plan_warn.sh
 scripts/lib/core/planning_ensure_tmpdir.sh
 scripts/lib/core/planning_tmpdir.sh
+scripts/lib/crypt/plan_crypt_bin.sh
+scripts/lib/crypt/plan_crypt_resolve.sh
+scripts/lib/crypt/plan_crypt_target_triple.sh
+scripts/lib/crypt/plan_fix_key.sh
+scripts/lib/crypt/plan_random_hex.sh
+scripts/lib/crypt/plan_sha256_chain.sh
+scripts/lib/crypt/plan_sha256_hex.sh
 scripts/lib/document/99-facade.sh
 scripts/lib/document/plan_delete_paragraph.sh
 scripts/lib/document/plan_document_kind.sh
@@ -3409,6 +3414,7 @@ scripts/todo-update.sh
 scripts/bug-add.sh
 scripts/bug-update.sh
 scripts/register-rebuild.sh
+tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
