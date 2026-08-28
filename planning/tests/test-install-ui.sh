@@ -434,6 +434,7 @@ esac
 [ "$IUI_RELEASE_VERSION" = '' ] \
     || note_fail 'the offline path must not invent a version'
 
+iui_release_version() { IUI_RELEASE_VERSION=9.9.9; IUI_RELEASE_CHECKED=1; }
 # Probed once per run, not once per redraw: the picker renders on every keypress.
 IUI_RELEASE_CHECKED=0
 iui_release_version
@@ -445,7 +446,6 @@ iui_release_version
 # The row must trigger the probe itself. Stubbed rather than fetched: if
 # iui_uptodate_text stops calling it, the version stays empty and every row reads
 # "unknown" forever -- silently, since offline looks identical.
-iui_release_version() { IUI_RELEASE_VERSION=9.9.9; IUI_RELEASE_CHECKED=1; }
 IUI_RELEASE_VERSION=''
 IUI_RELEASE_CHECKED=0
 IUI_SKILL_INSTALLED[0]=yes

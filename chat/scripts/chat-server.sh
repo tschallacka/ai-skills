@@ -96,12 +96,11 @@ rust_bin() {
         return 0
     fi
     local cand
-    for cand in "$(dirname "${BASH_SOURCE[0]}")/../runtime/chat-server-rs"; do
-        if [ -x "$cand" ]; then
-            printf '%s\n' "$cand"
-            return 0
-        fi
-    done
+    cand="$(cd "$(dirname "${BASH_SOURCE[0]}")/../runtime" 2>/dev/null && pwd)/chat-server-rs"
+    if [ -x "$cand" ]; then
+        printf '%s\n' "$cand"
+        return 0
+    fi
     return 1
 }
 
