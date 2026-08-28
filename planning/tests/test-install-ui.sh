@@ -434,7 +434,14 @@ esac
 [ "$IUI_RELEASE_VERSION" = '' ] \
     || note_fail 'the offline path must not invent a version'
 
-iui_release_version() { IUI_RELEASE_VERSION=9.9.9; IUI_RELEASE_CHECKED=1; }
+# One definition: IUI_STUB_PROBE=1 turns it into the no-op the second
+# group needs (a redefined stub trips SC2218 on shellcheck 0.9.0, where uses
+# before the LAST definition still count as use-before-def).
+iui_release_version() {
+    [ "${IUI_STUB_PROBE:-0}" = 1 ] && return 0
+    IUI_RELEASE_VERSION=9.9.9
+    IUI_RELEASE_CHECKED=1
+}
 # Probed once per run, not once per redraw: the picker renders on every keypress.
 IUI_RELEASE_CHECKED=0
 iui_release_version
@@ -458,7 +465,7 @@ esac
 # reinitialises every IUI_ global, so the skill arrays this file set up are wiped
 # and iui_uptodate_text reads unbound values. Every assertion below sets
 # IUI_RELEASE_VERSION itself, so a probe that does nothing is exactly right.
-iui_release_version() { :; }
+IUI_STUB_PROBE=1
 
 # The three answers and the role each gets. Each sets every input it depends on:
 # inheriting state from the block above is how this test passed standalone and
