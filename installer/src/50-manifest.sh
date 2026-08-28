@@ -354,6 +354,9 @@ EOF
         git-worktrees)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        merge-request-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
             ;;

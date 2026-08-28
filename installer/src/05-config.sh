@@ -38,7 +38,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -49,6 +49,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Merge request descriptions in your voice: a one-paragraph TLDR, then the fix.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -97,6 +98,10 @@ Reading takes a cursor rather than the whole channel, so a long conversation doe
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
+The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
+The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
+Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

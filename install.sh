@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -87,6 +87,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Merge request descriptions in your voice: a one-paragraph TLDR, then the fix.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -135,6 +136,10 @@ Reading takes a cursor rather than the whole channel, so a long conversation doe
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
+The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
+The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
+Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -419,6 +424,9 @@ runtime_requirements() {
             ;;
         git-worktrees)
             ;;
+        merge-request-etiquette)
+            case "$platform" in *:*) printf '%s\n' git ;; esac
+            ;;
         planning)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in *:*) printf '%s\n' jq ;; esac
@@ -446,6 +454,7 @@ runtime_requirement_strength() {
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         chat:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
@@ -463,6 +472,7 @@ runtime_requirement_why() {
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a jq call, and a register that cannot be read is worse than none' ;; esac ;;
         chat:bash) case "$platform" in *:*) printf '%s\n' 'the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler' ;; esac ;;
         chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working' ;; esac ;;
+        merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
@@ -3422,6 +3432,9 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         git-worktrees)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        merge-request-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)
