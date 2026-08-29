@@ -38,7 +38,7 @@ IUI_SKILL_WANT=()
 IUI_SKILL_SEL=()
 
 # The global dependency cache. Keyed by TOOL, never by skill, so reverifying
-# `jq` from one skill's info box refreshes every skill that also needs `jq`.
+# `rjq` from one skill's info box refreshes every skill that also needs `rjq`.
 IUI_DEP_TOOLS=()
 IUI_DEP_STATES=()
 

@@ -3,7 +3,7 @@
 
 **A work queue that outlives the conversation.**
 
-`TODO.json` — one file, read with jq, holding every task that must survive a
+`TODO.json` — one file, read with rjq, holding every task that must survive a
 restart, a handoff, or a context compaction. Tasks nest under tasks, and every
 closed item carries the evidence that closed it.
 

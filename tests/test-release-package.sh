@@ -36,7 +36,13 @@ trap 'rm -rf "$work"' EXIT
 version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     "$repo_root/package.json" | head -1)"
 t_assert_eq 'package.json states a version' \
-    "$(printf '%s' "$version" | grep -c '^[0-9][0-9.]*[0-9]$')" '1'
+    "$(printf '%s' "$version" | grep -Ec '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$')" '1'
+
+version_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+for invalid in 2.0 x.y.z ''; do
+    t_assert_eq "malformed version is rejected: ${invalid:-empty}" \
+        "$(printf '%s' "$invalid" | grep -Ec "$version_pattern" || true)" '0'
+done
 
 # ── the expected set, derived from the rule rather than from the builder ─────
 declares_prod() { # <path>
@@ -136,6 +142,6 @@ rc=0
 t_assert_eq 'the extracted package installs a skill' "$rc" '0'
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-    "SKILL.md docs requires.tsv schema.$version.json "
+     "SKILL.md docs requires.tsv schema.1.4.2.json schema.$version.json "
 
 t_end

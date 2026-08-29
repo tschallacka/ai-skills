@@ -76,17 +76,18 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
     'Caps CPU and memory for demanding tool runs.'
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
-    'A nested queue of work in one JSON file, read with jq.'
+    'A nested queue of work in one JSON file, read with rjq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -119,7 +120,7 @@ Skip it for small or fully specified changes, where the discussion costs more th
 The implementer analyses its own work, an independent agent proposes alternatives, and a critical agent attacks both.
 It ends in concrete proposed fixes rather than a verdict.
 Not a substitute for the pre-implementation adversarial review, which asks a different question: this one sees the code that exists.'
-    'A nested queue of work in one JSON file, read and written with jq.
+    'A nested queue of work in one JSON file, read and written with rjq.
 For work that outlives the conversation and must survive a restart, a handoff or a compaction.
 Every task carries its status and its detail, so a cold reader knows what was intended and what is left.
 Not for the steps of a task already in progress, and not for defects -- those belong in the bug register.'
@@ -135,6 +136,10 @@ History is additive: an agent fetches the messages after id N via the FETCH exte
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
+The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
+The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
+Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -411,16 +416,17 @@ runtime_requirements() {
         brainstorm)
             ;;
         bug-report)
-            case "$platform" in *:*) printf '%s\n' jq ;; esac
+            case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
         chat)
             ;;
         git-worktrees)
             ;;
+        merge-request-etiquette)
+            case "$platform" in *:*) printf '%s\n' git ;; esac
+            ;;
         planning)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
-            case "$platform" in *:*) printf '%s\n' jq ;; esac
-            case "$platform" in *:*) printf '%s\n' openssl ;; esac
             case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
             ;;
         post-implementation-review)
@@ -432,7 +438,7 @@ runtime_requirements() {
             case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
             ;;
         todo)
-            case "$platform" in *:*) printf '%s\n' jq ;; esac
+            case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
     esac
 }
@@ -441,14 +447,13 @@ runtime_requirement_strength() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
-        bug-report:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
-        todo:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        todo:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
     esac
 }
 
@@ -456,14 +461,13 @@ runtime_requirement_why() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
-        bug-report:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a jq call, and a register that cannot be read is worse than none' ;; esac ;;
+        bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none' ;; esac ;;
+        merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
-        planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
-        planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
-        todo:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a jq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
+        todo:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a rjq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
     esac
 }
 
@@ -478,7 +482,6 @@ runtime_requirement_members() {
 runtime_tool_verify() {
     case "$1" in
         bash) command -v bash >/dev/null 2>&1 ;;
-        jq) command -v jq >/dev/null 2>&1 ;;
         memlimit) command -v memlimit >/dev/null 2>&1 ;;
         openssl) command -v openssl >/dev/null 2>&1 ;;
         python3) command -v python3 >/dev/null 2>&1 ;;
@@ -619,50 +622,6 @@ runtime_tool_install_hint() {
                     ;;
             esac
             ;;
-        jq)
-            case "$platform" in
-                Darwin:*)
-                    if command -v brew >/dev/null 2>&1; then
-                        printf '%s\n' '  brew install jq'
-                    elif command -v port >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo port install jq'
-                    else
-                        printf '%s\n' '  install Homebrew (https://brew.sh) then: brew install jq'
-                    fi
-                    ;;
-                Linux:*)
-                    if command -v apt-get >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo apt-get install -y jq'
-                    elif command -v dnf >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo dnf install -y jq'
-                    elif command -v pacman >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo pacman -S --noconfirm jq'
-                    elif command -v zypper >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo zypper install -y jq'
-                    elif command -v apk >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo apk add jq'
-                    elif command -v snap >/dev/null 2>&1; then
-                        printf '%s\n' '  sudo snap install jq'
-                    else
-                        printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
-                    fi
-                    ;;
-                MINGW*:*|MSYS*:*|CYGWIN*:*)
-                    if command -v winget >/dev/null 2>&1; then
-                        printf '%s\n' '  winget install jqlang.jq'
-                    elif command -v choco >/dev/null 2>&1; then
-                        printf '%s\n' '  choco install jq'
-                    elif command -v scoop >/dev/null 2>&1; then
-                        printf '%s\n' '  scoop install jq'
-                    else
-                        printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
-                    fi
-                    ;;
-                *:*)
-                    printf '%s\n' '  download the static jq binary from https://github.com/jqlang/jq/releases'
-                    ;;
-            esac
-            ;;
         memlimit)
             case "$platform" in
                 *:*)
@@ -711,6 +670,24 @@ runtime_tool_install_hint() {
     esac
 }
 # END GENERATED DEPENDENCY BLOCK
+
+# Make the source bundle available before dependency checks. This keeps installs
+# independent of a system jq/rjq package while preserving PATH lookup semantics.
+prepend_bundled_rjq() {
+    local artifact=''
+    case "$(uname -s):$(uname -m)" in
+        Linux:x86_64|Linux:amd64) artifact='bin/x86_64-unknown-linux-musl/rjq' ;;
+        Linux:aarch64|Linux:arm64) artifact='bin/aarch64-unknown-linux-musl/rjq' ;;
+        Darwin:x86_64) artifact='bin/x86_64-apple-darwin/rjq' ;;
+        Darwin:arm64) artifact='bin/aarch64-apple-darwin/rjq' ;;
+        MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+            artifact='bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+    esac
+    if [ -n "$artifact" ] && [ -x "$SOURCE_ROOT/planning/$artifact" ]; then
+        PATH="$SOURCE_ROOT/planning/$(dirname "$artifact"):$PATH"
+        export PATH
+    fi
+}
 
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
@@ -841,7 +818,6 @@ verify_runtime_tools() {
     [ -n "$RUNTIME_BLOCKED_SKILLS" ] || return 0
     runtime_report_way_forward "$@"
 }
-
 # ---------------------------------------------------------------
 # 5. Agent target detection
 # ---------------------------------------------------------------
@@ -1257,7 +1233,7 @@ IUI_SKILL_WANT=()
 IUI_SKILL_SEL=()
 
 # The global dependency cache. Keyed by TOOL, never by skill, so reverifying
-# `jq` from one skill's info box refreshes every skill that also needs `jq`.
+# `rjq` from one skill's info box refreshes every skill that also needs `rjq`.
 IUI_DEP_TOOLS=()
 IUI_DEP_STATES=()
 
@@ -3071,7 +3047,7 @@ download_source() {
 # this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
 # not derive it from the manifest — the duplication IS the cross-check.
 # package_version is the released version from package.json, read with sed rather
-# than jq: jq is a declared runtime dependency of some skills but the installer
+# than rjq: rjq is a declared runtime dependency of some skills but the installer
 # must run before any of them is installed. A register written by a skill records
 # this value, so a reader can compare it against the installed skill and see that
 # an upgrade happened.
@@ -3107,11 +3083,12 @@ skill_files() {
         *) printf 'skill_files: unknown package: %s\n' "$package" >&2; return 64 ;;
     esac
     case "$1" in
-        planning)
+            planning)
             cat <<'EOF'
 SKILL.md
 docs/README.md
 REVIEWER.md
+binaries.tsv
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -3154,7 +3131,11 @@ scripts/create-progress.sh
 scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
+scripts/register-read.sh
+scripts/resolve-finding.sh
 scripts/render-plan-overview.sh
+scripts/render-plans-board.sh
+scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
@@ -3179,6 +3160,7 @@ scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-core-lib.sh
+scripts/plan-crypt-lib.sh
 scripts/plan-progress-lib.sh
 scripts/plan-table-lib.sh
 scripts/plan-document-lib.sh
@@ -3209,6 +3191,21 @@ scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
 EOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+                *)
+                    printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             [ "$package" = dev ] || return 0
             cat <<'EOF'
 .gitignore
@@ -3241,6 +3238,13 @@ scripts/lib/core/plan_track_tmp.sh
 scripts/lib/core/plan_warn.sh
 scripts/lib/core/planning_ensure_tmpdir.sh
 scripts/lib/core/planning_tmpdir.sh
+scripts/lib/crypt/plan_crypt_bin.sh
+scripts/lib/crypt/plan_crypt_resolve.sh
+scripts/lib/crypt/plan_crypt_target_triple.sh
+scripts/lib/crypt/plan_fix_key.sh
+scripts/lib/crypt/plan_random_hex.sh
+scripts/lib/crypt/plan_sha256_chain.sh
+scripts/lib/crypt/plan_sha256_hex.sh
 scripts/lib/document/99-facade.sh
 scripts/lib/document/plan_delete_paragraph.sh
 scripts/lib/document/plan_document_kind.sh
@@ -3344,6 +3348,7 @@ tests/test-limited-run-contract.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
+tests/test-plans-board.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh
@@ -3372,6 +3377,10 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-register-read.sh
+tests/test-resolve-finding.sh
+tests/test-validate-gates.sh
+tests/test-skill-provenance.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
@@ -3384,6 +3393,7 @@ scripts/todo-update.sh
 scripts/bug-add.sh
 scripts/bug-update.sh
 scripts/register-rebuild.sh
+tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
@@ -3391,6 +3401,7 @@ tests/test-self-hosted-plan.sh
 tests/test-sha256-fallbacks.sh
 tests/test-stale-sweep.sh
 tests/test-step-atomicity-reset.sh
+tests/test-step-testing-reminder.sh
 tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
 tests/test-target-path-validation.sh
@@ -3417,11 +3428,14 @@ EOF
         git-worktrees)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        merge-request-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         bug-report)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
@@ -3863,18 +3877,18 @@ strip_trailing_slashes() {
 
 # Both permission editors are reached only from planning_permission_step, inside
 # main's `contains planning "${SELECTED_SKILLS[@]}"` branch, and planning declares
-# jq in runtime_requirements() — so verify_runtime_tools has already refused to
-# get this far without jq. jq is therefore guaranteed, and the command -v check
+# rjq in runtime_requirements() — so verify_runtime_tools has already refused to
+# get this far without rjq. rjq is therefore guaranteed, and the command -v check
 # below only turns a hypothetical `set -e` abort into a clear message plus manual
 # instructions. It has to precede backup_file, or a failure here leaves
 # an orphaned backup behind. python3 is deliberately not used anywhere:
-# jq is the only runtime dependency this installer is allowed to add.
+# rjq is the only runtime dependency this installer is allowed to add.
 claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
     local doc added tmpfile program
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "  claude-code: jq is not installed; cannot edit $cfg safely." >&2
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
         print_manual_permissions claude "$scripts" "$plans" "$tmp"
         return 0
     fi
@@ -3885,7 +3899,7 @@ claude_permissions() {
 
     # An unparseable or non-object settings.json is rebuilt from {} rather than
     # edited. `objectify` is the same defensive read at every level.
-    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
     program='
 def objectify: if type == "object" then . else {} end;
@@ -3899,15 +3913,15 @@ def entries: [
 def allowed: objectify | .permissions | objectify | .allow
     | if type == "array" then . else [] end;
 '
-    added="$(printf '%s' "$doc" | jq -r \
+    added="$(printf '%s' "$doc" | rjq -r \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'(entries - allowed)[]')"
 
     # mktemp in the config's own directory so the rename is atomic, and cp -p to
-    # inherit the user's mode before jq truncates it.
+    # inherit the user's mode before rjq truncates it.
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | jq \
+    if ! printf '%s' "$doc" | rjq \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         objectify
@@ -3916,7 +3930,7 @@ def allowed: objectify | .permissions | objectify | .allow
         | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
         > "$tmpfile"; then
         rm -f "$tmpfile"
-        die "jq failed to update $cfg"
+        die "rjq failed to update $cfg"
     fi
     mv "$tmpfile" "$cfg"
 
@@ -3955,26 +3969,26 @@ opencode_permissions() {
         echo "  opencode: created $cfg" >&2
         created=1
     fi
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "  opencode: jq is not installed; cannot edit $cfg safely." >&2
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
         print_manual_permissions opencode "$scripts" "$plans" "$tmp"
         return 0
     fi
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    # A non-empty config that strict jq cannot parse carries JSON-C comments or
+    # A non-empty config that strict rjq cannot parse carries JSON-C comments or
     # trailing commas, which a rewrite would strip: print manual instructions
-    # instead of rebuilding from {}. Emptiness is decided here -- jq's own exit
+    # instead of rebuilding from {}. Emptiness is decided here -- rjq's own exit
     # status for empty input flips between versions.
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! jq -e '.' "$cfg" >/dev/null 2>&1; then
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
         echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
         print_manual_permissions opencode "$scripts" "$plans" "$tmp"
         return 0
     fi
     [ "$created" -eq 1 ] || backup_file "$cfg"
 
-    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
     # opencode's permission block is keyed by tool name; each value is either an
     # action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
@@ -3998,11 +4012,11 @@ def base:
        else ($p | objectify) end)
     | del(.allow, .deny, .ask);
 '
-    legacy="$(printf '%s' "$doc" | jq -r '
+    legacy="$(printf '%s' "$doc" | rjq -r '
         (if type == "object" then . else {} end) | .permission
         | if type == "object" and (.allow | type) == "array" and (.allow | length) > 0
           then "yes" else "no" end')"
-    added="$(printf '%s' "$doc" | jq -r \
+    added="$(printf '%s' "$doc" | rjq -r \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         [ wanted[] as $w
@@ -4014,7 +4028,7 @@ def base:
 
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | jq \
+    if ! printf '%s' "$doc" | rjq \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         (if type == "object" then . else {} end) as $data
@@ -4024,7 +4038,7 @@ def base:
         | $data | .permission = $perm' \
         > "$tmpfile"; then
         rm -f "$tmpfile"
-        die "jq failed to update $cfg"
+        die "rjq failed to update $cfg"
     fi
     mv "$tmpfile" "$cfg"
 
@@ -4134,6 +4148,7 @@ planning_permission_step() {
 # chosen roots — are printed at the end of the run rather than there.
 if [ -n "$CLI_MODE" ]; then
     download_source
+    prepend_bundled_rjq
     case "$CLI_MODE" in
         print) cli_print_skill_files ;;
         resolve) cli_resolve_source ;;
@@ -4146,12 +4161,13 @@ if [ -z "$SKILL_SELECTION" ] || [ -z "$TARGET_SELECTION" ]; then
     show_splash
 fi
 select_skills
+download_source
+prepend_bundled_rjq
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
 # PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
 # 3.2 treats the empty expansion as unbound under set -u.
 SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})
 select_targets
-download_source
 
 if [ "${#SELECTED_SKILLS[@]}" -eq 0 ]; then
     echo >&2

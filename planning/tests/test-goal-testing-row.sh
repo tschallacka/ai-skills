@@ -14,7 +14,7 @@
 #      a heading planning/goal-tables.json does not register.
 #
 # This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, jq only. No python3.
+# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
@@ -141,8 +141,8 @@ else
 fi
 
 # 4/5. The validation pass: the decoy table is reported, the plain goal is not.
-if ! command -v jq >/dev/null 2>&1; then
-    printf 'goal-testing-row: UNCONFIGURED (jq) — validation assertions skipped\n'
+if ! command -v rjq >/dev/null 2>&1; then
+    printf 'goal-testing-row: UNCONFIGURED (rjq) — validation assertions skipped\n'
     [ "$(t_failures)" -eq 0 ] || exit 1
     printf 'goal-testing-row: PASS\n'
     exit 0

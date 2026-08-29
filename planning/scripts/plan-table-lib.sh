@@ -159,6 +159,36 @@ plan_replace_testing_requirement() {
     trap - RETURN
 }
 
+# plan_review_finding_ids FILE — every finding id in the review's Findings
+# table, sorted and unique, one per line. Empty output for a missing file or a
+# table with no findings: that is a state, not an error.
+#
+# Callers use it to report what a rewrite changed rather than that it happened.
+# update-adversarial-review.sh rewrites the whole table from the rows it is
+# given, so a caller who derives that CSV from the table writes the same rows
+# back; with no delta the success line reads the same either way, which is how
+# nine findings stayed unrecorded across two cycles while the gate reported
+# passed on a table that did not contain them (T66).
+#
+# Cells come from plan_table_cell for the reason that helper exists at all: the
+# duplication ratchet counts inline pipe-splitting table parsers, and a helper
+# that adds one is not a helper.
+plan_review_finding_ids() {
+    local file="$1" line id in_findings=0
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            '## Findings'*) in_findings=1; continue ;;
+            '## '*) in_findings=0; continue ;;
+            '|'*) ;;
+            *) continue ;;
+        esac
+        [ "$in_findings" = 1 ] || continue
+        id="$(plan_table_cell "$line" 2)"
+        case "$id" in AR-[0-9]*) printf '%s\n' "$id" ;; esac
+    done < "$file" | sort -u
+}
+
 # The (finding, work unit) pairs the fix-key gate covers, as `AR-NN<TAB>WNN`.
 # One parser for the review's five-column Findings table, because three scripts
 # had their own copy of it: mint-fix-keys.sh derives a key per pair,
@@ -203,18 +233,18 @@ plan_table_cells() {
 
 # json_str TEXT — emit TEXT as one properly escaped JSON string value.
 json_str() {
-    command -v jq >/dev/null 2>&1 || {
-        printf 'plan-table: jq is required for JSON emission; install jq and re-run\n' >&2
+    command -v rjq >/dev/null 2>&1 || {
+        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
         exit 69
     }
- printf '%s' "$1" | jq -Rs '.'; }
+ printf '%s' "$1" | rjq -Rs '.'; }
 
 # plan_table_row_json HEADER_ROW DATA_ROW — emit one JSON object whose keys
 # are the header cells and whose values are the corresponding data cells.
 # Iterates columns until a header cell is empty.
 plan_table_row_json() {
-    command -v jq >/dev/null 2>&1 || {
-        printf 'plan-table: jq is required for JSON emission; install jq and re-run\n' >&2
+    command -v rjq >/dev/null 2>&1 || {
+        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
         exit 69
     }
 

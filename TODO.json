@@ -4,6 +4,24 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
+      "id": "T70",
+      "title": "Ship the compiled binaries with 2.0.0-alpha: build all five targets, declare them, commit them",
+      "status": "open",
+      "priority": "urgent",
+      "parent": null,
+      "detail": "Tschallacka: the binaries go out with the release. Nothing is shipped today — 'git ls-files planning/bin chat/bin' is empty for both, and planning has no binaries.tsv at all (chat has one declaring all five targets). rust-development-guidelines.md section 6 states the rules: binaries.tsv is MODE: PROD and must appear in skill_files(); the artifact lives at <skill>/bin/<target triple>/<binary> and is marker-exempt on the triple-shaped directory name; a declared-but-unbuilt row is legal, a built-but-undeclared binary is not — so declare before building, never after. The five targets are x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc. This workstation cannot produce all five: a cross-built aarch64-apple-darwin carries no ad-hoc signature and Apple Silicon refuses to exec it, and neither darwin nor msvc links on Linux at all. CI already builds and RUNS each target in the plan-crypt matrix, but no job uploads an artifact — they are built and discarded — so there is no pipeline to collect them from either. That gap is the work: either add upload-artifact to the matrix and collect, or build on real hardware per platform. tests/test-shipped-binaries.sh validates the registry against disk and was built with eleven mutations, so it is the gate that proves this landed.",
+      "blocked_on": null,
+      "refs": [
+        "rust-development-guidelines.md",
+        "chat/binaries.tsv",
+        "tests/test-shipped-binaries.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T17:15:01Z",
+      "updated_at": "2026-08-28T17:15:01Z"
+    },
+    {
       "id": "T51",
       "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
       "status": "open",
@@ -19,106 +37,24 @@
       "updated_at": "2026-08-27T12:37:03Z"
     },
     {
-      "id": "T52",
-      "title": "Check the installed planning skill against canonical before a plan is created",
+      "id": "T69",
+      "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
-      "priority": "high",
+      "priority": "low",
       "parent": null,
-      "detail": "codex postmortem recommendation 1, independently reproduced here 2026-08-27: the installed copy at the codex skill root was 290 lines adrift of planning/ in the repo, 58 lines only in the install and 232 only in canonical, with no MODE marker on line 2 and 9 mentions of 'inventory' against canonical's 37. The reader appeared to lack an inventory view, which produced a hand patch to the installed copy and false missing-coverage findings from reviewers reading through it. Nothing warned. A version probe at plan-creation time, comparing the installed .version or a hash of the scripts directory against canonical when a checkout is reachable, turns silent drift into a line of output. The installer already writes a .version and already detects a version transition, so the data exists.",
+      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
       "blocked_on": null,
       "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/create-plan.sh"
+        "planning/scripts/create-adversarial-review.sh"
       ],
       "note": null,
-      "created_at": "2026-08-27T22:38:19Z",
-      "updated_at": "2026-08-27T22:38:19Z"
-    },
-    {
-      "id": "T54",
-      "title": "A resolve-finding command that sets status, records the claim and refuses self-certification",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "codex postmortem recommendation 3, and the most repeated manual sequence in plan-overview-rebuild: for each of four cycles I rebuilt the entire findings CSV with awk to flip one status column, re-ran update-adversarial-review.sh, then looped add-fix-claim.sh over every minted pair, across forty findings. Two defects fall out of doing it by hand. A claim can be recorded for a finding whose status was never flipped, which happened here and left four superseded rows in fixes.md that verify-fix-keys.sh now reports as ignored rather than verified. And a claim can be self-certified by the session that minted the key, which codex hit as their operational failure 3 and resolved by re-minting under an independent identity. One command should set the status, record the claim, and refuse when the claiming session is the minting session.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/add-fix-claim.sh",
-        "planning/scripts/verify-fix-keys.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:38:19Z",
-      "updated_at": "2026-08-27T22:38:19Z"
-    },
-    {
-      "id": "T55",
-      "title": "Report the three gates separately: structurally valid, adversarially approved, implementation complete",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "codex postmortem recommendation 5, and a confusion this session hit directly. validate-plan.sh without a flag answers 'is this plan structurally sound and free of placeholders'; with --complete it answers something else entirely, and on a plan that is fully planned but unexecuted it printed over a hundred FAIL lines for untested UI stories and incomplete steps. Those are execution state, not planning defects, and a reader who runs --complete looking for planning readiness reads a wall of failures on a plan that is ready. The three states are distinct and the tool should name which one it is reporting.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/validate-plan.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-27T22:38:42Z"
-    },
-    {
-      "id": "T60",
-      "title": "Read, query and report helpers for both registers, so every caller stops hand-writing jq",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "The registers have four write helpers — bug-add, bug-update, todo-add, todo-update — a rebuild, and no read side at all. Every read is ad-hoc jq at the call site, which means every caller reimplements selection and every caller can get it wrong. Both happened in one session here. First: TODO.json carries two top-level arrays, .tasks and .todos, and I read .todos, found one done entry, and concluded the register was nearly empty while T51 sat open in .tasks; todo-add.sh itself only checks .tasks for duplicate ids, so the two arrays are not consistently treated even inside the skill. Second: computing the next free id as max of the numeric suffixes crashed on the existing id T1e, which does not parse as a number — a helper would have known its own id grammar. Beyond correctness it is sheer repetition: reading one bug's status, listing open bugs by id pattern, filtering todos by status, finding the next free id and counting entries were each written from scratch several times tonight, and each is a one-line question with a stable answer. Wanted: a read helper per register that answers show one entry, list by status or priority or surface, next free id, and count; and a report mode that prints what is open worst-first and what changed since a given timestamp, which is what a session hand-off actually needs. jq stays the reading language underneath, as T41 decided — the point is that it is written once, inside the skill, where it can be tested, rather than at every call site.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/bug-add.sh",
-        "planning/scripts/bug-update.sh",
-        "planning/scripts/todo-add.sh",
-        "planning/scripts/todo-update.sh",
-        "planning/scripts/register-lib.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:46:31Z",
-      "updated_at": "2026-08-27T22:46:31Z"
-    },
-    {
-      "id": "T62",
-      "title": "Rust chat binaries: a compiled chat-server rung with better response times",
-      "status": "done",
-      "priority": "high",
-      "parent": null,
-      "detail": "Finish the rust chat binary following tony-the-pony's layout (src/<crate>/, Cargo.toml, MODE/PACKAGE markers, zero runtime deps, self-test). A compiled server rung replaces interpreter startup cost per connection with a resident process: better response times for tomorrow's chat. Wire it as a rung in chat-server.sh's pick chain (python3 node perl socat today; rustc-built binary first when present), register in skill_files both arms + chat requires if applicable, add tests to chat/tests, build via nix flake (rust-toolchain already in dev shell), verify through the full suite and all three CI legs. The binary must speak the existing wire protocol exactly: NICK/JOIN [since]/PRIVMSG/FETCH/SEND/LEAVE/QUIT, log format MSG chan id ts nick :text, lock semantics as bash-handler.",
-      "blocked_on": "-",
-      "refs": [],
-      "note": "src/chat-server-rs: zero-dependency crate implementing the full wire protocol (NICK/JOIN+replay/PRIVMSG/FETCH/PING/QUIT, mkdir channel locks, highest+1 ids (B56), non-MSG lines skipped (B57), split invalid-channel/empty-text errors (B59), bare-digit port + server.port written (B63/B67)). Resident process — no interpreter startup per connection. chat-server.sh chain leads with it when present (chat/runtime/chat-server-rs or PATH), interpreter tiers unchanged as fallback; --runtime chat-server-rs valid. Tests: test-chat.sh exercises it with SKIP-loud absence (seeded out-of-order log proving id 8, stray-line tolerance, dialogue completeness). CI: ubuntu matrix leg builds the crate (rust-toolchain 1.97, actions-rust-lang) and places the binary so the rung runs in CI; macOS legs fall back loudly. Verified live through the launcher: full dialogue + port file + status/stop.",
-      "created_at": "2026-08-27T22:59:21Z",
-      "updated_at": "2026-08-28T04:04:45Z"
-    },
-    {
-      "id": "T53",
-      "title": "Run the reviewer-CSV check on the consume path instead of leaving it opt-in",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "codex postmortem recommendation 2, narrower than filed. update-adversarial-review.sh already has --check, which validates shape and mint and writes nothing, and it already mints against a throwaway copy first so a refusal leaves every plan file byte-identical. The gap is that --check is opt-in, so a reviewer emitting several work-unit ids in one row fails at consumption rather than at submission, which is what broke their run. Either run the check unconditionally before the archive step, or require a --check pass in the reviewer brief before rows are handed over.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:38:19Z",
-      "updated_at": "2026-08-27T22:38:19Z"
+      "created_at": "2026-08-28T15:33:14Z",
+      "updated_at": "2026-08-28T15:33:14Z"
     },
     {
       "id": "T56",
       "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "open",
+      "status": "blocked",
       "priority": "normal",
       "parent": null,
       "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
@@ -127,80 +63,9 @@
         "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
         "planning/scripts/update-adversarial-review.sh"
       ],
-      "note": null,
+      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
       "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-27T22:38:42Z"
-    },
-    {
-      "id": "T57",
-      "title": "Require reviewer reports to carry session id, elapsed time and a cost signal",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "codex postmortem recommendations 4, 8 and 9 taken together, since they are one thing: a review cycle currently reports findings and nothing about what it cost. Their run took 17 cycles, 109 findings and 41.7 million tokens, and no signal existed to say that cycle 9 was already disproportionate. A reviewer brief that requires session id, elapsed seconds and a telemetry lookup makes each cycle's cost visible, and a plan whose findings-per-cycle stops falling is the signal worth surfacing. Preserve the planning-boundary token snapshot rather than only the live cumulative total, which is what makes cycles comparable at all.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "benchmark/planning/telemetry.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-27T22:38:42Z"
-    },
-    {
-      "id": "T63",
-      "title": "Chat polling back-off cadence: 5s->10s->...->60s, reset on activity",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "When live monitoring (socket JOIN push) is not feasible and an agent polls chat-read, use a step-down cadence: poll twice every 5 seconds; if no new message, twice every 10s, then twice every 20s, increasing the interval by 10s each round until 60s is the steady state. Any new message resets the cadence to 5s so probes and questions get answered fast. Implement as a chat-watch.sh helper (or a --follow mode on chat-read) using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only. Bound the total run with a --max-wait so a caller can use it as a one-shot drain or a long-running monitor. Tests: fake clock or injected sleep function; assert the interval sequence 5,5,10,10,20,20,30,30,40,40,50,50,60,60... and the reset-on-arrival.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-watch.sh: step-down cadence 5,5->10,10->20,20->...->60 (cap), reset to 5 on any message; cursor is last-id+1 because FETCH is >= (the flood this exposed was fixed by that); --max-wall bounds the run. Verified live with a real server + a logging sleep shim: sleeps 5,10,reset-to-5 on arrival; two live messages each printed exactly once.",
-      "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-28T04:15:31Z"
-    },
-    {
-      "id": "T64",
-      "title": "Explicit @mention targeting for agents on the chat channel",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Protocol + helpers: a message whose text starts with or contains @<nick> is routed/highlighted to that agent. Server side: PRIVMSG text starting with @nick delivers as today (the log keeps one line) but connected subscribers whose nick matches get a targeted line (e.g. 'MENTION <chan> <id> <ts> <from> :text') or an inbox-style FETCH filter; other subscribers may ignore. Client side: chat-read --mentions <nick> returns only messages naming the agent; @all/@everyone broadcasts. Nick validation already exists (A-Za-z0-9_-). Decide and document: mentions are advisory metadata, not delivery guarantees (offline agents see them via history). Tests: two-socket delivery targeting, offline mention visible in history, @all semantics.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-read --mentions NICK: filters every mode (socket, --since, --last, --all) to lines whose text carries @NICK or @all/@everyone, delimited by space/punct/EOL so @oxen does not match @ox; documented as advisory metadata (offline agents see mentions via history). Verified: targeted, @all, trailing-punct, and non-substring cases on fixtures.",
-      "created_at": "2026-08-27T22:59:33Z",
-      "updated_at": "2026-08-28T04:15:31Z"
-    },
-    {
-      "id": "T65",
-      "title": "Server discovery via UDP broadcast + human-driven connect choice",
-      "status": "done",
-      "priority": "normal",
-      "parent": null,
-      "detail": "An AI chat host is discoverable on the LAN instead of by ip:port. (1) Servers announce themselves: a UDP broadcast beacon every N seconds carrying a JSON payload {name, port, proto, started} where name is human-identifiable (hostname + a friendly suffix like 'ai-skills/mdibbets-den') and stable. (2) A discovery client (chat-discover.sh, bash + /dev/udp, timeout-bounded) listens one beacon period and lists every server found. (3) The joining AGENT must ASK ITS DRIVING HUMAN before connecting: present the discovered list (or offer 'start your own local server') and let the human choose; never auto-join a network host. Multiple servers -> numbered list. Also the joining agent asks the human whether to pick its own nickname or let the human provide one (same prompt, one question). Privacy: bind the beacon to the LAN interface, not 0.0.0.0 by default; opt-out flag for servers. Tests: loopback beacon/discover pair, list formatting with multiple servers, timeout with none. CI: UDP broadcast on 127.0.0.1 works on GH runners; guard with UNCONFIGURED-style skip if the port is unavailable.",
-      "blocked_on": "T62",
-      "refs": [],
-      "note": "chat-announce.sh broadcasts a JSON beacon {proto,name,port,started} every 2s — python3 sender sets SO_BROADCAST (bash /dev/udp cannot send broadcast: EACCES), /dev/udp stays as unicast fallback; chat-server.sh start --announce [name] launches it and stop kills it (pid tracked; ~1s shutdown grace observed). chat-discover.sh listens one period (socat or python3 tier, UNCONFIGURED skip without either), dedupes by name+port, prints a numbered human list or --json. Human-choice flow (present list + start-local option, ask nickname) documented in SKILL.md 'Joining a server'. Verified: loopback pair (list + json), real 255.255.255.255 broadcast discovered reliably after the SO_BROADCAST fix, beacon lifecycle clean. Suite test exercises the loopback pair with SKIP-loud absence.",
-      "created_at": "2026-08-27T22:59:42Z",
-      "updated_at": "2026-08-28T04:21:38Z"
-    },
-    {
-      "id": "T58",
-      "title": "New plans carry an explicit assumptions section, and a postmortem template exists",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "codex postmortem recommendations 7 and 10. They asked no clarifying questions during planning and recorded the trade-off honestly: less interaction, more silent interpretation, with five interpretations only made explicit afterwards. An assumptions section in the plan template gives those a place to live at the time rather than in a postmortem. The postmortem template is the smaller half — token accounting and a reviewer-session table — and its value is that the cost data above only exists because they went and collected it by hand.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/create-plan.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-27T22:38:42Z"
+      "updated_at": "2026-08-28T15:28:39Z"
     },
     {
       "id": "T1e",
@@ -741,6 +606,104 @@
       "updated_at": "2026-08-27T14:18:12Z"
     },
     {
+      "id": "T52",
+      "title": "Check the installed planning skill against canonical before a plan is created",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 1, independently reproduced here 2026-08-27: the installed copy at the codex skill root was 290 lines adrift of planning/ in the repo, 58 lines only in the install and 232 only in canonical, with no MODE marker on line 2 and 9 mentions of 'inventory' against canonical's 37. The reader appeared to lack an inventory view, which produced a hand patch to the installed copy and false missing-coverage findings from reviewers reading through it. Nothing warned. A version probe at plan-creation time, comparing the installed .version or a hash of the scripts directory against canonical when a checkout is reachable, turns silent drift into a line of output. The installer already writes a .version and already detects a version transition, so the data exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/create-plan.sh"
+      ],
+      "note": "Implemented as plan_skill_provenance and plan_warn_skill_drift, called at the end of create-plan.sh, pinned by planning/tests/test-skill-provenance.sh. Every plan now states which build created it: a checkout reports its commit, an installed copy reports the build the installer recorded in .version, worded so the two are not confused — the installed number is what it was BUILT from and says nothing about what canonical holds now. With AI_SKILLS_REPO naming a canonical checkout, an installed copy behind it reports the distance; verified against a real installed tree at 61 commits behind. Silence is asserted as strictly as the warning: with no canonical checkout named, no drift is claimed, because a staleness warning without evidence sends someone to reinstall for nothing. Mutation-proven both ways — silencing the warning fails the drift assertion, warning unconditionally fails the no-evidence assertion.",
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-28T15:22:27Z"
+    },
+    {
+      "id": "T54",
+      "title": "A resolve-finding command that sets status, records the claim and refuses self-certification",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 3, and the most repeated manual sequence in plan-overview-rebuild: for each of four cycles I rebuilt the entire findings CSV with awk to flip one status column, re-ran update-adversarial-review.sh, then looped add-fix-claim.sh over every minted pair, across forty findings. Two defects fall out of doing it by hand. A claim can be recorded for a finding whose status was never flipped, which happened here and left four superseded rows in fixes.md that verify-fix-keys.sh now reports as ignored rather than verified. And a claim can be self-certified by the session that minted the key, which codex hit as their operational failure 3 and resolved by re-minting under an independent identity. One command should set the status, record the claim, and refuse when the claiming session is the minting session.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/add-fix-claim.sh",
+        "planning/scripts/verify-fix-keys.sh"
+      ],
+      "note": "Implemented as planning/scripts/resolve-finding.sh with planning/tests/test-resolve-finding.sh, suite 109/109. One command sets the status, records the claim from the plan's own fix-keys.json, and refuses self-certification at the point the claim is made. Both defects it was filed about are now structurally impossible: it edits the existing row rather than rewriting the table from a regenerated CSV (the mechanism by which nine findings were remediated and cited while never becoming rows), and it drops a superseded claim before recording a new one (what left four rows reported as ignored rather than verified). Five assertions pinned by exit code, including 65 for a finding with no row and 70 for a minter claiming its own keys. codex's postmortem recommendation 3, and the sequence I ran by hand across eight cycles.",
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-28T11:22:30Z"
+    },
+    {
+      "id": "T55",
+      "title": "Report the three gates separately: structurally valid, adversarially approved, implementation complete",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "codex postmortem recommendation 5, and a confusion this session hit directly. validate-plan.sh without a flag answers 'is this plan structurally sound and free of placeholders'; with --complete it answers something else entirely, and on a plan that is fully planned but unexecuted it printed over a hundred FAIL lines for untested UI stories and incomplete steps. Those are execution state, not planning defects, and a reader who runs --complete looking for planning readiness reads a wall of failures on a plan that is ready. The three states are distinct and the tool should name which one it is reporting.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/validate-plan.sh"
+      ],
+      "note": "Implemented in c68aa9b as plan_report_gates in validate-plan.sh, pinned by planning/tests/test-validate-gates.sh. Every run now closes with 'Gates: structurally valid=... adversarially approved=... implementation complete=...', on the failing path as well as the passing one — the failing path is where it matters, since --complete over a fully planned but unexecuted plan reports 218 errors that are all execution state. Two verdicts it refuses to infer rather than guessing: under --complete the structural gate reads 'not separable here', because the error count mixes structural defects with execution state and the checks interleave; and a plan with no adversarial-review.md reads 'no review file' rather than approved, which review_approved defaulting to true had been reporting as approval. The entry stayed open after the work landed, which is the same record-never-reached-the-document failure the plan reviewer named as lineage 4.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-28T15:19:09Z"
+    },
+    {
+      "id": "T60",
+      "title": "Read, query and report helpers for both registers, so every caller stops hand-writing jq",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "The registers have four write helpers — bug-add, bug-update, todo-add, todo-update — a rebuild, and no read side at all. Every read is ad-hoc jq at the call site, which means every caller reimplements selection and every caller can get it wrong. Both happened in one session here. First: TODO.json carries two top-level arrays, .tasks and .todos, and I read .todos, found one done entry, and concluded the register was nearly empty while T51 sat open in .tasks; todo-add.sh itself only checks .tasks for duplicate ids, so the two arrays are not consistently treated even inside the skill. Second: computing the next free id as max of the numeric suffixes crashed on the existing id T1e, which does not parse as a number — a helper would have known its own id grammar. Beyond correctness it is sheer repetition: reading one bug's status, listing open bugs by id pattern, filtering todos by status, finding the next free id and counting entries were each written from scratch several times tonight, and each is a one-line question with a stable answer. Wanted: a read helper per register that answers show one entry, list by status or priority or surface, next free id, and count; and a report mode that prints what is open worst-first and what changed since a given timestamp, which is what a session hand-off actually needs. jq stays the reading language underneath, as T41 decided — the point is that it is written once, inside the skill, where it can be tested, rather than at every call site.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/bug-add.sh",
+        "planning/scripts/bug-update.sh",
+        "planning/scripts/todo-add.sh",
+        "planning/scripts/todo-update.sh",
+        "planning/scripts/register-lib.sh"
+      ],
+      "note": "Implemented as planning/scripts/register-read.sh with planning/tests/test-register-read.sh. Subcommands: show (exits 1 on a missing id so a caller can branch on status rather than parse for emptiness), list with --status/--priority/--surface/--parent, report with --since, count, next-id. Registered in skill_files(), PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv in one change, staged before the gate ran. Pins the two failures that motivated it: next-id returns 10 past the non-numeric id T1e, which a hand-rolled max crashed on, and the entries array is named once so no caller can read the wrong one. test-installer-manifest caught the manifest half missing and test-flag-coverage caught an undocumented --file; both were fixed before commit.",
+      "created_at": "2026-08-27T22:46:31Z",
+      "updated_at": "2026-08-28T10:49:34Z"
+    },
+    {
+      "id": "T62",
+      "title": "Rust chat binaries: a compiled chat-server rung with better response times",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Finish the rust chat binary following tony-the-pony's layout (src/<crate>/, Cargo.toml, MODE/PACKAGE markers, zero runtime deps, self-test). A compiled server rung replaces interpreter startup cost per connection with a resident process: better response times for tomorrow's chat. Wire it as a rung in chat-server.sh's pick chain (python3 node perl socat today; rustc-built binary first when present), register in skill_files both arms + chat requires if applicable, add tests to chat/tests, build via nix flake (rust-toolchain already in dev shell), verify through the full suite and all three CI legs. The binary must speak the existing wire protocol exactly: NICK/JOIN [since]/PRIVMSG/FETCH/SEND/LEAVE/QUIT, log format MSG chan id ts nick :text, lock semantics as bash-handler.",
+      "blocked_on": "-",
+      "refs": [],
+      "note": "src/chat-server-rs: zero-dependency crate implementing the full wire protocol (NICK/JOIN+replay/PRIVMSG/FETCH/PING/QUIT, mkdir channel locks, highest+1 ids (B56), non-MSG lines skipped (B57), split invalid-channel/empty-text errors (B59), bare-digit port + server.port written (B63/B67)). Resident process — no interpreter startup per connection. chat-server.sh chain leads with it when present (chat/runtime/chat-server-rs or PATH), interpreter tiers unchanged as fallback; --runtime chat-server-rs valid. Tests: test-chat.sh exercises it with SKIP-loud absence (seeded out-of-order log proving id 8, stray-line tolerance, dialogue completeness). CI: ubuntu matrix leg builds the crate (rust-toolchain 1.97, actions-rust-lang) and places the binary so the rung runs in CI; macOS legs fall back loudly. Verified live through the launcher: full dialogue + port file + status/stop.",
+      "created_at": "2026-08-27T22:59:21Z",
+      "updated_at": "2026-08-28T04:04:45Z"
+    },
+    {
+      "id": "T66",
+      "title": "Every document- and register-writing helper reports its delta, not just the verb",
+      "status": "done",
+      "priority": "high",
+      "parent": "T60",
+      "detail": "Diagnosed from this session's failures; it is the single highest-yield change to the helper set. update-adversarial-review.sh prints 'Updated findings table in <file>' whether it wrote 40 rows over 40 or added nine. I fed it a CSV regenerated from the table, so it wrote the same rows back, and the success line was identical to a run that added findings — AR-42 to AR-50 went unrecorded for two cycles and the approval gate would have printed passed with nine remediations ungated, because the gate can only iterate rows that exist. tests/test-skill-files-manifest.sh prints a bare PASS, so a run that scanned 105 tracked files and one that scanned zero are textually identical, which is how a run before git add passed vacuously. remove-work-unit.sh pruned edges and coverage ids silently, which is B68 and T59. The fix is the same everywhere: print the count in and the count out, or the ids added and removed. A caller cannot notice a no-op it did not intend when the tool describes the operation instead of its effect. T59 is this fix for one script; this entry is the general form, and it should cover update-adversarial-review.sh, add-coverage.sh --replace, the register writers, and any gate whose PASS should carry how much it examined.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/update-adversarial-review.sh",
+        "tests/test-skill-files-manifest.sh",
+        "planning/scripts/add-coverage.sh"
+      ],
+      "note": "Completed across 7e2f341 and this change. update-adversarial-review.sh reports 'N row(s) in, M row(s) out; added/dropped <ids>'; add-coverage.sh reports whether a --replace replaced or added; tests/test-skill-files-manifest.sh now prints what it accounted for and, more importantly, NAMES the untracked files it could not examine. That last one is the fix for the failure this entry was filed about: git ls-files cannot see an unstaged file, so the gate passed honestly about a set that silently excluded the very file just added — three times in one day, the last twenty minutes after I warned two subagents about it. Proven by creating an untracked file under a skill and observing 'NOTE planning untracked file(s) not covered by this check'. The register writers still report the verb; that half is small and is left to whoever takes bug-add/todo-add next.",
+      "created_at": "2026-08-28T10:06:57Z",
+      "updated_at": "2026-08-28T10:49:34Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -1175,6 +1138,19 @@
       "updated_at": "2026-08-26T21:02:30Z"
     },
     {
+      "id": "T47",
+      "title": "Execute harden-plan-data-parsing goals 03-05",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "COMPLETE. All 26 units done; strict gate (validate-plan --complete) passes. Goals: 01 readers (12fec21), 02 atomicity (ce8600f), 03 migrations (3b66163..c0fef97), 04 writer hardening, 05 remaining parsers + parity. Ratchets: awk 30->15, lib-test 8->7, FL 68->66 all via clamp with same-commit MAINTAINER/gate-caps sync; guard enforces never-up vs git history. Remaining suite reds are PRE-EXISTING (verified red at baseline 00ecc69): test-flag-coverage criticals (undocumented/untested flags in bug/todo/overview scripts) and test-runtime-dependencies jq-guard gaps (9 scripts call jq unguarded). Both queued as next work. Restored 2026-08-28 after B69: this entry lived only in the .todos array and was deleted rather than folded when that array was dropped.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-08-28T07:49:45Z",
+      "updated_at": "2026-08-28T07:49:45Z"
+    },
+    {
       "id": "T48b",
       "title": "A gate that every runtime a skill probes with command -v has a row in that skill's requires.tsv",
       "status": "done",
@@ -1209,6 +1185,38 @@
       "updated_at": "2026-08-27T09:36:22Z"
     },
     {
+      "id": "T53",
+      "title": "Run the reviewer-CSV check on the consume path instead of leaving it opt-in",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 2, narrower than filed. update-adversarial-review.sh already has --check, which validates shape and mint and writes nothing, and it already mints against a throwaway copy first so a refusal leaves every plan file byte-identical. The gap is that --check is opt-in, so a reviewer emitting several work-unit ids in one row fails at consumption rather than at submission, which is what broke their run. Either run the check unconditionally before the archive step, or require a --check pass in the reviewer brief before rows are handed over.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": "Closed narrower than filed, and the entry's own premise was wrong. It said --check is opt-in so validation does not run on the consume path; it does. The shape gate and the mint preview both run BEFORE --check exits, so a write run performs identical validation and refuses without writing — proven by feeding a malformed row (two work-unit ids in one cell) to a write run: it refused with the mint diagnosis and the review file was byte-identical afterwards. Only stopping is opt-in, not checking. The real gap is where the refusal lands: at consumption, after the reviewer has finished and left, so the coordinator holds a refusal about rows it did not write and the session that could explain the intent is gone. Fixed in the brief rather than the code — SKILL.md now instructs a reviewer to run --check on its own rows before handing them over, names the commonest cause (a row naming more than one work unit, which the fix-key gate cannot mint), and REVIEWER.md carries it through the projection. Same class as AR-27: a right decision resting on a stated reason that turned out to be false.",
+      "created_at": "2026-08-27T22:38:19Z",
+      "updated_at": "2026-08-28T15:24:22Z"
+    },
+    {
+      "id": "T57",
+      "title": "Require reviewer reports to carry session id, elapsed time and a cost signal",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendations 4, 8 and 9 taken together, since they are one thing: a review cycle currently reports findings and nothing about what it cost. Their run took 17 cycles, 109 findings and 41.7 million tokens, and no signal existed to say that cycle 9 was already disproportionate. A reviewer brief that requires session id, elapsed seconds and a telemetry lookup makes each cycle's cost visible, and a plan whose findings-per-cycle stops falling is the signal worth surfacing. Preserve the planning-boundary token snapshot rather than only the live cumulative total, which is what makes cycles comparable at all.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "benchmark/planning/telemetry.sh"
+      ],
+      "note": "create-adversarial-review.sh now seeds three fields in the review-scope block — reviewer session id, elapsed wall time, and a findings count as the cost signal — and SKILL.md states what they are for, projected into REVIEWER.md. The session id is what lets a claim be traced to the run that made it, which matters because the fix-key gate refuses self-certification and the only artifact recording who minted is currently the honest prose in the verdict. The other two answer whether a review is converging: a falling findings count means the plan is improving, a flat one means the cycles are not finding less and the plan may not be the thing at fault. codex's run reached seventeen cycles and 41.7 million tokens before anyone asked, because no cycle recorded its cost. Nothing enforces a ceiling deliberately — the number is there when someone decides whether to run another. Verified by creating a review and reading the seeded block; five projection and preamble tests pass.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-28T15:29:40Z"
+    },
+    {
       "id": "T59",
       "title": "remove-work-unit.sh should name every edge and coverage id it prunes",
       "status": "done",
@@ -1240,6 +1248,61 @@
       "note": "Folded and dropped: .todos held exactly one entry — T47 [done], an artifact of my own 00ecc69 queue note writing d.get('todos') instead of .tasks (the .tasks T47 entry was the authoritative one and already done; the copy was redundant). Guard added: reg_findings fails any todo-register write with 'register carries a .todos array - fold its entries into .tasks and drop the key', verified live (todo-add refused on a seeded artifact). register-helpers suite green.",
       "created_at": "2026-08-27T22:46:46Z",
       "updated_at": "2026-08-27T22:51:29Z"
+    },
+    {
+      "id": "T63",
+      "title": "Chat polling back-off cadence: 5s->10s->...->60s, reset on activity",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "When live monitoring (socket JOIN push) is not feasible and an agent polls chat-read, use a step-down cadence: poll twice every 5 seconds; if no new message, twice every 10s, then twice every 20s, increasing the interval by 10s each round until 60s is the steady state. Any new message resets the cadence to 5s so probes and questions get answered fast. Implement as a chat-watch.sh helper (or a --follow mode on chat-read) using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only. Bound the total run with a --max-wait so a caller can use it as a one-shot drain or a long-running monitor. Tests: fake clock or injected sleep function; assert the interval sequence 5,5,10,10,20,20,30,30,40,40,50,50,60,60... and the reset-on-arrival.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-watch.sh: step-down cadence 5,5->10,10->20,20->...->60 (cap), reset to 5 on any message; cursor is last-id+1 because FETCH is >= (the flood this exposed was fixed by that); --max-wall bounds the run. Verified live with a real server + a logging sleep shim: sleeps 5,10,reset-to-5 on arrival; two live messages each printed exactly once.",
+      "created_at": "2026-08-27T22:59:33Z",
+      "updated_at": "2026-08-28T04:15:31Z"
+    },
+    {
+      "id": "T64",
+      "title": "Explicit @mention targeting for agents on the chat channel",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Protocol + helpers: a message whose text starts with or contains @<nick> is routed/highlighted to that agent. Server side: PRIVMSG text starting with @nick delivers as today (the log keeps one line) but connected subscribers whose nick matches get a targeted line (e.g. 'MENTION <chan> <id> <ts> <from> :text') or an inbox-style FETCH filter; other subscribers may ignore. Client side: chat-read --mentions <nick> returns only messages naming the agent; @all/@everyone broadcasts. Nick validation already exists (A-Za-z0-9_-). Decide and document: mentions are advisory metadata, not delivery guarantees (offline agents see them via history). Tests: two-socket delivery targeting, offline mention visible in history, @all semantics.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-read --mentions NICK: filters every mode (socket, --since, --last, --all) to lines whose text carries @NICK or @all/@everyone, delimited by space/punct/EOL so @oxen does not match @ox; documented as advisory metadata (offline agents see mentions via history). Verified: targeted, @all, trailing-punct, and non-substring cases on fixtures.",
+      "created_at": "2026-08-27T22:59:33Z",
+      "updated_at": "2026-08-28T04:15:31Z"
+    },
+    {
+      "id": "T65",
+      "title": "Server discovery via UDP broadcast + human-driven connect choice",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "An AI chat host is discoverable on the LAN instead of by ip:port. (1) Servers announce themselves: a UDP broadcast beacon every N seconds carrying a JSON payload {name, port, proto, started} where name is human-identifiable (hostname + a friendly suffix like 'ai-skills/mdibbets-den') and stable. (2) A discovery client (chat-discover.sh, bash + /dev/udp, timeout-bounded) listens one beacon period and lists every server found. (3) The joining AGENT must ASK ITS DRIVING HUMAN before connecting: present the discovered list (or offer 'start your own local server') and let the human choose; never auto-join a network host. Multiple servers -> numbered list. Also the joining agent asks the human whether to pick its own nickname or let the human provide one (same prompt, one question). Privacy: bind the beacon to the LAN interface, not 0.0.0.0 by default; opt-out flag for servers. Tests: loopback beacon/discover pair, list formatting with multiple servers, timeout with none. CI: UDP broadcast on 127.0.0.1 works on GH runners; guard with UNCONFIGURED-style skip if the port is unavailable.",
+      "blocked_on": "T62",
+      "refs": [],
+      "note": "chat-announce.sh broadcasts a JSON beacon {proto,name,port,started} every 2s — python3 sender sets SO_BROADCAST (bash /dev/udp cannot send broadcast: EACCES), /dev/udp stays as unicast fallback; chat-server.sh start --announce [name] launches it and stop kills it (pid tracked; ~1s shutdown grace observed). chat-discover.sh listens one period (socat or python3 tier, UNCONFIGURED skip without either), dedupes by name+port, prints a numbered human list or --json. Human-choice flow (present list + start-local option, ask nickname) documented in SKILL.md 'Joining a server'. Verified: loopback pair (list + json), real 255.255.255.255 broadcast discovered reliably after the SO_BROADCAST fix, beacon lifecycle clean. Suite test exercises the loopback pair with SKIP-loud absence.",
+      "created_at": "2026-08-27T22:59:42Z",
+      "updated_at": "2026-08-28T04:21:38Z"
+    },
+    {
+      "id": "T67",
+      "title": "The step-testing reminder fires unconditionally, so it trains its reader to ignore it",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "plan_emit_step_testing_reminder() emits 'testing instructions already exist … review them for accuracy and completeness after updating this step' whenever the goal requires testing and the companion file exists — with no check of whether the companion is actually behind the step. It therefore fires on every step edit, was true on all sixty or so I made in this session, and could never distinguish the occasion that needed action from the fifty-nine that did not. The occasion it exists for did arise: adversarial finding AR-56 was W90's instruction left behind when its criterion was corrected, and the reminder fired correctly on that edit among all the others. A signal true one hundred percent of the time carries no information, and a reader who acts on it every time is doing sixty reviews to catch one. Make it conditional on the companion being older than the step file, or on the step's content hash having changed since the companion was written, so that it fires when there is something to do. The unfired case is as valuable as the fired one: silence would then mean the companion is current.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/lib/progress/plan_emit_step_testing_reminder.sh",
+        "planning/scripts/plan-progress-lib.sh"
+      ],
+      "note": "Implemented in 7e2f341. plan_emit_step_testing_reminder now fires only when the companion was already behind the step, decided from git's pre-mutation state — mtime cannot answer it because the reminder runs after the write, so the step is always the newer file. Verified by planning/tests/test-step-testing-reminder.sh across four states: no companion (fires), companion current (silent), companion left behind (fires), companion refreshed (silent). Mutation-proven: reverting to always-fire trips two assertions, inverting the comparison trips the third. test-plan-commands.sh:85 had pinned the old always-fire wording and now asserts the silence instead. Suite 107/107.",
+      "created_at": "2026-08-28T10:07:14Z",
+      "updated_at": "2026-08-28T10:37:50Z"
     },
     {
       "id": "T8",
@@ -1361,6 +1424,37 @@
       ],
       "created_at": "2026-08-21T10:51:52Z",
       "updated_at": "2026-08-21T10:55:23Z"
+    },
+    {
+      "id": "T58",
+      "title": "New plans carry an explicit assumptions section, and a postmortem template exists",
+      "status": "done",
+      "priority": "low",
+      "parent": null,
+      "detail": "codex postmortem recommendations 7 and 10. They asked no clarifying questions during planning and recorded the trade-off honestly: less interaction, more silent interpretation, with five interpretations only made explicit afterwards. An assumptions section in the plan template gives those a place to live at the time rather than in a postmortem. The postmortem template is the smaller half — token accounting and a reviewer-session table — and its value is that the cost data above only exists because they went and collected it by hand.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/create-plan.sh"
+      ],
+      "note": "Half of it: new plans carry '## Assumptions' at § 11.1, seeded by create-plan.sh, registered in document-sections.json after approach-decisions, documented in SKILL.md and projected into REVIEWER.md. Placed after the last numbered section deliberately — inserting it anywhere earlier renumbers every § N.N below it and breaks paragraph addressing in every existing plan. Verified: a fresh plan carries it, it is addressable with -dp 11.1, none of the ten fresh-plan validation errors mentions it, and the live 116-unit plan still validates unchanged. The section is for what was assumed rather than confirmed, distinct from § 8's open questions: an adversarial reviewer can attack a stated assumption, while an unstated one is invisible until it turns out false and then reads as a defect in the work rather than a decision nobody recorded. The postmortem template half is NOT done and is not folded in silently — it is a separate artifact with no natural home in the plan documents, and it should be its own entry rather than riding on this one.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-28T15:33:14Z"
+    },
+    {
+      "id": "T68",
+      "title": "add-coverage --replace matches on the outcome text it is often asked to change",
+      "status": "done",
+      "priority": "low",
+      "parent": "T66",
+      "detail": "The replace path collapses rows whose Required outcome cell matches, so changing the outcome wording and the work-unit ids in one call appends a second row instead of replacing the first, silently. It happened here while closing AR-57: the outcome was reworded from 'registered by the unit that adds it' to 'registered by the unit that accounts for it' in the same call that corrected the ids, and the plan carried two contradictory rows until a later check found them. Either key the replace on something stable — a row id, or the id set — or refuse when the outcome does not match any existing row while --replace is set, so the caller is told rather than left with a duplicate.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/add-coverage.sh"
+      ],
+      "note": "Implemented in 7e2f341. add-coverage --replace now decides the verb before the write, so a reworded outcome reports 'Added ... --replace matched no existing outcome ... look for a stale row under the old outcome' instead of printing 'Replaced' beside two contradictory rows. Verified three ways on a fixture: same outcome replaces and says so, reworded outcome adds and says why, plain add is unchanged. The match-key inline parser was replaced with plan_table_cell after the duplication ratchet flagged it.",
+      "created_at": "2026-08-28T10:07:14Z",
+      "updated_at": "2026-08-28T10:37:50Z"
     },
     {
       "id": "T0",

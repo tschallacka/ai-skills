@@ -33,10 +33,10 @@ id="${1:-}"; [ -n "$id" ] && shift || {
 }
 
 status_val="" pri_val="" note_val="" detail_val="" blocked_val=""
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-running when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it reads and writes the JSON registers); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -55,12 +55,12 @@ done
 [ -n "$status_val$pri_val$note_val$detail_val$blocked_val" ] \
     || { printf '%s: nothing to set\n' "${0##*/}" >&2; exit 64; }
 
-jq -e --arg id "$id" '.tasks[]? | select(.id == $id)' "$file" >/dev/null \
+rjq -e --arg id "$id" '.tasks[]? | select(.id == $id)' "$file" >/dev/null \
     || { printf '%s: no task %s\n' "${0##*/}" "$id" >&2; exit 66; }
 
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp "${TMPDIR:-/tmp}/todo-update.XXXXXX")"
-jq --arg id "$id" --arg now "$now" \
+rjq --arg id "$id" --arg now "$now" \
    --arg status "$status_val" --arg pri "$pri_val" --arg note "$note_val" \
    --arg detail "$detail_val" --arg blocked "$blocked_val" '
    .tasks |= map(

@@ -12,6 +12,17 @@ export LC_ALL=C
 # descend, so both layouts find the sibling scripts.
 skill_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scripts_dir="$skill_root/scripts"
+case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64) rjq_dir="$skill_root/bin/x86_64-unknown-linux-musl" ;;
+    Linux:aarch64|Linux:arm64) rjq_dir="$skill_root/bin/aarch64-unknown-linux-musl" ;;
+    Darwin:x86_64) rjq_dir="$skill_root/bin/x86_64-apple-darwin" ;;
+    Darwin:arm64) rjq_dir="$skill_root/bin/aarch64-apple-darwin" ;;
+    *) rjq_dir="$skill_root/bin/x86_64-pc-windows-msvc" ;;
+esac
+if [ -x "$rjq_dir/rjq" ] || [ -x "$rjq_dir/rjq.exe" ]; then
+    PATH="$rjq_dir:$PATH"
+    export PATH
+fi
 plan_dir="${PLAN_DIR:?}"
 route="${ROUTE:-/}"
 

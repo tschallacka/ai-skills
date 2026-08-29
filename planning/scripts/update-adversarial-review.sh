@@ -122,6 +122,9 @@ done
 plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
 review_file="$plan_dir/adversarial-review.md"
+# Captured before the rewrite so the result line can report the delta rather than
+# the verb; an empty set is a fresh table, not an error.
+before_ids="$(plan_review_finding_ids "$review_file")"
 [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file (run create-adversarial-review.sh first)" 66
 
 # The trap is installed before the first write and never released with
@@ -258,4 +261,17 @@ mv "$temporary_file" "$review_file"
 # script's diagnostic, not its result, so it goes to stderr (§10).
 "$script_dir/mint-fix-keys.sh" "$plan_dir" >&2
 
-printf 'Updated findings table in %s\n' "$review_file"
+# The effect, not the verb. This script rewrites the whole table from the rows it
+# is given, so a caller who derives that CSV *from* the table writes the same rows
+# back and reads a success line identical to one that added findings. That is how
+# nine findings went unrecorded for two cycles while six work units cited them by
+# id: the gate can only mint, claim and verify rows that exist, so it reported
+# passed on a table that was missing them (T66).
+new_ids="$(plan_review_finding_ids "$review_file")"
+added="$(comm -13 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$new_ids") | tr '\n' ' ')"
+dropped="$(comm -23 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$new_ids") | tr '\n' ' ')"
+printf 'Updated findings table in %s: %s row(s) in, %s row(s) out' \
+    "$review_file" "$(printf '%s\n' "$before_ids" | grep -c .)" "$(printf '%s\n' "$new_ids" | grep -c .)"
+[ -z "$added" ] || printf '; added %s' "${added% }"
+[ -z "$dropped" ] || printf '; dropped %s' "${dropped% }"
+printf '\n'

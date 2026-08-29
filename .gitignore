@@ -47,3 +47,15 @@ src/chat-server-rs/target/
 # Built chat rust binaries (release/CI builds them; never committed).
 chat/bin/chat-server-rs
 chat/bin/chat-client-rs
+
+# A local `cargo build` drop of the plan-crypt helper, the same developer
+# convenience as chat/runtime/chat-server-rs above. Shipped per-target
+# artifacts live at planning/bin/<target triple>/plan-crypt and are tracked;
+# this bare path is one machine's build and is not.
+planning/bin/plan-crypt
+planning/bin/plan-crypt.exe
+
+# Workstation-only: the per-project deviation notes the project-specificies
+# skill records. The skill ships; what it records about this machine does not.
+project-specificies/*-deviations.md
+

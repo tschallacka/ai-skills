@@ -3,7 +3,7 @@
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `c2b89627d30095f5a6d0461a2d0de731e38fe7d7e37356cf31485262d53a5385`
+> Source SHA-256: `410cd6352184e48362fc9bfafd1cf5f28ecd211b6c58ea80771b526f3683923c`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -259,6 +259,44 @@ excepted.
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
+
+**A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
+assumed rather than confirmed, and what would change if the assumption is wrong.
+It is not a place for open questions — those are § 8 — but for the choices made
+silently, where nobody was asked and the plan proceeded anyway.
+
+The value is at review time. An adversarial reviewer can attack a stated
+assumption; an unstated one is invisible until it turns out to be false, and then
+it reads as a defect in the work rather than a decision nobody recorded. One
+comparable run made five interpretations that were only written down afterwards,
+in a postmortem, once they had already shaped the plan.
+
+**A reviewer report records what the cycle cost.** The review-scope block carries
+the reviewer's session id, the wall time, and the number of findings this cycle
+produced. The session id is what lets a claim be traced to the run that made it;
+the other two are the only signal anyone has that a review is converging.
+
+A falling findings count across cycles means the plan is improving. A flat one
+means the cycles are not finding less, and the plan may not be the thing at
+fault — one comparable run reached seventeen cycles and 41.7 million tokens
+before anyone asked that question, because no cycle recorded what it had cost.
+Nothing enforces a ceiling; the point is that the number is visible when someone
+decides whether to run another.
+
+**A reviewer runs `--check` on its own rows before handing them over.** The shape
+gate and the mint preview already run on the write path, so a malformed row can
+never land — but it fails at *consumption*, which is after the reviewer has
+finished and left. The coordinator is then holding a refusal about rows it did
+not write, and the one session that could explain the intent is gone. One command
+before returning moves the refusal to where it can be answered:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --check
+```
+
+The commonest cause is a row naming more than one work unit in the Work unit
+cell, which the fix-key gate cannot mint. One primary unit per finding; if a
+finding genuinely spans two, it is two findings that cross-reference each other.
 
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys

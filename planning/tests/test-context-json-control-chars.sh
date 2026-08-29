@@ -2,7 +2,7 @@
 # MODE: DEV
 # test-context-json-control-chars.sh — the reader's JSON must be parseable for
 # any document content. JSON forbids every character in U+0000-U+001F inside a
-# string, so one tab made the whole payload unreadable: jq stops with "control
+# string, so one tab made the whole payload unreadable: rjq stops with "control
 # characters ... must be escaped" and yields nothing.
 #
 # Reachable through the sanctioned flow, not only by hand-editing a document:
@@ -20,8 +20,8 @@ scripts_dir="$repo_root/planning/scripts"
 source "$tests_dir/lib-test.sh"
 t_begin
 
-command -v jq >/dev/null 2>&1 || {
-    printf 'test-context-json-control-chars: UNCONFIGURED (jq) — the point is that jq can read it\n' >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf 'test-context-json-control-chars: UNCONFIGURED (rjq) — the point is that rjq can read it\n' >&2
     exit 0
 }
 
@@ -42,7 +42,7 @@ reinit() { rm -rf "$plan/context"; "$scripts_dir/plan-context.sh" init --plan-di
 
 # ---- a clean document is passed through untouched ---------------------------
 reinit
-clean_content="$(read_json --document plan | jq -r '.content')"
+clean_content="$(read_json --document plan | rjq -r '.content')"
 [ -n "$clean_content" ] || t_fail 'could not read the content of a clean document'
 
 # ---- a tab and an exotic control character, written by the helper -----------
@@ -54,8 +54,8 @@ grep -q "$tab" "$plan/plan-description.md" \
 
 reinit
 payload="$(read_json --document plan)"
-if printf '%s' "$payload" | jq . >/dev/null 2>&1; then :; else
-    t_fail 'jq cannot parse the payload for a document containing a tab'
+if printf '%s' "$payload" | rjq . >/dev/null 2>&1; then :; else
+    t_fail 'rjq cannot parse the payload for a document containing a tab'
 fi
 
 # The named escape for a tab, and the six-character form for one that has none.
@@ -68,9 +68,9 @@ case "$payload" in
     *) t_fail 'the vertical tab was not emitted in the escaped unicode form' ;;
 esac
 
-# Escaping belongs on the wire only: what jq hands back must be the document's
+# Escaping belongs on the wire only: what rjq hands back must be the document's
 # own bytes, or the reader is lossy instead of merely well-formed.
-decoded="$(printf '%s' "$payload" | jq -r '.content')"
+decoded="$(printf '%s' "$payload" | rjq -r '.content')"
 case "$decoded" in
     *"tab[${tab}] vertical[${vertical_tab}] done."*) ;;
     *) t_fail 'the decoded content no longer holds the original control bytes' ;;
@@ -79,8 +79,8 @@ esac
 # ---- every view stays parseable --------------------------------------------
 for view_spec in '--document inventory' '--document coverage' '--document progress' '--unit W01'; do
     # shellcheck disable=SC2086
-    if read_json $view_spec | jq . >/dev/null 2>&1; then :; else
-        t_fail "jq cannot parse the payload for: $view_spec"
+    if read_json $view_spec | rjq . >/dev/null 2>&1; then :; else
+        t_fail "rjq cannot parse the payload for: $view_spec"
     fi
 done
 

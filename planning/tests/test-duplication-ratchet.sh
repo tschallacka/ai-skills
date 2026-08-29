@@ -81,26 +81,23 @@ markers="$( { grep -rl '# DEDUPE:' --include='*.sh' "$root/.." 2>/dev/null || tr
 [ "$markers" -eq 0 ] \
     || note_fail "$markers file(s) reintroduced a '# DEDUPE:' comment; record it in MAINTAINER.md section 3 instead"
 
-# ── Deliberate duplicates that must stay byte-identical ──────────────────────
-# Not everything duplicated should shrink. These pairs are intentionally copied
-# and are only correct while they match; a silent divergence is the failure.
-assert_identical() {
-    local label="$1" fn="$2" a="$3" b="$4"
-    local left right
-    left="$(awk "/^${fn}\\(\\)/,/^}/" "$a")"
-    right="$(awk "/^${fn}\\(\\)/,/^}/" "$b")"
-    if [ -z "$left" ] || [ -z "$right" ]; then
-        note_fail "$label: could not extract $fn() from both files"
-    elif [ "$left" != "$right" ]; then
-        note_fail "$label: $fn() has diverged between $(basename "$a") and $(basename "$b")"
+# ── Duplicates that were retired rather than pinned ──────────────────────────
+# There was an assert_identical helper here, holding one pair — the fix-key
+# derivation — to being byte-identical in two files. The pair is gone, so the
+# helper went with it rather than sitting unused waiting for a caller.
+#
+# The fix-key derivation used to be a byte-identical pair asserted here: a copy
+# of fix_key() in mint-fix-keys.sh and another in verify-fix-keys.sh, each under
+# a comment saying it must match the other. It is now one plan_fix_key in
+# plan-core-lib.sh, so there is nothing left to keep in step -- the duplicate is
+# gone rather than pinned. What has to be checked instead is that neither script
+# grows a private copy back, since a copy would compile and run and only differ
+# in the digest it produces.
+for fix_key_script in mint-fix-keys.sh verify-fix-keys.sh; do
+    if grep -q '^fix_key() {' "$scripts/$fix_key_script"; then
+        note_fail "$fix_key_script defines a local fix_key() again; the derivation is plan_fix_key in plan-crypt-lib.sh"
     fi
-}
-
-# A fix key is SHA-256 over (secret)(sid|finding|unit), secret first (T16
-# retired HMAC). If the minting and verifying derivations drift, every
-# previously minted key silently stops verifying.
-assert_identical 'fix-key derivation' fix_key \
-    "$scripts/mint-fix-keys.sh" "$scripts/verify-fix-keys.sh"
+done
 
 # The table must actually exist and name every capped row, so the caps and the
 # prose cannot drift apart.

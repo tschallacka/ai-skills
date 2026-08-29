@@ -374,7 +374,7 @@ hits). Use it before a paragraph-level edit to confirm the target is unique:
 **Worked examples:**
 ```bash
 # every document mentioning a phrase, machine-readable:
-plan-content.sh find <plan> "<pattern>" --in all --format json | jq -r '.matches[].document'
+plan-content.sh find <plan> "<pattern>" --in all --format json | rjq -r '.matches[].document'
 
 # did a fix land at THIS surface (not merely somewhere in the plan)?
 plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
@@ -388,7 +388,7 @@ plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
 zero **or** multiple matches — deliberately (a unique target is the goal).
 "Exit 1 with matches present" means *narrow the pattern*, not *error*, so a
 caller checking only the exit code will misread it. With `json`,
-`jq '.matches | length'` gives the count directly.
+`rjq '.matches | length'` gives the count directly.
 
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
@@ -896,6 +896,44 @@ it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
 
+**A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
+assumed rather than confirmed, and what would change if the assumption is wrong.
+It is not a place for open questions — those are § 8 — but for the choices made
+silently, where nobody was asked and the plan proceeded anyway.
+
+The value is at review time. An adversarial reviewer can attack a stated
+assumption; an unstated one is invisible until it turns out to be false, and then
+it reads as a defect in the work rather than a decision nobody recorded. One
+comparable run made five interpretations that were only written down afterwards,
+in a postmortem, once they had already shaped the plan.
+
+**A reviewer report records what the cycle cost.** The review-scope block carries
+the reviewer's session id, the wall time, and the number of findings this cycle
+produced. The session id is what lets a claim be traced to the run that made it;
+the other two are the only signal anyone has that a review is converging.
+
+A falling findings count across cycles means the plan is improving. A flat one
+means the cycles are not finding less, and the plan may not be the thing at
+fault — one comparable run reached seventeen cycles and 41.7 million tokens
+before anyone asked that question, because no cycle recorded what it had cost.
+Nothing enforces a ceiling; the point is that the number is visible when someone
+decides whether to run another.
+
+**A reviewer runs `--check` on its own rows before handing them over.** The shape
+gate and the mint preview already run on the write path, so a malformed row can
+never land — but it fails at *consumption*, which is after the reviewer has
+finished and left. The coordinator is then holding a refusal about rows it did
+not write, and the one session that could explain the intent is gone. One command
+before returning moves the refusal to where it can be answered:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --check
+```
+
+The commonest cause is a row naming more than one work unit in the Work unit
+cell, which the fix-key gate cannot mint. One primary unit per finding; if a
+finding genuinely spans two, it is two findings that cross-reference each other.
+
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
@@ -1026,7 +1064,7 @@ directory (`bin/`, `sbin/`, `.bin/`, `Scripts/` — covering `vendor/bin/`,
 `node_modules/.bin/`, `.venv/bin/`), or a first token in the small universal
 core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
 points — arguments strengthen a candidate but never qualify a span on their
-own. Data/markup extensions (the jq-matched list in
+own. Data/markup extensions (the rjq-matched list in
 `never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
 `:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
 without a bin-like segment) never flag. Each registered command's first token
@@ -1278,6 +1316,7 @@ ordering prose that accompanies recorded dependency edges.
 "$PLANNING_SKILL_DIR/scripts/update-step.sh" <goal-directory> <step-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-progress.sh" <goal-directory>
 "$PLANNING_SKILL_DIR/scripts/render-plan-overview.sh" <plan-directory> [--watch]   # one-file html dashboard: state, donut, goal bars, feedback cycles, narration
+"$PLANNING_SKILL_DIR/scripts/render-plans-board.sh" [--root <plans-root>] [--out FILE]   # one-file html board across EVERY plan in the root: lifecycle, steps, findings, review, last activity, and a link into each plan's own overview
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> in-progress
 "$PLANNING_SKILL_DIR/scripts/update-plan-progress.sh" <plan-directory> <goal-name> completed
 "$PLANNING_SKILL_DIR/scripts/update-plan-content.sh" --title <plan-directory> plan "<title>"

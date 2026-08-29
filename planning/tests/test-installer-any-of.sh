@@ -97,32 +97,46 @@ else
         || note_fail 'a soft group miss blocked the planning install'
 fi
 
-# ── single-tool strengths are untouched: jq hard blocks, openssl soft warns ──
+# ── the bundled rjq removes the former hard external dependency ───────────────
 jqless_bin="$temporary_root/bin-jqless"
-build_hidden_path "$jqless_bin" jq
-target_jq="$temporary_root/target-jq"
+build_hidden_path "$jqless_bin" rjq
+target_jq="$temporary_root/target-rjq"
 mkdir -p "$target_jq"
 set +e
 PATH="$jqless_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
-    --skill planning --target "$target_jq" --yes >/dev/null 2>"$temporary_root/err-jq" </dev/null
+    --skill planning --target "$target_jq" --yes >/dev/null 2>"$temporary_root/err-rjq" </dev/null
 hard_rc=$?
 set -e
-[ "$hard_rc" -ne 0 ] || note_fail 'a hard single requirement no longer blocks the install'
-grep -Fq 'jq' "$temporary_root/err-jq" || note_fail 'the hard block did not name jq'
+[ "$hard_rc" -eq 0 ] || note_fail 'the bundled rjq did not allow the install'
+[ -f "$target_jq/planning/SKILL.md" ] || note_fail 'the planning skill was not installed with bundled rjq'
 
-opensslless_bin="$temporary_root/bin-sslg"
-build_hidden_path "$opensslless_bin" openssl
-target_ssl="$temporary_root/target-ssl"
-mkdir -p "$target_ssl"
+# The soft single requirement was planning's openssl until plan-crypt replaced
+# it and the row left planning/requires.tsv. merge-request-etiquette's `git` is
+# the remaining ungrouped soft row that applies on every platform, so the arm
+# moved there rather than being dropped: an ungrouped soft miss must still warn
+# by name and still install, and nothing else covers that shape.
+gitless_bin="$temporary_root/bin-gitless"
+build_hidden_path "$gitless_bin" git
+target_soft="$temporary_root/target-soft"
+mkdir -p "$target_soft"
 set +e
-PATH="$opensslless_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
-    --skill planning --target "$target_ssl" --yes >"$temporary_root/out-ssl" 2>"$temporary_root/err-ssl" </dev/null
+PATH="$gitless_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
+    --skill merge-request-etiquette --target "$target_soft" --yes \
+    >"$temporary_root/out-soft" 2>"$temporary_root/err-soft" </dev/null
 soft_rc=$?
 set -e
 [ "$soft_rc" -eq 0 ] || note_fail "a soft single requirement changed the exit status: rc=$soft_rc"
-grep -Fq 'openssl' "$temporary_root/err-ssl" \
+grep -Fq 'git' "$temporary_root/err-soft" \
     || note_fail 'the soft single requirement was not warned about'
-[ -f "$target_ssl/planning/SKILL.md" ] || note_fail 'a soft single miss blocked the planning install'
+[ -f "$target_soft/merge-request-etiquette/SKILL.md" ] \
+    || note_fail 'a soft single miss blocked the install'
+
+# And planning now declares no ungrouped soft requirement at all, which is the
+# point of shipping plan-crypt: a static binary asks the target machine for
+# nothing, so the openssl row went away rather than moving.
+if awk -F'\t' '$1 == "openssl" { found = 1 } END { exit !found }' "$repo_dir/planning/requires.tsv"; then
+    note_fail 'planning/requires.tsv declares openssl again'
+fi
 
 # ── the generated artifact matches its sources ───────────────────────────────
 # One retry: the check is a pure regenerate-and-diff, so only genuine drift

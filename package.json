@@ -1,6 +1,6 @@
 {
   "name": "@tschallacka/ai-skills",
-  "version": "1.4.2",
+  "version": "2.0.0-alpha.1",
   "description": "Reusable skills and an installer for coding agents",
   "license": "MIT",
   "repository": {

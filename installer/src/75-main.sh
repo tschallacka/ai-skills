@@ -12,6 +12,7 @@
 # chosen roots — are printed at the end of the run rather than there.
 if [ -n "$CLI_MODE" ]; then
     download_source
+    prepend_bundled_rjq
     case "$CLI_MODE" in
         print) cli_print_skill_files ;;
         resolve) cli_resolve_source ;;
@@ -24,12 +25,13 @@ if [ -z "$SKILL_SELECTION" ] || [ -z "$TARGET_SELECTION" ]; then
     show_splash
 fi
 select_skills
+download_source
+prepend_bundled_rjq
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
 # PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
 # 3.2 treats the empty expansion as unbound under set -u.
 SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})
 select_targets
-download_source
 
 if [ "${#SELECTED_SKILLS[@]}" -eq 0 ]; then
     echo >&2

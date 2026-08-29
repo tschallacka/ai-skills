@@ -38,17 +38,18 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
     'Caps CPU and memory for demanding tool runs.'
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
-    'A nested queue of work in one JSON file, read with jq.'
+    'A nested queue of work in one JSON file, read with rjq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -81,7 +82,7 @@ Skip it for small or fully specified changes, where the discussion costs more th
 The implementer analyses its own work, an independent agent proposes alternatives, and a critical agent attacks both.
 It ends in concrete proposed fixes rather than a verdict.
 Not a substitute for the pre-implementation adversarial review, which asks a different question: this one sees the code that exists.'
-    'A nested queue of work in one JSON file, read and written with jq.
+    'A nested queue of work in one JSON file, read and written with rjq.
 For work that outlives the conversation and must survive a restart, a handoff or a compaction.
 Every task carries its status and its detail, so a cold reader knows what was intended and what is left.
 Not for the steps of a task already in progress, and not for defects -- those belong in the bug register.'
@@ -97,6 +98,10 @@ History is additive: an agent fetches the messages after id N via the FETCH exte
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
+The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
+The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
+Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

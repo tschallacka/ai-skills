@@ -1,5 +1,4 @@
 # MODE: DEV
-# PACKAGE: PROD
 [workspace]
 resolver = "2"
 members = [

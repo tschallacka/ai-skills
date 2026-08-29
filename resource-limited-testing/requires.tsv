@@ -15,8 +15,8 @@
 #              and warns which capability is lost
 #   why        one line naming the capability that is lost without the tool
 #
-# Line-oriented TSV rather than JSON on purpose: jq is itself declared here, so a
-# format that needed jq to read it could not be read on the machine that is
+# Line-oriented TSV rather than JSON on purpose: rjq is itself declared here, so a
+# format that needed rjq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
 tool	condition	strength	why
 bash	*:*	hard	the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command

@@ -18,7 +18,7 @@ set -euo pipefail
 #     language-agnostic — the registry itself is the vocabulary.
 extensions_file="$skill_root/never-executable-extensions.json"
 
-never_executable_ext() {  # rule 5: jq membership on the lowercase extension
+never_executable_ext() {  # rule 5: rjq membership on the lowercase extension
     local seg ext
     seg="$(printf '%s\n' "$1" | awk '{ print $NF }')"
     seg="${seg%/}"
@@ -26,7 +26,7 @@ never_executable_ext() {  # rule 5: jq membership on the lowercase extension
     ext=".${seg##*.}"
     # PORTABILITY(case-conversion)
     ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
-    jq -e --arg ext "$ext" 'index($ext)' "$extensions_file" >/dev/null 2>&1
+    rjq -e --arg ext "$ext" 'index($ext)' "$extensions_file" >/dev/null 2>&1
 }
 
 command_spans() {
@@ -107,7 +107,7 @@ command_disqualified() {  # report 20 §4 rules 5-8
     token="$(span_token "$1")"
     rest="$(span_rest "$1")"
     # rule 5: never-executable data/markup extension on the last segment
-    # (jq membership in never-executable-extensions.json, lowercased)
+    # (rjq membership in never-executable-extensions.json, lowercased)
     if never_executable_ext "$1"; then
         return 0
     fi
@@ -137,7 +137,7 @@ registered_command() {
         if [ "$span" = "$cmd" ] || [[ "$span" == "$cmd "* ]]; then
             return 0
         fi
-    done < <(jq -r '. | to_entries[] | .value.cmd' "$commands_file" 2>/dev/null || true)
+    done < <(rjq -r '. | to_entries[] | .value.cmd' "$commands_file" 2>/dev/null || true)
     return 1
 }
 
@@ -146,7 +146,7 @@ plan_validate_commands() {
     [ -f "$commands_file" ] || return 0
     # Small cross-language core; everything else comes from the registry.
     core_words='git make docker sh bash zsh env sudo npx'
-    registered_words="$(jq -r '. | to_entries[] | .value.cmd' "$commands_file" 2>/dev/null \
+    registered_words="$(rjq -r '. | to_entries[] | .value.cmd' "$commands_file" 2>/dev/null \
         | awk '{ print $1 }' | sort -u)"
     for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
         plan_map_load unit_goal "$id" || plan_map_value=""

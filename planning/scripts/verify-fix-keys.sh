@@ -75,24 +75,10 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$plan_dir" ] || usage
 
-# fix_key SECRET MESSAGE — lowercase hex SHA-256 over SECRET||MESSAGE.
-# The secret is always 64 lowercase hex chars, so the concatenation has exactly
-# one split and needs no separator. HMAC was retired (T16): the gate exists to
-# stop accidental self-certification by an agent that can read the secret
-# anyway, so a plain keyed digest through the repo's standard SHA-256 chain
-# removes the last hard dependency without weakening what the gate is for.
-# Keys minted under the retired HMAC scheme do not verify and must be re-minted.
-# Must stay byte-identical to the derivation in mint-fix-keys.sh.
-fix_key() {
-    local secret="$1" message="$2"
-    if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s%s' "$secret" "$message" | sha256sum | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        printf '%s%s' "$secret" "$message" | shasum -a 256 | awk '{print $1}'
-    else
-        printf '%s%s' "$secret" "$message" | openssl dgst -sha256 | awk '{print $NF}'
-    fi
-}
+# The derivation itself is plan_fix_key in plan-crypt-lib.sh, shared with
+# mint-fix-keys.sh. It used to be a copy in each script under a comment saying
+# the two must stay byte-identical; one definition is the mechanism that
+# comment was asking for.
 
 verify_fix_keys() {
     local plan_dir="$1"
@@ -127,10 +113,11 @@ verify_fix_keys() {
 
     # Refuse with 69 rather than report a mismatch that is really a missing
     # tool. The check sits after the ungated early-returns so an ungated plan
-    # still passes with no hash tool installed.
-    command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || \
-        command -v openssl >/dev/null 2>&1 || \
-        plan_die 'no SHA-256 tool available (need sha256sum, shasum, or openssl) to verify fix keys' 69
+    # still passes with no hash tool installed. Probing plan_sha256_hex on empty
+    # input is the preflight, so it cannot drift from the chain the derivation
+    # actually walks.
+    plan_sha256_hex < /dev/null > /dev/null 2>&1 || \
+        plan_die "no SHA-256 implementation available (need $(plan_sha256_chain)) to verify fix keys" 69
 
     secret_file="$(printf '%s/review-fix-keys/%s/secret\n' "$(planning_tmpdir)" "$session_id")"
     [ -f "$secret_file" ] || plan_die "session secret missing: $secret_file (was the session invalidated at approval?)"
@@ -156,7 +143,7 @@ verify_fix_keys() {
             warnings=$((warnings + 1))
             continue
         fi
-        expected="$(fix_key "$secret" "$session_id|$fid|$wu")"
+        expected="$(plan_fix_key "$secret" "$session_id|$fid|$wu")"
         if [ "$expected" != "$key" ]; then
             printf 'fix key mismatch for %s/%s (forged or stale key)\n' "$fid" "$wu" >&2
             failures=$((failures + 1))

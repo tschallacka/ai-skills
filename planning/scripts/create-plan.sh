@@ -125,6 +125,7 @@ trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
     printf '## Risks and open questions\n\n§ 8.1\n<items that could affect execution>\n\n'
     printf '## Environment facts\n\n§ 9.1\n<host or URL to verify on, auth route, and the order in which steps verify against the running application>\n\n'
     printf '## Approach decisions\n\n§ 10.1\n<mechanism choices as prose: where each change lives and why, and alternatives considered and rejected>\n\n'
+    printf '## Assumptions\n\n§ 11.1\n<what was assumed rather than confirmed, and what would change if it is wrong>\n\n'
     printf '## UI classification\n\n- UI affected: no\n- Rationale: <why>\n\n'
     printf '## Adversarial review\n\n- Artifact: `adversarial-review.md`\n- Status: 💤 pending\n'
 } > "$temporary_file"
@@ -207,3 +208,12 @@ if [ "$git_available" = true ]; then
 fi
 trap - EXIT
 printf 'Created %s\n' "$plan_dir"
+
+# Which build of the skill just created this plan, and a warning if it is an
+# installed copy behind a canonical checkout. Stated at creation rather than
+# left to be discovered: a copy 290 lines adrift behaved like a working skill
+# until a reader concluded the reader was missing a feature and patched around
+# it (T52). The provenance line goes to stdout with the result; the drift
+# warning to stderr, since it is a diagnostic and not the result.
+plan_skill_provenance "$script_dir/.." || true
+plan_warn_skill_drift "$script_dir/.."

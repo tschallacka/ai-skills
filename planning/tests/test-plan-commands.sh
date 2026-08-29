@@ -82,7 +82,15 @@ step_update_output="$temporary_root/step-update-output.log"
 "$script_dir/update-plan-content.sh" --step-section "$plan_dir" \
     01-sync/01-step-update-status objective \
     -p 4.1: 'Update both status fields atomically.' 2>"$step_update_output"
-grep -Fq 'Reminder: testing instructions already exist at ' "$step_update_output"
+# The companion was written after the step's last change, so it is current and
+# the reminder stays silent. It used to fire whenever a companion merely existed,
+# which made it true on every step edit and useless for spotting the edit that
+# left one behind (T67); test-step-testing-reminder.sh covers both directions.
+[ ! -s "$step_update_output" ] || {
+    printf 'test-plan-commands.sh:%s: a current companion should not draw a reminder, got: %s\n' \
+        "$LINENO" "$(cat "$step_update_output")" >&2
+    exit 1
+}
 "$script_dir/add-coverage.sh" "$plan_dir" 'Status fields are synchronized.' W01 \
     'The update command owns the mutation.'
 "$script_dir/add-coverage.sh" "$plan_dir" 'The synchronized state is validated.' W02 \
@@ -844,7 +852,7 @@ fi
 # Every in-document placeholder the templates can emit must be registered; CLI
 # usage/arg tokens are not document placeholders and must stay out.
 registry="$script_dir/../placeholders.json"
-jq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
+rjq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
     echo 'placeholders.json is not a JSON array.' >&2; exit 1
 }
 # (1) Every registered token is a well-formed <...> literal.
@@ -853,7 +861,7 @@ while IFS= read -r tok; do
         '<'*'>') ;;
         *) echo "registry entry is not a <...> token: $tok" >&2; exit 1 ;;
     esac
-done < <(jq -r '.placeholders[].token' "$registry")
+done < <(rjq -r '.placeholders[].token' "$registry")
 # (2) Every authoring-template in-document placeholder is registered.
 missing=0
 for t in \
@@ -871,13 +879,13 @@ for t in \
     '<what the next named work unit can rely on>' '<one concrete change>' \
     '<outcome>' '<why this work unit covers it>' '<verbatim or precise summary>' \
     '<what was checked>' '<why no unresolved work remains>'; do
-    jq -e --arg t "$t" '.placeholders[] | select(.token == $t)' "$registry" >/dev/null 2>&1 || {
+    rjq -e --arg t "$t" '.placeholders[] | select(.token == $t)' "$registry" >/dev/null 2>&1 || {
         echo "registry missing emitted placeholder: $t" >&2; missing=1
     }
 done
 # (3) The generated-artifact placeholders are registered as surface:generated.
 for t in '<short description>' '<required only when this goal has one permitted work unit>'; do
-    surf="$(jq -r --arg t "$t" '.placeholders[] | select(.token == $t) | .surface' "$registry" 2>/dev/null)"
+    surf="$(rjq -r --arg t "$t" '.placeholders[] | select(.token == $t) | .surface' "$registry" 2>/dev/null)"
     [ "$surf" = generated ] || { echo "registry: $t must be surface=generated (got '$surf')" >&2; missing=1; }
 done
 [ "$missing" -eq 0 ] || exit 1

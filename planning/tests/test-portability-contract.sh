@@ -27,8 +27,8 @@ generator="$repo_root/generate-portability.sh"
 
 note_fail() { printf 'portability: %s\n' "$1" >&2; t_record "$1"; }
 
-command -v jq >/dev/null 2>&1 || {
-    printf 'portability: UNCONFIGURED (jq)\n' >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf 'portability: UNCONFIGURED (rjq)\n' >&2
     exit 64
 }
 [ -f "$rules" ] || { note_fail "missing $rules"; exit 1; }
@@ -54,12 +54,20 @@ in_allowlist() {
         # compares declarations against; naming a tool is not requiring it.
         ./installer/build.sh:python3-shipped) return 0 ;;
         ./installer/build.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
-        # Fix keys probe the same sha256sum->shasum->openssl chain (T16): the
-        # minter, the verifier and their key tests each name what they may use.
-        ./planning/scripts/mint-fix-keys.sh:sha256-tool) return 0 ;;
-        ./planning/scripts/verify-fix-keys.sh:sha256-tool) return 0 ;;
+        # There is now one probe in the skill, and this is it: plan_sha256_hex
+        # chooses between the compiled plan-crypt binary, the GNU form and the
+        # BSD form, so it must name all three. It lives in one function file and
+        # is compiled into plan-crypt-lib.sh, so both spellings are exempt --
+        # the same arrangement plan_stat_probe.sh has above.
+        # mint-fix-keys.sh, verify-fix-keys.sh, plan-context-lib.sh and
+        # generate-reviewer.sh each held their own copy of the chain and were
+        # each exempt; they call plan_sha256_hex now and name no tool, so their
+        # exemptions went with the copies.
+        ./planning/scripts/lib/crypt/plan_sha256_hex.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/lib/crypt/plan_sha256_chain.sh:sha256-tool) return 0 ;;
+        ./planning/scripts/plan-crypt-lib.sh:sha256-tool) return 0 ;;
+        # Pins the rungs to each other, so it has to name them.
+        ./planning/tests/test-plan-crypt.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-fix-keys.sh:sha256-tool) return 0 ;;
         ./planning/tests/test-add-fix-claim.sh:sha256-tool) return 0 ;;
         # The generated dependency tables name every optional runtime they may
@@ -81,6 +89,7 @@ in_allowlist() {
         # The overview serve script names its runtime chain (T43a); the
         # generated installer tables name optional runtimes for verify/hint.
         ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
+
     esac
     return 1
 }
@@ -113,7 +122,7 @@ while IFS= read -r file; do
         [ -n "$hit" ] || continue
         line="${hit%%:*}"
         id="${hit#*:}"
-        if ! jq -e --arg i "$id" '.rules[]|select(.id==$i)' "$rules" >/dev/null 2>&1; then
+        if ! rjq -e --arg i "$id" '.rules[]|select(.id==$i)' "$rules" >/dev/null 2>&1; then
             note_fail "$file:$line names unknown rule id '$id' (add it to portability-rules.json)"
         fi
     done < <(awk '/# PORTABILITY\(/ {
@@ -171,7 +180,7 @@ while IFS="$(printf '\t')" read -r rule_id detect; do
         reported="$reported $file"
         note_fail "$file uses banned construct '$rule_id' at line $line — see PORTABILITY.md"
     done < <(cd "$stripped_root" && grep -rnE -- "$detect" . 2>/dev/null || true)
-done < <(jq -r '.rules[] | select(.detect != null) | "\(.id)\t\(.detect)"' "$rules")
+done < <(rjq -r '.rules[] | select(.detect != null) | "\(.id)\t\(.detect)"' "$rules")
 rm -rf "$stripped_root" "$scan_files"
 
 # 5. A foreign checkout under the repo does not reach the catalogue. An agent

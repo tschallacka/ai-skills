@@ -1,0 +1,7 @@
+# MODE: DEV
+[toolchain]
+# The same pin src/chat-server-rs and src/tony-the-pony carry: one compiler for
+# the repository, so a lint never fails on a contributor's newer toolchain alone.
+channel = "1.97"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

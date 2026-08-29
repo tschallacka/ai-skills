@@ -305,6 +305,33 @@ plan_resolve_symlink() {
     printf '%s\n' "$path"
 }
 
+# plan_skill_provenance SKILL_DIR — one line naming which build of the planning
+# skill is running, on stdout. Empty and non-zero when it cannot tell.
+#
+# The failure this answers was silent: an installed copy 290 lines adrift of
+# canonical looked and behaved like a working skill, and the drift only surfaced
+# when a reader concluded the reader itself was missing a feature and hand-
+# patched around it (T52). Nothing anywhere said which build was speaking.
+#
+# Two shapes. A checkout reports its commit, which is exact. An installed copy
+# reports what the installer recorded in .version at install time, which is the
+# commit it was BUILT from and says nothing about what canonical holds now — so
+# the wording distinguishes them rather than printing one number for both.
+plan_skill_provenance() {
+    local dir="$1" head marker package commit
+    if head="$(git -C "$dir" rev-parse --short HEAD 2>/dev/null)"; then
+        printf 'planning skill: checkout at %s\n' "$head"
+        return 0
+    fi
+    marker="$dir/.version"
+    [ -f "$marker" ] || return 1
+    package="$(sed -n 's/^package_version=//p' "$marker" | head -1)"
+    commit="$(sed -n 's/.*commit:\([0-9a-f]*\).*/\1/p' "$marker" | head -1)"
+    [ -n "$package$commit" ] || return 1
+    printf 'planning skill: installed build %s, from commit %s\n' \
+        "${package:-unknown}" "${commit:-unknown}"
+}
+
 # The repository that owns this plan's snapshots, as create-plan.sh pinned it in
 # PLAN_SNAPSHOT_REPO. Returns 1 when there is none, which is the honest answer
 # for a plan versioned in a repository the user owns: plan snapshots do not
@@ -347,6 +374,31 @@ plan_track_tmp() {
 
 plan_warn() {
     printf 'WARN: %s\n' "$*" >&2
+}
+
+# plan_warn_skill_drift SKILL_DIR — warn on stderr when the running skill is an
+# installed copy built from a commit that a reachable canonical checkout does
+# not contain. Silent when it cannot tell, which is most of the time.
+#
+# AI_SKILLS_REPO names the canonical checkout. Without it there is nothing to
+# compare against and the check does not guess: a wrong warning about staleness
+# is worse than none, because the response to it is to reinstall.
+plan_warn_skill_drift() {
+    local dir="$1" repo="${AI_SKILLS_REPO:-}" commit
+    [ -n "$repo" ] && [ -e "$repo/.git" ] || return 0
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && return 0
+    commit="$(sed -n 's/.*commit:\([0-9a-f]*\).*/\1/p' "$dir/.version" 2>/dev/null | head -1)"
+    [ -n "$commit" ] || return 0
+    if ! git -C "$repo" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        printf 'planning: this skill was installed from commit %s, which %s does not contain; reinstall before trusting it\n' \
+            "$commit" "$repo" >&2
+        return 0
+    fi
+    git -C "$repo" merge-base --is-ancestor "$commit" HEAD 2>/dev/null || return 0
+    if [ "$(git -C "$repo" rev-list --count "$commit"..HEAD 2>/dev/null)" -gt 0 ]; then
+        printf 'planning: this skill was installed from %s, %s commit(s) behind %s\n' \
+            "$commit" "$(git -C "$repo" rev-list --count "$commit"..HEAD)" "$repo" >&2
+    fi
 }
 
 # Ensure the planning scratch directory exists for this boot. Failure is

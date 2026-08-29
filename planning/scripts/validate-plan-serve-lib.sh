@@ -28,11 +28,11 @@ plan_validate_still_serves() {
     state_indicators=()
     while IFS= read -r registry_line; do
         state_indicators+=("$registry_line")
-    done < <(jq -r '.indicators[]?' "$state_change_registry" 2>/dev/null || true)
+    done < <(rjq -r '.indicators[]?' "$state_change_registry" 2>/dev/null || true)
     serve_phrases=()
     while IFS= read -r registry_line; do
         serve_phrases+=("$registry_line")
-    done < <(jq -r '.serve_phrases[]?' "$state_change_registry" 2>/dev/null || true)
+    done < <(rjq -r '.serve_phrases[]?' "$state_change_registry" 2>/dev/null || true)
     while IFS= read -r goal_name; do
         [ -n "$goal_name" ] || continue
         touched=false

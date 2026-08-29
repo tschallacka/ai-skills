@@ -1,13 +1,13 @@
 ---
 name: todo
-description: Use when work is queued that outlives the conversation and needs to survive a restart, a handoff, or a compaction, so tasks and their sub-tasks live in one JSON file read with jq. Also, when juggling three or more separate work items in sequence, ask the user whether to file them here before starting; never auto-file without asking. Do not use for a short in-chat checklist, for the steps of a task already in progress, for defects (use the bug-report skill), or where a planning skill's plan documents are the right home.
+description: Use when work is queued that outlives the conversation and needs to survive a restart, a handoff, or a compaction, so tasks and their sub-tasks live in one JSON file read with rjq. Also, when juggling three or more separate work items in sequence, ask the user whether to file them here before starting; never auto-file without asking. Do not use for a short in-chat checklist, for the steps of a task already in progress, for defects (use the bug-report skill), or where a planning skill's plan documents are the right home.
 ---
 <!-- MODE: PROD -->
 
 # Todo
 
 A queue of work that outlives the conversation, held in `TODO.json` and read with
-`jq`. Tasks nest: a large task carries sub-tasks, and a sub-task is a task in its
+`rjq`. Tasks nest: a large task carries sub-tasks, and a sub-task is a task in its
 own right that can be finished while its siblings wait.
 
 **JSON, not prose.** A queue is structured data. Statuses have to be derived
@@ -83,7 +83,7 @@ written by an older skill can be recognised before its schema is assumed:
 ```sh
 skill_dir="$(dirname "$(command -v true)")"   # replace with the installed skill's directory
 installed="$(sed -n 's/^package_version=//p' "$skill_dir/.version" 2>/dev/null)"
-recorded="$(jq -r '.skill_version // "unrecorded"' TODO.json)"
+recorded="$(rjq -r '.skill_version // "unrecorded"' TODO.json)"
 if [ -z "$installed" ]; then
     printf 'cannot read the installed version; leaving %s alone\n' TODO.json
 elif [ "$installed" = "$recorded" ]; then
@@ -97,7 +97,7 @@ fi
 Stamp it on every write, next to `updated_at`:
 
 ```sh
-jq --arg v "$installed" '.skill_version = $v' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
+rjq --arg v "$installed" '.skill_version = $v' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
 
 ### Upgrading a file an older skill wrote
@@ -111,11 +111,11 @@ the required and optional fields, the enums, the invariants, and — under
 recorded version differs from the installed one:
 
 ```sh
-jq -r '"required: \(.item.required | join(", "))",
+rjq -r '"required: \(.item.required | join(", "))",
        "enums:    \(.item.fields.status.enum | join("/"))",
        "upgrades from: \(.upgrade_from | keys | join(", ") | if . == "" then "nothing" else . end)"' \
    "$skill_dir/schema.$installed.json"
-jq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
+rjq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
    "$skill_dir/schema.$installed.json"
 ```
 
@@ -135,7 +135,7 @@ says recorded, not forgotten, and not now.
 
 **Flat list, `parent` pointer.** Not nested arrays: appending a sub-task is one
 object at the end of the list, with no walk to find its place and no rewrite of a
-parent. The tree is reconstructed on read, which is `jq`'s job.
+parent. The tree is reconstructed on read, which is `rjq`'s job.
 
 ## Adding a task
 
@@ -143,7 +143,7 @@ Order carries no meaning, so append and stop thinking about it.
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg now "$now" '.tasks += [{
+rjq --arg now "$now" '.tasks += [{
       "id": "T9", "title": "Move the artifact map into the coupling registry",
       "status": "open", "priority": "normal", "parent": null,
       "detail": "Some couplings live only in prose, where nothing can read them.",
@@ -159,7 +159,7 @@ A sub-task is the same call with `parent` set:
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg now "$now" '.tasks += [{
+rjq --arg now "$now" '.tasks += [{
       "id": "T9a", "title": "Move the four generated-artifact rows",
       "status": "open", "priority": "high", "parent": "T9",
       "detail": "The generated files and their builders, which change together.",
@@ -171,8 +171,8 @@ jq --arg now "$now" '.tasks += [{
 A sub-task carries its own priority. A high-priority sub-task under a low-priority
 parent is normal: it is how "one part of this matters now" gets recorded.
 
-**Write to a temp file and rename.** `jq ... TODO.json > TODO.json` truncates the
-file before `jq` reads it, and the queue is gone.
+**Write to a temp file and rename.** `rjq ... TODO.json > TODO.json` truncates the
+file before `rjq` reads it, and the queue is gone.
 
 ## Closing a task
 
@@ -180,7 +180,7 @@ Set the status and say where it got to, in one call.
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg id T9a --arg now "$now" '
+rjq --arg id T9a --arg now "$now" '
   (.tasks[] | select(.id == $id) | .status) = "done"
   | (.tasks[] | select(.id == $id) | .note) = "a1b2c3d, four rows moved"
   | (.tasks[] | select(.id == $id) | .updated_at) = $now' \
@@ -193,7 +193,7 @@ Changing a priority counts as a write:
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg id T9 --arg now "$now" '
+rjq --arg id T9 --arg now "$now" '
   (.tasks[] | select(.id == $id) | .priority) = "urgent"
   | (.tasks[] | select(.id == $id) | .updated_at) = $now' \
   TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
@@ -202,7 +202,7 @@ jq --arg id T9 --arg now "$now" '
 A parent is not closed by its children. Check, then close it deliberately:
 
 ```sh
-jq -r --arg id T9 '[.tasks[] | select(.parent == $id and .status != "done")] as $left
+rjq -r --arg id T9 '[.tasks[] | select(.parent == $id and .status != "done")] as $left
   | if ($left | length) == 0 then $id + " has nothing open under it"
     else $id + " still has: " + ($left | map(.id) | join(", ")) end' TODO.json
 ```
@@ -220,7 +220,7 @@ a row.
 The whole queue as an indented tree:
 
 ```sh
-jq -r '
+rjq -r '
   def glyph: {open:"💤", partly:"⏳", blocked:"⛔", decided:"📌",
               done:"✅", dropped:"✔️", obsolete:"🚫"}[.status] // "❔";
   def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
@@ -260,7 +260,7 @@ moving out from under its parent.
 What is live, one line each:
 
 ```sh
-jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+rjq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   [.tasks[] | select(.status == "open" or .status == "partly" or .status == "blocked")]
   | sort_by(rank, (.id | idkey))[]
@@ -271,14 +271,14 @@ jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""]
 Where things stand, for "what is left":
 
 ```sh
-jq -r '.tasks | group_by(.status)[]
+rjq -r '.tasks | group_by(.status)[]
        | "\(.[0].status): \(length)  \(map(.id) | join(" "))"' TODO.json
 ```
 
 Ready to start — open, with nothing open beneath it:
 
 ```sh
-jq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+rjq -r 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   .tasks as $all
   | [ $all[] | . as $task
@@ -293,7 +293,7 @@ Sorted by priority, so the first line is what to pick up.
 Two details that are load-bearing. `. as $task`, because inside the inner
 `select` a bare `.id` is the inner task's id, so `.parent == .id` is never true
 and the filter passes everything. And `.priority // ""` inside the rank map,
-because `{...}[null]` is a jq error rather than a miss: one row without a
+because `{...}[null]` is a rjq error rather than a miss: one row without a
 priority would otherwise kill the whole render. Inside the inner `select`, `.id` is the inner
 task's id, so `.parent == .id` compares each task's parent to its own id, is
 never true, and the filter silently passes everything.
@@ -301,7 +301,7 @@ never true, and the filter silently passes everything.
 One task in full:
 
 ```sh
-jq -r --arg id T7 '.tasks[] | select(.id == $id) | "
+rjq -r --arg id T7 '.tasks[] | select(.id == $id) | "
 \(.id)  \(.title)
 Status:  \(.status)\(if .blocked_on then "   Waiting on: " + .blocked_on else "" end)
 
@@ -314,7 +314,7 @@ Where it got to: \(.note // "nothing recorded")
 Blocked work and who owes it, which is what a check-in asks for:
 
 ```sh
-jq -r '.tasks[] | select(.status == "blocked")
+rjq -r '.tasks[] | select(.status == "blocked")
        | "\(.id)  \(.title)\n    waiting on: \(.blocked_on // "unrecorded")"' TODO.json
 ```
 
@@ -325,7 +325,7 @@ itself is for the human reading a diff: a new urgent task appearing at the top i
 visible, appended at the bottom it is not.
 
 ```sh
-jq 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+rjq 'def rank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
     .tasks |= sort_by(rank, (.id | idkey))' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json
 ```
@@ -358,7 +358,7 @@ reason. A deleted task takes its reasoning with it.
 ## Validating the file
 
 ```sh
-findings="$(jq -r '
+findings="$(rjq -r '
   (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
   (if (.skill // "") == "" then "the file does not name its schema" else empty end),
   ([.tasks[].id]) as $ids
@@ -374,7 +374,7 @@ findings="$(jq -r '
 [ -z "$findings" ] && echo 'TODO.json is sound' || printf '%s\n' "$findings"
 ```
 
-`jq -e` is wrong here: it exits 4 on empty output, which is the sound case, so a
+`rjq -e` is wrong here: it exits 4 on empty output, which is the sound case, so a
 clean file would look like a failure. Test the output instead.
 
 ## When not to use this

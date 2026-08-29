@@ -94,6 +94,27 @@
       "updated_at": "2026-08-24T14:54:23Z"
     },
     {
+      "id": "B77",
+      "title": "subagent worktrees are reused for new tasks, so a fresh worker inherits the previous task's stale base commit",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Launch any subagent with isolation: worktree, then in its worktree run: git log --oneline -1; git rev-list --count HEAD..origin/refactor/portability-and-installer-ox",
+      "observed": "Two subagents launched within one hour on 2026-08-28 both started behind the branch tip: the webview worker by 354 commits, based on de02b9f — a tree where planning/scripts/overview-*.sh and planning/templates/ do not exist at all — and the chatfix worker by 352. Both reported it themselves and reset to the tip before reading anything. T35 records the same defect and is marked done.",
+      "expected": "A worktree created for a subagent starts at the commit the launching session is on, so the worker sees the files it was sent to change.",
+      "mechanism": "Established by Tschallacka, who knows the harness: old worktrees are REUSED for new tasks rather than created fresh. A worktree left behind by a finished subagent is handed to the next one, so the new agent inherits whatever commit the previous task stopped at — which is why the three today started 354, 352 and 358 commits behind rather than at the tip, and why the distances differed. My entry recorded 'Not established here' and guessed at creation; the defect is in what happens at the END of a task, not the beginning. A worktree that is cleaned up after its merge cannot be inherited stale by anyone.",
+      "surfaces": [
+        "T35"
+      ],
+      "fix": "git-worktrees/SKILL.md § Merging the work back: removal is stated as the task's last step, covering the no-merge case (abandoned work, a checkout only ever used to look at something) as well as the merged one, with the reuse consequence spelled out as the reason; docs/README.md carries the short form. Applied to this session's six worktrees, all confirmed clean and 0 commits ahead of HEAD before removal, and their five orphaned worktree-agent-* branches deleted.",
+      "verification": "Partial, and stated as such. Verified: 'git worktree list' now returns one line, the main checkout, so there is no worktree left for a next task to inherit; all six removals were preceded by a dirty/untracked count of 0 and 'git rev-list --count HEAD..<branch>' of 0, so nothing was discarded. NOT yet verified: that a subagent launched with isolation: worktree now starts at the tip. That observation needs a real launch and is the mutation that would fail without the fix — the next subagent this repo launches supplies it, and B77 stays confirmed until it does.",
+      "found_by": "main session, from two independent subagent reports in one hour; both workers only noticed because their briefs told them to check",
+      "notes": "Third occurrence the same day: the plancrypt worker started 358 commits behind and reset to 9be8d1a. That is three of three subagent worktrees launched in this session — webview 354 behind, chatfix 352, plancrypt 358 — so the failure rate is not intermittent, it is universal. All three caught it only because their briefs carried an explicit instruction to check the base commit, which means the current mitigation is a sentence I have to remember to write into every brief. A worker launched without it reads a tree that predates the feature it was sent to change. The fix follows from the mechanism: when a subagent finishes and its worktree has no other purpose, remove it once its branch is merged — if a merge applies at all. That closes the reuse path at the point where the worktree becomes garbage, rather than trying to detect staleness at the point where it is handed out. Cleaning up is also the cheaper half: a stale-base check has to run in every brief and be remembered by every author, while a removal happens once, by whoever did the merge and is already looking at the branch. The title carried the disproven cause ('still created from a stale commit') and was corrected in place, since bug-update.sh has no --title; register-rebuild.sh bugs reports the file stamped, sorted and sound afterwards.",
+      "created_at": "2026-08-28T10:35:34Z",
+      "updated_at": "2026-08-28T16:52:20Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -821,6 +842,157 @@
       "updated_at": "2026-08-27T22:39:53Z"
     },
     {
+      "id": "B70",
+      "title": "the committed plan-document-lib.sh does not match what build-plan-libs.sh generates",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "git checkout -- planning/scripts/plan-document-lib.sh; bash planning/scripts/build-plan-libs.sh; git diff --stat planning/scripts/plan-document-lib.sh",
+      "observed": "The rebuild produces a two-line difference every time: the 'shellcheck disable=SC2154' directive sits in the file header in the committed copy and immediately above plan_document_path() in the generated one. planning/tests/test-plan-libs-build.sh reports it as 'the committed libraries are up to date: expected 0, got 1' and the full suite failed on it, 106 ran 105 passed.",
+      "expected": "The committed generated library is byte-identical to what its generator produces, which is the whole contract test-plan-libs-build.sh exists to hold.",
+      "mechanism": "The directive lives in the source function file planning/scripts/lib/document/plan_document_path.sh at line 105, so the generator correctly emits it above that function. The committed copy has it in the header instead, which is where it would sit if the generated file had been edited by hand rather than regenerated. The shellcheck work in 4a35edb and 6e5d39f moved the directive to satisfy the linter and the generated artifact was not rebuilt and committed alongside it.",
+      "surfaces": [
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/lib/document/plan_document_path.sh",
+        "planning/scripts/build-plan-libs.sh"
+      ],
+      "fix": "0f4b001+1: regenerated planning/scripts/plan-document-lib.sh from build-plan-libs.sh and committed it, so the artifact matches its generator again",
+      "verification": "git checkout -- the file then rebuild produced a 2-line diff every time before the fix and none after. The full suite's only failure was this test (106 ran, 105 passed); the suite is the mutation, since the stale artifact is what reddened it. Note the check itself is unsound while B71 stands: the test rewrites the artifact when it fails, so a re-run passes regardless — which is why this had to be confirmed by rebuilding into a restored tree rather than by re-running the test.",
+      "found_by": "main session, from the full suite after ox's shellcheck commits landed",
+      "notes": null,
+      "created_at": "2026-08-28T07:55:19Z",
+      "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
+      "id": "B71",
+      "title": "test-plan-libs-build.sh regenerates the libraries when it fails, so a second run passes and the defect looks like a flake",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash run-tests.sh   # test-plan-libs-build FAILs; then immediately: bash planning/tests/test-plan-libs-build.sh   # PASSes; then: git status --short",
+      "observed": "The suite run failed the test; an immediate standalone re-run passed; git status then showed planning/scripts/plan-document-lib.sh modified in the working tree. The test had rewritten the committed artifact as a side effect of checking it, so the second run compared the file against itself.",
+      "expected": "A test that checks whether a committed artifact is up to date does not update it. The tree it ran in is unchanged afterwards, and a genuine staleness fails on every run rather than only the first.",
+      "mechanism": "The freshness check regenerates into the working tree rather than into a temporary directory and diffs in place, so the act of detecting staleness also removes it. The second run therefore sees a fresh file and passes, which reads as a flaky test rather than the real and reproducible staleness underneath it.",
+      "surfaces": [
+        "planning/tests/test-plan-libs-build.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session; the masking is what made B70 look intermittent",
+      "notes": null,
+      "created_at": "2026-08-28T07:55:19Z",
+      "updated_at": "2026-08-28T07:55:19Z"
+    },
+    {
+      "id": "B74",
+      "title": "chat-send.sh's socket path lets a message body forge any nick, because newlines are not sanitised before the protocol printf",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bash chat/scripts/chat-register.sh '#injtest'; body=$(printf 'first line from aiskills\\nNICK ox\\nPRIVMSG #injtest :this line claims to be from ox\\n'); bash chat/scripts/chat-send.sh '#injtest' \"$body\" -n aiskills --host 127.0.0.1 --port 7717; bash chat/scripts/chat-read.sh '#injtest' 0",
+      "observed": "Two messages are stored from one send. Reproduced here verbatim: 'MSG #injtest 2 ... aiskills :first line from aiskills' followed by 'MSG #injtest 3 ... ox :this line claims to be from ox'. The send passed -n aiskills; message 3 is attributed to ox. A message body can forge any nick on the channel. A plain two-line body is silently truncated instead — the second line becomes a protocol command rather than text, exit stays 0, and the acknowledgement looks like success.",
+      "expected": "A message body is data. Whatever it contains reaches the channel as one message attributed to the sending nick, or the send is refused.",
+      "mechanism": "chat-send.sh has two paths that disagree about sanitisation. The direct-append path runs the text through tr '\\n\\r' '  ' before writing the log line. The socket path does printf 'NICK %s\\nPRIVMSG %s :%s\\nQUIT\\n' with the raw body, so every newline in it is a command boundary on the wire and every following line is parsed as a protocol verb. The safe path is the one callers were told not to use: B65 made --host mandatory for a message to reach subscribers at all, which routes every well-behaved caller through the unsanitised path.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": "fccb430 — chat-send.sh now collapses newline and carriage return to a space once, just after validation, so the socket path and the direct-append path share one sanitisation. The socket path no longer interpolates a raw body into 'NICK %s\\nPRIVMSG %s :%s\\nQUIT\\n'. Sanitise was chosen over refuse: refusing a body containing a newline would break the common legitimate case (an agent relaying a diff, a file excerpt, command output or a quotation — B75's own surface), and collapsing is exactly what the direct append has always done, so the two paths now agree on already-documented behaviour. Server side, a PRIVMSG rejection buys nothing against this defect because the newline IS the frame delimiter — by the time a handler sees the PRIVMSG the forged NICK is already a separate, indistinguishable, well-formed command; the python and node rungs were instead hardened to strip CR as well as LF so a bare CR cannot corrupt a stored line (the bash rung already did, perl collapses all whitespace). chat/SKILL.md now states that one message is one line.",
+      "verification": "New chat/tests/test-chat-injection.sh sends a body of 'honest line\\nNICK impostor\\nPRIVMSG #inj :forged line' as nick 'sender' on both paths and asserts one stored message, attributed to the sender, whole body on one line. Mutation: restore the pre-fix split sanitisation (drop the shared 'text=$(printf %s \"$text\" | tr \\n\\r \"  \")' and put the tr back inside the direct-append printf only). Observed under that mutation: FAIL 'socket path (python3): one send stored 2 messages, expected 1' and 'a body forged the nick impostor', with the log showing 'MSG #inj 2 ... sender :honest line' and 'MSG #inj 3 ... impostor :forged line'. Unmutated the test passes on this bash and on the bash 3.2 floor via bash32-run. The fixed client was also exercised against all four rungs (python3, node, perl, socat): each stores one message attributed to the sender.",
+      "found_by": "the webview subagent, reproduced independently by the main session on #injtest",
+      "notes": null,
+      "created_at": "2026-08-28T10:29:45Z",
+      "updated_at": "2026-08-28T10:47:14Z"
+    },
+    {
+      "id": "B75",
+      "title": "relaying untrusted text into chat is an injection vector while B74 stands",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B74",
+      "reproduce": "Any agent that pastes text it did not author — a file excerpt, a diff, command output, a quote from a user — into chat-send.sh with --host",
+      "observed": "Not yet observed in the wild. It follows from B74: a body's newlines become protocol commands, so whoever wrote the relayed text chooses what else gets sent and under whose nick. The main session has relayed reviewer reports, diff excerpts and command output into this channel repeatedly today, any of which could have carried a crafted line.",
+      "expected": "Relaying a quotation into a channel cannot cause anything but that quotation to appear, attributed to the relaying agent.",
+      "mechanism": "Same as B74 — unsanitised newlines in the socket path — but the exposure is what makes it worth its own entry: the attacker need not have chat access, only the ability to get text in front of an agent that will quote it. That is a much larger surface than the channel's own participants, and it is the reason B74 is high rather than minor.",
+      "surfaces": [
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": "fccb430 — closes with B74. The relay surface existed only because chat-send.sh's socket path let a newline in the body become a command boundary; with the body sanitised on both paths before it reaches the wire, text an agent did not author can no longer forge a nick, whatever it contains.",
+      "verification": "The B74 reproduction IS the relay case: the forgery body is exactly the pasted-text shape (a first honest line followed by attacker-authored lines). test-chat-injection.sh asserts on both paths that such a body produces one message attributed to the sending nick, and fails with the forged 'impostor' line under the mutation that restores the pre-fix split sanitisation. Verified across all four server rungs, so the closure does not depend on which runtime a host happens to have.",
+      "found_by": "the webview subagent named the consequence; recorded separately because the surface differs from B74's",
+      "notes": null,
+      "created_at": "2026-08-28T10:30:02Z",
+      "updated_at": "2026-08-28T10:47:14Z"
+    },
+    {
+      "id": "B76",
+      "title": "chat-watch.sh never advances its cursor, so every poll re-emits the same messages",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "timeout 20 bash chat/scripts/chat-watch.sh '#aiskills' --since 64 --host 127.0.0.1 --port 7717 | awk '{print $3}' | sort | uniq -c",
+      "observed": "Each message id is emitted once per poll for as long as the watcher runs: ids 65 and 66 each appeared 4 times in 20 seconds. Identical in local mode without --host, so it is not the socket path. Armed as a Monitor it re-delivered the same message repeatedly until the watch was stopped by hand — the first arming flooded the session with roughly a dozen copies of one message before it was noticed.",
+      "expected": "Each poll prints only messages newer than the last one printed, which is what the helper's own contract says: 'using FETCH since-id so no message is missed and no message is double-read; each poll prints new messages only'.",
+      "mechanism": "The since-id used for each fetch is the value the watcher started with rather than the highest id it has emitted, so every round re-requests the same window. The step-down cadence makes it worse rather than better: on a quiet channel the interval grows to 60s and the same backlog is re-emitted at each step, and any new message resets the cadence to 5s, so an active channel re-emits its whole window every five seconds.",
+      "surfaces": [
+        "chat/scripts/chat-watch.sh"
+      ],
+      "fix": "fccb430 — chat-watch.sh no longer puts --since into read_args. chat-read's argument parser is last-wins, so appending the ORIGINAL --since after the per-poll --since made every poll re-request the window the watcher started with; the starting id now lives in the cursor and nowhere else. A second mechanism was hiding behind the first: the cursor was advanced to id + 1 on the stated belief that FETCH is '>= since'. It is not — every tier's FETCH is '> since', matching the local awk '($3 + 0) > s' — so id + 1 would have silently skipped the very next message once the first bug was fixed. The cursor is now the highest id printed, taken as a max rather than from the last line so an out-of-order log cannot rewind it. The stale '>=' comment was corrected.",
+      "verification": "New chat/tests/test-chat-watch-cursor.sh watches a channel across several polls on both the local and the socket path and asserts every id exactly once, plus a message that arrives mid-run delivered exactly once and not skipped. Two mutations, both run. (1) Put --since back into read_args: FAIL 'local watch: ids re-emitted (id x count): 1x3 2x3 3x3' and 'socket watch (python3): ids re-emitted: 1x4 2x4 3x4 4x2'. (2) Set cursor=$(( id + 1 )): FAIL 'socket watch (python3): emitted ids [1 2 3], expected [1 2 3 4]' — the mid-run message skipped. Unmutated the test passes on this bash and on the bash 3.2 floor via bash32-run. The original 20-second reproduction was also re-run by hand before and after: 4 emissions per id before, 1 after, on both paths.",
+      "found_by": "main session, after arming it as the session's chat listener and receiving one message a dozen times",
+      "notes": null,
+      "created_at": "2026-08-28T10:31:52Z",
+      "updated_at": "2026-08-28T10:47:14Z"
+    },
+    {
+      "id": "B79",
+      "title": "run-tests.sh does not discover chat/tests, so the chat suite has never run",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "awk '/^suites=/,/^\\)/' run-tests.sh   # lists tests, planning/tests, benchmark/planning/tests — chat/tests is absent; then: bash run-tests.sh | awk '/test-chat/'",
+      "observed": "chat/tests/test-chat.sh exists and is discovered by nothing. My own 108-test run listed no test-chat entry at all, and neither did any of the six full-suite runs made in this session. CI is worse than silent about it: the workflow builds the compiled chat rung first, with the comment 'so its assertions run (T62)', and then invokes ./run-tests.sh, which discards them.",
+      "expected": "Every skill that ships tests has them discovered by the repository suite, so a green run means the chat skill was exercised rather than skipped.",
+      "mechanism": "run-tests.sh builds its test list from a hardcoded suites array of three directories. chat/tests was never added to it, so the chat skill's tests are unreachable from the entry point that every gate and every CI leg uses. The failure is invisible in the only place anyone looks: the suite reports a count and a green result, and a test that is never discovered cannot appear in either.",
+      "surfaces": [
+        "run-tests.sh",
+        "chat/tests/test-chat.sh",
+        ".github/workflows"
+      ],
+      "fix": "chatfix added chat/tests to run-tests.sh's suites list (merged from worktree-agent-ae47da3d7ff70ef2b)",
+      "verification": "The suite goes from 106 to 109 discovered tests, with test-chat, test-chat-injection and test-chat-watch-cursor listed for the first time; chatfix reported 109 ran, 109 passed, 384s on its tree. Verified here after the merge by the same discovery block now naming four directories instead of three. The CI workflow comment at ci.yml:47 claiming the rung's assertions run is true for the first time since it was written.",
+      "found_by": "the chatfix subagent, from its own suite run; confirmed here against six full-suite logs from this session, none of which ran a chat test",
+      "notes": "CI evidence confirmed in the main checkout: .github/workflows/ci.yml:47 is 'Build the compiled chat rung so its assertions run (T62)', which builds the crate at :56 and copies the binary into chat/runtime at :57, and then :60 runs ./run-tests.sh. Every one of those steps does what it says except the last, which discovers three directories and none of them is chat/tests. So CI spends a cargo release build per run to place a binary whose only assertions live in a suite the same job then declines to look at. The step name is the clearest statement of the intent and it is false; whoever fixes the discovery should correct that line in the same change, because a comment asserting a behaviour the code does not have is how this survived unnoticed in the first place.",
+      "created_at": "2026-08-28T10:51:52Z",
+      "updated_at": "2026-08-28T11:41:16Z"
+    },
+    {
+      "id": "B87",
+      "title": "the fix-key session id falls back to a guessable value built from the pid, the whole second and bash's $RANDOM",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "PATH=/usr/bin:/bin bash -c 'unset -f openssl; id=\"$(printf \"%s-%s-%s\" \"$$\" \"$(date +%s)\" \"$RANDOM$RANDOM\")\"; printf \"%s\\n\" \"$id\"'   # the arm mint-fix-keys.sh's new_session_id took whenever openssl was absent",
+      "observed": "The id is three guessable fields joined by hyphens: the process id, the current time truncated to a whole second, and two draws of bash's $RANDOM. On Linux the pid space is 4194304 by default and is usually far smaller in practice; the second is known to anyone who knows roughly when the review ran; $RANDOM is a 15-bit value from a PRNG seeded per shell, giving 30 bits across the two draws. A reader who can see the fixes.md timestamps can enumerate the space.",
+      "expected": "The session id comes from the OS CSPRNG or the helper refuses. It names the secret directory that gates approval, so it must not be derivable from information a claimant already has.",
+      "mechanism": "new_session_id ran 'openssl rand -hex 8' and, on any failure, fell through to 'printf %s-%s-%s \"$$\" \"$(date +%s)\" \"$RANDOM$RANDOM\"'. The guard after it only checked the result was non-empty, which the fallback always is, so the weak arm was indistinguishable from success. openssl was declared a soft requirement, so a machine without it took the weak arm silently on every mint. The same script's session secret had a matching pair — 'openssl rand -hex 32' with a '/dev/urandom | od' fallback — but that one degraded to another CSPRNG rather than to a guessable value, which is why only the id is this entry.",
+      "surfaces": [
+        "planning/scripts/mint-fix-keys.sh"
+      ],
+      "fix": "new_session_id calls plan_random_hex 8, which is the shipped plan-crypt binary (/dev/urandom on unix, BCryptGenRandom on Windows) or, without it, /dev/urandom read directly and length-checked. There is no third arm: without a CSPRNG the helper exits 69 and mints nothing. The session secret moved to plan_random_hex 32 in the same change, which also fixed a width inconsistency — 'openssl rand -hex 32' produced 64 hex chars but its 'head -c 64 /dev/urandom' fallback produced 128, against a comment in both scripts asserting the secret is always 64.",
+      "verification": "planning/tests/test-plan-crypt.sh section 6: two draws must differ, 64 consecutive draws must all be distinct, the width must be exactly 2 chars per byte, every character must be hex, and mint-fix-keys.sh must contain no $RANDOM expansion outside a comment. Mutation: replacing plan_random_hex's body with a constant ('printf ab' repeated) makes it report 'two session ids came out identical: abababababababab' and '64 draws are all distinct: expected 64, got 1'. A second mutation in the Rust source — random::fill returning a zeroed buffer instead of reading the OS — fails two cargo tests, draws_differ_and_are_not_zero and odd_lengths_are_filled. Starved-PATH run with no plan-crypt and no digest tool exits 69 rather than improvising.",
+      "found_by": "plancrypt, while replacing the openssl calls in the fix-key helpers with a compiled binary",
+      "notes": null,
+      "created_at": "2026-08-28T11:43:22Z",
+      "updated_at": "2026-08-28T11:43:29Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1104,6 +1276,73 @@
       "notes": null,
       "created_at": "2026-08-27T21:38:32Z",
       "updated_at": "2026-08-27T21:58:36Z"
+    },
+    {
+      "id": "B69",
+      "title": "the .todos fold deleted T47 rather than folding it, on a stated reason that was false",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git show 5032227:TODO.json | jq '.todos[]' ; jq '[.tasks[]|select(.id==\"T47\")]|length' TODO.json",
+      "observed": "T47 existed only in .todos before commit 35f803d and does not exist in .tasks after it. Counts: .tasks 88 and .todos 1 before, .tasks 92 after, with T62 to T65 added in the same window, so 88+4=92 and the .todos entry was dropped rather than merged. 35f803d's message states 'folded (the .tasks T47 entry was authoritative)', but git show 5032227:TODO.json shows zero T47 entries in .tasks, so there was no authoritative copy to prefer. The lost record carried its completion notes: the commit refs for goals 01 to 05, three ratchet clamps, and the finding that test-flag-coverage and test-runtime-dependencies were already red at baseline 00ecc69 — which is the part someone will otherwise rediscover by bisecting.",
+      "expected": "A fold moves every entry the dropped array holds into the surviving one, or refuses when an id exists in only one of them and the operator has not said which wins. Deleting the sole copy of a record is not a fold.",
+      "mechanism": "The fold was written from the belief that .todos duplicated .tasks, so preferring .tasks was safe. That premise held for zero of the one entry involved. Nothing compared the two id sets before writing, and no count was asserted after, so a fold that removed a record and a fold that merged one produce the same silent success.",
+      "surfaces": [
+        "TODO.json",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, reviewing ox's landed work against the caution given before it started",
+      "notes": null,
+      "created_at": "2026-08-28T07:49:34Z",
+      "updated_at": "2026-08-28T07:49:34Z"
+    },
+    {
+      "id": "B78",
+      "title": "reg_next_id mints the same id in two worktrees, because it can only see the register in its own tree",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Launch two subagents with isolation: worktree. In each, run planning/scripts/register-read.sh bug next-id (or any bug-add.sh). Both return the same number, and both are correct about the register they can see.",
+      "observed": "Two writers minted B77 for different defects within the hour: the main checkout for 'subagent worktrees are still created from a stale commit', a worktree for the E2BIG render failure. The worktree author had reasoned about collisions and deliberately started above the B74-B76 range it knew about; it still collided, because B77 was minted in main after that worktree forked. Neither party did anything wrong and no tool warned either of them.",
+      "expected": "Either an id is unique across the trees that will merge into one register, or minting says which register it consulted so a caller can tell the answer is local.",
+      "mechanism": "reg_next_id computes max(id)+1 over the single JSON file in the tree it runs in. That is the only register it can see, and a git worktree gives each writer its own copy, so concurrent branches diverge silently and their ids overlap on merge. The register's own soundness check catches a duplicate id inside one file, which is why this survives: each file is internally sound and the collision only exists in the union.",
+      "surfaces": [
+        "planning/scripts/register-lib.sh",
+        "planning/scripts/bug-add.sh",
+        "planning/scripts/todo-add.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session and the webview subagent, independently minting B77 within the hour",
+      "notes": null,
+      "created_at": "2026-08-28T10:46:33Z",
+      "updated_at": "2026-08-28T10:46:33Z"
+    },
+    {
+      "id": "B80",
+      "title": "render-plan-overview.sh dies with jq: Argument list too long on a large plan and writes a zero-byte page",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "OVERVIEW_NOW=fixed bash planning/scripts/render-plan-overview.sh --plan-dir ~/.plans/codegraph-bash-indexing-v2 --out /tmp/big.html; echo $?",
+      "observed": "render-plan-overview.sh: line 436: /usr/bin/jq: Argument list too long, exit 126, and the output file is never written. The same tree reads fine through overview-state.sh, which emits all 341083 bytes of state in 9 seconds and exits 0, so the plan is readable and only the renderer fails. The 173 KB xcore-paymentmethod-code-aliases plan still renders, so this is a size threshold rather than a broken plan.",
+      "expected": "A plan renders, or the renderer refuses with a diagnosis naming the limit it hit. Neither a zero-byte page nor a bare exit 126 tells a reader which of the two happened.",
+      "mechanism": "Line 436 builds the substitution map by passing every panel of the page to one jq invocation as --arg values: goal_bars, ledger, identity_panel, step_details, dep_graph, tests_panel, coverage_panel, findings_panel and about thirty more. The whole rendered document therefore has to fit in argv, and ARG_MAX is the ceiling. A second jq call then rebuilds the 18 KB template once per key through reduce and gsub, which is the same design paying a second cost.",
+      "surfaces": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/scripts/runtime/overview-server.py"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "webview, reading the overview surface before proposing work on it",
+      "notes": "Recorded as paragraph 2.1 of the .plans/plan-overview-rebuild plan, whose Rust renderer removes the limit by reading from files and stdin (its paragraphs 3.6 and 4.1). Filed here anyway because the register records what is broken in the tree today while the plan records the intent: if the rebuild slips, this entry is the only thing that remembers. Not fixed in place, on instruction, because render-plan-overview.sh is that plan W15 change target and W15 deletes the file. B51, already fixed, is the adjacent defect where the server sent HTTP 200 with an empty body on this failure; it now returns HTTP 500 with a fourteen-byte body, so an operator must still read the server log to learn the cause.",
+      "created_at": "2026-08-28T10:45:00Z",
+      "updated_at": "2026-08-28T10:45:00Z"
     },
     {
       "id": "B6",
@@ -1407,6 +1646,159 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
+      "id": "B72",
+      "title": "shellcheck directives were moved in a generated library without regenerating it",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git log --oneline -2 4a35edb 6e5d39f; git show 6e5d39f -- planning/scripts/lib/document/plan_document_path.sh planning/scripts/plan-document-lib.sh",
+      "observed": "The SC2154 directive was placed above plan_document_path in the source function file and left in the file header of the generated library, so the two disagreed from the moment the lint work landed.",
+      "expected": "A change to a generated library's source is followed by a rebuild and a commit of the artifact in the same change, which is what the freshness test asserts.",
+      "mechanism": "build-plan-libs.sh is not run by the lint workflow, and the generated file is editable by hand, so a linter-driven edit can be made in either place and only the source edit survives a rebuild. Nothing in the shellcheck path invokes the builder.",
+      "surfaces": [
+        "planning/scripts/build-plan-libs.sh",
+        ".github/workflows"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, as the upstream cause of B70",
+      "notes": null,
+      "created_at": "2026-08-28T07:56:06Z",
+      "updated_at": "2026-08-28T07:56:06Z"
+    },
+    {
+      "id": "B73",
+      "title": "the duplication ratchet counts inline table parsers in comments, not only in code",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Add a shell comment containing the literal text of the pattern the ratchet counts, then run planning/tests/test-duplication-ratchet.sh",
+      "observed": "A new helper written specifically to avoid an inline pipe-splitting parser failed the ratchet at 16 against a cap of 15. The only occurrence in the file was the sentence explaining why the helper does not use one; no code in it splits on the delimiter.",
+      "expected": "The ratchet counts parsers, so a comment naming the pattern it forbids does not raise the count. Documenting a rule should not violate it.",
+      "mechanism": "The count is a text match over the file rather than a match restricted to executable lines, so any occurrence raises it, comments included. The effect is perverse in exactly the case the ratchet is meant to reward: a contributor who replaces an inline parser with a helper and explains why is charged for the explanation.",
+      "surfaces": [
+        "planning/tests/test-duplication-ratchet.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, while replacing three inline parsers with one helper for T66",
+      "notes": "Recurred twice more the same day, both times against someone writing a comment to explain a correct choice. In test-flag-coverage it was a comment naming plan_hoist_plan_dir, filed as B82. In the duplication ratchet it was my own comment saying why resolve-finding.sh uses mktemp instead of a pid-suffixed temp path — the comment contained the pattern, so the ratchet counted it as a use and reported 44 against a cap of 43 for a file with zero such sites. Three instances now across three gates, and in every one the person was documenting the rule the gate enforces. The shared cause is that all three match file text rather than code; the shared cost is that the correct response looks like evasion, since the only way past is to describe the forbidden thing without naming it.",
+      "created_at": "2026-08-28T10:19:35Z",
+      "updated_at": "2026-08-28T11:11:46Z"
+    },
+    {
+      "id": "B81",
+      "title": "the overview page emits every step drill-down with an unterminated id attribute, so 100 details elements are malformed",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "OVERVIEW_NOW=fixed bash planning/scripts/render-plan-overview.sh --plan-dir ~/.plans/xcore-paymentmethod-code-aliases --out /tmp/x.html; then print the first step element: tr '<' '\\n<' < /tmp/x.html | sed -n '/details class=\"step-open\"/{p;q;}'",
+      "observed": "details class=\"step-open\" id=\"step-01-step-module-scaffolding'> — the id attribute is opened with a double quote and closed with an apostrophe. All 100 step elements on that page carry it. The double quote never closes, so an HTML parser reads on to the next double quote in the document and swallows the summary text into the attribute value.",
+      "expected": "Each step drill-down is a well-formed details element whose id is addressable, since the id exists so that a reader can link to one step.",
+      "mechanism": "build_step_details in render-plan-overview.sh writes the opening tag with a double-quoted id whose closing quote was typed as an apostrophe. Nothing catches it: the unresolved-token check at the end of the renderer looks for template tokens, not for malformed markup, and no test parses the page as HTML.",
+      "surfaces": [
+        "planning/scripts/render-plan-overview.sh",
+        "planning/tests/test-plan-overview.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "webview, reading the overview surface before proposing work on it",
+      "notes": "A one-character fix, deliberately not made: render-plan-overview.sh is the .plans/plan-overview-rebuild plan W15 change target and W15 deletes the file, so a fix here is thrown-away work in a file another plan owns. The wider point for that plan is that the current suite proves the page is self-contained and byte-deterministic without proving it is well-formed, which is how a defect present on every one of a hundred elements survived.",
+      "created_at": "2026-08-28T10:45:00Z",
+      "updated_at": "2026-08-28T10:45:00Z"
+    },
+    {
+      "id": "B82",
+      "title": "test-flag-coverage decides a script accepts --plan-dir by grepping for a function name, so a comment mentioning it counts as a call",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Add a shell comment containing the text plan_hoist_plan_dir to a script that does not call it, then run planning/tests/test-flag-coverage.sh",
+      "observed": "Reported by the webview subagent: adding a comment that named plan_hoist_plan_dir took the gate from 191 flags and 0 critical to 192 flags and a CRITICAL for a --plan-dir flag the script neither accepts nor documents. The script had not changed behaviour; only a comment was added.",
+      "expected": "The gate distinguishes a call from a mention, so explaining why a helper is or is not used does not change what the gate believes the script accepts.",
+      "mechanism": "planning/tests/test-flag-coverage.sh:42 does grep -q 'plan_hoist_plan_dir' over the script text and treats a hit as evidence the script hoists --plan-dir. Comments are part of that text. Same class as B73, where the duplication ratchet counts the pattern it forbids inside comments: both gates match on file text rather than on code, and both therefore punish documenting the rule they enforce.",
+      "surfaces": [
+        "planning/tests/test-flag-coverage.sh",
+        "planning/tests/test-duplication-ratchet.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent, while renaming a variable and explaining the rename in a comment",
+      "notes": null,
+      "created_at": "2026-08-28T10:59:48Z",
+      "updated_at": "2026-08-28T10:59:48Z"
+    },
+    {
+      "id": "B83",
+      "title": "a library's local array leaks its type across the shellcheck source boundary, so any caller using the same variable name as a scalar is falsely flagged",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Write a script that sources planning/scripts/plan-document-lib.sh and assigns a plain string to a variable named 'out', then run shellcheck -x on it",
+      "observed": "SC2178 'variable was used as an array but is now assigned a string' at the assignment and SC2128 'expanding an array without an index only gives the first element' at every expansion, in scripts whose own 'out' is a scalar and never an array. Three different agents hit it in one session on three unrelated files — a board renderer, a crypt test, and it is the same shape the editor is reporting live. No clobber can actually occur, because the library's copy is 'local' to its own function.",
+      "expected": "A variable local to a library function does not type a same-named variable in a script that sources the library.",
+      "mechanism": "shellcheck -x follows the source directive and merges the sourced file's inferred types into the caller's namespace; it does not model 'local' as scoping that inference. plan_hoist_plan_dir declares 'local out=()' and is reached through plan-document-lib.sh, which nearly every helper sources, so 'out' is effectively a reserved name repo-wide for anything that sources the library. The cost is not the warning but the response to it: the obvious fix is to rename the caller's variable, which is correct but arbitrary-looking, and a contributor who instead adds a shellcheck disable silences a rule that is load-bearing elsewhere.",
+      "surfaces": [
+        "planning/scripts/lib/core/plan_hoist_plan_dir.sh",
+        "planning/scripts/plan-document-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the webview subagent diagnosed the cause; the same warning then appeared in the plancrypt subagent's test file, and in a gate count I wrote myself",
+      "notes": null,
+      "created_at": "2026-08-28T11:01:56Z",
+      "updated_at": "2026-08-28T11:01:56Z"
+    },
+    {
+      "id": "B84",
+      "title": "chat-tail.sh interpolates CHAT_NICK into the protocol without the validation chat-send.sh applies",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "CHAT_NICK=$'x\\nNICK impostor' bash chat/scripts/chat-tail.sh '#chan' --host 127.0.0.1 --port 7717",
+      "observed": "Not exercised as an attack here; identified by reading. chat/scripts/chat-tail.sh:61 builds printf 'NICK %s\\nJOIN %s %s\\n' from CHAT_NICK with no character check, while chat-send.sh guards the same field with a *[!A-Za-z0-9_-]* case test. A newline in CHAT_NICK becomes a command boundary on the wire, the same mechanism as B74.",
+      "expected": "Every path that interpolates a value into the wire protocol validates it the same way, so one hardened path does not imply the others are.",
+      "mechanism": "Same class as B74 and a separate instance: the validation lives in chat-send.sh rather than in a shared helper both clients call, so hardening one path left the other as it was. The exposure is narrower — CHAT_NICK is set by the operator, not by relayed text — which is why it is its own entry rather than folded into B74.",
+      "surfaces": [
+        "chat/scripts/chat-tail.sh",
+        "chat/scripts/chat-send.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the chatfix subagent, reported rather than filed because BUGS.json is outside its scope",
+      "notes": "Filed first as B80, renumbered to B84: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "created_at": "2026-08-28T10:58:33Z",
+      "updated_at": "2026-08-28T10:58:33Z"
+    },
+    {
+      "id": "B86",
+      "title": "I minted ids that collided with ids I had just reserved for a worker, one hour after filing B78 about that hazard",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Instruct a worker to take B80 and B81; file two entries in the main checkout an hour later without re-reading what was reserved",
+      "observed": "webview was told to renumber its two findings to B80 and B81 and complied. I then filed the chat-tail and perl-rung defects as B80 and B81 in main. Two different pairs of entries carry the same two ids, and the register's own soundness check cannot see it because each file is internally consistent — the same mechanism as B78, which I had filed an hour earlier from the same failure.",
+      "expected": "An id reserved for another writer is not available to the reserver. Either the reservation is recorded where the next mint reads it, or the mint asks.",
+      "mechanism": "B78 is the tool half: reg_next_id sees only its own tree. This entry is the human half and is not fixed by fixing B78 — the reservation existed solely as a sentence in a chat message, so nothing I ran could have known about it. A verbal reservation with no artifact is not a reservation, and I proved that against my own instruction within the hour.",
+      "surfaces": [
+        "BUGS.json",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, on reading its own register after the worker reported its numbering",
+      "notes": null,
+      "created_at": "2026-08-28T11:08:56Z",
+      "updated_at": "2026-08-28T11:08:56Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -1471,6 +1863,30 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
+      "id": "B85",
+      "title": "the perl chat rung collapses all whitespace where the other three map newline to one space",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Send a body containing a tab or a run of spaces through each rung in turn and compare the stored log line",
+      "observed": "Not measured here; reported by the chatfix subagent from reading the four runtimes. perl does s/\\s+/ /g, collapsing every whitespace run to a single space; python3, node and the bash handler map each newline and CR to one space and leave other whitespace alone. The same message body therefore stores differently depending on which rung the host happened to pick.",
+      "expected": "A message body stores identically whichever rung is serving, since the rungs are meant to be interchangeable implementations of one protocol.",
+      "mechanism": "Each rung implements sanitisation independently rather than sharing a specification, so they drifted. Invisible in normal use because a host runs one rung, and only comparable across machines or after a rung falls back.",
+      "surfaces": [
+        "chat/runtime/server.pl",
+        "chat/runtime/server.py",
+        "chat/runtime/server.js",
+        "chat/runtime/bash-handler.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the chatfix subagent",
+      "notes": "Filed first as B81, renumbered to B85: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "created_at": "2026-08-28T10:58:33Z",
+      "updated_at": "2026-08-28T10:58:33Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
@@ -1491,6 +1907,74 @@
       "notes": null,
       "created_at": "2026-08-27T13:08:33Z",
       "updated_at": "2026-08-27T20:56:51Z"
+    },
+    {
+      "id": "B88",
+      "title": "The chat tests wait for a 'chat serving:' banner the detached server never prints, so every detached instance times out as not-ready",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "cd src/chat && cargo build && cd ../.. && h=$(mktemp -d /tmp/t.XXXXX) && ./src/chat/target/debug/chat serve --home \"$h\" --bind 127.0.0.1 --port 17901 >\"$h/serve.log\" 2>&1 & sleep 1; case \"$(cat \"$h/serve.log\")\" in *\"chat serving:\"*) echo MATCH;; *) echo 'NO MATCH';; esac",
+      "observed": "Prints 'NO MATCH'. The log holds 94 bytes: 'chat serving (detached): tcp 127.0.0.1:17901 pid 1146894 [endpoint given on the command line]'. The server is healthy — it binds, serves and answers clients — but the needle 'chat serving:' cannot occur in it. Both chat suites hang on this: test-chat-binary.sh:94 and test-chat-config.sh:386,417 all wait for that exact substring. test-chat-binary reports 'the server never reported serving on 17811. Its output:' followed by nothing, and test-chat-config reports FAIL (8) — every one of the eight downstream of a server that never became ready.",
+      "expected": "The readiness probe recognises a server that is in fact serving, in each of the three banner forms the binary emits.",
+      "mechanism": "src/chat/src/main.rs prints three different banners: line 2729 'chat serving: {} ({}), run dir {} [{}]' for the attached case, and lines 2622 and 2632 'chat serving (detached, unregistered): ...' and 'chat serving (detached): ...' for the two detached ones. The tests match the literal 'chat serving:' — with the colon immediately after 'serving' — so only the attached form is recognised, and every detached start reads as never-ready. The tests are the side that is wrong about the contract, but note test-chat-binary.sh:77-84 carries a comment explaining that the readiness probe must never be the thing under test; matching a banner's exact punctuation is the same coupling in a different place.",
+      "surfaces": [
+        "chat/tests/test-chat-binary.sh",
+        "chat/tests/test-chat-config.sh",
+        "src/chat/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, diagnosing the two red tests that block Phase 1 of the 2.0.0-alpha release",
+      "notes": null,
+      "created_at": "2026-08-28T16:58:45Z",
+      "updated_at": "2026-08-28T16:58:45Z"
+    },
+    {
+      "id": "B89",
+      "title": "The release-package gate rejects any prerelease version, so bumping package.json to 2.0.0-alpha turns the suite red",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "for v in 2.0.0 2.0.0-alpha 2.0.0-alpha.1; do printf '%-16s %s\\n' \"$v\" \"$(printf '%s' \"$v\" | grep -c '^[0-9][0-9.]*[0-9]$')\"; done",
+      "observed": "2.0.0 -> 1, 2.0.0-alpha -> 0, 2.0.0-alpha.1 -> 0. tests/test-release-package.sh:37-39 reads the version out of package.json and asserts that count is '1', so any version carrying a prerelease identifier fails 'package.json states a version' and the whole gate goes red.",
+      "expected": "The gate accepts the versions the project actually intends to publish, prerelease identifiers included, while still rejecting a missing or malformed one.",
+      "mechanism": "The pattern '^[0-9][0-9.]*[0-9]$' was written when every released version was numeric — the tag list is v1.0.0 through v1.4.2, none with a suffix — so nothing had ever exercised a prerelease. It anchors both ends and permits only digits and dots, which excludes the hyphen semver requires for a prerelease. This is a latent gate, not a regression: it has been correct for every version shipped so far and becomes wrong the first time an alpha is cut.",
+      "surfaces": [
+        "tests/test-release-package.sh",
+        "package.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
+      "notes": null,
+      "created_at": "2026-08-28T17:11:58Z",
+      "updated_at": "2026-08-28T17:11:58Z"
+    },
+    {
+      "id": "B90",
+      "title": "test-chat-binary and test-chat-config write presence files into the developer's real XDG_RUNTIME_DIR",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ls /run/user/$(id -u)/chat/*.server | wc -l; bash chat/tests/test-chat-config.sh >/dev/null 2>&1; ls /run/user/$(id -u)/chat/*.server | wc -l",
+      "observed": "41 .server files in /run/user/1000/chat after a session of running the chat suites, and every one of the 41 has a test-shaped home: 'awk -F= /^home=/ ... ' reports 41 under /tmp and none anywhere else. They accumulate rather than being cleaned, and they sit in the same registry the developer's own live bus uses for discovery.",
+      "expected": "A test run leaves the developer's real runtime directory exactly as it found it, the way test-chat-registry.sh already arranges.",
+      "mechanism": "chat/tests/test-chat-registry.sh:80-82 exports XDG_RUNTIME_DIR into its own throwaway root, with a comment at line 22 saying the location is the documented one and therefore has to be isolated. test-chat-binary.sh and test-chat-config.sh never mention XDG_RUNTIME_DIR at all, so every server they start registers into the real one. The isolation was understood and applied in one test and not carried to the two written later.",
+      "surfaces": [
+        "chat/tests/test-chat-binary.sh",
+        "chat/tests/test-chat-config.sh",
+        "chat/tests/test-chat-registry.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, answering which port the chat server runs on and finding 41 stale registry entries while looking",
+      "notes": null,
+      "created_at": "2026-08-29T11:21:21Z",
+      "updated_at": "2026-08-29T11:21:21Z"
     }
   ]
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-plan-libs-build.sh — the four compiled libraries match their sources.
+# test-plan-libs-build.sh — the five compiled libraries match their sources.
 #
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
-# file; the four plan-*-lib.sh files are compiled from it and are what ships.
+# file; the five plan-*-lib.sh files are compiled from it and are what ships.
 # That makes them generated artifacts under CODE-CONTRACTS.md contract 7:
 # regenerated, never hand-edited, and a stale one has to fail rather than drift.
 #
@@ -32,7 +32,7 @@ t_begin
 work="$(mktemp -d "${TMPDIR:-/tmp}/plan-libs-build.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-libraries='plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh'
+libraries='plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh plan-crypt-lib.sh'
 
 # ---- the committed libraries are what the sources compile to ----------------
 rc=0

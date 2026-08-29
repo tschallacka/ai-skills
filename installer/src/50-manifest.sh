@@ -8,7 +8,7 @@
 # this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
 # not derive it from the manifest — the duplication IS the cross-check.
 # package_version is the released version from package.json, read with sed rather
-# than jq: jq is a declared runtime dependency of some skills but the installer
+# than rjq: rjq is a declared runtime dependency of some skills but the installer
 # must run before any of them is installed. A register written by a skill records
 # this value, so a reader can compare it against the installed skill and see that
 # an upgrade happened.
@@ -44,11 +44,12 @@ skill_files() {
         *) printf 'skill_files: unknown package: %s\n' "$package" >&2; return 64 ;;
     esac
     case "$1" in
-        planning)
+            planning)
             cat <<'EOF'
 SKILL.md
 docs/README.md
 REVIEWER.md
+binaries.tsv
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -91,7 +92,11 @@ scripts/create-progress.sh
 scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
+scripts/register-read.sh
+scripts/resolve-finding.sh
 scripts/render-plan-overview.sh
+scripts/render-plans-board.sh
+scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
 scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
@@ -116,6 +121,7 @@ scripts/supervision-frame.sh
 scripts/update-work-unit.sh
 scripts/remove-work-unit.sh
 scripts/plan-core-lib.sh
+scripts/plan-crypt-lib.sh
 scripts/plan-progress-lib.sh
 scripts/plan-table-lib.sh
 scripts/plan-document-lib.sh
@@ -146,6 +152,21 @@ scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
 EOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+                *)
+                    printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             [ "$package" = dev ] || return 0
             cat <<'EOF'
 .gitignore
@@ -178,6 +199,13 @@ scripts/lib/core/plan_track_tmp.sh
 scripts/lib/core/plan_warn.sh
 scripts/lib/core/planning_ensure_tmpdir.sh
 scripts/lib/core/planning_tmpdir.sh
+scripts/lib/crypt/plan_crypt_bin.sh
+scripts/lib/crypt/plan_crypt_resolve.sh
+scripts/lib/crypt/plan_crypt_target_triple.sh
+scripts/lib/crypt/plan_fix_key.sh
+scripts/lib/crypt/plan_random_hex.sh
+scripts/lib/crypt/plan_sha256_chain.sh
+scripts/lib/crypt/plan_sha256_hex.sh
 scripts/lib/document/99-facade.sh
 scripts/lib/document/plan_delete_paragraph.sh
 scripts/lib/document/plan_document_kind.sh
@@ -281,6 +309,7 @@ tests/test-limited-run-contract.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
+tests/test-plans-board.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh
@@ -309,6 +338,10 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-register-read.sh
+tests/test-resolve-finding.sh
+tests/test-validate-gates.sh
+tests/test-skill-provenance.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
@@ -321,6 +354,7 @@ scripts/todo-update.sh
 scripts/bug-add.sh
 scripts/bug-update.sh
 scripts/register-rebuild.sh
+tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh
 tests/test-roster-cross-reference.sh
 tests/test-runtime-dependencies.sh
@@ -328,6 +362,7 @@ tests/test-self-hosted-plan.sh
 tests/test-sha256-fallbacks.sh
 tests/test-stale-sweep.sh
 tests/test-step-atomicity-reset.sh
+tests/test-step-testing-reminder.sh
 tests/test-step-testing-sections.sh
 tests/test-supervision-frame.sh
 tests/test-target-path-validation.sh
@@ -354,11 +389,14 @@ EOF
         git-worktrees)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        merge-request-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         bug-report)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv

@@ -30,7 +30,7 @@ placeholder_warning_docs=''
 # Print the registry surface for a token; empty if not registered.
 token_surface() {
     [ -f "$registry_file" ] || return 1
-    jq -r --arg t "$1" '.placeholders[] | select(.token == $t) | .surface' "$registry_file" 2>/dev/null
+    rjq -r --arg t "$1" '.placeholders[] | select(.token == $t) | .surface' "$registry_file" 2>/dev/null
 }
 
 # Scan one file for registered placeholders and apply the surface-based verdict.

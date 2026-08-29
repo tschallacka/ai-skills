@@ -23,6 +23,21 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-table-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-progress-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-crypt-lib.sh"
+
+plan_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64) rjq_dir="$plan_root/bin/x86_64-unknown-linux-musl" ;;
+    Linux:aarch64|Linux:arm64) rjq_dir="$plan_root/bin/aarch64-unknown-linux-musl" ;;
+    Darwin:x86_64) rjq_dir="$plan_root/bin/x86_64-apple-darwin" ;;
+    Darwin:arm64) rjq_dir="$plan_root/bin/aarch64-apple-darwin" ;;
+    MINGW*:*|MSYS*:*|CYGWIN*:*|Windows*:*) rjq_dir="$plan_root/bin/x86_64-pc-windows-msvc" ;;
+    *) rjq_dir="" ;;
+esac
+if [ -x "$rjq_dir/rjq" ] || [ -x "$rjq_dir/rjq.exe" ]; then
+    PATH="$rjq_dir:$PATH"
+    export PATH
+fi
 
 # ── Load-time initialisation ─────────────────────────────────────────────────
 # Guarded: this library is sourced more than once per process, and re-running it

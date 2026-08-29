@@ -17,10 +17,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=planning/scripts/register-lib.sh
 source "$script_dir/register-lib.sh"
 
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-emitting when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it assembles the JSON state); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -40,14 +40,14 @@ arr="$( [ "$kind" = bugs ] && printf bugs || printf tasks )"
 
 tmp="$(mktemp "${TMPDIR:-/tmp}/register-rebuild.XXXXXX")"
 if [ "$kind" = bugs ]; then
-    jq --arg now "$now" '.bugs |= map(
+    rjq --arg now "$now" '.bugs |= map(
         .created_at = ((.created_at // "") | if . == "" then $now else . end)
         | .updated_at = ((.updated_at // "") | if . == "" then $now else . end)
         | .severity = ((.severity // "") | if . == "" then "major" else . end)
         | .priority = ((.priority // "") | if . == "" then "normal" else . end)
     )' "$file" > "$tmp"
 else
-    jq --arg now "$now" '.tasks |= map(
+    rjq --arg now "$now" '.tasks |= map(
         .created_at = ((.created_at // "") | if . == "" then $now else . end)
         | .updated_at = ((.updated_at // "") | if . == "" then $now else . end)
         | .status = ((.status // "") | if . == "" then "open" else . end)
@@ -67,7 +67,7 @@ if [ -n "$findings" ]; then
 fi
 
 if [ "$kind" = bugs ]; then
-    jq --arg now "$now" '.skill_version = ((.skill_version // "") | if . == "" then "1.4.2" else . end)' \
+    rjq --arg now "$now" '.skill_version = ((.skill_version // "") | if . == "" then "1.4.2" else . end)' \
         "$file" > "$tmp" && mv "$tmp" "$file"
 fi
 
