@@ -112,17 +112,27 @@ case "$mode" in
         mkdir -p "$root"
         # The chat rust binaries are release-built, never committed. Build them
         # now (cargo lives in the nix dev shell or CI) and place them under
-        # chat/bin/ so the collect() copy loop below finds them. If cargo is
-        # absent the build fails loudly rather than producing an empty package.
+        # chat/bin/<host-triple>/ so the collect() copy loop below finds them
+        # (skill_files resolves the host's platform to one triple dir). If cargo
+        # is absent the build fails loudly rather than producing an empty package.
         if command -v cargo >/dev/null 2>&1; then
             ( cd "$repo_root/src" && cargo build --release --workspace ) \
                 || { printf '%s: cargo build failed\n' "${0##*/}" >&2; exit 66; }
-            mkdir -p "$repo_root/chat/bin"
-            cp "$repo_root/src/target/release/chat-server-rs" "$repo_root/chat/bin/chat-server-rs"
-            cp "$repo_root/src/target/release/chat-client-rs" "$repo_root/chat/bin/chat-client-rs"
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
+                Linux:aarch64|Linux:arm64) chat_dir=aarch64-unknown-linux-musl ;;
+                Darwin:x86_64) chat_dir=x86_64-apple-darwin ;;
+                Darwin:arm64) chat_dir=aarch64-apple-darwin ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) chat_dir=x86_64-pc-windows-msvc ;;
+                *) printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66 ;;
+            esac
+            mkdir -p "$repo_root/chat/bin/$chat_dir"
+            cp "$repo_root/src/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
+            cp "$repo_root/src/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
         else
             # Prebuilt binaries must already be in place (CI build step).
-            [ -x "$repo_root/chat/bin/chat-server-rs" ] && [ -x "$repo_root/chat/bin/chat-client-rs" ] || {
+            ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 || {
                 printf '%s: cargo not found and chat/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }

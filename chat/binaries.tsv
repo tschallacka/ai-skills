@@ -1,0 +1,14 @@
+# MODE: PROD
+# Prebuilt chat rust binaries shipped with the chat skill (server + client).
+# Built by the release/CI (cargo build --release --workspace); never committed.
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	chat-server-rs	Static 64-bit x86 Linux RFC-1459 IRC-over-TLS server
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	chat-client-rs	Static 64-bit x86 Linux TLS chat client
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	chat-server-rs	Static 64-bit ARM Linux RFC-1459 IRC-over-TLS server
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	chat-client-rs	Static 64-bit ARM Linux TLS chat client
+x86_64-apple-darwin	Darwin:x86_64	chat-server-rs	Intel macOS IRC-over-TLS server
+x86_64-apple-darwin	Darwin:x86_64	chat-client-rs	Intel macOS TLS chat client
+aarch64-apple-darwin	Darwin:arm64	chat-server-rs	Apple Silicon macOS IRC-over-TLS server
+aarch64-apple-darwin	Darwin:arm64	chat-client-rs	Apple Silicon macOS TLS chat client
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	chat-server-rs.exe	64-bit Windows IRC-over-TLS server
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	chat-client-rs.exe	64-bit Windows TLS chat client

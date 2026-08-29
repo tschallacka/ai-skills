@@ -202,9 +202,10 @@ build and is compiled into nothing. `Cargo.lock` is generated and exempt.
 **This does not widen the dependency budget in section 1.** That budget governs
 what the *target machine must already have*; a static binary asks it for
 nothing, so shipping one lowers the requirement rather than raising it. What
-ships is declared per target in the skill's own `binaries.tsv`, validated by
-`tests/test-shipped-binaries.sh`. The compiler is a dev dependency and lives in
-the flake.
+ships is declared per (target, binary) in the skill's own `binaries.tsv`
+(a skill may ship several binaries for one target, e.g. a server and a client),
+validated by `tests/test-shipped-binaries.sh`. The compiler is a dev dependency
+and lives in the flake.
 
 ---
 
