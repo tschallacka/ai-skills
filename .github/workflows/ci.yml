@@ -7,6 +7,12 @@ on:
     branches: [master, nextupdate]
   pull_request:
 
+# A CI result is only meaningful for the newest request. Keep one run for this
+# workflow globally so a newer pull-request commit cancels stale work.
+concurrency:
+  group: ci-latest
+  cancel-in-progress: true
+
 jobs:
   test:
     # Proves: the deterministic suite passes, and leaks no temp files, on both
