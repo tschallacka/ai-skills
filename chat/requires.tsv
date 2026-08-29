@@ -1,19 +1,8 @@
 # MODE: PROD
 # What this skill needs on the target machine at runtime, and how badly.
 #
-# The client helpers are pure bash plus POSIX coreutils and always work. A chat
-# SERVER needs one of the runtimes below to open a listening socket, and the
-# chain falls through in preference order:
-#   python3 -> node -> perl -> socat (driving runtime/bash-handler.sh)
-#
-# The four rows share one any-of group (fifth column), so the installer warns
-# once when none of them resolves instead of once per missing tool. Without any
-# of them chat-server.sh refuses with exit 69 and names the missing capability;
-# send/read/tail against an existing log never needed a server and keep working.
-
-tool	condition	strength	why	group
-bash	*:*	hard	the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler
-python3	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
-node	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
-perl	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
-socat	*:*	soft	a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working	server-runtimes
+# The skill ships prebuilt rust binaries (chat/bin/chat-server-rs, the TLS IRC
+# server; chat/bin/chat-client-rs, the TLS client). Neither is committed or
+# built at install time: the release/CI builds them and the install.sh copies
+# them. They have no runtime tool dependency — the server mints its self-signed
+# certificate in-crate (rcgen) and the client pins it via TOFU.

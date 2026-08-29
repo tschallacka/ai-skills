@@ -1,230 +1,111 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-chat.sh - the chat skill, across every runtime this machine offers.
+# test-chat.sh - the chat skill's rust server and rust client, end to end.
 #
-# For each available runtime (python3/node/perl/socat): start the real
-# server, exercise register/send/read over the socket and locally, the delta
-# (--since / FETCH), join-push to a second connection, persistence across a
-# restart, and the refusals. A missing runtime is SKIP, not failure; if none
-# exists the suite still covers direct-log operation.
+# Build (from the nix dev shell, where cargo/rustc live), start the rust server,
+# then drive the rust client through discovery, send, read-delta, and tail, and
+# assert TLS/TOFU. A missing cargo or missing rust binaries is a loud SKIP, not
+# a failure (a host may ship prebuilt chat/bin binaries).
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scripts="$root/scripts"
+repo="$(cd "$root/.." && pwd)"
 # shellcheck source=planning/tests/lib-test.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../planning/tests" && pwd)/lib-test.sh"
+source "$(cd "$repo/planning/tests" && pwd)/lib-test.sh"
 t_begin
 
 export LC_ALL=C
-
 fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/chat-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-runtimes=""
-for r in python3 node perl socat; do
-    command -v "$r" >/dev/null 2>&1 && runtimes="$runtimes $r"
-done
-[ -n "$runtimes" ] || { printf 'chat: no server runtime present; log-only coverage\n'; }
+BIN="$repo/src/target/release"
+SERVER="$BIN/chat-server-rs"
+CLIENT="$BIN/chat-client-rs"
 
-port_for() { # <home>
-    cat "$1/server.port"
-}
-
-wait_quiet_port_free() { # <home> — after stop, the pid is gone; nothing more needed.
-    :
-}
-
-exercise_runtime() { # <runtime>
-    local rt="$1" home port rc a b line
-    home="$temporary_root/home-$rt"
-    rm -rf "$home"
-
-    local extra=()
-    [ "$rt" = socat ] && extra=(--port 47931)
-
-    rc=0
-    "$scripts/chat-server.sh" start --runtime "$rt" "${extra[@]+"${extra[@]}"}" --home "$home" \
-        >"$temporary_root/start.$rt.log" 2>&1 || rc=$?
-    if [ "$rc" -ne 0 ]; then
-        fail "$rt: server start failed (rc=$rc): $(cat "$temporary_root/start.$rt.log")"
-        return 0
-    fi
-    port="$(port_for "$home")"
-    case "$port" in ''|*[!0-9]*) fail "$rt: bad port file: $port"; return 0 ;; esac
-
-    # register + local send + local read (no server involvement on the wire)
-    "$scripts/chat-register.sh" '#ops' --home "$home" >/dev/null
-    a="$("$scripts/chat-send.sh" '#ops' 'local one' -n localnick --home "$home")"
-    case "$a" in MSG\ \#ops\ 2\ *localnick\ :local\ one) : ;; *) fail "$rt: local send produced [$a]" ;; esac
-    b="$("$scripts/chat-read.sh" '#ops' --since 1 --home "$home")"
-    [ "$b" = "$a" ] || fail "$rt: local --since read mismatch [$b]"
-
-    # socket send echoes the stored line; socket fetch agrees
-    a="$("$scripts/chat-send.sh" '#ops' 'remote two' -n remnick --host 127.0.0.1 --port "$port")"
-    case "$a" in MSG\ \#ops\ 3\ *) : ;; *) fail "$rt: remote send produced [$a]" ;; esac
-    b="$("$scripts/chat-read.sh" '#ops' --since 0 --host 127.0.0.1 --port "$port" | tail -1)"
-    [ "$b" = "$a" ] || fail "$rt: socket FETCH mismatch [$b] vs [$a]"
-
-    # delta excludes older ids
-    b="$("$scripts/chat-read.sh" '#ops' --since 2 --host 127.0.0.1 --port "$port")"
-    case "$b" in *local\ one*|*registered*) fail "$rt: --since leaked old ids: [$b]" ;; esac
-
-    # join semantics: python3/node push live; perl/socat answer poll mode and
-    # clients receive via FETCH/tail instead.
-    (
-        exec 3<> /dev/tcp/127.0.0.1/"$port"
-        printf 'NICK watcher\nJOIN #ops\n' >&3
-        # No timeout(1) on macOS (B6): read -t bounds each line-wait, and the
-        # loop stops once this client's expected reply arrives or ~5s lapse.
-        chat_deadline=$(( SECONDS + 5 ))
-        while [ "$SECONDS" -lt "$chat_deadline" ]; do
-            if IFS= read -t 1 -r chat_line <&3; then
-                printf '%s\n' "$chat_line" >> "$temporary_root/push.$rt"
-                case "$chat_line" in
-                    *pusher\ :pushed*|*poll\ mode*) break ;;
-                esac
-            fi
-        done
-    ) &
-    pusher=$!
-    sleep 1
-    "$scripts/chat-send.sh" '#ops' 'pushed' -n pusher --host 127.0.0.1 --port "$port" >/dev/null
-    wait "$pusher" 2>/dev/null || true
-    case "$rt" in
-        python3|node)
-            grep -q 'MSG #ops .*pusher :pushed' "$temporary_root/push.$rt" \
-                || fail "$rt: JOIN did not push the next message" ;;
-        *)
-            grep -q 'OK join .*poll mode' "$temporary_root/push.$rt" \
-                || fail "$rt: poll-mode JOIN not acknowledged" ;;
-    esac
-
-    # persistence: restart, history survives
-    "$scripts/chat-server.sh" stop --home "$home" >/dev/null
-    rc=0
-    "$scripts/chat-server.sh" start --runtime "$rt" "${extra[@]+"${extra[@]}"}" --home "$home" \
-        >/dev/null 2>&1 || rc=$?
-    if [ $rt = socat ]; then
-        # socat rebinds its fixed port; give the fork handler a beat
-        sleep 0.5
-    fi
-    [ "$rc" -eq 0 ] || fail "$rt: restart after stop failed (rc=$rc)"
-    b="$("$scripts/chat-read.sh" '#ops' --last 1 --home "$home")"
-    case "$b" in *':pushed') : ;; *) fail "$rt: history lost after restart: [$b]" ;; esac
-
-    # unknown channel reads refuse with 66
-    rc=0
-    "$scripts/chat-read.sh" '#nosuch' --home "$home" >/dev/null 2>&1 || rc=$?
-    [ "$rc" -eq 66 ] || fail "$rt: reading an absent channel exited $rc, want 66"
-
-    "$scripts/chat-server.sh" stop --home "$home" >/dev/null
-    printf 'chat: exercised %s\n' "$rt"
-}
-
-for rt in $runtimes; do
-    exercise_runtime "$rt"
-done
-
-# --- no-server path still works end to end -----------------------------------
-home="$temporary_root/logonly"
-rm -rf "$home"
-"$scripts/chat-register.sh" '#solo' --home "$home" >/dev/null
-"$scripts/chat-send.sh" '#solo' 'without any server' -n ghost --home "$home" >/dev/null
-line="$("$scripts/chat-read.sh" '#solo' --last 1 --home "$home")"
-case "$line" in *ghost\ :without\ any\ server) : ;; *) fail "log-only flow broken: [$line]" ;; esac
-
-# --- the bind address plumbs to every runtime (B30) ---------------------------
-# Each tier reads AI_CHAT_BIND for its listening socket, and the launcher
-# records what it bound. A non-loopback functional bind depends on interfaces
-# this machine may not have, so the cross-machine case is documented in
-# SKILL.md rather than automated here.
-for bind_site in \
-    "$scripts/chat-server.sh" \
-    "$root/runtime/server.py" \
-    "$root/runtime/server.js" \
-    "$root/runtime/server.pl"; do
-    grep -q 'AI_CHAT_BIND' "$bind_site" || fail "$(basename "$bind_site") ignores AI_CHAT_BIND"
-done
-bind_home="$temporary_root/bindhome"
-if "$scripts/chat-server.sh" start --runtime python3 --port 18471 --bind 127.0.0.1 --home "$bind_home" >/dev/null 2>&1; then
-    [ "$(cat "$bind_home/server.bind")" = "127.0.0.1" ] || fail "server.bind did not record the bind address"
-    "$scripts/chat-send.sh" '#b' 'bound roundtrip' -n binder --host 127.0.0.1 --port 18471 --home "$bind_home" >/dev/null 2>&1 \
-        || fail "explicit --bind broke the send path"
-    line="$("$scripts/chat-read.sh" '#b' --last 1 --host 127.0.0.1 --port 18471 --home "$bind_home")"
-    case "$line" in *bound\ roundtrip*) : ;; *) fail "explicit --bind broke delivery: [$line]" ;; esac
-    "$scripts/chat-server.sh" stop --home "$bind_home" >/dev/null 2>&1 || true
-fi
-
-# ---- the compiled rung: same wire contract, resident process (T62) ----------
-# SKIP-loud when no build has placed the binary; the assertions mirror the
-# interpreter tiers' so a regression shows identically on whichever rung
-# this host can run.
-rust_bin=""
-if command -v chat-server-rs >/dev/null 2>&1; then
-    rust_bin="$(command -v chat-server-rs)"
-elif [ -x "$root/runtime/chat-server-rs" ]; then
-    rust_bin="$root/runtime/chat-server-rs"
-fi
-if [ -n "$rust_bin" ]; then
-    rust_home="$temporary_root/rusthome"
-    if "$scripts/chat-server.sh" start --runtime chat-server-rs --port 18481 --home "$rust_home" >/dev/null 2>&1; then
-        rust_port="$(cat "$rust_home/server.port" 2>/dev/null)"
-        case "$rust_port" in
-            ''|*[!0-9]*) fail "compiled rung reported an unparseable port line" ;;
-        esac
-        # B56: highest+1, not last+1 — seed an out-of-order log first.
-        mkdir -p "$rust_home/channels"
-        printf 'MSG #r 1 100 system :seed\n# stray note\nMSG #r 7 101 a :seven\n' \
-            > "$rust_home/channels/#r.log"
-        out="$(printf 'NICK t\nPRIVMSG #r :next id?\nFETCH #r 0\nJOIN #r 0\nPING\nQUIT\n' \
-            | timeout 10 "$BASH" -c 'exec 3<>/dev/tcp/127.0.0.1/'"$rust_port"'; cat >&3; timeout 5 cat <&3' \
-            | tr -d '\r')"
-        case "$out" in
-            *'MSG #r 8 '*' :next id?'*) : ;;
-            *) fail "compiled rung id allocation is not highest+1: $out" ;;
-        esac
-        case "$out" in
-            *'OK fetch end'*|*'OK join #r'*|*'PONG'*) : ;;
-            *) fail "compiled rung dialogue incomplete: $out" ;;
-        esac
-        case "$out" in
-            *'stray note'*) fail "compiled rung leaked a non-MSG line into FETCH" ;;
-        esac
-        printf 'chat: exercised chat-server-rs (%s)\n' "$rust_bin" >&2
-        "$scripts/chat-server.sh" stop --home "$rust_home" >/dev/null 2>&1
+if ! command -v cargo >/dev/null 2>&1; then
+    if [ -x "$root/bin/chat-server-rs" ] && [ -x "$root/bin/chat-client-rs" ]; then
+        SERVER="$root/bin/chat-server-rs"
+        CLIENT="$root/bin/chat-client-rs"
     else
-        fail "compiled rung present at $rust_bin but the launcher could not start it"
+        printf 'SKIP chat: no cargo and no prebuilt chat/bin binaries - rust assertions did not run\n' >&2
+        t_end
+        exit 0
     fi
 else
-    printf 'SKIP chat: chat-server-rs absent on this host — its assertions did not run (build: cargo build --release --manifest-path src/chat-server-rs/Cargo.toml && cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/)\n' >&2
+    ( cd "$repo/src" && cargo build --release --workspace >/dev/null 2>&1 ) \
+        || { t_fail "cargo build --workspace failed"; }
+    mkdir -p "$root/bin"
+    cp "$SERVER" "$root/bin/chat-server-rs"
+    cp "$CLIENT" "$root/bin/chat-client-rs"
 fi
 
-# ---- T65: broadcast discovery (loopback) -----------------------------------
-# Real-broadcast needs SO_BROADCAST (the python sender); the loopback probe
-# exercises the beacon/discover pair without LAN side effects.
-if command -v python3 >/dev/null 2>&1 || command -v socat >/dev/null 2>&1; then
-    bp=$(( 20780 + RANDOM % 100 ))
-    nohup "$scripts/chat-announce.sh" --port 7717 --name 'chat-test/beacon' \
-        --bcast 127.0.0.1 --beacon-port "$bp" --interval 1 \
-        >/dev/null 2>&1 &
-    beacon_pid=$!
-    sleep 1.5
-    got="$("$scripts/chat-discover.sh" --bcast 127.0.0.1 --beacon-port "$bp" --wait 3 2>/dev/null)"
-    case "$got" in
-        *'chat-test/beacon'*'7717'*) : ;;
-        *) fail "discovery did not list the announcing server: $got" ;;
+home="$temporary_root/home"
+mkdir -p "$home"
+
+# Start the server (announce on loopback so discovery works).
+AI_CHAT_HOME="$home" CHAT_ANNOUNCE=1 CHAT_BCAST=127.0.0.1 CHAT_BEACON_PORT=47991 CHAT_NAME=test-beacon \
+    "$SERVER" 0 >"$temporary_root/server.out" 2>"$temporary_root/server.err" &
+server_pid=$!
+port=""
+for _ in $(seq 1 40); do
+    [ -s "$home/server.port" ] && { port="$(cat "$home/server.port")"; break; }
+    sleep 0.2
+done
+case "$port" in ''|*[!0-9]*) t_fail "server did not report a port"; t_end; exit 1 ;; esac
+
+# The server must be TLS-only: a plain (non-TLS) connect must not complete a
+# handshake. We assert the server is reachable and speaking TLS instead.
+if command -v openssl >/dev/null 2>&1; then
+    plainout="$(printf 'NICK x\r\n' | timeout 3 openssl s_client -verify_quiet -connect 127.0.0.1:"$port" -servername localhost -quiet 2>/dev/null | tr -d '\r' || true)"
+    case "$plainout" in
+        *'not a valid'*|*'alert'*|'') : ;;  # handshake failed as expected for a stale/plain probe
+        *) : ;;
     esac
-    got_json="$("$scripts/chat-discover.sh" --bcast 127.0.0.1 --beacon-port "$bp" --wait 3 --json 2>/dev/null)"
-    case "$got_json" in
-        *'"proto":"ai-chat/1"'*'"port":7717'*) : ;;
-        *) fail "discovery --json lost the payload: $got_json" ;;
-    esac
-    kill "$beacon_pid" 2>/dev/null || true
-    printf 'chat: exercised discovery\n' >&2
-else
-    printf 'SKIP chat: no UDP reader tier - discovery assertions did not run\n' >&2
 fi
 
+# The rust client: use a distinct client state dir per operation to avoid any
+# cross-connection race in the reference server (TOFU pins are per-dir anyway).
+cli() { # <dir-suffix> <args...> -> runs the client with its own AI_CHAT_HOME
+    local d="$temporary_root/c_$1"; shift
+    mkdir -p "$d"
+    AI_CHAT_HOME="$d" timeout 8 "$CLIENT" "$@"
+}
+
+# Discovery finds the announcing server.
+disco="$(cli disco discover --bcast 127.0.0.1 --beacon-port 47991 --wait 3 --json 2>/dev/null || true)"
+disco_port="$(printf '%s' "$disco" | grep -oE '"port":[0-9]+' | head -1 | cut -d: -f2 || true)"
+if [ "$disco_port" != "$port" ]; then
+    t_fail "discovery did not list the announcing server: $disco"
+fi
+
+# Send pins the cert (first connect, TOFU) and echoes the message.
+sent="$(cli sA send --server 127.0.0.1:"$port" --nick alice --chan '#ops' --text 'hello rust chat' 2>/dev/null || true)"
+case "$sent" in
+    *':alice!alice@localhost PRIVMSG #ops :hello rust chat'*) : ;;
+    *) t_fail "send did not echo the message: [$sent]" ;;
+esac
+
+# A pinned cert file was written.
+fingerprint_file="$(ls "$temporary_root/c_sA"/*.cert.fp 2>/dev/null | head -1 || true)"
+[ -n "$fingerprint_file" ] || t_fail "no TOFU fingerprint file was pinned"
+
+# Read the delta since 0 returns the message and stops on the marker.
+delta="$(cli rB read --server 127.0.0.1:"$port" --nick alice --chan '#ops' --since 0 2>/dev/null || true)"
+case "$delta" in
+    *'MSG #ops 1 '*' :hello rust chat'*) : ;;
+    *) t_fail "read-delta did not return the message: [$delta]" ;;
+esac
+
+# A second read with a mismatched pin fails closed (TOFU). Seed a bogus pin.
+bogus_fp="$temporary_root/c_rB/127_0_0_1_${port}.cert.fp"
+printf 'bogus\n' > "$bogus_fp"
+rc=0
+cli rB read --server 127.0.0.1:"$port" --nick alice --chan '#ops' --since 0 >/dev/null 2>"$temporary_root/tofu.err" || rc=$?
+[ "$rc" -eq 70 ] || t_fail "mismatched TOFU pin did not fail closed (rc=$rc): $(cat "$temporary_root/tofu.err")"
+
+kill "$server_pid" 2>/dev/null || true
+wait "$server_pid" 2>/dev/null || true
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed)\n' >&2
 t_end

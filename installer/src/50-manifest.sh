@@ -368,18 +368,8 @@ EOF
 SKILL.md
 docs/README.md
 requires.tsv
-scripts/chat-server.sh
-scripts/chat-register.sh
-scripts/chat-send.sh
-scripts/chat-read.sh
-scripts/chat-tail.sh
-scripts/chat-watch.sh
-scripts/chat-announce.sh
-scripts/chat-discover.sh
-runtime/server.py
-runtime/server.js
-runtime/server.pl
-runtime/bash-handler.sh
+bin/chat-server-rs
+bin/chat-client-rs
 CHATEOF
             [ "$package" = dev ] || return 0
             cat <<'CHATEOF'

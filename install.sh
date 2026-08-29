@@ -85,7 +85,7 @@ SKILL_DESCRIPTIONS=(
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with jq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
-    'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
+    'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
 )
 
@@ -127,10 +127,10 @@ Not for the steps of a task already in progress, and not for defects -- those be
 One defect per entry: if stating it needs the word "and", it is two entries that reference each other.
 An entry closes only with a fix and a verification naming the mutation that fails without it, so a closure cannot be a claim.
 Written only through its helpers -- an out-of-enum value makes the register unsound and every later write refuses.'
-    'An IRC-basis message bus for agents: channels they register, join and leave, with deltas since an id and live tails.
-Two agents in different sessions or on different machines exchange messages without either knowing about the other.
-The log is the source of truth and the server is optional: local mode appends under a lock and needs no runtime at all.
-Reading takes a cursor rather than the whole channel, so a long conversation does not flood a context window.'
+    'An IRC-over-TLS message bus for agents: a rust server that a standard TLS IRC client could join, and a rust client.
+The server speaks the RFC 1459 grammar over TLS and mints its self-signed certificate at first run.
+The client discovers servers over UDP, pins the certificate (TOFU), and sends / reads a delta since an id / tails.
+History is additive: an agent fetches the messages after id N via the FETCH extension, instead of re-reading a whole channel.'
     'Gives a task its own checkout, so several agents can work at once without seeing each other half-finished edits.
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
@@ -414,8 +414,6 @@ runtime_requirements() {
             case "$platform" in *:*) printf '%s\n' jq ;; esac
             ;;
         chat)
-            case "$platform" in *:*) printf '%s\n' bash ;; esac
-            case "$platform" in *:*) printf '%s\n' @server-runtimes ;; esac
             ;;
         git-worktrees)
             ;;
@@ -444,8 +442,6 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        chat:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
@@ -461,8 +457,6 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a jq call, and a register that cannot be read is worse than none' ;; esac ;;
-        chat:bash) case "$platform" in *:*) printf '%s\n' 'the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler' ;; esac ;;
-        chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
         planning:openssl) case "$platform" in *:*) printf '%s\n' 'derives and verifies fix keys (HMAC-SHA256) for the adversarial-review gate; planning works without it, mint-fix-keys.sh and verify-fix-keys.sh refuse with exit 69' ;; esac ;;
@@ -477,7 +471,6 @@ runtime_requirement_members() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
-        @server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
         @overview-server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
     esac
 }
@@ -3438,18 +3431,8 @@ EOF
 SKILL.md
 docs/README.md
 requires.tsv
-scripts/chat-server.sh
-scripts/chat-register.sh
-scripts/chat-send.sh
-scripts/chat-read.sh
-scripts/chat-tail.sh
-scripts/chat-watch.sh
-scripts/chat-announce.sh
-scripts/chat-discover.sh
-runtime/server.py
-runtime/server.js
-runtime/server.pl
-runtime/bash-handler.sh
+bin/chat-server-rs
+bin/chat-client-rs
 CHATEOF
             [ "$package" = dev ] || return 0
             cat <<'CHATEOF'

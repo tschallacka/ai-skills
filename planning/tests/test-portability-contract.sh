@@ -53,10 +53,6 @@ in_allowlist() {
         # The T48b gate's known-runtime universe is a word LIST the build
         # compares declarations against; naming a tool is not requiring it.
         ./installer/build.sh:python3-shipped) return 0 ;;
-        # T65 UDP helpers: python3 is the broadcast-capable sender / reader
-        # tier, declared soft in chat's requires.tsv runtime group.
-        ./chat/scripts/chat-announce.sh:python3-shipped) return 0 ;;
-        ./chat/scripts/chat-discover.sh:python3-shipped) return 0 ;;
         ./installer/build.sh:sha256-tool) return 0 ;;
         ./planning/scripts/plan-context-lib.sh:sha256-tool) return 0 ;;
         ./planning/scripts/generate-reviewer.sh:sha256-tool) return 0 ;;
@@ -82,13 +78,9 @@ in_allowlist() {
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
-        # chat probes its optional server-runtime chain, so the fallback order
-        # must name each runtime it may pick (chat/requires.tsv).
-        ./chat/scripts/chat-server.sh:python3-shipped) return 0 ;;
         # The overview serve script names its runtime chain (T43a); the
         # generated installer tables name optional runtimes for verify/hint.
         ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
-        ./chat/tests/test-chat.sh:python3-shipped) return 0 ;;
     esac
     return 1
 }

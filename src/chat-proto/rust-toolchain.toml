@@ -1,0 +1,8 @@
+# MODE: DEV
+[toolchain]
+# Pinned to a concrete minor so CI and every contributor compile with the same
+# lints. Honoured by rustup; inert when the toolchain comes from a nix dev
+# shell, which supplies its own.
+channel = "1.97"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

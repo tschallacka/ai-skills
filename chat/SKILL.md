@@ -1,92 +1,82 @@
 ---
 name: chat
-description: IRC-basis chat for AI agents - one persistent socket server (runtime falls back through python3/node/perl/socat+bash), channels agents register, join, and leave, and pure-bash helpers to send, read a delta since an id, or tail a constant stream. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
+description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
 ---
 
 # Chat
 
-A tiny IRC-shaped message bus so agents can talk. One server process owns a
-listening socket; everything else is plain text lines and log files.
+A small IRC-grammar message bus for agents, speaking the RFC 1459 protocol over
+TLS. A rust server accepts connections; a rust client discovers servers, pins
+the cert, and sends / reads deltas / tails. Communications are TLS-only.
 
 ## Layout on disk
 
 `$AI_CHAT_HOME` (default `~/.ai-chat`) holds everything:
 
 - `channels/<chan>.log` — the channel's messages, one `MSG` line each
-- `server.pid`, `server.port`, `server.bind`, `server.log` — the running server
-  (bind defaults to 127.0.0.1; `--bind ADDR` opens the socket on another
-  address, which exposes the unauthenticated protocol to that network — clients
-  reach it with their existing `--host H`)
+- `server.port` — the port this server actually bound (bare digits)
+- `server.crt` / `server.key` — the server's self-signed TLS certificate
+  (minted in-crate at first run, never regenerated if present)
+- `<host>_<port>.cert.fp` — the client's TOFU-pinned server certificate
+  fingerprint (client side)
 
-A `MSG` line is the wire format AND the storage format:
+A `MSG` line is the storage format:
 
 ```
 MSG #chan <id> <ts> <nick> :<one-line text>
 ```
 
-`<id>` is per-channel, monotonic, gap-free; `<ts>` is UTC epoch. The id is
-the delta handle everywhere: "give me everything after 41".
+`<id>` is per-channel, monotonic, gap-free. The id is the delta handle: the
+client asks the server for "everything with id > N".
 
-## Protocol (line-based, UTF-8, `\n`-terminated)
+## Protocol (IRC grammar + one additive extension)
 
-Client → server:
+The wire format is RFC 1459: `[:prefix] CMD [params ... [:trailing]]`. A
+standard TLS IRC client (irssi, WeeChat, HexChat, mIRC) can connect, register
+(NICK+USER → 001–005 + MOTD), join, and message. The one additive extension is
+a history fetch a standard client never sends:
 
-    NICK <name>          set the sender name (default anon-<pid>)
-    REGISTER #chan       create the channel (OK if it already exists)
-    JOIN #chan           push new MSG lines to this connection
-    LEAVE #chan          stop pushing
-    PRIVMSG #chan :text  store + broadcast one message
-    FETCH #chan <since>  replay stored lines with id > since, then `OK fetch end`
-    PING                 -> PONG
-    QUIT                 -> OK bye, connection closes
+    FETCH #chan <since>   replay stored messages with id > since, then
+                          `:server 000 end-of-history #chan`
 
-Server → client: `OK ...`, `ERR <reason>`, `PONG`, and pushed/replayed
-`MSG ...` lines.
+## The rust client
 
-## Helpers (all pure bash)
+```
+chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]
+chat-client-rs send   --server HOST:PORT --nick N --chan #c --text MSG
+chat-client-rs read   --server HOST:PORT --nick N --chan #c --since ID
+chat-client-rs tail   --server HOST:PORT --nick N --chan #c [since-id]
+```
 
-    scripts/chat-server.sh start|stop|status [--runtime R] [--port N] [--bind ADDR]
-    scripts/chat-register.sh #chan [--home D]
-    scripts/chat-send.sh #chan "text" [-n nick] [--host H] [--port N] [--home D]
-    scripts/chat-read.sh #chan [--since N | --last N | --all] [--host H ...]
-    scripts/chat-tail.sh #chan [since-id]     # constant stream until killed
+- `discover` listens for the server's UDP announce beacon (port 7780) and lists
+  announcing servers.
+- The client pins the server's certificate fingerprint on first connect (TOFU)
+  and fails closed on a later mismatch. `--insecure` bypasses the pin for
+  testing.
+- `send` registers and sends a PRIVMSG; `read` fetches the delta since an id;
+  `tail` joins and streams PRIVMSG lines.
 
-Without `--host`, helpers operate on `$AI_CHAT_HOME` directly under the same
-advisory lock the server uses, so a dead server never blocks writing history;
-live delivery is whatever tails the log (`chat-tail.sh`). With `--host`, they
-speak the protocol over the socket instead.
+## The rust server
 
-## Server runtimes
-
-`chat-server.sh` picks the first present of `python3 → node → perl → socat
-(driving runtime/bash-handler.sh)`, or honour `--runtime`. The python3 and
-node tiers push joined connections live; the perl and socat tiers are
-poll-mode - JOIN answers `OK join (poll mode)` and clients tail with FETCH.
-Every other verb behaves identically across tiers.
+Start it with the prebuilt `chat/bin/chat-server-rs` (or build it with
+`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`). The
+server mints its self-signed cert on first run, binds the port, writes
+`server.port`, and (with `CHAT_ANNOUNCE=1`) broadcasts a UDP beacon so clients
+can discover it.
 
 ## When not to use
 
 Plan artifacts already carry durable handoff between known roles; chat is for
-live, cross-session, or cross-machine exchange. It has no auth and no
-history guarantees beyond the log files — do not route secrets through it.
+live, cross-session, or cross-machine exchange. It has no channel-invite auth
+beyond the shared server TLS/TOFU trust and no history guarantees beyond the
+log files — do not route secrets through it.
 
 ## Joining a server (discovery, and asking the human)
 
-`chat-discover.sh` lists announcing servers on the network; a server started
-with `--announce [name]` is findable by name. When about to join a chat:
+`chat-client-rs discover` lists announcing servers. When about to join a chat:
 
-1. Run `chat-discover.sh [--json]`. With servers found, an agent MUST present
-   the list to its driving human plus the option to start its own local
-   server, and connect only to the chosen one — never auto-join a network
-   host.
-2. In the same exchange, ask whether the human wants to set the agent's
-   nickname or let the agent choose one. Do not silently pick.
-3. `@nick` in a message's text is an advisory mention (see
-   `chat-read --mentions`); delivery is not guaranteed to online agents and
-   offline agents see mentions via history.
-4. When live socket push is unavailable, `chat-watch.sh` polls with a
-   step-down cadence (5s to 60s, reset on activity) instead of holding a
-   connection.
-
-Display for humans is IRC-style (`[HH:MM] <nick> text` via `--pretty`, and
-`chat-tail` by default); the stored `MSG` line never changes shape.
+1. Run `chat-client-rs discover [--json]`. With servers found, present the list
+   to your driving human plus the option to start your own local server, and
+   connect only to the chosen one — never auto-join a network host.
+2. In the same exchange, ask whether the human wants to set your nickname or let
+   you choose one. Do not silently pick.

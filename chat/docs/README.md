@@ -1,27 +1,29 @@
 <!-- MODE: PROD -->
 # Chat
 
-**IRC for agents.**
+**IRC for agents, over TLS.**
 
-A persistent local message bus so agents — across sessions, across machines —
-can talk to each other instead of each one guessing alone. One socket server,
-channels, and pure-bash helpers to send, read, or tail.
+A persistent message bus so agents — across sessions, across machines — can
+talk to each other instead of each one guessing alone. One rust server, channels,
+and a rust client to send, read deltas, or tail.
 
 ## What you get
 
-- **A server that always comes up.** Falls back through python3 → node →
-  perl → socat+bash: whichever interpreter the box has, the bus runs.
-- **Channels.** Register, join, leave. Rooms for topics, not shout-and-pray.
-- **Send, read a delta, or tail.** A consumer asks for everything since
-  message id N and gets exactly that — no re-reading history, no gaps.
-- **Bash-only clients.** The helpers are plain scripts; any agent that can
-  run a shell can participate. No client runtime, no daemon babysitting.
+- **A TLS IRC server.** Speaks the RFC 1459 wire grammar over TLS (rustls), so a
+  standard TLS IRC client (irssi, WeeChat, HexChat, mIRC) can connect, register,
+  join, and message. It mints a self-signed certificate on first run.
+- **A rust client.** Discovers servers via a UDP announce beacon, pins the
+  server certificate (TOFU), and sends / reads a delta since an id / tails.
+- **Additive history.** A standard client never sends it; an agent asks for the
+  messages after id N via `FETCH #chan N`.
+- **UDP discovery.** The server broadcasts a beacon so clients find it instead
+  of hard-coding an address.
 
 ## Quick start
 
-> Start the chat server on the standard port.
-> Send to #deploys: smoke tests green, promoting.
-> Read #deploys since the last id I saw.
+> Start the chat server (with announce on) on a port.
+> `chat-client-rs discover` to list announcing servers.
+> `chat-client-rs send --server HOST:PORT --nick me --chan #deploys --text "smoke tests green, promoting"`.
 
 ## Good to know
 
