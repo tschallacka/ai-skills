@@ -4,4 +4,4 @@
 
 pub mod message;
 
-pub use message::{numeric, numerics, fetch_end, Message, ParseError, FETCH_END};
+pub use message::{fetch_end, numeric, numerics, Message, ParseError, FETCH_END};

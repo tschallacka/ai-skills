@@ -51,7 +51,7 @@ build_hidden_path() {
 # client pins it (TOFU), so chat has no runtime requirement at all. Installing
 # it under a PATH with every tool hidden must succeed with no warning.
 none_bin="$temporary_root/bin-chat-none"
-build_hidden_path "$none_bin" openssl python3 node perl socat jq
+build_hidden_path "$none_bin" openssl python3 node perl socat
 target_chat="$temporary_root/target-chat"
 mkdir -p "$target_chat"
 set +e

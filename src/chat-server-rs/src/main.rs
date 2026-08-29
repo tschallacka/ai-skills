@@ -116,7 +116,10 @@ impl Hub {
                 nick,
                 text.replace('\n', " ")
             );
-            let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
             f.write_all(line.as_bytes())?;
             if let Ok(mut h) = self.highest.lock() {
                 h.insert(chan.to_string(), id);
@@ -144,7 +147,6 @@ impl Hub {
         }
         out
     }
-
 }
 
 fn valid_chan(c: &str) -> bool {
@@ -157,7 +159,9 @@ fn valid_chan(c: &str) -> bool {
 }
 
 fn valid_nick(n: &str) -> bool {
-    (1..=32).contains(&n.len()) && n.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    (1..=32).contains(&n.len())
+        && n.chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 fn ensure_cert(home: &Path) -> Result<(PathBuf, PathBuf), String> {
@@ -172,7 +176,9 @@ fn ensure_cert(home: &Path) -> Result<(PathBuf, PathBuf), String> {
     let cn = std::env::var("CHAT_CERT_CN").unwrap_or_else(|_| "localhost".into());
     let mut params = rcgen::CertificateParams::new(vec![cn.clone()])
         .map_err(|e| format!("cert params: {}", e))?;
-    params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, cn);
     let key_pair = rcgen::KeyPair::generate().map_err(|e| format!("keypair: {}", e))?;
     let cert = params
         .self_signed(&key_pair)
@@ -339,7 +345,15 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     if in_use {
                         let n = new_nick.clone();
                         let sn = sess.server_name.clone();
-                        w(st, &format!(":{} {} {} :Nickname is already in use", sn, numerics::ERR_NICKNAMEINUSE, n));
+                        w(
+                            st,
+                            &format!(
+                                ":{} {} {} :Nickname is already in use",
+                                sn,
+                                numerics::ERR_NICKNAMEINUSE,
+                                n
+                            ),
+                        );
                         continue;
                     }
                     sess.nick = new_nick.clone();
@@ -351,7 +365,11 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     // clients vary. Use the first parameter as the username and
                     // the fourth (or "localhost") for the host.
                     sess.user = params.first().cloned().unwrap_or_else(|| "*.net".into());
-                    sess.host = params.get(3).cloned().filter(|h| !h.is_empty()).unwrap_or_else(|| "localhost".into());
+                    sess.host = params
+                        .get(3)
+                        .cloned()
+                        .filter(|h| !h.is_empty())
+                        .unwrap_or_else(|| "localhost".into());
                     st.user = sess.user.clone();
                     st.host = sess.host.clone();
                     // Once both NICK and USER are present, registration is
@@ -364,15 +382,37 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         for (code, text) in [
                             (numerics::RPL_WELCOME, "Welcome to the chat server"),
                             (numerics::RPL_YOURHOST, "Your host is the chat server"),
-                            (numerics::RPL_CREATED, "This server was created for agent chat"),
+                            (
+                                numerics::RPL_CREATED,
+                                "This server was created for agent chat",
+                            ),
                             (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
                         ] {
                             w(st, &numeric(&sn, code, &n, text).serialize());
                         }
-                        w(st, &numeric(&sn, numerics::RPL_ISUPPORT, &n, "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4").serialize());
-                        w(st, &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize());
-                        w(st, &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize());
-                        w(st, &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize());
+                        w(
+                            st,
+                            &numeric(
+                                &sn,
+                                numerics::RPL_ISUPPORT,
+                                &n,
+                                "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
+                            )
+                            .serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat")
+                                .serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
+                        );
                     }
                     continue;
                 }
@@ -391,15 +431,36 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     for (code, text) in [
                         (numerics::RPL_WELCOME, "Welcome to the chat server"),
                         (numerics::RPL_YOURHOST, "Your host is the chat server"),
-                        (numerics::RPL_CREATED, "This server was created for agent chat"),
+                        (
+                            numerics::RPL_CREATED,
+                            "This server was created for agent chat",
+                        ),
                         (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
                     ] {
                         w(st, &numeric(&sn, code, &n, text).serialize());
                     }
-                    w(st, &numeric(&sn, numerics::RPL_ISUPPORT, &n, "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4").serialize());
-                    w(st, &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize());
-                    w(st, &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize());
-                    w(st, &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize());
+                    w(
+                        st,
+                        &numeric(
+                            &sn,
+                            numerics::RPL_ISUPPORT,
+                            &n,
+                            "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
+                        )
+                        .serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
+                    );
                     // Fall through so a JOIN/PRIVMSG issued in the same burst
                     // (as real clients do) is not swallowed by registration.
                 }
@@ -432,8 +493,14 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         };
                         let sn = sess.server_name.clone();
                         let n = sess.nick.clone();
-                        w(st, &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")));
-                        w(st, &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan));
+                        w(
+                            st,
+                            &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")),
+                        );
+                        w(
+                            st,
+                            &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan),
+                        );
                     }
                     "PART" => {
                         let chan = params.first().cloned().unwrap_or_default();
@@ -457,8 +524,14 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         };
                         let sn = sess.server_name.clone();
                         let n = sess.nick.clone();
-                        w(st, &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")));
-                        w(st, &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan));
+                        w(
+                            st,
+                            &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")),
+                        );
+                        w(
+                            st,
+                            &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan),
+                        );
                     }
                     "PRIVMSG" | "NOTICE" => {
                         let (chan, text) = match (params.first().cloned(), trailing.clone()) {
@@ -480,7 +553,10 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         match hub.append(&chan, &sess.nick, &text) {
                             Ok(_) => {
                                 let m = Message {
-                                    prefix: Some(format!("{}!{}@{}", sess.nick, sess.user, sess.host)),
+                                    prefix: Some(format!(
+                                        "{}!{}@{}",
+                                        sess.nick, sess.user, sess.host
+                                    )),
                                     command: verb.clone(),
                                     params: vec![chan.clone()],
                                     trailing: Some(text.clone()),
@@ -508,7 +584,8 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         }
                     }
                     "FETCH" => {
-                        let (chan, since) = match (params.first().cloned(), params.get(1).cloned()) {
+                        let (chan, since) = match (params.first().cloned(), params.get(1).cloned())
+                        {
                             (Some(c), Some(s)) => (c, s),
                             _ => {
                                 w(st, "ERROR :usage: FETCH #chan <since-id>");
@@ -576,7 +653,11 @@ fn main() {
     let home_path = Path::new(&home);
     let chan_dir = home_path.join("channels");
     if let Err(e) = fs::create_dir_all(&chan_dir) {
-        eprintln!("chat-server-rs: cannot create {}: {}", chan_dir.display(), e);
+        eprintln!(
+            "chat-server-rs: cannot create {}: {}",
+            chan_dir.display(),
+            e
+        );
         std::process::exit(66);
     }
 
@@ -623,7 +704,8 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(7780);
         let bcast = std::env::var("CHAT_BCAST").unwrap_or_else(|_| "255.255.255.255".into());
-        let name = std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", "localhost"));
+        let name =
+            std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", "localhost"));
         std::thread::spawn(move || announce_loop(actual, name, interval, beacon_port, bcast));
     }
 
@@ -645,20 +727,20 @@ fn main() {
                 Ok(c) => c,
                 Err(_) => return,
             };
-        let state = ConnState {
-            conn,
-            tcp: stream.try_clone().unwrap_or_else(|_| {
-                // Unreachable in practice on a live socket; if it fails the
-                // connection is unusable. Provide the original stream so the
-                // rest of the setup still compiles; serve will drop it on EOF.
-                stream.try_clone().unwrap()
-            }),
-            nick: String::new(),
-            user: String::new(),
-            host: "localhost".into(),
-            joined: Vec::new(),
-            closed: false,
-        };
+            let state = ConnState {
+                conn,
+                tcp: stream.try_clone().unwrap_or_else(|_| {
+                    // Unreachable in practice on a live socket; if it fails the
+                    // connection is unusable. Provide the original stream so the
+                    // rest of the setup still compiles; serve will drop it on EOF.
+                    stream.try_clone().unwrap()
+                }),
+                nick: String::new(),
+                user: String::new(),
+                host: "localhost".into(),
+                joined: Vec::new(),
+                closed: false,
+            };
             if let Ok(mut g) = slot.lock() {
                 *g = Some(state);
             }

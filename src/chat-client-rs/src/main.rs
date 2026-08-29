@@ -129,7 +129,12 @@ fn parse_flag(args: &[String], name: &str) -> Option<String> {
 
 type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-fn connect(server: &str, nick: &str, state_dir: &PathBuf, insecure: bool) -> Result<(Client, String), String> {
+fn connect(
+    server: &str,
+    nick: &str,
+    state_dir: &PathBuf,
+    insecure: bool,
+) -> Result<(Client, String), String> {
     let addr = resolve(server)?;
     let tcp = TcpStream::connect(addr).map_err(|e| format!("connect {}: {}", server, e))?;
     tcp.set_nodelay(true).ok();
@@ -186,7 +191,9 @@ fn client_config(_insecure: bool) -> rustls::ClientConfig {
     cfg
 }
 
-fn cert_fingerprint(tls: &rustls::StreamOwned<rustls::ClientConnection, TcpStream>) -> Result<String, String> {
+fn cert_fingerprint(
+    tls: &rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+) -> Result<String, String> {
     let certs = tls.conn.peer_certificates().ok_or("no peer certificate")?;
     let first = certs.first().ok_or("empty peer cert list")?;
     Ok(hex(&sha256_der(first.as_ref())))
@@ -197,7 +204,11 @@ fn check_or_pin(server: &str, fp: &str, state_dir: &PathBuf) -> Result<(), Strin
     if path.exists() {
         let stored = fs::read_to_string(&path).map_err(|e| format!("read pin: {}", e))?;
         if stored.trim() != fp {
-            return Err(format!("server certificate changed (TOFU pin mismatch); expected {} got {}", stored.trim(), fp));
+            return Err(format!(
+                "server certificate changed (TOFU pin mismatch); expected {} got {}",
+                stored.trim(),
+                fp
+            ));
         }
         Ok(())
     } else {
@@ -219,17 +230,23 @@ fn resolve(server: &str) -> Result<SocketAddr, String> {
     let mut it = server
         .to_socket_addrs()
         .map_err(|e| format!("resolve {}: {}", server, e))?;
-    it.next().ok_or_else(|| format!("no address for {}", server))
+    it.next()
+        .ok_or_else(|| format!("no address for {}", server))
 }
 
-fn write_line(tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>, line: &str) -> Result<(), String> {
+fn write_line(
+    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+    line: &str,
+) -> Result<(), String> {
     tls.write_all(format!("{}\r\n", line).as_bytes())
         .map_err(|e| format!("send: {}", e))?;
     tls.flush().map_err(|e| format!("flush: {}", e))?;
     Ok(())
 }
 
-fn read_line(tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>) -> Result<String, String> {
+fn read_line(
+    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+) -> Result<String, String> {
     let mut buf = Vec::new();
     let mut b = [0u8; 1];
     loop {
@@ -248,14 +265,20 @@ fn read_line(tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>)
     if buf.is_empty() {
         return Err("connection closed by server".into());
     }
-    Ok(String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string())
+    Ok(String::from_utf8_lossy(&buf)
+        .trim_end_matches(['\r', '\n'])
+        .to_string())
 }
 
 // ---- subcommands ----------------------------------------------------------
 
 fn discover(args: &[String]) {
-    let wait_s: u64 = parse_flag(args, "--wait").and_then(|v| v.parse().ok()).unwrap_or(5);
-    let beacon_port: u16 = parse_flag(args, "--beacon-port").and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_BEACON_PORT);
+    let wait_s: u64 = parse_flag(args, "--wait")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    let beacon_port: u16 = parse_flag(args, "--beacon-port")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_BEACON_PORT);
     let _bcast = parse_flag(args, "--bcast").unwrap_or_else(|| "255.255.255.255".into());
     let json = args.iter().any(|a| a == "--json");
 
@@ -263,7 +286,8 @@ fn discover(args: &[String]) {
         .map_err(|e| {
             eprintln!("chat-client-rs: bind beacon port: {}", e);
             std::process::exit(70);
-        }).unwrap();
+        })
+        .unwrap();
     sock.set_read_timeout(Some(Duration::from_secs(1))).ok();
     let deadline = SystemTime::now() + Duration::from_secs(wait_s);
     let mut seen: Vec<String> = Vec::new();
@@ -289,7 +313,10 @@ fn discover(args: &[String]) {
         }
     }
     if seen.is_empty() && !json {
-        eprintln!("chat-client-rs: no servers found within {}s on beacon port {}", wait_s, beacon_port);
+        eprintln!(
+            "chat-client-rs: no servers found within {}s on beacon port {}",
+            wait_s, beacon_port
+        );
     }
 }
 
@@ -397,13 +424,15 @@ fn tail(args: &[String], state_dir: &PathBuf) {
     }
 }
 
-fn wait_for_welcome(tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>) -> Result<(), String> {
+fn wait_for_welcome(
+    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+) -> Result<(), String> {
     let mut seen_001 = false;
     let deadline = SystemTime::now() + Duration::from_secs(4);
     while SystemTime::now() < deadline {
         match read_line(tls) {
             Ok(l) => {
-                                if l.contains(" 001 ") || l.starts_with(":") && l.contains(" 001 ") {
+                if l.contains(" 001 ") || l.starts_with(":") && l.contains(" 001 ") {
                     seen_001 = true;
                 }
                 if seen_001 && l.contains(" 376 ") {
@@ -411,7 +440,7 @@ fn wait_for_welcome(tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpS
                 }
             }
             Err(e) => {
-                                return Err(e);
+                return Err(e);
             }
         }
     }
@@ -440,17 +469,20 @@ fn sha256_der(der: &[u8]) -> [u8; 32] {
 // TOFU fingerprint.
 fn sha256(message: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let mut data = message.to_vec();
     let bitlen = (data.len() as u64).wrapping_mul(8);
@@ -462,7 +494,12 @@ fn sha256(message: &[u8]) -> [u8; 32] {
     let mut w = [0u32; 64];
     for chunk in data.chunks(64) {
         for i in 0..16 {
-            w[i] = u32::from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]]);
+            w[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -472,7 +509,8 @@ fn sha256(message: &[u8]) -> [u8; 32] {
                 .wrapping_add(w[i - 7])
                 .wrapping_add(s1);
         }
-        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) = (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
+            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
