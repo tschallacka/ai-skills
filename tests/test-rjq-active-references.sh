@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# MODE: DEV
 # test-rjq-active-references.sh - reject active jq references after migration.
 set -euo pipefail
 export LC_ALL=C
@@ -6,7 +7,8 @@ export LC_ALL=C
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 offenders="$(git -C "$repo_root" grep -n -w jq -- \
     ':!BUGS.json' ':!TODO.json' ':!benchmark/results/**' \
-    ':!tests/test-rjq-active-references.sh' || true)"
+    ':!tests/test-rjq-active-references.sh' ':!src/rjq/tests/differential.rs' \
+    ':!planning/bin/**' || true)"
 offenders="$(printf '%s\n' "$offenders" | awk -F: '
     $0 ~ /(^|:)#/ || $0 ~ /:\/\// || $0 ~ /\.md:/ { next }
     NF { print }

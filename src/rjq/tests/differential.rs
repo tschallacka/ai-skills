@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 
 use std::io::Write;
 use std::process::{Command, Output, Stdio};

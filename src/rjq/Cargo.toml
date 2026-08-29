@@ -1,3 +1,6 @@
+# MODE: DEV
+# PACKAGE: PROD
+
 [package]
 name = "rjq"
 version = "0.1.0"

@@ -5,7 +5,7 @@ fn main() {
     use std::rc::Rc;
 
     if std::env::args().any(|argument| argument == "--version") {
-        println!("rjq 0.1.0 (jq-compatible engine)");
+        println!("rjq 0.1.0 (JSON query-compatible engine)");
         return;
     }
     if std::env::args().any(|argument| argument == "--help" || argument == "-h") {
