@@ -1,0 +1,45 @@
+{
+  "schema": "bug-report",
+  "version": "2.0.0-alpha.1",
+  "file": "BUGS.json",
+  "comment": "Machine-readable shape of BUGS.json at skill version 2.0.0-alpha.1. Read this when a BUGS.json records a different skill_version than the installed skill: there is no backwards compatibility, so the agent holding the file upgrades it or rewrites it.",
+  "supersedes": "1.4.2",
+  "header": {
+    "required": ["skill", "skill_version", "bugs"],
+    "optional": ["comment"],
+    "skill": "bug-report",
+    "item_key": "bugs"
+  },
+  "item": {
+    "required": ["id", "title", "status", "severity", "priority", "reproduce", "observed", "expected", "created_at", "updated_at"],
+    "optional": ["parent", "mechanism", "surfaces", "fix", "verification", "found_by", "notes"],
+    "fields": {
+      "id": {"type": "string"},
+      "title": {"type": "string", "note": "the defect in one line, stated as what goes wrong"},
+      "status": {"type": "string", "enum": ["reported", "confirmed", "fixed", "not-a-defect", "wont-fix", "obsolete"]},
+      "severity": {"type": "string", "enum": ["blocking", "major", "minor", "cosmetic"]},
+      "priority": {"type": "string", "enum": ["urgent", "high", "normal", "low", "someday"]},
+      "parent": {"type": ["string", "null"]},
+      "reproduce": {"type": "string"},
+      "observed": {"type": "string"},
+      "expected": {"type": "string"},
+      "mechanism": {"type": ["string", "null"]},
+      "surfaces": {"type": "array", "items": "string"},
+      "fix": {"type": ["string", "null"]},
+      "verification": {"type": ["string", "null"]},
+      "found_by": {"type": ["string", "null"]},
+      "notes": {"type": ["string", "null"]},
+      "created_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"},
+      "updated_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"}
+    }
+  },
+  "invariants": ["ids are unique", "every parent names an existing id", "every entry has a reproduction", "a fixed entry has a verification", "a confirmed entry has a mechanism", "every write sets updated_at"],
+  "upgrade_from": {
+    "1.4.2": {
+      "describes": "A bug register written by skill version 1.4.2.",
+      "loses": "nothing",
+      "steps": ["rjq '.skill_version = \"2.0.0-alpha.1\"' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json"]
+    }
+  },
+  "if_no_schema_for_a_version": "Rewrite the file from the current schema rather than guessing the difference. Carry every reproduction across verbatim: it is the one field that cannot be reconstructed later."
+}

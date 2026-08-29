@@ -1,0 +1,49 @@
+{
+  "schema": "todo",
+  "version": "1.4.2",
+  "file": "TODO.json",
+  "comment": "Machine-readable shape of TODO.json at skill version 1.4.2. Read this when a TODO.json records a different skill_version than the installed skill: there is no backwards compatibility, so the agent holding the file upgrades it or rewrites it.",
+  "supersedes": "unversioned",
+  "header": {
+    "required": ["skill", "skill_version", "tasks"],
+    "optional": ["comment"],
+    "skill": "todo",
+    "item_key": "tasks"
+  },
+  "item": {
+    "required": ["id", "title", "status", "priority", "created_at", "updated_at"],
+    "optional": ["parent", "detail", "note", "blocked_on", "refs"],
+    "fields": {
+      "id": {"type": "string", "note": "stable handle; a sub-task conventionally extends its parent's id"},
+      "title": {"type": "string", "note": "one line, no trailing full stop"},
+      "status": {"type": "string", "enum": ["open", "partly", "blocked", "decided", "done", "dropped", "obsolete"]},
+      "priority": {"type": "string", "enum": ["urgent", "high", "normal", "low", "someday"]},
+      "parent": {"type": ["string", "null"], "note": "id of the task this nests under"},
+      "detail": {"type": ["string", "null"]},
+      "note": {"type": ["string", "null"], "note": "where it got to: a commit, a decision, a reason"},
+      "blocked_on": {"type": ["string", "null"], "note": "required non-empty when status is blocked"},
+      "refs": {"type": "array", "items": "string"},
+      "created_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"},
+      "updated_at": {"type": "string", "format": "%Y-%m-%dT%H:%M:%SZ"}
+    }
+  },
+  "invariants": [
+    "ids are unique",
+    "every parent names an existing id",
+    "no task is its own parent",
+    "a blocked task names what it waits on",
+    "every write sets updated_at"
+  ],
+  "upgrade_from": {
+    "unversioned": {
+      "describes": "A TODO.json with no skill or skill_version header, an items key instead of tasks, an evidence field instead of note, and no priority or timestamps.",
+      "loses": "nothing; every field maps",
+      "steps": [
+        "now=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+        "rjq --arg now \"$now\" --arg v 1.4.2 '{skill: \"todo\", skill_version: $v, comment: (.comment // \"Migrated from an unversioned TODO.json.\"), tasks: [(.items // .tasks)[] | {id, title, status: (if .status == \"not-a-defect\" then \"dropped\" else .status end), priority: (.priority // \"normal\"), parent: (.parent // null), detail: (.detail // null), note: (.note // .evidence // null), blocked_on: (.blocked_on // null), refs: (.refs // []), created_at: (.created_at // $now), updated_at: $now}]}' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json",
+        "Then assign real priorities: the migration defaults everything to normal, which is a queue with no order."
+      ]
+    }
+  },
+  "if_no_schema_for_a_version": "Rewrite the file from the current schema rather than guessing the difference. A register is cheap to rebuild from its own contents and expensive to half-migrate."
+}

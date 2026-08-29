@@ -1,0 +1,17 @@
+# Repository-wide shellcheck configuration, read by CI and by a local
+# `shellcheck -s bash <file>` run from anywhere in the tree.
+#
+# Only checks that are noise *in this repository* are disabled. Nothing that
+# can hide a real bug belongs here — see CODE-STYLE.md section 13.
+
+# Sourced siblings are located at runtime through "$script_dir/…", which
+# shellcheck cannot resolve at lint time.
+disable=SC1091
+
+# Single quotes are deliberate in the many embedded awk/python heredocs and
+# -v assignments: $0/$1/$NF must reach awk unexpanded by the shell.
+disable=SC2016
+
+# Library files assign variables for a sourcing caller to consume, so they read
+# as unused inside the file that defines them.
+disable=SC2034

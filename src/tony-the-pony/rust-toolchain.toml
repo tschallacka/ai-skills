@@ -1,0 +1,9 @@
+# MODE: DEV
+[toolchain]
+# Pinned to a concrete minor so CI and every contributor compile with the same
+# lints; an unpinned `stable` turns a new compiler's new warning into someone
+# else's surprise. Honoured by rustup (CI, local rustup builds); inert when the
+# toolchain comes from a nix dev shell, which supplies its own.
+channel = "1.97"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

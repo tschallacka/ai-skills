@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# MODE: DEV
 # Coverage-gap tests (report: adversarial test-coverage audit).
 #
 # Covers behavior that the other suite misses:
@@ -33,8 +34,12 @@ expect_grep() {
 plan="$tmp/reconcile"
 "$scripts/create-plan.sh" "$plan" reconcile >/dev/null
 "$scripts/add-goal.sh" "$plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-"$scripts/add-work-unit.sh" "$plan" W02 source b.php 'B::x' N/A 'change B' W01 01-g 02-step-b >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$plan" --id W02 --type source --file b.php \
+    --scope 'B::x' --subscope N/A --change 'change B' \
+    --depends-on W01 --goal 01-g --step 02-step-b >/dev/null
 "$scripts/update-plan-content.sh" --testing-requirement "$plan" 01-g no 'research' >/dev/null
 goal_file="$plan/01-g/goal.md"
 # Directly exercise the reconcile lib (the shared engine) rather than only via add-work-unit.
@@ -104,8 +109,12 @@ PLANS_ROOT="$PLANS_ROOT" "$scripts/cleanup-plans.sh" epsilon -y >/dev/null 2>&1
 prop_plan="$tmp/prop"
 "$scripts/create-plan.sh" "$prop_plan" prop >/dev/null
 "$scripts/add-goal.sh" "$prop_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$prop_plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
-"$scripts/add-work-unit.sh" "$prop_plan" W02 verification N/A 'v.sh' N/A 'Verify W01.' '—' 01-g 02-step-v >/dev/null
+"$scripts/add-work-unit.sh" "$prop_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$prop_plan" --id W02 --type verification --file N/A \
+    --scope 'v.sh' --subscope N/A --change 'Verify W01.' \
+    --depends-on '—' --goal 01-g --step 02-step-v >/dev/null
 "$scripts/update-plan-content.sh" --testing-requirement "$prop_plan" 01-g yes 'obs' >/dev/null
 printf '# V\n\n## Automated tests\n\nx\n' > "$prop_plan/01-g/steps/01-step-a-testing.md"
 printf '# V\n\n## Automated tests\n\nx\n' > "$prop_plan/01-g/steps/02-step-v-testing.md"
@@ -129,7 +138,9 @@ fi
 sum_plan="$tmp/sum"
 "$scripts/create-plan.sh" "$sum_plan" sum >/dev/null
 "$scripts/add-goal.sh" "$sum_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$sum_plan" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$sum_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 sum_md="$("$scripts/plan-content.sh" summary "$sum_plan" markdown 2>/dev/null)"
 expect_grep <(printf '%s' "$sum_md") 'Plan summary' 'summary markdown has title'
 expect_grep <(printf '%s' "$sum_md") 'W01' 'summary markdown lists unit'
@@ -159,7 +170,9 @@ expect_grep <(printf '%s' "$probe_out") 'spawn a fresh adversarial reviewer' 'ad
 mut="$tmp/mut"
 "$scripts/create-plan.sh" "$mut" mut >/dev/null
 "$scripts/add-goal.sh" "$mut" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$mut" W01 source a.php 'A::x' N/A 'change A' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$mut" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change 'change A' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 # remove the per-goal tracker so add-progress creates a fresh row for a
 # not-yet-tracked step (the append path), then rebuild rewrites from step files.
 rm -f "$mut/01-g/progress.md"
@@ -177,7 +190,9 @@ expect_grep "$mut/01-g/progress.md" '01-step-a' 'plan-mutate rebuild-progress re
 vt="$tmp/vt"
 "$scripts/create-plan.sh" "$vt" vt >/dev/null
 "$scripts/add-goal.sh" "$vt" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$vt" W01 markup app/design/frontend/Theme/templates/order/history.phtml '#order_history' N/A 'render history' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$vt" --id W01 --type markup --file app/design/frontend/Theme/templates/order/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'render history' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 repo="$tmp/vtrepo"
 mkdir -p "$repo/app/design/frontend/Theme/templates/order" "$repo/app/code/M/view/frontend/layout"
 printf 'template\n' > "$repo/app/design/frontend/Theme/templates/order/history.phtml"
@@ -190,7 +205,9 @@ expect_grep <(printf '%s' "$vt_out") 're-points block' 'verify-target flags setT
 vt2="$tmp/vt2"
 "$scripts/create-plan.sh" "$vt2" vt2 >/dev/null
 "$scripts/add-goal.sh" "$vt2" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$vt2" W01 markup app/code/M/view/frontend/templates/order/history.phtml '#order_history' N/A 'render history' '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$vt2" --id W01 --type markup --file app/code/M/view/frontend/templates/order/history.phtml \
+    --scope '#order_history' --subscope N/A --change 'render history' \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 repo2="$tmp/vtrepo2"
 mkdir -p "$repo2/app/code/M/view/frontend/templates/order" "$repo2/app/design/frontend/Theme/templates/order"
 printf 'module\n' > "$repo2/app/code/M/view/frontend/templates/order/history.phtml"
@@ -202,20 +219,20 @@ expect_grep <(printf '%s' "$vt2_out") 'theme override' 'verify-target flags them
 frame_sh="$scripts/supervision-frame.sh"
 monitor_sh="$scripts/monitor-read.sh"
 mkdir -p "$tmp/frames"
-bash "$frame_sh" write "$tmp/frames/a" --subagent a --persona chris --status ok --verdict clean >/dev/null
-status_out="$(ROLE_ID=maintainer bash "$monitor_sh" status "$tmp/frames/a" 2>/dev/null)"
+"$BASH" "$frame_sh" write "$tmp/frames/a" --subagent a --persona chris --status ok --verdict clean >/dev/null
+status_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" status "$tmp/frames/a" 2>/dev/null)"
 expect_grep <(printf '%s' "$status_out") 'status=ok' 'monitor-read status'
-summary_out="$(ROLE_ID=maintainer bash "$monitor_sh" summary "$tmp/frames" 2>/dev/null)"
+summary_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" summary "$tmp/frames" 2>/dev/null)"
 expect_grep <(printf '%s' "$summary_out") 'a:' 'monitor-read summary'
 printf 'grant\treviewer\tneeds path\tcommand\n' > "$tmp/grants.log"
-grants_out="$(ROLE_ID=maintainer bash "$monitor_sh" grants "$tmp/grants.log" --last 5 2>/dev/null)"
+grants_out="$(ROLE_ID=maintainer "$BASH" "$monitor_sh" grants "$tmp/grants.log" --last 5 2>/dev/null)"
 expect_grep <(printf '%s' "$grants_out") 'grant' 'monitor-read grants'
 
 # ---- flag coverage: role-context --page / --page-size, supervision-frame
 #      optional write flags, plan-content --full ----
 # role-context accepts -p/--page and --page-size (paged role-doc reads).
 rc_page=0
-if ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 1 --page-size 2048 >/dev/null 2>&1; then
+if ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 1 --page-size 2048 >/dev/null 2>&1; then
     rc_page=0
 else
     rc_page=$?
@@ -223,23 +240,26 @@ fi
 chk "$rc_page" 0 "role-context --page/--page-size accepted"
 # --page actually pages: with a tiny page budget, page 1 is smaller than the
 # full payload and shows a "more" continuation, page 2 differs from page 1.
-full_payload="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer 2>/dev/null || true)"
-page1="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 1 --page-size 500 2>/dev/null || true)"
-page2="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" maintainer -p 2 --page-size 500 2>/dev/null || true)"
-if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && printf '%s' "$page1" | grep -q 'more:'; then
+full_payload="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer 2>/dev/null || true)"
+page1="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 1 --page-size 500 2>/dev/null || true)"
+page2="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" maintainer -p 2 --page-size 500 2>/dev/null || true)"
+page1_continues=false
+case "$page1" in *'more:'*) page1_continues=true ;; esac
+if [ -n "$page1" ] && [ -n "$page2" ] && [ "$page1" != "$page2" ] && [ "$page1_continues" = true ]; then
     pass=$((pass+1)); echo "PASS: role-context --page paginates (p1 != p2, more: present)"
 else
     fail=$((fail+1)); echo "FAIL: role-context --page does not paginate"
 fi
 # --paths lists the role's doc paths (maintainer-only).
-paths_out="$(ROLE_ID=maintainer bash "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
-if printf '%s' "$paths_out" | grep -q 'ROLES.md'; then
+paths_out="$(ROLE_ID=maintainer "$BASH" "$scripts/role-context.sh" --paths maintainer 2>/dev/null || true)"
+case "$paths_out" in *'ROLES.md'*) paths_listed=true ;; *) paths_listed=false ;; esac
+if [ "$paths_listed" = true ]; then
     pass=$((pass+1)); echo "PASS: role-context --paths lists doc paths"
 else
     fail=$((fail+1)); echo "FAIL: role-context --paths"
 fi
 rc_nonmain=0
-if ROLE_ID=chris bash "$scripts/role-context.sh" --paths chris >/dev/null 2>&1; then rc_nonmain=0; else rc_nonmain=$?; fi
+if ROLE_ID=chris "$BASH" "$scripts/role-context.sh" --paths chris >/dev/null 2>&1; then rc_nonmain=0; else rc_nonmain=$?; fi
 chk "$rc_nonmain" 64 "role-context --paths non-maintainer refused"
 # supervision-frame write accepts the escalation/read/wholesale flags.
 "$scripts/supervision-frame.sh" write "$tmp/fullframe" \
@@ -252,9 +272,15 @@ chk "$rc_nonmain" 64 "role-context --paths non-maintainer refused"
 full_plan="$tmp/full"
 "$scripts/create-plan.sh" "$full_plan" full >/dev/null
 "$scripts/add-goal.sh" "$full_plan" 01-g 'G' 'O' >/dev/null
-"$scripts/add-work-unit.sh" "$full_plan" W01 source a.php 'A::x' N/A "$(printf 'long%.0s' $(seq 1 60))" '—' 01-g 01-step-a >/dev/null
+"$scripts/add-work-unit.sh" "$full_plan" --id W01 --type source --file a.php \
+    --scope 'A::x' --subscope N/A --change "$(printf 'long%.0s' $(seq 1 60))" \
+    --depends-on '—' --goal 01-g --step 01-step-a >/dev/null
 full_out="$("$scripts/plan-content.sh" find "$full_plan" 'longlong' --in units --full 2>/dev/null || true)"
-if [ "$(printf '%s' "$full_out" | grep -c '\.\.\.')" -eq 0 ] && printf '%s' "$full_out" | grep -q 'longlong'; then
+truncated=false
+case "$full_out" in *'...'*) truncated=true ;; esac
+excerpt_present=false
+case "$full_out" in *'longlong'*) excerpt_present=true ;; esac
+if [ "$truncated" = false ] && [ "$excerpt_present" = true ]; then
     pass=$((pass+1)); echo "PASS: find --full shows untruncated excerpt"
 else
     fail=$((fail+1)); echo "FAIL: find --full truncation"

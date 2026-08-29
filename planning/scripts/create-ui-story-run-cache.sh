@@ -1,10 +1,39 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# MODE: PROD
+# create-ui-story-run-cache.sh — create the empty browser run cache for one UI
+# story: its starting state, one buffered interaction, its readiness wait, and an
+# untested run result.
+#
+# add-ui-story.sh calls this, so the cache exists from the moment the story does.
+# Every field is the literal "not yet configured" until
+# configure-ui-story-cache.sh writes the real sequence; run that next.
+#
+# Usage:
+#   create-ui-story-run-cache.sh [--plan-dir] <plan-directory> <US-NN>
+#   create-ui-story-run-cache.sh --help
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $(basename "$0") <plan-directory> <US-NN>" >&2
-    exit 64
-fi
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [--plan-dir] <plan-directory> <US-NN>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 2 ] || usage
 
 plan_dir="$1"
 story_id="$2"
@@ -45,7 +74,5 @@ trap 'rm -f "$temporary_file"' EXIT
     printf '%s\n' '- Cache validity: not yet configured'
 } > "$temporary_file"
 mv "$temporary_file" "$cache_file"
-trap - EXIT
 
-echo "Created $cache_file"
-echo "Next: run configure-ui-story-cache.sh <plan-directory> $story_id \"<starting state>\" \"<direct UI input>\" \"<target/value>\" \"<readiness signal>\" \"<maximum wait>\" to configure it"
+printf 'Created %s\n' "$cache_file"

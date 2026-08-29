@@ -1,0 +1,96 @@
+# MODE: DEV
+# Shared tool registry — how to verify a tool, and how to install it, written
+# once per tool rather than once per skill that needs it.
+#
+# installer/build.sh generates install.sh's runtime_tool_verify() and
+# runtime_tool_install_hint() from this file. Each skill's own requires.tsv says
+# what it needs, under what condition, and how badly; this file says what to do
+# about a tool that is missing.
+#
+# Columns, tab-separated:
+#   kind       verify  the command that decides whether the tool is usable
+#              hint    one candidate install instruction
+#              default the instruction for a tool with no rows of its own
+#   tool       tool id, or * for the fallback row of that kind
+#   condition  <uname -s glob>:<uname -m glob> the row applies to; a bash case
+#              pattern, so | joins alternatives
+#   group      hint rows sharing (tool, condition, group) are one first-match
+#              chain: the first row whose probe resolves prints. Groups print in
+#              ascending order, so a tool can emit an instruction, an
+#              alternative, and a closing note.
+#   probe      command that must exist on PATH for the row to apply, or - for a
+#              row that always applies and closes the chain
+#   text       the line to print (hint, default) or the command to run (verify).
+#              A default row's text carries one %s for the tool name.
+#
+# Line-oriented TSV and not JSON, deliberately: this table declares rjq as a
+# dependency, so a format needing rjq to read it could not be read on the machine
+# that is missing rjq. awk and sed parse it.
+#
+# The verify column holds a command rather than a tool name so a tool that exists
+# but is the wrong build can grow a functional probe here without a code change.
+kind	tool	condition	group	probe	text
+# bash is the interpreter every shipped script is written for, not a tool a
+# script probes. It is declared so an install on a machine without it says so
+# up front rather than failing per script. CODE-STYLE.md sets 3.2 as the floor,
+# so the verify only asks whether bash exists at all.
+verify	bash	*:*	1	-	command -v bash
+hint	bash	Darwin:*	1	-	  bash ships with macOS (3.2 at /bin/bash); nothing to install
+hint	bash	Linux:*	1	apt-get	  sudo apt-get install -y bash
+hint	bash	Linux:*	1	dnf	  sudo dnf install -y bash
+hint	bash	Linux:*	1	pacman	  sudo pacman -S --noconfirm bash
+hint	bash	MINGW*|MSYS*|CYGWIN*:*	1	-	  install Git for Windows (https://git-scm.com/download/win); its Git Bash provides bash
+hint	bash	*:*	1	-	  install bash from your package manager, or Git for Windows on Windows
+verify	memlimit	*:*	1	-	command -v memlimit
+verify	openssl	*:*	1	-	command -v openssl
+verify	python3	*:*	1	-	command -v python3
+verify	node	*:*	1	-	command -v node
+verify	perl	*:*	1	-	command -v perl
+verify	socat	*:*	1	-	command -v socat
+verify	*	*:*	1	-	command -v "$1"
+hint	python3	Darwin:*	1	brew	  brew install python3
+hint	python3	Darwin:*	1	port	  sudo port install python3
+hint	python3	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install python3
+hint	python3	Linux:*	1	apt-get	  sudo apt-get install -y python3
+hint	python3	Linux:*	1	dnf	  sudo dnf install -y python3
+hint	python3	Linux:*	1	pacman	  sudo pacman -S --noconfirm python
+hint	python3	Linux:*	1	apk	  sudo apk add python3
+hint	python3	Linux:*	1	-	  install the python3 package for your distribution
+hint	node	Darwin:*	1	brew	  brew install node
+hint	node	Darwin:*	1	port	  sudo port install nodejs
+hint	node	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install node
+hint	node	Linux:*	1	apt-get	  sudo apt-get install -y nodejs
+hint	node	Linux:*	1	dnf	  sudo dnf install -y nodejs
+hint	node	Linux:*	1	pacman	  sudo pacman -S --noconfirm nodejs
+hint	node	Linux:*	1	apk	  sudo apk add nodejs
+hint	node	Linux:*	1	-	  install the nodejs package for your distribution
+hint	perl	Darwin:*	1	brew	  brew install perl
+hint	perl	Darwin:*	1	port	  sudo port install perl
+hint	perl	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install perl
+hint	perl	Linux:*	1	apt-get	  sudo apt-get install -y perl
+hint	perl	Linux:*	1	dnf	  sudo dnf install -y perl
+hint	perl	Linux:*	1	pacman	  sudo pacman -S --noconfirm perl
+hint	perl	Linux:*	1	apk	  sudo apk add perl
+hint	perl	Linux:*	1	-	  install the perl package for your distribution
+hint	socat	Darwin:*	1	brew	  brew install socat
+hint	socat	Darwin:*	1	port	  sudo port install socat
+hint	socat	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install socat
+hint	socat	Linux:*	1	apt-get	  sudo apt-get install -y socat
+hint	socat	Linux:*	1	dnf	  sudo dnf install -y socat
+hint	socat	Linux:*	1	pacman	  sudo pacman -S --noconfirm socat
+hint	socat	Linux:*	1	apk	  sudo apk add socat
+hint	socat	Linux:*	1	-	  install the socat package for your distribution
+hint	memlimit	*:*	1	-	  curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
+hint	memlimit	*:*	2	brew	  or: brew tap pingiun/memlimit https://github.com/pingiun/memlimit && brew install --HEAD memlimit
+hint	memlimit	*:*	2	cargo	  or: cargo install --git https://github.com/pingiun/memlimit memlimit
+hint	memlimit	*:*	3	-	  (memlimit is MIT-licensed, by Jelle Besseling; Apple Silicon only)
+default	*	*:*	1	-	  install %s via your system package manager
+hint	openssl	Darwin:*	1	-	  macOS ships /usr/bin/openssl (LibreSSL); if it is missing: brew install openssl
+hint	openssl	Linux:*	1	apt-get	  sudo apt-get install -y openssl
+hint	openssl	Linux:*	1	dnf	  sudo dnf install -y openssl
+hint	openssl	Linux:*	1	pacman	  sudo pacman -S --noconfirm openssl
+hint	openssl	Linux:*	1	zypper	  sudo zypper install -y openssl
+hint	openssl	Linux:*	1	apk	  sudo apk add openssl
+hint	openssl	Linux:*	1	-	  install the openssl package for your distribution
+hint	openssl	MINGW*:*|MSYS*:*|CYGWIN*:*	1	winget	  winget install ShiningLight.OpenSSL.Light
+hint	openssl	MINGW*:*|MSYS*:*|CYGWIN*:*	1	choco	  choco install openssl

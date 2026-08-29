@@ -1,8 +1,9 @@
+<!-- MODE: PROD -->
 # Reviewer contract
 
 > Generated from `SKILL.md` by `scripts/generate-reviewer.sh`.
 > Reviewer profile contract: `1.4.2`
-> Source SHA-256: `25f7f2ec0ec0f83ba4b881e57a9d076493db7f7a24729954353d4097c2e10ab7`
+> Source SHA-256: `410cd6352184e48362fc9bfafd1cf5f28ecd211b6c58ea80771b526f3683923c`
 
 This file is a review-scoped projection of the tagged `SKILL.md`; the tagged skill remains authoritative.
 
@@ -39,20 +40,34 @@ command, plan directory, and supported entry ids/views. Its starting prompt
 must include verbatim:
 
 "Read plan files and artifacts ONLY through the gated reader:
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --document ID
-  bash <PLANNING_SKILL_DIR>/scripts/plan-context.sh read --plan-dir <PLAN_DIR> --unit WNN
-Valid --document IDs: plan, inventory, progress, adversarial-review,
-goal:<goal id>, step:<goal>/<step>. Prefer the default summary view; raise
---max-records for a large inventory if needed. Plan-read bytes are capped at
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --document ID
+  "<PLANNING_SKILL_DIR>/scripts/plan-context.sh" read --plan-dir <PLAN_DIR> --unit WNN
+Valid --document IDs: plan, inventory, coverage, progress,
+goal-progress:<goal>, adversarial-review, stories, bugs, fixes, fix-keys,
+approval,
+goal:<goal id>, step:<goal>/<step>. Each read returns one PAGE, not the
+document. The documents that are not narrative — inventory, coverage,
+adversarial-review, stories, bugs, fixes, fix-keys, approval — default to the
+whole-document `full` view; every other id defaults to `summary`, and
+`--view full` is available for
+any of them. A page that withheld records reports next_token — pass it back as
+--token and keep going until no next_token comes back. You have NOT read a
+document until a page returns without one; treat a page you stopped early on as
+an unread document and say so. **The `summary` view is an excerpt of the head of
+the file, not a condensation of it, and it truncates before paging — so it
+returns no next_token however much it left out, and prints an `excerpt=` line
+saying so. No next_token from `summary` does NOT mean you have read the
+document. Reviewing a plan, judging a finding, or approving anything requires
+`--view full` paged to exhaustion.** Plan-read bytes are capped at
 the per-role budget when ROLE_ID is set (the gate lowers --max-bytes to it) —
-do not rely on --max-bytes above that cap. Never load a whole
+do not rely on --max-bytes above that cap; page instead. Never load a whole
 plan file, an entire plan directory, or the `.plans/` tree wholesale. A
 wholesale file read of a plan artifact is a context-overflow violation. If the
 gate cannot give you something, report it as a limitation — do not bypass it."
 
 The fresh adversary assumes the **chris placeholder persona** (oriented scout):
 spawn it with `ROLE_ID=chris`, have it load its scoped role docs and voice via
-`bash <PLANNING_SKILL_DIR>/scripts/role-context.sh chris` (which injects its
+`"<PLANNING_SKILL_DIR>/scripts/role-context.sh" chris` (which injects its
 stance preamble), and require it to state its persona id in the returned
 findings. The adversary forms its own findings from the bounded-read gate and
 its scoped role docs; it never receives the planning agent's conclusions. A
@@ -157,6 +172,10 @@ verification units name it).
 "execution order differs from step numbering" is sanctioned documentation when
 the dependency edges are also recorded; it is not a substitute for those edges.
 Reviewers reject ordering prose used as a substitute for recorded dependencies.
+**Numbering gaps are not a defect**: steps reading 02 and 04 with no 01 or 03
+need no repair when the Depends-on edges state the real order — a rename is a
+five-surface edit (file, inventory row, roster, companion, tracker) and risks
+more than the gap it fixes.
 
 The review boundary is filesystem-enforced: each worker and reviewer receives
 only its capsule and workspace, and each fresh reviewer receives a newly built
@@ -204,6 +223,18 @@ use doubled quotes (`""`) for CSV-standard literal quotes, or `\"` when a
 shell-friendly escaped quote is clearer. Use
 `--insert-after` or `--insert-before` with a document ID and paragraph label
 to add one paragraph; later labels in that same section shift automatically.
+The `-p N.N:` forms auto-create only when the section's labels are contiguous
+`1..max` with no trailing unlabeled content — a section with gaps or
+unlabeled paragraphs must be re-authored (e.g. re-run
+`create-step-testing.sh --overwrite` so every paragraph gets its `§ N.x`
+label) instead of silently appending.
+
+A section number is fixed per section name, not by position: automated tests
+are `§ 2.x`, browser `§ 3.x`, backend `§ 4.x`, manual `§ 5.x`, whichever of
+them a companion carries. A section form can only rewrite a section the
+companion already has, so supply the section when you create it — `-ss` cannot
+add one, and re-creating with `--overwrite` only helps if you pass the
+section flag as well.
 
 Run the validator again after revisions and reopen the adversarial review when
 the change affects scope, ownership, dependencies, or acceptance criteria.
@@ -216,19 +247,64 @@ keys. When recording which key a fix used, write one claim line per
 tab-separated). The approval gate auto-verifies `fixes.md` claims against
 `fix-keys.json` before flipping the review status to `approved`.
 
-**Reviewers may write `adversarial-review-incoming.md`** (the one plan file a
-reviewer may write, so findings survive the coordinator's context).
+**Reviewers must be allowed to write `adversarial-review-incoming.md`** (the one
+plan file a reviewer may write, so findings survive the coordinator's context).
+Instructing a reviewer subagent to be *strictly* read-only breaks the fix-key
+gate rather than tightening it: the reviewer cannot publish its findings, so the
+coordinator mints the keys from the reviewer's returned prose, and minting and
+claiming then happen in one session -- self-certification by construction, which
+`verify-fix-keys.sh` refuses. Read-only everywhere else, this one file
+excepted.
 `update-adversarial-review.sh` consumes it as its findings source and removes
 it after the table is rewritten. A reviewer writes its Findings CSV rows there;
 the coordinator runs `update-adversarial-review.sh <plan>` (no `--file`) to
 land them.
 
+**A plan records what it assumed.** `## Assumptions` (§ 11.1) holds what was
+assumed rather than confirmed, and what would change if the assumption is wrong.
+It is not a place for open questions — those are § 8 — but for the choices made
+silently, where nobody was asked and the plan proceeded anyway.
+
+The value is at review time. An adversarial reviewer can attack a stated
+assumption; an unstated one is invisible until it turns out to be false, and then
+it reads as a defect in the work rather than a decision nobody recorded. One
+comparable run made five interpretations that were only written down afterwards,
+in a postmortem, once they had already shaped the plan.
+
+**A reviewer report records what the cycle cost.** The review-scope block carries
+the reviewer's session id, the wall time, and the number of findings this cycle
+produced. The session id is what lets a claim be traced to the run that made it;
+the other two are the only signal anyone has that a review is converging.
+
+A falling findings count across cycles means the plan is improving. A flat one
+means the cycles are not finding less, and the plan may not be the thing at
+fault — one comparable run reached seventeen cycles and 41.7 million tokens
+before anyone asked that question, because no cycle recorded what it had cost.
+Nothing enforces a ceiling; the point is that the number is visible when someone
+decides whether to run another.
+
+**A reviewer runs `--check` on its own rows before handing them over.** The shape
+gate and the mint preview already run on the write path, so a malformed row can
+never land — but it fails at *consumption*, which is after the reviewer has
+finished and left. The coordinator is then holding a refusal about rows it did
+not write, and the one session that could explain the intent is gone. One command
+before returning moves the refusal to where it can be answered:
+
+```bash
+"$PLANNING_SKILL_DIR/scripts/update-adversarial-review.sh" <plan-directory> --check
+```
+
+The commonest cause is a row naming more than one work unit in the Work unit
+cell, which the fix-key gate cannot mint. One primary unit per finding; if a
+finding genuinely spans two, it is two findings that cross-reference each other.
+
 **Reviewers mint fix keys; fixers claim them. Never the same session.** A
 reviewer mints the keys by publishing its findings; the fixer claims the keys
 in `fixes.md`. Minting and claiming in the same session is self-certification:
-`verify-fix-keys.sh --claimed-by <session>` warns when the claiming session is
-the session recorded as `minted_by`, and a warning is a review finding, not a
-pass. If a fixer must mint its own keys to record a finding the reviewer
+`verify-fix-keys.sh --claimed-by <session>` FAILS when the claiming session is
+the session recorded as `minted_by`, and the approval gate always passes a
+claiming session, so a self-certified fix set cannot be approved. If a fixer
+must mint its own keys to record a finding the reviewer
 missed, surface it as an open finding for a fresh review rather than resolving
 it on its own authority.
 
@@ -249,6 +325,15 @@ Hash drift is reported as `suspect`/`external-edit`; it is not automatically
 overwritten or repaired. Ask for human resolution before refreshing. Agents
 invoke the shell helpers; helpers own snapshot, state, and plan-file writes.
 
+**A read returns one page, and the budgets bound the page, not the document.**
+Whenever a page withholds records it reports `next_token`; pass that value back
+as `--token` and repeat until a page comes back without one. The token carries
+the document's hash and view, so a token replayed after the document changed is
+refused (exit 65) rather than resuming into shifted records — re-read from page
+one after such a refusal. Raising `--max-records`/`--max-bytes` enlarges the
+page up to the per-role byte cap; past that cap the only way to see the rest of
+a document is to page.
+
 **All plan reads go through the gated readers** (see
 [`references/plan-read-contract.md`](references/plan-read-contract.md)). Both
 the planning agent and every fresh subagent (adversarial review, reviewer) MUST
@@ -262,11 +347,13 @@ with `USERPROFILE` and `HOMEDRIVE`/`HOMEPATH` support for Windows-compatible
 Bash.
 
 The Phase 1 command contract is fixed: `init` takes only `--plan-dir`; `read`
-takes exactly one `--document` or `--unit` plus optional `--view`, `--format`,
-`--max-bytes`, `--max-records`, and `--read-only`; `check` takes exactly one
-of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly one of
-`--entry` or `--stale`. Defaults are `summary`, `text`, 32768 bytes, and 128
-records. `--all` audits without registering entries. Global IDs, Git history,
+takes exactly one `--document` or `--unit` plus optional `--view`, `--token`,
+`--format`, `--max-bytes`, `--max-records`, and `--read-only`; `check` takes
+exactly one of `--entry`, `--changed`, or `--all`; and `refresh` takes exactly
+one of `--entry` or `--stale`. Defaults are `text`, 32768 bytes, and 128
+records; the default view is `full` for `inventory` and `adversarial-review`
+and `summary` for every other id. `--all` audits without registering entries.
+Global IDs, Git history,
 versions/changelogs, quarantine, events, compaction, and workers remain
 explicitly deferred from this Phase 1 cache.
 

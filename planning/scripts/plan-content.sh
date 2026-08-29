@@ -1,34 +1,57 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# plan-content.sh — read-only queries over one plan's documents.
+#
+# Five subcommands, all non-mutating: `get` prints one document, `summary`
+# renders the work-unit inventory, `blast-radius` walks the depends-on graph
+# from a unit/goal/step, `find` does a literal single-hit search that exits 1
+# unless exactly one line matches, and `diff` maps changed lines since a git ref
+# back to the enclosing "§ N.N" paragraph labels.
+#
+# Usage:
+#   The plan directory may be given positionally or as --plan-dir <path>.
+#   plan-content.sh get|summary|blast-radius|find|diff [--plan-dir] <plan-directory> [...]
+#   plan-content.sh --help
+#
+# Exit codes: 1 zero or multiple `find` matches, 64 bad invocation, 66 missing
+# document.
+# shellcheck disable=SC2154  # plan_inventory_* are assigned at runtime by the
+# sourced plan-inventory-lib row/split helpers
+
 set -euo pipefail
+export LC_ALL=C
 
 usage() {
     local rc="${1:-64}"
-    cat >&2 <<'USAGE'
+    cat <<USAGE
 Usage:
-  plan-content.sh get <plan-directory> <document-id> [markdown|text|json|path]
-  plan-content.sh summary <plan-directory> [markdown|text|json]
-  plan-content.sh blast-radius <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
-  plan-content.sh find <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
+  ${0##*/} get [--plan-dir] <plan-directory> <document-id> [markdown|text|json|path]
+  ${0##*/} summary [--plan-dir] <plan-directory> [markdown|text|json]
+  ${0##*/} blast-radius [--plan-dir] <plan-directory> <WNN|goal-name|goal-name/step-name> [markdown|text|json]
+  ${0##*/} find [--plan-dir] <plan-directory> <pattern> [--in plan|goals|steps|units|review|testing|coverage|stories|all] [--document <docid>] [--full] [--format text|json]
                                     literal search; prints docid<TAB>section<TAB>excerpt per match,
                                     exits 1 on zero or multiple matches; --document scopes to one document
-                                    (plan, review, coverage, stories, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
+                                    (plan, review, coverage, stories, planning-bugs, goal:<g>, step:<g>/<s>, unit:<WNN>, or a
                                     step:-testing id); --full disables excerpt truncation
-  plan-content.sh diff <plan-directory> <git-ref> [--format text|json]
+  ${0##*/} diff [--plan-dir] <plan-directory> <git-ref> [--format text|json]
                                     lists documents changed since git-ref and the
                                     paragraph labels touched in each
 USAGE
     exit "$rc"
 }
 
-help() { usage 0; }
-
 [ "$#" -ge 1 ] || usage
 if [ "$1" = '-h' ] || [ "$1" = '--help' ]; then
-    help
+    usage 0
 fi
 command="$1"; shift
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory (the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here).
+# The subcommand was already shifted off above, so the plan directory is $1.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
 json_string_file() {
     awk 'BEGIN { printf "\"" } { gsub(/\\/, "\\\\"); gsub(/\"/, "\\\""); if (NR > 1) printf "\\n"; printf "%s", $0 } END { printf "\"" }' "$1"
@@ -45,22 +68,13 @@ format_document() {
     esac
 }
 
-collect_units() {
-    awk -F'|' '
-        function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^`|`$/, "", value); return value }
-        /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-            print trim($2) "\t" trim($3) "\t" trim($4) "\t" trim($5) "\t" trim($6) "\t" trim($7) "\t" trim($8) "\t" trim($9) "\t" trim($10)
-        }
-    ' "$1/work-unit-inventory.md"
-}
-
 case "$command" in
     get)
-        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
+        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { printf 'plan-content.sh: get requires [--plan-dir] <plan-directory> <document-id> [markdown|text|json|path]\n' >&2; exit 64; }
         plan_dir="$1"; document_id="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
         file="$(plan_document_path "$plan_dir" "$document_id")"
-        [ -f "$file" ] || plan_die "Document not found: $file"
+        [ -f "$file" ] || plan_die "Document not found: $file" 66
         format_document "$format" "$document_id" "$file"
         ;;
     summary)
@@ -73,10 +87,22 @@ case "$command" in
             markdown)
                 printf '# Plan summary: %s\n\n' "$(basename "$plan_dir")"
                 printf '| ID | Type | File | Scope | Depends on | Goal | Step |\n|---|---|---|---|---|---|---|\n'
-                collect_units "$plan_dir" | awk -F'\t' '{ printf "| %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $7, $8, $9 }'
+                while IFS= read -r row; do
+                    plan_inventory_split "$row"
+                    printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
+                        "$plan_inventory_id" "$plan_inventory_type" "$plan_inventory_file" \
+                        "$plan_inventory_scope" "$plan_inventory_depends" \
+                        "$plan_inventory_goal" "$plan_inventory_step"
+                done < <(plan_inventory_rows "$inventory")
                 ;;
             text)
-                collect_units "$plan_dir" | awk -F'\t' '{ printf "%s  %s  %s :: %s  <- %s  [%s/%s]\n", $1, $2, $3, $4, $7, $8, $9 }'
+                while IFS= read -r row; do
+                    plan_inventory_split "$row"
+                    printf '%s  %s  %s :: %s  <- %s  [%s/%s]\n' \
+                        "$plan_inventory_id" "$plan_inventory_type" "$plan_inventory_file" \
+                        "$plan_inventory_scope" "$plan_inventory_depends" \
+                        "$plan_inventory_goal" "$plan_inventory_step"
+                done < <(plan_inventory_rows "$inventory")
                 ;;
             json)
                 printf '{"plan":"%s","work_units":[' "$(basename "$plan_dir")"
@@ -85,7 +111,7 @@ case "$command" in
                     [ "$first" = true ] || printf ','
                     first=false
                     printf '{"id":"%s","type":"%s","file":"%s","scope":"%s","depends_on":"%s","goal":"%s","step":"%s"}' "$id" "$type" "$file" "$scope" "$depends" "$goal" "$step"
-                done < <(collect_units "$plan_dir")
+                done < <(plan_inventory_rows "$inventory")
                 printf ']}\n'
                 ;;
             *) plan_die "Unknown format: $format (use markdown, text, or json)" ;;
@@ -95,60 +121,101 @@ case "$command" in
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
         plan_dir="$1"; target="$2"; format="${3:-markdown}"
         plan_require_directory "$plan_dir"
+        # This answers "which units depend on this one", not "where is it
+        # mentioned" — and the plausible half answer is where readers stop
+        # (T13). Point at the document sweep before the output begins.
+        printf '%s\n' "plan-content.sh: blast-radius walks dependency edges. To sweep every document mentioning this unit, run: $0 find --plan-dir <plan-directory> \"$target\" --in all" >&2
         inventory="$plan_dir/work-unit-inventory.md"
         [ -f "$inventory" ] || plan_die "Work-unit inventory not found: $inventory"
-        declare -A unit_goal unit_step unit_depends selected impacted
+        # bash 3.2 has no associative arrays, so these are plan_map_* maps.
+        # Cleared first: this subcommand can run twice in one process via
+        # plan-mutate.sh.
+        plan_map_clear unit_goal; plan_map_clear unit_step; plan_map_clear unit_depends
+        plan_map_clear selected; plan_map_clear impacted
         while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
-            unit_goal[$id]="$goal"; unit_step[$id]="$step"; unit_depends[$id]="$depends"
-        done < <(collect_units "$plan_dir")
+            plan_map_set unit_goal "$id" "$goal"
+            plan_map_set unit_step "$id" "$step"
+            plan_map_set unit_depends "$id" "$depends"
+        done < <(plan_inventory_rows "$inventory")
         case "$target" in
-            W*) [ -n "${unit_goal[$target]+x}" ] || plan_die "Work unit not found: $target"; selected[$target]=1 ;;
+            W*) plan_map_has unit_goal "$target" || plan_die "Work unit not found: $target"; plan_map_set selected "$target" 1 ;;
             */*)
                 target_goal="${target%%/*}"; target_step="${target#*/}"; found=false
-                for id in "${!unit_goal[@]}"; do
-                    if [ "${unit_goal[$id]}" = "$target_goal" ] && [ "${unit_step[$id]}" = "$target_step" ]; then selected[$id]=1; found=true; fi
-                done
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    plan_map_load unit_goal "$id" || plan_map_value=""
+                    [ "$plan_map_value" = "$target_goal" ] || continue
+                    plan_map_load unit_step "$id" || plan_map_value=""
+                    if [ "$plan_map_value" = "$target_step" ]; then plan_map_set selected "$id" 1; found=true; fi
+                done < <(plan_map_keys unit_goal)
                 [ "$found" = true ] || plan_die "Step not found: $target"
                 ;;
             *)
                 found=false
-                for id in "${!unit_goal[@]}"; do
-                    if [ "${unit_goal[$id]}" = "$target" ]; then selected[$id]=1; found=true; fi
-                done
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    plan_map_load unit_goal "$id" || plan_map_value=""
+                    if [ "$plan_map_value" = "$target" ]; then plan_map_set selected "$id" 1; found=true; fi
+                done < <(plan_map_keys unit_goal)
                 [ "$found" = true ] || plan_die "Goal not found: $target"
                 ;;
         esac
         changed=true
         while [ "$changed" = true ]; do
             changed=false
-            for id in "${!unit_goal[@]}"; do
-                for dependency in ${unit_depends[$id]//,/ }; do
-                    if [ -n "${selected[$dependency]+x}" ] && [ -z "${impacted[$id]+x}" ] && [ -z "${selected[$id]+x}" ]; then
-                        impacted[$id]=1; changed=true
+            while IFS= read -r id; do
+                [ -n "$id" ] || continue
+                plan_map_load unit_depends "$id" || plan_map_value=""
+                for dependency in ${plan_map_value//,/ }; do
+                    if plan_map_has selected "$dependency" && ! plan_map_has impacted "$id" && ! plan_map_has selected "$id"; then
+                        plan_map_set impacted "$id" 1; changed=true
                     fi
-                    if [ -n "${impacted[$dependency]+x}" ] && [ -z "${impacted[$id]+x}" ] && [ -z "${selected[$id]+x}" ]; then
-                        impacted[$id]=1; changed=true
+                    if plan_map_has impacted "$dependency" && ! plan_map_has impacted "$id" && ! plan_map_has selected "$id"; then
+                        plan_map_set impacted "$id" 1; changed=true
                     fi
                 done
-            done
+            done < <(plan_map_keys unit_goal)
         done
+        # Render one map's rows through $1 as a printf template taking id, goal
+        # and step. Keys come out in insertion order; markdown/text sort anyway.
+        blast_rows() {            local map="$1" template="$2" id
+            while IFS= read -r id; do
+                [ -n "$id" ] || continue
+                plan_map_load unit_goal "$id" || plan_map_value=""
+                local row_goal="$plan_map_value"
+                plan_map_load unit_step "$id" || plan_map_value=""
+                # shellcheck disable=SC2059  # template is a caller-supplied format
+                printf -- "$template" "$id" "$row_goal" "$plan_map_value"
+            done < <(plan_map_keys "$map")
+        }
         case "$format" in
             markdown)
                 printf '# Blast radius: %s\n\n' "$target"
                 printf '## Changed\n\n'
-                for id in "${!selected[@]}"; do printf -- '- `%s` → `%s/%s`\n' "$id" "${unit_goal[$id]}" "${unit_step[$id]}"; done | sort
+                blast_rows selected '- `%s` → `%s/%s`\n' | sort
                 printf '\n## Downstream work units\n\n'
-                if [ "${#impacted[@]}" -eq 0 ]; then printf '%s\n' '- None'; else for id in "${!impacted[@]}"; do printf -- '- `%s` → `%s/%s`\n' "$id" "${unit_goal[$id]}" "${unit_step[$id]}"; done | sort; fi
+                if [ "$(plan_map_count impacted)" -eq 0 ]; then printf '%s\n' '- None'; else blast_rows impacted '- `%s` → `%s/%s`\n' | sort; fi
                 ;;
             text)
-                for id in "${!selected[@]}"; do printf 'changed %s -> %s/%s\n' "$id" "${unit_goal[$id]}" "${unit_step[$id]}"; done | sort
-                for id in "${!impacted[@]}"; do printf 'downstream %s -> %s/%s\n' "$id" "${unit_goal[$id]}" "${unit_step[$id]}"; done | sort
+                blast_rows selected 'changed %s -> %s/%s\n' | sort
+                blast_rows impacted 'downstream %s -> %s/%s\n' | sort
                 ;;
             json)
-                printf '{"target":"%s","changed":[' "$target"; first=true
-                for id in "${!selected[@]}"; do [ "$first" = true ] || printf ','; first=false; printf '"%s"' "$id"; done
-                printf '],"downstream":['; first=true
-                for id in "${!impacted[@]}"; do [ "$first" = true ] || printf ','; first=false; printf '"%s"' "$id"; done
+                # plan_map_keys yields insertion order; sorting is what pins
+                # the JSON array to a deterministic order across bash builds.
+                blast_ids() {
+                    local first=true id
+                    while IFS= read -r id; do
+                        [ -n "$id" ] || continue
+                        [ "$first" = true ] || printf ','
+                        first=false
+                        printf '"%s"' "$id"
+                    done < <(plan_map_keys "$1" | sort)
+                }
+                printf '{"target":"%s","changed":[' "$target"
+                blast_ids selected
+                printf '],"downstream":['
+                blast_ids impacted
                 printf ']}\n'
                 ;;
             *) plan_die "Unknown format: $format (use markdown, text, or json)" ;;
@@ -174,6 +241,42 @@ case "$command" in
         case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
         # Literal scan of one document (used by both --document and the scoped
         # branches below; defined here so --document can call it).
+        # Row emitters for table-bearing documents: bash read-loops over the
+        # shared cell helper keep every consumer on one parsing contract.
+        emit_row() { # DOCID LINE FULL — outer pipes stripped, 120-char excerpt
+            local docid="$1" line="$2" row
+            row="$(printf '%s\n' "$line" | sed -e 's/^[[:space:]]*|[[:space:]]*//' -e 's/[[:space:]]*|[[:space:]]*$//')"
+            if [ "$full" != true ] && [ "${#row}" -gt 120 ]; then
+                row="${row:0:120}..."
+            fi
+            printf '%s\t%s\t%s\n' "$docid" "$row" "$row"
+        }
+        scan_coverage_rows() { # FILE DOCID PATTERN FULL — DoD coverage section
+            local cfile="$1" cdocid="$2" cpat="$3" cfull="$4" in_cov=0 cline
+            while IFS= read -r cline || [ -n "$cline" ]; do
+                case "$cline" in
+                    '## Definition-of-done coverage'*) in_cov=1; continue ;;
+                esac
+                [ "$in_cov" = 1 ] || continue
+                case "$cline" in '## '*) break ;; esac
+                case "$cline" in
+                    '|'*)
+                        if [ -z "$cpat" ] || [[ $cline == *"$cpat"* ]]; then
+                            emit_row "$cdocid" "$cline" "$cfull"
+                        fi
+                        ;;
+                esac
+            done < "$cfile"
+        }
+        scan_unit_rows() { # FILE PATTERN FULL — | WNN | rows in the inventory
+            local ufile="$1" upat="$2" ufull="$3" uline uid
+            while IFS= read -r uline || [ -n "$uline" ]; do
+                [[ $uline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]] || continue
+                [ -z "$upat" ] || [[ $uline == *"$upat"* ]] || continue
+                uid="$(plan_table_cell "$uline" 2)"
+                emit_row "unit:$uid" "$uline" "$ufull"
+            done < "$ufile"
+        }
         scan_file() {
             local docid="$1" file="$2" maxlen="$3"
             [ -f "$file" ] || return 0
@@ -198,16 +301,8 @@ case "$command" in
             matches_file="$(mktemp "${TMPDIR:-/tmp}/plan-find.XXXXXX")"
             trap 'rm -f "$matches_file"' EXIT
             case "$document" in
-                coverage) awk -F'|' -v pattern="$pattern" -v full="$full" '
-                        /^## Definition-of-done coverage/ { in_coverage = 1; next }
-                        in_coverage && /^## / { exit }
-                        in_coverage && /^\|/ && index($0, pattern) {
-                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                            print "coverage\t" row "\t" row
-                        }
-                    ' "$doc_file" >> "$matches_file"
-                    ;;
+                coverage) scan_coverage_rows "$doc_file" coverage "$pattern" "$full" >> "$matches_file" ;;
+
                 *) scan_file "$document" "$doc_file" "$([ "$full" = true ] && echo full || echo 120)" >> "$matches_file" ;;
             esac
             if [ "$format" = json ]; then
@@ -225,7 +320,9 @@ case "$command" in
             else
                 cat "$matches_file"
             fi
-            match_count="$(wc -l < "$matches_file")"
+            # BSD wc pads its count to a fixed width, so strip the padding before it
+            # reaches a user-visible message.
+            match_count="$(wc -l < "$matches_file" | tr -d ' ')"
             rm -f "$matches_file"
             trap - EXIT
             if [ "$match_count" -eq 0 ]; then
@@ -277,29 +374,14 @@ case "$command" in
         esac
         case "$scope" in
             units|inventory|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
-                    /^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\|/ {
-                        id=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
-                        if (index($0, pattern)) {
-                            row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                            if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                            print "unit:" id "\t" row "\t" row
-                        }
-                    }
-                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                [ -f "$plan_dir/work-unit-inventory.md" ] \
+                    && scan_unit_rows "$plan_dir/work-unit-inventory.md" "$pattern" "$full" >> "$matches_file"
                 ;;
         esac
         case "$scope" in
             coverage|all)
-                [ -f "$plan_dir/work-unit-inventory.md" ] && awk -F'|' -v pattern="$pattern" -v full="$full" '
-                    /^## Definition-of-done coverage/ { in_coverage = 1; next }
-                    in_coverage && /^## / { exit }
-                    in_coverage && /^\|/ && index($0, pattern) {
-                        row = $0; gsub(/^[[:space:]]*\|[[:space:]]*/, "", row); gsub(/[[:space:]]*\|[[:space:]]*$/, "", row)
-                        if (full != "true" && length(row) > 120) row = substr(row, 1, 120) "..."
-                        print "coverage\t" row "\t" row
-                    }
-                ' "$plan_dir/work-unit-inventory.md" >> "$matches_file"
+                [ -f "$plan_dir/work-unit-inventory.md" ] \
+                    && scan_coverage_rows "$plan_dir/work-unit-inventory.md" coverage "$pattern" "$full" >> "$matches_file"
                 ;;
         esac
         case "$scope" in
@@ -329,7 +411,9 @@ case "$command" in
         else
             cat "$matches_file"
         fi
-        match_count="$(wc -l < "$matches_file")"
+        # BSD wc pads its count to a fixed width, so strip the padding before it
+        # reaches a user-visible message.
+        match_count="$(wc -l < "$matches_file" | tr -d ' ')"
         rm -f "$matches_file"
         trap - EXIT
         if [ "$match_count" -eq 0 ]; then
@@ -343,88 +427,10 @@ case "$command" in
         ;;
     diff)
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
-        plan_dir="$1"; git_ref="$2"; format="${3:-text}"
-        plan_require_directory "$plan_dir"
-        case "$format" in text|json) ;; *) plan_die "Unknown format: $format (use text or json)" ;; esac
-        # The plan may be a subdirectory of a repo that covers it (e.g. a
-        # git-excluded .plans root or an initiative repo holding sibling plans),
-        # so walk up to the enclosing repo and scope the diff to the plan dir.
-        repo_root="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null || true)"
-        if [ -z "$repo_root" ]; then
-            plan_die "plan directory is not inside a git repository: $plan_dir"
-        fi
-        repo_root="$(cd "$repo_root" && pwd -P)"
-        plan_abs="$(cd "$plan_dir" && pwd -P)"
-        plan_rel="."
-        if [ "$plan_abs" != "$repo_root" ]; then
-            plan_rel="${plan_abs#"$repo_root"/}"
-        fi
-        # name-only, scoped to the plan subtree (relative paths).
-        changed="$(git -C "$repo_root" diff --name-only "$git_ref" -- "$plan_rel" 2>/dev/null | sed "s#^$plan_rel/##" | grep -v '^$' || true)"
-        if [ -z "$changed" ]; then
-            git -C "$repo_root" rev-parse -q --verify "$git_ref" >/dev/null 2>&1 \
-                || plan_die "git ref not found: $git_ref"
-            printf 'No plan documents changed since %s\n' "$git_ref"
-            exit 0
-        fi
-        # A changed paragraph label is usually an UNCHANGED diff line (only its
-        # content changed), so map each changed line on the new-file side back
-        # to the enclosing "§ N.N" label.
-        python3 - "$plan_abs" "$plan_rel" "$repo_root" "$git_ref" "$format" "$changed" <<'PY'
-import json, subprocess, sys
-
-plan_abs, plan_rel, repo_root, git_ref, fmt = sys.argv[1:6]
-docs = [d for d in sys.argv[6].splitlines() if d]
-
-def diff_lines(doc):
-    path = f"{plan_rel}/{doc}" if plan_rel != "." else doc
-    out = subprocess.run(
-        ["git", "-C", repo_root, "diff", "-U0", git_ref, "--", path],
-        capture_output=True, text=True).stdout
-    # Parse new-file side: after "@@ -a,b +c,d @@", new-file lines are numbered
-    # from c; '+' lines are added content, context lines exist in both.
-    new_line = None
-    added = []
-    for raw in out.splitlines():
-        if raw.startswith("@@"):
-            m = __import__("re").search(r"\+(\d+)", raw)
-            new_line = int(m.group(1)) if m else None
-            continue
-        if new_line is None:
-            continue
-        if raw.startswith("+") and not raw.startswith("+++"):
-            added.append(new_line)
-        if not raw.startswith("-"):
-            new_line += 1
-    if not added:
-        return []
-    # Find the label enclosing each added new-file line.
-    with open(f"{plan_abs}/{doc}", encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-    label_by_line = {}
-    current = None
-    for i, line in enumerate(lines, start=1):
-        if line.startswith("§ ") and __import__("re").match(r"^§ [0-9]+\.[0-9]+$", line):
-            current = line
-        label_by_line[i] = current
-    labels = []
-    for ln in added:
-        lab = label_by_line.get(ln)
-        if lab and lab not in labels:
-            labels.append(lab)
-    return labels
-
-if fmt == "text":
-    for doc in docs:
-        print(f"## {doc}")
-        for label in diff_lines(doc):
-            print(label)
-else:
-    rows = []
-    for doc in docs:
-        rows.append({"document": doc, "paragraphs": diff_lines(doc)})
-    print(json.dumps({"ref": git_ref, "documents": rows}))
-PY
+        # The diff subcommand lives in a sibling library so this file stays
+        # under the CODE-STYLE.md §3 size limit.
+        source "$script_dir/plan-content-diff-lib.sh"
+        plan_content_diff "$@"
         ;;
     *) usage ;;
 esac

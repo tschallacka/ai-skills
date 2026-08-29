@@ -1,99 +1,181 @@
 #!/usr/bin/env bash
+# MODE: PROD
 # update-adversarial-review.sh — rewrite the "## Findings" table in a plan's
 # adversarial-review.md from CSV rows (ID, Missing or over-broad item, Required
-# plan change, Status, Work unit). Reads CSV from stdin by default
-# (heredoc-friendly) or from --file PATH. It only rewrites Findings; the
-# Verdict is authored by the reviewer and flipped to approved via
-# update-plan-content.sh --review-status.
+# plan change, Status, Work unit).
+#
+# Reads CSV from adversarial-review-incoming.md when that file exists (the one
+# plan file a reviewer may write, so a reviewer report survives the
+# coordinator's context), else from --file PATH, else from stdin
+# (heredoc-friendly). It rewrites only Findings; the Verdict is authored by the
+# reviewer and flipped to approved via update-plan-content.sh --review-status.
+#
+# Usage:
+#   update-adversarial-review.sh [--plan-dir] <plan-directory> [--file CSV] [--cycle N]
+#   update-adversarial-review.sh --help
+#
+# The Work unit column is mandatory-with-blank-allowed: leave it empty (or N/A)
+# for findings that carry no fix key, or name the owning work unit (WNN) to gate
+# the finding. Cells must not contain `|`, and input must be LF, not CRLF.
+#
+# The input is a findings document, not bare rows: title/comment lines starting
+# with `#`, blank lines, and one repeated copy of the header row are skipped,
+# whatever the source, so a reviewer can paste their whole document.
+#
+# Nothing is rewritten unless the new rows mint cleanly: the rewrite is minted
+# against a throwaway copy first, so a gated-row or openssl refusal leaves
+# every plan file byte-identical.
+#
+# The previous Findings table is archived into adversarial-review-history.md
+# under a `## Cycle N` heading (--cycle numbers it; otherwise the highest
+# recorded number plus one) so reviewers of later cycles can see what earlier
+# ones found. Archiving the same rows twice is a no-op; a --cycle that names an
+# already-recorded cycle while holding different rows is refused rather than
+# dropping them.
+#
+# Exit codes: 64 bad invocation, 65 unusable CSV, 66 the plan or its review file
+# is missing, 73 --cycle collides with a recorded cycle holding other findings.
 
 set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/plan-document-lib.sh"
-source "$SCRIPT_DIR/plan-reconcile-lib.sh"
+export LC_ALL=C
 
-readonly HELP=$'Updates the adversarial-review "## Findings" table.\n\nUsage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N]\n\nReads CSV rows (ID, Missing or over-broad item, Required plan change, Status,\nWork unit) from stdin by default (heredoc-friendly), or from --file PATH, and\nrewrites only the Findings section of adversarial-review.md. Work unit is\nmandatory-with-blank-allowed: leave it empty (or N/A) for findings that carry\nno fix key, or name the owning work unit (WNN) to gate the finding.\n\nInput rules: cells must not contain `|`; input must be LF, not CRLF (no\nWindows line endings).\n\nThe previous Findings table is archived into adversarial-review-history.md\nunder a `## Cycle N` heading (use --cycle to number it; the next free number is\nused otherwise) so reviewers of later cycles can see what earlier ones found.\n\nNote: this does not set the Verdict to approved. Author the Verdict and run\n`update-plan-content.sh --review-status <plan> approved` separately.'
+source "$script_dir/plan-reconcile-lib.sh"
 
-case "${1:-}" in
-    -h|--help) printf '%s\n' "$HELP"; exit 0 ;;
-esac
-[ "$#" -ge 1 ] && [ "$#" -le 5 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [--plan-dir] <plan-directory> [--file CSV] [--cycle N]
+       ${0##*/} --help
 
-plan_dir="$1"; shift
+Rewrites the adversarial-review "## Findings" table from CSV rows whose columns
+are: ID, Missing or over-broad item, Required plan change, Status, Work unit.
+Rows are read from adversarial-review-incoming.md if present, else from --file
+CSV, else from stdin.
+
+  --file CSV   read the rows from CSV instead of stdin
+  --cycle N    number the archived history entry N instead of the next one up
+  --check      validate the rows (shape and mint) and report; writes nothing
+
+This does not set the Verdict to approved. Author the Verdict and run
+\`update-plan-content.sh --review-status <plan> approved\` separately.
+USAGE
+    exit "$rc"
+}
+
+# The highest `## Cycle N` recorded, 0 when there is none. It is a maximum and
+# never a count: one explicit --cycle N above the count would otherwise send
+# every later automatic number backwards, into labels already in use.
+highest_cycle_number() {
+    local history="$1" highest
+    [ -f "$history" ] || { printf '0\n'; return 0; }
+    highest="$({ grep -E '^## Cycle [0-9]+$' "$history" || true; } | awk '{ print $3 }' | sort -n | tail -1)"
+    printf '%d\n' "${highest:-0}"
+}
+
+# The rows filed under the last heading — comparing them is what stops the same
+# review being archived twice.
+last_archived_rows() {
+    local history="$1"
+    [ -f "$history" ] || return 0
+    awk '
+        /^## Cycle [0-9]+$/ { rows = ""; next }
+        /^\|/ { rows = rows $0 "\n" }
+        END { printf "%s", rows }
+    ' "$history"
+}
+
+cycle_already_recorded() {
+    local history="$1" wanted="$2"
+    [ -f "$history" ] || return 1
+    awk -v wanted="$wanted" '
+        /^## Cycle [0-9]+$/ && $3 + 0 == wanted + 0 { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$history"
+}
+
+plan_dir=""
 csv_source=""
+consumed_incoming=0
 cycle_number=""
+check_only=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --file)
-            [ "$#" -ge 2 ] || plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
-            csv_source="$2"; shift 2
-            ;;
-        --cycle)
-            [ "$#" -ge 2 ] || plan_err "--cycle requires a number"
-            cycle_number="$2"; shift 2
-            ;;
-        *) plan_err "usage: update-adversarial-review.sh <plan-directory> [--file CSV] [--cycle N] (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" ;;
+        -h|--help) usage 0 ;;
+        --file) [ "$#" -ge 2 ] || usage; csv_source="$2"; shift 2 ;;
+        --cycle) [ "$#" -ge 2 ] || usage; cycle_number="$2"; shift 2 ;;
+        --check) check_only=1; shift ;;
+        --) shift; break ;;
+        -*) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; usage ;;
+        *) [ -z "$plan_dir" ] || usage; plan_dir="$1"; shift ;;
     esac
 done
+[ -n "$plan_dir" ] || usage
 
-plan_require_directory "$plan_dir" || plan_err "plan directory not found: $plan_dir (pass an absolute path, e.g. .plans/<plan-name>)"
+plan_require_directory "$plan_dir"
 plan_git_snapshot "$plan_dir"
 review_file="$plan_dir/adversarial-review.md"
-[ -f "$review_file" ] || plan_err "adversarial-review.md not found: $review_file (run create-adversarial-review.sh first)"
+# Captured before the rewrite so the result line can report the delta rather than
+# the verb; an empty set is a fresh table, not an error.
+before_ids="$(plan_review_finding_ids "$review_file")"
+[ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file (run create-adversarial-review.sh first)" 66
 
+# The trap is installed before the first write and never released with
+# `trap - EXIT`: releasing it discards the library's cleanup handler (§8) and
+# leaked both mktemp files on every successful run.
 csv_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-table.XXXXXX")"
 rendered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-rendered.XXXXXX")"
+filtered_file="$(mktemp "${TMPDIR:-/tmp}/adversarial-review-filtered.XXXXXX")"
 temporary_file="${review_file}.tmp.$$"
-trap 'rm -f "$csv_file" "$rendered_file" "$temporary_file"' EXIT
+preview_dir=""
+trap 'rm -f "$csv_file" "$rendered_file" "$filtered_file" "$temporary_file"; [ -z "$preview_dir" ] || rm -rf "$preview_dir"' EXIT
 
-# Reviewers write their findings to adversarial-review-incoming.md (the one
-# plan file a reviewer may write); this is its only consumer. It takes
-# precedence over stdin so a reviewer report survives the coordinator's context.
+# Reviewers write their findings to adversarial-review-incoming.md; this is its
+# only consumer. It takes precedence over stdin so a reviewer report survives
+# the coordinator's context.
 incoming_file="$plan_dir/adversarial-review-incoming.md"
 if [ -n "$csv_source" ]; then
-    [ -f "$csv_source" ] || plan_err "CSV file not found: $csv_source"
+    [ -f "$csv_source" ] || plan_die "CSV file not found: $csv_source" 66
     cp "$csv_source" "$csv_file"
 elif [ -f "$incoming_file" ]; then
     cp "$incoming_file" "$csv_file"
-    printf 'Consumed reviewer findings from %s\n' "$incoming_file"
+    consumed_incoming=1
+    printf 'Consumed reviewer findings from %s\n' "$incoming_file" >&2
 else
     if [ -t 0 ]; then
-        plan_err "no CSV provided. Pipe rows or a heredoc to stdin, pass --file PATH, or let reviewers write adversarial-review-incoming.md (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+        plan_die "no CSV provided. Pipe rows or a heredoc to stdin, pass --file PATH, or let reviewers write adversarial-review-incoming.md (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 64
     fi
     cat > "$csv_file"
 fi
-[ -s "$csv_file" ] || plan_err "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)"
+[ -s "$csv_file" ] || plan_die "CSV input is empty (columns: ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
 
-plan_render_csv_table 5 "$(awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
+# The input is a findings document, not bare rows: a reviewer's title line,
+# blank lines, and their own copy of the header row arrive here whatever the
+# source. Skip all three so the renderer sees rows only.
+findings_header='ID,Missing or over-broad item,Required plan change,Status,Work unit'
+awk -v header="$findings_header" '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    !header_dropped && $0 == header { header_dropped = 1; next }
+    { print }
+' "$csv_file" > "$filtered_file"
+mv "$filtered_file" "$csv_file"
+[ -s "$csv_file" ] || plan_die "no finding rows beneath the title/comment lines: write one row per line with 5 comma-separated columns (ID, Missing or over-broad item, Required plan change, Status, Work unit)" 65
 
-# Archive the prior Findings rows (if any) into adversarial-review-history.md
-# so reviewers of later cycles can see what earlier ones found.
-history_file="$plan_dir/adversarial-review-history.md"
-history_rows="$(awk '
-    /^## Findings$/ { in_findings = 1; next }
-    in_findings && /^## Verdict$/ { exit }
-    in_findings && /^\|/ { print }
-' "$review_file")"
-# Record a cycle entry whenever a rewrite happens, even when the prior table
-# was replaced by narrative (no row-level rows to archive) — the cycle marker
-# itself is the history a later reviewer needs. Guard against re-archiving the
-# same review file twice by comparing the last archived row set.
-if [ -z "$cycle_number" ]; then
-    cycle_number="$(grep -c '^## Cycle ' "$history_file" 2>/dev/null || true)"
-    cycle_number=$((cycle_number + 1))
-fi
-last_cycle="$(grep -oE '^## Cycle [0-9]+' "$history_file" 2>/dev/null | tail -1 | awk '{print $3}')" || true
-if [ "$last_cycle" != "$cycle_number" ]; then
-    {
-        printf '\n## Cycle %s\n\n' "$cycle_number"
-        if [ -n "$history_rows" ]; then
-            printf '%s\n' "$history_rows"
-        else
-            printf '%s\n' '_No row-level findings were recorded for this cycle._'
-        fi
-    } >> "$history_file"
-    printf 'Archived previous Findings table to %s (Cycle %s)\n' "$history_file" "$cycle_number"
-fi
+# The header row is prepended here, not left to the renderer. plan_render_csv_table
+# emits the |---| delimiter after row 1, which is correct for --table-paragraph
+# where the caller's first row IS the header. Passing findings straight in made
+# the first finding of every cycle the header: the table lost its column names
+# and AR-nn was presented as one. create-adversarial-review.sh writes this same
+# header, so the two must stay identical.
+plan_render_csv_table 5 "$(printf '%s\\n' "$findings_header"; awk '{ printf "%s\\n", $0 }' "$csv_file")" > "$rendered_file"
 
 awk -v replacement_file="$rendered_file" '
     function emit_replacement(    line) {
@@ -116,8 +198,80 @@ awk -v replacement_file="$rendered_file" '
     in_findings { next }
     { print }
 ' "$review_file" > "$temporary_file"
+
+# Mint against a throwaway copy before anything is written (contract 2: the
+# irreversible step is last). Every refusal mint can produce — a gated row
+# with non-conforming ids, openssl unavailable — lands here, while every plan
+# file still holds its original bytes. The success line names a directory the
+# caller will never see, so only its diagnostics flow through.
+preview_dir="$(mktemp -d "${TMPDIR:-/tmp}/adversarial-review-mint.XXXXXX")"
+cp -- "$temporary_file" "$preview_dir/adversarial-review.md"
+mint_rc=0
+"$script_dir/mint-fix-keys.sh" "$preview_dir" >/dev/null || mint_rc=$?
+if [ "$mint_rc" -ne 0 ]; then
+    plan_die "findings were not minted; nothing was modified — fix the finding/work-unit cells and rerun (diagnosis above)" "$mint_rc"
+fi
+
+# --check stops here: the shape gate above and the mint preview are exactly the
+# refusals a write run would produce, so a reviewer learns about a malformed row
+# before it lands — and before they have left the conversation (T8). The
+# incoming file is deliberately not consumed and no table, history or key is
+# written.
+if [ "$check_only" -eq 1 ]; then
+    rows="$(grep -c . "$csv_file" || true)"
+    printf 'CSV is valid: %s finding row(s) passed the shape and mint checks; nothing was written\n' "$rows"
+    exit 0
+fi
+
+# Archive the prior Findings rows (if any) into adversarial-review-history.md
+# so reviewers of later cycles can see what earlier ones found.
+history_file="$plan_dir/adversarial-review-history.md"
+history_rows="$(awk '
+    /^## Findings$/ { in_findings = 1; next }
+    in_findings && /^## Verdict$/ { exit }
+    in_findings && /^\|/ { print }
+' "$review_file")"
+# Record a cycle entry on every rewrite, even with no rows to archive: the marker
+# itself is the history a later reviewer needs. Comparing the last archived row
+# set stops a double archive; an unarchived set is never dropped for a number.
+if [ -z "$cycle_number" ]; then
+    cycle_number=$(($(highest_cycle_number "$history_file") + 1))
+fi
+if [ -n "$history_rows" ] && [ "$history_rows" = "$(last_archived_rows "$history_file")" ]; then
+    printf 'Findings table is already the last entry in %s; not archiving it twice\n' "$history_file" >&2
+elif cycle_already_recorded "$history_file" "$cycle_number"; then
+    plan_die "Cycle $cycle_number is already recorded in $history_file with other findings; archiving would discard them (choose a free --cycle number)" 73
+else
+    {
+        printf '\n## Cycle %s\n\n' "$cycle_number"
+        if [ -n "$history_rows" ]; then
+            printf '%s\n' "$history_rows"
+        else
+            printf '%s\n' '_No row-level findings were recorded for this cycle._'
+        fi
+    } >> "$history_file"
+    printf 'Archived previous Findings table to %s (Cycle %s)\n' "$history_file" "$cycle_number" >&2
+fi
+
 mv "$temporary_file" "$review_file"
-[ -f "$incoming_file" ] && rm -f "$incoming_file"
-"$SCRIPT_DIR/mint-fix-keys.sh" "$plan_dir"
-trap - EXIT
-printf 'Updated findings table in %s\n' "$review_file"
+# A reviewer report only survives the coordinator's context while the file does,
+# so it is removed only when it was the source that got rendered.
+[ "$consumed_incoming" -eq 0 ] || rm -f "$incoming_file"
+# Fix keys are re-minted from the rewritten table; its progress line is this
+# script's diagnostic, not its result, so it goes to stderr (§10).
+"$script_dir/mint-fix-keys.sh" "$plan_dir" >&2
+
+# The effect, not the verb. This script rewrites the whole table from the rows it
+# is given, so a caller who derives that CSV *from* the table writes the same rows
+# back and reads a success line identical to one that added findings. That is how
+# nine findings went unrecorded for two cycles while six work units cited them by
+# id: the gate can only mint, claim and verify rows that exist, so it reported
+# passed on a table that was missing them (T66).
+new_ids="$(plan_review_finding_ids "$review_file")"
+added="$(comm -13 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$new_ids") | tr '\n' ' ')"
+dropped="$(comm -23 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$new_ids") | tr '\n' ' ')"
+printf 'Updated findings table in %s: %s row(s) in, %s row(s) out' \
+    "$review_file" "$(printf '%s\n' "$before_ids" | grep -c .)" "$(printf '%s\n' "$new_ids" | grep -c .)"
+[ -z "$added" ] || printf '; added %s' "${added% }"
+[ -z "$dropped" ] || printf '; dropped %s' "${dropped% }"
+printf '\n'

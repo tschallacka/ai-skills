@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
+# MODE: DEV
 # test-progress-derivation.sh — every progress-tracker builder must derive the
 # row Description from source intent, never write a literal placeholder into a
-# generated table. The derivation is duplicated across four scripts, so this
-# asserts each one independently (report 15 §2 / report 16 follow-up):
+# generated table. The derivation is duplicated across four builders, so each
+# is asserted independently:
 #   - create-progress.sh        (goal-level, step -> §4.1 Objective)
 #   - plan-mutate.sh rebuild-progress (goal-level, step -> §4.1 Objective)
 #   - create-plan-progress.sh   (plan-level, goal -> Outcome/DoD)
 #   - rebuild-plan-progress.sh  (plan-level, goal -> Outcome/DoD)
 # A step/goal with a real Objective/DoD must surface that text (truncated to
-# 100 chars); a step/goal with NO Objective/DoD must fall back to its name —
-# and never to "<short description>" (which would fail plan validation).
+# 100 chars); one with none falls back to its name, never "<short description>",
+# which would fail plan validation.
+set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-derivation-test.XXXXXX")"
@@ -80,7 +80,10 @@ check_no_placeholder 'create-plan-progress does not emit a placeholder' "$plan_r
 check 'rebuild-plan-progress derives from goal Outcome/DoD' "$plan_root/progress.md" 'The goal-level DoD derivation text\.'
 check_no_placeholder 'rebuild-plan-progress does not emit a placeholder' "$plan_root/progress.md"
 # A goal with no DoD falls back to its goal name, never a placeholder.
-check 'rebuild-plan-progress falls back to goal name for a bare goal' "$plan_root/progress.md" '| 02-goal | 02-goal |'
+# Pipes escaped: check() greps with -E, and a leading bare | is an empty
+# alternation branch. GNU grep tolerates it, BSD grep refuses outright with
+# "empty (sub)expression" and the pattern never matches. PORTABILITY(ere-empty-branch).
+check 'rebuild-plan-progress falls back to goal name for a bare goal' "$plan_root/progress.md" '\| 02-goal \| 02-goal \|'
 
 [ "$FAILED" -eq 0 ] || exit 1
 printf 'Progress derivation regression test passed.\n'

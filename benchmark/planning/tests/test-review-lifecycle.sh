@@ -1,66 +1,90 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../planning/tests" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$root/runtime/lib-agent.sh"  # defines benchmark_result_parent for the archive path
+# The harness surface is the setup emitter plus the generated worker spine and
+# the libraries extracted out of it. A contract string may live in any of them,
+# so assert against the whole set rather than pinning a string to one file.
+harness_sources=("$root/setup-benchmark.sh" "$root/case/start-worker.sh")
+for harness_extra in \
+    "$root/lib-portable.sh" \
+    "$root/lib-process.sh" \
+    "$root/lib-structural-gate.sh" \
+    "$root/lib-approval.py" \
+    "$root/synthesize-state.py" \
+    "$root/emit-telemetry.py"; do
+    [ -f "$harness_extra" ] || continue
+    harness_sources+=("$harness_extra")
+done
+harness_grep() { grep -Fq -- "$1" "${harness_sources[@]}"; }
+harness_grep_e() { grep -Eq -- "$1" "${harness_sources[@]}"; }
 grep -Fq 'Fresh-review mode is the default.' "$root/worker-prompt.md"
 grep -Fq 'stable `AR-NN` findings' "$root/worker-prompt.md"
 grep -Fq 'final independent' "$root/worker-prompt.md"
-grep -Fq 'worker-subagent' "$root/setup-benchmark.sh"
-grep -Fq 'if [ ! -s "$approval" ] && [ -s "$capsule/approval.json" ]; then' "$root/setup-benchmark.sh"
-grep -Fq 'cp "$approval" "$capsule/plan/approval.json"' "$root/setup-benchmark.sh"
-grep -Fq 'BLINDED_ORACLE_SPEC' "$root/setup-benchmark.sh"
-grep -Fq 'ORACLE_ROLE=independent-oracle' "$root/setup-benchmark.sh"
-grep -Fq 'oracle-rejection.json' "$root/setup-benchmark.sh"
-grep -Fq 'rm -rf "$ORACLE_PRIVATE_ROOT"' "$root/setup-benchmark.sh"
+harness_grep 'worker-subagent'
+harness_grep 'if [ ! -s "$approval" ] && [ -s "$capsule/approval.json" ]; then'
+harness_grep 'cp "$approval" "$capsule/plan/approval.json"'
+harness_grep 'BLINDED_ORACLE_SPEC'
+harness_grep 'ORACLE_ROLE=independent-oracle'
+harness_grep 'oracle-rejection.json'
+harness_grep 'rm -rf "$ORACLE_PRIVATE_ROOT"'
 grep -Eq '"mode": (os\.)?environ\.get\("ORACLE_MODE"\)' "$root/grade-blinded-run.sh"
 grep -Fq 'protocol_role=worker-internal' "$root/analyzer-prompt.md"
 grep -Fq 'review mode, reviewer sessions, cycles' "$root/analyzer-prompt.md"
 grep -Fq 'passes per reviewer' "$root/benchmark-test.md"
 grep -Fq 'three fresh-review cycles' "$root/benchmark-test.md"
-grep -Fq '"review_completed": review_completed' "$root/setup-benchmark.sh"
-grep -Fq '"plan_approved": plan_approved' "$root/setup-benchmark.sh"
-grep -Fq '"oracle_completed": oracle_completed' "$root/setup-benchmark.sh"
-grep -Fq '"adoptable": adoptable' "$root/setup-benchmark.sh"
-grep -Fq '"fail_closed_reasons": sorted(reasons)' "$root/setup-benchmark.sh"
-grep -Fq '"approval_conflict": approval_conflict' "$root/setup-benchmark.sh"
-grep -Fq '"review_state": reviewer_state' "$root/setup-benchmark.sh"
-grep -Fq 'state_schema' "$root/setup-benchmark.sh"
-grep -Fq 'PLAN_NOT_APPROVED' "$root/setup-benchmark.sh"
-grep -Fq 'APPROVAL_MISSING' "$root/setup-benchmark.sh"
-grep -Fq 'APPROVAL_CONFLICT' "$root/setup-benchmark.sh"
-grep -Fq 'MISSING_DENOMINATOR' "$root/setup-benchmark.sh"
-grep -Fq 'SEMANTIC_THRESHOLD_FAILED' "$root/setup-benchmark.sh"
-grep -Fq 'INDEPENDENT_THRESHOLD_FAILED' "$root/setup-benchmark.sh"
+harness_grep '"review_completed": review_completed'
+harness_grep '"plan_approved": plan_approved'
+harness_grep '"oracle_completed": oracle_completed'
+harness_grep '"adoptable": adoptable'
+harness_grep '"fail_closed_reasons": sorted(reasons)'
+harness_grep '"approval_conflict": approval_conflict'
+harness_grep '"review_state": reviewer_state'
+harness_grep 'state_schema'
+harness_grep 'PLAN_NOT_APPROVED'
+harness_grep 'APPROVAL_MISSING'
+harness_grep 'APPROVAL_CONFLICT'
+harness_grep 'MISSING_DENOMINATOR'
+harness_grep 'SEMANTIC_THRESHOLD_FAILED'
+harness_grep 'INDEPENDENT_THRESHOLD_FAILED'
 grep -Fq 'review_completed' "$root/analyzer-prompt.md"
 grep -Fq 'Mechanical exact-ID diagnostics are' "$root/analyzer-prompt.md"
 grep -Fq 'false` is valid terminal evidence' "$root/worker-prompt.md"
-grep -Fq 'approval_schema_validator()' "$root/setup-benchmark.sh"
-grep -Fq 'select_reviewer_b_approval()' "$root/setup-benchmark.sh"
-grep -Fq 'reviewer_b_session_binding()' "$root/setup-benchmark.sh"
-grep -Fq 'APPROVAL_DUPLICATE' "$root/setup-benchmark.sh"
-grep -Fq 'UNAUTHORIZED_REVIEWER_APPROVAL' "$root/setup-benchmark.sh"
-grep -Fq 'REVIEWER_BINDING_SESSION_MISMATCH' "$root/setup-benchmark.sh"
-grep -Fq 'REVIEWER_BINDING_CAPSULE_MISMATCH' "$root/setup-benchmark.sh"
-grep -Fq 'REVIEWER_BINDING_MODE_MISMATCH' "$root/setup-benchmark.sh"
-grep -Fq 'REVIEWER_BINDING_STALE' "$root/setup-benchmark.sh"
-grep -Fq 'APPROVAL_SCHEMA_INVALID' "$root/setup-benchmark.sh"
-grep -Fq 'reviewer_authority' "$root/setup-benchmark.sh"
-grep -Fq 'selected_reviewer_session_id' "$root/setup-benchmark.sh"
-grep -Fq 'selected_capsule_manifest_sha256' "$root/setup-benchmark.sh"
-grep -Fq 'defective-plan-manifest.json' "$root/setup-benchmark.sh"
-grep -Fq 'target-snapshot-manifest.json' "$root/setup-benchmark.sh"
-grep -Fq 'archive_path' "$root/setup-benchmark.sh"
+harness_grep 'approval_schema_validator()'
+harness_grep 'select_reviewer_b_approval()'
+harness_grep 'reviewer_b_session_binding()'
+harness_grep 'APPROVAL_DUPLICATE'
+harness_grep 'UNAUTHORIZED_REVIEWER_APPROVAL'
+harness_grep 'REVIEWER_BINDING_SESSION_MISMATCH'
+harness_grep 'REVIEWER_BINDING_CAPSULE_MISMATCH'
+harness_grep 'REVIEWER_BINDING_MODE_MISMATCH'
+harness_grep 'REVIEWER_BINDING_STALE'
+harness_grep 'APPROVAL_SCHEMA_INVALID'
+harness_grep 'reviewer_authority'
+harness_grep 'selected_reviewer_session_id'
+harness_grep 'selected_capsule_manifest_sha256'
+harness_grep 'defective-plan-manifest.json'
+harness_grep 'target-snapshot-manifest.json'
+harness_grep 'archive_path'
 grep -Fq 'authority`' "$root/analyzer-prompt.md"
 grep -Fq 'approval_schema_status' "$root/analyzer-prompt.md"
 grep -Fq 'reviewer_binding_status' "$root/analyzer-prompt.md"
-python3 - "$root" <<'PY'
+python3 - "${harness_sources[@]}" <<'PY'
 import json
 import pathlib
-import tempfile
+import sys
 
-root = pathlib.Path(__import__("sys").argv[1])
-setup = (root / "setup-benchmark.sh").read_text(encoding="utf-8")
+# Concatenated harness surface: the emitter, the generated worker spine, and the
+# libraries extracted out of it. Assertions below are "this contract string is
+# somewhere in the harness", not "in this one file".
+setup = "\n".join(pathlib.Path(arg).read_text(encoding="utf-8") for arg in sys.argv[1:])
 
 # W05 fixture: Reviewer A is handoff-only. A=true/B=false is rejection plus
 # unauthorized evidence, never an undifferentiated approval conflict.
@@ -119,7 +143,22 @@ tmp="$(mktemp -d /tmp/reviewer-lifecycle-goal03.XXXXXX)"
 trap 'rm -rf -- "$tmp"' EXIT
 fixture_root="$tmp/contract-fixture"
 mkdir -p "$fixture_root"
-source <(awk '/^approval_schema_validator\(\) \{/{capture=1} capture{print} /^REVIEWER_STATUS="not-run"$/{exit}' "$root/setup-benchmark.sh")
+# The authority/schema/binding checks run through the same production entry
+# points the case runner calls, so the wrappers below are the whole coupling.
+lib_approval="$root/lib-approval.py"
+test -f "$lib_approval"
+approval_schema_validator() { python3 "$lib_approval" schema-validate "$1" "$2"; }
+select_reviewer_b_approval() { python3 "$lib_approval" select-approval "$1" "$2" "$3"; }
+reviewer_b_session_binding() { python3 "$lib_approval" bind-session "$1" "$2" "$3" "$4"; }
+# A bad subcommand or arity must be rejected as a usage error, not silently pass.
+if python3 "$lib_approval" no-such-entry-point >/dev/null 2>&1; then
+    echo "lib-approval.py accepted an unknown entry point" >&2
+    exit 1
+fi
+if python3 "$lib_approval" schema-validate only-one-argument >/dev/null 2>&1; then
+    echo "lib-approval.py accepted the wrong argument count" >&2
+    exit 1
+fi
 
 python3 - "$fixture_root" <<'PY'
 import hashlib
@@ -250,14 +289,12 @@ grep -Fq 'APPROVAL_MISSING' "$fixture_root/selection-a-only.json"
 grep -Fq 'UNAUTHORIZED_REVIEWER_APPROVAL' "$fixture_root/selection-a-only.json"
 select_reviewer_b_approval "$fixture_root/reviewers" "$fixture_root/reviewer-lifecycle.jsonl" "$fixture_root/selection-duplicate.json"
 grep -Fq 'APPROVAL_DUPLICATE' "$fixture_root/selection-duplicate.json"
-grep -Fq 'PROVENANCE_MISSING' "$root/setup-benchmark.sh"
+harness_grep 'PROVENANCE_MISSING'
 printf 'Production authority/schema/binding fixture execution passed.\n'
 
-# W13: threshold/denominator reason split. Replicates the reviewer-state reason
-# synthesis in setup-benchmark.sh: MISSING_THRESHOLDS fires only when the
-# threshold values are absent, while MISSING_DENOMINATOR fires only when the
-# oracle denominator is absent/invalid/<= 0. A valid denominator (3) with the
-# thresholds absent must NOT fire MISSING_DENOMINATOR.
+# Threshold/denominator reason split: MISSING_THRESHOLDS fires only on absent
+# threshold values, MISSING_DENOMINATOR only on an absent/invalid/<= 0 oracle
+# denominator. A valid denominator with thresholds absent must fire only the one.
 python3 - <<'PY'
 import os
 
@@ -306,15 +343,74 @@ finally:
 print("Threshold/denominator reason split enforced (MISSING_THRESHOLDS vs MISSING_DENOMINATOR).")
 PY
 
-# W14: exercise the real setup adapter with deterministic worker/reviewer
-# commands. The fake commands replace only the external model invocation; the
-# adapter still performs seeding, lifecycle selection, binding, grading,
-# provenance publication, and redaction.
+# Structural gate: the verdict travels as an exit code, not a global mutated
+# inside the redirected brace group, so it survives `> report` and taints the run.
+# shellcheck source=../lib-structural-gate.sh
+source "$root/lib-structural-gate.sh"
+gate_root="$fixture_root/structural-gate"
+gate_plan="$gate_root/plan"
+mkdir -p "$gate_plan/ui-story-runs" "$gate_plan/context/snapshots"
+touch "$gate_plan/plan-description.md" "$gate_plan/progress.md" \
+    "$gate_plan/validation.md" "$gate_plan/analysis-report.md" \
+    "$gate_plan/goal.md" "$gate_plan/work-unit-inventory.md" \
+    "$gate_plan/ui-user-stories.md" "$gate_plan/adversarial-review.md" \
+    "$gate_plan/bugs.md" "$gate_plan/context-snapshot.md" \
+    "$gate_plan/plan-testing.md" \
+    "$gate_plan/ui-story-runs/fixture.txt" "$gate_plan/context/snapshots/fixture.txt"
+
+structural_verdict="pass"
+structural_gate_report "$gate_plan" gate-fixture 1 > "$gate_root/complete.txt" \
+    || structural_verdict="fail"
+if [ "$structural_verdict" != pass ]; then
+    echo "complete plan did not pass the structural gate" >&2
+    cat "$gate_root/complete.txt" >&2
+    exit 1
+fi
+grep -Fq 'result=pass' "$gate_root/complete.txt"
+
+# Remove one required artifact: the caller's variable must flip to fail even
+# though the verdict is computed inside a redirected call.
+rm -f "$gate_plan/progress.md"
+structural_verdict="pass"
+structural_gate_report "$gate_plan" gate-fixture 1 > "$gate_root/missing.txt" \
+    || structural_verdict="fail"
+if [ "$structural_verdict" != fail ]; then
+    echo "a missing required artifact did not taint the structural verdict" >&2
+    exit 1
+fi
+grep -Fq 'result=fail' "$gate_root/missing.txt"
+grep -Fq 'FAIL: plan progress tracker' "$gate_root/missing.txt"
+
+# A missing plan directory taints too, and says so in the report.
+structural_verdict="pass"
+structural_gate_report "$gate_root/absent" gate-fixture 0 > "$gate_root/absent.txt" \
+    || structural_verdict="fail"
+if [ "$structural_verdict" != fail ]; then
+    echo "a missing plan directory did not taint the structural verdict" >&2
+    exit 1
+fi
+grep -Fq 'FAIL: plan directory missing' "$gate_root/absent.txt"
+
+# ...and a fail verdict is wired into the run's taint expression, not merely
+# reported. This is the one line in the case runner that connects them.
+grep -Fq '[ "$STRUCTURAL_VALIDATION" = "fail" ]' "$root/case/start-worker.sh"
+grep -Fq 'STRUCTURAL_GATE_FAILED' "${harness_sources[@]}" >/dev/null
+printf 'Structural gate verdict survives redirection and taints the run.\n'
+
+# Exercise the real setup adapter with deterministic worker/reviewer commands.
+# The fakes replace only the external model invocation; seeding, selection,
+# binding, grading, provenance publication and redaction all still run.
 integration_root="$fixture_root/integration"
 fake_bin="$integration_root/bin"
 fixture_plan="$integration_root/fixture-plan"
 mkdir -p "$fake_bin" "$fixture_plan"
-cp -R "$root/../../.plans/reviewer-oracle-evidence-hardening/." "$fixture_plan/"
+# A committed fixture, not a transient .plans/ tree: this test used to copy a
+# gitignored plan, so it could only pass on a machine that happened to have one.
+# The fixture holds exactly the artifacts the structural gate requires and that
+# this test does not create for itself.
+fixture_plan_src="$root/tests/fixtures/review-lifecycle-plan"
+[ -d "$fixture_plan_src" ] || { printf 'missing fixture: %s\n' "$fixture_plan_src" >&2; exit 66; }
+( cd "$fixture_plan_src" && tar cf - . ) | ( cd "$fixture_plan" && tar xf - )
 rm -f "$fixture_plan/approval.json"
 cat > "$fixture_plan/plan.md" <<'EOF'
 one initial button
@@ -330,15 +426,32 @@ JSON
 cat > "$fake_bin/codex-worker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-# Stay alive briefly so the runner can capture this worker's process group for
-# the post-run process audit (a real worker outlives the group-id capture).
-sleep 1
+# Stay alive until the runner has captured this worker, then exit: the worker
+# polls the process registry (its path arrives through the exported
+# BENCHMARK_PROCESS_REGISTRY) for its own pid -- or, if the detach shim forked,
+# any registered agent row writing this worker's jsonl -- so the handshake is
+# event-driven instead of a wall-clock sleep that loses races on loaded runners.
+# The ceiling exists only to bound a defect; reaching it proceeds normally,
+# which is the old sleep's behaviour with a bound instead of a guess.
 workspace=''
 capsule=''
 while [ "$#" -gt 0 ]; do
     if [ "$1" = -C ]; then workspace="$2"; shift 2; continue; fi
     if [ "$1" = --add-dir ] && [ -z "$capsule" ]; then capsule="$2"; shift 2; continue; fi
     shift
+done
+tab="$(printf '\t')"
+attempt=0
+while [ "$attempt" -lt 150 ]; do
+    if [ -n "${BENCHMARK_PROCESS_REGISTRY:-}" ] \
+        && awk -F "$tab" -v me="$$" '
+            $1 == "agent" && ($2 == me || $5 ~ /worker\.jsonl$/) { found = 1 }
+            END { exit found ? 0 : 1 }
+        ' "$BENCHMARK_PROCESS_REGISTRY" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
 done
 cp -R "$FAKE_PLAN_SOURCE/." "$workspace/$PLAN_NAME/"
 printf '{"type":"thread.started","thread_id":"fake-worker-session"}\n'
@@ -355,7 +468,15 @@ while [ "$#" -gt 0 ]; do
 done
 capsule="${capsule:?reviewer capsule argument missing}"
 printf 'workspace=%s capsule=%s session=%s capsule_id=%s\\n' "$workspace" "$capsule" "$REVIEWER_SESSION_ID" "$REVIEWER_CAPSULE_ID" > "$FAKE_REVIEWER_LOG"
-manifest_hash="$(sha256sum "$capsule/capsule-manifest.json" | awk '{print $1}')"
+# This runs in the generated fixture's own shell, so it cannot use the
+# harness helper; stock macOS has no sha256sum, hence the cascade.
+if command -v sha256sum >/dev/null 2>&1; then
+    manifest_hash="$(sha256sum "$capsule/capsule-manifest.json" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+    manifest_hash="$(shasum -a 256 "$capsule/capsule-manifest.json" | awk '{print $1}')"
+else
+    manifest_hash="$(openssl dgst -sha256 "$capsule/capsule-manifest.json" | awk '{print $NF}')"
+fi
 cat > "$capsule/plan/approval.json" <<JSON
 {"reviewer_session_id":"$REVIEWER_SESSION_ID","capsule_id":"$REVIEWER_CAPSULE_ID","mode":"$REVIEWER_MODE","capsule_manifest_sha256":"$manifest_hash","approved_at":"$REVIEWER_APPROVED_AT","overall_plan_approval":true,"approved_findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The plan contradicts the one initial button, fourth generated button, and visible white border requirements.","observed_contradiction":"The target contains two initial buttons, a third generated button, and a visible black border instead of one initial button, a fourth generated button, and a visible white border.","impact":"The proof can accept the wrong implementation.","evidence":"plan.md § 3.1 contains all three contradictory signals: one initial button, fourth generated button, and visible white border.","required_correction":"Replace two initial buttons with one, replace the third generated button with the fourth, and replace the visible black border with a visible white border.","independent":true}],"rejected_findings":[]}
 JSON
@@ -366,8 +487,35 @@ cat > "$fake_bin/codex" <<'EOF'
 #!/usr/bin/env bash
 exec "$FAKE_WORKER_COMMAND" "$@"
 EOF
-chmod +x "$fake_bin/codex"
-run_id="$(date -u +%Y%m%dT%H%M%SZ)-adapter-test"
+cat > "$fake_bin/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" -gt 1 ] || exit 64
+shift
+exec "$@"
+EOF
+chmod +x "$fake_bin/codex" "$fake_bin/timeout"
+no_setsid_path="$integration_root/no-setsid-path"
+mkdir -p "$no_setsid_path"
+old_ifs="$IFS"
+IFS=:
+for dir in $PATH; do
+    [ -d "$dir" ] || continue
+    for path in "$dir"/*; do
+        [ -x "$path" ] || continue
+        tool="${path##*/}"
+        case "$tool" in setsid|nohup|open) continue ;; esac
+        [ -e "$no_setsid_path/$tool" ] || ln -s "$path" "$no_setsid_path/$tool"
+    done
+done
+IFS="$old_ifs"
+for tool in codex fake-reviewer codex-worker timeout; do
+    ln -sf "$fake_bin/$tool" "$no_setsid_path/$tool"
+done
+# The run id must match UTC_TIMESTAMP-<name>, so the name is the only place
+# collision-proof entropy fits: two suite runs starting in the same second
+# otherwise derive the same RESULT_DIR and race the publication `mv`.
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-adapter-test-$$"
 export FAKE_PLAN_SOURCE="$fixture_plan"
 export FAKE_WORKER_COMMAND="$fake_bin/codex-worker"
 export FAKE_REVIEWER_LOG="$integration_root/fake-reviewer.log"
@@ -382,7 +530,13 @@ connection.execute("insert into threads values ('fake-worker-session', 100)")
 connection.commit()
 connection.close()
 PY
-if ! PATH="$fake_bin:$PATH" timeout 60s env \
+# No wall clock. Everything below it is a shell script in this fixture that
+# writes a file and exits, so a 60s cap could only fire on a defect -- and then it
+# would report a timeout instead of the defect. It also made this the only test in
+# the suite whose result depended on machine speed, and the only one that could
+# not run on macOS at all, where `timeout` does not exist. A hang here is a hang
+# to see, the same as in the other 79 tests, none of which are capped.
+if ! PATH="$no_setsid_path" env \
     REVIEWER_COMMAND="$fake_bin/fake-reviewer" \
     REVIEWER_SESSION_ID="${run_id}-current-B-fixed" \
     REVIEWER_CAPSULE_ID="capsule-001" \
@@ -391,7 +545,7 @@ if ! PATH="$fake_bin:$PATH" timeout 60s env \
     SEMANTIC_THRESHOLD=1.0 \
     INDEPENDENT_THRESHOLD=1.0 \
     BLINDED_ORACLE_SPEC="$integration_root/seeded-defects.json" \
-    bash "$root/setup-benchmark.sh" current "$integration_root/testing" adapter-test "$run_id" \
+    "$BASH" "$root/setup-benchmark.sh" current "$integration_root/testing" "adapter-test-$$" "$run_id" \
     > "$integration_root/setup-output.txt" 2>&1; then
     cat "$integration_root/setup-output.txt" >&2
     exit 1
@@ -400,11 +554,24 @@ if ! bash -n "$integration_root/testing/current-$run_id/start-worker.sh"; then
     nl -ba "$integration_root/testing/current-$run_id/start-worker.sh" | sed -n '600,620p' >&2
     exit 1
 fi
-if ! PATH="$fake_bin:$PATH" timeout 60s bash "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
+if ! PATH="$no_setsid_path" "$BASH" "$integration_root/testing/current-$run_id/start-worker.sh" > "$integration_root/worker-output.txt" 2>&1; then
     cat "$integration_root/worker-output.txt" >&2 || true
     cat "$integration_root/testing/current-$run_id/workspace/oracle-grade.txt" >&2 2>/dev/null || true
     exit 1
 fi
+case_root="$integration_root/testing/current-$run_id"
+registry_file="$case_root/process-registry.tsv"
+test -s "$registry_file"
+awk -F "$(printf '\t')" '
+    $1 == "agent" && $2 ~ /^[0-9]+$/ && $5 ~ /worker\.jsonl$/ { worker = 1 }
+    $1 == "agent" && $2 ~ /^[0-9]+$/ && $5 ~ /reviewer\.jsonl$/ { reviewer = 1 }
+    END { exit(worker && reviewer ? 0 : 1) }
+' "$registry_file"
+test -x "$case_root/no-detach-bin/nohup"
+test -x "$case_root/no-detach-bin/setsid"
+test -x "$case_root/no-detach-bin/open"
+grep -Fq 'Worker isolation mode: registry' "$integration_root/testing/current-$run_id/workspace/process-audit.txt"
+grep -Fq 'Process audit: pass' "$integration_root/testing/current-$run_id/workspace/process-audit.txt"
 archive="$root/../results/codex/$(benchmark_result_parent current)/$run_id/current"
 for artifact in oracle-terminal-evidence.json oracle.json reviewer-state.json protocol-metadata.json reviewer-lifecycle.jsonl evaluation.md; do
     if ! test -f "$archive/$artifact"; then
@@ -427,6 +594,7 @@ grep -Fq '"adoptable": true' "$archive/reviewer-state.json"
 ! grep -Eq 'oracle-key|defect-map.enc|private|seeded-defects' "$archive/oracle.json" "$archive/protocol-metadata.json"
 rm -rf -- "$root/../results/codex/$(benchmark_result_parent current)/$run_id"
 rm -rf -- "${PLANNING_AGENT_TMPDIR:-${TMPDIR:-/tmp}/planning-agent}/ai-skills-capsules/$run_id"
+rm -rf -- "$root/../results/codex/.staging/$run_id"
 printf 'Real setup adapter integration fixture passed.\n'
 
 printf 'Review lifecycle contract tests passed.\n'

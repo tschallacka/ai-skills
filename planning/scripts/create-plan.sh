@@ -1,13 +1,35 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# MODE: PROD
+# create-plan.sh — create a plan directory with its plan-description.md,
+# work-unit-inventory.md, commands.json, env files, and initial git commit.
+#
+# Where the plan lands depends on the argument: a path (containing "/") is used
+# verbatim, a bare name resolves the plans root via plan-root.sh, prompting on
+# first use in a project. Which repository owns the plan's history is decided
+# further down, next to the rules it follows.
+#
+# Usage:
+#   create-plan.sh <plan-name|plan-directory> <title>
+#   create-plan.sh --help
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $(basename "$0") <plan-name|plan-directory> <title>" >&2
-    echo "  <plan-directory> may be an explicit path (existing behaviour)." >&2
-    echo "  <plan-name> (no '/') resolves the plans root via plan-root.sh," >&2
-    echo "             prompting on first use in a project." >&2
-    exit 64
-fi
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} <plan-name|plan-directory> <title>
+       ${0##*/} --help
+
+  <plan-directory>  an explicit path (existing behaviour).
+  <plan-name>       no '/': resolves the plans root via plan-root.sh,
+                    prompting on first use in a project.
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 2 ] || usage
 
 plan_arg="$1"
 title="$2"
@@ -18,7 +40,17 @@ planning_ensure_tmpdir
 case "$plan_arg" in
     */*)
         plan_dir="$plan_arg"
-        plans_root="${PLANS_ROOT:-$HOME/.plans}"
+        # The directory that holds this plan, not the global default. Everything
+        # downstream reads plans_root as "this plan and its siblings": the
+        # duplicate-step scan, the git and snapshot repository decisions, and the
+        # .env manifest write-global places *inside* it. Naming ~/.plans for a
+        # plan created elsewhere pointed all of that at the wrong directory, and
+        # at one that need not exist -- a fresh machine, or a user who declined
+        # the installer's offer to create it, got a raw `cd` error with no remedy.
+        #
+        # For the common call, a path inside the plans root, this is the same
+        # answer as before.
+        plans_root="$(dirname "$plan_dir")"
         ;;
     *)
         resolved_root="$("$script_dir/plan-root.sh" resolve "${PROJECT_DIR:-$PWD}")"
@@ -28,11 +60,58 @@ case "$plan_arg" in
 esac
 
 [[ "$(basename "$plan_dir")" =~ ^[a-z0-9][a-z0-9-]*$ ]] || plan_die "Plan directory name must be kebab-case"
-[ ! -e "$plan_dir" ] || plan_die "Plan directory already exists: $plan_dir"
+if [ -e "$plan_dir" ]; then
+    printf '%s: %s\n' "${0##*/}" "Plan directory already exists: $plan_dir" >&2
+    exit 73
+fi
 plan_require_safe_value title "$title"
+
+# After the guards, not before: an explicit path may create the directory that
+# holds it, but a call that is about to be refused must leave nothing behind
+# (CODE-CONTRACTS.md contract 2). It ran in the argument case, so a bad plan name
+# created the parent and then died.
+[ -d "$plans_root" ] || mkdir -p "$plans_root"
+
+# ---- refuse while any plan under this root holds a duplicate step number ----
+# Two steps numbered alike in one goal have no defined order, and there is no
+# renumbering helper, so the repair is a rename the calling agent has to make.
+# Blocking creation is deliberate and it is loud: a broken plan left behind while
+# new work starts elsewhere is how the state survives, and the agent that can fix
+# it is the one standing here.
+duplicate_report=""
+for existing_plan in "$plans_root"/*/; do
+    [ -d "$existing_plan" ] || continue
+    while IFS= read -r collision; do
+        [ -n "$collision" ] || continue
+        duplicate_report="$duplicate_report$(printf '\n  %s: goal %s' "$(basename "${existing_plan%/}")" "$collision")"
+    done <<COLLISIONS
+$(plan_duplicate_step_numbers "${existing_plan%/}")
+COLLISIONS
+done
+if [ -n "$duplicate_report" ]; then
+    {
+        printf '\n'
+        printf '%s\n' '================================================================'
+        printf '%s\n' 'REFUSING TO CREATE A PLAN: a plan under this root has two steps'
+        printf '%s\n' 'sharing one number, so their execution order is undefined.'
+        printf '%s\n' '================================================================'
+        printf 'Plans root: %s\n' "$plans_root"
+        printf 'Collisions (goal, number, then the colliding files):%s\n' "$duplicate_report"
+        printf '\n'
+        printf '%s\n' 'Rename one of each pair to a free number, then create this plan.'
+        printf '%s\n' 'A step rename touches five surfaces: the step file, its testing'
+        printf '%s\n' 'companion, the inventory row File cell, the goal owned-unit blurb,'
+        printf '%s\n' 'and any progress tracker naming the step. Sweep all five.'
+        printf '%s\n' 'plan-content.sh find <plan> <step-name> --in all lists them.'
+        printf '\n'
+    } >&2
+    exit 73
+fi
 
 mkdir -p "$plan_dir"
 description="$plan_dir/plan-description.md"
+# The trap unwinds a partial creation (it also removes the new plan directory),
+# so it is released on success rather than left to run.
 temporary_file="${description}.tmp.$$"
 trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
 {
@@ -44,10 +123,14 @@ trap 'rm -f "$temporary_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
     printf '## Affected areas\n\n§ 6.1\n<files, modules, layouts, services, data, and systems>\n\n'
     printf '## Constraints and decisions\n\n§ 7.1\n<permissions, ownership, conventions, and user choices>\n\n'
     printf '## Risks and open questions\n\n§ 8.1\n<items that could affect execution>\n\n'
+    printf '## Environment facts\n\n§ 9.1\n<host or URL to verify on, auth route, and the order in which steps verify against the running application>\n\n'
+    printf '## Approach decisions\n\n§ 10.1\n<mechanism choices as prose: where each change lives and why, and alternatives considered and rejected>\n\n'
+    printf '## Assumptions\n\n§ 11.1\n<what was assumed rather than confirmed, and what would change if it is wrong>\n\n'
     printf '## UI classification\n\n- UI affected: no\n- Rationale: <why>\n\n'
     printf '## Adversarial review\n\n- Artifact: `adversarial-review.md`\n- Status: 💤 pending\n'
 } > "$temporary_file"
 mv "$temporary_file" "$description"
+printf '{}\n' > "$plan_dir/commands.json"
 inventory="$plan_dir/work-unit-inventory.md"
 {
     printf '# Work-unit inventory: %s\n\n' "$(basename "$plan_dir")"
@@ -65,17 +148,27 @@ inventory="$plan_dir/work-unit-inventory.md"
     printf '%s\n' '- [ ] Dependencies form an executable order with no cycle.'
 } > "$inventory"
 plan_root=$(cd "$plan_dir" && pwd -P)
-"$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
-"$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root"
+# The plans root is expected to exist here: explicit paths create their parent
+# above, and bare plan names come from plan-root.sh. Keep the fallback anyway so
+# a surprising external removal reports cleanly instead of leaking a raw cd
+# failure.
+if [ -d "$plans_root" ]; then
+    plans_root_path=$(cd "$plans_root" && pwd -P)
+else
+    plans_root_path="$plans_root"
+fi
+
+# Which repository owns this plan's history, and which owns its pre-mutation
+# snapshots. Both are decided here, before the manifests are written, because
+# PLAN_SNAPSHOT_REPO pins the answer for the life of the plan.
+git_available=false
+git_repo=""
+snapshot_repo=""
 if command -v git >/dev/null 2>&1; then
-    # Decide which repo owns the plan's history. A git-excluded plans root
-    # (a project's /.plans in .gitignore) or a plans root outside any repo
-    # gets its own repo at the root so the whole plans tree is versioned and
-    # cross-plan diffs (plan-content.sh diff walking up) work; re-initializes
-    # the root repo when its .git is missing. A plan inside an already-versioned
-    # tree commits into that tree. An explicit path outside any repo keeps its
-    # own per-plan repo (existing behaviour).
-    git_repo=""
+    git_available=true
+    # A git-excluded plans root, or one outside any repo, gets its own repo at
+    # the root so cross-plan diffs work; a plan inside an already-versioned
+    # tree commits into that tree instead.
     if top="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)"; then
         if git -C "$top" check-ignore -q "$plan_dir" 2>/dev/null; then
             git_repo="$plans_root"
@@ -85,6 +178,21 @@ if command -v git >/dev/null 2>&1; then
     elif [[ "$plan_arg" != */* ]]; then
         git_repo="$plans_root"
     fi
+    # A repository at the plans root or at the plan itself is ours to commit
+    # into on every mutation. The enclosing work tree of a tracked plan is the
+    # user's, so it takes the initial commit and nothing after it.
+    if [ -n "$git_repo" ]; then
+        case "$(cd "$git_repo" 2>/dev/null && pwd -P)" in
+            "$plans_root_path") snapshot_repo="$plans_root_path" ;;
+        esac
+    else
+        snapshot_repo="$plan_root"
+    fi
+fi
+
+"$script_dir/plan-env.sh" write-global "$plans_root" "$(cd "$script_dir/.." && pwd -P)"
+"$script_dir/plan-env.sh" write-plan "$plan_root" "$plans_root" "$snapshot_repo"
+if [ "$git_available" = true ]; then
     if [ -n "$git_repo" ]; then
         mkdir -p "$git_repo"
         git init -q "$git_repo" 2>/dev/null || true
@@ -99,4 +207,13 @@ if command -v git >/dev/null 2>&1; then
     fi
 fi
 trap - EXIT
-echo "Created $plan_dir"
+printf 'Created %s\n' "$plan_dir"
+
+# Which build of the skill just created this plan, and a warning if it is an
+# installed copy behind a canonical checkout. Stated at creation rather than
+# left to be discovered: a copy 290 lines adrift behaved like a working skill
+# until a reader concluded the reader was missing a feature and patched around
+# it (T52). The provenance line goes to stdout with the result; the drift
+# warning to stderr, since it is a diagnostic and not the result.
+plan_skill_provenance "$script_dir/.." || true
+plan_warn_skill_drift "$script_dir/.."

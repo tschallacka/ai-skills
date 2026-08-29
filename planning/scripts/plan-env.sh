@@ -1,15 +1,44 @@
 #!/usr/bin/env bash
+# MODE: PROD
+# plan-env.sh — write and verify the .env manifests that pin a plan's paths.
+#
+# Two manifests exist: a global one at <plans-root>/.env naming the plans root
+# and the installed planning skill, and a per-plan one at <plan-root>/.env
+# naming every document path inside that plan. `check` is a gate: it refuses a
+# manifest that is a symlink, is not mode 600, is not owned by the caller, has a
+# duplicate/unexpected/missing key, or carries a value with shell metacharacters
+# — only then is the manifest safe to source.
+#
+# Usage:
+#   plan-env.sh write-global <plans-root> <planning-root>
+#   plan-env.sh write-plan <plan-root> [plans-root] [snapshot-repo]
+#   plan-env.sh check <plan-root> [plans-root]
+#   plan-env.sh path global|plan <plan-root> [plans-root]
+#   plan-env.sh print <plan-root> [plans-root]
+#
+# Exit codes: 64 bad invocation, 65 malformed manifest, 66 missing path or
+# manifest, 69 no usable stat(1).
+#
+# Not sourced: this file is only ever exec'd, so the bare names `usage`, `die`
+# and `absolute_path` cannot shadow a caller's functions. Every other name here
+# is prefixed or file-local; keep it that way if this ever becomes a library.
+
 set -euo pipefail
+export LC_ALL=C
 
 umask 077
 
 usage() {
-    printf 'Usage: %s write-global <plans-root> <planning-root>\n' "$(basename "$0")" >&2
-    printf '       %s write-plan <plan-root> [plans-root]\n' "$(basename "$0")" >&2
-    printf '       %s check <plan-root> [plans-root]\n' "$(basename "$0")" >&2
-    printf '       %s path global|plan <plan-root> [plans-root]\n' "$(basename "$0")" >&2
-    printf '       %s print <plan-root> [plans-root]\n' "$(basename "$0")" >&2
-    exit 64
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} write-global <plans-root> <planning-root>
+       ${0##*/} write-plan <plan-root> [plans-root] [snapshot-repo]
+       ${0##*/} check <plan-root> [plans-root]
+       ${0##*/} path global|plan <plan-root> [plans-root]
+       ${0##*/} print <plan-root> [plans-root]
+       ${0##*/} --help
+USAGE
+    exit "$rc"
 }
 
 die() {
@@ -17,14 +46,27 @@ die() {
     exit "${2:-1}"
 }
 
+# PORTABILITY(stat-format): probe once at load, so the manifest gate works on
+# both instead of comparing against the empty output of a failed `stat -c`.
+if stat -c '%a' . >/dev/null 2>&1; then
+    stat_mode() { stat -c '%a' "$1"; }
+    stat_uid() { stat -c '%u' "$1"; }
+elif stat -f '%Lp' . >/dev/null 2>&1; then
+    stat_mode() { stat -f '%Lp' "$1"; }
+    stat_uid() { stat -f '%u' "$1"; }
+else
+    stat_mode() { die "no usable stat(1): need GNU 'stat -c' or BSD 'stat -f'" 69; }
+    stat_uid() { stat_mode "$1"; }
+fi
+
 absolute_path() {
-    local path=$1
+    local path="$1"
     [ -d "$path" ] || die "directory does not exist: $path" 66
     (cd "$path" && pwd -P)
 }
 
 write_manifest() {
-    local target=$1
+    local target="$1"
     shift
     local parent temporary
     parent=$(dirname "$target")
@@ -52,22 +94,27 @@ plan_env_path() {
 }
 
 manifest_check() {
-    local file=$1 expected=$2 line key value
-    declare -A seen=()
+    local file="$1" expected="$2" line key value
+    # Duplicate-key set as a space-delimited string, not an associative array:
+    # `declare -A` is bash 4 and this must run on macOS bash 3.2. Keys match
+    # ^[A-Z_][A-Z0-9_]*$ (checked below), so they never contain a space.
+    local seen=' '
     [ -e "$file" ] || die "manifest is missing: $file" 66
     [ ! -L "$file" ] || die "manifest must not be a symlink: $file" 65
-    [ "$(stat -c '%a' "$file")" = 600 ] || die "manifest mode must be 600: $file" 65
-    [ "$(stat -c '%u' "$file")" = "$(id -u)" ] || die "manifest owner must be the current user: $file" 65
+    [ "$(stat_mode "$file")" = 600 ] || die "manifest mode must be 600: $file" 65
+    [ "$(stat_uid "$file")" = "$(id -u)" ] || die "manifest owner must be the current user: $file" 65
     bash -n "$file" 2>/dev/null || die "manifest is not valid shell syntax: $file" 65
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             ''|'#'*) continue ;;
         esac
         [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] || die "invalid manifest assignment in $file" 65
-        key=${BASH_REMATCH[1]}
-        value=${BASH_REMATCH[2]}
-        [ -z "${seen[$key]+present}" ] || die "duplicate manifest key $key in $file" 65
-        seen[$key]=1
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        case "$seen" in
+            *" $key "*) die "duplicate manifest key $key in $file" 65 ;;
+        esac
+        seen="$seen$key "
         case "$value" in
             *'$'*|*'`'*|*';'*|*'|'*|*'&'*|*'<'*|*'>'*|*'~'*|*$'\n'*)
                 die "unsafe manifest value for $key in $file" 65
@@ -78,13 +125,15 @@ manifest_check() {
             *) die "unexpected manifest key $key in $file" 65 ;;
         esac
     done < "$file"
+    # Intentional word split: $expected is a space-delimited key allow-list.
+    # shellcheck disable=SC2086
     for key in $expected; do
         grep -qE "^${key}=" "$file" || die "missing manifest key $key in $file" 65
     done
 }
 
 load_manifest() {
-    local file=$1
+    local file="$1"
     # Callers must run manifest_check before this function. The file is then
     # constrained to assignments for the allow-listed keys.
     set -a
@@ -93,12 +142,26 @@ load_manifest() {
     set +a
 }
 
+# Print the PLAN_SNAPSHOT_REPO already recorded in a plan manifest, or nothing.
+# plan-env.sh sources no library on purpose, so this does not reuse
+# plan_snapshot_repo from plan-document-lib.sh.
+read_pinned_snapshot_repo() {
+    local file="$1" assignment repo
+    [ -f "$file" ] || return 0
+    assignment="$(grep '^PLAN_SNAPSHOT_REPO=' "$file" 2>/dev/null)" || return 0
+    case "$assignment" in
+        *'$'*|*'`'*|*';'*|*'|'*|*'&'*|*'<'*|*'>'*) return 0 ;;
+    esac
+    eval "repo=${assignment#PLAN_SNAPSHOT_REPO=}" 2>/dev/null || return 0
+    printf '%s' "$repo"
+}
+
 write_global() {
     local plans_root planning_root
     plans_root=$(absolute_path "$1")
     planning_root=$(absolute_path "$2")
     write_manifest "$(global_env_path "$plans_root")" \
-        PLAN_ENV_SCHEMA_VERSION 1 \
+        PLAN_ENV_SCHEMA_VERSION 2 \
         PLANS_ROOT "$plans_root" \
         PLANNING_SKILL_ROOT "$planning_root" \
         PLANNING_SCRIPTS_ROOT "$planning_root/scripts" \
@@ -106,14 +169,32 @@ write_global() {
 }
 
 write_plan() {
-    local plan_root plans_root planning_root global_file
+    local plan_root plans_root planning_root global_file snapshot_repo
     plan_root=$(absolute_path "$1")
     plans_root=$(absolute_path "${2:-${PLANS_ROOT:-$HOME/.plans}}")
     planning_root=$(cd "$(dirname "$0")/.." && pwd -P)
     global_file=$(global_env_path "$plans_root")
+    # The repository that owns this plan's pre-mutation snapshots, decided once
+    # by create-plan.sh and pinned here so a later .gitignore change cannot move
+    # it silently. Empty means "do not auto-commit": the plan is versioned in a
+    # repository the user owns, and plan snapshots do not belong in that history.
+    snapshot_repo="${3:-}"
+    # Regenerating a manifest must not lose the pin: with no explicit argument,
+    # carry forward whatever the existing manifest recorded.
+    if [ -z "$snapshot_repo" ]; then
+        snapshot_repo=$(read_pinned_snapshot_repo "$(plan_env_path "$plan_root")")
+    fi
+    if [ -n "$snapshot_repo" ]; then
+        snapshot_repo=$(absolute_path "$snapshot_repo")
+        case "$snapshot_repo" in
+            "$plans_root"|"$plan_root") ;;
+            *) die "snapshot repo must be the plans root or the plan root: $snapshot_repo" 64 ;;
+        esac
+    fi
     write_global "$plans_root" "$planning_root"
     write_manifest "$(plan_env_path "$plan_root")" \
-        PLAN_ENV_SCHEMA_VERSION 1 \
+        PLAN_ENV_SCHEMA_VERSION 2 \
+        PLAN_SNAPSHOT_REPO "$snapshot_repo" \
         PLANS_ROOT "$plans_root" \
         PLAN_ROOT "$plan_root" \
         PLAN_NAME "$(basename "$plan_root")" \
@@ -128,29 +209,26 @@ write_plan() {
 }
 
 check_manifests() {
-    local plan_root=$1 plans_root=${2:-${PLANS_ROOT:-$HOME/.plans}}
+    local plan_root="$1"
+    local plans_root="${2:-${PLANS_ROOT:-$HOME/.plans}}"
     plan_root=$(absolute_path "$plan_root")
     plans_root=$(absolute_path "$plans_root")
     manifest_check "$(global_env_path "$plans_root")" \
         'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLANNING_SKILL_ROOT PLANNING_SCRIPTS_ROOT PLANNING_TESTS_ROOT'
     manifest_check "$(plan_env_path "$plan_root")" \
-        'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
+        'PLAN_ENV_SCHEMA_VERSION PLAN_SNAPSHOT_REPO PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
     local global_root plan_manifest_root global_schema plan_schema
     local global_skill_root global_scripts_root global_tests_root
-    set -a
-    # shellcheck disable=SC1090
-    source "$(global_env_path "$plans_root")"
+    load_manifest "$(global_env_path "$plans_root")"
     global_schema=$PLAN_ENV_SCHEMA_VERSION
     global_root=$PLANS_ROOT
     global_skill_root=$PLANNING_SKILL_ROOT
     global_scripts_root=$PLANNING_SCRIPTS_ROOT
     global_tests_root=$PLANNING_TESTS_ROOT
-    # shellcheck disable=SC1090
-    source "$(plan_env_path "$plan_root")"
-    set +a
+    load_manifest "$(plan_env_path "$plan_root")"
     plan_schema=$PLAN_ENV_SCHEMA_VERSION
-    [ "$global_schema" = 1 ] || die "unsupported global manifest schema: $global_schema" 65
-    [ "$plan_schema" = 1 ] || die "unsupported plan manifest schema: $plan_schema" 65
+    [ "$global_schema" = 2 ] || die "unsupported global manifest schema: $global_schema" 65
+    [ "$plan_schema" = 2 ] || die "unsupported plan manifest schema: $plan_schema" 65
     plan_manifest_root=$PLAN_ROOT
     [ "$global_root" = "$plans_root" ] || die "global manifest root mismatch" 65
     [ "$plan_manifest_root" = "$plan_root" ] || die "plan manifest root mismatch" 65
@@ -167,16 +245,21 @@ check_manifests() {
     [ "$PLAN_VALIDATION_FILE" = "$plan_root/validation-report.md" ] || die "validation path mismatch" 65
     [ "$PLAN_CONTEXT_ROOT" = "$plan_root/context" ] || die "context root mismatch" 65
     [ "$PLAN_STEPS_ROOT" = "$plan_root/steps" ] || die "steps root mismatch" 65
+    case "$PLAN_SNAPSHOT_REPO" in
+        ''|"$plans_root"|"$plan_root") ;;
+        *) die "snapshot repo mismatch" 65 ;;
+    esac
 }
 
 case "${1:-}" in
+    -h|--help) usage 0 ;;
     write-global)
         [ "$#" -eq 3 ] || usage
         write_global "$2" "$3"
         ;;
     write-plan)
-        [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
-        write_plan "$2" "${3:-}"
+        [ "$#" -ge 2 ] && [ "$#" -le 4 ] || usage
+        write_plan "$2" "${3:-}" "${4:-}"
         ;;
     check)
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage

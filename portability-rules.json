@@ -1,0 +1,297 @@
+{
+  "target": {
+    "shell": "bash 3.2 (stock macOS /bin/bash)",
+    "userland": "GNU or BSD; POSIX utility flags only",
+    "locale": "LC_ALL=C for anything that sorts, compares or byte-counts",
+    "verified": {
+      "bash-3.2": "yes — the full suite runs green under a real 3.2.57 (nix develop; bash32-run-tests)",
+      "bsd-userland": "yes — CI's macOS legs are blocking since T37 and run the full suite under BSD userland on every push; locally those rules are still verified by reading, not by execution."
+    }
+  },
+  "rules": [
+    {
+      "id": "assoc-array",
+      "construct": "declare -A",
+      "detect": "declare[[:space:]]+-[A-Za-z]*A",
+      "breaks": "bash 3.2",
+      "symptom": "declare: -A: invalid option, then the script aborts under set -e",
+      "replacement": "plan_map_set / plan_map_load / plan_map_has / plan_map_keys / plan_map_count / plan_map_clear (plan-map-lib.sh)",
+      "note": "plan_map_get forks at the call site; use plan_map_load in a loop."
+    },
+    {
+      "id": "awk-bracket-escape",
+      "construct": "backslash escape inside an awk bracket expression",
+      "detect": "\\[\\[:space:\\]\\\\\\\\n\\]",
+      "breaks": "undefined in POSIX awk; BSD awk may read it literally",
+      "symptom": "'n' becomes strippable whitespace",
+      "replacement": "[[:space:]] already includes newline; drop the \\n"
+    },
+    {
+      "id": "bash-by-path-lookup",
+      "construct": "bash -c / bash <script>",
+      "detect": "(^|[^-[:alnum:]_./\"$])bash[[:space:]]+(-c|\")",
+      "breaks": "any host where PATH's bash is not the running interpreter",
+      "symptom": "the child shell is a different bash than the parent, so set -e and pipefail semantics differ between the two halves of one script",
+      "replacement": "\"$BASH\" -c ... / \"$BASH\" <script> — the interpreter already running this script",
+      "note": "PATH injection (bash32-bin) is still required for #!/usr/bin/env bash shebangs, which $BASH cannot redirect."
+    },
+    {
+      "id": "bre-alternation",
+      "construct": "\\| as alternation in a basic regular expression, e.g. sed '/\\(DEV\\|PROD\\)/d'",
+      "detect": "\\\\\\([^)]*\\\\\\|",
+      "breaks": "BSD / macOS",
+      "symptom": "the pattern matches nothing, silently, so a filter or a strip does no work at all",
+      "replacement": "one expression per literal (sed -e ... -e ...), or grep -E where | is portable. Note that \\| inside an -E pattern is a literal pipe and is correct -- this catches the escaped-group form, which is BRE-only by construction; the unparenthesised form has no textual signal and the macOS CI leg is the backstop.",
+      "note": "Found by the macOS leg: build-plan-libs.sh stripped its MODE and PACKAGE markers with \\(DEV\\|PROD\\), which GNU sed accepts and BSD sed does not, so every source marker was copied into the compiled libraries on macOS and nowhere else."
+    },
+    {
+      "id": "bytes-vs-characters",
+      "construct": "mixing ${#str} with head -c / wc -c budgets",
+      "detect": null,
+      "breaks": "any host, whenever the text is not ASCII",
+      "symptom": "truncation mid-UTF-8-sequence, and a wrong truncated/not-truncated verdict",
+      "replacement": "do all budget arithmetic in one unit and say which in a comment",
+      "note": "Plan documents are full of multi-byte glyphs (§ 💤 ⏳ ✅ —), so this is not hypothetical."
+    },
+    {
+      "id": "case-conversion",
+      "construct": "${var,,} / ${var^^}",
+      "detect": "\\$\\{[A-Za-z_][A-Za-z0-9_]*(,,|\\^\\^)\\}",
+      "breaks": "bash 3.2",
+      "symptom": "bad substitution",
+      "replacement": "$(printf '%s' \"$var\" | tr '[:upper:]' '[:lower:]')"
+    },
+    {
+      "id": "case-in-substitution",
+      "construct": "case statement inside $( ) or < <( )",
+      "breaks": "bash 3.2",
+      "symptom": "syntax error near unexpected token `;;' — 3.2's parser cannot pair a case-pattern `)` with the substitution's closing paren; bash 4+ accepts it, so local runs and ubuntu CI stay green while the macOS 3.2 leg fails",
+      "replacement": "call a top-level library helper and keep only its invocation inside the substitution: read -r a b < <(plan_count_progress_rows \"$file\" 5) (planning/scripts/lib/progress/plan_count_progress_rows.sh). The shared libraries define the pattern once, so call sites stay OS-agnostic by construction.",
+      "note": "no line-regex can see substitution containment; the detector is the bash32 -n sweep over every tracked script (flake target bash32-run-tests runs it against the whole suite). Found the hard way in update-progress/update-plan-progress/validate-plan-inventory-lib during the plan-data-parsing migration."
+    },
+    {
+      "id": "cp-dot-source",
+      "construct": "cp -R src/. dst",
+      "detect": "cp[[:space:]]+-[a-zA-Z]*R[a-zA-Z]*[[:space:]]+[^[:space:]]*/\\.[[:space:]]",
+      "breaks": "unspecified in POSIX; BSD has differed",
+      "symptom": "copies the wrong thing, or dotfiles are handled differently",
+      "replacement": "(cd src && tar cf - .) | (cd dst && tar xf -)"
+    },
+    {
+      "id": "date-nanoseconds",
+      "construct": "date +%N",
+      "detect": "date[^|;)]*%N",
+      "breaks": "BSD / macOS",
+      "symptom": "emits a literal 'N', so an id keeps its shape while losing all entropy",
+      "replacement": "date +%s plus $RANDOM$RANDOM"
+    },
+    {
+      "id": "echo-flags",
+      "construct": "echo -e / echo -n",
+      "detect": "echo[[:space:]]+-[en]",
+      "breaks": "not portable across shells or /bin/echo builds",
+      "symptom": "prints the flag literally, or fails to interpret escapes",
+      "replacement": "printf"
+    },
+    {
+      "id": "empty-array-setu",
+      "construct": "\"${arr[@]}\" on a possibly-empty array",
+      "detect": null,
+      "breaks": "bash before 4.4 under set -u",
+      "symptom": "arr[@]: unbound variable instead of the intended output",
+      "replacement": "${arr[@]+\"${arr[@]}\"} , or guard with [ \"${#arr[@]}\" -gt 0 ]",
+      "note": "No reliable detector: the pattern is only wrong when the array can be empty. Review every new array expansion by hand."
+    },
+    {
+      "id": "ere-word-boundary",
+      "construct": "\\\\b in an ERE",
+      "detect": "grep[^|;]*-[a-zA-Z]*E[^|;]*\\\\\\\\b",
+      "breaks": "BSD / macOS (undefined in POSIX ERE)",
+      "symptom": "matches nothing, so a check passes vacuously — worse with || true",
+      "replacement": "tr -c 'A-Za-z0-9_' '\\n' then grep -x, which emulates a word boundary exactly"
+    },
+    {
+      "id": "find-printf",
+      "construct": "find ... -printf",
+      "detect": "find[^|]*-printf",
+      "breaks": "BSD / macOS",
+      "symptom": "no such option; with 2>/dev/null the loop silently reads nothing and the caller reports success",
+      "replacement": "find ... -print and derive the field in the read loop"
+    },
+    {
+      "id": "gnu-only-tools",
+      "construct": "timeout, nproc, free, realpath, tac, base64 -w, head -n -N, xargs -r, getopt, /proc",
+      "detect": "(^|[^A-Za-z0-9_./-])(nproc|tac|realpath|getopt)([^A-Za-z0-9_-]|$)|base64[[:space:]]+-w|head[[:space:]]+-n[[:space:]]*-|xargs[[:space:]]+-r|/proc/",
+      "breaks": "BSD / macOS",
+      "symptom": "command not found, or a silently different result",
+      "replacement": "ask before introducing any of these; timeout has a gtimeout fallback on macOS"
+    },
+    {
+      "id": "heredoc-quote-in-command-substitution",
+      "construct": "x=\"$(cmd <<'EOF' … an apostrophe in the body … EOF\n)\"",
+      "breaks": "bash 3.2",
+      "symptom": "unexpected EOF while looking for matching `'', or syntax error near unexpected token `)', reported at a line that is NOT the offending one -- the scanner opens a quote in the here-document body and only fails when it runs out of file, so the line number misdirects.",
+      "replacement": "keep the here-document out of the command substitution: have the helper write a file or set a global, and read that. Backticks also work, but the global is clearer.",
+      "note": "bash 3.2 tracks ' and \" through a here-document body when it is inside $( ). It is PARITY, not presence: two apostrophes in the body parse fine, one does not. Independent of delimiter quoting, of layout, of assignment-vs-command, and of whether a function is involved. Backslash-escaping is NOT a workaround -- with a quoted delimiter no escape processing happens, so the backslash lands in the data on every shell. bash 4's recursive $( ) parser fixed it. Verified: `x=\"$(cat <<'MD'\\nthe unit's own\\nMD\\n)\"` is a syntax error on 3.2.57 and fine on 5.3. This bites here because plan fixtures are English prose. Locate candidates with `grep -rn '[$](.*<<' --include='*.sh'`, then check quote parity of each body; all four current sites are even-parity and safe, but one added apostrophe breaks them."
+    },
+    {
+      "id": "httpserver-getfqdn-stall",
+      "construct": "http.server.HTTPServer binding on 127.0.0.1 (server_bind -> socket.getfqdn)",
+      "breaks": "macOS runners (mDNSResponder reverse-DNS stall)",
+      "symptom": "the server prints its bound port late or never; the process is alive but blocked in gethostbyaddr, so there is no traceback and a port poll times out while the same code binds instantly on Linux (getfqdn answers from /etc/hosts)",
+      "replacement": "subclass and set server_name yourself: class Server(http.server.HTTPServer):\\n    def server_bind(self):\\n        socketserver.TCPServer.server_bind(self)\\n        self.server_name = \"localhost\"\\n        self.server_port = self.server_address[1]\\nThe name only feeds error pages, so a literal is safe. Found when the python served-overview rung passed everywhere except both macOS CI legs."
+    },
+    {
+      "id": "local-self-reference",
+      "construct": "local a=\"$1\" b=\"$a/x\"   (under set -u)",
+      "breaks": "every bash, whenever set -u is on",
+      "symptom": "a: unbound variable, reported at the declaration itself",
+      "replacement": "split the declaration: local a=\"$1\"; local b=\"$a/x\"",
+      "note": "local declares every name in the statement before evaluating any right-hand side, so the earlier name is already local-and-unset while the later value is expanded."
+    },
+    {
+      "id": "locale-sort",
+      "construct": "bare sort on data a user or a test sees",
+      "detect": null,
+      "breaks": "any host with a non-C locale",
+      "symptom": "collation differs per developer, so generated row order is not reproducible",
+      "replacement": "export LC_ALL=C at the top of the script, or LC_ALL=C sort at the call"
+    },
+    {
+      "id": "mapfile",
+      "construct": "mapfile / readarray",
+      "detect": "\\b(mapfile|readarray)\\b",
+      "breaks": "bash 3.2",
+      "symptom": "mapfile: command not found",
+      "replacement": "arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(...)"
+    },
+    {
+      "id": "od-padding",
+      "construct": "comparing `od` output literally, e.g. od -An -c | tr -s ' '",
+      "detect": null,
+      "breaks": "BSD / macOS",
+      "symptom": "the value differs only by trailing whitespace, so an equality assertion fails with two strings that look identical in the report",
+      "replacement": "trim the end before comparing: `| sed 's/[[:space:]]*$//'`. Not gated: a pattern cannot tell a byte dump being compared from one being converted, so this is a documented caution and the macOS CI leg is the backstop. Do not widen the comparison to a substring match -- the point of a byte dump is that every byte is checked.",
+      "note": "Found by the macOS leg: test-lib-core.sh asserted ' a \\n b' and BSD od produced ' a \\n b ', which reads as a mysterious failure because the report shows the two values with no visible difference."
+    },
+    {
+      "id": "pattern-substitution-quote",
+      "construct": "a quote character inside ${...} — ${var//$'\"'/…}, or a quoted replacement ${var//pat/\"$repl\"}",
+      "detect": "\\$\\{[^{}]*\\$'\\\\?[\"']'",
+      "breaks": "bash 3.2",
+      "symptom": "bash: bad substitution: no closing `}' — printed with the expansion truncated at the quote, so the reported text is not what you wrote; or, for a quoted replacement, NO error at all and the quote characters land in the data.",
+      "replacement": "hold the quote in a plain variable and expand it UNQUOTED inside the braces — q='\"'; out=\"${v//$q/\\\\$q}\" behaves identically on 3.2.57 and 5.3.9 — or run the substitution through sed/awk when several passes are needed (context_json_escape_file in plan-context.sh does the three-pass JSON string escape that way).",
+      "note": "Two defects, one cause: bash 3.2 does not track quoting inside ${ }; bash 4 fixed both. Same family as heredoc-quote-in-command-substitution. (1) PARSE ERROR — an ANSI-C $'…' that yields a QUOTE character ends the scan early. Verified on 3.2.57 vs 5.3.9: with v='a\"b', the line printf '%s' \"${v//$'\"'/X}\" prints aXb on 5.3.9 and dies on 3.2.57 with: bad substitution: no closing `}' in \"${v//\"/X}\". ${v#$'\"'} fails the same way, so it is not specific to //. It is the quote CHARACTER, not $'…' — $'\\n' and $'\\t' are fine on 3.2, and a single quote breaks it too. ${v:-$'\"'} fails on BOTH shells, so that form is a plain bug, not a portability question. (2) SILENT WRONG DATA — a quoted REPLACEMENT is never unquoted on 3.2. Verified: with v='a.b' and dash='-', \"${v//./\"$dash\"}\" is a-b on 5.3.9 and a\"-\"b on 3.2.57. No error, wrong output. A quoted PATTERN is fine on both (\"${v//\".\"/$dash}\" is a-b everywhere), so only the replacement side diverges. The detector covers (1) only; (2) cannot be grepped without false positives — review every ${var//…/…} whose replacement is quoted."
+    },
+    {
+      "id": "pipefail-grep-q",
+      "construct": "cmd | grep -q   (under set -o pipefail)",
+      "breaks": "every shell, whenever pipefail is set",
+      "symptom": "the pipeline reports 141 (SIGPIPE) even though grep matched, so `... && found=1` never runs and an `if` silently takes the wrong branch. A check reports 'not found' for something that is there, and a test passes without asserting.",
+      "replacement": "capture first, then match the string: out=\"$(cmd || true)\"; case \"$out\" in *needle*) ... ;; esac",
+      "note": "grep -q exits on the first match and closes the pipe, so the writer dies of SIGPIPE. The sibling trap is grep -c / grep -v / grep -o exiting 1 when nothing matches, which aborts the script under set -e before any assertion runs; wrap those as { grep -c ... || true; }. The failure is timing-dependent — a writer that finishes before grep -q exits never sees SIGPIPE — which is why it survives in small cases and lies in large ones. A whole-input reader is safe, so `| grep -c PATTERN >/dev/null` is the escape hatch when the pattern must stay a line-scoped regex.",
+      "detect": "(^|[^|])\\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q|-q[A-Za-z]*)"
+    },
+    {
+      "id": "pipeline-subshell-guard",
+      "construct": "a guard inside a `while` at the end of a pipeline, e.g. printf ... | while read -r x; do ... || die; done",
+      "detect": null,
+      "breaks": "bash 3.2 (the floor), silently",
+      "symptom": "the guard never refuses: it exits a subshell, and on bash 3.2 `set -e` does not abort on that pipeline's non-zero status either, so the script carries on and the caller sees success",
+      "replacement": "keep the loop in the current shell: split with IFS and a `for`, or redirect a here-document into the `while`. Not gated -- the shape spans several lines, and a pipeline-while is perfectly fine when it is not guarding, so a per-line pattern cannot tell them apart.",
+      "note": "Found by the bash 3.2 leg on add-ui-story-links.sh: rejecting an unknown work unit passed under bash 5 and did nothing on 3.2. Verified in isolation -- `set -euo pipefail; printf a | while read x; do exit 66; done; echo CONTINUED` prints CONTINUED on 3.2 and aborts on 5.3."
+    },
+    {
+      "id": "python3-shipped",
+      "construct": "python3 required at runtime by shipped skills",
+      "detect": "python3",
+      "breaks": "the dependency budget, not a platform",
+      "symptom": "a machine without python3 loses a documented feature",
+      "replacement": "awk for text, rjq for JSON — rjq stays the ceiling for a required runtime. Declaring an OPTIONAL runtime is fine: requires.tsv soft any-of groups feed the verify and hint tables, naming is not requiring, and strength decides what a missing one costs. Probe sites, the generated installer tables, and dev-only trees carry allowlist rows."
+    },
+    {
+      "id": "read-timeout-floor",
+      "construct": "`read -t 0` as an availability test, or a fractional timeout such as `read -t 0.05`",
+      "detect": null,
+      "breaks": "bash 3.2 (the floor)",
+      "symptom": "`read -t 0` returns 1 even when input is waiting, so an availability test always reports empty; a fractional timeout is refused outright with `read: 0.05: invalid timeout specification` and the read does not happen at all",
+      "replacement": "put the terminal in non-canonical mode with `stty min 0 time 0` and read normally -- POSIX, and read(2) then returns immediately with whatever is buffered. Not gated: `read -t` is correct with an integer timeout, and a per-line pattern cannot tell an integer from a fraction reliably enough to refuse it.",
+      "note": "Found while draining queued SGR mouse reports on the installer's exit path, which otherwise print as `[<0;79;20M` at the shell's next prompt. Measured on bash 3.2.57 from the dev flake: `printf x | bash32 -c 'read -r -t 0'` exits 1, and `read -r -t 0.05 -n 1` prints the invalid-timeout error. Both work on bash 5.3."
+    },
+    {
+      "id": "read-timeout-integer",
+      "construct": "read -t with a fractional timeout",
+      "detect": "read[^|;]*-t[[:space:]]*[0-9]*\\.",
+      "breaks": "bash 3.2",
+      "symptom": "invalid timeout specification; the read fails instead of polling",
+      "replacement": "an integer timeout (`read -t 1`), and design the loop so one second of granularity is acceptable",
+      "note": "This is why a TUI idle animation on the floor ticks at 1s: sub-second polling, and disambiguating a lone ESC from an escape sequence by timeout, are both unavailable."
+    },
+    {
+      "id": "readlink-f",
+      "construct": "readlink -f",
+      "detect": "readlink[[:space:]]+-f",
+      "breaks": "BSD; macOS before 12.3",
+      "symptom": "fails, then dirname \"\" yields '.', so script_dir becomes the caller's cwd",
+      "replacement": "a while [ -L \"$p\" ] loop (see monitor-read.sh), or plan_resolve_symlink"
+    },
+    {
+      "id": "sed-ere-flag",
+      "construct": "sed -r",
+      "detect": "sed[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*-r([[:space:]]|$)",
+      "breaks": "BSD / macOS",
+      "symptom": "unknown option",
+      "replacement": "sed -E, which both GNU and BSD accept"
+    },
+    {
+      "id": "sed-inplace",
+      "construct": "sed -i",
+      "detect": "sed[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*-i([[:space:]]|$)",
+      "breaks": "BSD / macOS",
+      "symptom": "BSD sed requires a backup suffix, so it eats the script as the suffix and then fails",
+      "replacement": "sed ... \"$f\" > \"$f.new\" && mv \"$f.new\" \"$f\""
+    },
+    {
+      "id": "sha256-tool",
+      "construct": "sha256sum",
+      "detect": "sha256sum",
+      "breaks": "BSD userland (stock macOS)",
+      "symptom": "sha256sum: command not found, and under set -e the script aborts; without set -e a hash comparison silently compares two empty strings and passes",
+      "replacement": "t_sha256 (planning/tests/lib-test.sh) in a test, benchmark_hash_file (benchmark/planning/lib-portable.sh) in the harness, or context_hash_file / context_hash_stdin in the planning scripts",
+      "note": "macOS ships shasum (Perl) and openssl, not GNU sha256sum. Probe once at load rather than per call, and name all the forms you accept. Four files used it unguarded until this rule was added; the probe-defining files are exempted in test-portability-contract.sh because they must name both forms."
+    },
+    {
+      "id": "sort-z",
+      "construct": "sort -z",
+      "detect": "sort[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-z",
+      "breaks": "BSD / macOS",
+      "symptom": "illegal option; a NUL-delimited pipeline then yields zero records",
+      "replacement": "drop the sort from the NUL pipeline, or sort a newline-safe projection"
+    },
+    {
+      "id": "stat-format",
+      "construct": "stat -c FMT",
+      "detect": "stat[[:space:]]+-c",
+      "breaks": "BSD / macOS",
+      "symptom": "stat: illegal option -- c, empty output, so a mode comparison silently fails",
+      "replacement": "plan_stat_mode / plan_stat_uid (plan-document-lib.sh), or probe once: stat -c works ? -c : -f '%Lp'"
+    },
+    {
+      "id": "tty-probe",
+      "construct": "ps -p $$ -o tty= as a tty probe",
+      "detect": "ps[[:space:]]+-p[^|;]*-o[[:space:]]*tty",
+      "breaks": "macOS",
+      "symptom": "Linux prints '?' for no tty, macOS prints '??', so the guard passes and the following /dev/tty open fails with ENXIO",
+      "replacement": "[ -t 0 ], then try ( exec 3</dev/tty ) 2>/dev/null, else exec 3<&-"
+    },
+    {
+      "id": "wc-padding",
+      "construct": "wc output interpolated into a message",
+      "detect": null,
+      "breaks": "BSD / macOS",
+      "symptom": "BSD wc pads to a fixed width, so a message reads 'ok:       42 bytes'",
+      "replacement": "pipe through | tr -d ' ' before interpolating",
+      "note": "Arithmetic comparisons are unaffected; only interpolated text shows the padding."
+    }
+  ]
+}

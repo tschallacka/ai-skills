@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../planning/tests" && pwd)/lib-test.sh"
+# Report the failing expression: these assertions are bare `[ ... ]` under
+# set -e, which otherwise exits 1 in silence.
+t_trap_assertions
+
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=benchmark/planning/lib-portable.sh
+source "$root/lib-portable.sh"
 
 fixture="$tmp/semantic-fixture.json"
 cat > "$fixture" <<'JSON'
@@ -52,7 +60,7 @@ JSON
 "$root/seed-blinded-defects.sh" "$seed_root" "$defective_root" "$private_root" "$tmp/defects.json"
 [ "$(find "$private_root" -type f -perm -004 | wc -l)" -eq 0 ]
 [ ! -e "$defective_root/oracle-key" ]
-[ "$(sha256sum "$defective_root/plan.md" | awk '{print $1}')" = "$(openssl enc -d -aes-256-cbc -pbkdf2 -in "$private_root/defect-map.enc" -pass file:"$private_root/oracle-key" 2>/dev/null | python3 -c 'import json,sys,hashlib; print(json.load(sys.stdin)["defects"][0]["defective_sha256"])')" ]
+[ "$(benchmark_hash_file "$defective_root/plan.md")" = "$(openssl enc -d -aes-256-cbc -pbkdf2 -in "$private_root/defect-map.enc" -pass file:"$private_root/oracle-key" 2>/dev/null | python3 -c 'import json,sys,hashlib; print(json.load(sys.stdin)["defects"][0]["defective_sha256"])')" ]
 
 cat > "$tmp/evidence.json" <<'JSON'
 {"terminal":true,"target_role":"reviewer-b","transcript_sha256":"transcript-sha","findings":[{"finding_id":"AR-01","path":"plan.md","location":"plan.md § 3.1","summary":"The plan contradicts itself on one initial button, fourth generated button, and visible white border.","observed_contradiction":"The plan contains all three contradictory requirements.","impact":"The proof would accept the wrong implementation.","evidence":"The observed text contains all three signals.","required_correction":"Correct one initial button, fourth generated button, and visible white border.","independent":true}],"evidence_paths":["/tmp/private/secret-path"]}
@@ -318,11 +326,9 @@ run_natural_case ordinal-negative "$tmp/natural/spec-generated.json" "$tmp/natur
 check_natural_row "$tmp/natural/ordinal-negative-report.json" 1 partial AR-02 SIGNAL,CORRECTION
 check_natural_counts "$tmp/natural/ordinal-negative-report.json" '{"ambiguous":0,"duplicates":0,"false_negatives":1,"false_positives":0,"independent_catches":0,"true_positives":0,"unresolved":0,"partial":1}'
 
-# Mutated-conflict negative: a bare echo of one value ("one initial button")
-# with no contradiction. It references the defect file/section and the signal
-# matches literally, but it never names the mutated conflict's other side nor
-# proposes the correction, so it must not be a true positive; the grader pins
-# it partial with the CORRECTION predicate failed.
+# Mutated-conflict negative: echoes one value with no contradiction. Path,
+# location and signal all match, but the other side of the conflict is never
+# named, so the grader must pin it partial with CORRECTION failed.
 cat > "$tmp/natural/mutated-negative.json" <<'JSON'
 {"terminal":true,"target_role":"reviewer-b","transcript_sha256":"t","findings":[{"finding_id":"AR-02","path":"plan.md","location":"plan.md § 3.1","summary":"The plan requires one initial button.","observed_contradiction":"The plan requires one initial button consistently.","impact":"A reader takes the requirement at face value.","evidence":"plan.md § 3.1.","required_correction":"The plan is consistent; no correction is needed.","independent":true}],"evidence_paths":[]}
 JSON

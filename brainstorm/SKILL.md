@@ -1,7 +1,8 @@
 ---
 name: brainstorm
-description: Use when the user asks to build, make, add, redesign, or implement something that is under-specified and could branch in different directions, to run a brief recorded pre-planning back-and-forth that settles what to build before committing to a plan or an implementation. Do not use for small, trivial, or fully-specified changes, or when the user explicitly wants an immediate plan or implementation without discussion.
+description: Use when the user says "brainstorm" or "lets brainstorm" — that is an explicit invocation and always triggers this skill. Also use when the user asks to build, make, add, redesign, or implement something that is under-specified and could branch in materially different directions., to run a brief recorded pre-planning back-and-forth that settles what to build before committing to a plan or an implementation. Do not use for small, trivial, or fully-specified changes, or when the user explicitly wants an immediate plan or implementation without discussion.
 ---
+<!-- MODE: PROD -->
 
 # Brainstorm
 
@@ -42,25 +43,25 @@ If the user declines the brainstorm, proceed to whatever they asked for
 
 ```mermaid
 flowchart TD
-    A[User asks to build/make/change X] --> B{Change trivial<br/>or fully specified?}
-    B -- yes --> Z[Just do it / plan directly; no brainstorm]
-    B -- no --> C{Offer brainstorm?}
-    C -- no (user declines) --> Z
-    C -- yes --> D[Phase 1: Collaborative back-and-forth]
-    D --> E{User satisfied with idea?}
-    E -- no --> D
-    E -- yes --> F[Phase 2: Adversarial completion pass]
-    F --> G{Any gaps or unknowns found?}
-    G -- questions for user --> H[Phase 3: Take questions back to user]
-    H --> I[Update brainstorm.md with answers]
+    A["User asks to build/make/change X"] --> B{"Change trivial<br/>or fully specified?"}
+    B -->|"yes"| Z["Just do it / plan directly; no brainstorm"]
+    B -->|"no"| C{"Offer brainstorm?"}
+    C -->|"no (user declines)"| Z
+    C -->|"yes"| D["Phase 1: Collaborative back-and-forth"]
+    D --> E{"User satisfied with idea?"}
+    E -->|"no"| D
+    E -->|"yes"| F["Phase 2: Adversarial completion pass"]
+    F --> G{"Any gaps or unknowns found?"}
+    G -->|"questions for user"| H["Phase 3: Take questions back to user"]
+    H --> I["Update brainstorm.md with answers"]
     I --> F
-    G -- converged --> J[Phase 4: Present summary]
-    J --> K{Decision gate: plan or implement?}
-    K -- structured plan --> L[Hand off to planning skill in .plans]
-    K -- implement as is --> M[Implement now]
-    M --> N{Residual bugs / undecided?}
-    N -- yes --> O[Offer post-implementation-review]
-    N -- no --> Z
+    G -->|"converged"| J["Phase 4: Present summary"]
+    J --> K{"Decision gate: plan or implement?"}
+    K -->|"structured plan"| L["Hand off to planning skill in .plans"]
+    K -->|"implement as is"| M["Implement now"]
+    M --> N{"Residual bugs / undecided?"}
+    N -->|"yes"| O["Offer post-implementation-review"]
+    N -->|"no"| Z
 ```
 
 ## Phase 1 — Collaborative back-and-forth

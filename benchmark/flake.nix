@@ -22,6 +22,7 @@
             (pkgs.python3.withPackages (pythonPackages: [
               pythonPackages.pyyaml
             ]))
+            pkgs.shellcheck
           ];
         };
       });

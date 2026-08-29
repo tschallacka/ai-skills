@@ -1,0 +1,7 @@
+# MODE: DEV
+[toolchain]
+# Pinned with tony-the-pony's reasoning: same minor, same lints, no surprise
+# compiler warnings drifting between contributors and CI.
+channel = "1.97"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

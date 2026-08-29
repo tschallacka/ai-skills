@@ -1,3 +1,4 @@
+<!-- MODE: PROD -->
 # Internal planning-style contract
 
 This is an internal maintainer document. It is not part of the agent-facing
@@ -5,6 +6,11 @@ planning instructions. Read it when changing a planning helper, validator, or
 generated artifact; keep the scripts, validator, tests, and this contract in
 sync. See `MAINTAINER.md` for the architecture, artifact relations, and
 behavior rules.
+
+"Internal" describes the audience, not the distribution: this file ships in
+the prod install and `role-context.sh` serves it to the maintainer, installer,
+oracle and eve roles (T28 decision), so it cannot be moved to dev-only without
+breaking the installed gatekeeper.
 
 ## Source of truth
 
@@ -113,7 +119,7 @@ Verdict by document surface:
 
 Adding a new template placeholder to any generator script requires registering
 it (with the correct `surface`) in `placeholders.json`; the installer-manifest
-test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.txt`,
+test keeps `placeholders.json` listed in `install.sh`, `PACKAGE-MANIFEST.tsv`,
 and `PACKAGE-MAP.tsv`. A typo'd placeholder (`<shortdescription>`) is a
 maintainer bug caught by the test suite, not by the validator.
 

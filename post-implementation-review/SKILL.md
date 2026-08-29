@@ -2,6 +2,7 @@
 name: post-implementation-review
 description: Use after an implementation that leaves potential bugs, undecided choices, or unverified risks, to offer a comprehensive after-the-fact review backed by three roles (implementer self-analysis, an independent solutions agent, and a critical-feedback agent) that ends in concrete proposed fixes. Do not use for tiny committed changes with no residual risk, or as a substitute for the planning skill's pre-implementation adversarial review.
 ---
+<!-- MODE: PROD -->
 
 # Post-implementation review
 
@@ -47,21 +48,21 @@ is" branch, this skill is the expected follow-on if residual issues appear.
 
 ```mermaid
 flowchart TD
-    A[Implementation complete] --> B{Residual bugs / undecided<br/>/ unverified?}
-    B -- no --> Z[Done]
-    B -- yes --> C{Offer post-implementation-review?}
-    C -- no --> Z
-    C -- yes --> D[Phase 1: Implementer self-analysis]
-    D --> E[Phase 2: Independent solutions agent]
-    E --> F[Phase 3: Critical-feedback agent]
-    F --> G[Phase 4: Consolidate report + present]
-    G --> H{Apply proposed fixes?}
-    H -- yes --> I[Apply minimal fixes; re-run tests]
-    H -- refine --> E
-    H -- no / document only --> J[Record decisions; stop]
-    I --> K{Any new regressions?}
-    K -- yes --> D
-    K -- no --> Z
+    A["Implementation complete"] --> B{"Residual bugs / undecided<br/>/ unverified?"}
+    B -->|"no"| Z["Done"]
+    B -->|"yes"| C{"Offer post-implementation-review?"}
+    C -->|"no"| Z
+    C -->|"yes"| D["Phase 1: Implementer self-analysis"]
+    D --> E["Phase 2: Independent solutions agent"]
+    E --> F["Phase 3: Critical-feedback agent"]
+    F --> G["Phase 4: Consolidate report + present"]
+    G --> H{"Apply proposed fixes?"}
+    H -->|"yes"| I["Apply minimal fixes; re-run tests"]
+    H -->|"refine"| E
+    H -->|"no / document only"| J["Record decisions; stop"]
+    I --> K{"Any new regressions?"}
+    K -->|"yes"| D
+    K -->|"no"| Z
 ```
 
 ## Phase 1 — Implementer self-analysis

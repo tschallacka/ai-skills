@@ -1,6 +1,6 @@
 {
   "name": "@tschallacka/ai-skills",
-  "version": "1.4.2",
+  "version": "2.0.0-alpha.1",
   "description": "Reusable skills and an installer for coding agents",
   "license": "MIT",
   "repository": {
@@ -12,17 +12,31 @@
     "ai-skills-install": "install.sh"
   },
   "scripts": {
-    "install-skills": "./install.sh"
+    "install-skills": "./install.sh",
+    "prepack": "tests/test-skill-files-manifest.sh && tests/test-register-schemas.sh",
+    "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [
     "install.sh",
+    "install-ui.sh",
     "planning",
     "project-specificies",
     "resource-limited-testing",
     "brainstorm",
+    "todo",
+    "bug-report",
+    "chat",
+    "git-worktrees",
     "post-implementation-review",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!planning/tests/**",
+    "!planning/scripts/lib/**",
+    "!planning/scripts/build-plan-libs.sh",
+    "!planning/ARCHITECTURE.md",
+    "!planning/MAINTAINER.md",
+    "!planning/PACKAGE-MAP.tsv",
+    "!project-specificies/*-deviations.md"
   ],
   "engines": {
     "node": ">=14"

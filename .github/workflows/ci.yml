@@ -2,24 +2,563 @@ name: ci
 
 on:
   push:
-    branches: [nextupdate, main]
+    # master is the default branch (origin/HEAD -> origin/master); nextupdate is
+    # the long-lived integration branch. Pushes to either run the full matrix.
+    branches: [master, nextupdate]
   pull_request:
+
+# A CI result is only meaningful for the newest request. Keep one run for this
+# workflow globally so a newer pull-request commit cancels stale work.
+concurrency:
+  group: ci-latest
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Proves: the deterministic suite passes, and leaks no temp files, on both
+    # supported operating systems with each one's default bash.
+    name: Test suite passes on ${{ matrix.os }} (default bash)
+    runs-on: ${{ matrix.os }}
+    # Both operating systems are blocking. The macOS leg earned this once two
+    # consecutive runner runs were green under both bash flavors (runs
+    # 32474258670 and 32476867183), closing blocker 8; a macOS regression now
+    # fails the PR instead of being informational.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # blast-radius.sh resolves a merge base against master and reads the
+          # commits touching a path, and test-blast-radius.sh asks for the parent
+          # of the newest commit touching planning/SKILL.md. The default depth-1
+          # checkout has neither, so all three of its history assertions failed
+          # here while passing locally -- reproduced with `git clone --depth 1`.
+          fetch-depth: 0
+
+      - name: Record the bash under test
+        run: bash --version
+
+      - name: Build and expose the native rjq test binary
+        uses: dtolnay/rust-toolchain@1.97
+
+      - name: Add bundled rjq to PATH for the suite
+        shell: bash
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          case "$host" in
+            x86_64-unknown-linux-*) target=x86_64-unknown-linux-musl; dir=x86_64-unknown-linux-musl ;;
+            aarch64-unknown-linux-*) target=aarch64-unknown-linux-musl; dir=aarch64-unknown-linux-musl ;;
+            x86_64-apple-darwin) target=x86_64-apple-darwin; dir=x86_64-apple-darwin ;;
+            aarch64-apple-darwin) target=aarch64-apple-darwin; dir=aarch64-apple-darwin ;;
+            *) echo "::error::unsupported rjq test host: $host"; exit 1 ;;
+          esac
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          mkdir -p "planning/bin/$dir"
+          cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
+          echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
+
+      - name: Install socat so the served-overview rung is exercised (B48)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y -qq socat
+          elif command -v brew >/dev/null 2>&1; then
+            brew install socat
+            brew install coreutils
+            echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          fi
+          command -v socat || echo "socat still absent; its rung will SKIP loudly"
+
+      - name: Build the compiled chat rung so its assertions run (T62)
+        if: runner.os == 'Linux'
+        uses: dtolnay/rust-toolchain@1.97
+
+      - name: Place the compiled chat rung
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
+          cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/chat-server-rs
+
+      - name: Place the compiled plan-crypt rung so its assertions run
+        # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
+        # compiled branch loudly and check only the shell rungs, which is the
+        # half that already ran everywhere.
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release --manifest-path src/plan-crypt/Cargo.toml
+          mkdir -p planning/.ci-bin
+          cp src/plan-crypt/target/release/plan-crypt planning/.ci-bin/plan-crypt
+          echo "PLAN_CRYPT_BIN=$PWD/planning/.ci-bin/plan-crypt" >> "$GITHUB_ENV"
 
       - name: Run the full deterministic test suite
         run: ./run-tests.sh
 
       - name: Verify no temp files leaked outside the runner's scope
         run: |
-          leftovers="$(find /tmp -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' \) 2>/dev/null | wc -l)"
+          # run-tests.sh stages its scratch root under ${TMPDIR:-/tmp}. On the
+          # macOS runner TMPDIR is a per-session /var/folders/... directory and
+          # /tmp is a symlink to /private/tmp, which BSD find refuses to descend
+          # unless -H is given; scan both. -maxdepth, -name and -o behave the
+          # same on GNU and BSD find.
+          scans="${TMPDIR:-/tmp}"
+          [ "$scans" = "/tmp" ] || scans="$scans /tmp"
+          leftovers=0
+          for scan in $scans; do
+            [ -d "$scan" ] || continue
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' -o -name 't.?????' \) 2>/dev/null)"
+            [ -n "$found" ] || continue
+            printf '%s\n' "$found"
+            leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))
+          done
           echo "leftover temp roots: $leftovers"
           if [ "$leftovers" -ne 0 ]; then
             echo "::error::run-tests.sh left temp files behind"
             exit 1
           fi
+
+  test-bash32:
+    # Proves: the suite runs on the bash 3.2 floor that CODE-STYLE.md section 1
+    # declares. A separate leg is needed because `#!/usr/bin/env bash` on a
+    # macOS runner can resolve to a newer Homebrew bash, which hides every
+    # bash-4-only construct.
+    name: Test suite passes on macOS system bash 3.2 (portability floor)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Same reason as the leg above: the suite includes history-dependent
+          # assertions that a shallow checkout cannot satisfy.
+          fetch-depth: 0
+
+      - name: Put /bin first on PATH so bash resolves to system bash 3.2
+        run: echo "/bin" >> "$GITHUB_PATH"
+
+      - name: Build and expose the native rjq test binary
+        uses: dtolnay/rust-toolchain@1.97
+
+      - name: Add bundled rjq to PATH for the bash 3.2 suite
+        shell: bash
+        run: |
+          case "$(uname -m)" in
+            x86_64) target=x86_64-apple-darwin ;;
+            arm64|aarch64) target=aarch64-apple-darwin ;;
+            *) echo "::error::unsupported macOS host: $(uname -m)"; exit 1 ;;
+          esac
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          mkdir -p "planning/bin/$target"
+          cp "src/rjq/target/$target/release/rjq" "planning/bin/$target/rjq"
+          echo "$PWD/planning/bin/$target" >> "$GITHUB_PATH"
+
+      - name: Record the bash under test (must be 3.2.x)
+        run: |
+          command -v bash
+          bash --version
+          /bin/bash --version
+
+      - name: Install socat so the served-overview rung is exercised (B48)
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y -qq socat
+          elif command -v brew >/dev/null 2>&1; then
+            brew install socat
+            brew install coreutils
+            echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          fi
+          command -v socat || echo "socat still absent; its rung will SKIP loudly"
+
+      - name: Run the full deterministic test suite under /bin/bash
+        run: /bin/bash ./run-tests.sh
+
+      - name: Verify no temp files leaked outside the runner's scope
+        run: |
+          scans="${TMPDIR:-/tmp}"
+          [ "$scans" = "/tmp" ] || scans="$scans /tmp"
+          leftovers=0
+          for scan in $scans; do
+            [ -d "$scan" ] || continue
+            found="$(find -H "$scan" -maxdepth 1 \( -name 'ai-skills-tests.*' -o -name 'planning-agent' -o -name 't.?????' \) 2>/dev/null)"
+            [ -n "$found" ] || continue
+            printf '%s\n' "$found"
+            leftovers=$((leftovers + $(printf '%s\n' "$found" | wc -l)))
+          done
+          echo "leftover temp roots: $leftovers"
+          if [ "$leftovers" -ne 0 ]; then
+            echo "::error::run-tests.sh left temp files behind"
+            exit 1
+          fi
+
+  # The former macos-known-failures job is gone (T37): its blocker list is
+  # fully cleared -- items 1-7 are enforced by tests, and blocker 8 was closed
+  # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
+  # macOS legs above are now blocking.
+
+  plan-crypt:
+    # Proves: the fix-key primitives are correct on every platform we ship to,
+    # by building the binary on that platform and RUNNING it there. A digest is
+    # the one thing in this repository that is silently wrong when it is wrong
+    # -- a corrupted round constant still yields a 64-character hex string --
+    # so the artifact is exercised rather than merely produced.
+    #
+    # Each target gets its own runner. Cross-building from Linux is deliberately
+    # not done here: an aarch64-apple-darwin binary cross-built on Linux carries
+    # no ad-hoc signature and Apple Silicon refuses to exec it
+    # (rust-development-guidelines.md section 4), and neither the darwin nor the
+    # msvc target links on a Linux runner at all.
+    name: plan-crypt builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/plan-crypt
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Ensure the target standard library is installed
+        run: rustup target add --toolchain 1.97 "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/plan-crypt
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/plan-crypt
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-crypt-${{ matrix.target }}
+          path: |
+            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt
+            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt.exe
+          if-no-files-found: error
+
+      - name: The musl build must actually be static
+        if: contains(matrix.target, 'musl')
+        working-directory: src/plan-crypt
+        run: |
+          # The whole distribution claim is that the target machine needs
+          # nothing, so assert it rather than assume it. ldd prints either
+          # "not a dynamic executable" or "statically linked" for a static-pie.
+          out="$(ldd target/${{ matrix.target }}/release/plan-crypt 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::the musl build links against a shared library"; exit 1 ;;
+          esac
+
+      - name: Run the built binary and check it against this platform's own tool
+        shell: bash
+        working-directory: src/plan-crypt
+        run: |
+          # Run the artifact directly, never through `cargo run`: the claim is
+          # about the binary, not about a toolchain being present.
+          bin="target/${{ matrix.target }}/release/plan-crypt"
+          [ -x "$bin" ] || bin="$bin.exe"
+
+          # The canonical NIST vector first, so a platform that disagrees is
+          # named before anything else runs.
+          got="$(printf 'abc' | "$bin" sha256)"
+          want='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+          [ "$got" = "$want" ] || { echo "::error::abc digest is $got, want $want"; exit 1; }
+
+          # Then agreement with whatever digest tool this platform ships, which
+          # is what lets a key minted by the shell chain keep verifying. macOS
+          # has shasum and no sha256sum; the Windows runner's Git Bash has both.
+          if command -v sha256sum >/dev/null 2>&1; then
+            reference() { sha256sum | awk '{print $1}'; }
+          else
+            reference() { shasum -a 256 | awk '{print $1}'; }
+          fi
+          rc=0
+          for n in 0 1 55 56 63 64 65 1000 70000; do
+            input="$(awk -v n="$n" 'BEGIN { s = "x"; while (length(s) < n) s = s s; printf "%s", substr(s, 1, n) }')"
+            a="$(printf '%s' "$input" | "$bin" sha256)"
+            b="$(printf '%s' "$input" | reference)"
+            if [ "$a" != "$b" ]; then
+              echo "::error::$n bytes: plan-crypt $a, platform tool $b"
+              rc=1
+            fi
+          done
+          [ "$rc" -eq 0 ] || exit 1
+
+          # And the CSPRNG answers on this platform: correct width, and two
+          # draws that differ. On Windows this is the only place
+          # BCryptGenRandom is ever executed.
+          one="$("$bin" random-hex 8)"
+          two="$("$bin" random-hex 8)"
+          [ "${#one}" -eq 16 ] || { echo "::error::random-hex 8 gave ${#one} chars"; exit 1; }
+          [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
+          printf 'digest and entropy agree on %s\n' '${{ matrix.target }}'
+
+  chat-binary:
+    name: chat builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      HOME: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/chat
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Ensure the target standard library is installed
+        run: rustup target add --toolchain 1.97 "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/chat
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/chat
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-${{ matrix.target }}
+          path: |
+            src/chat/target/${{ matrix.target }}/release/chat
+            src/chat/target/${{ matrix.target }}/release/chat.exe
+          if-no-files-found: error
+
+  rjq-binary:
+    name: rjq builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.required == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            required: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            required: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            required: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            required: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            required: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/rjq
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          components: rustfmt, clippy
+
+      - name: Install the target for the crate toolchain
+        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/rjq
+        run: |
+          rustup run 1.97.1 cargo fmt --check
+          rustup run 1.97.1 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
+          rustup run 1.97.1 cargo test --target "${{ matrix.target }}"
+
+      - name: Build rjq
+        working-directory: src/rjq
+        run: rustup run 1.97.1 cargo build --release --target "${{ matrix.target }}"
+
+      - name: Run the built artifact
+        shell: bash
+        working-directory: src/rjq
+        run: |
+          bin="target/${{ matrix.target }}/release/rjq"
+          [ -x "$bin" ] || bin="$bin.exe"
+          output="$(printf '{"a":1}' | "$bin" '.a')"
+          [ "$output" = "1" ] || { echo "::error::rjq output was $output"; exit 1; }
+
+      - name: Stage the target artifact for suite jobs
+        shell: bash
+        run: |
+          mkdir -p "rjq-artifacts/${{ matrix.target }}"
+          if [ -f "src/rjq/target/${{ matrix.target }}/release/rjq" ]; then
+            cp "src/rjq/target/${{ matrix.target }}/release/rjq" \
+              "rjq-artifacts/${{ matrix.target }}/rjq"
+          else
+            cp "src/rjq/target/${{ matrix.target }}/release/rjq.exe" \
+              "rjq-artifacts/${{ matrix.target }}/rjq.exe"
+          fi
+
+      - name: Upload the target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rjq-${{ matrix.target }}
+          path: rjq-artifacts
+          if-no-files-found: error
+
+  shellcheck:
+    # Proves: no `error`-severity shellcheck finding exists in any tracked live
+    # shell script, and reports the full finding count so it can be ratcheted.
+    #
+    # shellcheck is preinstalled on the ubuntu-latest image, so it is invoked
+    # directly rather than through ludeeus/action-shellcheck: that keeps the
+    # exact file list (tracked *.sh minus archived benchmark output), the
+    # severity gate, and the informational report under this workflow's control
+    # and adds no third-party action to the supply chain.
+    name: No warning-level shellcheck findings in live shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record the shellcheck version
+        run: |
+          # Preinstalled on the ubuntu-latest image; install it if that ever
+          # changes, so the gate cannot silently stop running.
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+
+      - name: Collect the tracked live shell scripts
+        run: |
+          # benchmark/results/** holds archived output snapshots of past runs,
+          # not live code, so it is excluded.
+          git ls-files '*.sh' | grep -v '^benchmark/results/' > /tmp/sh-files.txt
+          echo "linting $(wc -l < /tmp/sh-files.txt) files"
+
+      - name: Full report (informational — the count to ratchet down)
+        continue-on-error: true
+        run: |
+          xargs shellcheck -s bash -f gcc < /tmp/sh-files.txt > /tmp/shellcheck.txt || true
+          sed -n '1,400p' /tmp/shellcheck.txt
+          printf 'errors:   %s\n' "$(grep -c ': error:' /tmp/shellcheck.txt || true)"
+          printf 'warnings: %s\n' "$(grep -c ': warning:' /tmp/shellcheck.txt || true)"
+          printf 'notes:    %s\n' "$(grep -c ': note:' /tmp/shellcheck.txt || true)"
+          printf 'total:    %s\n' "$(wc -l < /tmp/shellcheck.txt)"
+
+      - name: Fail on error-severity findings
+        run: xargs shellcheck -s bash --severity=warning < /tmp/sh-files.txt
+
+  installer-build:
+    # Proves: the committed install.sh is exactly what installer/build.sh
+    # assembles from installer/src/ plus the generated dependency tables, so the
+    # shipped artifact cannot drift from its parts through a hand edit.
+    name: install.sh matches installer/build.sh output
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rebuild and compare
+        run: ./installer/build.sh --check
+
+      - name: Parse every part and the artifact
+        run: bash -n install.sh installer/build.sh installer/src/*.sh
+
+  mermaid-render:
+    # Proves: every fenced mermaid block in the repo's markdown is SYNTACTICALLY
+    # valid — mermaid-cli parses and renders it. It proves nothing about
+    # accuracy: a diagram can render perfectly and still describe a flow the code
+    # does not have. planning/tests/test-mermaid-accuracy.sh owns the existence
+    # checks (script, artifact, node id, function) and runs mmdc too when the dev
+    # flake provides it; this job is the leg that cannot be skipped, and it lives
+    # here rather than only in the suite because the suite may not assume node
+    # (CODE-STYLE.md section 1).
+    name: Every mermaid diagram renders (syntax only, proves nothing about accuracy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record the node under test
+        run: node --version
+
+      - name: Extract every fenced mermaid block
+        run: |
+          # benchmark/results/** is archived output, not live documentation.
+          mkdir -p /tmp/mermaid
+          for doc in $(git ls-files '*.md' | grep -v '^benchmark/results/'); do
+            tag="$(printf '%s' "$doc" | tr '/' '-')"
+            awk -v out=/tmp/mermaid -v tag="$tag" '
+              !inb && /^```mermaid[[:space:]]*$/ { inb = 1; f = sprintf("%s/%s@%d.mmd", out, tag, NR); next }
+              inb && /^```/ { inb = 0; next }
+              inb { print > f }
+            ' "$doc"
+          done
+          blocks="$(find /tmp/mermaid -name '*.mmd' | wc -l)"
+          find /tmp/mermaid -name '*.mmd' | sort
+          echo "mermaid blocks: $blocks"
+          if [ "$blocks" -eq 0 ]; then
+            echo "::error::no mermaid block found — the extractor or the docs changed shape"
+            exit 1
+          fi
+
+      - name: Render each block with mermaid-cli
+        run: |
+          # Pinned to the version the dev flake ships, so a local run and CI
+          # agree on the parser. --no-sandbox: chromium has no user namespace on
+          # the runner.
+          printf '%s\n' '{ "args": ["--no-sandbox", "--disable-dev-shm-usage"] }' > /tmp/puppeteer.json
+          rc=0
+          for f in /tmp/mermaid/*.mmd; do
+            if ! npx -y @mermaid-js/mermaid-cli@11.16.0 -q \
+                -p /tmp/puppeteer.json -i "$f" -o "$f.svg"; then
+              echo "::error::mermaid rejected $(basename "$f" .mmd | tr '@' ':')"
+              rc=1
+            fi
+          done
+          exit "$rc"

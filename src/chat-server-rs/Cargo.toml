@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "chat-server-rs"
+version = "0.1.0"
+edition = "2021"
+description = "The compiled chat-server rung: the same wire protocol as the interpreter tiers, resident instead of per-connection"
+license = "MIT"
+
+[dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

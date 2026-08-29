@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
+# MODE: DEV
 set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 
 # test-fix-keys.sh — reviewer-gated fix keys: mint (W01/W12), verify (W02),
 # failure matrix (W04), schema conformance of the 5-column findings table
@@ -10,11 +13,14 @@ temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/planning-fix-keys-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
 export TMPDIR="${TMPDIR:-/tmp}"
+t_begin
 
-fail() {
-    echo "test-fix-keys.sh: $*" >&2
-    exit 1
-}
+# The shared reporter. Its own copy exited on the first finding, so one broken
+# thing hid the other 92 assertions -- and this is the only test of the fix-key
+# gate: minting, forged and stale keys, self-certification, the warning count.
+# The prefix changes from "test-fix-keys.sh:" to the library's "FAIL:"; nothing
+# outside this file read the old one, and run-tests.sh keys on the exit code.
+fail() { t_fail "$*"; }
 
 FIXED_SECRET='00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
 
@@ -28,8 +34,9 @@ seed_secret_session() {
 
 expected_key() {
     local sid="$1" fid="$2" wu="$3"
-    printf '%s' "$sid|$fid|$wu" | openssl dgst -sha256 -hmac "$FIXED_SECRET" -binary \
-        | od -An -vtx1 | tr -d ' \n'
+    # Same derivation as the scripts under test: SHA-256 over SECRET||MESSAGE
+    # through the standard chain (T16 retired the openssl-HMAC scheme).
+    printf '%s%s' "$FIXED_SECRET" "$sid|$fid|$wu" | sha256sum | awk '{print $1}'
 }
 
 seed_gated_plan() {
@@ -77,9 +84,9 @@ grep -Fq '00112233' "$plan_a/fix-keys.json" && fail 'the session secret leaked i
 key_01="$(expected_key test-session-a AR-01 W05)"
 key_03="$(expected_key test-session-a AR-03 W07)"
 grep -Fq "\"W05\": \"$key_01\"" "$plan_a/fix-keys.json" \
-    || fail 'derived key for AR-01/W05 does not match HMAC-SHA256(secret, sid|fid|wu)'
+    || fail 'derived key for AR-01/W05 does not match SHA-256 over (secret)(sid|fid|wu)'
 grep -Fq "\"W07\": \"$key_03\"" "$plan_a/fix-keys.json" \
-    || fail 'derived key for AR-03/W07 does not match HMAC-SHA256(secret, sid|fid|wu)'
+    || fail 'derived key for AR-03/W07 does not match SHA-256 over (secret)(sid|fid|wu)'
 cp "$plan_a/fix-keys.json" "$temporary_root/fix-keys-before.json"
 "$script_dir/mint-fix-keys.sh" "$plan_a" >/dev/null 2>&1
 cmp -s "$temporary_root/fix-keys-before.json" "$plan_a/fix-keys.json" \
@@ -97,7 +104,7 @@ grep -Fq "\"W05\": \"$key_01\"" "$plan_a/fix-keys.json" \
 #     claiming session is the minting session (self-certification). ---
 plan_bad="$temporary_root/plan-bad"
 seed_gated_plan "$plan_bad" test-session-bad
-sed -i 's/| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |/| AR6-01 | First gap. | Implement W05. | ✅ resolved | W05 |/' \
+t_sed_i 's/| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |/| AR6-01 | First gap. | Implement W05. | ✅ resolved | W05 |/' \
     "$plan_bad/adversarial-review.md"
 seed_secret_session test-session-bad
 if "$script_dir/mint-fix-keys.sh" "$plan_bad" >"$temporary_root/mint-bad.log" 2>&1; then
@@ -121,15 +128,39 @@ key_by3="$(expected_key test-session-by AR-03 W07)"
 write_claims "$plan_by" "AR-01	W05	$key_by1" "AR-03	W07	$key_by3"
 if "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by reviewer-session-1 \
     >"$temporary_root/verify-self.log" 2>&1; then
-    :
-else
-    fail 'verify rejected a valid claim with a same-session warning'
+    fail 'verify accepted a self-certified claim set (minted and claimed by one session)'
 fi
 grep -Fq 'self-certification' "$temporary_root/verify-self.log" \
-    || fail 'verify did not warn about a same-session claim'
+    || fail 'verify did not report the same-session claim as self-certification'
+grep -Fq 'fix-keys verification failed' "$temporary_root/verify-self.log" \
+    || fail 'self-certification did not count towards the verification failure'
 "$script_dir/verify-fix-keys.sh" "$plan_by" --claimed-by fixer-session-9 \
     >"$temporary_root/verify-distinct.log" 2>&1 \
     || fail 'verify rejected a distinct-session claim'
+
+# --- a warning has to reach the summary count. A worker found the older build
+# emitting the self-certification warning after "$warnings" was read, so the
+# summary said "0 warning(s)" and a caller keying on that line read a
+# self-certified run as clean. Self-certification is a failure here, not a
+# warning, but the summary count itself was asserted nowhere. ---
+plan_warn="$temporary_root/plan-warn"
+seed_gated_plan "$plan_warn" test-session-warn
+seed_secret_session test-session-warn
+MINTED_BY=reviewer-session-2 "$script_dir/mint-fix-keys.sh" "$plan_warn" >/dev/null 2>&1 \
+    || fail 'mint rejected a valid gated plan for the warning-count case'
+key_warn1="$(expected_key test-session-warn AR-01 W05)"
+key_warn3="$(expected_key test-session-warn AR-03 W07)"
+# One claim for a pair fix-keys.json does not gate: reported, not fatal.
+write_claims "$plan_warn" "AR-01	W05	$key_warn1" "AR-03	W07	$key_warn3" \
+    "AR-99	W42	deadbeef"
+"$script_dir/verify-fix-keys.sh" "$plan_warn" --claimed-by fixer-session-7 \
+    >"$temporary_root/verify-warn.log" 2>&1 \
+    || fail 'verify failed on a claim for a pair that is merely not gated'
+grep -Fq 'ignoring claim for pair AR-99/W42' "$temporary_root/verify-warn.log" \
+    || fail 'verify did not report the ungated claim'
+grep -Fq '1 warning(s)' "$temporary_root/verify-warn.log" \
+    || fail 'the summary did not count the warning it just reported'
+
 grep -Fq 'self-certification' "$temporary_root/verify-distinct.log" \
     && fail 'verify warned about a distinct-session claim'
 "$script_dir/verify-fix-keys.sh" "$plan_by" >"$temporary_root/verify-noclaimant.log" 2>&1 \
@@ -187,7 +218,7 @@ rm -f "$plan_b/fix-keys.json"
 plan_c="$temporary_root/plan-c"
 mkdir -p "$plan_c"
 "$script_dir/create-adversarial-review.sh" "$plan_c" >/dev/null
-sed -i '/^## Verdict$/i No additional substantive finding remains.' \
+t_sed_insert_before '^## Verdict$' 'No additional substantive finding remains.' \
     "$plan_c/adversarial-review.md"
 grep -Fqx '| ID | Missing or over-broad item | Required plan change | Status | Work unit |' \
     "$plan_c/adversarial-review.md" || fail 'create-adversarial-review.sh did not emit the 5-column header'
@@ -241,7 +272,7 @@ if "$script_dir/update-plan-content.sh" --review-status "$plan_c2" approved \
     >"$temporary_root/reapprove-open.log" 2>&1; then
     fail 'approval accepted a review with an open 5-column finding row'
 fi
-sed -i 's/| AR-09 | Open gap. | Fix it. | 💤 open | W01 |/| AR-09 | Open gap. | Fix it. | ✅ resolved | W01 |/' \
+t_sed_i 's/| AR-09 | Open gap. | Fix it. | 💤 open | W01 |/| AR-09 | Open gap. | Fix it. | ✅ resolved | W01 |/' \
     "$plan_c2/adversarial-review.md"
 if "$script_dir/validate-plan.sh" "$plan_c2" >"$temporary_root/validate-resolved.log" 2>&1; then
     :
@@ -267,8 +298,20 @@ grep -Fqx -- '- Status: `💤 pending`' "$plan_d/adversarial-review.md" \
 [ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-d" ] \
     || fail 'refused approval invalidated the session secret'
 write_claims "$plan_d" "AR-01	W05	$key_d1" "AR-03	W07	$(expected_key test-session-d AR-03 W07)"
-"$script_dir/update-plan-content.sh" --review-status "$plan_d" approved >/dev/null 2>&1 \
-    || fail 'approval rejected matching fix key claims'
+# The gate names the claiming session: unnamed defaults to the minting session,
+# which is self-certification and must be refused before the status flips.
+if "$script_dir/update-plan-content.sh" --review-status "$plan_d" approved \
+    >"$temporary_root/approve-selfcert.log" 2>&1; then
+    fail 'approval accepted matching claims recorded by the minting session (self-certification)'
+fi
+grep -Fq 'self-certification' "$temporary_root/approve-selfcert.log" \
+    || fail 'approval did not report self-certification'
+grep -Fqx -- '- Status: `💤 pending`' "$plan_d/adversarial-review.md" \
+    || fail 'refused self-certified approval changed the review status'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-d" ] \
+    || fail 'refused self-certified approval invalidated the session secret'
+CLAIMED_BY=fixer-session-d "$script_dir/update-plan-content.sh" --review-status "$plan_d" approved >/dev/null 2>&1 \
+    || fail 'approval rejected matching fix key claims from a distinct claiming session'
 grep -Fqx -- '- Status: `✅ approved`' "$plan_d/adversarial-review.md" \
     || fail 'review status was not flipped to approved'
 grep -Fqx -- '- Status: ✅ approved' "$plan_d/plan-description.md" \
@@ -331,7 +374,7 @@ fi
 plan_g="$temporary_root/plan-g"
 seed_gated_plan "$plan_g" test-session-g
 seed_secret_session test-session-g
-sed -i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 | First gap. | Implement W05. | ✅ resolved | N/A |#; s#| AR-03 | Third gap. | Implement W07. | ✅ resolved | W07 |#| AR-03 | Third gap. | Implement W07. | ✅ resolved | N/A |#' \
+t_sed_i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 | First gap. | Implement W05. | ✅ resolved | N/A |#; s#| AR-03 | Third gap. | Implement W07. | ✅ resolved | W07 |#| AR-03 | Third gap. | Implement W07. | ✅ resolved | N/A |#' \
     "$plan_g/adversarial-review.md"
 "$script_dir/mint-fix-keys.sh" "$plan_g" >/dev/null 2>&1
 "$script_dir/update-plan-content.sh" --review-status "$plan_g" approved >/dev/null 2>&1 \
@@ -339,4 +382,32 @@ sed -i 's#| AR-01 | First gap. | Implement W05. | ✅ resolved | W05 |#| AR-01 |
 [ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-g" ] \
     && fail 'no-unit approval did not invalidate the session secret'
 
-printf 'test-fix-keys.sh passed.\n'
+# --- P0-2: an approval that dies on a malformed document must leave the session
+#     secret intact, so the review stays approvable ---
+plan_h="$temporary_root/plan-h"
+seed_gated_plan "$plan_h" test-session-h
+seed_secret_session test-session-h
+"$script_dir/mint-fix-keys.sh" "$plan_h" >/dev/null 2>&1
+write_claims "$plan_h" "AR-01	W05	$(expected_key test-session-h AR-01 W05)" \
+    "AR-03	W07	$(expected_key test-session-h AR-03 W07)"
+t_sed_i '/^- Status:/d' "$plan_h/plan-description.md"
+if CLAIMED_BY=fixer-session-h "$script_dir/update-plan-content.sh" --review-status "$plan_h" approved \
+    >"$temporary_root/approve-nostatus.log" 2>&1; then
+    fail 'approval succeeded with no Status field in plan-description.md'
+fi
+grep -Fq 'Plan description must contain exactly one Status field' "$temporary_root/approve-nostatus.log" \
+    || fail 'approval did not report the malformed plan description'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-h" ] \
+    || fail 'an approval that failed its writes invalidated the session secret'
+printf '# Plan: fixture\n\n- Status: `💤 pending`\n' > "$plan_h/plan-description.md"
+CLAIMED_BY=fixer-session-h "$script_dir/update-plan-content.sh" --review-status "$plan_h" approved \
+    >"$temporary_root/approve-repaired.log" 2>&1 \
+    || fail 'approval on a repaired description failed: the failed attempt was unrecoverable'
+grep -Fqx -- '- Status: `✅ approved`' "$plan_h/adversarial-review.md" \
+    || fail 'the repaired approval did not flip the review status'
+grep -Fqx -- '- Status: ✅ approved' "$plan_h/plan-description.md" \
+    || fail 'the repaired approval did not mirror the status into the description'
+[ -d "$TMPDIR/planning-agent/review-fix-keys/test-session-h" ] \
+    && fail 'the repaired approval did not invalidate the session secret'
+
+t_end

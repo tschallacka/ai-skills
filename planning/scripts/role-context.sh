@@ -1,53 +1,40 @@
 #!/usr/bin/env bash
-# role-context.sh — role-gated context reader.
+# MODE: PROD
+# role-context.sh — role-gated context reader (persona registry + scope docs).
 #
-# Given a role id or canonical name, print (or list) the .md documents that
-# single role needs, concatenated with provenance headers, so an agent gets a
-# scoped payload instead of doing many file lookups or loading unrelated
-# ("future-phase") knowledge.
-#
-# Output is BYTE-budgeted and paginated for non-interactive agents: run
-#   role-context.sh <role-id|name> -p1     # first page  (-p|--page N)
-#   role-context.sh <role-id|name> -p2     # next page (if "more: ..." is shown)
-# Each page is a deterministic slice; agents never need an interactive TTY.
-#   -l|--list  list roles (identity-free); --paths (maintainer) prints doc paths;
-#   --page-size BYTES sets the per-page byte budget (default 12000).
-#
-# GATING: the script is identity-aware and FAILS CLOSED. Any content read
-# requires a valid ROLE_ID resolving to a registered persona; an unset or
-# unknown ROLE_ID is a hard refusal with a "FAIL-CLOSED identity" message, and
-# the worker is denied a persona. Reads are further restricted to the caller's
-# own role (reviewer family or the maintainer may read more). Only `--list` is
-# identity-free (safe mode: reveals nothing but ids/names). `--paths` exposes
-# the on-disk layout and is maintainer-only:
-#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>
-# Shell gates are advisory (not a security boundary); the agent framework is
-# what actually confines the process.
-#
-# Alongside the docs, each payload prefixes the role's voice/stance preamble
-# from roles/VOICES.md (identity preamble; see voice_for). This script is the
-# machine source of the persona registry (ROLES=()) and per-role scope
-# (role_docs()); the ROLES.md persona matrix is a maintained mirror of that
-# scope, and scope-doc shipping is enforced by test-persona-drift.sh. Sourcing
-# this file (not executing it) defines only the registry + resolvers (sourcing
-# guard), so callers reuse resolve_id without running the CLI main flow.
+# Given a role id or canonical name, print the .md documents that single role
+# needs, concatenated with provenance headers and the role's voice preamble, so
+# an agent gets a scoped payload instead of loading unrelated knowledge.
 #
 # Usage:
-#   role-context.sh <role-id|canonical-name> [-p N] [--page-size BYTES]   # needs ROLE_ID
-#   role-context.sh --list                                                 # open (safe mode)
-#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>              # maintainer-only
+#   role-context.sh <role-id|name> [-p N|--page N] [--page-size BYTES]
+#   role-context.sh --list                    # -l; identity-free (safe mode)
+#   ROLE_ID=maintainer role-context.sh --paths <role-id|name>  # maintainer-only
 #   role-context.sh --help
 #
-# Accepts both the canonical id and the canonical name (case-insensitive),
-# plus id/name aliases (e.g. "willie" or "maintainer", "pythia" or "oracle",
-# "benny-02" -> "benny").
+# Output is BYTE-budgeted and paginated: -p2 (or -p 2) prints the next page when
+# a "more: ..." footer is shown; --page-size sets the per-page byte budget
+# (default 12000). Every page is a deterministic slice; no TTY is needed.
+#
+# GATING: identity-aware and FAILS CLOSED. Any content read requires a ROLE_ID
+# resolving to a registered persona; reads are restricted to the caller's own
+# role (reviewer family mutual, maintainer may read all). --list is open.
+
+# `usage` prints lines 1-20 verbatim, so the docblock above MUST stay 20 lines.
+# `ROLES`, `resolve_id`, `canonical_name`, `role_docs`, `list_roles`, `voice_for`
+# and `can_access` are this file's sourced public surface; do not rename them.
 
 set -euo pipefail
+# LC_ALL=C also pins the page accounting to BYTES: under a UTF-8 locale ${#str}
+# counts characters, which mis-bills the byte budget below for the multi-byte
+# glyphs (§ 💤 ⏳ ✅ —) these documents are full of. Bytes everywhere, one unit.
+export LC_ALL=C
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+skill_dir="$(cd "$script_dir/.." && pwd)"
 
 # Canonical registry: "id:name". Source of truth is the maintainer contract.
+# Public when this file is sourced — see the DUAL-NATURED note above.
 ROLES=(
     alex:Alex
     benny:Benny
@@ -63,8 +50,15 @@ ROLES=(
 )
 
 usage() {
-    sed -n '1,26p' "$0" >&2
-    exit 64
+    local rc="${1:-64}"
+    awk 'NR == 1 { next }
+         /^#/ {
+             sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
+             print; next
+         }
+         { exit }' "$0"
+    exit "$rc"
 }
 
 resolve_id() {
@@ -111,12 +105,11 @@ list_roles() {
     done
 }
 
-# Return the persona's voice/stance line from roles/VOICES.md, keyed by the
-# canonical role id, for injection into the identity preamble. Emits nothing if
-# the voice document is missing (the reader still fails closed on missing docs
-# elsewhere; a missing voice is surfaced by the voice-artifact drift test).
+# Emits nothing when the voice document is missing: this lookup must not be the
+# thing that fails closed, because a missing voice is a drift-test finding
+# rather than a read refusal.
 voice_for() {
-    local id="$1" file="$SKILL_DIR/roles/VOICES.md"
+    local id="$1" file="$skill_dir/roles/VOICES.md"
     [ -f "$file" ] || return 0
     awk -F'|' -v wanted="$id" '
         function trim(v){gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); return v}
@@ -143,36 +136,40 @@ can_access() {
     return 1
 }
 
-# Sourcing guard: when this file is sourced (not executed), only the registry
-# (ROLES=()) and the resolver functions are defined; the CLI main flow that
-# parses args / renders context is skipped so the caller can reuse resolve_id
-# without this script's main body running (and its exit / usage firing).
+# Sourcing guard: sourced, this file must define only the registry and the
+# resolver functions. Letting the CLI main flow run would fire its arg parsing,
+# usage and exit inside the caller.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
     return 0
 fi
 
-PAGE=1
-PAGE_BUDGET="${PAGE_BUDGET:-12000}"     # bytes per page
-MODE=print
-ROLE=""
+req_page=1
+page_budget="${PAGE_BUDGET:-12000}"     # bytes per page
+mode=print
+role=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -p|--page) [ "$#" -ge 2 ] || usage; PAGE="$2"; shift 2 ;;
-        -p[0-9]*) PAGE="${1#-p}"; shift ;;
-        --page-size) [ "$#" -ge 2 ] || usage; PAGE_BUDGET="$2"; shift 2 ;;
-        --paths) MODE=paths; shift ;;
-        --list|-l) MODE=list; shift ;;
-        -h|--help) sed -n '1,43p' "$0"; exit 0 ;;
+        -p|--page) [ "$#" -ge 2 ] || usage; req_page="$2"; shift 2 ;;
+        -p[0-9]*) req_page="${1#-p}"; shift ;;
+        --page-size) [ "$#" -ge 2 ] || usage; page_budget="$2"; shift 2 ;;
+        --paths) mode=paths; shift ;;
+        --list|-l) mode=list; shift ;;
+        -h|--help) usage 0 ;;
+        --) shift; break ;;
         -*) usage ;;
-        *) [ -z "$ROLE" ] && ROLE="$1" || usage; shift ;;
+        *)
+            [ -z "$role" ] || usage
+            role="$1"
+            shift
+            ;;
     esac
 done
 # --list is identity-free and needs no role token; all other modes do.
-if [ "$MODE" != list ]; then
-    [ -n "$ROLE" ] || usage
-    id="$(resolve_id "$ROLE")"
+if [ "$mode" != list ]; then
+    [ -n "$role" ] || usage
+    id="$(resolve_id "$role")"
     [ "$id" = UNKNOWN ] && {
-        printf 'role-context: unknown role or name: %s\n' "$ROLE" >&2
+        printf 'role-context: unknown role or name: %s\n' "$role" >&2
         printf '  valid: ' >&2; list_roles >&2
         exit 64
     }
@@ -192,7 +189,7 @@ if [ -n "${ROLE_ID:-}" ]; then
     }
 fi
 
-case "$MODE" in
+case "$mode" in
     list) list_roles; exit 0 ;;
     paths)
         [ "$caller_id" = maintainer ] || {
@@ -218,14 +215,14 @@ can_access "$caller_id" "$id" || {
 # Render the full payload once, then slice it into byte-budgeted pages.
 name="$(canonical_name "$id")"
 voice="$(voice_for "$id")"
-tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+tmp="$(mktemp "${TMPDIR:-/tmp}/role-context.XXXXXX")"; trap 'rm -f "$tmp"' EXIT
 {
     printf '# Role context: %s (%s)\n\n' "$id" "$name"
     if [ -n "$voice" ]; then
         printf '# Voice (%s): %s\n\n' "$id" "$voice"
     fi
     for rel in $(role_docs "$id"); do
-        file="$SKILL_DIR/$rel"
+        file="$skill_dir/$rel"
         if [ -f "$file" ]; then
             printf '\n===== %s =====\n' "$rel"
             cat "$file"
@@ -235,30 +232,31 @@ tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
     done
 } > "$tmp"
 
-# Build page boundaries by cumulative byte budget.
+# Build page boundaries by cumulative byte budget. ALL arithmetic here is in
+# BYTES: LC_ALL=C above makes ${#l} a byte count, and the +1 is the newline
+# `read` stripped, so the total matches what `wc -c` would report.
 declare -a start_line end_line
 line=0; page=1; bytes=0; start_line[1]=1
 while IFS= read -r l; do
     line=$((line + 1))
     len=$(( ${#l} + 1 ))
-    if [ "$line" -gt 1 ] && [ $((bytes + len)) -gt "$PAGE_BUDGET" ]; then
-        end_line[$page]=$((line - 1))
+    if [ "$line" -gt 1 ] && [ $((bytes + len)) -gt "$page_budget" ]; then
+        end_line[page]=$((line - 1))
         page=$((page + 1))
-        start_line[$page]="$line"
+        start_line[page]="$line"
         bytes=0
     fi
     bytes=$((bytes + len))
 done < "$tmp"
-end_line[$page]="$line"
+end_line[page]="$line"
 total_page="$page"
 
-PAGE="${PAGE:-1}"
-printf '# role-context %s (%s) — page %s/%s\n' "$id" "$name" "$PAGE" "$total_page"
-if [ "$PAGE" -lt 1 ] || [ "$PAGE" -gt "$total_page" ]; then
+printf '# role-context %s (%s) — page %s/%s\n' "$id" "$name" "$req_page" "$total_page"
+if [ "$req_page" -lt 1 ] || [ "$req_page" -gt "$total_page" ]; then
     printf '# (page out of range; expected 1..%s)\n' "$total_page"
     exit 0
 fi
-sed -n "${start_line[$PAGE]},${end_line[$PAGE]}p" "$tmp"
-if [ "$PAGE" -lt "$total_page" ]; then
-    printf '\n# more: role-context.sh <%s|name> -p %s\n' "$id" "$((PAGE + 1))"
+sed -n "${start_line[$req_page]},${end_line[$req_page]}p" "$tmp"
+if [ "$req_page" -lt "$total_page" ]; then
+    printf '\n# more: role-context.sh <%s|name> -p %s\n' "$id" "$((req_page + 1))"
 fi

@@ -1,15 +1,41 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# MODE: PROD
+# create-plan-progress.sh — generate a plan's top-level progress.md: one row per
+# goal directory holding a goal.md, each carrying that goal's definition of done.
+#
+# Row order is the goal directories in byte order (export LC_ALL=C above, so the
+# generated order is the same for every developer on every locale). Refuses to
+# overwrite an existing tracker (73); rebuild-plan-progress.sh refreshes one.
+#
+# Usage:
+#   create-plan-progress.sh [--plan-dir] <plan-directory>
+#   create-plan-progress.sh --help
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $(basename "$0") <plan-directory>" >&2
-    exit 64
-fi
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=planning/scripts/plan-document-lib.sh
+source "$script_dir/plan-document-lib.sh"
+# Accept --plan-dir as a synonym for the positional plan directory: the
+# bounded reader takes the flag, so a reader who learned it there is not
+# refused here.
+eval "set -- $(plan_hoist_plan_dir 1 "$@")"
+
+export LC_ALL=C
+
+usage() {
+    local rc="${1:-64}"
+    cat <<USAGE
+Usage: ${0##*/} [--plan-dir] <plan-directory>
+       ${0##*/} --help
+USAGE
+    exit "$rc"
+}
+
+case "${1:-}" in -h|--help) usage 0 ;; esac
+[ "$#" -eq 1 ] || usage
 
 plan_dir="$1"
 progress_file="$plan_dir/progress.md"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$script_dir/plan-document-lib.sh"
 
 if [ -e "$progress_file" ]; then
     echo "Progress file already exists: $progress_file" >&2
@@ -41,6 +67,5 @@ trap 'rm -f "$temporary_file"' EXIT
     done
 } > "$temporary_file"
 mv "$temporary_file" "$progress_file"
-trap - EXIT
 
-echo "Created $progress_file with ${#goal_names[@]} goal rows"
+printf 'Created %s\n' "$progress_file"
