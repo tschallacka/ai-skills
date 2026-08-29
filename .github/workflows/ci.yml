@@ -19,7 +19,6 @@ jobs:
     # supported operating systems with each one's default bash.
     name: Test suite passes on ${{ matrix.os }} (default bash)
     runs-on: ${{ matrix.os }}
-    needs: rjq-binary
     # Both operating systems are blocking. The macOS leg earned this once two
     # consecutive runner runs were green under both bash flavors (runs
     # 32474258670 and 32476867183), closing blocker 8; a macOS regression now
@@ -41,29 +40,6 @@ jobs:
 
       - name: Record the bash under test
         run: bash --version
-
-      - name: Download all native rjq test artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: rjq-*
-          path: /tmp/rjq-artifacts
-          merge-multiple: true
-
-      - name: Place the complete rjq artifact set
-        shell: bash
-        run: |
-          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
-              x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
-            mkdir -p "planning/bin/$target"
-            if [ -f "/tmp/rjq-artifacts/$target/rjq" ]; then
-              cp "/tmp/rjq-artifacts/$target/rjq" "planning/bin/$target/rjq"
-            elif [ -f "/tmp/rjq-artifacts/$target/rjq.exe" ]; then
-              cp "/tmp/rjq-artifacts/$target/rjq.exe" "planning/bin/$target/rjq.exe"
-            else
-              echo "::error::missing rjq artifact for $target"
-              exit 1
-            fi
-          done
 
       - name: Build and expose the native rjq test binary
         uses: dtolnay/rust-toolchain@1.97
@@ -150,7 +126,6 @@ jobs:
     # bash-4-only construct.
     name: Test suite passes on macOS system bash 3.2 (portability floor)
     runs-on: macos-latest
-    needs: rjq-binary
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,29 +136,6 @@ jobs:
 
       - name: Put /bin first on PATH so bash resolves to system bash 3.2
         run: echo "/bin" >> "$GITHUB_PATH"
-
-      - name: Download all native rjq test artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: rjq-*
-          path: /tmp/rjq-artifacts
-          merge-multiple: true
-
-      - name: Place the complete rjq artifact set
-        shell: bash
-        run: |
-          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
-              x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
-            mkdir -p "planning/bin/$target"
-            if [ -f "/tmp/rjq-artifacts/$target/rjq" ]; then
-              cp "/tmp/rjq-artifacts/$target/rjq" "planning/bin/$target/rjq"
-            elif [ -f "/tmp/rjq-artifacts/$target/rjq.exe" ]; then
-              cp "/tmp/rjq-artifacts/$target/rjq.exe" "planning/bin/$target/rjq.exe"
-            else
-              echo "::error::missing rjq artifact for $target"
-              exit 1
-            fi
-          done
 
       - name: Build and expose the native rjq test binary
         uses: dtolnay/rust-toolchain@1.97
