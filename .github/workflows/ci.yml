@@ -55,8 +55,8 @@ jobs:
             aarch64-apple-darwin) target=aarch64-apple-darwin; dir=aarch64-apple-darwin ;;
             *) echo "::error::unsupported rjq test host: $host"; exit 1 ;;
           esac
-          rustup target add "$target"
-          cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$dir"
           cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
           echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
@@ -144,8 +144,8 @@ jobs:
         shell: bash
         run: |
           target=x86_64-apple-darwin
-          rustup target add "$target"
-          cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p planning/bin/x86_64-apple-darwin
           cp "src/rjq/target/$target/release/rjq" planning/bin/x86_64-apple-darwin/rjq
           echo "$PWD/planning/bin/x86_64-apple-darwin" >> "$GITHUB_PATH"
@@ -408,13 +408,13 @@ jobs:
       - name: Format, lint and test
         working-directory: src/rjq
         run: |
-          cargo fmt --check
-          cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
-          cargo test --target "${{ matrix.target }}"
+          rustup run 1.97.1 cargo fmt --check
+          rustup run 1.97.1 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
+          rustup run 1.97.1 cargo test --target "${{ matrix.target }}"
 
       - name: Build rjq
         working-directory: src/rjq
-        run: cargo build --release --target "${{ matrix.target }}"
+        run: rustup run 1.97.1 cargo build --release --target "${{ matrix.target }}"
 
       - name: Run the built artifact
         shell: bash
