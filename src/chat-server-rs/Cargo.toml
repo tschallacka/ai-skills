@@ -17,3 +17,9 @@ rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"]
 # store is needed on the server.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pki-types = { version = "1", features = ["std"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

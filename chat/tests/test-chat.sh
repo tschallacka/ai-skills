@@ -20,25 +20,25 @@ fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/chat-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-BIN="$repo/src/target/release"
-SERVER="$BIN/chat-server-rs"
-CLIENT="$BIN/chat-client-rs"
+SERVER="$repo/src/chat-server-rs/target/release/chat-server-rs"
+CLIENT="$repo/src/chat-client-rs/target/release/chat-client-rs"
 
 if ! command -v cargo >/dev/null 2>&1; then
-    if [ -x "$root/bin/chat-server-rs" ] && [ -x "$root/bin/chat-client-rs" ]; then
-        SERVER="$root/bin/chat-server-rs"
-        CLIENT="$root/bin/chat-client-rs"
+    prebuilt_server="$(ls "$root"/bin/*/chat-server-rs 2>/dev/null | head -1 || true)"
+    prebuilt_client="$(ls "$root"/bin/*/chat-client-rs 2>/dev/null | head -1 || true)"
+    if [ -n "$prebuilt_server" ] && [ -n "$prebuilt_client" ]; then
+        SERVER="$prebuilt_server"
+        CLIENT="$prebuilt_client"
     else
         printf 'SKIP chat: no cargo and no prebuilt chat/bin binaries - rust assertions did not run\n' >&2
         t_end
         exit 0
     fi
 else
-    ( cd "$repo/src" && cargo build --release --workspace >/dev/null 2>&1 ) \
-        || { t_fail "cargo build --workspace failed"; }
-    mkdir -p "$root/bin"
-    cp "$SERVER" "$root/bin/chat-server-rs"
-    cp "$CLIENT" "$root/bin/chat-client-rs"
+    ( cd "$repo/src/chat-server-rs" && cargo build --release >/dev/null 2>&1 ) \
+        || { t_fail "cargo build chat-server-rs failed"; }
+    ( cd "$repo/src/chat-client-rs" && cargo build --release >/dev/null 2>&1 ) \
+        || { t_fail "cargo build chat-client-rs failed"; }
 fi
 
 home="$temporary_root/home"

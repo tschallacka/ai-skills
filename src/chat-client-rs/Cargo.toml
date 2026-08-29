@@ -12,3 +12,9 @@ chat-proto = { path = "../chat-proto" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pki-types = { version = "1", features = ["std"] }
 # No webpki-roots: TOFU pins the server cert directly.
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

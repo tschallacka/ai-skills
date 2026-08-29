@@ -116,8 +116,10 @@ case "$mode" in
         # (skill_files resolves the host's platform to one triple dir). If cargo
         # is absent the build fails loudly rather than producing an empty package.
         if command -v cargo >/dev/null 2>&1; then
-            ( cd "$repo_root/src" && cargo build --release --workspace ) \
-                || { printf '%s: cargo build failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root/src/chat-server-rs" && cargo build --release ) \
+                || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root/src/chat-client-rs" && cargo build --release ) \
+                || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
                 Linux:aarch64|Linux:arm64) chat_dir=aarch64-unknown-linux-musl ;;
@@ -127,8 +129,8 @@ case "$mode" in
                 *) printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66 ;;
             esac
             mkdir -p "$repo_root/chat/bin/$chat_dir"
-            cp "$repo_root/src/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
-            cp "$repo_root/src/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
+            cp "$repo_root/src/chat-server-rs/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
+            cp "$repo_root/src/chat-client-rs/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \

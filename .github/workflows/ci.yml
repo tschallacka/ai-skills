@@ -79,22 +79,23 @@ jobs:
 
       - name: Place the compiled chat rung
         run: |
-          # Build the chat workspace natively and place the two binaries under
+          # Build the chat crates natively and place the two binaries under
           # the chat/bin/<triple>/ dir skill_files() resolves for this host, so
           # the manifest and shipped-binaries tests see them. The dedicated
           # chat-binary job builds the cross/static artifacts for release.
-          cargo build --release --workspace --manifest-path src/Cargo.toml
+          cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
+          cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
           case "$(uname -s):$(uname -m)" in
-            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl; src=src/target/release ;;
-            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl; src=src/target/release ;;
-            Darwin:x86_64) dir=x86_64-apple-darwin; src=src/target/release ;;
-            Darwin:arm64) dir=aarch64-apple-darwin; src=src/target/release ;;
-            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc; src=src/target/release ;;
+            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
+            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
+            Darwin:x86_64) dir=x86_64-apple-darwin; src=src/chat-server-rs/target/release ;;
+            Darwin:arm64) dir=aarch64-apple-darwin; src=src/chat-server-rs/target/release ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc; src=src/chat-server-rs/target/release ;;
             *) echo "::error::unsupported host for chat binaries: $(uname -s):$(uname -m)"; exit 1 ;;
           esac
           mkdir -p "chat/bin/$dir"
           cp "$src/chat-server-rs" "chat/bin/$dir/chat-server-rs"
-          cp "$src/chat-client-rs" "chat/bin/$dir/chat-client-rs"
+          cp "src/chat-client-rs/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
 
       - name: Place the compiled plan-crypt rung so its assertions run
         # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
@@ -356,7 +357,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            src/Cargo.toml
             src/chat-proto
             src/chat-server-rs
             src/chat-client-rs
@@ -375,25 +375,29 @@ jobs:
         run: sudo apt-get install -y -qq musl-tools
 
       - name: Format, lint and test
-        working-directory: src
+        working-directory: src/chat-server-rs
         run: |
           cargo fmt --check
-          cargo clippy --workspace --target ${{ matrix.target }} --all-targets -- -D warnings
-          cargo test --workspace --target ${{ matrix.target }}
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
 
-      - name: Build the release artifact
-        working-directory: src
-        run: cargo build --release --workspace --target ${{ matrix.target }}
+      - name: Build the release artifact (server)
+        working-directory: src/chat-server-rs
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build the release artifact (client)
+        working-directory: src/chat-client-rs
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload the release artifact
         uses: actions/upload-artifact@v4
         with:
           name: chat-${{ matrix.target }}
           path: |
-            src/target/${{ matrix.target }}/release/chat-server-rs
-            src/target/${{ matrix.target }}/release/chat-client-rs
-            src/target/${{ matrix.target }}/release/chat-server-rs.exe
-            src/target/${{ matrix.target }}/release/chat-client-rs.exe
+            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs
+            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs.exe
+            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs
+            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs.exe
           if-no-files-found: error
 
   rjq-binary:
