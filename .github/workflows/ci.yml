@@ -400,8 +400,10 @@ jobs:
       - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.97
         with:
-          targets: ${{ matrix.target }}
           components: rustfmt, clippy
+
+      - name: Install the target for the crate toolchain
+        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/rjq
