@@ -1952,6 +1952,29 @@
       "notes": null,
       "created_at": "2026-08-28T17:11:58Z",
       "updated_at": "2026-08-28T17:11:58Z"
+    },
+    {
+      "id": "B90",
+      "title": "test-chat-binary and test-chat-config write presence files into the developer's real XDG_RUNTIME_DIR",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ls /run/user/$(id -u)/chat/*.server | wc -l; bash chat/tests/test-chat-config.sh >/dev/null 2>&1; ls /run/user/$(id -u)/chat/*.server | wc -l",
+      "observed": "41 .server files in /run/user/1000/chat after a session of running the chat suites, and every one of the 41 has a test-shaped home: 'awk -F= /^home=/ ... ' reports 41 under /tmp and none anywhere else. They accumulate rather than being cleaned, and they sit in the same registry the developer's own live bus uses for discovery.",
+      "expected": "A test run leaves the developer's real runtime directory exactly as it found it, the way test-chat-registry.sh already arranges.",
+      "mechanism": "chat/tests/test-chat-registry.sh:80-82 exports XDG_RUNTIME_DIR into its own throwaway root, with a comment at line 22 saying the location is the documented one and therefore has to be isolated. test-chat-binary.sh and test-chat-config.sh never mention XDG_RUNTIME_DIR at all, so every server they start registers into the real one. The isolation was understood and applied in one test and not carried to the two written later.",
+      "surfaces": [
+        "chat/tests/test-chat-binary.sh",
+        "chat/tests/test-chat-config.sh",
+        "chat/tests/test-chat-registry.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, answering which port the chat server runs on and finding 41 stale registry entries while looking",
+      "notes": null,
+      "created_at": "2026-08-29T11:21:21Z",
+      "updated_at": "2026-08-29T11:21:21Z"
     }
   ]
 }
