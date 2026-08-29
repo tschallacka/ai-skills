@@ -52,10 +52,10 @@ USAGE
     exit "$rc"
 }
 
-# jq reads the key out of fix-keys.json; refuse up front rather than half-way
+# rjq reads the key out of fix-keys.json; refuse up front rather than half-way
 # through, after the status has already been flipped.
-command -v jq >/dev/null 2>&1 || {
-    printf '%s: jq is required (it reads fix-keys.json); install jq and re-run\n' "${0##*/}" >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf '%s: rjq is required (it reads fix-keys.json); install rjq and re-run\n' "${0##*/}" >&2
     exit 69
 }
 
@@ -128,7 +128,7 @@ printf '%s: status %s -> %s (gated on %s)\n' "$finding" "$before" "$new_status" 
 # removed first: leaving it is what made verify-fix-keys report ignored rather
 # than verified, so the file stopped saying which unit resolved the finding.
 [ -f "$keys_file" ] || { printf '%s: no fix-keys.json yet; mint keys before claiming\n' "${0##*/}" >&2; exit 0; }
-key="$(jq -r --arg f "$finding" --arg w "$work_unit" '.keys[$f][$w] // empty' "$keys_file" 2>/dev/null || true)"
+key="$(rjq -r --arg f "$finding" --arg w "$work_unit" '.keys[$f][$w] // empty' "$keys_file" 2>/dev/null || true)"
 [ -n "$key" ] || { printf '%s: no key for %s/%s; re-mint after adding the row\n' "${0##*/}" "$finding" "$work_unit" >&2; exit 0; }
 
 fixes="$plan_dir/fixes.md"

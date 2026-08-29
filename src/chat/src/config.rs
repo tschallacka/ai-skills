@@ -214,8 +214,8 @@ pub fn load(home: &Path) -> Result<Option<Transport>, String> {
 /// `key=value`, one per line, `#` comments, blank lines ignored.
 ///
 /// Not JSON, deliberately: `chat-send.sh` and friends have to read this too, and
-/// jq is the repository's ceiling for a runtime dependency — a config the shell
-/// clients cannot read without jq defeats the point of having one. Unknown keys
+/// rjq is the repository's ceiling for a runtime dependency — a config the shell
+/// clients cannot read without rjq defeats the point of having one. Unknown keys
 /// are ignored so a newer writer's extra key does not break an older reader.
 pub fn parse(text: &str, home: &Path) -> Result<Transport, String> {
     let mut transport = None;
@@ -283,7 +283,7 @@ pub fn save(home: &Path, transport: &Transport) -> Result<(), String> {
          # for.\n\
          #\n\
          # Read by the `chat` binary and by the bash helpers, so it is\n\
-         # key=value and not JSON: the helpers must not need jq for it.\n\
+         # key=value and not JSON: the helpers must not need rjq for it.\n\
          #\n\
          # Delete this file to be asked again. Edit it by hand if you prefer;\n\
          # transport is socket or tcp, and tcp with no port= means {DEFAULT_PORT}.\n\
@@ -486,7 +486,7 @@ mod tests {
         let h = home("format");
         save(&h, &Transport::any_interface()).unwrap();
         let text = fs::read_to_string(config_path(&h)).unwrap();
-        assert!(!text.contains('{'), "must be readable without jq:\n{text}");
+        assert!(!text.contains('{'), "must be readable without rjq:\n{text}");
         let mut seen = Vec::new();
         for line in text.lines() {
             if line.trim().is_empty() || line.starts_with('#') {

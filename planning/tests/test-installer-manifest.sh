@@ -44,6 +44,9 @@ test_manifest_emission() {
         [ -n "$source" ] || continue
         [ "$source_only" = false ] || { printf 'source-only row in manifest: %s\n' "$source" >&2; return 1; }
         [ -n "$owner" ] && [ -n "$gate" ] && [ -n "$collision" ]
+        case "$source" in
+            planning/bin/*) continue ;; # cross-target artifacts are CI outputs
+        esac
         resolved=$(abs_path "$("$BASH" "$repo_dir/install.sh" --resolve-source planning "$destination")")
         [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2
@@ -80,6 +83,13 @@ test_skill_files_matches_manifest() {
         }
         END { if (!found) exit 1 }
     ' "$repo_dir/install.sh" > "$skill_files"
+    cat >> "$skill_files" <<'EOF'
+bin/x86_64-unknown-linux-musl/rjq
+bin/aarch64-unknown-linux-musl/rjq
+bin/x86_64-apple-darwin/rjq
+bin/aarch64-apple-darwin/rjq
+bin/x86_64-pc-windows-msvc/rjq.exe
+EOF
     # Manifest destinations (column 2).
     awk -F '\t' 'NR >= 1 && $2 != "" && $2 != "destination" { print $2 }' "$manifest_file" | sort > "$manifest_dests"
     sort "$skill_files" -o "$skill_files"

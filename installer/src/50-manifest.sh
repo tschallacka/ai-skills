@@ -8,7 +8,7 @@
 # this heredoc by regex. Do not restructure skill_files() or that heredoc, and do
 # not derive it from the manifest — the duplication IS the cross-check.
 # package_version is the released version from package.json, read with sed rather
-# than jq: jq is a declared runtime dependency of some skills but the installer
+# than rjq: rjq is a declared runtime dependency of some skills but the installer
 # must run before any of them is installed. A register written by a skill records
 # this value, so a reader can compare it against the installed skill and see that
 # an upgrade happened.
@@ -152,6 +152,21 @@ scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
 EOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+                *)
+                    printf 'skill_files: no rjq artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             [ "$package" = dev ] || return 0
             cat <<'EOF'
 .gitignore

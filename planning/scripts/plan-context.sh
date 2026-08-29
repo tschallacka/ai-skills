@@ -195,7 +195,7 @@ context_trim_partial_utf8() {
 }
 
 # JSON forbids every character in U+0000-U+001F inside a string, so a tab or a
-# CR in a document made the whole payload unparseable -- `jq` reports "control
+# CR in a document made the whole payload unparseable -- `rjq` reports "control
 # characters ... must be escaped" and reads nothing. Reachable through the
 # sanctioned writer: update-plan-content.sh -dp keeps a tab in the paragraph
 # text verbatim. Documents with no control characters take the fast path and are

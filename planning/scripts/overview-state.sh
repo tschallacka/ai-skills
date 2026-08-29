@@ -19,10 +19,10 @@ eval "set -- $(plan_hoist_plan_dir 1 "$@")"
 
 export LC_ALL=C
 
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-emitting when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it assembles the JSON state); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -53,8 +53,8 @@ plan_require_directory "$plan_dir"
 
 # jstr TEXT: emit TEXT as one JSON string (safe inside any JSON position).
 # Reads from a heredoc, NOT stdin — inside a while-read loop over the
-# inventory file, an unredirected jq would eat the remaining lines.
-jstr() { jq -Rs 'rtrimstr("\n")' <<< "$1"; }
+# inventory file, an unredirected rjq would eat the remaining lines.
+jstr() { rjq -Rs 'rtrimstr("\n")' <<< "$1"; }
 
 # sec FILE HEADING: print the paragraphs under "## HEADING" until the next "##".
 sec() {

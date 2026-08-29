@@ -14,6 +14,11 @@ var port = process.argv[3] ? parseInt(process.argv[3], 10) : 0;
 var scriptDir = __dirname;
 var stateScript = scriptDir + "/../overview-state.sh";
 var renderScript = scriptDir + "/../render-plan-overview.sh";
+var bundle = process.platform === "linux" && process.arch === "x64" ? "x86_64-unknown-linux-musl" :
+    process.platform === "linux" && process.arch === "arm64" ? "aarch64-unknown-linux-musl" :
+    process.platform === "darwin" && process.arch === "x64" ? "x86_64-apple-darwin" :
+    process.platform === "darwin" && process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-pc-windows-msvc";
+process.env.PATH = path.join(scriptDir, "..", "..", "bin", bundle) + path.delimiter + process.env.PATH;
 
 function bash(script, args, cb) {
     child.execFile("bash", [script].concat(args), { maxBuffer: 32 * 1024 * 1024 },

@@ -1,0 +1,24 @@
+[package]
+name = "rjq"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rjq"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rjq"
+path = "src/main.rs"
+
+[dependencies]
+jaq-core = "3.1.1"
+jaq-json = "2.0.3"
+jaq-std = "3.0.3"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.dist]
+inherits = "release"

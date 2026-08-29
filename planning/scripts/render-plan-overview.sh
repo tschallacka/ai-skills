@@ -68,10 +68,10 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$plan_dir" ] || usage
 
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-rendering when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it assembles the JSON state); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it assembles the JSON state); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -423,7 +423,7 @@ plan_name="$(sed -n 's/^# Plan: //p' "$plan_dir/plan-description.md" 2>/dev/null
 footer="$(esc "$(basename "$plan_dir") · generated $generated · single-file html, no external assets")"
 
 # The substitution map: one JSON object carrying every panel's HTML.
-# jq encodes multi-line values as native JSON strings, so nothing is lost
+# rjq encodes multi-line values as native JSON strings, so nothing is lost
 # across lines (the TSV+awk system dropped content after the first line).
 subs_file="$(mktemp "${TMPDIR:-/tmp}/overview-subs.XXXXXX")"
 out_tmp="$(mktemp "${TMPDIR:-/tmp}/overview-out.XXXXXX")"
@@ -433,7 +433,7 @@ trap 'rm -f "$subs_file" "$out_tmp"' EXIT
 effective_refresh="$refresh"
 if [ "$serve" = true ]; then effective_refresh=0; fi
 
-jq -n \
+rjq -n \
     --arg plan_name "$(esc "$plan_name")" \
     --arg state "$state" \
     --arg phase_line "$(esc "$phase_line")" \
@@ -500,10 +500,10 @@ JS
         TICKER: $ticker, FOOTER: $footer
     }' > "$subs_file"
 
-# Single jq call substitutes all tokens. Multi-line values are native JSON
+# Single rjq call substitutes all tokens. Multi-line values are native JSON
 # strings and survive intact — the old TSV+awk system dropped content after
 # the first line of any multi-line value.
-jq -rn --rawfile template "$template" --slurpfile s "$subs_file" '
+rjq -rn --rawfile template "$template" --slurpfile s "$subs_file" '
     $template |
     reduce ($s[0] | to_entries[]) as $e (.; gsub("@_" + $e.key + "_@"; $e.value))
 ' > "$out_tmp"

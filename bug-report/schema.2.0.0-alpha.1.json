@@ -38,7 +38,7 @@
     "1.4.2": {
       "describes": "A bug register written by skill version 1.4.2.",
       "loses": "nothing",
-      "steps": ["jq '.skill_version = \"2.0.0-alpha.1\"' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json"]
+      "steps": ["rjq '.skill_version = \"2.0.0-alpha.1\"' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json"]
     }
   },
   "if_no_schema_for_a_version": "Rewrite the file from the current schema rather than guessing the difference. Carry every reproduction across verbatim: it is the one field that cannot be reconstructed later."

@@ -207,7 +207,7 @@
       "detect": "python3",
       "breaks": "the dependency budget, not a platform",
       "symptom": "a machine without python3 loses a documented feature",
-      "replacement": "awk for text, jq for JSON — jq stays the ceiling for a required runtime. Declaring an OPTIONAL runtime is fine: requires.tsv soft any-of groups feed the verify and hint tables, naming is not requiring, and strength decides what a missing one costs. Probe sites, the generated installer tables, and dev-only trees carry allowlist rows."
+      "replacement": "awk for text, rjq for JSON — rjq stays the ceiling for a required runtime. Declaring an OPTIONAL runtime is fine: requires.tsv soft any-of groups feed the verify and hint tables, naming is not requiring, and strength decides what a missing one costs. Probe sites, the generated installer tables, and dev-only trees carry allowlist rows."
     },
     {
       "id": "read-timeout-floor",

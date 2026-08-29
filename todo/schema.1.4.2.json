@@ -40,7 +40,7 @@
       "loses": "nothing; every field maps",
       "steps": [
         "now=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
-        "jq --arg now \"$now\" --arg v 1.4.2 '{skill: \"todo\", skill_version: $v, comment: (.comment // \"Migrated from an unversioned TODO.json.\"), tasks: [(.items // .tasks)[] | {id, title, status: (if .status == \"not-a-defect\" then \"dropped\" else .status end), priority: (.priority // \"normal\"), parent: (.parent // null), detail: (.detail // null), note: (.note // .evidence // null), blocked_on: (.blocked_on // null), refs: (.refs // []), created_at: (.created_at // $now), updated_at: $now}]}' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json",
+        "rjq --arg now \"$now\" --arg v 1.4.2 '{skill: \"todo\", skill_version: $v, comment: (.comment // \"Migrated from an unversioned TODO.json.\"), tasks: [(.items // .tasks)[] | {id, title, status: (if .status == \"not-a-defect\" then \"dropped\" else .status end), priority: (.priority // \"normal\"), parent: (.parent // null), detail: (.detail // null), note: (.note // .evidence // null), blocked_on: (.blocked_on // null), refs: (.refs // []), created_at: (.created_at // $now), updated_at: $now}]}' TODO.json > TODO.json.tmp && mv TODO.json.tmp TODO.json",
         "Then assign real priorities: the migration defaults everything to normal, which is a queue with no order."
       ]
     }

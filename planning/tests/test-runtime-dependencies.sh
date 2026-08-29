@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-runtime-dependencies — a shipped script that needs jq must refuse without
+# test-runtime-dependencies — a shipped script that needs rjq must refuse without
 # it, not quietly do less.
 #
 # Usage: test-runtime-dependencies.sh
 #
-# jq is a declared requirement of the planning skill (install.sh
+# rjq is a declared requirement of the planning skill (install.sh
 # runtime_requirements), and the installer refuses to install without it. But a
-# hand-copied skill directory never went through the installer, and every jq
+# hand-copied skill directory never went through the installer, and every rjq
 # call in the validate-plan pass libraries is `2>/dev/null`. Measured on a real
-# plan before the guard existed: 14 findings with jq, 2 without, exit 127 with
+# plan before the guard existed: 14 findings with rjq, 2 without, exit 127 with
 # no explanation. A gate that quietly stops enforcing is worse than one that
 # refuses to run, so the entry points check up front and exit 69.
 set -euo pipefail
@@ -26,7 +26,7 @@ trap 'rm -rf "$temporary_root"' EXIT
 
 note_fail() { printf 'runtime-deps: %s\n' "$1" >&2; t_record "$1"; }
 
-# A PATH that is complete except for jq. Mirroring the whole PATH would be slow,
+# A PATH that is complete except for rjq. Mirroring the whole PATH would be slow,
 # so mirror the tools the scripts actually reach before and around the guard.
 # Anything genuinely absent on this host is skipped rather than failing the test.
 jqless_bin="$temporary_root/bin"
@@ -39,8 +39,8 @@ for tool in bash sh dirname basename cat cp mv rm mkdir rmdir mktemp ln \
     [ -n "$path" ] || continue
     ln -sf "$path" "$jqless_bin/$tool"
 done
-if [ -e "$jqless_bin/jq" ]; then
-    note_fail 'the jq-less PATH unexpectedly contains jq'
+if [ -e "$jqless_bin/rjq" ]; then
+    note_fail 'the rjq-less PATH unexpectedly contains rjq'
 fi
 
 run_without_jq() {
@@ -52,20 +52,20 @@ run_without_jq() {
 plan_dir="$temporary_root/plan"
 PLANS_ROOT="$temporary_root" "$scripts/create-plan.sh" "$plan_dir" 'Dependency guard' >/dev/null
 
-# validate-plan.sh: refuses with 69 and names jq.
+# validate-plan.sh: refuses with 69 and names rjq.
 set +e
 output="$(run_without_jq "$scripts/validate-plan.sh" "$plan_dir")"
 rc=$?
 set -e
-[ "$rc" -eq 69 ] || note_fail "validate-plan.sh without jq exited $rc, expected 69"
+[ "$rc" -eq 69 ] || note_fail "validate-plan.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *jq*) ;;
-    *) note_fail "validate-plan.sh without jq did not mention jq: $output" ;;
+    *rjq*) ;;
+    *) note_fail "validate-plan.sh without rjq did not mention rjq: $output" ;;
 esac
 # It must refuse rather than report findings, or a caller cannot tell a broken
 # install from a bad plan.
 case "$output" in
-    *FAIL:*) note_fail 'validate-plan.sh without jq reported findings instead of refusing' ;;
+    *FAIL:*) note_fail 'validate-plan.sh without rjq reported findings instead of refusing' ;;
 esac
 
 # register-command.sh: same contract.
@@ -73,34 +73,34 @@ set +e
 output="$(run_without_jq "$scripts/register-command.sh" "$plan_dir" build 'make all' 'when building')"
 rc=$?
 set -e
-[ "$rc" -eq 69 ] || note_fail "register-command.sh without jq exited $rc, expected 69"
+[ "$rc" -eq 69 ] || note_fail "register-command.sh without rjq exited $rc, expected 69"
 case "$output" in
-    *jq*) ;;
-    *) note_fail "register-command.sh without jq did not mention jq: $output" ;;
+    *rjq*) ;;
+    *) note_fail "register-command.sh without rjq did not mention rjq: $output" ;;
 esac
 
-# With jq present the same commands must work, so the guard cannot be a
+# With rjq present the same commands must work, so the guard cannot be a
 # permanent refusal caused by a broken probe.
-if command -v jq >/dev/null 2>&1; then
+if command -v rjq >/dev/null 2>&1; then
     set +e
     "$scripts/validate-plan.sh" "$plan_dir" >/dev/null 2>&1
     rc=$?
     set -e
     # A fresh plan legitimately fails validation (1); it must not be 69.
-    [ "$rc" -ne 69 ] || note_fail 'validate-plan.sh reported a missing jq while jq is installed'
+    [ "$rc" -ne 69 ] || note_fail 'validate-plan.sh reported a missing rjq while rjq is installed'
 else
-    printf 'runtime-deps: jq is not installed here; skipped the positive case\n' >&2
+    printf 'runtime-deps: rjq is not installed here; skipped the positive case\n' >&2
 fi
 
-# Every shipped script that calls jq must either guard it itself or be reachable
+# Every shipped script that calls rjq must either guard it itself or be reachable
 # only through an entry point that does. The pass libraries are sourced by
-# validate-plan.sh, which guards; a NEW jq caller outside that set needs its own.
+# validate-plan.sh, which guards; a NEW rjq caller outside that set needs its own.
 guarded_by_entry_point='validate-plan-commands-lib.sh validate-plan-comparisons-lib.sh validate-plan-goals-lib.sh validate-plan-placeholders-lib.sh validate-plan-serve-lib.sh'
 while IFS= read -r script; do
     [ -n "$script" ] || continue
     name="$(basename "$script")"
     case " $guarded_by_entry_point " in *" $name "*) continue ;; esac
-    grep -q 'command -v jq' "$script" && continue
+    grep -q 'command -v rjq' "$script" && continue
     # Delegating to a shared guard is better than copying the probe, and the
     # contract above already allows it -- "or be reachable only through an entry
     # point that does". Accept a named guard helper, but verify the helper
@@ -110,14 +110,14 @@ while IFS= read -r script; do
     guard='reg_require_jq'
     if grep -q "$guard" "$script"; then
         guard_src="$(grep -rl "^$guard()" "$scripts" 2>/dev/null | head -1)"
-        if [ -n "$guard_src" ] && awk -v fn="$guard" '$0 ~ "^"fn"\\(\\)" {inside=1} inside && /command -v jq/ {found=1} inside && /^}/ {inside=0} END {exit !found}' \
+        if [ -n "$guard_src" ] && awk -v fn="$guard" '$0 ~ "^"fn"\\(\\)" {inside=1} inside && /command -v rjq/ {found=1} inside && /^}/ {inside=0} END {exit !found}' \
             "$guard_src"; then
             delegated=yes
         fi
     fi
     [ -n "$delegated" ] \
-        || note_fail "$name calls jq but neither guards it nor is covered by a guarded entry point"
-done < <(grep -lE '(^|[^A-Za-z0-9_])jq ' "$scripts"/*.sh 2>/dev/null || true)
+        || note_fail "$name calls rjq but neither guards it nor is covered by a guarded entry point"
+done < <(grep -lE '(^|[^A-Za-z0-9_])rjq ' "$scripts"/*.sh 2>/dev/null || true)
 
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-runtime-dependencies: PASS'

@@ -38,30 +38,30 @@ t_assert_eq 'and asking for it reports the input missing' "$rc" '66'
 
 # ── first use creates it, and the result is readable JSON ───────────────────
 # Asserted by reading the entry back, not by the exit code: an earlier version
-# wrote a zero-byte file and reported success, because jq handed /dev/null as
+# wrote a zero-byte file and reported success, because rjq handed /dev/null as
 # input never runs its filter.
 add "$plan" --id PB-01 --title 'The importer drops the last row' \
     --reproduce "printf 'a,b' | bin/import" --observed '1 row, 2 expected' \
     --expected 'both rows' --found-by 'step 02' >/dev/null
 t_assert_eq 'the register is created' "$([ -s "$register" ] && printf yes || printf no)" 'yes'
 t_assert_eq 'and the entry is in it' \
-    "$(jq -r '.bugs[0].id' "$register")" 'PB-01'
+    "$(rjq -r '.bugs[0].id' "$register")" 'PB-01'
 t_assert_eq 'with the schema its readers expect' \
-    "$(jq -r '.skill' "$register")" 'bug-report'
+    "$(rjq -r '.skill' "$register")" 'bug-report'
 t_assert_eq 'the defaults are recorded rather than left null' \
-    "$(jq -r '.bugs[0] | "\(.status)/\(.severity)/\(.priority)"' "$register")" 'reported/major/normal'
+    "$(rjq -r '.bugs[0] | "\(.status)/\(.severity)/\(.priority)"' "$register")" 'reported/major/normal'
 t_assert_eq 'and the timestamps are set' \
-    "$(jq -r '.bugs[0] | select(.created_at != null and .updated_at != null) | "set"' "$register")" 'set'
+    "$(rjq -r '.bugs[0] | select(.created_at != null and .updated_at != null) | "set"' "$register")" 'set'
 
 # ── text that would break a hand-rolled writer survives ────────────────────
 add "$plan" --id PB-02 --title 'The regex \d fails and it says "no input"' \
     --reproduce 'grep -E "\d" f' --observed 'exit 1' --expected 'a match' \
     --severity minor --priority low --status confirmed >/dev/null
 t_assert_eq 'a backslash and quotes survive the round trip' \
-    "$(jq -r '.bugs[] | select(.id == "PB-02") | .title' "$register")" \
+    "$(rjq -r '.bugs[] | select(.id == "PB-02") | .title' "$register")" \
     'The regex \d fails and it says "no input"'
 t_assert_eq 'the second entry is appended, not replacing the first' \
-    "$(jq -r '.bugs | length' "$register")" '2'
+    "$(rjq -r '.bugs | length' "$register")" '2'
 
 # ── the refusals, each with its own exit code ──────────────────────────────
 t_assert_eq 'a duplicate id is refused' \
@@ -91,7 +91,7 @@ t_assert_eq 'and the damaged file is left as it was' "$(cat "$register")" 'not j
 cp "$work/keep.json" "$register"
 
 # ── the bug-report skill's own render reads a plan register unchanged ───────
-rendered="$(jq -r '
+rendered="$(rjq -r '
   def glyph: {reported:"💤", confirmed:"⛔", fixed:"✅"}[.status] // "❔";
   def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
@@ -104,14 +104,14 @@ t_assert_contains 'and the second' 'PB-02' "$rendered"
 # ── the read-back refuses a write that produced nothing ────────────────────
 # The actionable-error path (MAINTAINER.md section 4 step 3). It needs a write
 # that succeeds and yet leaves the entry out, which is what happened for real:
-# jq handed an empty input never runs its filter, so the register came out
-# zero-length and the script still reported success. The seam is a jq on PATH
+# rjq handed an empty input never runs its filter, so the register came out
+# zero-length and the script still reported success. The seam is a rjq on PATH
 # that passes everything through except the append -- the one call carrying
 # --arg now -- which it answers with nothing.
 stub_dir="$work/stub-bin"
 mkdir -p "$stub_dir"
-real_jq="$(command -v jq)"
-cat > "$stub_dir/jq" <<STUB
+real_jq="$(command -v rjq)"
+cat > "$stub_dir/rjq" <<STUB
 #!/usr/bin/env bash
 for arg in "\$@"; do
     if [ "\$arg" = now ]; then
@@ -120,7 +120,7 @@ for arg in "\$@"; do
 done
 exec "$real_jq" "\$@"
 STUB
-chmod +x "$stub_dir/jq"
+chmod +x "$stub_dir/rjq"
 
 empty_plan="$work/root/empty-write"
 "$scripts/create-plan.sh" "$empty_plan" 'Demo' >/dev/null 2>&1

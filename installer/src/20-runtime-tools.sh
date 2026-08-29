@@ -26,6 +26,24 @@
 # BEGIN GENERATED DEPENDENCY BLOCK
 # END GENERATED DEPENDENCY BLOCK
 
+# Make the source bundle available before dependency checks. This keeps installs
+# independent of a system jq/rjq package while preserving PATH lookup semantics.
+prepend_bundled_rjq() {
+    local artifact=''
+    case "$(uname -s):$(uname -m)" in
+        Linux:x86_64|Linux:amd64) artifact='bin/x86_64-unknown-linux-musl/rjq' ;;
+        Linux:aarch64|Linux:arm64) artifact='bin/aarch64-unknown-linux-musl/rjq' ;;
+        Darwin:x86_64) artifact='bin/x86_64-apple-darwin/rjq' ;;
+        Darwin:arm64) artifact='bin/aarch64-apple-darwin/rjq' ;;
+        MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+            artifact='bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+    esac
+    if [ -n "$artifact" ] && [ -x "$SOURCE_ROOT/planning/$artifact" ]; then
+        PATH="$SOURCE_ROOT/planning/$(dirname "$artifact"):$PATH"
+        export PATH
+    fi
+}
+
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
 skill_runtime_tools_present() {
@@ -155,4 +173,3 @@ verify_runtime_tools() {
     [ -n "$RUNTIME_BLOCKED_SKILLS" ] || return 0
     runtime_report_way_forward "$@"
 }
-

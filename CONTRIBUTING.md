@@ -17,15 +17,15 @@ Everything you need is in the flake, including the one tool you cannot get from
 a package manager: **bash 3.2**.
 
 ```bash
-nix develop           # bash32, bash32-run-tests, shellcheck, jq, git
+nix develop           # bash32, bash32-run-tests, shellcheck, rjq, git
 ```
 
-Without nix, install `shellcheck` and `jq` yourself and see
+Without nix, install `shellcheck` and `rjq` yourself and see
 [Testing on bash 3.2 without nix](#testing-on-bash-32-without-nix).
 
 The flake is a **development** dependency only. Nothing it provides is required
 to *use* the skills — those need `bash`, POSIX coreutils, `awk`, `sed`, `grep`,
-`git`, plus `jq` for the `planning` skill and `memlimit` for
+`git`, plus `rjq` for the `planning` skill and `memlimit` for
 `resource-limited-testing` on Apple Silicon macOS (that one is the only memory
 mechanism macOS has; Intel Macs degrade instead, since memlimit is arm64-only). See `CODE-STYLE.md` §1 for the
 dependency budget, which is deliberately tight because these scripts get
@@ -173,8 +173,8 @@ Then, specific to this repo:
   it. `hard` means the installer refuses to install *that skill* and exits
   non-zero; `soft` means it installs and warns. How to verify and how to install
   a tool belongs in the shared `installer/tools.tsv`, once per tool. Both are
-  line-oriented TSV rather than JSON, deliberately: `jq` is itself declared
-  there, so a format needing `jq` to read it could not be read on the machine
+  line-oriented TSV rather than JSON, deliberately: `rjq` is itself declared
+  there, so a format needing `rjq` to read it could not be read on the machine
   that is missing it.
 - **A new or renamed file under a skill directory moves in four places** or
   `planning/tests/test-installer-manifest.sh` fails:

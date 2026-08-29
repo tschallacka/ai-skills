@@ -12,7 +12,7 @@
 # it ignored rather than verified; and a session claiming keys it had minted.
 #
 # This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, jq only. No python3.
+# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
@@ -73,7 +73,7 @@ assert_rc 65 "$scripts/resolve-finding.sh" "$plan" AR-03
 
 # 5. The session that minted the keys cannot claim them. The gate refuses this
 #    too, but refusing at the claim puts the error where the mistake is made.
-minter="$(jq -r '.minted_by' "$plan/fix-keys.json")"
+minter="$(rjq -r '.minted_by' "$plan/fix-keys.json")"
 assert_rc 70 "$scripts/resolve-finding.sh" "$plan" AR-02 --claimed-by "$minter"
 assert_eq "resolved" "$(status_of AR-02)" "a refused claim leaves the status alone"
 

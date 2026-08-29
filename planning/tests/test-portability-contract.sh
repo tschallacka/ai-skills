@@ -27,8 +27,8 @@ generator="$repo_root/generate-portability.sh"
 
 note_fail() { printf 'portability: %s\n' "$1" >&2; t_record "$1"; }
 
-command -v jq >/dev/null 2>&1 || {
-    printf 'portability: UNCONFIGURED (jq)\n' >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf 'portability: UNCONFIGURED (rjq)\n' >&2
     exit 64
 }
 [ -f "$rules" ] || { note_fail "missing $rules"; exit 1; }
@@ -134,7 +134,7 @@ while IFS= read -r file; do
         [ -n "$hit" ] || continue
         line="${hit%%:*}"
         id="${hit#*:}"
-        if ! jq -e --arg i "$id" '.rules[]|select(.id==$i)' "$rules" >/dev/null 2>&1; then
+        if ! rjq -e --arg i "$id" '.rules[]|select(.id==$i)' "$rules" >/dev/null 2>&1; then
             note_fail "$file:$line names unknown rule id '$id' (add it to portability-rules.json)"
         fi
     done < <(awk '/# PORTABILITY\(/ {
@@ -192,7 +192,7 @@ while IFS="$(printf '\t')" read -r rule_id detect; do
         reported="$reported $file"
         note_fail "$file uses banned construct '$rule_id' at line $line — see PORTABILITY.md"
     done < <(cd "$stripped_root" && grep -rnE -- "$detect" . 2>/dev/null || true)
-done < <(jq -r '.rules[] | select(.detect != null) | "\(.id)\t\(.detect)"' "$rules")
+done < <(rjq -r '.rules[] | select(.detect != null) | "\(.id)\t\(.detect)"' "$rules")
 rm -rf "$stripped_root" "$scan_files"
 
 # 5. A foreign checkout under the repo does not reach the catalogue. An agent

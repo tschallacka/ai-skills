@@ -10,7 +10,7 @@
 # is worse than none, because the response to it is to reinstall.
 plan_warn_skill_drift() {
     local dir="$1" repo="${AI_SKILLS_REPO:-}" commit
-    [ -n "$repo" ] && [ -d "$repo/.git" ] || return 0
+    [ -n "$repo" ] && [ -e "$repo/.git" ] || return 0
     git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && return 0
     commit="$(sed -n 's/.*commit:\([0-9a-f]*\).*/\1/p' "$dir/.version" 2>/dev/null | head -1)"
     [ -n "$commit" ] || return 0

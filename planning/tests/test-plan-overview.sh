@@ -123,7 +123,7 @@ cmp -s "$temporary_root/first.html" "$out" || fail "output is not deterministic 
 # --- implementation: approved review plus partial steps ----------------------
 must 'add finding AR-05' "$script_dir/add-adversarial-finding.sh" "$plan" AR-05 'Thin scope' 'Narrow it' resolved --work-unit W01
 MINTED_BY=test-reviewer must 'mint fix keys' "$script_dir/mint-fix-keys.sh" "$plan"
-k="$(jq -r '.keys["AR-05"]["W01"]' "$plan/fix-keys.json")"
+k="$(rjq -r '.keys["AR-05"]["W01"]' "$plan/fix-keys.json")"
 must 'add fix claim' "$script_dir/add-fix-claim.sh" "$plan" --finding AR-05 --work-unit W01 --key "$k"
 must 'review approved' "$script_dir/update-plan-content.sh" --review-status "$plan" approved
 must 'step 01-step-a completed' "$script_dir/update-step.sh" "$plan/01-build" 01-step-a completed

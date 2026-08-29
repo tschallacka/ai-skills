@@ -1,12 +1,12 @@
 ---
 name: bug-report
-description: Use when a defect is found that will not be fixed in the same breath, so it is recorded with its reproduction, the measurement that proves it real, its mechanism, and later its fix and verification, in one JSON file read with jq. Do not use for work that is merely queued (use the todo skill), for a design preference, or for a defect being fixed immediately in the current change.
+description: Use when a defect is found that will not be fixed in the same breath, so it is recorded with its reproduction, the measurement that proves it real, its mechanism, and later its fix and verification, in one JSON file read with rjq. Do not use for work that is merely queued (use the todo skill), for a design preference, or for a defect being fixed immediately in the current change.
 ---
 <!-- MODE: PROD -->
 
 # Bug report
 
-A register of defects, held in `BUGS.json` and read with `jq`. One entry per
+A register of defects, held in `BUGS.json` and read with `rjq`. One entry per
 defect, carrying the four things that decide whether it can be acted on: how to
 reproduce it, the measurement proving it real, the mechanism, and what closed it.
 
@@ -83,7 +83,7 @@ written by an older skill can be recognised before its schema is assumed:
 ```sh
 skill_dir="$(dirname "$(command -v true)")"   # replace with the installed skill's directory
 installed="$(sed -n 's/^package_version=//p' "$skill_dir/.version" 2>/dev/null)"
-recorded="$(jq -r '.skill_version // "unrecorded"' BUGS.json)"
+recorded="$(rjq -r '.skill_version // "unrecorded"' BUGS.json)"
 if [ -z "$installed" ]; then
     printf 'cannot read the installed version; leaving %s alone\n' BUGS.json
 elif [ "$installed" = "$recorded" ]; then
@@ -97,7 +97,7 @@ fi
 Stamp it on every write, next to `updated_at`:
 
 ```sh
-jq --arg v "$installed" '.skill_version = $v' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
+rjq --arg v "$installed" '.skill_version = $v' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
 ```
 
 ### Upgrading a file an older skill wrote
@@ -111,11 +111,11 @@ the required and optional fields, the enums, the invariants, and — under
 recorded version differs from the installed one:
 
 ```sh
-jq -r '"required: \(.item.required | join(", "))",
+rjq -r '"required: \(.item.required | join(", "))",
        "enums:    \(.item.fields.status.enum | join("/"))",
        "upgrades from: \(.upgrade_from | keys | join(", ") | if . == "" then "nothing" else . end)"' \
    "$skill_dir/schema.$installed.json"
-jq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
+rjq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
    "$skill_dir/schema.$installed.json"
 ```
 
@@ -133,7 +133,7 @@ the moment an entry exists. `mechanism`, `fix` and `verification` fill in as it 
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg now "$now" '.bugs += [{
+rjq --arg now "$now" '.bugs += [{
       "id": "B12", "title": "A colonless heading silently ignores a rename",
       "status": "confirmed", "severity": "minor", "priority": "normal", "parent": null,
       "reproduce": "printf \\"# NoColon\\\\n\\" > d.md; plan_replace_title d.md New; head -1 d.md",
@@ -148,8 +148,8 @@ jq --arg now "$now" '.bugs += [{
     }]' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
 ```
 
-Write to a temp file and rename. `jq ... BUGS.json > BUGS.json` truncates the
-file before `jq` reads it. `date -u +%Y-%m-%dT%H:%M:%SZ` is the one spelling that
+Write to a temp file and rename. `rjq ... BUGS.json > BUGS.json` truncates the
+file before `rjq` reads it. `date -u +%Y-%m-%dT%H:%M:%SZ` is the one spelling that
 works on both GNU and BSD date.
 
 ## Closing one
@@ -159,7 +159,7 @@ is a claim that the defect is gone.
 
 ```sh
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-jq --arg id B12 --arg now "$now" '
+rjq --arg id B12 --arg now "$now" '
     (.bugs[] | select(.id == $id) | .status) = "fixed"
   | (.bugs[] | select(.id == $id) | .fix) = "a1b2c3d — refuses a heading it cannot rewrite"
   | (.bugs[] | select(.id == $id) | .verification) = "Reproduction now exits 65; mutation removing the guard fails the test"
@@ -182,7 +182,7 @@ These commands print what the user reads. Pass the output through unchanged.
 The register, worst first, grouped by status:
 
 ```sh
-jq -r '
+rjq -r '
   def glyph: {reported:"💤", confirmed:"⛔", fixed:"✅",
               "not-a-defect":"✔️", "wont-fix":"🚫", obsolete:"🚫"}[.status] // "❔";
   def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
@@ -210,7 +210,7 @@ nobody can reach outranking a cosmetic one on every screen.
 What is open and confirmed, which is the work queue:
 
 ```sh
-jq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+rjq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
   def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
   def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
   [.bugs[] | select(.status == "reported" or .status == "confirmed")]
@@ -222,7 +222,7 @@ jq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""
 One entry as a report a person can act on:
 
 ```sh
-jq -r --arg id B7 '.bugs[] | select(.id == $id) | "
+rjq -r --arg id B7 '.bugs[] | select(.id == $id) | "
 \(.id)  \(.title)
 Status:   \(.status)   Severity: \(.severity)   Found by: \(.found_by // "unrecorded")
 
@@ -242,14 +242,14 @@ Verification: \(.verification // "none yet")
 Entries nobody can act on, which is the register's own health check:
 
 ```sh
-jq -r '.bugs[] | select(.reproduce == null or .reproduce == "")
+rjq -r '.bugs[] | select(.reproduce == null or .reproduce == "")
        | "\(.id) has no reproduction"' BUGS.json
 ```
 
 Fixed without verification, and confirmed without a mechanism:
 
 ```sh
-jq -r '.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
+rjq -r '.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
                  | "\(.id) is fixed with nothing proving it",
        .bugs[] | select(.status == "confirmed" and (.mechanism == null or .mechanism == ""))
                  | "\(.id) is confirmed with no mechanism"' BUGS.json
@@ -258,7 +258,7 @@ jq -r '.bugs[] | select(.status == "fixed" and (.verification == null or .verifi
 A severity roll-up of what is still open:
 
 ```sh
-jq -r '[.bugs[] | select(.status == "reported" or .status == "confirmed")]
+rjq -r '[.bugs[] | select(.status == "reported" or .status == "confirmed")]
        | group_by(.priority)[] | "\(.[0].priority): \(length)  \(map(.id) | join(" "))"' BUGS.json
 ```
 
@@ -269,7 +269,7 @@ itself is for the human reading a diff: a new urgent entry appearing at the top 
 visible, and appended at the bottom it is not.
 
 ```sh
-jq 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
+rjq 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
     def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
     def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
     .bugs |= sort_by(prank, srank, (.id | idkey))' \
@@ -311,7 +311,7 @@ behaviour will be reported again.
 ## Validating the file
 
 ```sh
-findings="$(jq -r '
+findings="$(rjq -r '
   (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
   (if (.skill // "") == "" then "the file does not name its schema" else empty end),
   ([.bugs[].id]) as $ids
@@ -333,7 +333,7 @@ findings="$(jq -r '
 [ -z "$findings" ] && echo 'BUGS.json is sound' || printf '%s\n' "$findings"
 ```
 
-`jq -e` is wrong here: it exits 4 on empty output, which is the sound case.
+`rjq -e` is wrong here: it exits 4 on empty output, which is the sound case.
 
 ## When not to use this
 

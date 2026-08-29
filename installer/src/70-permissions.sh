@@ -35,18 +35,18 @@ strip_trailing_slashes() {
 
 # Both permission editors are reached only from planning_permission_step, inside
 # main's `contains planning "${SELECTED_SKILLS[@]}"` branch, and planning declares
-# jq in runtime_requirements() — so verify_runtime_tools has already refused to
-# get this far without jq. jq is therefore guaranteed, and the command -v check
+# rjq in runtime_requirements() — so verify_runtime_tools has already refused to
+# get this far without rjq. rjq is therefore guaranteed, and the command -v check
 # below only turns a hypothetical `set -e` abort into a clear message plus manual
 # instructions. It has to precede backup_file, or a failure here leaves
 # an orphaned backup behind. python3 is deliberately not used anywhere:
-# jq is the only runtime dependency this installer is allowed to add.
+# rjq is the only runtime dependency this installer is allowed to add.
 claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
     local doc added tmpfile program
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "  claude-code: jq is not installed; cannot edit $cfg safely." >&2
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
         print_manual_permissions claude "$scripts" "$plans" "$tmp"
         return 0
     fi
@@ -57,7 +57,7 @@ claude_permissions() {
 
     # An unparseable or non-object settings.json is rebuilt from {} rather than
     # edited. `objectify` is the same defensive read at every level.
-    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
     program='
 def objectify: if type == "object" then . else {} end;
@@ -71,15 +71,15 @@ def entries: [
 def allowed: objectify | .permissions | objectify | .allow
     | if type == "array" then . else [] end;
 '
-    added="$(printf '%s' "$doc" | jq -r \
+    added="$(printf '%s' "$doc" | rjq -r \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'(entries - allowed)[]')"
 
     # mktemp in the config's own directory so the rename is atomic, and cp -p to
-    # inherit the user's mode before jq truncates it.
+    # inherit the user's mode before rjq truncates it.
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | jq \
+    if ! printf '%s' "$doc" | rjq \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         objectify
@@ -88,7 +88,7 @@ def allowed: objectify | .permissions | objectify | .allow
         | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
         > "$tmpfile"; then
         rm -f "$tmpfile"
-        die "jq failed to update $cfg"
+        die "rjq failed to update $cfg"
     fi
     mv "$tmpfile" "$cfg"
 
@@ -127,26 +127,26 @@ opencode_permissions() {
         echo "  opencode: created $cfg" >&2
         created=1
     fi
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "  opencode: jq is not installed; cannot edit $cfg safely." >&2
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
         print_manual_permissions opencode "$scripts" "$plans" "$tmp"
         return 0
     fi
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    # A non-empty config that strict jq cannot parse carries JSON-C comments or
+    # A non-empty config that strict rjq cannot parse carries JSON-C comments or
     # trailing commas, which a rewrite would strip: print manual instructions
-    # instead of rebuilding from {}. Emptiness is decided here -- jq's own exit
+    # instead of rebuilding from {}. Emptiness is decided here -- rjq's own exit
     # status for empty input flips between versions.
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! jq -e '.' "$cfg" >/dev/null 2>&1; then
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
         echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
         print_manual_permissions opencode "$scripts" "$plans" "$tmp"
         return 0
     fi
     [ "$created" -eq 1 ] || backup_file "$cfg"
 
-    doc="$(jq '.' "$cfg" 2>/dev/null || true)"
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
     # opencode's permission block is keyed by tool name; each value is either an
     # action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
@@ -170,11 +170,11 @@ def base:
        else ($p | objectify) end)
     | del(.allow, .deny, .ask);
 '
-    legacy="$(printf '%s' "$doc" | jq -r '
+    legacy="$(printf '%s' "$doc" | rjq -r '
         (if type == "object" then . else {} end) | .permission
         | if type == "object" and (.allow | type) == "array" and (.allow | length) > 0
           then "yes" else "no" end')"
-    added="$(printf '%s' "$doc" | jq -r \
+    added="$(printf '%s' "$doc" | rjq -r \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         [ wanted[] as $w
@@ -186,7 +186,7 @@ def base:
 
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | jq \
+    if ! printf '%s' "$doc" | rjq \
         --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
         "$program"'
         (if type == "object" then . else {} end) as $data
@@ -196,7 +196,7 @@ def base:
         | $data | .permission = $perm' \
         > "$tmpfile"; then
         rm -f "$tmpfile"
-        die "jq failed to update $cfg"
+        die "rjq failed to update $cfg"
     fi
     mv "$tmpfile" "$cfg"
 

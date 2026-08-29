@@ -9,7 +9,7 @@
 # heading goal-tables.json does not register is hand-edit damage and fails.
 #
 # Sourced by validate-plan.sh; never executed. Requires
-# validate-plan-common-lib.sh, jq, and the inventory data model.
+# validate-plan-common-lib.sh, rjq, and the inventory data model.
 #
 # validate_goal_testing_requirement is the only writer of
 # goal_testing_required, which is why the proof-coverage pass in
@@ -37,7 +37,7 @@ load_goal_table_registry() {
         fail "goal-tables.json registry is missing at $goal_tables_registry"
         return 0
     fi
-    goal_registered_sections="$(jq -r '.tables[] | select(.document == "goal.md") | .section' \
+    goal_registered_sections="$(rjq -r '.tables[] | select(.document == "goal.md") | .section' \
         "$goal_tables_registry" 2>/dev/null)"
     if [ -z "$goal_registered_sections" ]; then
         fail "goal-tables.json registers no goal.md section with a yes/no first column"

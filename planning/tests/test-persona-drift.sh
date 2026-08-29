@@ -86,6 +86,9 @@ done
 if [ -f "$manifest" ]; then
     while IFS=$'\t' read -r source _; do
         [ -n "$source" ] || continue
+        case "$source" in
+            planning/bin/*) continue ;; # native artifacts are produced by CI
+        esac
         [ -f "$root/${source#planning/}" ] || note_fail "manifest references missing file: $source"
     done < "$manifest"
 fi

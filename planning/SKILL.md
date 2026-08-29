@@ -374,7 +374,7 @@ hits). Use it before a paragraph-level edit to confirm the target is unique:
 **Worked examples:**
 ```bash
 # every document mentioning a phrase, machine-readable:
-plan-content.sh find <plan> "<pattern>" --in all --format json | jq -r '.matches[].document'
+plan-content.sh find <plan> "<pattern>" --in all --format json | rjq -r '.matches[].document'
 
 # did a fix land at THIS surface (not merely somewhere in the plan)?
 plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
@@ -388,7 +388,7 @@ plan-content.sh find <plan> "<required wording>" --document step:<goal>/<step>
 zero **or** multiple matches — deliberately (a unique target is the goal).
 "Exit 1 with matches present" means *narrow the pattern*, not *error*, so a
 caller checking only the exit code will misread it. With `json`,
-`jq '.matches | length'` gives the count directly.
+`rjq '.matches | length'` gives the count directly.
 
 **A fix is verified by finding the wording at the surface the finding named,
 never by finding it somewhere in the plan.** The plan-wide probe
@@ -1064,7 +1064,7 @@ directory (`bin/`, `sbin/`, `.bin/`, `Scripts/` — covering `vendor/bin/`,
 `node_modules/.bin/`, `.venv/bin/`), or a first token in the small universal
 core (`git make docker sh bash zsh env sudo npx`). Those are the only entry
 points — arguments strengthen a candidate but never qualify a span on their
-own. Data/markup extensions (the jq-matched list in
+own. Data/markup extensions (the rjq-matched list in
 `never-executable-extensions.json` — e.g. `.xml`, `.sql`, `.php`, `.md`),
 `:line`/`#Lnn` citation suffixes, and route/prose shapes (a leading `/`
 without a bin-like segment) never flag. Each registered command's first token

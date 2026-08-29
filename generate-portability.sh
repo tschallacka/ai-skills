@@ -32,8 +32,8 @@ case "${1:-}" in
                     { exit }' "$0"; exit 0 ;;
 esac
 
-command -v jq >/dev/null 2>&1 || {
-    printf '%s: jq is required to read %s\n' "${0##*/}" "$rules" >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf '%s: rjq is required to read %s\n' "${0##*/}" "$rules" >&2
     exit 69
 }
 [ -f "$rules" ] || { printf '%s: missing %s\n' "${0##*/}" "$rules" >&2; exit 66; }
@@ -94,28 +94,28 @@ emit() {
 
     printf '## Target\n\n'
     printf '| | |\n|---|---|\n'
-    printf '| Shell | %s |\n' "$(jq -r '.target.shell' "$rules")"
-    printf '| Userland | %s |\n' "$(jq -r '.target.userland' "$rules")"
-    printf '| Locale | %s |\n' "$(jq -r '.target.locale' "$rules")"
+    printf '| Shell | %s |\n' "$(rjq -r '.target.shell' "$rules")"
+    printf '| Userland | %s |\n' "$(rjq -r '.target.userland' "$rules")"
+    printf '| Locale | %s |\n' "$(rjq -r '.target.locale' "$rules")"
     printf '\n**Verified:**\n\n'
-    printf -- '- bash 3.2 — %s\n' "$(jq -r '.target.verified["bash-3.2"]' "$rules")"
-    printf -- '- BSD userland — %s\n\n' "$(jq -r '.target.verified["bsd-userland"]' "$rules")"
+    printf -- '- bash 3.2 — %s\n' "$(rjq -r '.target.verified["bash-3.2"]' "$rules")"
+    printf -- '- BSD userland — %s\n\n' "$(rjq -r '.target.verified["bsd-userland"]' "$rules")"
 
     printf '## The gotchas\n\n'
     local id construct breaks symptom replacement note all_sightings
     all_sightings="$(marker_sightings)"
     while IFS= read -r id; do
-        construct="$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.construct' "$rules")"
-        breaks="$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.breaks' "$rules")"
-        symptom="$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.symptom' "$rules")"
-        replacement="$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.replacement' "$rules")"
-        note="$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.note // ""' "$rules")"
+        construct="$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.construct' "$rules")"
+        breaks="$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.breaks' "$rules")"
+        symptom="$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.symptom' "$rules")"
+        replacement="$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.replacement' "$rules")"
+        note="$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.note // ""' "$rules")"
         printf '### `%s`\n\n' "$construct"
         printf -- '- **Breaks on:** %s\n' "$breaks"
         printf -- '- **Symptom:** %s\n' "$symptom"
         printf -- '- **Use instead:** %s\n' "$replacement"
         [ -n "$note" ] && printf -- '- **Note:** %s\n' "$note"
-        if [ "$(jq -r --arg i "$id" '.rules[]|select(.id==$i)|.detect' "$rules")" = null ]; then
+        if [ "$(rjq -r --arg i "$id" '.rules[]|select(.id==$i)|.detect' "$rules")" = null ]; then
             printf -- '- **Detection:** none possible — this one is a review item, not a grep.\n'
         fi
         local sightings
@@ -131,7 +131,7 @@ emit() {
             done
         fi
         printf '\n'
-    done < <(jq -r '.rules[].id' "$rules")
+    done < <(rjq -r '.rules[].id' "$rules")
 
     printf '## Recording a new gotcha\n\n'
     printf 'Two places, and both are required.\n\n'

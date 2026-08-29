@@ -57,7 +57,7 @@ if [ "${1:-}" = "--clamp" ]; then
             *) fail "clamp: cap $old not found on line $ln of test-duplication-ratchet.sh" ;;
         esac
         tmp_json="$(mktemp "${TMPDIR:-/tmp}/gate-caps.XXXXXX")"
-        jq --arg k "$label" --argjson v "$new" '.duplication_caps[$k] = $v' \
+        rjq --arg k "$label" --argjson v "$new" '.duplication_caps[$k] = $v' \
             "$caps_file" > "$tmp_json" && mv "$tmp_json" "$caps_file"
         printf 'gate-caps: lowered %s %s -> %s\n' "$label" "$old" "$new"
         lowered=1
@@ -75,7 +75,7 @@ if [ "${1:-}" = "--clamp" ]; then
         new="${fl_line%%|->*}"; old="${fl_line#*|->}"
         t_sed_i "s/^CAP=$old\$/CAP=$new/" "$fl_test"
         tmp_json="$(mktemp "${TMPDIR:-/tmp}/gate-caps.XXXXXX")"
-        jq --argjson v "$new" '.function_length_cap = $v' \
+        rjq --argjson v "$new" '.function_length_cap = $v' \
             "$caps_file" > "$tmp_json" && mv "$tmp_json" "$caps_file"
         printf 'gate-caps: lowered function_length_cap %s -> %s\n' "$old" "$new"
         lowered=1
@@ -95,7 +95,7 @@ fi
 fl_cap="$(sed -n 's/^CAP=\([0-9]*\)$/\1/p' "$fl_test" | head -1)"
 [ -n "$fl_cap" ] || fail "could not read CAP from test-function-length-ratchet.sh"
 
-approved_fl="$(jq -r '.function_length_cap' "$caps_file")"
+approved_fl="$(rjq -r '.function_length_cap' "$caps_file")"
 [ -n "$approved_fl" ] && [ "$approved_fl" != "null" ] || fail "function_length_cap missing from gate-caps.json"
 
 if [ "$fl_cap" -ne "$approved_fl" ]; then
@@ -118,7 +118,7 @@ while IFS= read -r line; do
     [ -n "$cap" ] || cap="${after#*[!0-9]}"
     cap="${cap%%[!0-9]*}"
     [ -n "$label" ] && [ -n "$cap" ] || continue
-    approved="$(jq -r --arg k "$label" '.duplication_caps[$k] // ""' "$caps_file")"
+    approved="$(rjq -r --arg k "$label" '.duplication_caps[$k] // ""' "$caps_file")"
     if [ -z "$approved" ] || [ "$approved" = "null" ]; then
         printf 'gate-caps: cap %s not found in gate-caps.json\n' "$label" >&2
         dup_failed=1
@@ -158,7 +158,7 @@ fi
 
 if [ -n "$baseline_file" ]; then
     rose=0
-    base_fl="$(jq -r '.function_length_cap // empty' "$baseline_file")"
+    base_fl="$(rjq -r '.function_length_cap // empty' "$baseline_file")"
     if [ -n "$base_fl" ] && [ "$approved_fl" -gt "$base_fl" ]; then
         printf 'gate-caps: function_length_cap went UP from %s to %s — caps only ever go down; reduce the count instead\n' \
             "$base_fl" "$approved_fl" >&2
@@ -166,15 +166,15 @@ if [ -n "$baseline_file" ]; then
     fi
     while IFS= read -r key; do
         [ -n "$key" ] || continue
-        cur="$(jq -r --arg k "$key" '.duplication_caps[$k] // empty' "$caps_file")"
-        base="$(jq -r --arg k "$key" '.duplication_caps[$k] // empty' "$baseline_file")"
+        cur="$(rjq -r --arg k "$key" '.duplication_caps[$k] // empty' "$caps_file")"
+        base="$(rjq -r --arg k "$key" '.duplication_caps[$k] // empty' "$baseline_file")"
         [ -n "$cur" ] && [ -n "$base" ] || continue
         if [ "$cur" -gt "$base" ]; then
             printf 'gate-caps: cap %s went UP from %s to %s — caps only ever go down; reduce the count instead\n' \
                 "$key" "$base" "$cur" >&2
             rose=1
         fi
-    done < <(jq -r '.duplication_caps | keys[]' "$caps_file")
+    done < <(rjq -r '.duplication_caps | keys[]' "$caps_file")
     [ "$rose" -eq 0 ] || { rm -f "$baseline_file"; fail "a cap rose against its recorded history"; }
     rm -f "$baseline_file"
 fi

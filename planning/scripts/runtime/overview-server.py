@@ -16,6 +16,17 @@ import tempfile
 plan_dir = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 skill_dir = os.path.dirname(os.path.abspath(__file__))
+if sys.platform.startswith("linux") and os.uname().machine in ("x86_64", "amd64"):
+    rjq_dir = "x86_64-unknown-linux-musl"
+elif sys.platform.startswith("linux"):
+    rjq_dir = "aarch64-unknown-linux-musl"
+elif sys.platform == "darwin" and os.uname().machine == "x86_64":
+    rjq_dir = "x86_64-apple-darwin"
+elif sys.platform == "darwin":
+    rjq_dir = "aarch64-apple-darwin"
+else:
+    rjq_dir = "x86_64-pc-windows-msvc"
+os.environ["PATH"] = os.path.join(skill_dir, "..", "..", "bin", rjq_dir) + os.pathsep + os.environ.get("PATH", "")
 
 state_script = os.path.join(skill_dir, "..", "overview-state.sh")
 render_script = os.path.join(skill_dir, "..", "render-plan-overview.sh")

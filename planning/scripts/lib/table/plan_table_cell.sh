@@ -20,18 +20,18 @@ plan_table_cells() {
 
 # json_str TEXT — emit TEXT as one properly escaped JSON string value.
 json_str() {
-    command -v jq >/dev/null 2>&1 || {
-        printf 'plan-table: jq is required for JSON emission; install jq and re-run\n' >&2
+    command -v rjq >/dev/null 2>&1 || {
+        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
         exit 69
     }
- printf '%s' "$1" | jq -Rs '.'; }
+ printf '%s' "$1" | rjq -Rs '.'; }
 
 # plan_table_row_json HEADER_ROW DATA_ROW — emit one JSON object whose keys
 # are the header cells and whose values are the corresponding data cells.
 # Iterates columns until a header cell is empty.
 plan_table_row_json() {
-    command -v jq >/dev/null 2>&1 || {
-        printf 'plan-table: jq is required for JSON emission; install jq and re-run\n' >&2
+    command -v rjq >/dev/null 2>&1 || {
+        printf 'plan-table: rjq is required for JSON emission; install rjq and re-run\n' >&2
         exit 69
     }
 

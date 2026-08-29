@@ -35,7 +35,7 @@ separate and stated here:
 
 The installer and the helper scripts need `bash`, POSIX `coreutils`, `awk`,
 `sed`, `grep`, `git`, and `curl` for the one-command install. The `planning`
-skill additionally needs `jq`, and on macOS `resource-limited-testing` needs
+skill additionally needs `rjq`, and on macOS `resource-limited-testing` needs
 `memlimit`; the installer checks for both up front and prints a per-platform
 install hint rather than failing partway through. Those two are the only extra
 runtime dependencies any skill has — in particular `python3` is **not** required
@@ -158,7 +158,7 @@ what was not, and why; the progress and diagnostics go to stderr, so
 `install.sh … > summary.txt` keeps the outcome and `2>/dev/null` keeps it
 readable. A blocked skill is reported once — not once per root — with the
 commands that finish the job. This is what an `--all` run on a machine without
-`jq` prints:
+`rjq` prints:
 
 ```
 == Summary ==
@@ -168,8 +168,8 @@ Installed: /home/u/.agents/skills/brainstorm
 Installed: /home/u/.agents/skills/post-implementation-review
 Skipped:   planning — a hard requirement is missing, nothing was written
 To install planning once its requirements are met:
-  1. install jq:
-    sudo apt-get install -y jq
+  1. install rjq:
+    sudo apt-get install -y rjq
   2. replay this run:
   ./install.sh --skill planning --target /home/u/.agents/skills --yes
 ```
@@ -194,7 +194,7 @@ what it needs, on which platform and architecture, and how badly:
 
 Currently:
 
-- `planning` requires `jq` (**hard**, every platform) — without it
+- `planning` requires `rjq` (**hard**, every platform) — without it
   `validate-plan.sh` refuses to run and the plan gates stop firing.
 - `resource-limited-testing` names `memlimit` (**soft**, Apple Silicon macOS
   only) — see [Supported platforms](#supported-platforms) above for what the

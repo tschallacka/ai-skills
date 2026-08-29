@@ -166,18 +166,18 @@ else
         || note_fail 'a soft group miss blocked the planning install'
 fi
 
-# ── single-tool strengths are untouched: jq hard blocks, a soft row warns ────
+# ── the bundled rjq removes the former hard external dependency ───────────────
 jqless_bin="$temporary_root/bin-jqless"
-build_hidden_path "$jqless_bin" jq
-target_jq="$temporary_root/target-jq"
+build_hidden_path "$jqless_bin" rjq
+target_jq="$temporary_root/target-rjq"
 mkdir -p "$target_jq"
 set +e
 PATH="$jqless_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
-    --skill planning --target "$target_jq" --yes >/dev/null 2>"$temporary_root/err-jq" </dev/null
+    --skill planning --target "$target_jq" --yes >/dev/null 2>"$temporary_root/err-rjq" </dev/null
 hard_rc=$?
 set -e
-[ "$hard_rc" -ne 0 ] || note_fail 'a hard single requirement no longer blocks the install'
-grep -Fq 'jq' "$temporary_root/err-jq" || note_fail 'the hard block did not name jq'
+[ "$hard_rc" -eq 0 ] || note_fail 'the bundled rjq did not allow the install'
+[ -f "$target_jq/planning/SKILL.md" ] || note_fail 'the planning skill was not installed with bundled rjq'
 
 # The soft single requirement was planning's openssl until plan-crypt replaced
 # it and the row left planning/requires.tsv. merge-request-etiquette's `git` is

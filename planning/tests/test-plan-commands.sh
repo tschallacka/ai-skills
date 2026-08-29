@@ -852,7 +852,7 @@ fi
 # Every in-document placeholder the templates can emit must be registered; CLI
 # usage/arg tokens are not document placeholders and must stay out.
 registry="$script_dir/../placeholders.json"
-jq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
+rjq -e '.placeholders | type == "array"' "$registry" >/dev/null 2>&1 || {
     echo 'placeholders.json is not a JSON array.' >&2; exit 1
 }
 # (1) Every registered token is a well-formed <...> literal.
@@ -861,7 +861,7 @@ while IFS= read -r tok; do
         '<'*'>') ;;
         *) echo "registry entry is not a <...> token: $tok" >&2; exit 1 ;;
     esac
-done < <(jq -r '.placeholders[].token' "$registry")
+done < <(rjq -r '.placeholders[].token' "$registry")
 # (2) Every authoring-template in-document placeholder is registered.
 missing=0
 for t in \
@@ -879,13 +879,13 @@ for t in \
     '<what the next named work unit can rely on>' '<one concrete change>' \
     '<outcome>' '<why this work unit covers it>' '<verbatim or precise summary>' \
     '<what was checked>' '<why no unresolved work remains>'; do
-    jq -e --arg t "$t" '.placeholders[] | select(.token == $t)' "$registry" >/dev/null 2>&1 || {
+    rjq -e --arg t "$t" '.placeholders[] | select(.token == $t)' "$registry" >/dev/null 2>&1 || {
         echo "registry missing emitted placeholder: $t" >&2; missing=1
     }
 done
 # (3) The generated-artifact placeholders are registered as surface:generated.
 for t in '<short description>' '<required only when this goal has one permitted work unit>'; do
-    surf="$(jq -r --arg t "$t" '.placeholders[] | select(.token == $t) | .surface' "$registry" 2>/dev/null)"
+    surf="$(rjq -r --arg t "$t" '.placeholders[] | select(.token == $t) | .surface' "$registry" 2>/dev/null)"
     [ "$surf" = generated ] || { echo "registry: $t must be surface=generated (got '$surf')" >&2; missing=1; }
 done
 [ "$missing" -eq 0 ] || exit 1

@@ -18,12 +18,11 @@
 #              row sharing the id, so the installer warns once for the set
 #              instead of once per member. Ids must be unique across skills.
 #
-# Line-oriented TSV rather than JSON on purpose: jq is itself declared here, so a
-# format that needed jq to read it could not be read on the machine that is
+# Line-oriented TSV rather than JSON on purpose: rjq is itself declared here, so a
+# format that needed rjq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
 tool	condition	strength	why	group
 bash	*:*	hard	every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine
-jq	*:*	hard	reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it
 python3	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
 node	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
 perl	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes

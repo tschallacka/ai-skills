@@ -7,7 +7,7 @@
 # name, JSON-C syntax allowed in both. The editor used to look at opencode.json
 # only, so on a machine whose config is the .jsonc one (or that has none yet)
 # the grant silently did nothing -- and a commented config would have been
-# rebuilt from {} through jq, stripping every comment in it.
+# rebuilt from {} through rjq, stripping every comment in it.
 
 set -euo pipefail
 export LC_ALL=C
@@ -31,7 +31,7 @@ install_planning() { # <home>
 }
 
 grant_state() { # <cfg> <tool> <glob>
-    jq -r --arg tool "$2" --arg glob "$3" '.permission[$tool][$glob] // "missing"' "$1"
+    rjq -r --arg tool "$2" --arg glob "$3" '.permission[$tool][$glob] // "missing"' "$1"
 }
 
 # ── an existing opencode.jsonc is the one edited ────────────────────────────
@@ -45,7 +45,7 @@ t_assert_eq 'a jsonc-only config installs cleanly' "$rc" '0'
 t_assert_eq 'the plans grant landed in the jsonc file' \
     "$(grant_state "$home/.config/opencode/opencode.jsonc" read "$home/.plans/**")" 'allow'
 t_assert_eq 'the pre-existing model field survived' \
-    "$(jq -r '.model' "$home/.config/opencode/opencode.jsonc")" 'opencode/big-pickle'
+    "$(rjq -r '.model' "$home/.config/opencode/opencode.jsonc")" 'opencode/big-pickle'
 t_assert_eq 'and no parallel opencode.json appeared' \
     "$([ -f "$home/.config/opencode/opencode.json" ] && printf yes || printf no)" 'no'
 
@@ -57,7 +57,7 @@ t_assert_eq 'a machine with no config installs cleanly' "$rc" '0'
 cfg="$home/.config/opencode/opencode.json"
 t_assert_eq 'an opencode.json was created' "$([ -f "$cfg" ] && printf yes || printf no)" 'yes'
 t_assert_eq 'carrying the schema reference' \
-    "$(jq -r '."$schema"' "$cfg")" 'https://opencode.ai/config.json'
+    "$(rjq -r '."$schema"' "$cfg")" 'https://opencode.ai/config.json'
 t_assert_eq 'and a bash grant scoped to the installed scripts' \
     "$(grant_state "$cfg" "bash" "$home/.config/opencode/skills/planning/scripts/**")" 'allow'
 
@@ -89,10 +89,10 @@ install_planning "$home" || rc=$?
 t_assert_eq 'an existing opencode.json installs cleanly' "$rc" '0'
 t_assert_eq 'the user rule survived the merge' \
     "$(grant_state "$home/.config/opencode/opencode.json" bash 'git *')" 'allow'
-before="$(jq '.permission.read | length' "$home/.config/opencode/opencode.json")"
+before="$(rjq '.permission.read | length' "$home/.config/opencode/opencode.json")"
 rc=0
 install_planning "$home" || rc=$?
-after="$(jq '.permission.read | length' "$home/.config/opencode/opencode.json")"
+after="$(rjq '.permission.read | length' "$home/.config/opencode/opencode.json")"
 t_assert_eq 'a second run reports nothing to add' \
     "$(grep -c 'permissions already present' "$work/out" || true)" '1'
 t_assert_eq 'and does not duplicate entries' "$( [ "$before" -eq "$after" ] && printf same || printf grew)" 'same'

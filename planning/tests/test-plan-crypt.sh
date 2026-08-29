@@ -19,7 +19,7 @@
 # and still checks the shell rungs; it never passes in silence.
 #
 # This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md section 1: bash, POSIX coreutils, awk, sed, grep, jq only.
+# CODE-STYLE.md section 1: bash, POSIX coreutils, awk, sed, grep, rjq only.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh

@@ -4,7 +4,7 @@
 **Every defect, one file, full story.**
 
 When a bug is found but not fixed in the same breath, it goes here: `BUGS.json`
-— one register read with jq, where each entry carries its reproduction, the
+— one register read with rjq, where each entry carries its reproduction, the
 measurement that proves it real, the mechanism once known, and the
 verification that fails without the fix.
 

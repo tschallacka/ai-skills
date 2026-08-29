@@ -33,7 +33,7 @@ cross-check, the same arrangement `planning/PACKAGE-MANIFEST.tsv` has.
    because stock macOS ships 3.2 and the code targets it.
 
 2. **Bump the version** in `package.json`. Nothing else records it: the installer
-   reads it with `sed` (jq may not be installed yet) and stamps it into each
+   reads it with `sed` (rjq may not be installed yet) and stamps it into each
    skill's `.version` file.
 
 3. **Ship a schema for the new version.** Both register skills need

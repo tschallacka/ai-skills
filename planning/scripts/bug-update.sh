@@ -37,10 +37,10 @@ id="${1:-}"; [ -n "$id" ] && shift || {
 }
 
 status_val="" fix_val="" ver_val="" reason_val="" pri_val="" mech_val="" note_val=""
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-running when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it reads and writes the JSON registers); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -61,7 +61,7 @@ done
 [ -n "$status_val$fix_val$ver_val$reason_val$pri_val$mech_val$note_val" ] \
     || { printf '%s: nothing to set\n' "${0##*/}" >&2; exit 64; }
 
-jq -e --arg id "$id" '.bugs[]? | select(.id == $id)' "$file" >/dev/null \
+rjq -e --arg id "$id" '.bugs[]? | select(.id == $id)' "$file" >/dev/null \
     || { printf '%s: no defect %s\n' "${0##*/}" "$id" >&2; exit 66; }
 
 # Closing evidence rules: fixed needs what changed AND how it is proven;
@@ -78,7 +78,7 @@ esac
 
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp "${TMPDIR:-/tmp}/bug-update.XXXXXX")"
-jq --arg id "$id" --arg now "$now" \
+rjq --arg id "$id" --arg now "$now" \
    --arg status "$status_val" --arg fix "$fix_val" --arg ver "$ver_val" \
    --arg reason "$reason_val" --arg pri "$pri_val" --arg mech "$mech_val" --arg note "$note_val" '
    .bugs |= map(

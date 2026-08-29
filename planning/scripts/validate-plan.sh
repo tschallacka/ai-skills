@@ -124,11 +124,11 @@ plan_validate_cleanup() {
 }
 trap plan_validate_cleanup EXIT
 
-# Refuse without jq rather than degrade: every jq call in the pass libraries is
+# Refuse without rjq rather than degrade: every rjq call in the pass libraries is
 # `2>/dev/null`, so the placeholder registry, the serve check and part of
 # command-literal detection would silently stop firing and still exit 0.
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads placeholders.json, state-change-registry.json, goal-tables.json and commands.json); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it reads placeholders.json, state-change-registry.json, goal-tables.json and commands.json); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi

@@ -157,7 +157,7 @@ validate_requires_groups() {
 # is deliberate: an unknown tool name in a probe is not silently skipped, it
 # simply needs a universe row when a skill adopts it.
 probe_allowlist='installer/probe-allowlist.tsv'
-probe_universe='python3 python node nodejs perl socat jq openssl sha256sum shasum git'
+probe_universe='python3 python node nodejs perl socat rjq openssl sha256sum shasum git'
 
 shipped_scripts_of() { # <skill> — the prod arm of skill_files from the manifest part
     # Sourced fresh in a subshell so this build's own state is untouched;

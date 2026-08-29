@@ -3,7 +3,7 @@
 #
 # The transport is the user's decision, asked once by the server and recorded in
 # $AI_CHAT_HOME/config. This is the bash half of reading it, and it is bash and
-# not jq on purpose: jq is this repository's ceiling for a runtime dependency, so
+# not rjq on purpose: rjq is this repository's ceiling for a runtime dependency, so
 # a config the helpers could not read without it would defeat the point of
 # having one. The file is therefore key=value, one per line, # comments.
 #

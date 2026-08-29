@@ -104,3 +104,8 @@ planning/scripts/runtime/overview-server.py	scripts/runtime/overview-server.py	i
 planning/scripts/runtime/overview-server.js	scripts/runtime/overview-server.js	installer	review-approved	backup-then-replace	false
 planning/scripts/runtime/overview-server.pl	scripts/runtime/overview-server.pl	installer	review-approved	backup-then-replace	false
 planning/gate-caps.json	gate-caps.json	installer	review-approved	backup-then-replace	false
+planning/bin/x86_64-unknown-linux-musl/rjq	bin/x86_64-unknown-linux-musl/rjq	W12,W13,W14,W15,W16	review-approved	backup-then-replace	false
+planning/bin/aarch64-unknown-linux-musl/rjq	bin/aarch64-unknown-linux-musl/rjq	W12,W13,W14,W15,W16	review-approved	backup-then-replace	false
+planning/bin/x86_64-apple-darwin/rjq	bin/x86_64-apple-darwin/rjq	W12,W13,W14,W15,W16	review-approved	backup-then-replace	false
+planning/bin/aarch64-apple-darwin/rjq	bin/aarch64-apple-darwin/rjq	W12,W13,W14,W15,W16	review-approved	backup-then-replace	false
+planning/bin/x86_64-pc-windows-msvc/rjq.exe	bin/x86_64-pc-windows-msvc/rjq.exe	W12,W13,W14,W15,W16	review-approved	backup-then-replace	false
