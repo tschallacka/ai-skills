@@ -1975,6 +1975,74 @@
       "notes": null,
       "created_at": "2026-08-29T11:21:21Z",
       "updated_at": "2026-08-29T11:21:21Z"
+    },
+    {
+      "id": "B91",
+      "title": "resource-limited-testing SKILL.md claims the installer hard-refuses without memlimit; requires.tsv declares it soft",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "grep -n refuses-to-run resource-limited-testing/SKILL.md; grep memlimit resource-limited-testing/requires.tsv",
+      "observed": "SKILL.md line 142 says memlimit is a hard gate: the installer refuses to run on macOS until it is present. requires.tsv row 3 declares the opposite: memlimit Darwin:arm64 soft, without it limited-run.sh caps CPU only. The installer treats soft as warn-and-install (20-runtime-tools.sh), so the refusal the SKILL.md advertises does not exist, while the degrade path SKILL.md lines 50-53 describe (warn, name memlimit, degrade to nice plus optional cpulimit) is the real behavior.",
+      "expected": "The third-party-tools bullet states the soft contract the requires.tsv row already declares: the installer installs with a warning naming the lost capability, and the wrapper degrades to nice plus optional cpulimit. One policy, stated once.",
+      "mechanism": "The SKILL.md bullet and the requires.tsv row were written under different policies and never reconciled; requires.tsv drives the installer, so the row is authoritative and the prose is the stale half.",
+      "surfaces": [
+        "resource-limited-testing/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B92",
+      "title": "README and both register docs advertise bug-add.sh/bug-update.sh/todo-add.sh/todo-update.sh helpers that were never shipped",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ls bug-report/scripts todo/scripts; grep -rn bug-add.sh bug-report/docs/README.md README.md | head -3",
+      "observed": "bug-report/docs/README.md line 19 and todo/docs/README.md line 18 say Shell helpers, not hand-editing, naming bug-add.sh / bug-update.sh and todo-add.sh / todo-update.sh; README.md rows 12-13 repeat the claim. Neither skill ships a scripts directory - the SKILL.md files document raw rjq recipes as the only write path.",
+      "expected": "Either the four helpers exist, are registered in skill_files() and PACKAGE-MANIFEST.tsv, and the docs describe them truthfully, or the docs describe the rjq recipes as the write path and drop the helper claim.",
+      "mechanism": "The helper plan is recorded as queued work (a TODO.json entry describes shell helpers under todo/scripts covering every write, with enum checks and atomic writes) but never landed, and the doc rows were written as if it had.",
+      "surfaces": [
+        "README.md",
+        "bug-report/docs/README.md",
+        "todo/docs/README.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "Found while filing B91-B93 by hand through the documented rjq recipes, which is exactly the hand-editing the docs claim nobody does.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B93",
+      "title": "project-specificies directory and registry name misspells specifics as specificies",
+      "status": "reported",
+      "severity": "cosmetic",
+      "priority": "someday",
+      "parent": null,
+      "reproduce": "ls -d project-specificies; grep -o specificies installer/src/05-config.sh package.json | head -2",
+      "observed": "The skill directory, SKILL_NAMES, skill_files(), package.json, README and every installed path spell the name project-specificies; the word is specifics.",
+      "expected": "project-specifics everywhere, or the misspelling documented as deliberate so nobody fixes one registry and forks the name.",
+      "mechanism": "A typo in the original directory name propagated into every registry that keys on it. Fixing is a breaking rename across SKILL_NAMES, skill_files(), package.json, README, and installed paths - legal under the no-backwards-compat rule, but only as one coordinated change.",
+      "surfaces": [
+        "project-specificies",
+        "installer/src/05-config.sh",
+        "package.json",
+        "README.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
     }
   ]
 }
