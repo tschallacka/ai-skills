@@ -43,9 +43,10 @@ a history fetch a standard client never sends:
 
 ```
 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]
-chat-client-rs send   --server HOST:PORT --nick N --chan #c --text MSG
-chat-client-rs read   --server HOST:PORT --nick N --chan #c --since ID
-chat-client-rs tail   --server HOST:PORT --nick N --chan #c [since-id]
+chat-client-rs send   [--server HOST:PORT] [--nick N] --chan #c --text MSG
+chat-client-rs read   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
+chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c
+chat-client-rs session show | set | clear | cursor #chan [ID]
 ```
 
 - `discover` listens for the server's UDP announce beacon (port 7780) and lists
@@ -54,7 +55,14 @@ chat-client-rs tail   --server HOST:PORT --nick N --chan #c [since-id]
   and fails closed on a later mismatch. `--insecure` bypasses the pin for
   testing.
 - `send` registers and sends a PRIVMSG; `read` fetches the delta since an id;
-  `tail` joins and streams PRIVMSG lines.
+  `tail` polls the channel with a step-down cadence (5s → 60s, reset on a new
+  message) so an idle agent stays alive and wakes when a message arrives.
+- **Session.** `session.json` under the state dir remembers the default
+  `server` + `nick` and a per-channel cursor (last seen message id), so later
+  `send`/`read`/`tail` calls can omit `--server`, `--nick`, and `--since`.
+  `session set --server H --nick N` records it; `session show` displays it;
+  `session clear` (or `--cursors`) removes it; `--no-session` bypasses it for
+  one call. A malformed `session.json` is reset with a warning, never a crash.
 
 ## The rust server
 

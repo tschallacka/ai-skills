@@ -134,7 +134,40 @@ fi
 kill "$wake_pid" 2>/dev/null || true
 wait "$wake_pid" 2>/dev/null || true
 
+# A session remembers server+nick and per-channel cursors, so send/read can
+# omit --server/--nick/--since; a malformed session.json recovers with a warning.
+session_home="$temporary_root/session"
+mkdir -p "$session_home"
+cli sess session set --server 127.0.0.1:"$port" --nick sessioner >/dev/null 2>&1
+shown="$(cli sess session show 2>/dev/null || true)"
+case "$shown" in
+    *"server=127.0.0.1:$port"*"nick=sessioner"*) : ;;
+    *) t_fail "session set/show did not persist server+nick: [$shown]" ;;
+esac
+# send WITHOUT --server/--nick uses the session, on a fresh channel so the
+# cursor count is deterministic.
+sent2="$(cli sess send --chan '#sess' --text 'session message' --insecure 2>/dev/null || true)"
+case "$sent2" in
+    *':sessioner!sessioner@localhost PRIVMSG #sess :session message'*) : ;;
+    *) t_fail "session-backed send failed: [$sent2]" ;;
+esac
+# send advances the channel cursor; a later no-arg send works too.
+cli sess send --chan '#sess' --text 'second session' --insecure >/dev/null 2>&1 || true
+cursor="$(cli sess session show 2>/dev/null | grep 'cursor #sess' | awk '{print $NF}' || true)"
+[ "$cursor" = "2" ] || t_fail "session cursor did not advance to 2: [$cursor]"
+# A malformed session.json must recover (warning + empty session), not crash.
+printf '{ broken json !!!' > "$temporary_root/c_sess/session.json"
+recovered="$(cli sess session show 2>/dev/null || true)"
+case "$recovered" in
+    *'server='*) : ;;
+    *) t_fail "malformed session did not recover: [$recovered]" ;;
+esac
+# --no-session ignores the saved server/nick (send without them fails).
+rc=0
+cli sess send --chan '#x' --text 'x' --insecure --no-session >/dev/null 2>"$temporary_root/nosession.err" || rc=$?
+[ "$rc" -eq 64 ] || t_fail "--no-session send without server/nick exited $rc (want 64)"
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail stays alive and wakes)\n' >&2
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session)\n' >&2
 t_end

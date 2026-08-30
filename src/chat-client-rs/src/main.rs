@@ -29,12 +29,18 @@ fn usage() {
         "chat-client-rs\n\n\
          usage:\n\
          \x20 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]\n\
-         \x20 chat-client-rs send --server HOST:PORT --nick N --chan #c --text MSG [--insecure]\n\
-         \x20 chat-client-rs read  --server HOST:PORT --nick N --chan #c --since ID [--insecure]\n\
-         \x20 chat-client-rs tail  --server HOST:PORT --nick N --chan #c [since-id] [--insecure]\n\n\
+         \x20 chat-client-rs send [--server HOST:PORT] [--nick N] --chan #c --text MSG [--insecure]\n\
+         \x20 chat-client-rs read  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
+         \x20 chat-client-rs tail  [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
+         \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options:\n\
-         \x20 --state DIR   client state dir (default $AI_CHAT_HOME or ~/.ai-chat)\n\
-         \x20 --insecure    do not pin the server cert (testing)"
+         \x20 --state DIR    client state dir (default $AI_CHAT_HOME or ~/.ai-chat)\n\
+         \x20 --insecure     do not pin the server cert (testing)\n\
+         \x20 --no-session   ignore the saved session (server/nick/cursor)\n\n\
+         The session remembers the default server+nick and per-channel cursors\n\
+         (last seen message id), so later send/read/tail calls can omit\n\
+         --server, --nick and --since. `session clear` removes it; a malformed\n\
+         session.json is reset with a warning."
     );
     std::process::exit(64);
 }
@@ -50,9 +56,83 @@ fn main() {
         "send" => send(&args[2..], &state_dir),
         "read" => read_delta(&args[2..], &state_dir),
         "tail" => tail(&args[2..], &state_dir),
+        "session" => session_cmd(&args[2..], &state_dir),
         other => {
             eprintln!("chat-client-rs: unknown subcommand: {}", other);
             usage();
+        }
+    }
+}
+
+/// Manage the persisted session (default server+nick and channel cursors).
+/// Subcommands: `show`, `set --server H --nick N`, `clear [--cursors]`,
+/// `cursor #chan [ID]`.
+fn session_cmd(args: &[String], state_dir: &std::path::Path) {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("show");
+    match sub {
+        "show" => {
+            let s = Session::load(state_dir);
+            println!("server={}", s.server);
+            println!("nick={}", s.nick);
+            for (chan, id) in &s.cursors {
+                println!("cursor {} {}", chan, id);
+            }
+        }
+        "set" => {
+            let mut s = Session::load(state_dir);
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--server" => {
+                        i += 1;
+                        if let Some(v) = args.get(i) {
+                            s.server = v.clone();
+                        }
+                    }
+                    "--nick" => {
+                        i += 1;
+                        if let Some(v) = args.get(i) {
+                            s.nick = v.clone();
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if s.server.is_empty() && s.nick.is_empty() {
+                eprintln!("chat-client-rs: session set needs --server and/or --nick");
+                std::process::exit(64);
+            }
+            let _ = s.save(state_dir);
+            println!("server={} nick={}", s.server, s.nick);
+        }
+        "clear" => {
+            if args.iter().any(|a| a == "--cursors") {
+                let mut s = Session::load(state_dir);
+                s.cursors.clear();
+                let _ = s.save(state_dir);
+                println!("cleared channel cursors");
+            } else {
+                let _ = fs::remove_file(Session::path(state_dir));
+                println!("cleared session");
+            }
+        }
+        "cursor" => {
+            let chan = args.get(1).cloned().unwrap_or_default();
+            if chan.is_empty() {
+                eprintln!("chat-client-rs: session cursor needs #chan [ID]");
+                std::process::exit(64);
+            }
+            let mut s = Session::load(state_dir);
+            if let Some(id) = args.get(2).and_then(|v| v.parse::<u64>().ok()) {
+                s.cursors.insert(chan.clone(), id);
+                let _ = s.save(state_dir);
+            }
+            println!("{} {}", chan, s.cursor(&chan));
+        }
+        other => {
+            eprintln!("chat-client-rs: unknown session subcommand: {}", other);
+            std::process::exit(64);
         }
     }
 }
@@ -67,6 +147,81 @@ fn dirs_home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
 }
 
+/// Persistent session state: the default server+nick and per-channel message
+/// cursors, so an agent does not repeat `--server host:port --nick me` (and a
+/// since-id) on every call. Stored as `<state>/session.json`.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Session {
+    server: String,
+    nick: String,
+    #[serde(default)]
+    cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
+}
+
+impl Session {
+    fn path(state_dir: &std::path::Path) -> PathBuf {
+        state_dir.join("session.json")
+    }
+
+    /// Load the session, recovering from a missing or malformed file. A
+    /// malformed file is reported on stderr (so an agent knows the cursors were
+    /// reset) and an empty session is returned; the next save overwrites it.
+    fn load(state_dir: &std::path::Path) -> Session {
+        let path = Session::path(state_dir);
+        let raw = match fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => return Session::default(), // no file yet
+        };
+        match serde_json::from_str(&raw) {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!(
+                    "chat-client-rs: session file {} is malformed; starting a fresh session",
+                    path.display()
+                );
+                Session::default()
+            }
+        }
+    }
+
+    fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
+        fs::create_dir_all(state_dir)?;
+        let json = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
+        fs::write(Session::path(state_dir), json)
+    }
+
+    fn cursor(&self, chan: &str) -> u64 {
+        self.cursors.get(chan).copied().unwrap_or(0)
+    }
+}
+
+/// Fill missing command options from the session (if a session is active).
+/// Returns (server, nick) with the session's values where the caller left them
+/// empty, and whether the session was consulted.
+fn apply_session(
+    server: &str,
+    nick: &str,
+    state_dir: &std::path::Path,
+    no_session: bool,
+) -> (String, String, bool) {
+    if no_session {
+        return (server.to_string(), nick.to_string(), false);
+    }
+    let s = Session::load(state_dir);
+    let server = if server.is_empty() {
+        s.server.clone()
+    } else {
+        server.to_string()
+    };
+    let nick = if nick.is_empty() {
+        s.nick.clone()
+    } else {
+        nick.to_string()
+    };
+    let used = !s.server.is_empty() || !s.nick.is_empty();
+    (server, nick, used)
+}
+
 struct Opts {
     server: String,
     nick: String,
@@ -74,6 +229,7 @@ struct Opts {
     text: String,
     since: String,
     insecure: bool,
+    no_session: bool,
 }
 
 fn parse_opts(args: &[String]) -> Opts {
@@ -84,6 +240,7 @@ fn parse_opts(args: &[String]) -> Opts {
         text: String::new(),
         since: String::new(),
         insecure: false,
+        no_session: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -109,11 +266,36 @@ fn parse_opts(args: &[String]) -> Opts {
                 o.since = args.get(i).cloned().unwrap_or_default();
             }
             "--insecure" => o.insecure = true,
+            "--no-session" => o.no_session = true,
             _ => {}
         }
         i += 1;
     }
     o
+}
+
+/// Record a sent/received message id as the channel cursor in the session.
+fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
+    if no_session {
+        return;
+    }
+    let mut s = Session::load(state_dir);
+    if id > s.cursor(chan) {
+        s.cursors.insert(chan.to_string(), id);
+        let _ = s.save(state_dir);
+    }
+}
+
+/// Remember the server+nick for later calls.
+fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
+    let mut s = Session::load(state_dir);
+    if !server.is_empty() {
+        s.server = server.to_string();
+    }
+    if !nick.is_empty() {
+        s.nick = nick.to_string();
+    }
+    let _ = s.save(state_dir);
 }
 
 fn parse_flag(args: &[String], name: &str) -> Option<String> {
@@ -132,7 +314,7 @@ type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 fn connect(
     server: &str,
     nick: &str,
-    state_dir: &PathBuf,
+    state_dir: &std::path::Path,
     insecure: bool,
 ) -> Result<(Client, String), String> {
     let addr = resolve(server)?;
@@ -201,7 +383,7 @@ fn cert_fingerprint(
     Ok(hex(&sha256_der(first.as_ref())))
 }
 
-fn check_or_pin(server: &str, fp: &str, state_dir: &PathBuf) -> Result<(), String> {
+fn check_or_pin(server: &str, fp: &str, state_dir: &std::path::Path) -> Result<(), String> {
     let path = state_dir.join(format!("{}.cert.fp", server_safe(server)));
     if path.exists() {
         let stored = fs::read_to_string(&path).map_err(|e| format!("read pin: {}", e))?;
@@ -332,19 +514,23 @@ fn json_field(s: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn send(args: &[String], state_dir: &PathBuf) {
+fn send(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    if o.server.is_empty() || o.nick.is_empty() || o.chan.is_empty() || o.text.is_empty() {
-        eprintln!("chat-client-rs: send needs --server --nick --chan --text");
+    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() || o.text.is_empty() {
+        eprintln!("chat-client-rs: send needs --server --nick --chan --text (or a saved session)");
         std::process::exit(64);
     }
-    let (mut tls, _fp) = match connect(&o.server, &o.nick, state_dir, o.insecure) {
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
             std::process::exit(70);
         }
     };
+    if !used_session {
+        save_session(state_dir, &server, &nick);
+    }
     // drain to registration complete
     let _ = wait_for_welcome(&mut tls);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
@@ -368,25 +554,12 @@ fn send(args: &[String], state_dir: &PathBuf) {
         std::process::exit(70);
     }
     println!("{}", out);
-    let _ = write_line(&mut tls, "QUIT");
-}
-
-fn read_delta(args: &[String], state_dir: &PathBuf) {
-    let o = parse_opts(args);
-    if o.server.is_empty() || o.nick.is_empty() || o.chan.is_empty() || o.since.is_empty() {
-        eprintln!("chat-client-rs: read needs --server --nick --chan --since");
-        std::process::exit(64);
-    }
-    let (mut tls, _fp) = match connect(&o.server, &o.nick, state_dir, o.insecure) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("chat-client-rs: {}", e);
-            std::process::exit(70);
-        }
-    };
-    let _ = wait_for_welcome(&mut tls);
-    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, o.since));
-    let deadline = SystemTime::now() + Duration::from_secs(5);
+    // Advance the channel cursor to the newest id. The echo line is the
+    // IRC-prefix form (no id), so fetch history to learn the id of the message
+    // just stored.
+    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, 0));
+    let deadline = SystemTime::now() + Duration::from_secs(3);
+    let mut max_id: u64 = Session::load(state_dir).cursor(&o.chan);
     while SystemTime::now() < deadline {
         match read_line(&mut tls) {
             Ok(l) => {
@@ -394,37 +567,108 @@ fn read_delta(args: &[String], state_dir: &PathBuf) {
                     break;
                 }
                 if l.starts_with("MSG ") {
-                    println!("{}", l);
+                    if let Some(id) = l
+                        .split_whitespace()
+                        .nth(2)
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        if id > max_id {
+                            max_id = id;
+                        }
+                    }
                 }
             }
             Err(_) => break,
         }
     }
+    if max_id > 0 {
+        save_cursor(state_dir, &o.chan, max_id, o.no_session);
+    }
     let _ = write_line(&mut tls, "QUIT");
 }
 
-fn tail(args: &[String], state_dir: &PathBuf) {
+fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    if o.server.is_empty() || o.nick.is_empty() || o.chan.is_empty() {
-        eprintln!("chat-client-rs: tail needs --server --nick --chan");
+    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: read needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
     }
-    let (mut tls, _fp) = match connect(&o.server, &o.nick, state_dir, o.insecure) {
+    // --since defaults to the session cursor ("everything since I last saw").
+    let since = if o.since.is_empty() && !o.no_session {
+        Session::load(state_dir).cursor(&o.chan).to_string()
+    } else {
+        o.since.clone()
+    };
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
             std::process::exit(70);
         }
     };
+    if !used_session {
+        save_session(state_dir, &server, &nick);
+    }
+    let _ = wait_for_welcome(&mut tls);
+    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, since));
+    let deadline = SystemTime::now() + Duration::from_secs(5);
+    let mut max_id: u64 = 0;
+    while SystemTime::now() < deadline {
+        match read_line(&mut tls) {
+            Ok(l) => {
+                if l.starts_with(":server 000 end-of-history") {
+                    break;
+                }
+                if l.starts_with("MSG ") {
+                    if let Some(id) = l
+                        .split_whitespace()
+                        .nth(2)
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        if id > max_id {
+                            max_id = id;
+                        }
+                    }
+                    println!("{}", l);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if max_id > 0 {
+        save_cursor(state_dir, &o.chan, max_id, o.no_session);
+    }
+    let _ = write_line(&mut tls, "QUIT");
+}
+
+fn tail(args: &[String], state_dir: &std::path::Path) {
+    let o = parse_opts(args);
+    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: tail needs --server --nick --chan (or a saved session)");
+        std::process::exit(64);
+    }
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    };
+    if !used_session {
+        save_session(state_dir, &server, &nick);
+    }
     let _ = wait_for_welcome(&mut tls);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    // Live tail: stay alive across idle stretches so a later message wakes this
-    // agent. The step-down poll cadence (5s -> 10s -> 20s -> ... -> 60s cap,
-    // reset on any new message) is the graceful-degradation fallback for when
-    // live push is unavailable or a push is missed; it also keeps the process
-    // alive so a message arriving later wakes this agent.
+    // Resume from the session cursor so a re-tailing agent does not re-read
+    // everything since 0.
+    let mut last_id: u64 = if o.no_session {
+        0
+    } else {
+        Session::load(state_dir).cursor(&o.chan)
+    };
     let mut interval: u64 = 5;
-    let mut last_id: u64 = 0;
     let mut last_seen = SystemTime::now();
     loop {
         // Poll for new history since the last id we saw; print any new rows.
@@ -447,6 +691,7 @@ fn tail(args: &[String], state_dir: &PathBuf) {
                             last_id = id;
                             new_msg = true;
                             println!("{}", l);
+                            save_cursor(state_dir, &o.chan, id, o.no_session);
                         }
                     }
                 }
@@ -646,5 +891,97 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
             rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
             rustls::SignatureScheme::ED25519,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp_state(name: &str) -> PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("chat-session-test-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn session_round_trips_server_nick_and_cursors() {
+        let d = tmp_state("session_round_trips_server_nick_and_cursors");
+        let s = Session {
+            server: "127.0.0.1:1234".into(),
+            nick: "agent".into(),
+            cursors: std::collections::HashMap::from([("#ops".to_string(), 7)]),
+        };
+        s.save(&d).unwrap();
+
+        let loaded = Session::load(&d);
+        assert_eq!(loaded.server, "127.0.0.1:1234");
+        assert_eq!(loaded.nick, "agent");
+        assert_eq!(loaded.cursor("#ops"), 7);
+        assert_eq!(loaded.cursor("#other"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn session_missing_file_is_empty_session() {
+        let d = tmp_state("session_missing_file_is_empty_session");
+        let s = Session::load(&d);
+        assert_eq!(s.server, "");
+        assert_eq!(s.nick, "");
+        assert_eq!(s.cursor("#x"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn session_malformed_json_recovers_to_empty() {
+        let d = tmp_state("session_malformed_json_recovers_to_empty");
+        fs::write(Session::path(&d), "{ not valid json !!!").unwrap();
+        let s = Session::load(&d);
+        assert_eq!(s.server, "");
+        assert_eq!(s.nick, "");
+        assert_eq!(s.cursor("#x"), 0);
+        // a subsequent save overwrites the malformed file cleanly
+        let s2 = Session {
+            server: "h:1".into(),
+            nick: String::new(),
+            cursors: Default::default(),
+        };
+        s2.save(&d).unwrap();
+        let reloaded = Session::load(&d);
+        assert_eq!(reloaded.server, "h:1");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn session_partial_json_keeps_what_parses_or_resets() {
+        // A JSON object missing the cursors key must still deserialize
+        // (serde default) rather than failing the whole file.
+        let d = tmp_state("session_partial_json_keeps_what_parses_or_resets");
+        fs::write(Session::path(&d), "{\"server\":\"h:1\",\"nick\":\"n\"}").unwrap();
+        let s = Session::load(&d);
+        assert_eq!(s.server, "h:1");
+        assert_eq!(s.nick, "n");
+        assert_eq!(s.cursor("#x"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn cursor_updates_monotonically() {
+        let d = tmp_state("cursor_updates_monotonically");
+        save_cursor(&d, "#ops", 5, false);
+        save_cursor(&d, "#ops", 3, false); // lower: ignored
+        assert_eq!(Session::load(&d).cursor("#ops"), 5);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_session_flag_skips_cursor_save() {
+        let d = tmp_state("no_session_flag_skips_cursor_save");
+        save_cursor(&d, "#ops", 9, true);
+        assert_eq!(Session::load(&d).cursor("#ops"), 0);
+        let _ = fs::remove_dir_all(&d);
     }
 }
