@@ -10,7 +10,10 @@ instead of re-debugging.
 
 ## What you get
 
-- **A deviations note per project.** `<project>-deviations.md` records
+- **A deviations note per project.** Notes live in the shared skill-data
+  directory, `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/`, one
+  `<project>-deviations.md` per project — outside the skill's install
+  directory, so a skill update never walks over them. They record
   behavior that deviates from the normal defaults: environment quirks,
   non-obvious conventions, tooling gotchas — each one *confirmed*, not
   suspected.

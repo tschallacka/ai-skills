@@ -852,6 +852,18 @@ agent_target_available() {
     esac
 }
 
+# The shared skill-data directory beside the custom-locations file: user data
+# that must survive a skill reinstall (project deviation notes) lives here, so
+# the installer guarantees it exists and stays readable, writable and
+# creatable by the running user before any skill lands. Agents registered
+# under that user inherit the access.
+ensure_agent_data_dir() {
+    local dir
+    dir="$(dirname "$CUSTOM_LOCATIONS_FILE")"
+    mkdir -p "$dir"
+    chmod u+rwx "$dir" 2>/dev/null || true
+}
+
 save_custom_location() {
     local path="$1"
     mkdir -p "$(dirname "$CUSTOM_LOCATIONS_FILE")"
@@ -1062,8 +1074,9 @@ show_shop_menu() {
     local horizontal=''
     local index label description
     # The registry from section 1, plus the synthetic "everything" entry whose
-    # number select_skills() treats as "all".
-    local -a labels=("${SKILL_NAMES[@]}" 'all five skills')
+    # number select_skills() treats as "all". The label derives from the count,
+    # so adding a skill cannot leave a stale number behind.
+    local -a labels=("${SKILL_NAMES[@]}" "all ${#SKILL_NAMES[@]} skills")
     local -a descriptions=("${SKILL_DESCRIPTIONS[@]}" 'Installs or updates the complete skill set.')
 
     [ -n "$COLOR_MODE" ] || detect_color_mode
@@ -4176,7 +4189,7 @@ if [ -n "$CLI_MODE" ]; then
     case "$CLI_MODE" in
         print) cli_print_skill_files ;;
         resolve) cli_resolve_source ;;
-        install) cli_install_skill ;;
+        install) ensure_agent_data_dir; cli_install_skill ;;
     esac
     exit $?
 fi
@@ -4188,6 +4201,7 @@ select_skills
 download_source
 prepend_bundled_rjq
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
+ensure_agent_data_dir
 # PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
 # 3.2 treats the empty expansion as unbound under set -u.
 SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})
