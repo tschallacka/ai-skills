@@ -17,7 +17,7 @@ compatible agent tools.
 | Resource-limited testing | Runs heavyweight commands (suites, builds, analyzers, browsers) under platform-appropriate CPU/memory caps, with honest degradation when a platform has no cap mechanism. | [docs](resource-limited-testing/docs/README.md) |
 | Chat | RFC-1459 IRC-over-TLS message bus for agents: a rust server a standard TLS IRC client can join, a rust client with UDP discovery and TOFU cert pinning, channels, and additive history/delta reads. | [docs](chat/docs/README.md) |
 | Git worktrees | Parallel agents in one repository: isolated worktree verification, per-agent trees, and merging back in a conflict-aware order without trampling the main checkout. | [docs](git-worktrees/docs/README.md) |
-| Text etiquette | Shorthand and a clipped register for agent chat: facts first, a shared shorthand with an ask-don't-guess rule, praise capped at `gj`, and the people-please prose banned. | [docs](text-etiquette/docs/README.md) |
+| Text etiquette | Shorthand and a clipped register for an agent's prose - chat, dev talk, and its own thinking: facts first, a shared shorthand with an ask-don't-guess rule, praise capped at `gj`, and the people-please prose banned. Plain english on request. | [docs](text-etiquette/docs/README.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.

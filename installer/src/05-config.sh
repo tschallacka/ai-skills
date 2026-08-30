@@ -50,7 +50,7 @@ SKILL_DESCRIPTIONS=(
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
-    'Shorthand and a clipped register for agent chat: short, factual, no people-please prose.'
+    'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -103,10 +103,10 @@ And the part that is usually learned late: the order to merge the branches back 
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
 Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
-    'Tells an agent how to talk in a shared channel: clipped sentences, a shared shorthand, and the prose that is banned.
+    'Tells an agent how to talk everywhere verbosity creeps in: chat with agents, dev talk with the developer, and its own thinking prose.
 The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
 Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
-The register bends only where brevity would cost understanding: destructive actions, security warnings and direct questions.'
+The reader may always ask for plain english; the register bends only where brevity would cost understanding.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
