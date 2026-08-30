@@ -44,8 +44,10 @@ a history fetch a standard client never sends:
 ```
 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]
 chat-client-rs send   [--server HOST:PORT] [--nick N] --chan #c --text MSG
-chat-client-rs read   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
-chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c
+chat-client-rs read   [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions]
+chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit]
+chat-client-rs join   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
+chat-client-rs leave  [--server HOST:PORT] [--nick N] --chan #c
 chat-client-rs session show | set | clear | cursor #chan [ID]
 ```
 
@@ -63,6 +65,17 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   `session set --server H --nick N` records it; `session show` displays it;
   `session clear` (or `--cursors`) removes it; `--no-session` bypasses it for
   one call. A malformed `session.json` is reset with a warning, never a crash.
+- **join / leave.** `join #c` seeds the channel cursor to the channel's CURRENT
+  end (via the server's `LASTID`), so tailing or reading an old channel never
+  dumps its whole history — only new messages arrive. `--since ID` overrides
+  the seed (use `--since 0` to read everything). `leave #c` sends PART and drops
+  the channel's cursor, so a later join starts fresh at the new end.
+- **Mentions.** `read`/`tail` with `--mentions` ask the server to filter rows to
+  those mentioning your nick (`@<nick>` in the text) — server-side tracking, so
+  a watcher pulls only what names it. `tail --mention-exit` exits as soon as a
+  mention arrives (a notification for an agent to act on). When your nick is
+  taken by a concurrent connection (e.g. a tail), the client auto-suffixes it
+  (`nick-2`, `nick-3`, …) like a standard IRC client so sends/reads still work.
 
 ## The rust server
 

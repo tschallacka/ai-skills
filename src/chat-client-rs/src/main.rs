@@ -30,17 +30,21 @@ fn usage() {
          usage:\n\
          \x20 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]\n\
          \x20 chat-client-rs send [--server HOST:PORT] [--nick N] --chan #c --text MSG [--insecure]\n\
-         \x20 chat-client-rs read  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
-         \x20 chat-client-rs tail  [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
+         \x20 chat-client-rs read  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions] [--insecure]\n\
+         \x20 chat-client-rs tail  [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit] [--insecure]\n\
+         \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
+         \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options:\n\
-         \x20 --state DIR    client state dir (default $AI_CHAT_HOME or ~/.ai-chat)\n\
-         \x20 --insecure     do not pin the server cert (testing)\n\
-         \x20 --no-session   ignore the saved session (server/nick/cursor)\n\n\
+         \x20 --state DIR     client state dir (default $AI_CHAT_HOME or ~/.ai-chat)\n\
+         \x20 --insecure      do not pin the server cert (testing)\n\
+         \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
+         \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
+         \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\n\
          The session remembers the default server+nick and per-channel cursors\n\
-         (last seen message id), so later send/read/tail calls can omit\n\
-         --server, --nick and --since. `session clear` removes it; a malformed\n\
-         session.json is reset with a warning."
+         (last seen message id). join seeds the cursor to the channel's current\n\
+         end (so read/tail never dump old history); leave PARTs and drops the\n\
+         cursor. A malformed session.json is reset with a warning."
     );
     std::process::exit(64);
 }
@@ -56,6 +60,8 @@ fn main() {
         "send" => send(&args[2..], &state_dir),
         "read" => read_delta(&args[2..], &state_dir),
         "tail" => tail(&args[2..], &state_dir),
+        "join" => join_channel(&args[2..], &state_dir),
+        "leave" => leave_channel(&args[2..], &state_dir),
         "session" => session_cmd(&args[2..], &state_dir),
         other => {
             eprintln!("chat-client-rs: unknown subcommand: {}", other);
@@ -230,6 +236,8 @@ struct Opts {
     since: String,
     insecure: bool,
     no_session: bool,
+    mentions: bool,
+    mention_exit: bool,
 }
 
 fn parse_opts(args: &[String]) -> Opts {
@@ -241,6 +249,8 @@ fn parse_opts(args: &[String]) -> Opts {
         since: String::new(),
         insecure: false,
         no_session: false,
+        mentions: false,
+        mention_exit: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -267,6 +277,8 @@ fn parse_opts(args: &[String]) -> Opts {
             }
             "--insecure" => o.insecure = true,
             "--no-session" => o.no_session = true,
+            "--mentions" => o.mentions = true,
+            "--mention-exit" => o.mention_exit = true,
             _ => {}
         }
         i += 1;
@@ -532,7 +544,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
         save_session(state_dir, &server, &nick);
     }
     // drain to registration complete
-    let _ = wait_for_welcome(&mut tls);
+    let _ = wait_for_welcome(&mut tls, &nick);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
     let _ = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, o.text));
     // read the echo of the stored line
@@ -546,7 +558,11 @@ fn send(args: &[String], state_dir: &std::path::Path) {
                     break;
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                if !e.contains("os error 11") {
+                    break;
+                }
+            }
         }
     }
     if out.is_empty() {
@@ -578,12 +594,112 @@ fn send(args: &[String], state_dir: &std::path::Path) {
                     }
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                if !e.contains("os error 11") {
+                    break;
+                }
+            }
         }
     }
     if max_id > 0 {
         save_cursor(state_dir, &o.chan, max_id, o.no_session);
     }
+    let _ = write_line(&mut tls, "QUIT");
+}
+
+/// Read the server's `:server 999 <nick> #chan <id>` reply (current max id).
+fn read_last_id(
+    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+    chan: &str,
+) -> u64 {
+    let deadline = SystemTime::now() + Duration::from_secs(3);
+    while SystemTime::now() < deadline {
+        match read_line(tls) {
+            Ok(l) => {
+                if l.contains(" 999 ") && l.contains(chan) {
+                    return l
+                        .split_whitespace()
+                        .last()
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(0);
+                }
+            }
+            Err(e) => {
+                if !e.contains("os error 11") {
+                    break;
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Join a channel without reading its history: seed the session cursor to the
+/// channel's current end so later read/tail resume from "now".
+fn join_channel(args: &[String], state_dir: &std::path::Path) {
+    let o = parse_opts(args);
+    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: join needs --server --nick --chan (or a saved session)");
+        std::process::exit(64);
+    }
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    };
+    if !used_session {
+        save_session(state_dir, &server, &nick);
+    }
+    let _ = wait_for_welcome(&mut tls, &nick);
+    let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
+    // Ask for the current max id; we do NOT dump the channel history.
+    let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+    let current = read_last_id(&mut tls, &o.chan);
+    // Seed the cursor: explicit --since overrides; otherwise the current end.
+    let seed = if o.since.is_empty() {
+        current
+    } else {
+        o.since.parse::<u64>().unwrap_or(current)
+    };
+    if !o.no_session {
+        let mut s = Session::load(state_dir);
+        s.cursors.insert(o.chan.clone(), seed);
+        let _ = s.save(state_dir);
+    }
+    println!("joined {} (resuming after id {})", o.chan, seed);
+    let _ = write_line(&mut tls, "QUIT");
+}
+
+/// Leave a channel: send PART and drop the channel cursor from the session.
+fn leave_channel(args: &[String], state_dir: &std::path::Path) {
+    let o = parse_opts(args);
+    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: leave needs --server --nick --chan (or a saved session)");
+        std::process::exit(64);
+    }
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    };
+    if !used_session {
+        save_session(state_dir, &server, &nick);
+    }
+    let _ = wait_for_welcome(&mut tls, &nick);
+    let _ = write_line(&mut tls, &format!("PART {}", o.chan));
+    // Clean up the channel's cursor so a later join starts fresh at the end.
+    if !o.no_session {
+        let mut s = Session::load(state_dir);
+        s.cursors.remove(&o.chan);
+        let _ = s.save(state_dir);
+    }
+    println!("left {}", o.chan);
     let _ = write_line(&mut tls, "QUIT");
 }
 
@@ -595,11 +711,16 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
         std::process::exit(64);
     }
     // --since defaults to the session cursor ("everything since I last saw").
-    let since = if o.since.is_empty() && !o.no_session {
-        Session::load(state_dir).cursor(&o.chan).to_string()
-    } else {
-        o.since.clone()
-    };
+    // With no cursor and no --since, default to the channel's CURRENT end (via
+    // LASTID) so reading an old channel does not dump its whole history; use
+    // `--since 0` (or --history via session cursor 0) to read everything.
+    let mut since = o.since.clone();
+    if since.is_empty() && !o.no_session {
+        let cur = Session::load(state_dir).cursor(&o.chan);
+        if cur > 0 {
+            since = cur.to_string();
+        }
+    }
     let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
@@ -610,8 +731,19 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     if !used_session {
         save_session(state_dir, &server, &nick);
     }
-    let _ = wait_for_welcome(&mut tls);
-    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, since));
+    let _ = wait_for_welcome(&mut tls, &nick);
+    if since.is_empty() {
+        // No cursor yet: find the current end, then fetch nothing from before
+        // it unless the caller asked for history.
+        let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+        let current = read_last_id(&mut tls, &o.chan);
+        since = current.to_string();
+    }
+    let mention_suffix = if o.mentions { " mentions" } else { "" };
+    let _ = write_line(
+        &mut tls,
+        &format!("FETCH {} {}{}", o.chan, since, mention_suffix),
+    );
     let deadline = SystemTime::now() + Duration::from_secs(5);
     let mut max_id: u64 = 0;
     while SystemTime::now() < deadline {
@@ -633,7 +765,11 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
                     println!("{}", l);
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                if !e.contains("os error 11") {
+                    break;
+                }
+            }
         }
     }
     if max_id > 0 {
@@ -659,20 +795,31 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     if !used_session {
         save_session(state_dir, &server, &nick);
     }
-    let _ = wait_for_welcome(&mut tls);
+    let _ = wait_for_welcome(&mut tls, &nick);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    // Resume from the session cursor so a re-tailing agent does not re-read
-    // everything since 0.
+    // Resume from the session cursor; with no cursor yet, default to the
+    // channel's CURRENT end (LASTID) so tailing an old channel does not dump
+    // its whole history — only new messages are shown from now on.
     let mut last_id: u64 = if o.no_session {
         0
     } else {
-        Session::load(state_dir).cursor(&o.chan)
+        let cur = Session::load(state_dir).cursor(&o.chan);
+        if cur > 0 {
+            cur
+        } else {
+            let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+            read_last_id(&mut tls, &o.chan)
+        }
     };
+    let mention_suffix = if o.mentions { " mentions" } else { "" };
     let mut interval: u64 = 5;
     let mut last_seen = SystemTime::now();
     loop {
         // Poll for new history since the last id we saw; print any new rows.
-        let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, last_id));
+        let _ = write_line(
+            &mut tls,
+            &format!("FETCH {} {}{}", o.chan, last_id, mention_suffix),
+        );
         let poll_deadline = SystemTime::now() + Duration::from_secs(2);
         let mut new_msg = false;
         while SystemTime::now() < poll_deadline {
@@ -690,12 +837,26 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                         if id > last_id {
                             last_id = id;
                             new_msg = true;
-                            println!("{}", l);
+                            if o.mentions {
+                                // Notification: mark the mention distinctly so
+                                // a watcher can act on it.
+                                println!("!! MENTION !! {}", l);
+                                if o.mention_exit {
+                                    let _ = write_line(&mut tls, "QUIT");
+                                    std::process::exit(0);
+                                }
+                            } else {
+                                println!("{}", l);
+                            }
                             save_cursor(state_dir, &o.chan, id, o.no_session);
                         }
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    if !e.contains("os error 11") {
+                        break;
+                    }
+                }
             }
         }
         if new_msg {
@@ -715,14 +876,25 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
 
 fn wait_for_welcome(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+    base_nick: &str,
 ) -> Result<(), String> {
     let mut seen_001 = false;
+    let mut attempt = 2u32;
     let deadline = SystemTime::now() + Duration::from_secs(4);
     while SystemTime::now() < deadline {
         match read_line(tls) {
             Ok(l) => {
                 if l.contains(" 001 ") || l.starts_with(":") && l.contains(" 001 ") {
                     seen_001 = true;
+                }
+                // Nick already in use (e.g. a tail holds the session nick):
+                // auto-retry with a numeric suffix like real IRC clients, so a
+                // concurrent send/read can register alongside the holder.
+                if l.contains(" 433 ") {
+                    let alt = format!("{}-{}", base_nick, attempt);
+                    attempt += 1;
+                    let _ = write_line(tls, &format!("NICK {}", alt));
+                    continue;
                 }
                 if seen_001 && l.contains(" 376 ") {
                     return Ok(());
@@ -983,5 +1155,61 @@ mod tests {
         save_cursor(&d, "#ops", 9, true);
         assert_eq!(Session::load(&d).cursor("#ops"), 0);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn parse_opts_reads_mention_flags() {
+        let o = parse_opts(&[
+            "--mentions".into(),
+            "--mention-exit".into(),
+            "--chan".into(),
+            "#m".into(),
+            "--server".into(),
+            "h:1".into(),
+            "--nick".into(),
+            "me".into(),
+        ]);
+        assert!(o.mentions);
+        assert!(o.mention_exit);
+        assert_eq!(o.chan, "#m");
+        assert!(!o.no_session);
+    }
+
+    #[test]
+    fn session_clear_drops_cursors_keeps_identity() {
+        let d = tmp_state("session_clear_drops_cursors_keeps_identity");
+        let mut s = Session {
+            server: "h:1".into(),
+            nick: "me".into(),
+            cursors: std::collections::HashMap::from([("#a".to_string(), 3)]),
+        };
+        s.save(&d).unwrap();
+        s.cursors.clear();
+        s.save(&d).unwrap();
+        let loaded = Session::load(&d);
+        assert_eq!(loaded.server, "h:1");
+        assert_eq!(loaded.nick, "me");
+        assert_eq!(loaded.cursor("#a"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn read_last_id_parses_numeric_reply() {
+        // Simulate the server's `:server 999 nick #chan 42` reply line.
+        let line = ":server 999 me #ops 42";
+        let id = line
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        assert_eq!(id, 42);
+        // A malformed reply yields 0 (client treats it as an empty channel).
+        let bad = " 999 me #ops";
+        let id2 = bad
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        assert_eq!(id2, 0);
     }
 }

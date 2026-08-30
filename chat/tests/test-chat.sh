@@ -167,7 +167,55 @@ rc=0
 cli sess send --chan '#x' --text 'x' --insecure --no-session >/dev/null 2>"$temporary_root/nosession.err" || rc=$?
 [ "$rc" -eq 64 ] || t_fail "--no-session send without server/nick exited $rc (want 64)"
 
+# join seeds the cursor to the channel's CURRENT end (no history dump); read
+# after join resumes from the cursor; leave drops the cursor. Mentions: a tail
+# --mentions --mention-exit catches a concurrent @<nick> and exits.
+# (Re-set the session: the malformed-JSON recovery above reset it.)
+cli sess session set --server 127.0.0.1:"$port" --nick sessioner >/dev/null 2>&1 || true
+cli sess send --chan '#old' --text 'ancient' --insecure >/dev/null 2>&1 || true
+cli sess send --chan '#old' --text 'elder' --insecure >/dev/null 2>&1 || true
+j="$(cli sess join --chan '#old' --insecure 2>&1)"
+case "$j" in
+    *'resuming after id 2'*) : ;;
+    *) t_fail "join did not seed to current end: [$j]" ;;
+esac
+# read after join without --since must not dump the old history.
+after="$(cli sess read --chan '#old' --insecure 2>&1)"
+[ -z "$after" ] || t_fail "read after join dumped history: [$after]"
+# explicit --since 0 still reads everything.
+hist="$(cli sess read --chan '#old' --since 0 --insecure 2>&1)"
+case "$hist" in
+    *'ancient'*'elder'*) : ;;
+    *) t_fail "read --since 0 did not return full history: [$hist]" ;;
+esac
+# leave drops the cursor from the session.
+cli sess leave --chan '#old' --insecure >/dev/null 2>&1 || true
+cleft="$(cli sess session show 2>/dev/null | grep 'cursor #old' || true)"
+[ -z "$cleft" ] || t_fail "leave did not drop the #old cursor: [$cleft]"
+# mention-notify: a tail --mentions --mention-exit exits when a concurrent
+# send mentions @<session nick> (the sender auto-suffixes on nick-in-use).
+mhome="$temporary_root/ment"
+mkdir -p "$mhome"
+AI_CHAT_HOME="$mhome" "$CLIENT" session set --server 127.0.0.1:"$port" --nick mwatcher >/dev/null 2>&1 || true
+AI_CHAT_HOME="$mhome" "$CLIENT" join --chan '#ment' --insecure >/dev/null 2>&1 || true
+AI_CHAT_HOME="$mhome" "$CLIENT" tail --chan '#ment' --mentions --mention-exit --insecure \
+    >>"$temporary_root/ment.log" 2>>"$temporary_root/ment.err" &
+ment_pid=$!
+sleep 5
+AI_CHAT_HOME="$mhome" "$CLIENT" send --chan '#ment' --text 'ping @mwatcher now' --insecure \
+    >/dev/null 2>>"$temporary_root/ment-send.err" || t_fail "mention send failed: $(cat "$temporary_root/ment-send.err")"
+for i in $(seq 1 6); do
+    kill -0 "$ment_pid" 2>/dev/null || break
+    sleep 2
+done
+if kill -0 "$ment_pid" 2>/dev/null; then
+    t_fail "tail --mentions --mention-exit did not exit on a mention"
+fi
+grep -q '!! MENTION !!' "$temporary_root/ment.log" \
+    || t_fail "mention was not surfaced: [$(cat "$temporary_root/ment.log")]"
+wait "$ment_pid" 2>/dev/null || true
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session)\n' >&2
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions)\n' >&2
 t_end

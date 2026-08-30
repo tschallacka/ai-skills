@@ -151,6 +151,34 @@ impl Hub {
         }
         out
     }
+
+    /// The channel's current maximum message id (0 when empty). A client uses
+    /// this to seed a cursor without reading the whole history.
+    fn last_id(&self, chan: &str) -> u64 {
+        self.scan_highest(chan)
+    }
+
+    /// Like `fetch`, but only rows whose text mentions `@nick` (server-side
+    /// mention tracking, so a client can watch for its name without pulling
+    /// the whole channel).
+    fn fetch_mentions(&self, chan: &str, since: u64, nick: &str) -> Vec<String> {
+        let needle = format!("@{}", nick);
+        let path = self.chan_path(chan);
+        let mut out = Vec::new();
+        if let Ok(f) = fs::File::open(&path) {
+            for line in BufReader::new(f).lines().map_while(Result::ok) {
+                let f: Vec<&str> = line.splitn(4, ' ').collect();
+                if f.len() >= 4 && f[0] == "MSG" && f[1] == chan {
+                    if let Ok(id) = f[2].parse::<u64>() {
+                        if id > since && line.contains(&needle) {
+                            out.push(line);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 fn valid_chan(c: &str) -> bool {
@@ -258,12 +286,7 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                 match st.conn.complete_io(&mut st.tcp) {
                     Ok(_) => {
                         handshake_done = !st.conn.is_handshaking();
-                        // complete_io returns when it can't make progress; if we
-                        // are no longer handshaking we're done, else loop again.
                         if st.conn.is_handshaking() {
-                            // Need more data; complete_io already read+wrote what
-                            // it could. Re-loop to process any newly available
-                            // plaintext/staged writes.
                             continue;
                         }
                     }
@@ -276,12 +299,12 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     }
                 }
             }
-        } else {
-            // Already past handshake: read raw bytes, process, flush.
-            let _ = st.conn.read_tls(&mut st.tcp);
-            let _ = st.conn.process_new_packets();
-            while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
         }
+        // After the handshake, catch any further buffered raw bytes and
+        // decrypt them before draining plaintext.
+        let _ = st.conn.read_tls(&mut st.tcp);
+        let _ = st.conn.process_new_packets();
+        while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
         while let Ok(n) = st.conn.reader().read(&mut raw) {
             if n == 0 {
                 break;
@@ -581,12 +604,24 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                             Err(e) => w(st, &format!("ERROR :{}", e)),
                         }
                     }
+                    "LASTID" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        if !valid_chan(&chan) {
+                            w(st, "ERROR :usage: LASTID #chan");
+                            continue;
+                        }
+                        let id = hub.last_id(&chan);
+                        // Private numeric 999: `:server 999 <nick> #chan <id>`.
+                        let sn = sess.server_name.clone();
+                        let n = sess.nick.clone();
+                        w(st, &format!(":{} 999 {} {} {}", sn, n, chan, id));
+                    }
                     "FETCH" => {
                         let (chan, since) = match (params.first().cloned(), params.get(1).cloned())
                         {
                             (Some(c), Some(s)) => (c, s),
                             _ => {
-                                w(st, "ERROR :usage: FETCH #chan <since-id>");
+                                w(st, "ERROR :usage: FETCH #chan <since-id> [mentions]");
                                 continue;
                             }
                         };
@@ -594,11 +629,19 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                             && since.chars().all(|c| c.is_ascii_digit())
                             && !since.is_empty();
                         if !ok {
-                            w(st, "ERROR :usage: FETCH #chan <since-id>");
+                            w(st, "ERROR :usage: FETCH #chan <since-id> [mentions]");
                             continue;
                         }
                         let since_id: u64 = since.parse().unwrap_or(0);
-                        for row in hub.fetch(&chan, since_id) {
+                        // Optional third param `mentions` filters to rows that
+                        // mention the requesting nick (server-side tracking).
+                        let only_mentions = params.get(2).map(|s| s.as_str()) == Some("mentions");
+                        let rows = if only_mentions {
+                            hub.fetch_mentions(&chan, since_id, &sess.nick)
+                        } else {
+                            hub.fetch(&chan, since_id)
+                        };
+                        for row in rows {
                             w(st, row.trim_end_matches('\n'));
                         }
                         w(st, &format!("{} {}", FETCH_END, chan));
@@ -713,6 +756,13 @@ fn main() {
             Ok(s) => s,
             Err(_) => continue,
         };
+        // A short read timeout lets each serve thread release its slot guard
+        // frequently instead of holding it across an indefinitely-blocking
+        // read_tls (which would stall broadcasters trying to deliver a message
+        // to an idle member).
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok();
         let hub = Arc::clone(&hub);
         let tls_config = Arc::clone(&tls_config);
         let mut writers = hub.writers.lock().unwrap();
