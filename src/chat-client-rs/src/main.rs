@@ -157,7 +157,6 @@ fn connect(
         // handshake; flushing between them ensures each line is on the wire.
         let res = write_line(&mut tls, &format!("NICK {}", nick))
             .and_then(|_| write_line(&mut tls, &format!("USER {} 0 * :{}", nick, nick)));
-        eprintln!("chat-client-rs: registered nick={} user={}", nick, nick);
         match res {
             Ok(()) => break,
             Err(e) => {
