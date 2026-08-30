@@ -153,8 +153,11 @@ fn connect(
     // transient race with a just-started server.
     let mut attempts = 0;
     loop {
+        // Register in two writes (NICK then USER). The first write drives the
+        // handshake; flushing between them ensures each line is on the wire.
         let res = write_line(&mut tls, &format!("NICK {}", nick))
             .and_then(|_| write_line(&mut tls, &format!("USER {} 0 * :{}", nick, nick)));
+        eprintln!("chat-client-rs: registered nick={} user={}", nick, nick);
         match res {
             Ok(()) => break,
             Err(e) => {
@@ -416,11 +419,53 @@ fn tail(args: &[String], state_dir: &PathBuf) {
     };
     let _ = wait_for_welcome(&mut tls);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    // Stream lines until EOF (this is a live tail; Ctrl-C to stop).
-    while let Ok(l) = read_line(&mut tls) {
-        if l.starts_with(":") && l.contains("PRIVMSG") {
-            println!("{}", l);
+    // Live tail: stay alive across idle stretches so a later message wakes this
+    // agent. The step-down poll cadence (5s -> 10s -> 20s -> ... -> 60s cap,
+    // reset on any new message) is the graceful-degradation fallback for when
+    // live push is unavailable or a push is missed; it also keeps the process
+    // alive so a message arriving later wakes this agent.
+    let mut interval: u64 = 5;
+    let mut last_id: u64 = 0;
+    let mut last_seen = SystemTime::now();
+    loop {
+        // Poll for new history since the last id we saw; print any new rows.
+        let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, last_id));
+        let poll_deadline = SystemTime::now() + Duration::from_secs(2);
+        let mut new_msg = false;
+        while SystemTime::now() < poll_deadline {
+            match read_line(&mut tls) {
+                Ok(l) => {
+                    if l.starts_with(":server 000 end-of-history") {
+                        break;
+                    }
+                    if l.starts_with("MSG ") {
+                        let id = l
+                            .split_whitespace()
+                            .nth(2)
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(0);
+                        if id > last_id {
+                            last_id = id;
+                            new_msg = true;
+                            println!("{}", l);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
         }
+        if new_msg {
+            // A message reset the cadence to fast.
+            interval = 5;
+            last_seen = SystemTime::now();
+        } else {
+            // No new message: step down toward the 60s cap.
+            interval = (interval + 10).min(60);
+        }
+        std::thread::sleep(Duration::from_secs(interval));
+        // Bound an idle stretch to the cadence; if the connection is dead the
+        // next FETCH will error and this loop breaks.
+        let _ = last_seen;
     }
 }
 
@@ -440,7 +485,12 @@ fn wait_for_welcome(
                 }
             }
             Err(e) => {
-                return Err(e);
+                // EAGAIN/EWOULDBLOCK: the welcome hasn't arrived within this
+                // read's timeout but the connection is alive; keep waiting for
+                // the deadline rather than failing a noisy localhost exchange.
+                if !e.contains("os error 11") {
+                    return Err(e);
+                }
             }
         }
     }

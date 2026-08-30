@@ -98,14 +98,43 @@ case "$delta" in
     *) t_fail "read-delta did not return the message: [$delta]" ;;
 esac
 
-# A second read with a mismatched pin fails closed (TOFU). Seed a bogus pin.
+# The mismatched-pin fail-closed path (TOFU).
 bogus_fp="$temporary_root/c_rB/127_0_0_1_${port}.cert.fp"
 printf 'bogus\n' > "$bogus_fp"
 rc=0
 cli rB read --server 127.0.0.1:"$port" --nick alice --chan '#ops' --since 0 >/dev/null 2>"$temporary_root/tofu.err" || rc=$?
 [ "$rc" -eq 70 ] || t_fail "mismatched TOFU pin did not fail closed (rc=$rc): $(cat "$temporary_root/tofu.err")"
 
+# An idle tail stays alive across a silence longer than the old 5s read
+# timeout, and wakes when a message arrives on the channel it is watching.
+wake_home="$temporary_root/wake"
+mkdir -p "$wake_home"
+AI_CHAT_HOME="$wake_home" "$CLIENT" tail --server 127.0.0.1:"$port" --nick wakee --chan '#wake' --insecure \
+    </dev/null >>"$temporary_root/wake.log" 2>>"$temporary_root/wake.err" &
+wake_pid=$!
+sleep 2
+if ! kill -0 "$wake_pid" 2>/dev/null; then
+    t_fail "idle tail did not start: $(cat "$temporary_root/wake.err")"
+fi
+# Survive a silence past the old 5s read timeout.
+sleep 6
+if ! kill -0 "$wake_pid" 2>/dev/null; then
+    t_fail "idle tail exited during a 6s silence: $(cat "$temporary_root/wake.err")"
+fi
+# Send a wake message; the tail's poll must pick it up and print it.
+wake_msg="wake wakee now"
+cli wS send --server 127.0.0.1:"$port" --nick waker --chan '#wake' --text "$wake_msg" >/dev/null 2>"$temporary_root/wake-send.err" \
+    || t_fail "wake send failed: $(cat "$temporary_root/wake-send.err")"
+sleep 8 # allow the tail's poll (5s interval) to catch it
+grep -q "$wake_msg" "$temporary_root/wake.log" \
+    || t_fail "idle tail did not wake on the message: [$(cat "$temporary_root/wake.log")]"
+if ! kill -0 "$wake_pid" 2>/dev/null; then
+    t_fail "tail exited after waking"
+fi
+kill "$wake_pid" 2>/dev/null || true
+wait "$wake_pid" 2>/dev/null || true
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed)\n' >&2
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail stays alive and wakes)\n' >&2
 t_end

@@ -52,6 +52,10 @@ struct Hub {
     chan_dir: PathBuf,
     highest: Mutex<HashMap<String, u64>>,
     channels: Mutex<HashMap<String, Vec<String>>>, // chan -> nicks
+    // Registered nicks, so a nick-in-use check never needs the writers lock
+    // (holding a connection's own slot guard while acquiring writers is an
+    // ABBA deadlock with the broadcast path).
+    nicks: Mutex<HashMap<String, u64>>, // nick -> conn index
     // zero-sized connection writers: one per live connection, keyed by index
     writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>,
 }
@@ -323,21 +327,8 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         continue;
                     }
                     let in_use = {
-                        if let Ok(writers) = hub.writers.lock() {
-                            let mut used = false;
-                            for (i, s) in writers.iter().enumerate() {
-                                if i == idx {
-                                    continue;
-                                }
-                                if let Ok(g) = s.lock() {
-                                    if let Some(c) = g.as_ref() {
-                                        if c.nick == new_nick {
-                                            used = true;
-                                        }
-                                    }
-                                }
-                            }
-                            used
+                        if let Ok(nicks) = hub.nicks.lock() {
+                            nicks.contains_key(&new_nick)
                         } else {
                             false
                         }
@@ -358,6 +349,9 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     }
                     sess.nick = new_nick.clone();
                     st.nick = new_nick.clone();
+                    if let Ok(mut nicks) = hub.nicks.lock() {
+                        nicks.insert(new_nick.clone(), idx as u64);
+                    }
                     continue;
                 }
                 if verb == "USER" {
@@ -420,6 +414,9 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     w(st, "ERROR :bye");
                     st.closed = true;
                     sess.closed = true;
+                    if let Ok(mut nicks) = hub.nicks.lock() {
+                        nicks.retain(|_, v| *v != idx as u64);
+                    }
                     drop(guard);
                     return;
                 }
@@ -572,7 +569,8 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                                         }
                                         if let Ok(mut g) = s.lock() {
                                             if let Some(c) = g.as_mut() {
-                                                if !c.closed {
+                                                if !c.closed && c.joined.iter().any(|j| j == &chan)
+                                                {
                                                     c.write_line(&out);
                                                 }
                                             }
@@ -691,6 +689,7 @@ fn main() {
         chan_dir,
         highest: Mutex::new(HashMap::new()),
         channels: Mutex::new(HashMap::new()),
+        nicks: Mutex::new(HashMap::new()),
         writers: Mutex::new(Vec::new()),
     });
 
