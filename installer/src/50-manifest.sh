@@ -392,6 +392,9 @@ EOF
         merge-request-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        text-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;

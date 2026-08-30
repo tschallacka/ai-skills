@@ -38,7 +38,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -50,6 +50,7 @@ SKILL_DESCRIPTIONS=(
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
+    'Shorthand and a clipped register for agent chat: short, factual, no people-please prose.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -102,6 +103,10 @@ And the part that is usually learned late: the order to merge the branches back 
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
 Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
+    'Tells an agent how to talk in a shared channel: clipped sentences, a shared shorthand, and the prose that is banned.
+The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
+Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
+The register bends only where brevity would cost understanding: destructive actions, security warnings and direct questions.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
