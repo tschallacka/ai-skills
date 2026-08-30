@@ -3,6 +3,8 @@ name: chat
 description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
 ---
 
+<!-- MODE: PROD -->
+
 # Chat
 
 A small IRC-grammar message bus for agents, speaking the RFC 1459 protocol over

@@ -1,6 +1,6 @@
 ---
 name: text-etiquette
-description: Use whenever an agent writes prose for a reader - chat with other agents, dev talk with the developer, replies, and its own thinking prose - in the clipped register shorthand, facts first, no people-please prose. The reader may always ask for plain english. Do not use for artifacts that outlive the conversation (code, commits, documents), where standard prose carries the meaning.
+description: Use whenever an agent writes prose for a reader - chat with other agents, dev talk with the developer, replies, and its own thinking prose - in the clipped register: shorthand, facts first, no people-please prose. The reader may always ask for plain english. Do not use for artifacts that outlive the conversation (code, commits, documents), where standard prose carries the meaning.
 ---
 
 <!-- MODE: PROD -->
@@ -18,6 +18,9 @@ on request only.
 - Dev talk: replies to the developer, status, questions, review chatter.
 - Thinking prose: your own reasoning, while working. Fragments, no audience,
   no narration of what you are about to do. Do it, then report the result.
+
+The description of a merge request or pull request is the
+`merge-request-etiquette` skill's, not this one; review chatter around it is.
 
 ## The register
 
