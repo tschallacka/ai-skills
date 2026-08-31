@@ -40,6 +40,15 @@ fn start_binary(binary: &str, dir: &Path, command: &[&str], idle: &str) -> Child
         .unwrap()
 }
 
+fn start_fixture(dir: &Path, idle: &str) -> Child {
+    start_binary(
+        env!("CARGO_BIN_EXE_interactive-shell"),
+        dir,
+        &[env!("CARGO_BIN_EXE_interactive-shell-fixture")],
+        idle,
+    )
+}
+
 fn request(dir: &Path, body: &str) -> Value {
     for _ in 0..100 {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
@@ -124,12 +133,7 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
 #[test]
 fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
     let dir = temp_dir("fragmented-osc");
-    let mut child = start_binary(
-        env!("CARGO_BIN_EXE_interactive-shell-fixture"),
-        &dir,
-        &[],
-        "5",
-    );
+    let mut child = start_fixture(&dir, "5");
     let mut output = String::new();
     child
         .stdout

@@ -16,4 +16,5 @@ fn main() {
     stdout.write_all(&[b'x'; 4097]).unwrap();
     stdout.write_all(b"\x07OSC_SAFE").unwrap();
     stdout.flush().unwrap();
+    thread::sleep(Duration::from_millis(200));
 }

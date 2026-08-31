@@ -346,6 +346,29 @@ fn remove_unidentified_bound_socket(path: &Path) {
     }
 }
 
+struct SocketGuard {
+    path: PathBuf,
+    identity: Option<(u64, u64)>,
+}
+
+impl SocketGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            identity: None,
+        }
+    }
+}
+
+impl Drop for SocketGuard {
+    fn drop(&mut self) {
+        match self.identity {
+            Some(identity) => remove_socket(&self.path, Some(identity)),
+            None => remove_unidentified_bound_socket(&self.path),
+        }
+    }
+}
+
 extern "C" fn interrupt_handler(_: libc::c_int) {
     INTERRUPTED.store(true, Ordering::Relaxed);
 }
@@ -624,12 +647,14 @@ pub fn run(
         return Err("refusing existing socket".into());
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
+    let mut socket_guard = SocketGuard::new(socket.clone());
     let id = match fs::metadata(&socket) {
-        Ok(metadata) => Some((metadata.dev(), metadata.ino())),
-        Err(error) => {
-            remove_unidentified_bound_socket(&socket);
-            return Err(error.to_string());
+        Ok(metadata) => {
+            let identity = (metadata.dev(), metadata.ino());
+            socket_guard.identity = Some(identity);
+            Some(identity)
         }
+        Err(error) => return Err(error.to_string()),
     };
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(&socket, id);
@@ -652,6 +677,7 @@ pub fn run(
         socket: socket.clone(),
         identity: id,
     };
+    std::mem::forget(socket_guard);
     let mut screen = Screen::new(rows as usize, cols as usize);
     let mut out = io::BufWriter::new(io::stdout());
     let start = Instant::now();
