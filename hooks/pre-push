@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # The repo's pre-push gate: ./pre-push-check.sh (MAINTAINER.md section 4).
-# Hook failure aborts the push. Bypass explicitly with --no-verify when you
-# truly must; CI runs the same gates server-side regardless.
-exec "$(git rev-parse --show-toplevel)/pre-push-check.sh" "$@"
+# Hook failure aborts the push. Git hands the hook a remote name, a URL and
+# ref lines on stdin; the checker needs none of them, so they are dropped.
+# Bypass explicitly with --no-verify when you truly must; CI runs the same
+# gates server-side regardless.
+#
+# Branches that predate the checker do not carry it: a missing file is a
+# no-op pass, never a blocked push.
+gate="$(git rev-parse --show-toplevel)/pre-push-check.sh"
+[ -x "$gate" ] || exit 0
+exec "$gate" < /dev/null
