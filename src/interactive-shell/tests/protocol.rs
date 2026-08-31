@@ -213,3 +213,38 @@ fn idle_timeout_reports_status_124() {
     ));
     assert!(!dir.join("socket").exists());
 }
+
+#[test]
+fn long_input_and_descendants_are_handled() {
+    let dir = temp_dir("long-input");
+    let pid_file = dir.join("descendant.pid");
+    let command = format!(
+        "sleep 30 & echo $! > {}; wc -c >/dev/null; wait",
+        pid_file.display()
+    );
+    let mut child = start(&dir, &["sh", "-c", &command], "5");
+    for _ in 0..1000 {
+        if pid_file.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let text = "x".repeat(60_000) + "\n";
+    let body = serde_json::json!({"v":1,"op":"text","text":text}).to_string() + "\n";
+    let ack = request(&dir, &body);
+    assert_eq!(ack["event"], "ack");
+    let descendant: libc::pid_t = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _ = request(&dir, "{\"v\":1,\"op\":\"shutdown\"}\n");
+    child.wait().unwrap();
+    for _ in 0..100 {
+        if unsafe { libc::kill(descendant, 0) } == -1 {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("descendant survived wrapper cleanup");
+}
