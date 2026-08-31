@@ -780,8 +780,7 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         if params.len() > 1 {
                             let flags = params.get(1).cloned().unwrap_or_default();
                             if target == sess.nick && valid_umode_set(&flags) {
-                                let prefix =
-                                    format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                                let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
                                 w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
                             } else if valid_chan(&target) {
                                 // Channel modes need an operator model the bus
