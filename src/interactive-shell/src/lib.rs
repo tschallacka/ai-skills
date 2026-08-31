@@ -606,11 +606,8 @@ pub fn run(
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
     let id = match fs::metadata(&socket) {
-        Ok(m) => Some((m.dev(), m.ino())),
-        Err(error) => {
-            let _ = fs::remove_file(&socket);
-            return Err(error.to_string());
-        }
+        Ok(metadata) => Some((metadata.dev(), metadata.ino())),
+        Err(error) => return Err(error.to_string()),
     };
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(&socket, id);
