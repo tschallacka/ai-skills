@@ -17,7 +17,11 @@ fn temp_dir(label: &str) -> PathBuf {
 }
 
 fn start(dir: &Path, command: &[&str], idle: &str) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+    start_binary(env!("CARGO_BIN_EXE_interactive-shell"), dir, command, idle)
+}
+
+fn start_binary(binary: &str, dir: &Path, command: &[&str], idle: &str) -> Child {
+    Command::new(binary)
         .args([
             "--socket",
             dir.join("socket").to_str().unwrap(),
@@ -120,7 +124,12 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
 #[test]
 fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
     let dir = temp_dir("fragmented-osc");
-    let mut child = start(&dir, &["sh", "-c", "printf '\\x1b]'; i=0; while [ $i -lt 4097 ]; do printf x; i=$((i+1)); done; printf '\\007SAFE'; sleep .2"], "5");
+    let mut child = start_binary(
+        env!("CARGO_BIN_EXE_interactive-shell-fixture"),
+        &dir,
+        &[],
+        "5",
+    );
     let mut output = String::new();
     child
         .stdout
@@ -129,7 +138,8 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
         .read_to_string(&mut output)
         .unwrap();
     child.wait().unwrap();
-    assert!(output.lines().any(|line| line.contains("SAFE")));
+    assert!(output.lines().any(|line| line.contains("CSI_SAFE")));
+    assert!(output.lines().any(|line| line.contains("OSC_SAFE")));
 }
 
 #[test]

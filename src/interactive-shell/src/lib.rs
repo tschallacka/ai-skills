@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -338,6 +338,14 @@ fn remove_socket(path: &Path, identity: Option<(u64, u64)>) {
     }
 }
 
+fn remove_unidentified_bound_socket(path: &Path) {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_socket() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 extern "C" fn interrupt_handler(_: libc::c_int) {
     INTERRUPTED.store(true, Ordering::Relaxed);
 }
@@ -618,7 +626,10 @@ pub fn run(
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
     let id = match fs::metadata(&socket) {
         Ok(metadata) => Some((metadata.dev(), metadata.ino())),
-        Err(error) => return Err(error.to_string()),
+        Err(error) => {
+            remove_unidentified_bound_socket(&socket);
+            return Err(error.to_string());
+        }
     };
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(&socket, id);

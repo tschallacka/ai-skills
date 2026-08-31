@@ -15,6 +15,10 @@ path = "src/bin/interactive-shell.rs"
 name = "interactive-shell-input"
 path = "src/bin/interactive-shell-input.rs"
 
+[[bin]]
+name = "interactive-shell-fixture"
+path = "src/bin/interactive-shell-fixture.rs"
+
 [dependencies]
 libc = "=0.2.159"
 serde = { version = "=1.0.210", features = ["derive"] }
