@@ -740,6 +740,12 @@ mod tests {
         s.feed(&overlong);
         assert_eq!(s.rows[0][3], b'-');
         assert_eq!(s.rows[0][4], b'S');
+        let mut osc = vec![0x1b, b']'];
+        osc.extend(std::iter::repeat_n(b'x', 4097));
+        osc.extend_from_slice(b"\x07O");
+        let mut osc_screen = Screen::new(1, 10);
+        osc_screen.feed(&osc);
+        assert_eq!(osc_screen.rows[0][0], b'O');
     }
     #[test]
     fn alternate_screen_round_trips_primary_content() {
