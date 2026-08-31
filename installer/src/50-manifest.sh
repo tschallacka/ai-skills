@@ -50,6 +50,11 @@ SKILL.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
+bin/x86_64-unknown-linux-musl/plan-overview
+bin/aarch64-unknown-linux-musl/plan-overview
+bin/x86_64-apple-darwin/plan-overview
+bin/aarch64-apple-darwin/plan-overview
+bin/x86_64-pc-windows-msvc/plan-overview.exe
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -69,7 +74,6 @@ PACKAGE-MANIFEST.tsv
 requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
-templates/plan-overview.html.tmpl
 roles/planning.md
 roles/execution.md
 roles/cleanup.md
@@ -94,7 +98,6 @@ scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
 scripts/register-read.sh
 scripts/resolve-finding.sh
-scripts/render-plan-overview.sh
 scripts/render-plans-board.sh
 scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
@@ -102,11 +105,6 @@ scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
-scripts/overview-serve.sh
-scripts/runtime/overview-server.py
-scripts/runtime/overview-server.js
-scripts/runtime/overview-server.pl
-scripts/runtime/overview-serve-handler.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
@@ -217,6 +215,12 @@ scripts/lib/table/plan_replace_testing_requirement.sh
 scripts/lib/table/plan_review_gated_pairs.sh
 scripts/lib/table/plan_testing_requirement_for_goal.sh
 scripts/lib/table/plan_testing_requirement_row.sh
+EOF
+            if [ -d "$SOURCE_ROOT/planning/tests/fixtures/overview" ]; then
+                (cd "$SOURCE_ROOT/planning/tests/fixtures/overview" && find . -type f -print) \
+                    | sed 's#^\./#tests/fixtures/overview/#'
+            fi
+            cat <<'EOF'
 tests/fixtures/adversary-probe/01-health-endpoint/goal.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
@@ -333,6 +337,8 @@ tests/test-plan-data-lib.sh
 tests/test-writer-hardening.sh
 tests/test-overview-state.sh
 tests/test-overview-serve.sh
+tests/test-platform-selection.sh
+tests/test-npm-package.sh
 scripts/register-lib.sh
 scripts/todo-add.sh
 scripts/todo-update.sh

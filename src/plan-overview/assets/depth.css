@@ -1,0 +1,8 @@
+/* MODE: DEV */
+/* PACKAGE: PROD */
+/* Maximum depth: three named levels. */
+.panel { --depth-blur: 0px; --depth-border: rgba(255,255,255,.18); --depth-shadow: 0 2px 8px rgba(0,0,0,.22); background: color-mix(in srgb, var(--color-surface) 92%, transparent); backdrop-filter: blur(var(--depth-blur)); border: 1px solid var(--depth-border); box-shadow: var(--depth-shadow); }
+.panel[data-depth="1"] { --depth-blur: 2px; --depth-border: rgba(255,255,255,.18); --depth-shadow: 0 2px 8px rgba(0,0,0,.22); }
+.panel[data-depth="2"] { --depth-blur: 6px; --depth-border: rgba(255,255,255,.26); --depth-shadow: 0 8px 24px rgba(0,0,0,.30); }
+.panel[data-depth="3"] { --depth-blur: 10px; --depth-border: rgba(255,255,255,.34); --depth-shadow: 0 16px 40px rgba(0,0,0,.38); }
+html[data-tier="reduced"] .panel, html[data-tier="minimal"] .panel { backdrop-filter: none; }

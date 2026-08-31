@@ -56,6 +56,7 @@ version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".
 # A file's own header decides. Read the top only: a heredoc further down mentions
 # these strings, and a test that plants one would otherwise ship itself.
 declares_prod() { # <path>
+    [ -f "$repo_root/$1" ] || return 1
     case "$(sed -n '1,25p' "$repo_root/$1" 2>/dev/null)" in
         *'# MODE: PROD'*|*'<!-- MODE: PROD -->'*) return 0 ;;
     esac
@@ -72,9 +73,19 @@ listed_by_installer() {
     # shellcheck disable=SC1090
     source "$repo_root/installer/src/50-manifest.sh"
     SOURCE_ROOT="$repo_root"
-    local skill
+    local skill path
     for skill in "${SKILL_NAMES[@]}"; do
-        skill_files "$skill" | sed "s|^|$skill/|"
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if [ ! -f "$repo_root/$skill/$path" ]; then
+                case "$skill/$path" in
+                    planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                esac
+            fi
+            printf '%s/%s\n' "$skill" "$path"
+        done <<EOF
+$(skill_files "$skill")
+EOF
     done
 }
 

@@ -2,8 +2,9 @@
   description = "ai-skills development environment: shell portability testing and linting";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
-  outputs = { nixpkgs, ... }:
+  outputs = { nixpkgs, rust-overlay, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -13,7 +14,10 @@
       ];
       forEachSystem = function:
         nixpkgs.lib.genAttrs systems (system: function {
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ (import rust-overlay) ];
+          };
         });
 
       # CODE-STYLE.md §1 sets bash 3.2 as the portability floor, because that is
@@ -129,10 +133,16 @@
               # dependency all the same: a shipped binary asks nothing of the
               # target box, which is why shipping one lowers the runtime budget
               # in CODE-STYLE section 1 rather than widening it.
-              pkgs.cargo
-              pkgs.rustc
-              pkgs.clippy
-              pkgs.rustfmt
+              (pkgs.rust-bin.stable."1.86.0".default.override {
+                extensions = [ "rust-src" "rustfmt" "clippy" ];
+                targets = [
+                  "x86_64-unknown-linux-musl"
+                  "aarch64-unknown-linux-musl"
+                  "x86_64-apple-darwin"
+                  "aarch64-apple-darwin"
+                  "x86_64-pc-windows-msvc"
+                ];
+              })
               # Renders the architecture diagrams. Development-only: the test
               # suite must still run without nix, so the render check reports
               # UNCONFIGURED when mmdc is absent rather than failing.

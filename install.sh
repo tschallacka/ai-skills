@@ -430,7 +430,7 @@ runtime_requirements() {
         planning)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in *:*) printf '%s\n' jq ;; esac
-            case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
+            case "$platform" in *:*) printf '%s\n' @overview-runtimes ;; esac
             ;;
         post-implementation-review)
             ;;
@@ -456,7 +456,7 @@ runtime_requirement_strength() {
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        planning:@overview-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
@@ -473,7 +473,7 @@ runtime_requirement_why() {
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:jq) case "$platform" in *:*) printf '%s\n' 'reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it' ;; esac ;;
-        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
+        planning:@overview-runtimes) case "$platform" in *:*) printf '%s\n' 'serve mode is unavailable without a local overview runtime' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
         todo:jq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a jq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
@@ -485,7 +485,7 @@ runtime_requirement_members() {
     platform="$(uname -s):$(uname -m)"
     case "$1" in
         @server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
-        @overview-server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
+        @overview-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
     esac
 }
 
@@ -726,6 +726,55 @@ runtime_tool_install_hint() {
 }
 # END GENERATED DEPENDENCY BLOCK
 
+# Called by artifact selection when no prebuilt overview matches the host. Keep
+# this separate from selection so the installer can state the degraded result
+# without leaving a partial renderer behind.
+plan_overview_unavailable() {
+    local os="$1"
+    local arch="$2"
+    printf 'Plan overview unavailable on this platform (%s:%s): no prebuilt artifact is available.\n' \
+        "$os" "$arch" >&2
+    return 1
+}
+
+# Return the Rust target triple for the host. Test mode supplies the same two
+# inputs production detection reads, so selection tests exercise this function.
+normalize_platform() {
+    local os arch
+    if [ "${PLAN_OVERVIEW_TEST_MODE:-0}" = 1 ]; then
+        os="${PLAN_OVERVIEW_TEST_OS:-}"
+        arch="${PLAN_OVERVIEW_TEST_ARCH:-}"
+    else
+        os="$(uname -s)"
+        arch="$(uname -m)"
+    fi
+    case "$os:$arch" in
+        Linux:x86_64|Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
+        Linux:aarch64|Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
+        Darwin:x86_64|Darwin:amd64) printf '%s\n' x86_64-apple-darwin ;;
+        Darwin:arm64|Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
+        Windows_NT:AMD64|Windows_NT:x86_64) printf '%s\n' x86_64-pc-windows-msvc ;;
+        *) return 1 ;;
+    esac
+}
+
+plan_overview_selected_artifact() {
+    local target path os arch
+    os="${PLAN_OVERVIEW_TEST_OS:-$(uname -s)}"
+    arch="${PLAN_OVERVIEW_TEST_ARCH:-$(uname -m)}"
+    target="$(normalize_platform)" || {
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    }
+    path="bin/$target/plan-overview"
+    [ "$target" = x86_64-pc-windows-msvc ] && path="$path.exe"
+    if [ -n "${SOURCE_ROOT:-}" ] && [ ! -f "$SOURCE_ROOT/planning/$path" ]; then
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    fi
+    printf '%s\n' "$path"
+}
+
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
 skill_runtime_tools_present() {
@@ -855,7 +904,6 @@ verify_runtime_tools() {
     [ -n "$RUNTIME_BLOCKED_SKILLS" ] || return 0
     runtime_report_way_forward "$@"
 }
-
 # ---------------------------------------------------------------
 # 5. Agent target detection
 # ---------------------------------------------------------------
@@ -3127,6 +3175,11 @@ SKILL.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
+bin/x86_64-unknown-linux-musl/plan-overview
+bin/aarch64-unknown-linux-musl/plan-overview
+bin/x86_64-apple-darwin/plan-overview
+bin/aarch64-apple-darwin/plan-overview
+bin/x86_64-pc-windows-msvc/plan-overview.exe
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -3146,7 +3199,6 @@ PACKAGE-MANIFEST.tsv
 requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
-templates/plan-overview.html.tmpl
 roles/planning.md
 roles/execution.md
 roles/cleanup.md
@@ -3171,7 +3223,6 @@ scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
 scripts/register-read.sh
 scripts/resolve-finding.sh
-scripts/render-plan-overview.sh
 scripts/render-plans-board.sh
 scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
@@ -3179,11 +3230,6 @@ scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
-scripts/overview-serve.sh
-scripts/runtime/overview-server.py
-scripts/runtime/overview-server.js
-scripts/runtime/overview-server.pl
-scripts/runtime/overview-serve-handler.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
@@ -3294,6 +3340,12 @@ scripts/lib/table/plan_replace_testing_requirement.sh
 scripts/lib/table/plan_review_gated_pairs.sh
 scripts/lib/table/plan_testing_requirement_for_goal.sh
 scripts/lib/table/plan_testing_requirement_row.sh
+EOF
+            if [ -d "$SOURCE_ROOT/planning/tests/fixtures/overview" ]; then
+                (cd "$SOURCE_ROOT/planning/tests/fixtures/overview" && find . -type f -print) \
+                    | sed 's#^\./#tests/fixtures/overview/#'
+            fi
+            cat <<'EOF'
 tests/fixtures/adversary-probe/01-health-endpoint/goal.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
@@ -3410,6 +3462,8 @@ tests/test-plan-data-lib.sh
 tests/test-writer-hardening.sh
 tests/test-overview-state.sh
 tests/test-overview-serve.sh
+tests/test-platform-selection.sh
+tests/test-npm-package.sh
 scripts/register-lib.sh
 scripts/todo-add.sh
 scripts/todo-update.sh
@@ -3663,10 +3717,18 @@ install_skill() {
     local missing=0
     local managed_version_transition=0
     local files
+    local overview_artifact=''
+
+    if [ "$skill" = planning ]; then
+        overview_artifact="$(plan_overview_selected_artifact || true)"
+    fi
 
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
@@ -3721,6 +3783,9 @@ EOF
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         # Back up unless we can prove the file is ours and untouched. A version
@@ -3746,7 +3811,6 @@ EOF
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }
-
 # ---------------------------------------------------------------
 # 11b. End-of-run summary and replay commands
 # ---------------------------------------------------------------

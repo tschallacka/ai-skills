@@ -26,6 +26,55 @@
 # BEGIN GENERATED DEPENDENCY BLOCK
 # END GENERATED DEPENDENCY BLOCK
 
+# Called by artifact selection when no prebuilt overview matches the host. Keep
+# this separate from selection so the installer can state the degraded result
+# without leaving a partial renderer behind.
+plan_overview_unavailable() {
+    local os="$1"
+    local arch="$2"
+    printf 'Plan overview unavailable on this platform (%s:%s): no prebuilt artifact is available.\n' \
+        "$os" "$arch" >&2
+    return 1
+}
+
+# Return the Rust target triple for the host. Test mode supplies the same two
+# inputs production detection reads, so selection tests exercise this function.
+normalize_platform() {
+    local os arch
+    if [ "${PLAN_OVERVIEW_TEST_MODE:-0}" = 1 ]; then
+        os="${PLAN_OVERVIEW_TEST_OS:-}"
+        arch="${PLAN_OVERVIEW_TEST_ARCH:-}"
+    else
+        os="$(uname -s)"
+        arch="$(uname -m)"
+    fi
+    case "$os:$arch" in
+        Linux:x86_64|Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
+        Linux:aarch64|Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
+        Darwin:x86_64|Darwin:amd64) printf '%s\n' x86_64-apple-darwin ;;
+        Darwin:arm64|Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
+        Windows_NT:AMD64|Windows_NT:x86_64) printf '%s\n' x86_64-pc-windows-msvc ;;
+        *) return 1 ;;
+    esac
+}
+
+plan_overview_selected_artifact() {
+    local target path os arch
+    os="${PLAN_OVERVIEW_TEST_OS:-$(uname -s)}"
+    arch="${PLAN_OVERVIEW_TEST_ARCH:-$(uname -m)}"
+    target="$(normalize_platform)" || {
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    }
+    path="bin/$target/plan-overview"
+    [ "$target" = x86_64-pc-windows-msvc ] && path="$path.exe"
+    if [ -n "${SOURCE_ROOT:-}" ] && [ ! -f "$SOURCE_ROOT/planning/$path" ]; then
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    fi
+    printf '%s\n' "$path"
+}
+
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
 skill_runtime_tools_present() {
@@ -155,4 +204,3 @@ verify_runtime_tools() {
     [ -n "$RUNTIME_BLOCKED_SKILLS" ] || return 0
     runtime_report_way_forward "$@"
 }
-

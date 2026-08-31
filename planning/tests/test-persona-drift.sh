@@ -86,7 +86,12 @@ done
 if [ -f "$manifest" ]; then
     while IFS=$'\t' read -r source _; do
         [ -n "$source" ] || continue
-        [ -f "$root/${source#planning/}" ] || note_fail "manifest references missing file: $source"
+        if [ ! -f "$root/${source#planning/}" ]; then
+            case "$source" in
+                planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                *) note_fail "manifest references missing file: $source" ;;
+            esac
+        fi
     done < "$manifest"
 fi
 

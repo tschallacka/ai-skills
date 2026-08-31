@@ -70,7 +70,17 @@ REPO_REF='test'
         planning project-specificies resource-limited-testing brainstorm \
         post-implementation-review todo bug-report)
     for skill in "${SKILL_NAMES[@]}"; do
-        skill_files "$skill" | sed "s|^|$skill/|"
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if [ ! -f "$repo_root/$skill/$path" ]; then
+                case "$skill/$path" in
+                    planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                esac
+            fi
+            printf '%s/%s\n' "$skill" "$path"
+        done <<EOF
+$(skill_files "$skill")
+EOF
     done
 } | sort -u > "$work/expected"
 

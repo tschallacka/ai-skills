@@ -13,7 +13,7 @@
   },
   "scripts": {
     "install-skills": "./install.sh",
-    "prepack": "tests/test-skill-files-manifest.sh && tests/test-register-schemas.sh",
+    "prepack": "tests/test-skill-files-manifest.sh >/dev/null && tests/test-register-schemas.sh >/dev/null",
     "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [
@@ -27,6 +27,7 @@
     "bug-report",
     "chat",
     "git-worktrees",
+    "planning/bin",
     "post-implementation-review",
     "README.md",
     "LICENSE",

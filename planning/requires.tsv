@@ -9,8 +9,8 @@
 #   tool       tool id; must have a row in installer/tools.tsv
 #   condition  <uname -s glob>:<uname -m glob> the row applies to, e.g. *:* or
 #              Darwin:arm64 — a bash case pattern, so | may join alternatives
-#   strength   hard = the skill does not work without the tool, so the installer
-#              refuses to install this skill and exits non-zero
+#   strength   hard = the skill does not work without the tool, so without it
+#              the installer refuses to install this skill and exits non-zero
 #              soft = the skill degrades honestly, so the installer installs it
 #              and warns which capability is lost
 #   why        one line naming the capability that is lost without the tool
@@ -24,7 +24,7 @@
 tool	condition	strength	why	group
 bash	*:*	hard	every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine
 jq	*:*	hard	reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it
-python3	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-node	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-perl	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-socat	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
+python3	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
+node	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
+perl	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
+socat	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes

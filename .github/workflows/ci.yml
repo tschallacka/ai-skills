@@ -38,6 +38,19 @@ jobs:
           # here while passing locally -- reproduced with `git clone --depth 1`.
           fetch-depth: 0
 
+      - name: Install the plan-overview toolchain floor
+        uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
+          components: rustfmt,clippy
+
+      - name: Refuse an unconfigured plan-overview crate leg
+        env:
+          REFUSE_UNCONFIGURED_CARGO: 1
+        run: |
+          rustc --version | grep '1.86.0'
+          cargo test --manifest-path src/plan-overview/Cargo.toml
+
       - name: Record the bash under test
         run: bash --version
 

@@ -65,6 +65,9 @@ t_assert_eq 'the installer lists files to compare against' \
 # or the format has no comment syntax. These are declared by skill_files() alone.
 exempt() { # <path> → prints the reason, or nothing
     case "$1" in
+        planning/scripts/overview-*|planning/scripts/render-plan-overview.sh|planning/scripts/runtime/overview-*|planning/templates/plan-overview.html.tmpl)
+            [ -e "$repo_root/$1" ] && return 1
+            printf 'retired legacy overview wrapper\n' ;;
         */tests/fixtures/*)
             printf 'a fixture; its bytes are the test input\n' ;;
         */Cargo.lock)
@@ -73,10 +76,6 @@ exempt() { # <path> → prints the reason, or nothing
             ;;
         *.json | *.jsonl | *.pub | */FIXTURE-VERSION)
             printf 'the format has no comment syntax\n' ;;
-        # Interpreter payloads whose comment syntax the marker reader does
-        # not speak; the manifest is the registration that ships them.
-        planning/scripts/runtime/*.py | planning/scripts/runtime/*.js | planning/scripts/runtime/*.pl)
-            printf 'a runtime payload in its own language; registered by manifest\n' ;;
         planning/PACKAGE-MANIFEST.tsv | planning/PACKAGE-MAP.tsv)
             printf 'structured data with its own cross-check\n' ;;
         *.gitignore)
@@ -94,6 +93,7 @@ marker_of() { # <path> <MODE|PACKAGE> → DEV, PROD, or nothing
     sed -n '1,25p' "$1" \
         | sed -n -e "s/^# $2: \\([A-Z]*\\)\$/\\1/p" -e "s/^<!-- $2: \\([A-Z]*\\) -->\$/\\1/p" \
                  -e "s|^// $2: \([A-Z]*\)$|\1|p" \
+                 -e "s|^[[:space:]]*/\* $2: \([A-Z]*\) \*/$|\1|p" \
         | head -1
 }
 

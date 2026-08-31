@@ -22,10 +22,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 note_fail() { printf 'function-length-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
-CAP=66
+CAP=64
 count=0
 worst=""
 for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do
+    # Deleted tracked files remain in git ls-files until the change is committed;
+    # they are no longer code whose function length can be ratcheted.
+    [ -f "$root/$f" ] || continue
     # A function runs from its `name() {` line to the first column-0 closing
     # brace; that is the same convention test-duplication-ratchet.sh uses to
     # extract functions, and CODE-STYLE.md section 12 forbids nothing here:
@@ -36,7 +39,7 @@ for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do
         worst="$worst$len $f:$line $name_
 "
     done <<EOF
-$(awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{/{start=NR; name=$0} start && /^\}$/{if (NR-start+1>40) print NR-start+1, start, name; start=""}' "$root/$f")
+$(awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{[[:space:]]*(#.*)?$/{start=NR; name=$0} start && /^\}$/{if (NR-start+1>40) print NR-start+1, start, name; start=""}' "$root/$f")
 EOF
 done
 

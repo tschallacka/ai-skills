@@ -95,9 +95,13 @@ a="$(bash "$scripts/overview-state.sh" "$work/a/plan")"
 b="$(bash "$scripts/overview-state.sh" --plan-dir "$work/b/plan")"
 [ "$a" = "$b" ] || t_fail 'overview-state: --plan-dir output differs from positional'
 [ -n "$a" ] || t_fail 'overview-state produced no output'
-# overview-serve starts a server and never exits: cannot use check_pair.
-# The --plan-dir flag is verified by test-overview-serve.sh instead.
-check_pair render-plan-overview - render-plan-overview.sh
+# The binary is exercised directly so --plan-dir coverage does not depend on a
+# retired shell wrapper.
+binary="$repo_root/src/plan-overview/target/debug/plan-overview"
+cargo build --manifest-path "$repo_root/src/plan-overview/Cargo.toml" --offline >/dev/null
+OVERVIEW_NOW=fixed "$binary" --plan-dir "$work/a/plan" --out "$work/a.html"
+OVERVIEW_NOW=fixed "$binary" --plan-dir "$work/b/plan" --out "$work/b.html"
+t_assert_eq 'plan-overview --plan-dir produces output' "$(cat "$work/a.html")" "$(cat "$work/b.html")"
 check_pair create-plan-progress 'rm -f progress.md' create-plan-progress.sh
 check_pair register-command - register-command.sh probe-key 'ls -la' 'while probing'
 check_pair mint-fix-keys - mint-fix-keys.sh
@@ -221,7 +225,7 @@ exempt_from_pairs() { # <script>
         # overview-state is read-only (no tree mutation to verify) and
         # overview-serve starts a server that never exits; both are covered
         # by dedicated checks elsewhere in this file or in their own tests.
-        overview-state.sh|overview-serve.sh) return 0 ;;
+        overview-state.sh) return 0 ;;
     esac
     return 1
 }
