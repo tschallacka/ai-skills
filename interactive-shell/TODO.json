@@ -19,7 +19,7 @@
     {
       "id": "ISH-1a",
       "title": "Add complete keyboard input coverage",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "ISH-1",
       "detail": "Support F5-F12 and complete Ctrl, Alt, Shift, navigation, and terminal-specific key combinations without requiring agents to handcraft raw escape sequences.",
@@ -27,12 +27,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1b",
       "title": "Add screen snapshots and resynchronization",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "ISH-1",
       "detail": "Provide a current full-screen snapshot, event-history or sequence inspection, and recovery after an agent misses a delta so screen state does not depend on perfect stream consumption.",
@@ -40,12 +40,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1c",
       "title": "Add structured mouse paste and resize actions",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "ISH-1",
       "detail": "Expose mouse clicks, movement, button release, bracketed paste, and PTY resize as structured operations with raw-byte fallback where appropriate.",
@@ -53,12 +53,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1d",
       "title": "Represent terminal attributes and scrolling",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "ISH-1",
       "detail": "Extend the screen model with colors, bold/reverse and other attributes, scrollback, scroll regions, insert/delete lines, and the terminal controls used by ncurses TUIs.",
@@ -66,12 +66,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1e",
       "title": "Add agent-level observe-and-wait operations",
-      "status": "open",
+      "status": "done",
       "priority": "normal",
       "parent": "ISH-1",
       "detail": "Offer a supported observe operation and optionally send-and-wait predicates so agents do not need to implement fragile external polling and screen reconstruction for every action.",
@@ -79,12 +79,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/bin/interactive-shell-input.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1f",
       "title": "Expose clickable elements and labels",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "ISH-1",
       "detail": "Provide an easy, structured way to obtain clickable or actionable screen elements with their labels, coordinates, and stable identifiers when the terminal or TUI exposes enough information to identify them.",
@@ -92,12 +92,12 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1g",
       "title": "Add click-by-element and click-by-coordinate actions",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "ISH-1",
       "detail": "Allow an agent to click a discovered element by stable identifier or label, and provide explicit coordinate clicking for TUIs that expose no semantic element metadata.",
@@ -105,7 +105,7 @@
       "blocked_on": null,
       "refs": ["src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:40:00Z"
     },
     {
       "id": "ISH-1h",
@@ -132,6 +132,19 @@
       "refs": ["src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
       "updated_at": "2026-08-31T22:58:00Z"
+    },
+    {
+      "id": "ISH-1j",
+      "title": "Preserve foreground input for nested interactive children",
+      "status": "open",
+      "priority": "high",
+      "parent": "ISH-1",
+      "detail": "Ensure structured keyboard input reaches the active foreground child when a TUI such as MC launches an editor, and verify exit keys and save prompts across the nested process boundary.",
+      "note": "Discovered by the observation-driven MC-to-nano test: text reached the editor, but Ctrl-X/F10 did not reliably exit it.",
+      "blocked_on": null,
+      "refs": ["src/interactive-shell/src/lib.rs", "tests/test-interactive-shell-exploration.sh"],
+      "created_at": "2026-08-31T23:40:00Z",
+      "updated_at": "2026-08-31T23:40:00Z"
     }
   ]
 }

@@ -1,3 +1,5 @@
+# MODE: DEV
+# PACKAGE: PROD
 [package]
 name = "interactive-shell"
 version = "0.1.0"

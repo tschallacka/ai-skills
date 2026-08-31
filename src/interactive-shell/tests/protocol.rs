@@ -1,3 +1,4 @@
+// MODE: DEV
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
@@ -319,6 +320,34 @@ fn structured_observe_paste_mouse_and_resize_requests_work() {
 }
 
 #[test]
+fn wait_returns_a_snapshot_after_a_screen_predicate() {
+    let dir = temp_dir("wait");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf before; sleep .1; printf TARGET; sleep .2",
+        ],
+        "5",
+    );
+    let events = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"TARGET","timeout_ms":2000}
+"#,
+    );
+    let wait = events
+        .iter()
+        .find(|event| event["event"] == "wait")
+        .unwrap();
+    assert_eq!(wait["matched"], true);
+    assert!(wait["rows"].to_string().contains("TARGET"));
+    assert!(events.iter().any(|event| event["event"] == "ack"));
+    child.kill().ok();
+    child.wait().unwrap();
+}
+
+#[test]
 fn observe_exposes_osc8_elements_and_click_targets() {
     let dir = temp_dir("elements");
     let mut child = start(
@@ -342,6 +371,11 @@ fn observe_exposes_osc8_elements_and_click_targets() {
     let element = &screen["elements"][0];
     assert_eq!(element["label"], "LINK");
     assert_eq!(element["uri"], "https://example.test");
+    assert!(screen["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| candidate["id"] == "text-0-0"));
     let id = element["id"].as_str().unwrap();
     let body = format!(
         r#"{{"v":1,"op":"click","id":"{id}","button":0}}

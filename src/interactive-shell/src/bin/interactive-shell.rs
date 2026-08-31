@@ -1,3 +1,5 @@
+// MODE: DEV
+// PACKAGE: PROD
 use std::env;
 use std::path::PathBuf;
 fn main() {

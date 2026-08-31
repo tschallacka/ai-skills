@@ -1,3 +1,5 @@
+// MODE: DEV
+// PACKAGE: PROD
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::CString;
@@ -39,6 +41,13 @@ enum Request {
     Raw { v: u8, hex: String },
     #[serde(rename = "observe")]
     Observe { v: u8 },
+    #[serde(rename = "wait")]
+    Wait {
+        v: u8,
+        contains: String,
+        #[serde(default = "default_wait_timeout")]
+        timeout_ms: u64,
+    },
     #[serde(rename = "paste")]
     Paste { v: u8, text: String },
     #[serde(rename = "mouse")]
@@ -100,6 +109,23 @@ struct ScreenEvent {
     elements: Vec<Clickable>,
     styles: BTreeMap<usize, Vec<StyleSpan>>,
     scrollback: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct WaitEvent {
+    v: u8,
+    event: &'static str,
+    matched: bool,
+    seq: u64,
+    rows: BTreeMap<usize, String>,
+    cursor: Cursor,
+    elements: Vec<Clickable>,
+    styles: BTreeMap<usize, Vec<StyleSpan>>,
+    scrollback: Vec<String>,
+}
+
+fn default_wait_timeout() -> u64 {
+    30_000
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -546,7 +572,31 @@ impl Screen {
             .collect()
     }
     fn elements(&self) -> Vec<Clickable> {
-        self.elements.clone()
+        let mut elements = self.elements.clone();
+        for (row, cells) in self.rows.iter().enumerate() {
+            let mut col = 0;
+            while col < cells.len() {
+                while col < cells.len() && cells[col].is_ascii_whitespace() {
+                    col += 1;
+                }
+                let start = col;
+                while col < cells.len() && !cells[col].is_ascii_whitespace() {
+                    col += 1;
+                }
+                if col > start + 1 {
+                    let label = String::from_utf8_lossy(&cells[start..col]).into_owned();
+                    elements.push(Clickable {
+                        id: format!("text-{row}-{start}"),
+                        label,
+                        uri: "terminal://visible-text".into(),
+                        row,
+                        col: start,
+                        width: col - start,
+                    });
+                }
+            }
+        }
+        elements
     }
     fn styles(&self) -> BTreeMap<usize, Vec<StyleSpan>> {
         let plain = CellStyle {
@@ -984,7 +1034,8 @@ fn client(
     mut stream: UnixStream,
     master: RawFd,
     screen: &mut Screen,
-    seq: u64,
+    seq: &mut u64,
+    out: &mut impl Write,
     stopped: &mut bool,
     reason: &mut &'static str,
 ) -> Result<(), String> {
@@ -1104,8 +1155,63 @@ fn client(
                 &ScreenEvent {
                     v: 1,
                     event: "snapshot",
-                    seq,
-                    base: seq,
+                    seq: *seq,
+                    base: *seq,
+                    rows: screen.snapshot(),
+                    cursor: screen.cursor(),
+                    elements: screen.elements(),
+                    styles: screen.styles(),
+                    scrollback: screen.scrollback(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::Wait {
+            v: 1,
+            contains,
+            timeout_ms,
+        } => {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms.min(300_000));
+            let mut matched = screen
+                .snapshot()
+                .values()
+                .any(|row| row.contains(&contains));
+            while !matched && Instant::now() < deadline {
+                let mut buf = [0; 8192];
+                let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
+                if n > 0 {
+                    screen.feed(&buf[..n as usize]);
+                    *seq += 1;
+                    let event = ScreenEvent {
+                        v: 1,
+                        event: "screen",
+                        seq: *seq,
+                        base: *seq - 1,
+                        rows: screen.delta(),
+                        cursor: screen.cursor(),
+                        elements: screen.elements(),
+                        styles: screen.styles(),
+                        scrollback: screen.scrollback(),
+                    };
+                    json(out, &event).map_err(|e| e.to_string())?;
+                    json(&mut stream, &event).map_err(|e| e.to_string())?;
+                    matched = screen
+                        .snapshot()
+                        .values()
+                        .any(|row| row.contains(&contains));
+                } else if n < 0 && io::Error::last_os_error().kind() != io::ErrorKind::WouldBlock {
+                    break;
+                } else {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            json(
+                &mut stream,
+                &WaitEvent {
+                    v: 1,
+                    event: "wait",
+                    matched,
+                    seq: *seq,
                     rows: screen.snapshot(),
                     cursor: screen.cursor(),
                     elements: screen.elements(),
@@ -1321,7 +1427,15 @@ pub fn run(
             .map_err(|e| e.to_string())?;
         }
         if let Ok((s, _)) = listener.accept() {
-            if let Err(e) = client(s, master, &mut screen, seq, &mut stopped, &mut reason) {
+            if let Err(e) = client(
+                s,
+                master,
+                &mut screen,
+                &mut seq,
+                &mut out,
+                &mut stopped,
+                &mut reason,
+            ) {
                 eprintln!("interactive-shell client: {e}");
             }
         }
