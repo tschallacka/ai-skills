@@ -26,6 +26,29 @@ enum Request {
     Key { v: u8, key: String },
     #[serde(rename = "raw")]
     Raw { v: u8, hex: String },
+    #[serde(rename = "observe")]
+    Observe { v: u8 },
+    #[serde(rename = "paste")]
+    Paste { v: u8, text: String },
+    #[serde(rename = "mouse")]
+    Mouse {
+        v: u8,
+        x: u16,
+        y: u16,
+        button: u8,
+        action: String,
+    },
+    #[serde(rename = "click")]
+    Click {
+        v: u8,
+        id: Option<String>,
+        label: Option<String>,
+        x: Option<u16>,
+        y: Option<u16>,
+        button: u8,
+    },
+    #[serde(rename = "resize")]
+    Resize { v: u8, cols: u16, rows: u16 },
     #[serde(rename = "shutdown")]
     Shutdown { v: u8 },
 }
@@ -63,6 +86,17 @@ struct ScreenEvent {
     base: u64,
     rows: BTreeMap<usize, String>,
     cursor: Cursor,
+    elements: Vec<Clickable>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct Clickable {
+    id: String,
+    label: String,
+    uri: String,
+    row: usize,
+    col: usize,
+    width: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +120,8 @@ struct Screen {
     line_drawing: bool,
     parser: Parser,
     saved_primary: Option<ScreenState>,
+    active_link: Option<String>,
+    elements: Vec<Clickable>,
 }
 
 #[derive(Clone, Debug)]
@@ -108,6 +144,8 @@ impl Screen {
             line_drawing: false,
             parser: Parser::Ground,
             saved_primary: None,
+            active_link: None,
+            elements: Vec::new(),
         }
     }
     fn cursor(&self) -> Cursor {
@@ -161,6 +199,12 @@ impl Screen {
             }
             Parser::Osc(mut value) => {
                 if byte == 7 || (byte == b'\\' && value.last() == Some(&0x1b)) {
+                    if byte == 7 {
+                        self.osc(&value);
+                    } else {
+                        value.pop();
+                        self.osc(&value);
+                    }
                 } else if value.len() < 4096 {
                     value.push(byte);
                     self.parser = Parser::Osc(value);
@@ -190,7 +234,48 @@ impl Screen {
                 self.dirty[self.row] = true;
             }
         }
+        if let Some(uri) = self.active_link.as_ref() {
+            if let Some(element) = self.elements.last_mut() {
+                if element.uri == *uri
+                    && element.row == self.row
+                    && element.col + element.width == self.col
+                {
+                    element.label.push(byte as char);
+                    element.width += 1;
+                } else {
+                    let id = format!("link-{}", self.elements.len() + 1);
+                    self.elements.push(Clickable {
+                        id,
+                        label: (byte as char).to_string(),
+                        uri: uri.clone(),
+                        row: self.row,
+                        col: self.col,
+                        width: 1,
+                    });
+                }
+            } else {
+                self.elements.push(Clickable {
+                    id: "link-1".into(),
+                    label: (byte as char).to_string(),
+                    uri: uri.clone(),
+                    row: self.row,
+                    col: self.col,
+                    width: 1,
+                });
+            }
+        }
         self.col = (self.col + 1).min(self.rows[0].len().saturating_sub(1));
+    }
+    fn osc(&mut self, value: &[u8]) {
+        let value = String::from_utf8_lossy(value);
+        let mut fields = value.splitn(3, ';');
+        if fields.next() == Some("8") {
+            let _params = fields.next();
+            self.active_link = fields
+                .next()
+                .filter(|uri| !uri.is_empty())
+                .map(str::to_owned);
+        }
     }
     fn csi(&mut self, raw: &[u8], final_byte: u8) {
         let s = String::from_utf8_lossy(raw);
@@ -271,6 +356,25 @@ impl Screen {
         }
         self.dirty.fill(false);
         out
+    }
+    fn snapshot(&self) -> BTreeMap<usize, String> {
+        self.rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| (i, String::from_utf8_lossy(row).trim_end().to_string()))
+            .collect()
+    }
+    fn elements(&self) -> Vec<Clickable> {
+        self.elements.clone()
+    }
+    fn resize(&mut self, rows: usize, cols: usize) {
+        self.rows.resize_with(rows, || vec![b' '; cols]);
+        for row in &mut self.rows {
+            row.resize(cols, b' ');
+        }
+        self.dirty = vec![true; rows];
+        self.row = self.row.min(rows.saturating_sub(1));
+        self.col = self.col.min(cols.saturating_sub(1));
     }
 }
 fn line_drawing(b: u8) -> u8 {
@@ -561,6 +665,8 @@ fn status(s: i32) -> i32 {
 fn client(
     mut stream: UnixStream,
     master: RawFd,
+    screen: &mut Screen,
+    seq: u64,
     stopped: &mut bool,
     reason: &mut &'static str,
 ) -> Result<(), String> {
@@ -653,6 +759,59 @@ fn client(
                 return Ok(());
             }
         },
+        Request::Observe { v: 1 } => {
+            json(
+                &mut stream,
+                &ScreenEvent {
+                    v: 1,
+                    event: "snapshot",
+                    seq,
+                    base: seq,
+                    rows: screen.snapshot(),
+                    cursor: screen.cursor(),
+                    elements: screen.elements(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::Paste { v: 1, text } => {
+            write_master(master, b"\x1b[200~")?;
+            write_master(master, text.as_bytes())?;
+            write_master(master, b"\x1b[201~")?;
+        }
+        Request::Mouse {
+            v: 1,
+            x,
+            y,
+            button,
+            action,
+        } => write_master(master, &mouse_bytes(x, y, button, &action)?)?,
+        Request::Click {
+            v: 1,
+            id,
+            label,
+            x,
+            y,
+            button,
+        } => {
+            let target = screen.elements().into_iter().find(|element| {
+                id.as_deref() == Some(element.id.as_str())
+                    || label.as_deref() == Some(element.label.as_str())
+            });
+            let (x, y) = match target {
+                Some(element) => (element.col as u16 + 1, element.row as u16 + 1),
+                None => match (x, y) {
+                    (Some(x), Some(y)) => (x, y),
+                    _ => return Err("click needs a known id/label or x and y".into()),
+                },
+            };
+            write_master(master, &mouse_bytes(x, y, button, "down")?)?;
+            write_master(master, &mouse_bytes(x, y, button, "up")?)?;
+        }
+        Request::Resize { v: 1, cols, rows } => {
+            resize_master(master, cols, rows)?;
+            screen.resize(rows as usize, cols as usize);
+        }
         Request::Shutdown { v: 1 } => {
             *stopped = true;
             *reason = "client_shutdown";
@@ -697,6 +856,40 @@ fn write_master(fd: RawFd, bytes: &[u8]) -> Result<(), String> {
         return Err(io::Error::last_os_error().to_string());
     }
     Ok(())
+}
+
+fn resize_master(fd: RawFd, cols: u16, rows: u16) -> Result<(), String> {
+    if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
+        return Err("dimensions must be within cols 1..240 and rows 1..100".into());
+    }
+    let size = libc::winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) } < 0 {
+        return Err(io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+fn mouse_bytes(x: u16, y: u16, button: u8, action: &str) -> Result<Vec<u8>, String> {
+    if x == 0 || y == 0 || button > 7 {
+        return Err("mouse coordinates are 1-based and button must be 0..7".into());
+    }
+    let suffix = match action {
+        "down" => 'M',
+        "up" => 'm',
+        "move" => 'M',
+        _ => return Err("mouse action must be down, up, or move".into()),
+    };
+    let code = if action == "move" {
+        button | 32
+    } else {
+        button
+    };
+    Ok(format!("\x1b[<{};{};{}{}", code, x, y, suffix).into_bytes())
 }
 
 pub fn run(
@@ -779,12 +972,13 @@ pub fn run(
                     base: seq - 1,
                     rows: screen.delta(),
                     cursor: screen.cursor(),
+                    elements: screen.elements(),
                 },
             )
             .map_err(|e| e.to_string())?;
         }
         if let Ok((s, _)) = listener.accept() {
-            if let Err(e) = client(s, master, &mut stopped, &mut reason) {
+            if let Err(e) = client(s, master, &mut screen, seq, &mut stopped, &mut reason) {
                 eprintln!("interactive-shell client: {e}");
             }
         }

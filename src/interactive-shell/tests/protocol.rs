@@ -63,6 +63,23 @@ fn request(dir: &Path, body: &str) -> Value {
     panic!("socket did not appear")
 }
 
+fn request_all(dir: &Path, body: &str) -> Vec<Value> {
+    for _ in 0..100 {
+        if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
+            stream.write_all(body.as_bytes()).unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            let mut out = String::new();
+            stream.read_to_string(&mut out).unwrap();
+            return out
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("socket did not appear")
+}
+
 #[test]
 fn wrapper_reports_screen_ack_and_lifecycle() {
     let dir = temp_dir("events");
@@ -256,6 +273,87 @@ fn invalid_dimensions_fail_before_creating_socket() {
             .unwrap();
         assert!(!output.status.success());
     }
+}
+
+#[test]
+fn structured_observe_paste_mouse_and_resize_requests_work() {
+    let dir = temp_dir("structured-actions");
+    let mut child = start(&dir, &["sh", "-c", "sleep 2"], "5");
+    let observed = request_all(
+        &dir,
+        r#"{"v":1,"op":"observe"}
+"#,
+    );
+    assert_eq!(observed[0]["event"], "snapshot");
+    assert_eq!(observed[1]["event"], "ack");
+    assert_eq!(
+        request(
+            &dir,
+            r#"{"v":1,"op":"paste","text":"pasted"}
+"#
+        )["event"],
+        "ack"
+    );
+    assert_eq!(
+        request(
+            &dir,
+            r#"{"v":1,"op":"mouse","x":2,"y":2,"button":0,"action":"down"}
+"#
+        )["event"],
+        "ack"
+    );
+    assert_eq!(
+        request(
+            &dir,
+            r#"{"v":1,"op":"resize","cols":30,"rows":6}
+"#
+        )["event"],
+        "ack"
+    );
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+#[test]
+fn observe_exposes_osc8_elements_and_click_targets() {
+    let dir = temp_dir("elements");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 2",
+        ],
+        "5",
+    );
+    let snapshot = request_all(
+        &dir,
+        r#"{"v":1,"op":"observe"}
+"#,
+    );
+    let screen = snapshot
+        .iter()
+        .find(|event| event["event"] == "snapshot")
+        .unwrap();
+    let element = &screen["elements"][0];
+    assert_eq!(element["label"], "LINK");
+    assert_eq!(element["uri"], "https://example.test");
+    let id = element["id"].as_str().unwrap();
+    let body = format!(
+        r#"{{"v":1,"op":"click","id":"{id}","button":0}}
+"#
+    );
+    assert_eq!(request(&dir, &body)["event"], "ack");
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
 }
 
 #[test]
