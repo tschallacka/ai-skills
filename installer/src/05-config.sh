@@ -100,6 +100,11 @@ History is additive: an agent fetches the messages after id N via the FETCH exte
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Decides what a conflicted file should say once both changes exist, rather than reaching for --ours or --theirs.
+Reads each side out of history -- what changed, what the commit said, when, and which side is the file lineage that kept evolving.
+Names the conflicts that are unions rather than choices, and the ones git reports clean while the meaning is wrong.
+Generated output is regenerated, never stitched; an unresolved generated file counts every symbol twice and fakes a ratchet jump.
+Every post-merge failure is run against both parents first, so an inherited failure is reported rather than absorbed into the merge.'
     'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
