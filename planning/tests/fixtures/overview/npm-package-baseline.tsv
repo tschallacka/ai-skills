@@ -10,8 +10,6 @@ package/bug-report/requires.tsv	1300
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
 package/chat/SKILL.md	5315
-package/chat/bin/x86_64-unknown-linux-musl/chat-client-rs	1252888
-package/chat/bin/x86_64-unknown-linux-musl/chat-server-rs	1302488
 package/chat/binaries.tsv	1195
 package/chat/docs/README.md	1308
 package/chat/requires.tsv	467
@@ -34,7 +32,6 @@ package/planning/REVIEWER.md	22954
 package/planning/ROLES.md	4355
 package/planning/SKILL.md	89668
 package/planning/artifact-comparisons.json	1779
-package/planning/bin/x86_64-unknown-linux-musl/rjq	2980120
 package/planning/binaries.tsv	1158
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
 package/planning/context/brainstorm-limiting-context-contract.json	11532

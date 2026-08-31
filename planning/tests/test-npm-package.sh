@@ -14,9 +14,17 @@ cleanup() { rm -rf "$tmp"; [ -z "$tarball" ] || rm -f "$repo_root/$tarball"; }
 trap cleanup EXIT
 tarball="$(cd "$repo_root" && npm pack --silent)"
 [ -f "$repo_root/$tarball" ]
+# Compiled artifacts under bin/ are excluded, path and size both. Only one is
+# tracked; CI rebuilds that one and creates the others, so their presence
+# depends on whether a build has run here and their size on which toolchain ran
+# it. What a skill ships as a binary is declared in its binaries.tsv and checked
+# by tests/test-shipped-binaries.sh, which is where that belongs.
+packable() { case "$1" in */bin/*) return 1 ;; *) return 0 ;; esac; }
+
 actual="$tmp/actual.tsv"
 printf 'package_path\tbyte_size\n' >"$actual"
 tar -tzf "$repo_root/$tarball" | LC_ALL=C sort | while IFS= read -r path; do
+    packable "$path" || continue
     size="$(tar -xOf "$repo_root/$tarball" "$path" | wc -c | tr -d ' ')"
     printf '%s\t%s\n' "$path" "$size"
 done >>"$actual"
