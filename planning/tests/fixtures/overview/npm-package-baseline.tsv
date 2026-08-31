@@ -81,8 +81,8 @@ package/planning/scripts/plan-context-lib.sh	23333
 package/planning/scripts/plan-context-wrapper.sh	1259
 package/planning/scripts/plan-context.sh	23287
 package/planning/scripts/plan-core-lib.sh	17735
-package/planning/scripts/plan-crypt-lib.sh	8821
-package/planning/scripts/plan-document-lib.sh	22799
+package/planning/scripts/plan-crypt-lib.sh	10564
+package/planning/scripts/plan-document-lib.sh	23104
 package/planning/scripts/plan-env.sh	11679
 package/planning/scripts/plan-inventory-lib.sh	3921
 package/planning/scripts/plan-map-lib.sh	4963

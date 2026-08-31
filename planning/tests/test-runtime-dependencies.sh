@@ -117,7 +117,12 @@ while IFS= read -r script; do
     fi
     [ -n "$delegated" ] \
         || note_fail "$name calls rjq but neither guards it nor is covered by a guarded entry point"
-done < <(grep -lE '(^|[^A-Za-z0-9_])rjq ' "$scripts"/*.sh 2>/dev/null || true)
+# Full-line comments are excluded: this looks for scripts that CALL rjq, and a
+# comment naming it is not a call. Matching prose made the gate fail on a
+# library whose only mention of rjq was the sentence explaining where the
+# binary is found. A trailing comment on a real command still counts.
+done < <(awk '/^[[:space:]]*#/ { next } /(^|[^A-Za-z0-9_])rjq / { print FILENAME; nextfile }' \
+    "$scripts"/*.sh 2>/dev/null || true)
 
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-runtime-dependencies: PASS'

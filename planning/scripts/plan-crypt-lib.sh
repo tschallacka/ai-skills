@@ -31,7 +31,7 @@ PLAN_CRYPT_LIB_LOADED=1
 # segments shallower, so the same literal climbed two directories too far in
 # the compiled copy and the bundled rjq was never found (B95).
 plan_bin_dir() {
-    local triple candidate dir
+    local triple candidate dir found
     if [ -n "${AI_SKILLS_BIN_ROOT:-}" ] && [ -d "$AI_SKILLS_BIN_ROOT" ]; then
         printf '%s\n' "$AI_SKILLS_BIN_ROOT"
         return 0
@@ -43,14 +43,16 @@ plan_bin_dir() {
     fi
     triple="$(plan_crypt_target_triple)" || return 1
     dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+    # The OUTERMOST match wins, so the walk does not stop early. A skill that
+    # still carries its own bin/<triple> would otherwise shadow the shared one
+    # above it and hide every binary it does not itself hold.
+    found=''
     while [ -n "$dir" ] && [ "$dir" != / ]; do
-        if [ -d "$dir/bin/$triple" ]; then
-            printf '%s\n' "$dir/bin/$triple"
-            return 0
-        fi
+        [ -d "$dir/bin/$triple" ] && found="$dir/bin/$triple"
         dir="$(dirname "$dir")"
     done
-    return 1
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
 }
 
 # plan_crypt_bin — print the path to the plan-crypt binary, or return 1.
