@@ -1,3 +1,5 @@
+// MODE: DEV
+// PACKAGE: PROD
 use serde_json::json;
 use std::env;
 use std::io::{self, Write};
@@ -48,6 +50,19 @@ fn main() {
                     std::process::exit(2);
                 }
                 op = Some(a[i].clone());
+            }
+            "wait" => {
+                if op.is_some() || i + 1 >= a.len() {
+                    eprintln!("wait requires text and optional timeout milliseconds");
+                    std::process::exit(2);
+                }
+                op = Some(a[i].clone());
+                args.push(a[i + 1].clone());
+                i += 1;
+                if i + 1 < a.len() {
+                    args.push(a[i + 1].clone());
+                    i += 1;
+                }
             }
             "mouse" => {
                 if op.is_some() || i + 4 >= a.len() {
@@ -113,6 +128,22 @@ fn main() {
     }
     let operation = req["op"].as_str().unwrap_or_default().to_owned();
     match operation.as_str() {
+        "wait" => {
+            if args.is_empty() || args.len() > 2 {
+                eprintln!("wait requires text and optional timeout milliseconds");
+                std::process::exit(2);
+            }
+            req["contains"] = args[0].clone().into();
+            if let Some(timeout) = args.get(1) {
+                req["timeout_ms"] = timeout
+                    .parse::<u64>()
+                    .unwrap_or_else(|_| {
+                        eprintln!("invalid wait timeout");
+                        std::process::exit(2)
+                    })
+                    .into();
+            }
+        }
         "combo" => {
             if args.is_empty() {
                 eprintln!("combo requires a key");
@@ -230,5 +261,10 @@ fn main() {
     }
     writeln!(s, "{req}").unwrap();
     s.shutdown(Shutdown::Write).unwrap();
-    io::copy(&mut s, &mut io::stdout()).unwrap();
+    if let Err(error) = io::copy(&mut s, &mut io::stdout()) {
+        if error.kind() != io::ErrorKind::ConnectionReset {
+            eprintln!("read response: {error}");
+            std::process::exit(1);
+        }
+    }
 }

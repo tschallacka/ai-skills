@@ -10,17 +10,23 @@ such as nano, Midnight Commander, a pager, or a terminal menu. Start
 `interactive-shell --socket PATH --cols 80 --rows 24 --idle-timeout 300 -- COMMAND`
 and observe its JSONL stdout. Send one request at a time with
 `interactive-shell-input --socket PATH text TEXT`, `key KEY`, `combo KEY [CTRL] [ALT] [SHIFT]`, `paste TEXT`,
-`mouse X Y BUTTON down|up|move`, `resize COLS ROWS`, `observe`, `raw HEX`, or
+`mouse X Y BUTTON down|up|move`, `resize COLS ROWS`, `observe`, `wait TEXT [TIMEOUT_MS]`, `raw HEX`, or
 `click-id ID BUTTON`, `click-label LABEL BUTTON`, `click-at X Y BUTTON`, or
 `shutdown`.
 
 Screen events contain only rows changed since the previous event, a monotonically
 increasing `seq`, the preceding `base`, and the cursor. An `observe` request
 returns a `snapshot` event containing every current row, followed by an
-acknowledgement; use it to resynchronize after missed deltas. Snapshot and screen
+acknowledgement; use it to resynchronize after missed deltas. `wait TEXT`
+waits up to the optional timeout (default 30 seconds) for visible screen text,
+publishes intervening deltas, and returns a full snapshot with `matched` true
+or false. Snapshot and screen
 events also contain `elements`: OSC 8 hyperlinks appear as elements with an id,
-label, URI, row, column, and width. Use `click-id` or `click-label` for those;
-use `click-at` when the TUI exposes only a coordinate-based action. Parse those JSON fields;
+label, URI, row, column, and width; visible non-whitespace text runs are also
+reported as stable coordinate targets for TUIs that expose no semantic metadata.
+Use `click-id` or `click-label` for those; use `click-at` when the TUI exposes
+only a coordinate-based action. Text targets are a heuristic, not proof that a
+TUI will respond to a mouse click. Parse those JSON fields;
 do not grep terminal output or acknowledgements. An acknowledgement means only
 that input was accepted by the wrapper, not that the program completed the
 resulting action. Wait for a screen predicate or lifecycle event after every
