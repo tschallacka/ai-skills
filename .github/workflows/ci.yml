@@ -73,14 +73,29 @@ jobs:
           command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
       - name: Build the compiled chat rung so its assertions run (T62)
-        if: runner.os == 'Linux'
         uses: dtolnay/rust-toolchain@1.97
+        with:
+          components: rustfmt, clippy
 
       - name: Place the compiled chat rung
-        if: runner.os == 'Linux'
         run: |
+          # Build the chat crates natively and place the two binaries under
+          # the chat/bin/<triple>/ dir skill_files() resolves for this host, so
+          # the manifest and shipped-binaries tests see them. The dedicated
+          # chat-binary job builds the cross/static artifacts for release.
           cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
-          cp src/chat-server-rs/target/release/chat-server-rs chat/runtime/chat-server-rs
+          cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
+          case "$(uname -s):$(uname -m)" in
+            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
+            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
+            Darwin:x86_64) dir=x86_64-apple-darwin; src=src/chat-server-rs/target/release ;;
+            Darwin:arm64) dir=aarch64-apple-darwin; src=src/chat-server-rs/target/release ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc; src=src/chat-server-rs/target/release ;;
+            *) echo "::error::unsupported host for chat binaries: $(uname -s):$(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "chat/bin/$dir"
+          cp "$src/chat-server-rs" "chat/bin/$dir/chat-server-rs"
+          cp "src/chat-client-rs/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
 
       - name: Place the compiled plan-crypt rung so its assertions run
         # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
@@ -341,7 +356,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          sparse-checkout: src/chat
+          sparse-checkout: |
+            src/chat-proto
+            src/chat-server-rs
+            src/chat-client-rs
 
       - name: Pin the toolchain the crate declares
         uses: dtolnay/rust-toolchain@1.97
@@ -352,15 +370,23 @@ jobs:
       - name: Ensure the target standard library is installed
         run: rustup target add --toolchain 1.97 "${{ matrix.target }}"
 
+      - name: Install the musl C cross-toolchain (ring needs a C compiler)
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
       - name: Format, lint and test
-        working-directory: src/chat
+        working-directory: src/chat-server-rs
         run: |
           cargo fmt --check
           cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
           cargo test --target ${{ matrix.target }}
 
-      - name: Build the release artifact
-        working-directory: src/chat
+      - name: Build the release artifact (server)
+        working-directory: src/chat-server-rs
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build the release artifact (client)
+        working-directory: src/chat-client-rs
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload the release artifact
@@ -368,8 +394,10 @@ jobs:
         with:
           name: chat-${{ matrix.target }}
           path: |
-            src/chat/target/${{ matrix.target }}/release/chat
-            src/chat/target/${{ matrix.target }}/release/chat.exe
+            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs
+            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs.exe
+            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs
+            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs.exe
           if-no-files-found: error
 
   rjq-binary:

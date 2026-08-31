@@ -392,6 +392,9 @@ EOF
         merge-request-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        text-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
@@ -407,28 +410,25 @@ SKILL.md
 docs/README.md
 requires.tsv
 binaries.tsv
-scripts/lib-config.sh
-scripts/chat-server.sh
-scripts/chat-register.sh
-scripts/chat-send.sh
-scripts/chat-read.sh
-scripts/chat-tail.sh
-scripts/chat-watch.sh
-scripts/chat-announce.sh
-scripts/chat-discover.sh
-runtime/server.py
-runtime/server.js
-runtime/server.pl
-runtime/bash-handler.sh
 CHATEOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/chat-server-rs' 'bin/x86_64-unknown-linux-musl/chat-client-rs' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/chat-server-rs' 'bin/aarch64-unknown-linux-musl/chat-client-rs' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/chat-server-rs' 'bin/x86_64-apple-darwin/chat-client-rs' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/chat-server-rs' 'bin/aarch64-apple-darwin/chat-client-rs' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/chat-server-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-client-rs.exe' ;;
+                *)
+                    printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             [ "$package" = dev ] || return 0
             cat <<'CHATEOF'
 tests/test-chat.sh
-tests/test-chat-injection.sh
-tests/test-chat-watch-cursor.sh
-tests/test-chat-binary.sh
-tests/test-chat-config.sh
-tests/test-chat-registry.sh
 CHATEOF
             ;;
     esac

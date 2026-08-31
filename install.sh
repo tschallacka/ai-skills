@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -85,9 +85,10 @@ SKILL_DESCRIPTIONS=(
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with rjq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
-    'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
+    'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
+    'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -128,10 +129,10 @@ Not for the steps of a task already in progress, and not for defects -- those be
 One defect per entry: if stating it needs the word "and", it is two entries that reference each other.
 An entry closes only with a fix and a verification naming the mutation that fails without it, so a closure cannot be a claim.
 Written only through its helpers -- an out-of-enum value makes the register unsound and every later write refuses.'
-    'An IRC-basis message bus for agents: channels they register, join and leave, with deltas since an id and live tails.
-Two agents in different sessions or on different machines exchange messages without either knowing about the other.
-The log is the source of truth and the server is optional: local mode appends under a lock and needs no runtime at all.
-Reading takes a cursor rather than the whole channel, so a long conversation does not flood a context window.'
+    'An IRC-over-TLS message bus for agents: a rust server that a standard TLS IRC client could join, and a rust client.
+The server speaks the RFC 1459 grammar over TLS and mints its self-signed certificate at first run.
+The client discovers servers over UDP, pins the certificate (TOFU), and sends / reads a delta since an id / tails.
+History is additive: an agent fetches the messages after id N via the FETCH extension, instead of re-reading a whole channel.'
     'Gives a task its own checkout, so several agents can work at once without seeing each other half-finished edits.
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
@@ -140,6 +141,10 @@ And the part that is usually learned late: the order to merge the branches back 
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
 Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
+    'Tells an agent how to talk everywhere verbosity creeps in: chat with agents, dev talk with the developer, and its own thinking prose.
+The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
+Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
+The reader may always ask for plain english; the register bends only where brevity would cost understanding.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -419,8 +424,6 @@ runtime_requirements() {
             case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
         chat)
-            case "$platform" in *:*) printf '%s\n' bash ;; esac
-            case "$platform" in *:*) printf '%s\n' @server-runtimes ;; esac
             ;;
         git-worktrees)
             ;;
@@ -439,6 +442,8 @@ runtime_requirements() {
             case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
             ;;
+        text-etiquette)
+            ;;
         todo)
             case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
@@ -450,8 +455,6 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        chat:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
@@ -466,8 +469,6 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none' ;; esac ;;
-        chat:bash) case "$platform" in *:*) printf '%s\n' 'the server, register and send/read/tail helpers are bash scripts, so without bash none of them run, and the socat rung needs it for the handler' ;; esac ;;
-        chat:@server-runtimes) case "$platform" in *:*) printf '%s\n' 'a chat server cannot open a listening socket without one of these runtimes; the server refuses with exit 69 while send/read/tail keep working' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
@@ -481,7 +482,6 @@ runtime_requirement_members() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
-        @server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
         @overview-server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
     esac
 }
@@ -852,6 +852,18 @@ agent_target_available() {
     esac
 }
 
+# The shared skill-data directory beside the custom-locations file: user data
+# that must survive a skill reinstall (project deviation notes) lives here, so
+# the installer guarantees it exists and stays readable, writable and
+# creatable by the running user before any skill lands. Agents registered
+# under that user inherit the access.
+ensure_agent_data_dir() {
+    local dir
+    dir="$(dirname "$CUSTOM_LOCATIONS_FILE")"
+    mkdir -p "$dir"
+    chmod u+rwx "$dir" 2>/dev/null || true
+}
+
 save_custom_location() {
     local path="$1"
     mkdir -p "$(dirname "$CUSTOM_LOCATIONS_FILE")"
@@ -1062,8 +1074,9 @@ show_shop_menu() {
     local horizontal=''
     local index label description
     # The registry from section 1, plus the synthetic "everything" entry whose
-    # number select_skills() treats as "all".
-    local -a labels=("${SKILL_NAMES[@]}" 'all five skills')
+    # number select_skills() treats as "all". The label derives from the count,
+    # so adding a skill cannot leave a stale number behind.
+    local -a labels=("${SKILL_NAMES[@]}" "all ${#SKILL_NAMES[@]} skills")
     local -a descriptions=("${SKILL_DESCRIPTIONS[@]}" 'Installs or updates the complete skill set.')
 
     [ -n "$COLOR_MODE" ] || detect_color_mode
@@ -3438,6 +3451,9 @@ EOF
         merge-request-etiquette)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        text-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
         todo)
             printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
             ;;
@@ -3453,28 +3469,25 @@ SKILL.md
 docs/README.md
 requires.tsv
 binaries.tsv
-scripts/lib-config.sh
-scripts/chat-server.sh
-scripts/chat-register.sh
-scripts/chat-send.sh
-scripts/chat-read.sh
-scripts/chat-tail.sh
-scripts/chat-watch.sh
-scripts/chat-announce.sh
-scripts/chat-discover.sh
-runtime/server.py
-runtime/server.js
-runtime/server.pl
-runtime/bash-handler.sh
 CHATEOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/chat-server-rs' 'bin/x86_64-unknown-linux-musl/chat-client-rs' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/chat-server-rs' 'bin/aarch64-unknown-linux-musl/chat-client-rs' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/chat-server-rs' 'bin/x86_64-apple-darwin/chat-client-rs' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/chat-server-rs' 'bin/aarch64-apple-darwin/chat-client-rs' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/chat-server-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-client-rs.exe' ;;
+                *)
+                    printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             [ "$package" = dev ] || return 0
             cat <<'CHATEOF'
 tests/test-chat.sh
-tests/test-chat-injection.sh
-tests/test-chat-watch-cursor.sh
-tests/test-chat-binary.sh
-tests/test-chat-config.sh
-tests/test-chat-registry.sh
 CHATEOF
             ;;
     esac
@@ -4176,7 +4189,7 @@ if [ -n "$CLI_MODE" ]; then
     case "$CLI_MODE" in
         print) cli_print_skill_files ;;
         resolve) cli_resolve_source ;;
-        install) cli_install_skill ;;
+        install) ensure_agent_data_dir; cli_install_skill ;;
     esac
     exit $?
 fi
@@ -4188,6 +4201,7 @@ select_skills
 download_source
 prepend_bundled_rjq
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
+ensure_agent_data_dir
 # PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
 # 3.2 treats the empty expansion as unbound under set -u.
 SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})

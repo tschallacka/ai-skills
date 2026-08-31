@@ -13,10 +13,13 @@ agents do not need to rediscover them.
 
 ## The convention
 
-- Give each project a note file in this skill's directory:
-  `project-specificies/<project-name>-deviations.md`. Use a short identifier
-  based on the repository name, directory name, or the name used by the user
-  or team.
+- Give each project a note file in the shared skill-data directory:
+  `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/<project-name>-deviations.md`.
+  Notes live there rather than inside this skill's install directory, so a
+  skill update or reinstall cannot walk over them. The installer guarantees
+  the directory exists and is writable by the installing user; if it is
+  missing, create it with `mkdir -p`. Use a short identifier based on the
+  repository name, directory name, or the name used by the user or team.
 - Organize each note under area-based headings. Use short statements of fact,
   not narrated debugging journeys. Include enough context to show when a fact
   might be stale.
@@ -35,8 +38,9 @@ agents do not need to rediscover them.
 ## When starting relevant work
 
 1. Identify the current project from the directory, repository, or conversation.
-2. Check whether `project-specificies/<project-name>-deviations.md` exists in
-   this skill's directory.
+2. Check whether
+   `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/<project-name>-deviations.md`
+   exists.
 3. If it exists, read it before investigating project-specific behavior or
    making assumptions about how the project should work.
 4. If it does not exist, continue normally. Create it only when a confirmed
@@ -52,7 +56,9 @@ does not depend on project-specific behavior.
 2. Check whether the current project's note already exists.
 3. If it exists, add the fact under the relevant heading, or create a heading
    when none fits.
-4. If it does not exist, create it with frontmatter containing:
+4. If it does not exist, create the directory if needed
+   (`mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills"`) and write
+   the note with frontmatter containing:
    - `name`: the filename without the extension
    - `description`: what the note covers and when to load it
 5. Keep entries terse and organized by area.

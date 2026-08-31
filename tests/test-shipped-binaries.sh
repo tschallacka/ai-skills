@@ -7,7 +7,9 @@
 # A row may name a binary that is not built yet: the registry is the
 # declaration, and a release builds against it. What must always hold is that
 # the declaration is well formed, unambiguous, and that nothing sits under
-# bin/ that no row accounts for.
+# bin/ that no row accounts for. A skill may ship several binaries for one
+# target (one row per binary, e.g. a server and a client), so uniqueness is per
+# (condition, binary), not per target.
 
 set -euo pipefail
 export LC_ALL=C
@@ -42,7 +44,7 @@ for reg in $registries; do
     rows="$(awk '!/^#/ && NF' "$reg" | tail -n +2)"
     [ -n "$rows" ] || t_fail "$rel: registry has a header but no rows"
 
-    seen_targets="" seen_conditions=""
+    seen_pairs="" seen_targets=""
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         fields="$(printf '%s' "$row" | awk -F'\t' '{print NF}')"
@@ -54,15 +56,16 @@ for reg in $registries; do
         binary="$(printf '%s' "$row" | cut -f3)"
         why="$(printf '%s' "$row" | cut -f4)"
 
-        case " $seen_targets " in
-            *" $target "*) t_fail "$rel: target $target declared twice" ;;
+        # A skill may ship several binaries for one target (e.g. a server and a
+        # client). Uniqueness is per (condition, binary), so the same binary for
+        # the same condition is never declared twice, but a target may host as
+        # many binaries as it ships.
+        pair="$condition|$binary"
+        case " $seen_pairs " in
+            *" $pair "*) t_fail "$rel: (condition, binary) '$pair' declared twice, so which row wins is ambiguous" ;;
         esac
+        seen_pairs="$seen_pairs $pair"
         seen_targets="$seen_targets $target"
-
-        case " $seen_conditions " in
-            *" $condition "*) t_fail "$rel: condition '$condition' declared twice, so which row wins is ambiguous" ;;
-        esac
-        seen_conditions="$seen_conditions $condition"
 
         # condition is <uname -s glob>:<uname -m glob>
         case "$condition" in

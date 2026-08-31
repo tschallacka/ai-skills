@@ -184,8 +184,10 @@ Three traps, all of which have already bitten:
 ## 6. Declaring what ships (this repo specifically)
 
 A binary shipped by an `ai-skills` skill is declared in that skill's
-`binaries.tsv` — one row per target: triple, host condition, filename, why.
-The rules:
+`binaries.tsv` — one row per (target triple, binary): triple, host condition,
+filename, why. A skill may ship several binaries for one target (for example a
+server and a client), each with its own row; the installer resolves the set for
+the host's platform. The rules:
 
 - `binaries.tsv` is `MODE: PROD` (the installer reads it on the target) and
   must appear in `skill_files()` in `installer/src/50-manifest.sh`.

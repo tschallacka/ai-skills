@@ -186,8 +186,9 @@ show_shop_menu() {
     local horizontal=''
     local index label description
     # The registry from section 1, plus the synthetic "everything" entry whose
-    # number select_skills() treats as "all".
-    local -a labels=("${SKILL_NAMES[@]}" 'all five skills')
+    # number select_skills() treats as "all". The label derives from the count,
+    # so adding a skill cannot leave a stale number behind.
+    local -a labels=("${SKILL_NAMES[@]}" "all ${#SKILL_NAMES[@]} skills")
     local -a descriptions=("${SKILL_DESCRIPTIONS[@]}" 'Installs or updates the complete skill set.')
 
     [ -n "$COLOR_MODE" ] || detect_color_mode

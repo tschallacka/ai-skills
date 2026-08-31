@@ -1,53 +1,14 @@
 # MODE: PROD
-# Prebuilt binaries this skill SHIPS as artifacts, one row per target.
-#
-# This is a different budget from requires.tsv. requires.tsv declares what the
-# target machine must already HAVE; this file declares what we DELIVER. A
-# self-contained binary asks nothing of the box, so shipping one lowers the
-# skill's runtime requirements rather than raising them — the python3/node/perl/
-# socat any-of group in requires.tsv exists only because there is no binary yet.
-#
-# Rust is a DEV dependency: the toolchain builds these. The crate lives at
-# src/chat/ per CODE-STYLE 1b - beside the skill directories, not inside this
-# one, because a crate is what CI builds while a skill directory is what the
-# installer copies. Its sources are MODE: DEV plus PACKAGE: PROD, so the source
-# never ships but its content reaches the user inside the artifact. Users need
-# no Rust, no cargo and no interpreter.
-#
-# One binary, `chat`, carrying subcommands rather than one binary per verb:
-# `chat serve` is the server and `chat send|read|tail|register` are the client
-# verbs. The five helper scripts are bash, which a Windows agent outside Git
-# Bash does not have, so a server-only binary would have left such a host a bus
-# it could not talk to.
-#
-# Each binary lives at bin/<target>/<binary>. The installer matches `condition`
-# against the host the same way requires.tsv rows are matched, and installs the
-# first row that matches. Every binary ships in the npm package regardless of
-# host, because we do not know who or what pulls it.
-#
-# Columns, tab-separated:
-#   target     Rust target triple; also the directory name under bin/
-#   condition  <uname -s glob>:<uname -m glob> this row serves, a bash case
-#              pattern, so | may join alternatives (same grammar as
-#              requires.tsv). The first matching row wins, top to bottom.
-#   binary     filename inside bin/<target>/ — carries .exe on Windows
-#   why        one line: which hosts this row serves, and why this triple
-#
-# Linux ships musl rather than gnu so one static binary covers every distro
-# regardless of glibc version. magequery ships both because it links a C MySQL
-# client; the chat server has no C dependencies, so musl alone is sufficient and
-# one row per condition keeps selection unambiguous.
-#
-# Windows: one msvc build serves native Windows, Git Bash (MINGW*), MSYS2 and
-# Cygwin, because all four report distinct `uname -s` values but run the same
-# PE binary. rustc does list a tier-3 x86_64-pc-cygwin target, but tier 3 has
-# no prebuilt std and no CI guarantee, and a Cygwin user is already served by
-# the row below — so it is deliberately not shipped. Say the word if a native
-# Cygwin build is wanted anyway; it costs a build-std step.
-
+# Prebuilt chat rust binaries shipped with the chat skill (server + client).
+# Built by the release/CI (cargo build --release --workspace); never committed.
 target	condition	binary	why
-x86_64-unknown-linux-musl	Linux:x86_64|amd64	chat	64-bit x86 Linux; static musl so it runs on any distro and any glibc vintage, Alpine included
-aarch64-unknown-linux-musl	Linux:aarch64|arm64	chat	64-bit ARM Linux: Graviton, Ampere, Raspberry Pi 64-bit, arm64 devcontainers
-x86_64-apple-darwin	Darwin:x86_64	chat	Intel macOS
-aarch64-apple-darwin	Darwin:arm64	chat	Apple Silicon macOS; cross-built darwin-arm64 needs an ad-hoc signature or the kernel refuses to exec it
-x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	chat.exe	64-bit Windows, and the POSIX layers on it: Git Bash, MSYS2 and Cygwin all run this PE binary
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	chat-server-rs	Static 64-bit x86 Linux RFC-1459 IRC-over-TLS server
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	chat-client-rs	Static 64-bit x86 Linux TLS chat client
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	chat-server-rs	Static 64-bit ARM Linux RFC-1459 IRC-over-TLS server
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	chat-client-rs	Static 64-bit ARM Linux TLS chat client
+x86_64-apple-darwin	Darwin:x86_64	chat-server-rs	Intel macOS IRC-over-TLS server
+x86_64-apple-darwin	Darwin:x86_64	chat-client-rs	Intel macOS TLS chat client
+aarch64-apple-darwin	Darwin:arm64	chat-server-rs	Apple Silicon macOS IRC-over-TLS server
+aarch64-apple-darwin	Darwin:arm64	chat-client-rs	Apple Silicon macOS TLS chat client
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	chat-server-rs.exe	64-bit Windows IRC-over-TLS server
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	chat-client-rs.exe	64-bit Windows TLS chat client

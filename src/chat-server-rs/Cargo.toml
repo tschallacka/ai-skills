@@ -4,10 +4,19 @@
 name = "chat-server-rs"
 version = "0.1.0"
 edition = "2021"
-description = "The compiled chat-server rung: the same wire protocol as the interpreter tiers, resident instead of per-connection"
+description = "The RFC-grammar TLS IRC chat server, sharing the chat-proto wire model"
 license = "MIT"
 
 [dependencies]
+chat-proto = { path = "../chat-proto" }
+# rcgen (ring backend) mints the self-signed certificate in-crate at first run,
+# so the server needs no external binary (no openssl) and no other trust store.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+# rustls with the ring provider, NOT the aws-lc-rs default (no C toolchain).
+# The client pins the server cert via TOFU, so no webpki-roots / system trust
+# store is needed on the server.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
 
 [profile.release]
 opt-level = "z"

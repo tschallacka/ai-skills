@@ -15,8 +15,10 @@ compatible agent tools.
 | Post-implementation review | After-the-fact review of built code with concrete proposed fixes, in three passes: implementer self-analysis, an independent solutions agent, and a critical-feedback agent that ranks every fix. | [docs](post-implementation-review/docs/README.md) |
 | Project-specific deviations | Records confirmed project behavior and environment quirks in per-project notes that future agents load instead of re-debugging. | [docs](project-specificies/docs/README.md) |
 | Resource-limited testing | Runs heavyweight commands (suites, builds, analyzers, browsers) under platform-appropriate CPU/memory caps, with honest degradation when a platform has no cap mechanism. | [docs](resource-limited-testing/docs/README.md) |
-| Chat | IRC-basis message bus for agents: one persistent server (runtime falls back through python3/node/perl/socat+bash), channels, and pure-bash helpers to send, read a delta since an id, or tail a stream. | [docs](chat/docs/README.md) |
+| Chat | RFC-1459 IRC-over-TLS message bus for agents: a rust server a standard TLS IRC client can join, a rust client with UDP discovery and TOFU cert pinning, channels, and additive history/delta reads. | [docs](chat/docs/README.md) |
 | Git worktrees | Parallel agents in one repository: isolated worktree verification, per-agent trees, and merging back in a conflict-aware order without trampling the main checkout. | [docs](git-worktrees/docs/README.md) |
+| Merge request etiquette | Descriptions a reviewer can act on, in the author's voice: a one-paragraph TLDR, the defect/cause/change body, derived from the branch's commits, and the one case where a collapsible section earns its place. | [docs](merge-request-etiquette/docs/README.md) |
+| Text etiquette | Shorthand and a clipped register for an agent's prose - chat, dev talk, and its own thinking: facts first, a shared shorthand with an ask-don't-guess rule, praise capped at `gj`, and the people-please prose banned. Plain english on request. | [docs](text-etiquette/docs/README.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.

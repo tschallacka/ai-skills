@@ -16,7 +16,7 @@ if [ -n "$CLI_MODE" ]; then
     case "$CLI_MODE" in
         print) cli_print_skill_files ;;
         resolve) cli_resolve_source ;;
-        install) cli_install_skill ;;
+        install) ensure_agent_data_dir; cli_install_skill ;;
     esac
     exit $?
 fi
@@ -28,6 +28,7 @@ select_skills
 download_source
 prepend_bundled_rjq
 verify_runtime_tools "${SELECTED_SKILLS[@]}"
+ensure_agent_data_dir
 # PORTABILITY(empty-array-setu): every requested skill can be blocked, and bash
 # 3.2 treats the empty expansion as unbound under set -u.
 SELECTED_SKILLS=(${RUNTIME_READY_SKILLS[@]+"${RUNTIME_READY_SKILLS[@]}"})

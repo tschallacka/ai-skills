@@ -27,6 +27,8 @@
     "bug-report",
     "chat",
     "git-worktrees",
+    "merge-request-etiquette",
+    "text-etiquette",
     "post-implementation-review",
     "README.md",
     "LICENSE",
@@ -35,8 +37,7 @@
     "!planning/scripts/build-plan-libs.sh",
     "!planning/ARCHITECTURE.md",
     "!planning/MAINTAINER.md",
-    "!planning/PACKAGE-MAP.tsv",
-    "!project-specificies/*-deviations.md"
+    "!planning/PACKAGE-MAP.tsv"
   ],
   "engines": {
     "node": ">=14"

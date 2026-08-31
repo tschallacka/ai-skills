@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Use when the user says "brainstorm" or "lets brainstorm" — that is an explicit invocation and always triggers this skill. Also use when the user asks to build, make, add, redesign, or implement something that is under-specified and could branch in materially different directions., to run a brief recorded pre-planning back-and-forth that settles what to build before committing to a plan or an implementation. Do not use for small, trivial, or fully-specified changes, or when the user explicitly wants an immediate plan or implementation without discussion.
+description: Use when the user says "brainstorm" or "lets brainstorm" — that is an explicit invocation and always triggers this skill. Also use when the user asks to build, make, add, redesign, or implement something that is under-specified and could branch in materially different directions, to run a brief recorded pre-planning back-and-forth that settles what to build before committing to a plan or an implementation. Do not use for small, trivial, or fully-specified changes, or when the user explicitly wants an immediate plan or implementation without discussion.
 ---
 <!-- MODE: PROD -->
 
