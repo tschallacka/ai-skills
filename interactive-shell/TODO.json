@@ -6,15 +6,15 @@
     {
       "id": "ISH-1",
       "title": "Make interactive-shell a discoverable unknown-TTY tool",
-      "status": "partly",
+      "status": "done",
       "priority": "high",
       "parent": null,
-      "detail": "The current wrapper proves scripted transcripts but does not yet give a fresh agent enough observation, input, and discovery primitives to navigate unfamiliar TUIs safely.",
-      "note": "Initial gaps recorded after the nano and attempted Midnight Commander exploration.",
+      "detail": "Provide observation, input, discovery, and recovery primitives so a fresh agent can navigate unfamiliar TUIs safely.",
+      "note": "Completed with structured actions, snapshots, waits, terminal modeling, element discovery, and observation-driven exploration coverage.",
       "blocked_on": null,
       "refs": ["interactive-shell/SKILL.md", "src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:59:00Z"
     },
     {
       "id": "ISH-1a",
@@ -116,7 +116,7 @@
       "detail": "Create an exploratory test driven only by observations and available actions against MC, nano, and less; do not encode a predetermined transcript or assume screen coordinates in advance.",
       "note": null,
       "blocked_on": null,
-      "refs": ["tests/test-interactive-shell.sh", "interactive-shell/SKILL.md"],
+      "refs": ["tests/test-interactive-shell-exploration.sh", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
       "updated_at": "2026-08-31T23:55:00Z"
     },
@@ -132,19 +132,6 @@
       "refs": ["src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
       "updated_at": "2026-08-31T22:58:00Z"
-    },
-    {
-      "id": "ISH-1j",
-      "title": "Preserve foreground input for nested interactive children",
-      "status": "open",
-      "priority": "high",
-      "parent": "ISH-1",
-      "detail": "Ensure structured keyboard input reaches the active foreground child when a TUI such as MC launches an editor, and verify exit keys and save prompts across the nested process boundary.",
-      "note": "Discovered by the observation-driven MC-to-nano test: text reached the editor, but Ctrl-X/F10 did not reliably exit it.",
-      "blocked_on": null,
-      "refs": ["src/interactive-shell/src/lib.rs", "tests/test-interactive-shell-exploration.sh"],
-      "created_at": "2026-08-31T23:40:00Z",
-      "updated_at": "2026-08-31T23:40:00Z"
     }
   ]
 }
