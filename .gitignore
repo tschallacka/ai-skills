@@ -44,8 +44,15 @@ src/*/target/
 chat/runtime/chat-server-rs
 src/chat-server-rs/target/
 
-# Built chat rust binaries (release/CI builds them; never committed), placed
-# under chat/bin/<target-triple>/ per binaries.tsv.
+# The development tree's compiled helpers, built by ./setup-dev-env.sh into one
+# bin/<target triple> for every skill to share. Never committed: they are
+# per-platform, large, and rebuilt from src/ in a command. A release builds its
+# own; an install gets them under $XDG_CONFIG_HOME/tsch-ai-skills/bin.
+/bin/
+
+# Built chat rust binaries. installer/build-release.sh and CI still place them
+# per-skill; T72 moves that to the shared directory above, and this rule goes
+# with it.
 chat/bin/*/
 
 # A local `cargo build` drop of the plan-crypt helper, the same developer

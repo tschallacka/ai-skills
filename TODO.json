@@ -37,6 +37,41 @@
       "updated_at": "2026-08-27T12:37:03Z"
     },
     {
+      "id": "T72",
+      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/60-install.sh",
+        "planning/scripts/plan-env.sh",
+        "tests/test-shipped-binaries.sh",
+        "rust-development-guidelines.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-31T13:27:55Z",
+      "updated_at": "2026-08-31T13:27:55Z"
+    },
+    {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-08-30T21:50:27Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
@@ -1481,23 +1516,6 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T16:32:43Z"
-    },
-    {
-      "id": "T71",
-      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
-      "note": null,
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/MAINTAINER.md",
-        "planning/docs/README.md"
-      ],
-      "created_at": "2026-08-30T21:50:27Z",
-      "updated_at": "2026-08-30T21:50:27Z"
     }
   ]
 }

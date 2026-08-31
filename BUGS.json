@@ -2043,6 +2043,74 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B94",
+      "title": "normalize_platform matches only Windows_NT, so plan-overview is reported unavailable under Git Bash, MSYS2 and Cygwin",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "PLAN_OVERVIEW_TEST_MODE=1 PLAN_OVERVIEW_TEST_OS=MINGW64_NT-10.0-19045 PLAN_OVERVIEW_TEST_ARCH=x86_64 bash -c 'source installer/src/20-runtime-tools.sh; normalize_platform; echo rc=$?'",
+      "observed": "normalize_platform returns 1 and prints nothing, so plan_overview_selected_artifact calls plan_overview_unavailable and the installer reports 'Plan overview unavailable on this platform'.",
+      "expected": "It returns x86_64-pc-windows-msvc, the row rust-development-guidelines.md:129 declares serves 'Windows, and Git Bash / MSYS2 / Cygwin on it'.",
+      "mechanism": "installer/src/20-runtime-tools.sh:57 matches only Windows_NT:AMD64|Windows_NT:x86_64, but uname -s prints MINGW64_NT-... under Git Bash, MSYS_NT-... under MSYS2 and CYGWIN_NT-... under Cygwin. Two sibling copies of the same table already match those: prepend_bundled_rjq at 20-runtime-tools.sh:88 and skill_files() in 50-manifest.sh both accept MINGW*|MSYS*|CYGWIN*|Windows*, and plan_crypt_target_triple accepts MINGW*|MSYS*|CYGWIN* but not Windows_NT. So on a real Windows bash rjq resolves from the arm directly below the one that refuses plan-overview.",
+      "surfaces": [
+        "installer/src/20-runtime-tools.sh",
+        "planning/scripts/lib/crypt/plan_crypt_target_triple.sh",
+        "installer/src/50-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:02Z",
+      "updated_at": "2026-08-31T13:20:02Z"
+    },
+    {
+      "id": "B95",
+      "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd $(git rev-parse --show-toplevel); echo \"source: $(cd planning/scripts/lib/document && cd ../../../.. && pwd)\"; echo \"compiled: $(cd planning/scripts && cd ../../../.. && pwd)\"",
+      "observed": "The source file resolves the repo root; the compiled library resolves two directories above it (…/git/ai-skills/.claude here). rjq_dir therefore names a path that holds no binaries, the [ -x ] guard fails, and PATH is never prepended.",
+      "expected": "Both resolve the root that holds bin/<triple>, so a tree or an install carrying its own rjq uses it.",
+      "mechanism": "scripts/build-plan-libs.sh concatenates each scripts/lib/<group>/*.sh verbatim into planning/scripts/<group>-lib.sh. The block in lib/document/99-facade.sh computes plan_root as $(dirname BASH_SOURCE)/../../../.., which is correct from planning/scripts/lib/document but wrong from planning/scripts, where the compiled copy lands: it is two segments shallower, so the same literal climbs two directories too far. A relative-depth expression cannot survive being copied between directories, and nothing asserts the resolved path exists.",
+      "surfaces": [
+        "planning/scripts/lib/document/99-facade.sh",
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/build-plan-libs.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:46Z",
+      "updated_at": "2026-08-31T13:20:46Z"
+    },
+    {
+      "id": "B96",
+      "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Re-run the macOS system bash 3.2 leg of any run that failed it; run 33401864955 failed cargo-plan-overview at watcher_reports_a_real_edit and the identical job passed on rerun with no code change.",
+      "observed": "cargo test --test watch fails with 'test result: FAILED. 2 passed; 1 failed' on the macOS floor leg, taking the whole suite to 119/120. The same job re-run on the same commit passes.",
+      "expected": "The watcher test is deterministic on every supported platform, or declares its timing assumption and skips loudly where it cannot hold.",
+      "mechanism": "Not yet proven. Two candidates, both macOS-specific. (1) Timing: watch_plan_dir sleeps SCAN_INTERVAL 250ms per poll and the test allows 2s, so it needs one of about eight polls to observe the write; a slow or loaded runner can starve that thread. (2) Path identity: the test asserts event.changed == vec![root.join(\"plan.md\")] by exact equality, and std::env::temp_dir() on macOS is /var/folders/... which is a symlink to /private/var/folders/..., so any canonicalisation on the way through makes the two spellings differ on macOS while matching on Linux. Ruled out: timestamp granularity. The snapshot stores a content fingerprint alongside mtime and size, so a same-length 'one'->'two' edit is detectable whatever the filesystem does with mtime.",
+      "surfaces": [
+        "src/plan-overview/tests/watch.rs",
+        "src/plan-overview/src/watch.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "PR #7 CI",
+      "notes": null,
+      "created_at": "2026-08-31T14:50:34Z",
+      "updated_at": "2026-08-31T14:50:34Z"
     }
   ]
 }

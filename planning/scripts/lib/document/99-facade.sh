@@ -14,18 +14,21 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-map-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-inventory-lib.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/plan-crypt-lib.sh"
 
-plan_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-case "$(uname -s):$(uname -m)" in
-    Linux:x86_64|Linux:amd64) rjq_dir="$plan_root/bin/x86_64-unknown-linux-musl" ;;
-    Linux:aarch64|Linux:arm64) rjq_dir="$plan_root/bin/aarch64-unknown-linux-musl" ;;
-    Darwin:x86_64) rjq_dir="$plan_root/bin/x86_64-apple-darwin" ;;
-    Darwin:arm64) rjq_dir="$plan_root/bin/aarch64-apple-darwin" ;;
-    MINGW*:*|MSYS*:*|CYGWIN*:*|Windows*:*) rjq_dir="$plan_root/bin/x86_64-pc-windows-msvc" ;;
-    *) rjq_dir="" ;;
-esac
-if [ -x "$rjq_dir/rjq" ] || [ -x "$rjq_dir/rjq.exe" ]; then
-    PATH="$rjq_dir:$PATH"
-    export PATH
+# rjq is invoked by name from these helpers, so the directory holding it has to
+# be on PATH before any of them run. plan_bin_dir answers where that is for an
+# install and for a development tree alike; it replaces a hand-rolled copy of
+# the platform table that also counted parent directories, and got a different
+# answer once the library build moved this block two levels shallower (B95).
+# Only when the machine offers none: the bundled copy is a fallback, never an
+# override. Prepending unconditionally would defeat whoever put a particular
+# rjq first on purpose -- an operator pinning a version, or a test injecting a
+# stub to prove a failed write is refused, which is exactly what it broke.
+if ! command -v rjq >/dev/null 2>&1; then
+    rjq_dir="$(plan_bin_dir)" || rjq_dir=''
+    if [ -n "$rjq_dir" ] && { [ -x "$rjq_dir/rjq" ] || [ -x "$rjq_dir/rjq.exe" ]; }; then
+        PATH="$rjq_dir:$PATH"
+        export PATH
+    fi
 fi
 
 # ── Load-time initialisation ─────────────────────────────────────────────────

@@ -116,7 +116,7 @@ in_scope="$(cd "$repo_root" && git ls-files \
     planning project-specificies resource-limited-testing brainstorm \
     post-implementation-review todo bug-report installer tests src \
     run-tests.sh blast-radius.sh generate-portability.sh verify-both-shells.sh \
-    install.sh install-ui.sh)"
+    install.sh install-ui.sh setup-dev-env.sh)"
 
 missing='' bad_mode='' bad_package='' stray_package='' input_mode='' disagree='' checked=0
 while IFS= read -r path; do

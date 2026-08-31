@@ -116,6 +116,37 @@
             fi
             PATH="${bash32}/bin/bash32-bin:$PATH" exec ${bash32}/bin/bash32 "$@"
           '';
+
+          # One toolchain: the NEWEST stable rust the pinned nixpkgs offers.
+          #
+          # A version literal here rots silently until something refuses to
+          # build, which is exactly what happened -- the shell pinned 1.86.0
+          # while six of the seven rust-toolchain.toml files under src/ asked
+          # for 1.97, so it could not build chat-server-rs at all (its `time`
+          # dependency requires 1.88) while CI, which installs a toolchain per
+          # job, built it fine. Nothing tested the shell against the crates, so
+          # the gap stayed invisible.
+          #
+          # There is deliberately no older floor toolchain. Every crate here is
+          # pure Rust with no system library dependency a newer compiler cannot
+          # satisfy, and a binary built by a newer compiler runs on the target
+          # systems all the same, so carrying a second compiler to prove an old
+          # one still works buys nothing and costs a build.
+          #
+          # `flake.lock` is what makes "latest" reproducible: everyone on one
+          # lock gets one compiler, and `nix flake update` is the deliberate
+          # moment it moves.
+          rustTargets = [
+            "x86_64-unknown-linux-musl"
+            "aarch64-unknown-linux-musl"
+            "x86_64-apple-darwin"
+            "aarch64-apple-darwin"
+            "x86_64-pc-windows-msvc"
+          ];
+          rustLatest = pkgs.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" "rustfmt" "clippy" ];
+            targets = rustTargets;
+          };
         in {
           default = pkgs.mkShell {
             packages = [
@@ -132,16 +163,7 @@
               # dependency all the same: a shipped binary asks nothing of the
               # target box, which is why shipping one lowers the runtime budget
               # in CODE-STYLE section 1 rather than widening it.
-              (pkgs.rust-bin.stable."1.86.0".default.override {
-                extensions = [ "rust-src" "rustfmt" "clippy" ];
-                targets = [
-                  "x86_64-unknown-linux-musl"
-                  "aarch64-unknown-linux-musl"
-                  "x86_64-apple-darwin"
-                  "aarch64-apple-darwin"
-                  "x86_64-pc-windows-msvc"
-                ];
-              })
+              rustLatest
               # Renders the architecture diagrams. Development-only: the test
               # suite must still run without nix, so the render check reports
               # UNCONFIGURED when mmdc is absent rather than failing.
@@ -156,6 +178,8 @@
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
               echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
               echo "  cargo            $(cargo --version | cut -d' ' -f2)  (builds the crates under src/)"
+              echo "  cargo186         $(cargo186 --version | cut -d' ' -f2)  (plan-overview's declared floor)"
+              echo "  ./setup-dev-env.sh  build the crates into this tree so the skills use them"
               echo
               echo "Portability checks:"
               echo "  ./run-tests.sh                    # your bash"
