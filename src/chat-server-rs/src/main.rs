@@ -194,6 +194,15 @@ fn valid_chan(c: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
 }
 
+// A umode set a client may send at connect or with /mode <self>: the letters
+// a standard client expects to be accepted (i invisible, w WALLOPS, s server
+// notices) with optional +/- prefixes. There is no behavior behind them; the
+// point is that the set succeeds so the client's startup reads as clean.
+fn valid_umode_set(flags: &str) -> bool {
+    let body = flags.trim_start_matches(['+', '-']);
+    !body.is_empty() && body.chars().all(|ch| matches!(ch, 'i' | 'w' | 's'))
+}
+
 fn valid_nick(n: &str) -> bool {
     (1..=32).contains(&n.len())
         && n.chars()
@@ -761,15 +770,32 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         );
                     }
                     "MODE" => {
-                        // Query-only support: a channel gets its (empty) modes,
-                        // the user their (empty) umodes, and a set attempt is
-                        // refused with 501 rather than silently ignored, so the
-                        // client knows nothing was applied.
+                        // Queries are answered, and the umode set a standard
+                        // client sends at connect (Konversation: `MODE <nick>
+                        // +i`) is accepted with a confirmation so it does not
+                        // read as an error. Unknown flags are still 501.
                         let target = params.first().cloned().unwrap_or_default();
                         let sn = sess.server_name.clone();
                         let me = sess.nick.clone();
                         if params.len() > 1 {
-                            w(st, &format!(":{} 501 {} :Unknown MODE flag", sn, me));
+                            let flags = params.get(1).cloned().unwrap_or_default();
+                            if target == sess.nick && valid_umode_set(&flags) {
+                                let prefix =
+                                    format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                                w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
+                            } else if valid_chan(&target) {
+                                // Channel modes need an operator model the bus
+                                // does not have; refuse rather than pretend.
+                                w(
+                                    st,
+                                    &format!(
+                                        ":{} 482 {} {} :You're not a channel operator",
+                                        sn, me, target
+                                    ),
+                                );
+                            } else {
+                                w(st, &format!(":{} 501 {} :Unknown MODE flag", sn, me));
+                            }
                         } else if valid_chan(&target) {
                             w(st, &format!(":{} 324 {} {} +", sn, me, target));
                         } else if target == sess.nick {
