@@ -336,6 +336,7 @@ fn valid_dir(path: &Path) -> Result<(), String> {
 struct SocketIdentity {
     parent: File,
     name: CString,
+    device: u64,
     inode: u64,
 }
 
@@ -348,6 +349,7 @@ fn remove_socket(identity: &SocketIdentity) {
             &mut stat,
             libc::AT_SYMLINK_NOFOLLOW,
         ) == 0
+            && stat.st_dev == identity.device
             && stat.st_ino == identity.inode
     };
     if same_entry {
@@ -367,22 +369,6 @@ fn fd_path(fd: RawFd) -> PathBuf {
     PathBuf::from(format!("/dev/fd/{fd}"))
 }
 
-fn chmod_socket(identity: &SocketIdentity) -> io::Result<()> {
-    if unsafe {
-        libc::fchmodat(
-            identity.parent.as_raw_fd(),
-            identity.name.as_ptr(),
-            0o600,
-            0,
-        )
-    } == 0
-    {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
 fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentity, String> {
     let name = path.file_name().ok_or("socket needs a filename")?;
     let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
@@ -399,6 +385,7 @@ fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentit
             return Ok(SocketIdentity {
                 parent: parent_fd,
                 name: name_c,
+                device: stat.st_dev,
                 inode: stat.st_ino,
             });
         }
@@ -707,13 +694,14 @@ pub fn run(
     };
     let name = socket.file_name().ok_or("socket needs a filename")?;
     let bind_path = fd_path(parent_fd.as_raw_fd()).join(name);
-    let listener = UnixListener::bind(&bind_path).map_err(|e| e.to_string())?;
+    let old_umask = unsafe { libc::umask(0o177) };
+    let listener_result = UnixListener::bind(&bind_path);
+    unsafe {
+        libc::umask(old_umask);
+    }
+    let listener = listener_result.map_err(|e| e.to_string())?;
     let mut socket_guard = SocketGuard::new();
     socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
-    if let Err(error) = chmod_socket(socket_guard.identity.as_ref().unwrap()) {
-        remove_socket(socket_guard.identity.as_ref().unwrap());
-        return Err(error.to_string());
-    }
     if let Err(error) = listener.set_nonblocking(true) {
         remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
