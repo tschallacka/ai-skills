@@ -300,14 +300,35 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         }
                         // A plaintext client retrying against the TLS listener
                         // loops this path thousands of times a minute; logging
-                        // each attempt once filled tens of megabytes in minutes.
-                        // Log the first, then every 1000th with the running
-                        // total, so the flood is visible without being the log.
+                        // each attempt once filled tens of megabytes in
+                        // minutes. Time-gated, not count-gated: at most one
+                        // line per minute no matter how hard the flood runs,
+                        // carrying the running total.
                         let n = HANDSHAKE_ERRORS.fetch_add(1, Ordering::Relaxed);
-                        if n == 0 || n % 1000 == 0 {
+                        let due = {
+                            let mut last = LAST_LOG.lock().unwrap_or_else(|p| p.into_inner());
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            if now.saturating_sub(last.1) >= 60 || last.1 == 0 {
+                                last.0 = n;
+                                last.1 = now;
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if due {
+                            let peer = st
+                                .tcp
+                                .peer_addr()
+                                .map(|a| a.to_string())
+                                .unwrap_or_else(|_| "unknown".into());
                             eprintln!(
-                                "chat-server-rs: handshake error #{} (log-spam gate): {:?}",
+                                "chat-server-rs: handshake error #{} so far from {} (one line per minute): {:?}",
                                 n + 1,
+                                peer,
                                 e
                             );
                         }
@@ -942,8 +963,10 @@ fn announce_host() -> String {
     "localhost".to_string()
 }
 
-// Failed TLS handshakes since start; the log-spam gate reads it.
+// Failed TLS handshakes since start, and the second the last one was logged:
+// the log-spam gate reads both.
 static HANDSHAKE_ERRORS: AtomicU64 = AtomicU64::new(0);
+static LAST_LOG: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn main() {
     let home = std::env::var("AI_CHAT_HOME").unwrap_or_else(|_| {
