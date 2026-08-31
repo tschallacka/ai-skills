@@ -392,7 +392,21 @@ fn client(
         }
         line.push(b[0]);
     }
-    let value: serde_json::Value = serde_json::from_slice(&line).map_err(|e| e.to_string())?;
+    let value: serde_json::Value = match serde_json::from_slice(&line) {
+        Ok(value) => value,
+        Err(error) => {
+            json(
+                &mut stream,
+                &ErrorEvent {
+                    v: 1,
+                    event: "error",
+                    message: "invalid JSON",
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            return Err(error.to_string());
+        }
+    };
     if value.get("v").and_then(|v| v.as_u64()) != Some(1) {
         json(
             &mut stream,
@@ -405,11 +419,53 @@ fn client(
         .map_err(|e| e.to_string())?;
         return Ok(());
     }
-    let req: Request = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let req: Request = match serde_json::from_value(value) {
+        Ok(request) => request,
+        Err(error) => {
+            json(
+                &mut stream,
+                &ErrorEvent {
+                    v: 1,
+                    event: "error",
+                    message: "invalid request",
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            return Err(error.to_string());
+        }
+    };
     match req {
         Request::Text { v: 1, text } => write_master(master, text.as_bytes())?,
-        Request::Key { v: 1, key } => write_master(master, key_bytes(&key).ok_or("unknown key")?)?,
-        Request::Raw { v: 1, hex } => write_master(master, &decode_hex(&hex)?)?,
+        Request::Key { v: 1, key } => match key_bytes(&key) {
+            Some(bytes) => write_master(master, bytes)?,
+            None => {
+                json(
+                    &mut stream,
+                    &ErrorEvent {
+                        v: 1,
+                        event: "error",
+                        message: "unknown key",
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        },
+        Request::Raw { v: 1, hex } => match decode_hex(&hex) {
+            Ok(bytes) => write_master(master, &bytes)?,
+            Err(message) => {
+                json(
+                    &mut stream,
+                    &ErrorEvent {
+                        v: 1,
+                        event: "error",
+                        message,
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        },
         Request::Shutdown { v: 1 } => {
             *stopped = true;
             *reason = "client_shutdown";
