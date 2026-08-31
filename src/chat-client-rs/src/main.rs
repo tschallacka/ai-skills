@@ -36,7 +36,7 @@ fn usage() {
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options:\n\
-         \x20 --state DIR     client state dir (default $AI_CHAT_HOME or ~/.ai-chat)\n\
+         \x20 --state DIR     client state dir (default $AI_CHAT_HOME or the tsch-ai-skills XDG chat dir)\n\
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
@@ -146,7 +146,22 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
 fn client_state_dir() -> PathBuf {
     std::env::var("AI_CHAT_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs_home().join(".ai-chat"))
+        .unwrap_or_else(|_| chat_default_home())
+}
+
+// The central state home everything global shares: the XDG config home's
+// tsch-ai-skills directory, beside the shared bin/ and the global plans.
+fn chat_default_home() -> PathBuf {
+    match std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
+        Some(v) => PathBuf::from(v).join("tsch-ai-skills").join("chat"),
+        None => dirs_home()
+            .join(".config")
+            .join("tsch-ai-skills")
+            .join("chat"),
+    }
 }
 
 fn dirs_home() -> PathBuf {

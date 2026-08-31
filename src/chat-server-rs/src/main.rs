@@ -994,9 +994,19 @@ static HANDSHAKE_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LAST_LOG: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn main() {
+    // Same central default as the client: the tsch-ai-skills XDG home.
     let home = std::env::var("AI_CHAT_HOME").unwrap_or_else(|_| {
-        eprintln!("chat-server-rs: AI_CHAT_HOME must be set");
-        std::process::exit(64);
+        let xdg = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|v| !v.is_empty());
+        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        match xdg {
+            Some(v) => format!("{}/tsch-ai-skills/chat", v.trim_end_matches('/')),
+            None => format!(
+                "{}/.config/tsch-ai-skills/chat",
+                home_dir.trim_end_matches('/')
+            ),
+        }
     });
     let args: Vec<String> = std::env::args().collect();
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
