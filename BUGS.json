@@ -49,6 +49,51 @@
       "updated_at": "2026-08-24T17:36:36Z"
     },
     {
+      "id": "B88",
+      "title": "The chat tests wait for a 'chat serving:' banner the detached server never prints, so every detached instance times out as not-ready",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "cd src/chat && cargo build && cd ../.. && h=$(mktemp -d /tmp/t.XXXXX) && ./src/chat/target/debug/chat serve --home \"$h\" --bind 127.0.0.1 --port 17901 >\"$h/serve.log\" 2>&1 & sleep 1; case \"$(cat \"$h/serve.log\")\" in *\"chat serving:\"*) echo MATCH;; *) echo 'NO MATCH';; esac",
+      "observed": "Prints 'NO MATCH'. The log holds 94 bytes: 'chat serving (detached): tcp 127.0.0.1:17901 pid 1146894 [endpoint given on the command line]'. The server is healthy — it binds, serves and answers clients — but the needle 'chat serving:' cannot occur in it. Both chat suites hang on this: test-chat-binary.sh:94 and test-chat-config.sh:386,417 all wait for that exact substring. test-chat-binary reports 'the server never reported serving on 17811. Its output:' followed by nothing, and test-chat-config reports FAIL (8) — every one of the eight downstream of a server that never became ready.",
+      "expected": "The readiness probe recognises a server that is in fact serving, in each of the three banner forms the binary emits.",
+      "mechanism": "src/chat/src/main.rs prints three different banners: line 2729 'chat serving: {} ({}), run dir {} [{}]' for the attached case, and lines 2622 and 2632 'chat serving (detached, unregistered): ...' and 'chat serving (detached): ...' for the two detached ones. The tests match the literal 'chat serving:' — with the colon immediately after 'serving' — so only the attached form is recognised, and every detached start reads as never-ready. The tests are the side that is wrong about the contract, but note test-chat-binary.sh:77-84 carries a comment explaining that the readiness probe must never be the thing under test; matching a banner's exact punctuation is the same coupling in a different place.",
+      "surfaces": [
+        "chat/tests/test-chat-binary.sh",
+        "chat/tests/test-chat-config.sh",
+        "src/chat/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, diagnosing the two red tests that block Phase 1 of the 2.0.0-alpha release",
+      "notes": null,
+      "created_at": "2026-08-28T16:58:45Z",
+      "updated_at": "2026-08-28T16:58:45Z"
+    },
+    {
+      "id": "B89",
+      "title": "The release-package gate rejects any prerelease version, so bumping package.json to 2.0.0-alpha turns the suite red",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "for v in 2.0.0 2.0.0-alpha 2.0.0-alpha.1; do printf '%-16s %s\\n' \"$v\" \"$(printf '%s' \"$v\" | grep -c '^[0-9][0-9.]*[0-9]$')\"; done",
+      "observed": "2.0.0 -> 1, 2.0.0-alpha -> 0, 2.0.0-alpha.1 -> 0. tests/test-release-package.sh:37-39 reads the version out of package.json and asserts that count is '1', so any version carrying a prerelease identifier fails 'package.json states a version' and the whole gate goes red.",
+      "expected": "The gate accepts the versions the project actually intends to publish, prerelease identifiers included, while still rejecting a missing or malformed one.",
+      "mechanism": "The pattern '^[0-9][0-9.]*[0-9]$' was written when every released version was numeric — the tag list is v1.0.0 through v1.4.2, none with a suffix — so nothing had ever exercised a prerelease. It anchors both ends and permits only digits and dots, which excludes the hyphen semver requires for a prerelease. This is a latent gate, not a regression: it has been correct for every version shipped so far and becomes wrong the first time an alpha is cut.",
+      "surfaces": [
+        "tests/test-release-package.sh",
+        "package.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
+      "notes": null,
+      "created_at": "2026-08-28T17:11:58Z",
+      "updated_at": "2026-08-28T17:11:58Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -1345,6 +1390,52 @@
       "updated_at": "2026-08-28T10:45:00Z"
     },
     {
+      "id": "B94",
+      "title": "normalize_platform matches only Windows_NT, so plan-overview is reported unavailable under Git Bash, MSYS2 and Cygwin",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "PLAN_OVERVIEW_TEST_MODE=1 PLAN_OVERVIEW_TEST_OS=MINGW64_NT-10.0-19045 PLAN_OVERVIEW_TEST_ARCH=x86_64 bash -c 'source installer/src/20-runtime-tools.sh; normalize_platform; echo rc=$?'",
+      "observed": "normalize_platform returns 1 and prints nothing, so plan_overview_selected_artifact calls plan_overview_unavailable and the installer reports 'Plan overview unavailable on this platform'.",
+      "expected": "It returns x86_64-pc-windows-msvc, the row rust-development-guidelines.md:129 declares serves 'Windows, and Git Bash / MSYS2 / Cygwin on it'.",
+      "mechanism": "installer/src/20-runtime-tools.sh:57 matches only Windows_NT:AMD64|Windows_NT:x86_64, but uname -s prints MINGW64_NT-... under Git Bash, MSYS_NT-... under MSYS2 and CYGWIN_NT-... under Cygwin. Two sibling copies of the same table already match those: prepend_bundled_rjq at 20-runtime-tools.sh:88 and skill_files() in 50-manifest.sh both accept MINGW*|MSYS*|CYGWIN*|Windows*, and plan_crypt_target_triple accepts MINGW*|MSYS*|CYGWIN* but not Windows_NT. So on a real Windows bash rjq resolves from the arm directly below the one that refuses plan-overview.",
+      "surfaces": [
+        "installer/src/20-runtime-tools.sh",
+        "planning/scripts/lib/crypt/plan_crypt_target_triple.sh",
+        "installer/src/50-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:02Z",
+      "updated_at": "2026-08-31T13:20:02Z"
+    },
+    {
+      "id": "B95",
+      "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd $(git rev-parse --show-toplevel); echo \"source: $(cd planning/scripts/lib/document && cd ../../../.. && pwd)\"; echo \"compiled: $(cd planning/scripts && cd ../../../.. && pwd)\"",
+      "observed": "The source file resolves the repo root; the compiled library resolves two directories above it (…/git/ai-skills/.claude here). rjq_dir therefore names a path that holds no binaries, the [ -x ] guard fails, and PATH is never prepended.",
+      "expected": "Both resolve the root that holds bin/<triple>, so a tree or an install carrying its own rjq uses it.",
+      "mechanism": "scripts/build-plan-libs.sh concatenates each scripts/lib/<group>/*.sh verbatim into planning/scripts/<group>-lib.sh. The block in lib/document/99-facade.sh computes plan_root as $(dirname BASH_SOURCE)/../../../.., which is correct from planning/scripts/lib/document but wrong from planning/scripts, where the compiled copy lands: it is two segments shallower, so the same literal climbs two directories too far. A relative-depth expression cannot survive being copied between directories, and nothing asserts the resolved path exists.",
+      "surfaces": [
+        "planning/scripts/lib/document/99-facade.sh",
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/build-plan-libs.sh"
+      ],
+      "fix": "dfd5781 — plan_bin_dir replaces the facade's hand-rolled lookup and finds the tree by walking UP for a bin/<target triple> instead of computing a fixed $(dirname BASH_SOURCE)/../../../.., so the answer no longer depends on which directory the file is read from. Shipped in c7bb034 (PR #7).",
+      "verification": "Mutation: restore the fixed-depth expression in plan_bin_dir.sh, rebuild the libraries with build-plan-libs.sh, then source the compiled planning/scripts/plan-document-lib.sh with AI_SKILLS_BIN_ROOT unset, XDG_CONFIG_HOME pointed at a nonexistent path and PATH reduced to /usr/bin:/bin. With the mutation, command -v rjq prints nothing: B95 reproduced. Restore the walk-up, rebuild, repeat, and it resolves to the tree's own bin/x86_64-unknown-linux-musl/rjq. The three inputs are pinned because each one disables a different rung -- the .env pin, the shared install directory, and the machine's own rjq -- so only the development-tree rung is under test.",
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:46Z",
+      "updated_at": "2026-08-31T15:14:26Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -1799,6 +1890,95 @@
       "updated_at": "2026-08-28T11:08:56Z"
     },
     {
+      "id": "B90",
+      "title": "test-chat-binary and test-chat-config write presence files into the developer's real XDG_RUNTIME_DIR",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ls /run/user/$(id -u)/chat/*.server | wc -l; bash chat/tests/test-chat-config.sh >/dev/null 2>&1; ls /run/user/$(id -u)/chat/*.server | wc -l",
+      "observed": "41 .server files in /run/user/1000/chat after a session of running the chat suites, and every one of the 41 has a test-shaped home: 'awk -F= /^home=/ ... ' reports 41 under /tmp and none anywhere else. They accumulate rather than being cleaned, and they sit in the same registry the developer's own live bus uses for discovery.",
+      "expected": "A test run leaves the developer's real runtime directory exactly as it found it, the way test-chat-registry.sh already arranges.",
+      "mechanism": "chat/tests/test-chat-registry.sh:80-82 exports XDG_RUNTIME_DIR into its own throwaway root, with a comment at line 22 saying the location is the documented one and therefore has to be isolated. test-chat-binary.sh and test-chat-config.sh never mention XDG_RUNTIME_DIR at all, so every server they start registers into the real one. The isolation was understood and applied in one test and not carried to the two written later.",
+      "surfaces": [
+        "chat/tests/test-chat-binary.sh",
+        "chat/tests/test-chat-config.sh",
+        "chat/tests/test-chat-registry.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "main session, answering which port the chat server runs on and finding 41 stale registry entries while looking",
+      "notes": null,
+      "created_at": "2026-08-29T11:21:21Z",
+      "updated_at": "2026-08-29T11:21:21Z"
+    },
+    {
+      "id": "B91",
+      "title": "resource-limited-testing SKILL.md claims the installer hard-refuses without memlimit; requires.tsv declares it soft",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "grep -n refuses-to-run resource-limited-testing/SKILL.md; grep memlimit resource-limited-testing/requires.tsv",
+      "observed": "SKILL.md line 142 says memlimit is a hard gate: the installer refuses to run on macOS until it is present. requires.tsv row 3 declares the opposite: memlimit Darwin:arm64 soft, without it limited-run.sh caps CPU only. The installer treats soft as warn-and-install (20-runtime-tools.sh), so the refusal the SKILL.md advertises does not exist, while the degrade path SKILL.md lines 50-53 describe (warn, name memlimit, degrade to nice plus optional cpulimit) is the real behavior.",
+      "expected": "The third-party-tools bullet states the soft contract the requires.tsv row already declares: the installer installs with a warning naming the lost capability, and the wrapper degrades to nice plus optional cpulimit. One policy, stated once.",
+      "mechanism": "The SKILL.md bullet and the requires.tsv row were written under different policies and never reconciled; requires.tsv drives the installer, so the row is authoritative and the prose is the stale half.",
+      "surfaces": [
+        "resource-limited-testing/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B92",
+      "title": "README and both register docs advertise bug-add.sh/bug-update.sh/todo-add.sh/todo-update.sh helpers that were never shipped",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ls bug-report/scripts todo/scripts; grep -rn bug-add.sh bug-report/docs/README.md README.md | head -3",
+      "observed": "bug-report/docs/README.md line 19 and todo/docs/README.md line 18 say Shell helpers, not hand-editing, naming bug-add.sh / bug-update.sh and todo-add.sh / todo-update.sh; README.md rows 12-13 repeat the claim. Neither skill ships a scripts directory - the SKILL.md files document raw rjq recipes as the only write path.",
+      "expected": "Either the four helpers exist, are registered in skill_files() and PACKAGE-MANIFEST.tsv, and the docs describe them truthfully, or the docs describe the rjq recipes as the write path and drop the helper claim.",
+      "mechanism": "The helper plan is recorded as queued work (a TODO.json entry describes shell helpers under todo/scripts covering every write, with enum checks and atomic writes) but never landed, and the doc rows were written as if it had.",
+      "surfaces": [
+        "README.md",
+        "bug-report/docs/README.md",
+        "todo/docs/README.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "Found while filing B91-B93 by hand through the documented rjq recipes, which is exactly the hand-editing the docs claim nobody does.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B96",
+      "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Re-run the macOS system bash 3.2 leg of any run that failed it; run 33401864955 failed cargo-plan-overview at watcher_reports_a_real_edit and the identical job passed on rerun with no code change.",
+      "observed": "cargo test --test watch fails with 'test result: FAILED. 2 passed; 1 failed' on the macOS floor leg, taking the whole suite to 119/120. The same job re-run on the same commit passes.",
+      "expected": "The watcher test is deterministic on every supported platform, or declares its timing assumption and skips loudly where it cannot hold.",
+      "mechanism": "Not yet proven. Two candidates, both macOS-specific. (1) Timing: watch_plan_dir sleeps SCAN_INTERVAL 250ms per poll and the test allows 2s, so it needs one of about eight polls to observe the write; a slow or loaded runner can starve that thread. (2) Path identity: the test asserts event.changed == vec![root.join(\"plan.md\")] by exact equality, and std::env::temp_dir() on macOS is /var/folders/... which is a symlink to /private/var/folders/..., so any canonicalisation on the way through makes the two spellings differ on macOS while matching on Linux. Ruled out: timestamp granularity. The snapshot stores a content fingerprint alongside mtime and size, so a same-length 'one'->'two' edit is detectable whatever the filesystem does with mtime.",
+      "surfaces": [
+        "src/plan-overview/tests/watch.rs",
+        "src/plan-overview/src/watch.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "PR #7 CI",
+      "notes": null,
+      "created_at": "2026-08-31T14:50:34Z",
+      "updated_at": "2026-08-31T14:50:34Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -1909,118 +2089,6 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
-      "id": "B88",
-      "title": "The chat tests wait for a 'chat serving:' banner the detached server never prints, so every detached instance times out as not-ready",
-      "status": "confirmed",
-      "severity": "blocking",
-      "priority": "urgent",
-      "parent": null,
-      "reproduce": "cd src/chat && cargo build && cd ../.. && h=$(mktemp -d /tmp/t.XXXXX) && ./src/chat/target/debug/chat serve --home \"$h\" --bind 127.0.0.1 --port 17901 >\"$h/serve.log\" 2>&1 & sleep 1; case \"$(cat \"$h/serve.log\")\" in *\"chat serving:\"*) echo MATCH;; *) echo 'NO MATCH';; esac",
-      "observed": "Prints 'NO MATCH'. The log holds 94 bytes: 'chat serving (detached): tcp 127.0.0.1:17901 pid 1146894 [endpoint given on the command line]'. The server is healthy — it binds, serves and answers clients — but the needle 'chat serving:' cannot occur in it. Both chat suites hang on this: test-chat-binary.sh:94 and test-chat-config.sh:386,417 all wait for that exact substring. test-chat-binary reports 'the server never reported serving on 17811. Its output:' followed by nothing, and test-chat-config reports FAIL (8) — every one of the eight downstream of a server that never became ready.",
-      "expected": "The readiness probe recognises a server that is in fact serving, in each of the three banner forms the binary emits.",
-      "mechanism": "src/chat/src/main.rs prints three different banners: line 2729 'chat serving: {} ({}), run dir {} [{}]' for the attached case, and lines 2622 and 2632 'chat serving (detached, unregistered): ...' and 'chat serving (detached): ...' for the two detached ones. The tests match the literal 'chat serving:' — with the colon immediately after 'serving' — so only the attached form is recognised, and every detached start reads as never-ready. The tests are the side that is wrong about the contract, but note test-chat-binary.sh:77-84 carries a comment explaining that the readiness probe must never be the thing under test; matching a banner's exact punctuation is the same coupling in a different place.",
-      "surfaces": [
-        "chat/tests/test-chat-binary.sh",
-        "chat/tests/test-chat-config.sh",
-        "src/chat/src/main.rs"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, diagnosing the two red tests that block Phase 1 of the 2.0.0-alpha release",
-      "notes": null,
-      "created_at": "2026-08-28T16:58:45Z",
-      "updated_at": "2026-08-28T16:58:45Z"
-    },
-    {
-      "id": "B89",
-      "title": "The release-package gate rejects any prerelease version, so bumping package.json to 2.0.0-alpha turns the suite red",
-      "status": "confirmed",
-      "severity": "blocking",
-      "priority": "urgent",
-      "parent": null,
-      "reproduce": "for v in 2.0.0 2.0.0-alpha 2.0.0-alpha.1; do printf '%-16s %s\\n' \"$v\" \"$(printf '%s' \"$v\" | grep -c '^[0-9][0-9.]*[0-9]$')\"; done",
-      "observed": "2.0.0 -> 1, 2.0.0-alpha -> 0, 2.0.0-alpha.1 -> 0. tests/test-release-package.sh:37-39 reads the version out of package.json and asserts that count is '1', so any version carrying a prerelease identifier fails 'package.json states a version' and the whole gate goes red.",
-      "expected": "The gate accepts the versions the project actually intends to publish, prerelease identifiers included, while still rejecting a missing or malformed one.",
-      "mechanism": "The pattern '^[0-9][0-9.]*[0-9]$' was written when every released version was numeric — the tag list is v1.0.0 through v1.4.2, none with a suffix — so nothing had ever exercised a prerelease. It anchors both ends and permits only digits and dots, which excludes the hyphen semver requires for a prerelease. This is a latent gate, not a regression: it has been correct for every version shipped so far and becomes wrong the first time an alpha is cut.",
-      "surfaces": [
-        "tests/test-release-package.sh",
-        "package.json"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
-      "notes": null,
-      "created_at": "2026-08-28T17:11:58Z",
-      "updated_at": "2026-08-28T17:11:58Z"
-    },
-    {
-      "id": "B90",
-      "title": "test-chat-binary and test-chat-config write presence files into the developer's real XDG_RUNTIME_DIR",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "ls /run/user/$(id -u)/chat/*.server | wc -l; bash chat/tests/test-chat-config.sh >/dev/null 2>&1; ls /run/user/$(id -u)/chat/*.server | wc -l",
-      "observed": "41 .server files in /run/user/1000/chat after a session of running the chat suites, and every one of the 41 has a test-shaped home: 'awk -F= /^home=/ ... ' reports 41 under /tmp and none anywhere else. They accumulate rather than being cleaned, and they sit in the same registry the developer's own live bus uses for discovery.",
-      "expected": "A test run leaves the developer's real runtime directory exactly as it found it, the way test-chat-registry.sh already arranges.",
-      "mechanism": "chat/tests/test-chat-registry.sh:80-82 exports XDG_RUNTIME_DIR into its own throwaway root, with a comment at line 22 saying the location is the documented one and therefore has to be isolated. test-chat-binary.sh and test-chat-config.sh never mention XDG_RUNTIME_DIR at all, so every server they start registers into the real one. The isolation was understood and applied in one test and not carried to the two written later.",
-      "surfaces": [
-        "chat/tests/test-chat-binary.sh",
-        "chat/tests/test-chat-config.sh",
-        "chat/tests/test-chat-registry.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "main session, answering which port the chat server runs on and finding 41 stale registry entries while looking",
-      "notes": null,
-      "created_at": "2026-08-29T11:21:21Z",
-      "updated_at": "2026-08-29T11:21:21Z"
-    },
-    {
-      "id": "B91",
-      "title": "resource-limited-testing SKILL.md claims the installer hard-refuses without memlimit; requires.tsv declares it soft",
-      "status": "reported",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "grep -n refuses-to-run resource-limited-testing/SKILL.md; grep memlimit resource-limited-testing/requires.tsv",
-      "observed": "SKILL.md line 142 says memlimit is a hard gate: the installer refuses to run on macOS until it is present. requires.tsv row 3 declares the opposite: memlimit Darwin:arm64 soft, without it limited-run.sh caps CPU only. The installer treats soft as warn-and-install (20-runtime-tools.sh), so the refusal the SKILL.md advertises does not exist, while the degrade path SKILL.md lines 50-53 describe (warn, name memlimit, degrade to nice plus optional cpulimit) is the real behavior.",
-      "expected": "The third-party-tools bullet states the soft contract the requires.tsv row already declares: the installer installs with a warning naming the lost capability, and the wrapper degrades to nice plus optional cpulimit. One policy, stated once.",
-      "mechanism": "The SKILL.md bullet and the requires.tsv row were written under different policies and never reconciled; requires.tsv drives the installer, so the row is authoritative and the prose is the stale half.",
-      "surfaces": [
-        "resource-limited-testing/SKILL.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "skill review, maintainer session 2026-08-30",
-      "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed.",
-      "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B92",
-      "title": "README and both register docs advertise bug-add.sh/bug-update.sh/todo-add.sh/todo-update.sh helpers that were never shipped",
-      "status": "reported",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "ls bug-report/scripts todo/scripts; grep -rn bug-add.sh bug-report/docs/README.md README.md | head -3",
-      "observed": "bug-report/docs/README.md line 19 and todo/docs/README.md line 18 say Shell helpers, not hand-editing, naming bug-add.sh / bug-update.sh and todo-add.sh / todo-update.sh; README.md rows 12-13 repeat the claim. Neither skill ships a scripts directory - the SKILL.md files document raw rjq recipes as the only write path.",
-      "expected": "Either the four helpers exist, are registered in skill_files() and PACKAGE-MANIFEST.tsv, and the docs describe them truthfully, or the docs describe the rjq recipes as the write path and drop the helper claim.",
-      "mechanism": "The helper plan is recorded as queued work (a TODO.json entry describes shell helpers under todo/scripts covering every write, with enum checks and atomic writes) but never landed, and the doc rows were written as if it had.",
-      "surfaces": [
-        "README.md",
-        "bug-report/docs/README.md",
-        "todo/docs/README.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "skill review, maintainer session 2026-08-30",
-      "notes": "Found while filing B91-B93 by hand through the documented rjq recipes, which is exactly the hand-editing the docs claim nobody does.",
-      "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
       "id": "B93",
       "title": "project-specificies directory and registry name misspells specifics as specificies",
       "status": "reported",
@@ -2043,74 +2111,6 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B94",
-      "title": "normalize_platform matches only Windows_NT, so plan-overview is reported unavailable under Git Bash, MSYS2 and Cygwin",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "PLAN_OVERVIEW_TEST_MODE=1 PLAN_OVERVIEW_TEST_OS=MINGW64_NT-10.0-19045 PLAN_OVERVIEW_TEST_ARCH=x86_64 bash -c 'source installer/src/20-runtime-tools.sh; normalize_platform; echo rc=$?'",
-      "observed": "normalize_platform returns 1 and prints nothing, so plan_overview_selected_artifact calls plan_overview_unavailable and the installer reports 'Plan overview unavailable on this platform'.",
-      "expected": "It returns x86_64-pc-windows-msvc, the row rust-development-guidelines.md:129 declares serves 'Windows, and Git Bash / MSYS2 / Cygwin on it'.",
-      "mechanism": "installer/src/20-runtime-tools.sh:57 matches only Windows_NT:AMD64|Windows_NT:x86_64, but uname -s prints MINGW64_NT-... under Git Bash, MSYS_NT-... under MSYS2 and CYGWIN_NT-... under Cygwin. Two sibling copies of the same table already match those: prepend_bundled_rjq at 20-runtime-tools.sh:88 and skill_files() in 50-manifest.sh both accept MINGW*|MSYS*|CYGWIN*|Windows*, and plan_crypt_target_triple accepts MINGW*|MSYS*|CYGWIN* but not Windows_NT. So on a real Windows bash rjq resolves from the arm directly below the one that refuses plan-overview.",
-      "surfaces": [
-        "installer/src/20-runtime-tools.sh",
-        "planning/scripts/lib/crypt/plan_crypt_target_triple.sh",
-        "installer/src/50-manifest.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "binary-layout restructure recon",
-      "notes": null,
-      "created_at": "2026-08-31T13:20:02Z",
-      "updated_at": "2026-08-31T13:20:02Z"
-    },
-    {
-      "id": "B95",
-      "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "cd $(git rev-parse --show-toplevel); echo \"source: $(cd planning/scripts/lib/document && cd ../../../.. && pwd)\"; echo \"compiled: $(cd planning/scripts && cd ../../../.. && pwd)\"",
-      "observed": "The source file resolves the repo root; the compiled library resolves two directories above it (…/git/ai-skills/.claude here). rjq_dir therefore names a path that holds no binaries, the [ -x ] guard fails, and PATH is never prepended.",
-      "expected": "Both resolve the root that holds bin/<triple>, so a tree or an install carrying its own rjq uses it.",
-      "mechanism": "scripts/build-plan-libs.sh concatenates each scripts/lib/<group>/*.sh verbatim into planning/scripts/<group>-lib.sh. The block in lib/document/99-facade.sh computes plan_root as $(dirname BASH_SOURCE)/../../../.., which is correct from planning/scripts/lib/document but wrong from planning/scripts, where the compiled copy lands: it is two segments shallower, so the same literal climbs two directories too far. A relative-depth expression cannot survive being copied between directories, and nothing asserts the resolved path exists.",
-      "surfaces": [
-        "planning/scripts/lib/document/99-facade.sh",
-        "planning/scripts/plan-document-lib.sh",
-        "planning/scripts/build-plan-libs.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "binary-layout restructure recon",
-      "notes": null,
-      "created_at": "2026-08-31T13:20:46Z",
-      "updated_at": "2026-08-31T13:20:46Z"
-    },
-    {
-      "id": "B96",
-      "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "Re-run the macOS system bash 3.2 leg of any run that failed it; run 33401864955 failed cargo-plan-overview at watcher_reports_a_real_edit and the identical job passed on rerun with no code change.",
-      "observed": "cargo test --test watch fails with 'test result: FAILED. 2 passed; 1 failed' on the macOS floor leg, taking the whole suite to 119/120. The same job re-run on the same commit passes.",
-      "expected": "The watcher test is deterministic on every supported platform, or declares its timing assumption and skips loudly where it cannot hold.",
-      "mechanism": "Not yet proven. Two candidates, both macOS-specific. (1) Timing: watch_plan_dir sleeps SCAN_INTERVAL 250ms per poll and the test allows 2s, so it needs one of about eight polls to observe the write; a slow or loaded runner can starve that thread. (2) Path identity: the test asserts event.changed == vec![root.join(\"plan.md\")] by exact equality, and std::env::temp_dir() on macOS is /var/folders/... which is a symlink to /private/var/folders/..., so any canonicalisation on the way through makes the two spellings differ on macOS while matching on Linux. Ruled out: timestamp granularity. The snapshot stores a content fingerprint alongside mtime and size, so a same-length 'one'->'two' edit is detectable whatever the filesystem does with mtime.",
-      "surfaces": [
-        "src/plan-overview/tests/watch.rs",
-        "src/plan-overview/src/watch.rs"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "PR #7 CI",
-      "notes": null,
-      "created_at": "2026-08-31T14:50:34Z",
-      "updated_at": "2026-08-31T14:50:34Z"
     }
   ]
 }
