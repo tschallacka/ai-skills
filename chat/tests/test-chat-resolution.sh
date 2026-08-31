@@ -141,9 +141,15 @@ c_session session set --server 127.0.0.1:1 --nick junkbox >/dev/null 2>&1 || {
 c_session send --chan '#ladder' --text 'resolve me' >/dev/null 2>&1 || {
     t_fail "send did not resolve a dead session to the live server"
 }
+# The healed address is whichever server answered the discovery ladder - on a
+# CI runner that is this test's loopback server; on a box with a live LAN
+# server it is the LAN one, which the ladder is right to prefer. Either way
+# it must be alive, not the dead session address.
 healed="$(c_session session show | sed -n 's/^server=//p')"
-[ "$healed" = "127.0.0.1:$lport" ] || t_fail "the session did not heal to the live server: $healed"
-grep -q "127.0.0.1:$lport" "$cl/discovered-servers.txt" \
+[ "$healed" != "127.0.0.1:1" ] || t_fail "the session did not heal away from the dead address: $healed"
+c_session read --server "$healed" --nick junkbox --chan '#ladder' --since 0 >/dev/null 2>&1 \
+    || t_fail "the healed session address is not alive: $healed"
+grep -q "$healed" "$cl/discovered-servers.txt" \
     || t_fail "the resolved server was not cached"
 
 # The cache is the fast track: with the session pointed at a dead port again,
@@ -152,7 +158,7 @@ c_session session set --server 127.0.0.1:1 --nick junkbox >/dev/null 2>&1
 c_session read --chan '#ladder' --since 0 >/dev/null 2>&1 \
     || t_fail "the cache fast-track did not resolve the live server"
 healed2="$(c_session session show | sed -n 's/^server=//p')"
-[ "$healed2" = "127.0.0.1:$lport" ] || t_fail "the cache hit did not heal the session: $healed2"
+[ "$healed2" = "$healed" ] || t_fail "the cache hit did not heal the session: $healed2"
 
 # An explicit --server wins and is used as-is: the dead address surfaces in
 # the connect error rather than being silently replaced.
