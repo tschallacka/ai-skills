@@ -8,7 +8,7 @@ use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirEntryExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -357,32 +357,28 @@ fn remove_socket(identity: &SocketIdentity) {
     }
 }
 
-fn capture_socket_identity(path: &Path) -> Result<SocketIdentity, String> {
-    let parent = path.parent().ok_or("socket needs a parent")?;
+fn capture_socket_identity(path: &Path, parent_fd: &File) -> Result<SocketIdentity, String> {
     let name = path.file_name().ok_or("socket needs a filename")?;
     let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
+    let fd = parent_fd.as_raw_fd();
     loop {
-        match fs::read_dir(parent) {
-            Ok(entries) => {
-                for entry in entries {
-                    let entry = match entry {
-                        Ok(entry) => entry,
-                        Err(_) => break,
-                    };
-                    if entry.file_name() == name {
-                        return Ok(SocketIdentity {
-                            parent: File::open(parent).map_err(|e| e.to_string())?,
-                            name: name_c,
-                            inode: entry.ino(),
-                        });
-                    }
-                }
-                if !path.exists() {
-                    return Err("bound socket disappeared before identity capture".into());
-                }
+        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+        let result =
+            unsafe { libc::fstatat(fd, name_c.as_ptr(), &mut stat, libc::AT_SYMLINK_NOFOLLOW) };
+        if result == 0 {
+            let mode = stat.st_mode as libc::mode_t;
+            if mode & libc::S_IFMT != libc::S_IFSOCK {
+                return Err("bound socket entry is not a socket".into());
             }
-            Err(error) if !path.exists() => return Err(error.to_string()),
-            Err(_) => {}
+            return Ok(SocketIdentity {
+                parent: parent_fd.try_clone().map_err(|e| e.to_string())?,
+                name: name_c,
+                inode: stat.st_ino,
+            });
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::NotFound {
+            return Err("bound socket disappeared before identity capture".into());
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -679,12 +675,13 @@ pub fn run(
         return Err("command is required".into());
     }
     valid_dir(socket.parent().ok_or("socket needs parent")?)?;
+    let parent_fd = File::open(socket.parent().unwrap()).map_err(|e| e.to_string())?;
     if socket.exists() {
         return Err("refusing existing socket".into());
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
     let mut socket_guard = SocketGuard::new();
-    socket_guard.identity = Some(capture_socket_identity(&socket)?);
+    socket_guard.identity = Some(capture_socket_identity(&socket, &parent_fd)?);
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
