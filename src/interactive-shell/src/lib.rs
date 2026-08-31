@@ -666,6 +666,19 @@ pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
         _ => None,
     }
 }
+
+pub fn key_sequence(key: &str) -> Option<Vec<u8>> {
+    if let Some(bytes) = key_bytes(key) {
+        return Some(bytes.to_vec());
+    }
+    if let Some(letter) = key.strip_prefix("ALT-") {
+        let bytes = letter.as_bytes();
+        if bytes.len() == 1 && bytes[0].is_ascii_graphic() {
+            return Some(vec![0x1b, bytes[0]]);
+        }
+    }
+    None
+}
 fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
     if s.is_empty() || !s.len().is_multiple_of(2) {
         return Err("hex must be non-empty and even-length");
@@ -943,8 +956,8 @@ fn client(
     };
     match req {
         Request::Text { v: 1, text } => write_master(master, text.as_bytes())?,
-        Request::Key { v: 1, key } => match key_bytes(&key) {
-            Some(bytes) => write_master(master, bytes)?,
+        Request::Key { v: 1, key } => match key_sequence(&key) {
+            Some(bytes) => write_master(master, &bytes)?,
             None => {
                 json(
                     &mut stream,
@@ -1337,5 +1350,10 @@ mod tests {
         assert_eq!(s.scrollback, vec!["Ra"]);
         assert_eq!(String::from_utf8_lossy(&s.rows[0]), "  b ");
         assert_eq!(String::from_utf8_lossy(&s.rows[1]), "   c");
+    }
+    #[test]
+    fn alt_graphic_keys_are_encoded_without_raw_bytes() {
+        assert_eq!(key_sequence("ALT-X"), Some(vec![0x1b, b'X']));
+        assert_eq!(key_sequence("ALT-LEFT"), None);
     }
 }
