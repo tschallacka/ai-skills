@@ -44,6 +44,10 @@ REPO_REF='test'
 # is the point: without one, the file is a packaging bug, not an exemption.
 unshipped_reason() { # <skill> <path> → prints the reason, or nothing
     case "$1/$2" in
+        planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe)
+            printf 'a release artifact built by the platform-specific workflow\n' ;;
+        planning/scripts/overview-*|planning/scripts/render-plan-overview.sh|planning/scripts/runtime/overview-*|planning/templates/plan-overview.html.tmpl)
+            printf 'retired legacy overview wrapper; the compiled renderer is authoritative\n' ;;
         # Developer-facing documentation and the maintainer's own tooling. The
         # shipped set of planning is PACKAGE-MANIFEST.tsv, diffed against this
         # list by planning/tests/test-installer-manifest.sh.
@@ -95,7 +99,12 @@ for skill in "${SKILL_NAMES[@]}"; do
     absent=''
     while IFS= read -r path; do
         [ -n "$path" ] || continue
-        [ -e "$repo_root/$skill/$path" ] || absent="$absent $path"
+        [ -e "$repo_root/$skill/$path" ] || {
+            case "$skill/$path" in
+                planning/bin/*) continue ;; # cross-target artifacts are CI outputs
+                *) absent="$absent $path" ;;
+            esac
+        }
     done < "$work/listed"
     t_assert_eq "$skill: every file skill_files() promises exists on disk" "${absent# }" ''
     # The dev arm is inclusive, so between them the two arms must account for

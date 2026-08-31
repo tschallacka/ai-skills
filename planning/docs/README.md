@@ -15,7 +15,7 @@ conversation.
   Crash, restart, hand it to another agent — the plan carries on.
 - **Progress that tracks itself.** Completing a step updates the goal and the
   plan tracker; the overview renders it all as one self-contained HTML page.
-- **An overview worth reading.** `render-plan-overview.sh` produces a single
+- **An overview worth reading.** `plan-overview --plan-dir DIR --out FILE` produces a single
   file (open it, print it, archive it) — identity, step drill-downs, the
   dependency graph, test and coverage panels, findings.
 - **A board across every plan.** `render-plans-board.sh` answers the question
@@ -23,10 +23,9 @@ conversation.
   plans root, which are being worked, which wait on a review, which are done,
   and which are not plans at all. One card per plan, linking into that plan's
   own overview.
-- **A live version too.** `overview-serve.sh` serves the same page on
-  localhost and updates it *in place* while you watch — no reload, no flicker,
-  your scroll position survives. Works with python3, node, perl, or socat;
-  whichever is on the box.
+- **A live version too.** `plan-overview --plan-dir DIR --serve --port PORT` serves
+  the artifact itself on loopback. If no matching prebuilt artifact exists, the
+  installer reports that the plan overview is unavailable on that platform.
 - **Honest completion.** Steps tick their atomicity boxes from real git-diff
   evidence, not decoration. If a step touched files it did not own, the
   annotation says so.

@@ -55,9 +55,8 @@ check_cap 'tests not sourcing lib-test.sh' 7 \
 # Inline inventory-row parsing with hard-coded field indices. plan_inventory_row
 # now owns the work-unit rows; the remainder are other tables plus the two
 # inventory rewriters, and the floor is 1 (the helper's own parser).
-# 29th site: render-plan-overview.sh cells() is a generic canonical-table reader
-# (any table, header-aware), not the ten-field inventory parse; admitted here so
-# the debt is visible rather than hidden behind a rewritten pattern.
+# The former overview renderer's generic reader was removed with that renderer;
+# only the remaining canonical-table sites are counted here.
 # 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
 # a new distinct table, admitted on the same terms as the 29th. The shared
 # reader that would absorb both remains future work tracked in MAINTAINER §3.

@@ -1,0 +1,30 @@
+{
+  "render-plan-overview": {
+    "cmd": "planning/scripts/render-plan-overview.sh",
+    "when": "The jq renderer being removed. Named only where the plan records what is retired or what a declaration must stop pointing at; it is never run as part of the plan's verification."
+  },
+  "overview-serve": {
+    "cmd": "planning/scripts/overview-serve.sh",
+    "when": "The serve wrapper being removed. Named only as a removal target and in the declarations and tests that must stop referring to it."
+  },
+  "test-mode-markers": {
+    "cmd": "tests/test-mode-markers.sh",
+    "when": "The marker and manifest cross-check. Run after any change to a MODE or PACKAGE marker or to skill_files(), including the artifact rows and the marker exemption."
+  },
+  "test-plan-overview": {
+    "cmd": "planning/tests/test-plan-overview.sh",
+    "when": "The suite file whose twelve assertions drove the old renderer. Run in goal 14 after its assertions are rewritten against the binary, and under each injected fault to prove the replacements bite."
+  },
+  "test-plan-dir-synonym": {
+    "cmd": "planning/tests/test-plan-dir-synonym.sh",
+    "when": "The plan-dir synonym coverage. Run after the note delegating to the retired serve test is replaced by direct coverage, and under the removed-flag fault injection."
+  },
+  "test-portability-contract": {
+    "cmd": "planning/tests/test-portability-contract.sh",
+    "when": "The portability rule contract, including the python3-shipped rule. Run after the overview-serve allowlist arm is removed, and again with a reintroduced python3 invocation to prove the rule reports what the stale exemption hid."
+  },
+  "binaries-contract-test": {
+    "cmd": "tests/test-shipped-binaries.sh",
+    "when": "Run from the repository root after the shipped-binaries contract test is added; validates planning/binaries.tsv against committed artifacts."
+  }
+}

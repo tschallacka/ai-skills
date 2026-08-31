@@ -87,6 +87,13 @@ discover() {
     find "$dir" -maxdepth 1 -type f -name 'test-*.sh' -print | sort
 }
 
+# Rust crates are separate gate cases so a broken crate cannot hide behind the
+# shell-suite result. A contributor without cargo gets an explicit, non-failing
+# unconfigured result unless the CI refusal switch is set.
+discover_crates() {
+    [ -f "$repo_root/src/plan-overview/Cargo.toml" ] && printf '%s\n' src/plan-overview
+}
+
 suites=(
     tests
     planning/tests
@@ -153,6 +160,41 @@ echo
 for t in ${tests[@]+"${tests[@]}"}; do
     run_one "$t"
 done
+
+run_cargo_one() {
+    local crate="$1"
+    local label="cargo-${crate##*/}"
+    if ! command -v cargo >/dev/null 2>&1; then
+        if [ "${REFUSE_UNCONFIGURED_CARGO:-0}" = 1 ]; then
+            failed=$((failed + 1))
+            failed_names+=("$label")
+            printf '  %-52s FAIL (cargo unavailable; REFUSE_UNCONFIGURED_CARGO=1)\n' "$label"
+        else
+            unconfigured=$((unconfigured + 1))
+            unconfigured_names+=("$label")
+            printf '  %-52s UNCONFIGURED (cargo)\n' "$label"
+        fi
+        return
+    fi
+    total=$((total + 1))
+    if "$wrapper" 2G 400 -- cargo test --manifest-path "$repo_root/$crate/Cargo.toml" >"$test_output" 2>&1; then
+        passed=$((passed + 1))
+        printf '  %-52s PASS\n' "$label"
+        [ "$verbose" = true ] && sed 's/^/      /' "$test_output"
+    else
+        code=$?
+        failed=$((failed + 1))
+        failed_names+=("$label")
+        printf '  %-52s FAIL (exit %s)\n' "$label" "$code"
+        sed 's/^/      /' "$test_output"
+    fi
+    rm -f "$test_output"
+}
+
+while IFS= read -r crate; do
+    [ -n "$crate" ] || continue
+    run_cargo_one "$crate"
+done < <(discover_crates)
 
 elapsed="$(( $(date -u +%s) - start ))"
 echo

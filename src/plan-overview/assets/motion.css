@@ -1,0 +1,7 @@
+/* MODE: DEV */
+/* PACKAGE: PROD */
+:root { --motion-fast: 120ms; --motion-page: 240ms; --motion-cinematic: 420ms; --ease-standard: cubic-bezier(.2,.8,.2,1); --ease-enter: cubic-bezier(.16,1,.3,1); }
+.motion, .route-transition, .growth-enter { transition-duration: var(--motion-page); transition-timing-function: var(--ease-standard); }
+.route-transition { animation: route-enter var(--motion-page) var(--ease-enter); }
+@keyframes route-enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0ms !important; transition-duration: 0ms !important; transform: none !important; } }

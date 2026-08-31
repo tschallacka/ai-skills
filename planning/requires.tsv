@@ -9,8 +9,8 @@
 #   tool       tool id; must have a row in installer/tools.tsv
 #   condition  <uname -s glob>:<uname -m glob> the row applies to, e.g. *:* or
 #              Darwin:arm64 — a bash case pattern, so | may join alternatives
-#   strength   hard = the skill does not work without the tool, so the installer
-#              refuses to install this skill and exits non-zero
+#   strength   hard = the skill does not work without the tool, so without it
+#              the installer refuses to install this skill and exits non-zero
 #              soft = the skill degrades honestly, so the installer installs it
 #              and warns which capability is lost
 #   why        one line naming the capability that is lost without the tool
@@ -18,12 +18,12 @@
 #              row sharing the id, so the installer warns once for the set
 #              instead of once per member. Ids must be unique across skills.
 #
-# Line-oriented TSV rather than JSON on purpose: rjq is itself declared here, so a
-# format that needed rjq to read it could not be read on the machine that is
-# missing it. awk and sed parse this.
+# Line-oriented TSV rather than JSON on purpose: this file says what the box must
+# already have, so a format needing a JSON reader to parse it could not be read
+# on a box that is missing one. awk and sed parse this.
+#
+# The JSON runtime (rjq) and the overview renderer (plan-overview) are SHIPPED as
+# prebuilt artifacts — see binaries.tsv — so they ask nothing of the target box
+# and are deliberately absent here.
 tool	condition	strength	why	group
 bash	*:*	hard	every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine
-python3	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-node	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-perl	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes
-socat	*:*	soft	overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file	overview-server-runtimes

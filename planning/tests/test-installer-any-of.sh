@@ -64,11 +64,11 @@ grep -qi 'degraded\|warning.*missing.*tool\|requires' "$temporary_root/err-chat"
     && note_fail "chat warned about a runtime tool it does not need: $(cat "$temporary_root/err-chat")"
 [ -f "$target_chat/chat/SKILL.md" ] || note_fail 'chat install did not place SKILL.md'
 
-# ── T48a: planning's own group is asserted, not only chat's ──────────────────
-# Deleting one of planning's four runtime rows (and regenerating) must fail
-# HERE, on the reported members and capability, not only via group-id
-# uniqueness elsewhere. The group is soft: serve mode degrades, the file
-# overview still ships.
+# ── T48a: planning declares no any-of runtime group any more ─────────────────
+# Serve mode is served by the shipped plan-overview binary, so python3, node,
+# perl and socat are no longer consulted for planning at all. Hiding all four
+# must therefore install planning silently: no member set is named and no
+# capability is reported lost. Re-adding such a row would fail HERE.
 plan_none_bin="$temporary_root/bin-plan-none"
 build_hidden_path "$plan_none_bin" python3 node perl socat
 if PATH="$plan_none_bin" command -v python3 >/dev/null 2>&1 ||
@@ -83,18 +83,20 @@ else
         >"$temporary_root/out-plan" 2>"$temporary_root/err-plan" </dev/null
     plan_rc=$?
     set -e
-    [ "$plan_rc" -eq 0 ] || note_fail "planning soft group miss changed the exit status: rc=$plan_rc"
+    [ "$plan_rc" -eq 0 ] || note_fail "planning install exited $plan_rc with no runtime present"
     plan_err="$(cat "$temporary_root/err-plan")"
     case "$plan_err" in
-        *'any of python3, node, perl, socat (soft requirement of planning)'*) ;;
-        *) note_fail "planning's warning did not name its member set: $plan_err" ;;
-    esac
-    case "$plan_err" in
-        *'serve mode'*|*'listening socket'*) ;;
-        *) note_fail "planning's warning did not name the lost serve capability: $plan_err" ;;
+        *'soft requirement of planning'*)
+            note_fail "planning still declares a soft runtime requirement: $plan_err" ;;
     esac
     [ -f "$target_plan/planning/SKILL.md" ] \
-        || note_fail 'a soft group miss blocked the planning install'
+        || note_fail 'planning did not install without the retired runtimes'
+fi
+
+# The retired group must not come back through requires.tsv either.
+if awk -F'\t' '!/^#/ && NF > 4 && $5 != "" && $5 != "group" { found = 1 } END { exit !found }' \
+    "$repo_dir/planning/requires.tsv"; then
+    note_fail 'planning/requires.tsv declares an any-of group again'
 fi
 
 # ── the bundled rjq removes the former hard external dependency ───────────────

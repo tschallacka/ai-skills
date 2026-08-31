@@ -101,10 +101,18 @@ install_skill() {
     local missing=0
     local managed_version_transition=0
     local files
+    local overview_artifact=''
+
+    if [ "$skill" = planning ]; then
+        overview_artifact="$(plan_overview_selected_artifact || true)"
+    fi
 
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
@@ -159,6 +167,9 @@ EOF
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         # Back up unless we can prove the file is ours and untouched. A version
@@ -184,4 +195,3 @@ EOF
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }
-

@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -87,6 +87,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )
@@ -137,6 +138,11 @@ History is additive: an agent fetches the messages after id N via the FETCH exte
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
 And the part that is usually learned late: the order to merge the branches back in, and which conflict classes to expect.'
+    'Decides what a conflicted file should say once both changes exist, rather than reaching for --ours or --theirs.
+Reads each side out of history -- what changed, what the commit said, when, and which side is the file lineage that kept evolving.
+Names the conflicts that are unions rather than choices, and the ones git reports clean while the meaning is wrong.
+Generated output is regenerated, never stitched; an unresolved generated file counts every symbol twice and fakes a ratchet jump.
+Every post-merge failure is run against both parents first, so an inherited failure is reported rather than absorbed into the merge.'
     'Writes the merge request description in the voice of the person whose name is on it, opening with a one-paragraph TLDR.
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
@@ -425,6 +431,9 @@ runtime_requirements() {
             ;;
         chat)
             ;;
+        git-merge-resolving)
+            case "$platform" in *:*) printf '%s\n' git ;; esac
+            ;;
         git-worktrees)
             ;;
         merge-request-etiquette)
@@ -432,7 +441,6 @@ runtime_requirements() {
             ;;
         planning)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
-            case "$platform" in *:*) printf '%s\n' @overview-server-runtimes ;; esac
             ;;
         post-implementation-review)
             ;;
@@ -455,9 +463,9 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
-        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
         todo:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
@@ -469,9 +477,9 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none' ;; esac ;;
+        git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'every command the guidance names reads history or a conflicted index through git; without it the reasoning still reads but nothing can be checked' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
-        planning:@overview-server-runtimes) case "$platform" in *:*) printf '%s\n' 'overview-serve.sh cannot open a listening socket without one of these runtimes; serve mode refuses with exit 69 while render-plan-overview.sh still writes the overview to a file' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
         todo:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a rjq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
@@ -482,7 +490,6 @@ runtime_requirement_members() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
-        @overview-server-runtimes) case "$platform" in *:*) printf '%s\n' python3 node perl socat ;; esac ;;
     esac
 }
 
@@ -677,6 +684,55 @@ runtime_tool_install_hint() {
     esac
 }
 # END GENERATED DEPENDENCY BLOCK
+
+# Called by artifact selection when no prebuilt overview matches the host. Keep
+# this separate from selection so the installer can state the degraded result
+# without leaving a partial renderer behind.
+plan_overview_unavailable() {
+    local os="$1"
+    local arch="$2"
+    printf 'Plan overview unavailable on this platform (%s:%s): no prebuilt artifact is available.\n' \
+        "$os" "$arch" >&2
+    return 1
+}
+
+# Return the Rust target triple for the host. Test mode supplies the same two
+# inputs production detection reads, so selection tests exercise this function.
+normalize_platform() {
+    local os arch
+    if [ "${PLAN_OVERVIEW_TEST_MODE:-0}" = 1 ]; then
+        os="${PLAN_OVERVIEW_TEST_OS:-}"
+        arch="${PLAN_OVERVIEW_TEST_ARCH:-}"
+    else
+        os="$(uname -s)"
+        arch="$(uname -m)"
+    fi
+    case "$os:$arch" in
+        Linux:x86_64|Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
+        Linux:aarch64|Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
+        Darwin:x86_64|Darwin:amd64) printf '%s\n' x86_64-apple-darwin ;;
+        Darwin:arm64|Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
+        Windows_NT:AMD64|Windows_NT:x86_64) printf '%s\n' x86_64-pc-windows-msvc ;;
+        *) return 1 ;;
+    esac
+}
+
+plan_overview_selected_artifact() {
+    local target path os arch
+    os="${PLAN_OVERVIEW_TEST_OS:-$(uname -s)}"
+    arch="${PLAN_OVERVIEW_TEST_ARCH:-$(uname -m)}"
+    target="$(normalize_platform)" || {
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    }
+    path="bin/$target/plan-overview"
+    [ "$target" = x86_64-pc-windows-msvc ] && path="$path.exe"
+    if [ -n "${SOURCE_ROOT:-}" ] && [ ! -f "$SOURCE_ROOT/planning/$path" ]; then
+        plan_overview_unavailable "$os" "$arch"
+        return 1
+    fi
+    printf '%s\n' "$path"
+}
 
 # Make the source bundle available before dependency checks. This keeps installs
 # independent of a system jq/rjq package while preserving PATH lookup semantics.
@@ -3109,6 +3165,11 @@ SKILL.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
+bin/x86_64-unknown-linux-musl/plan-overview
+bin/aarch64-unknown-linux-musl/plan-overview
+bin/x86_64-apple-darwin/plan-overview
+bin/aarch64-apple-darwin/plan-overview
+bin/x86_64-pc-windows-msvc/plan-overview.exe
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -3128,7 +3189,6 @@ PACKAGE-MANIFEST.tsv
 requires.tsv
 ROLES.md
 MAINTAINER-STYLE-CONTRACT.md
-templates/plan-overview.html.tmpl
 roles/planning.md
 roles/execution.md
 roles/cleanup.md
@@ -3153,7 +3213,6 @@ scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
 scripts/register-read.sh
 scripts/resolve-finding.sh
-scripts/render-plan-overview.sh
 scripts/render-plans-board.sh
 scripts/plans-board-lib.sh
 scripts/create-ui-story-run-cache.sh
@@ -3161,11 +3220,6 @@ scripts/create-ui-validation.sh
 scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
-scripts/overview-serve.sh
-scripts/runtime/overview-server.py
-scripts/runtime/overview-server.js
-scripts/runtime/overview-server.pl
-scripts/runtime/overview-serve-handler.sh
 scripts/plan-content-diff-lib.sh
 scripts/plan-context-lib.sh
 scripts/plan-context.sh
@@ -3291,6 +3345,12 @@ scripts/lib/table/plan_replace_testing_requirement.sh
 scripts/lib/table/plan_review_gated_pairs.sh
 scripts/lib/table/plan_testing_requirement_for_goal.sh
 scripts/lib/table/plan_testing_requirement_row.sh
+EOF
+            if [ -d "$SOURCE_ROOT/planning/tests/fixtures/overview" ]; then
+                (cd "$SOURCE_ROOT/planning/tests/fixtures/overview" && find . -type f -print) \
+                    | sed 's#^\./#tests/fixtures/overview/#'
+            fi
+            cat <<'EOF'
 tests/fixtures/adversary-probe/01-health-endpoint/goal.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md
@@ -3407,6 +3467,9 @@ tests/test-plan-data-lib.sh
 tests/test-writer-hardening.sh
 tests/test-overview-state.sh
 tests/test-overview-serve.sh
+tests/test-platform-selection.sh
+tests/test-npm-package.sh
+tests/test-overview-fixtures.sh
 scripts/register-lib.sh
 scripts/todo-add.sh
 scripts/todo-update.sh
@@ -3446,6 +3509,9 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         git-worktrees)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        git-merge-resolving)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         merge-request-etiquette)
@@ -3660,10 +3726,18 @@ install_skill() {
     local missing=0
     local managed_version_transition=0
     local files
+    local overview_artifact=''
+
+    if [ "$skill" = planning ]; then
+        overview_artifact="$(plan_overview_selected_artifact || true)"
+    fi
 
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
@@ -3718,6 +3792,9 @@ EOF
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
         # Back up unless we can prove the file is ours and untouched. A version
@@ -3743,7 +3820,6 @@ EOF
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }
-
 # ---------------------------------------------------------------
 # 11b. End-of-run summary and replay commands
 # ---------------------------------------------------------------

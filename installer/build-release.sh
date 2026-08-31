@@ -56,6 +56,12 @@ version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".
 # A file's own header decides. Read the top only: a heredoc further down mentions
 # these strings, and a test that plants one would otherwise ship itself.
 declares_prod() { # <path>
+    [ -f "$repo_root/$1" ] || return 1
+    # A fixture's bytes are test input, not a declaration. A captured render
+    # carries whatever marker the thing that produced it wrote, so reading it
+    # as self-declaration ships the fixture. tests/test-mode-markers.sh exempts
+    # the same paths for the same reason.
+    case "$1" in */tests/fixtures/*) return 1 ;; esac
     case "$(sed -n '1,25p' "$repo_root/$1" 2>/dev/null)" in
         *'# MODE: PROD'*|*'<!-- MODE: PROD -->'*) return 0 ;;
     esac
@@ -72,9 +78,19 @@ listed_by_installer() {
     # shellcheck disable=SC1090
     source "$repo_root/installer/src/50-manifest.sh"
     SOURCE_ROOT="$repo_root"
-    local skill
+    local skill path
     for skill in "${SKILL_NAMES[@]}"; do
-        skill_files "$skill" | sed "s|^|$skill/|"
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if [ ! -f "$repo_root/$skill/$path" ]; then
+                case "$skill/$path" in
+                    planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                esac
+            fi
+            printf '%s/%s\n' "$skill" "$path"
+        done <<EOF
+$(skill_files "$skill")
+EOF
     done
 }
 
@@ -101,6 +117,12 @@ case "$mode" in
         # than maintained: a new maintainer file would otherwise be published.
         { printf '# GENERATED FILE — do not edit. Written by installer/build-release.sh --npmignore\n'
           printf '# Everything not marked MODE: PROD. Regenerate after adding a file.\n'
+          # The list below is derived from git ls-files, so it can only name
+          # TRACKED files. Build scratch inside a directory package.json ships
+          # wholesale is untracked, never appears there, and would be published
+          # by any machine that had built — CI writes planning/.ci-bin/plan-crypt
+          # and npm pack carried it. Untracked output needs a standing rule.
+          printf '.ci-bin/\n'
           comm -13 <(collect) <(cd "$repo_root" && git ls-files | sort)
         }
         ;;

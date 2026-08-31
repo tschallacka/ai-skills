@@ -10,6 +10,8 @@
 # coreutils, awk, sed, grep, git only. No python3.
 set -euo pipefail
 export LC_ALL=C
+# shellcheck source=planning/tests/lib-test.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
@@ -22,6 +24,13 @@ abs_path() {
     dir="$(dirname "$path")"
     base="$(basename "$path")"
     printf '%s/%s\n' "$(cd "$dir" && pwd -P)" "$base"
+}
+
+deferred_artifact() {
+    case "$1" in
+        bin/*) return 0 ;; # cross-target artifacts are CI outputs
+        *) return 1 ;;
+    esac
 }
 
 test_manifest_emission() {
@@ -44,9 +53,13 @@ test_manifest_emission() {
         [ -n "$source" ] || continue
         [ "$source_only" = false ] || { printf 'source-only row in manifest: %s\n' "$source" >&2; return 1; }
         [ -n "$owner" ] && [ -n "$gate" ] && [ -n "$collision" ]
-        case "$source" in
-            planning/bin/*) continue ;; # cross-target artifacts are CI outputs
-        esac
+        if [ ! -e "$repo_dir/$source" ]; then
+            deferred_artifact "$destination" || {
+                printf 'missing manifest source: %s\n' "$source" >&2
+                return 1
+            }
+            continue
+        fi
         resolved=$(abs_path "$("$BASH" "$repo_dir/install.sh" --resolve-source planning "$destination")")
         [ "$resolved" = "$(abs_path "$repo_dir/$source")" ] || {
             printf 'source mismatch: %s -> %s (got %s)\n' "$source" "$destination" "$resolved" >&2

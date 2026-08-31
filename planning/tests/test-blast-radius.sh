@@ -71,7 +71,7 @@ rc=0; "$tool" --nonsense >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 64 ] || note_fail "an unknown option exited $rc, want 64"
 
 # ---- a consistent tree is quiet ---------------------------------------------
-run 0 'consistent tree' planning/SKILL.md installer/src/00-header.sh
+run 0 'consistent tree' planning/MAINTAINER-STYLE-CONTRACT.md installer/src/00-header.sh
 out="$RUN_OUT"
 case "$out" in
     *'0 failure(s)'*) ;;
@@ -119,13 +119,13 @@ esac
 rm -f "$probe_test"
 
 # ---- drift is reported against the base -------------------------------------
-# The parent of the newest commit touching SKILL.md, so drift is guaranteed
+# The parent of the newest commit touching the maintainer contract, so drift is guaranteed
 # rather than depending on what the last commit happened to include.
-drift_base="$(git log -1 --format=%H -- planning/SKILL.md)^"
-run 0 'drift' --base "$drift_base" planning/SKILL.md
+drift_base="$(git log -1 --format=%H -- planning/MAINTAINER-STYLE-CONTRACT.md)^"
+run 0 'drift' --base "$drift_base" planning/MAINTAINER-STYLE-CONTRACT.md
 out="$RUN_OUT"
 case "$out" in
-    *'planning/SKILL.md changed in '*) ;;
+    *'planning/MAINTAINER-STYLE-CONTRACT.md changed in '*) ;;
     *) note_fail_out 'drift against an explicit base was not reported' "$out" ;;
 esac
 case "$out" in

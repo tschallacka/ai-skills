@@ -77,7 +77,6 @@ in_allowlist() {
         ./planning/tests/test-register-helpers.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-installer-noninteractive.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-plan-dir-synonym.sh:bash-by-path-lookup) return 0 ;;
-        ./planning/scripts/runtime/overview-serve-handler.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-overview-state.sh:bash-by-path-lookup) return 0 ;;
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
@@ -86,10 +85,6 @@ in_allowlist() {
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
-        # The overview serve script names its runtime chain (T43a); the
-        # generated installer tables name optional runtimes for verify/hint.
-        ./planning/scripts/overview-serve.sh:python3-shipped) return 0 ;;
-
     esac
     return 1
 }

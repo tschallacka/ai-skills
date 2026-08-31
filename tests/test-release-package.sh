@@ -46,6 +46,10 @@ done
 
 # ── the expected set, derived from the rule rather than from the builder ─────
 declares_prod() { # <path>
+    # A fixture's bytes are test input, not a declaration: a captured render
+    # carries whatever marker its producer wrote. The same exemption is in
+    # installer/build-release.sh and tests/test-mode-markers.sh.
+    case "$1" in */tests/fixtures/*) return 1 ;; esac
     case "$(sed -n '1,25p' "$repo_root/$1" 2>/dev/null)" in
         *'# MODE: PROD'*|*'<!-- MODE: PROD -->'*) return 0 ;;
     esac
@@ -70,7 +74,17 @@ REPO_REF='test'
         planning project-specificies resource-limited-testing brainstorm \
         post-implementation-review todo bug-report)
     for skill in "${SKILL_NAMES[@]}"; do
-        skill_files "$skill" | sed "s|^|$skill/|"
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if [ ! -f "$repo_root/$skill/$path" ]; then
+                case "$skill/$path" in
+                    planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                esac
+            fi
+            printf '%s/%s\n' "$skill" "$path"
+        done <<EOF
+$(skill_files "$skill")
+EOF
     done
 } | sort -u > "$work/expected"
 

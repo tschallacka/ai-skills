@@ -1,226 +1,28 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-overview-serve — T43f: both delivery modes agree, every runtime rung
-# serves identical routes, the no-runtime rung refuses with exit 69, and a
-# clean stop leaves nothing behind. The served flavor carries no reload call.
+# Binary serve contract: printed endpoint is live before the first request.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 t_begin
-
-scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
-work="$(mktemp -d "${TMPDIR:-/tmp}/overview-serve.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
-
-# Self-contained fixture: .plans/ is gitignored, so the test builds a real
-# (small) plan with the sanctioned creators — a served page needs goals,
-# units and a review to render every panel.
-plan_dir="$work/plan"
-mkdir -p "$work/src" && printf 'probe target\n' > "$work/src/probe.sh"
-PLANS_ROOT="$work" "$scripts/create-plan.sh" "$plan_dir" 'Serve probe' >/dev/null
-"$scripts/add-goal.sh" "$plan_dir" 01-probe 'Probe goal' 'Probe outcome' >/dev/null
-"$scripts/add-work-unit.sh" --plan-dir "$plan_dir" --repo-root "$work" \
-    --id W01 --type source --file src/probe.sh --scope probe \
-    --subscope N/A --change 'Probe unit' --depends-on - \
-    --goal 01-probe --step 01-step-probe >/dev/null
-"$scripts/add-adversarial-finding.sh" "$plan_dir" AR-1 'Probe finding.' 'None.' resolved >/dev/null 2>&1 || true
-
-fetch() { # URL -> body on stdout (curl when present, python3 otherwise)
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsS --max-time 15 "$1" 2>/dev/null || true
-    else
-        python3 - "$1" <<'PYEOF'
-import sys, urllib.request
-try:
-    sys.stdout.write(urllib.request.urlopen(sys.argv[1], timeout=15).read().decode())
-except Exception:
-    pass
-PYEOF
-    fi
-}
-
-norm_state() { # JSON — generatedAt varies per render; strip it for equality
-    sed 's/"generatedAt":"[^"]*"/"generatedAt":"X"/'
-}
-
-# ---- both modes render from one source: state extractor feeds the pin ----
-want_state="$(OVERVIEW_NOW=fixed "$BASH" "$scripts/overview-state.sh" "$plan_dir" | norm_state)"
-
-start_bg() { # NAME CMD... -> pid file + port file polled for 6s
-    local name="$1"; shift
-    ("$@" >"$work/port.$name" 2>"$work/err.$name" & echo $! >"$work/pid.$name")
-    local i
-    # 15s: a cold interpreter start on a shared macOS runner can be slow,
-    # and a premature give-up reads as "never reported a port".
-    for i in $(seq 1 50); do
-        [ -s "$work/port.$name" ] && break
-        sleep 0.3
-    done
-}
-
-stop_bg() { # NAME — TERM, short grace, KILL
-    local name="$1" pid i
-    [ -f "$work/pid.$name" ] || return 0
-    pid="$(cat "$work/pid.$name")"
-    kill "$pid" 2>/dev/null || true
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.2
-    done
-    kill -9 "$pid" 2>/dev/null || true
-    rm -f "$work/pid.$name"
-}
-
-rung_port=""
-exercised=""
-
-serve_checks() { # NAME PORT — the identical-route contract every rung meets
-    local name="$1" port="$2"
-    # B67: a failing assertion dumps the rung's stderr (req/exec diagnostics)
-    # so a host-specific failure names its cause in the CI log.
-    dump_rung_log() {
-        printf 'rung %s stderr:\n' "$name" >&2
-        cat "$work/err.$name" >&2 2>/dev/null || true
-    }
-    case "$port" in
-        ''|*[!0-9]*)
-        t_fail "$name reported an unparseable port line: $(printf '%s' "$port" | cat -v)"
-        printf 'stderr:\n' >&2
-        cat "$work/err.$name" >&2 2>/dev/null || true
-        return ;;
-    esac
-    if [ -z "$port" ]; then
-        t_fail "$name never reported a port"
-        printf 'stderr:\n' >&2
-        cat "$work/err.$name" >&2 || true
-        printf 'port-file:\n' >&2
-        cat "$work/port.$name" >&2 || true
-        printf 'interp: %s\n' "$(command -v python3 || echo none)" >&2
-        python3 -V >&2 2>&1 || true
-        printf 'interp-echo: %s\n' "$(python3 -c 'print("ok")' 2>&1 || true)" >&2
-        return
-    fi
-    local got html sec fails_before
-    fails_before="$(t_failures)"
-    got="$(fetch "http://127.0.0.1:$port/state.json" | norm_state)"
-    t_assert_eq "$name /state.json equals the extractor" "$got" "$want_state"
-    html="$(fetch "http://127.0.0.1:$port/")"
-    t_assert_contains "$name / serves the artifact" '<!DOCTYPE html>' "$html"
-    case "$html" in *'location.reload('*) t_fail "$name served flavor calls location.reload" ;; esac
-    sec="$(fetch "http://127.0.0.1:$port/sections/identity-panel")"
-    t_assert_contains "$name /sections slices identity-panel" 'id="identity-panel"' "$sec"
-    sec="$(fetch "http://127.0.0.1:$port/sections/no-such-panel")"
-    case "$sec" in *identity-panel*|*tests-panel*) t_fail "$name served a bogus section id" ;; esac
-    [ "$(t_failures)" -eq "$fails_before" ] || dump_rung_log
-}
-
-# ---- python3 rung ----------------------------------------------------------
-if command -v python3 >/dev/null 2>&1; then
-    start_bg python3 python3 -u "$scripts/runtime/overview-server.py" "$plan_dir"
-    rung_port="$(head -1 "$work/port.python3")"
-    serve_checks python3 "$rung_port"
-exercised="$exercised python3"
-    stop_bg python3
-    sleep 0.4
-    # Exit status carries the verdict: 0 = still accepting (bad), 3 = refused.
-    if python3 - "$rung_port" <<'PYEOF'
-import socket, sys
-s = socket.socket()
-s.settimeout(1)
-try:
-    s.connect(("127.0.0.1", int(sys.argv[1])))
-except Exception:
-    sys.exit(3)
-finally:
-    s.close()
-PYEOF
-    then t_fail "python3 listener survived the stop"; fi
-else
-    printf 'SKIP overview-serve: python3 absent on this host - its assertions did not run\n' >&2
-fi
-
-# ---- node rung ---------------------------------------------------------------
-NODE_BIN=""
-if command -v node >/dev/null 2>&1; then NODE_BIN=node
-elif command -v nodejs >/dev/null 2>&1; then NODE_BIN=nodejs; fi
-if [ -n "$NODE_BIN" ]; then
-    start_bg node "$NODE_BIN" "$scripts/runtime/overview-server.js" "$plan_dir"
-    rung_port="$(head -1 "$work/port.node")"
-    serve_checks node "$rung_port"
-exercised="$exercised node"
-    kill "$(cat "$work/pid.node")" 2>/dev/null || true; rm -f "$work/pid.node"
-else
-    printf 'SKIP overview-serve: node absent on this host - its assertions did not run\n' >&2
-fi
-
-# ---- perl rung (core modules only) -------------------------------------------
-if command -v perl >/dev/null 2>&1; then
-    start_bg pl perl "$scripts/runtime/overview-server.pl" "$plan_dir"
-    rung_port="$(head -1 "$work/port.pl")"
-    serve_checks perl "$rung_port"
-exercised="$exercised perl"
-    kill "$(cat "$work/pid.pl")" 2>/dev/null || true; rm -f "$work/pid.pl"
-else
-    printf 'SKIP overview-serve: perl absent on this host - its assertions did not run\n' >&2
-fi
-
-# ---- socat rung (explicit port; bash handler) --------------------------------
-if command -v socat >/dev/null 2>&1; then
-    sport=$(( 20000 + RANDOM % 20000 ))
-    (PLAN_DIR="$plan_dir" nohup socat "TCP-LISTEN:$sport,fork,reuseaddr,bind=127.0.0.1" \
-        "SYSTEM:$scripts/runtime/overview-serve-handler.sh,stderr" \
-        >"$work/socat.log" 2>&1 & echo $! >"$work/pid.socat")
-    sleep 1
-    serve_checks socat "$sport"
-exercised="$exercised socat"
-    kill "$(cat "$work/pid.socat")" 2>/dev/null || true; rm -f "$work/pid.socat"
-else
-    printf 'SKIP overview-serve: socat absent on this host - its assertions did not run\n' >&2
-fi
-
-# ---- no-runtime rung: exit 69 naming the capability ---------------------------
-# A PATH that has every tool the script needs EXCEPT the four runtimes: build
-# it by symlinking the standard PATH bins, skipping python3/node/perl/socat.
-nort="$work/nort"; mkdir -p "$nort"
-_IFS="$IFS"; IFS=':'
-for d in $PATH; do
-    IFS="$_IFS"
-    [ -d "$d" ] || continue
-    for b in "$d"/*; do
-        [ -f "$b" ] && [ -x "$b" ] || continue
-        base="${b##*/}"
-        case "$base" in python3|python|node|nodejs|perl|socat) continue ;; esac
-        [ -e "$nort/$base" ] || ln -sf "$b" "$nort/$base"
-    done
-    IFS=':'
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+binary="$repo/src/plan-overview/target/debug/plan-overview"
+fixture="$repo/planning/tests/fixtures/overview/navigation"
+cargo build --manifest-path "$repo/src/plan-overview/Cargo.toml" --offline >/dev/null
+port_file="$(mktemp)"
+err_file="$(mktemp)"
+trap 'rm -f "$port_file" "$err_file"; kill "$pid" 2>/dev/null || true' EXIT
+OVERVIEW_NOW=fixed "$binary" --plan-dir "$fixture" --serve --port 0 >"$port_file" 2>"$err_file" &
+pid=$!
+port=''
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -s "$port_file" ] && { port="$(cut -d: -f2 "$port_file")"; break; }
+    sleep 0.1
 done
-IFS="$_IFS"
-out="$(PATH="$nort" "$BASH" "$scripts/overview-serve.sh" "$plan_dir" 2>&1 || true)"
-case "$out" in
-    *'no suitable runtime'*python3*|*'no suitable runtime'*socat*) : ;;
-    *) t_fail "no-runtime refusal did not name the capability: $out" ;;
-esac
-rc=0; PATH="$nort" "$BASH" "$scripts/overview-serve.sh" "$plan_dir" >/dev/null 2>&1 || rc=$?
-t_assert_eq "no-runtime exits 69" "$rc" 69
-
-# ---- file mode stays a snapshot; served mode swaps in place --------------------
-OVERVIEW_NOW=fixed "$BASH" "$scripts/render-plan-overview.sh" "$plan_dir" --out "$work/file.html" >/dev/null 2>&1
-OVERVIEW_NOW=fixed "$BASH" "$scripts/render-plan-overview.sh" "$plan_dir" --serve --out "$work/served.html" >/dev/null 2>&1
-t_assert_contains "file mode keeps its meta refresh" 'http-equiv="refresh"' "$(cat "$work/file.html")"
-if grep -q 'http-equiv="refresh"' "$work/served.html"; then
-    t_fail "served mode kept the meta refresh"
+case "$port" in ''|*[!0-9]*) t_fail 'serve did not print a numeric port' ;; esac
+if command -v curl >/dev/null 2>&1 && [ -n "$port" ]; then
+    t_assert_contains 'serve answers root immediately' '<!doctype html>' "$(curl -fsS "http://127.0.0.1:$port/")"
+    t_assert_contains 'serve answers state endpoint' 'identity' "$(curl -fsS "http://127.0.0.1:$port/state.json")"
+else
+    printf '%s\n' 'test-overview-serve: curl unavailable; endpoint assertions skipped' >&2
 fi
-if grep -q 'location.reload(' "$work/served.html"; then
-    t_fail "served flavor contains a reload call"
-fi
-t_assert_contains "served flavor polls sections" 'fetch("/sections/"' "$(cat "$work/served.html")"
-t_assert_contains "served flavor carries the revision swap" 'data-rev' "$(cat "$work/served.html")"
-
-# Reach summary: what this run actually exercised (B48 — a green suite must
-# not silently mean "attempted less").
-printf 'overview-serve: rungs exercised ->%s\n' "$exercised" >&2
-case "$exercised" in
-    *python3*node*perl*socat*) : ;;
-    *) printf 'overview-serve: INCOMPLETE RUNG COVERAGE this run:%s\n' "$exercised" >&2 ;;
-esac
-
 t_end

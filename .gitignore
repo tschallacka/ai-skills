@@ -59,3 +59,6 @@ planning/bin/plan-crypt.exe
 # skill records. The skill ships; what it records about this machine does not.
 project-specificies/*-deviations.md
 
+
+# CI builds plan-crypt here for the suite; never committed.
+.ci-bin/
