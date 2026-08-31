@@ -24,6 +24,17 @@ enum Request {
     Text { v: u8, text: String },
     #[serde(rename = "key")]
     Key { v: u8, key: String },
+    #[serde(rename = "combo")]
+    Combo {
+        v: u8,
+        key: String,
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        shift: bool,
+    },
     #[serde(rename = "raw")]
     Raw { v: u8, hex: String },
     #[serde(rename = "observe")]
@@ -679,6 +690,86 @@ pub fn key_sequence(key: &str) -> Option<Vec<u8>> {
     }
     None
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct KeyModifiers {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+pub fn key_combo_sequence(key: &str, modifiers: KeyModifiers) -> Result<Vec<u8>, &'static str> {
+    if !modifiers.ctrl && !modifiers.alt && !modifiers.shift {
+        return key_sequence(key).ok_or("unknown key");
+    }
+    let upper = key.to_ascii_uppercase();
+    let named = match upper.as_str() {
+        "UP" => Some("A"),
+        "DOWN" => Some("B"),
+        "RIGHT" => Some("C"),
+        "LEFT" => Some("D"),
+        "HOME" => Some("H"),
+        "END" => Some("F"),
+        _ => None,
+    };
+    if let Some(final_byte) = named {
+        let modifier = 1
+            + u8::from(modifiers.shift)
+            + 2 * u8::from(modifiers.alt)
+            + 4 * u8::from(modifiers.ctrl);
+        return Ok(format!("\x1b[1;{modifier}{final_byte}").into_bytes());
+    }
+    if let Some(function) = upper.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
+        if (1..=12).contains(&function) {
+            let base = match function {
+                1 => "P",
+                2 => "Q",
+                3 => "R",
+                4 => "S",
+                5 => "15~",
+                6 => "17~",
+                7 => "18~",
+                8 => "19~",
+                9 => "20~",
+                10 => "21~",
+                11 => "23~",
+                12 => "24~",
+                _ => unreachable!(),
+            };
+            let modifier = 1
+                + u8::from(modifiers.shift)
+                + 2 * u8::from(modifiers.alt)
+                + 4 * u8::from(modifiers.ctrl);
+            if function <= 4 {
+                return Ok(format!("\x1b[1;{modifier}{base}").into_bytes());
+            }
+            let (number, suffix) = base.split_at(base.len() - 1);
+            return Ok(format!("\x1b[{number};{modifier}{suffix}").into_bytes());
+        }
+    }
+    let bytes = key.as_bytes();
+    if bytes.len() != 1 || !bytes[0].is_ascii_graphic() {
+        return Err("combination requires one printable ASCII key or a supported named key");
+    }
+    let mut byte = bytes[0];
+    if modifiers.shift && byte.is_ascii_lowercase() {
+        byte = byte.to_ascii_uppercase();
+    }
+    if modifiers.ctrl {
+        let control = match byte.to_ascii_uppercase() {
+            b'@'..=b'_' => byte.to_ascii_uppercase() - b'@',
+            b' ' => 0,
+            _ => return Err("Ctrl combination is unsupported for this key"),
+        };
+        byte = control;
+    }
+    let mut result = Vec::with_capacity(2);
+    if modifiers.alt {
+        result.push(0x1b);
+    }
+    result.push(byte);
+    Ok(result)
+}
 fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
     if s.is_empty() || !s.len().is_multiple_of(2) {
         return Err("hex must be non-empty and even-length");
@@ -965,6 +1056,27 @@ fn client(
                         v: 1,
                         event: "error",
                         message: "unknown key",
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        },
+        Request::Combo {
+            v: 1,
+            key,
+            ctrl,
+            alt,
+            shift,
+        } => match key_combo_sequence(&key, KeyModifiers { ctrl, alt, shift }) {
+            Ok(bytes) => write_master(master, &bytes)?,
+            Err(message) => {
+                json(
+                    &mut stream,
+                    &ErrorEvent {
+                        v: 1,
+                        event: "error",
+                        message,
                     },
                 )
                 .map_err(|e| e.to_string())?;
@@ -1355,5 +1467,31 @@ mod tests {
     fn alt_graphic_keys_are_encoded_without_raw_bytes() {
         assert_eq!(key_sequence("ALT-X"), Some(vec![0x1b, b'X']));
         assert_eq!(key_sequence("ALT-LEFT"), None);
+    }
+
+    #[test]
+    fn arbitrary_modifier_combinations_are_encoded() {
+        assert_eq!(
+            key_combo_sequence(
+                "h",
+                KeyModifiers {
+                    ctrl: true,
+                    alt: true,
+                    shift: true
+                }
+            ),
+            Ok(vec![0x1b, 0x08])
+        );
+        assert_eq!(
+            key_combo_sequence(
+                "RIGHT",
+                KeyModifiers {
+                    ctrl: true,
+                    alt: true,
+                    shift: true
+                }
+            ),
+            Ok(b"\x1b[1;8C".to_vec())
+        );
     }
 }
