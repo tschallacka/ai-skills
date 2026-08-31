@@ -9,7 +9,7 @@ Use this skill when an agent must operate a full-screen or interactive program
 such as nano, Midnight Commander, a pager, or a terminal menu. Start
 `interactive-shell --socket PATH --cols 80 --rows 24 --idle-timeout 300 -- COMMAND`
 and observe its JSONL stdout. Send one request at a time with
-`interactive-shell-input --socket PATH text TEXT`, `key KEY`, `paste TEXT`,
+`interactive-shell-input --socket PATH text TEXT`, `key KEY`, `combo KEY [CTRL] [ALT] [SHIFT]`, `paste TEXT`,
 `mouse X Y BUTTON down|up|move`, `resize COLS ROWS`, `observe`, `raw HEX`, or
 `click-id ID BUTTON`, `click-label LABEL BUTTON`, `click-at X Y BUTTON`, or
 `shutdown`.
@@ -26,10 +26,13 @@ that input was accepted by the wrapper, not that the program completed the
 resulting action. Wait for a screen predicate or lifecycle event after every
 state-changing request.
 
-Named keys include ENTER, CTRL-A through CTRL-Z, BACKSPACE, TAB, ESC,
-META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
+Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
+TAB, ESC, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
 DELETE, SHIFT/CTRL cursor variants, and F1 through F12. Use `raw` for an
-explicit byte sequence, encoded as non-empty even-length hexadecimal.
+explicit byte sequence, encoded as non-empty even-length hexadecimal. Use
+`combo` when the needed modifier combination is not in the named-key list;
+for example, `combo h ctrl alt shift` sends Alt followed by Ctrl-H, while
+named cursor/function keys use xterm modifier encoding.
 
 `paste` sends bracketed paste delimiters around the text. `mouse` uses 1-based
 coordinates and sends an xterm mouse event. `resize` changes both the PTY and

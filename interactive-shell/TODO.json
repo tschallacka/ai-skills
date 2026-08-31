@@ -119,6 +119,19 @@
       "refs": ["tests/test-interactive-shell.sh", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
       "updated_at": "2026-08-31T20:35:47Z"
+    },
+    {
+      "id": "ISH-1i",
+      "title": "Encode arbitrary modifier key combinations",
+      "status": "done",
+      "priority": "high",
+      "parent": "ISH-1",
+      "detail": "Allow an agent to request combinations such as Ctrl+Alt+Shift+H on the fly through structured modifier and key fields, with terminal-appropriate encoding and raw-byte fallback.",
+      "note": "Requested explicitly after the initial named-key expansion; the standard key list must not be the ceiling.",
+      "blocked_on": null,
+      "refs": ["src/interactive-shell/src/lib.rs", "src/interactive-shell/src/bin/interactive-shell-input.rs", "interactive-shell/SKILL.md"],
+      "created_at": "2026-08-31T20:35:47Z",
+      "updated_at": "2026-08-31T22:58:00Z"
     }
   ]
 }

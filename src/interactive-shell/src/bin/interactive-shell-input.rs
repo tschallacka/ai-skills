@@ -33,6 +33,15 @@ fn main() {
                 i += 1;
                 value = Some(a[i].clone())
             }
+            "combo" => {
+                if op.is_some() || i + 1 >= a.len() {
+                    eprintln!("combo requires a key and optional modifiers");
+                    std::process::exit(2);
+                }
+                op = Some(a[i].clone());
+                args.extend_from_slice(&a[i + 1..]);
+                i = a.len() - 1;
+            }
             "observe" | "shutdown" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
@@ -104,6 +113,24 @@ fn main() {
     }
     let operation = req["op"].as_str().unwrap_or_default().to_owned();
     match operation.as_str() {
+        "combo" => {
+            if args.is_empty() {
+                eprintln!("combo requires a key");
+                std::process::exit(2);
+            }
+            req["key"] = args[0].clone().into();
+            for modifier in &args[1..] {
+                match modifier.to_ascii_lowercase().as_str() {
+                    "ctrl" | "control" => req["ctrl"] = true.into(),
+                    "alt" | "meta" => req["alt"] = true.into(),
+                    "shift" => req["shift"] = true.into(),
+                    _ => {
+                        eprintln!("unknown combo modifier: {modifier}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+        }
         "mouse" => {
             if args.len() != 4 {
                 eprintln!("mouse requires x y button action");
