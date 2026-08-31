@@ -39,7 +39,8 @@
     "!planning/scripts/build-plan-libs.sh",
     "!planning/ARCHITECTURE.md",
     "!planning/MAINTAINER.md",
-    "!planning/PACKAGE-MAP.tsv"
+    "!planning/PACKAGE-MAP.tsv",
+    "!**/.ci-bin"
   ],
   "engines": {
     "node": ">=14"

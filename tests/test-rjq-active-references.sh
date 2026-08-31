@@ -3,6 +3,9 @@
 # test-rjq-active-references.sh - reject active jq references after migration.
 # planning/tests/fixtures/** is frozen render evidence: plan prose and rendered
 # snapshots that record the migration itself, not call sites that execute jq.
+# .npmignore is a generated inventory of paths; a fixture step file named
+# 02-step-remove-jq-renderer.md puts the word in the list without any code
+# calling jq.
 set -euo pipefail
 export LC_ALL=C
 
@@ -10,7 +13,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 offenders="$(git -C "$repo_root" grep -n -w jq -- \
     ':!BUGS.json' ':!TODO.json' ':!benchmark/results/**' \
     ':!tests/test-rjq-active-references.sh' ':!src/rjq/tests/differential.rs' \
-    ':!planning/bin/**' ':!planning/tests/fixtures/**' || true)"
+    ':!planning/bin/**' ':!planning/tests/fixtures/**' ':!.npmignore' || true)"
 offenders="$(printf '%s\n' "$offenders" | awk -F: '
     $0 ~ /(^|:)#/ || $0 ~ /:\/\// || $0 ~ /\.md:/ { next }
     NF { print }

@@ -117,6 +117,12 @@ case "$mode" in
         # than maintained: a new maintainer file would otherwise be published.
         { printf '# GENERATED FILE — do not edit. Written by installer/build-release.sh --npmignore\n'
           printf '# Everything not marked MODE: PROD. Regenerate after adding a file.\n'
+          # The list below is derived from git ls-files, so it can only name
+          # TRACKED files. Build scratch inside a directory package.json ships
+          # wholesale is untracked, never appears there, and would be published
+          # by any machine that had built — CI writes planning/.ci-bin/plan-crypt
+          # and npm pack carried it. Untracked output needs a standing rule.
+          printf '.ci-bin/\n'
           comm -13 <(collect) <(cd "$repo_root" && git ls-files | sort)
         }
         ;;

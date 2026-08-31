@@ -25,7 +25,7 @@ package/install.sh	181009
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	1219
+package/package.json	1238
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	12839
 package/planning/REVIEWER.md	22954
