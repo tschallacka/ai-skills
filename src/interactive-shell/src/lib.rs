@@ -357,7 +357,7 @@ fn remove_socket(identity: &SocketIdentity) {
     }
 }
 
-fn capture_socket_identity(path: &Path, parent_fd: &File) -> Result<SocketIdentity, String> {
+fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentity, String> {
     let name = path.file_name().ok_or("socket needs a filename")?;
     let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
     let fd = parent_fd.as_raw_fd();
@@ -371,7 +371,7 @@ fn capture_socket_identity(path: &Path, parent_fd: &File) -> Result<SocketIdenti
                 return Err("bound socket entry is not a socket".into());
             }
             return Ok(SocketIdentity {
-                parent: parent_fd.try_clone().map_err(|e| e.to_string())?,
+                parent: parent_fd,
                 name: name_c,
                 inode: stat.st_ino,
             });
@@ -679,9 +679,11 @@ pub fn run(
     if socket.exists() {
         return Err("refusing existing socket".into());
     };
-    let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
+    let name = socket.file_name().ok_or("socket needs a filename")?;
+    let bind_path = PathBuf::from(format!("/proc/self/fd/{}", parent_fd.as_raw_fd())).join(name);
+    let listener = UnixListener::bind(&bind_path).map_err(|e| e.to_string())?;
     let mut socket_guard = SocketGuard::new();
-    socket_guard.identity = Some(capture_socket_identity(&socket, &parent_fd)?);
+    socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
