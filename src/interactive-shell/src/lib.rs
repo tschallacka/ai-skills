@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirEntryExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -346,6 +346,19 @@ fn remove_unidentified_bound_socket(path: &Path) {
     }
 }
 
+fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
+    let parent = path.parent().ok_or("socket needs a parent")?;
+    let device = fs::metadata(parent).map_err(|e| e.to_string())?.dev();
+    let name = path.file_name().ok_or("socket needs a filename")?;
+    for entry in fs::read_dir(parent).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == name {
+            return Ok((device, entry.ino()));
+        }
+    }
+    Err("bound socket disappeared before identity capture".into())
+}
+
 struct SocketGuard {
     path: PathBuf,
     identity: Option<(u64, u64)>,
@@ -648,13 +661,10 @@ pub fn run(
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
     let mut socket_guard = SocketGuard::new(socket.clone());
-    let id = match fs::metadata(&socket) {
-        Ok(metadata) => {
-            let identity = (metadata.dev(), metadata.ino());
-            socket_guard.identity = Some(identity);
-            Some(identity)
-        }
-        Err(error) => return Err(error.to_string()),
+    let id = {
+        let identity = capture_socket_identity(&socket)?;
+        socket_guard.identity = Some(identity);
+        Some(identity)
     };
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
         remove_socket(&socket, id);

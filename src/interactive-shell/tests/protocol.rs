@@ -142,8 +142,26 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
         .read_to_string(&mut output)
         .unwrap();
     child.wait().unwrap();
-    assert!(output.lines().any(|line| line.contains("CSI_SAFE")));
-    assert!(output.lines().any(|line| line.contains("OSC_SAFE")));
+    let rows = output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| event["event"] == "screen")
+        .flat_map(|event| {
+            event["rows"]
+                .as_object()
+                .map(|rows| {
+                    rows.values()
+                        .filter_map(|row| row.as_str().map(str::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rows.contains("CSI_SAFE"));
+    assert!(rows.contains("OSC_SAFE"));
+    assert!(!rows.contains(&"1".repeat(129)));
+    assert!(!rows.contains(&"x".repeat(4097)));
 }
 
 #[test]
