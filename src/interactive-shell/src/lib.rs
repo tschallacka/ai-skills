@@ -357,6 +357,32 @@ fn remove_socket(identity: &SocketIdentity) {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn fd_path(fd: RawFd) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{fd}"))
+}
+
+#[cfg(target_os = "macos")]
+fn fd_path(fd: RawFd) -> PathBuf {
+    PathBuf::from(format!("/dev/fd/{fd}"))
+}
+
+fn chmod_socket(identity: &SocketIdentity) -> io::Result<()> {
+    if unsafe {
+        libc::fchmodat(
+            identity.parent.as_raw_fd(),
+            identity.name.as_ptr(),
+            0o600,
+            0,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentity, String> {
     let name = path.file_name().ok_or("socket needs a filename")?;
     let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
@@ -680,11 +706,11 @@ pub fn run(
         return Err("refusing existing socket".into());
     };
     let name = socket.file_name().ok_or("socket needs a filename")?;
-    let bind_path = PathBuf::from(format!("/proc/self/fd/{}", parent_fd.as_raw_fd())).join(name);
+    let bind_path = fd_path(parent_fd.as_raw_fd()).join(name);
     let listener = UnixListener::bind(&bind_path).map_err(|e| e.to_string())?;
     let mut socket_guard = SocketGuard::new();
     socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
-    if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
+    if let Err(error) = chmod_socket(socket_guard.identity.as_ref().unwrap()) {
         remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
     }
