@@ -100,6 +100,7 @@ install_skill() {
     local changed=0
     local missing=0
     local managed_version_transition=0
+    local rjq_notice_printed=0
     local files
     local overview_artifact=''
 
@@ -107,11 +108,31 @@ install_skill() {
         overview_artifact="$(plan_overview_selected_artifact || true)"
     fi
 
+    # A bundled-binary row whose artifact is absent is skipped with a notice
+    # rather than failing the install: CI delivers these per host, and the
+    # notice names where the artifact comes from. Returns 0 when the row must
+    # be skipped.
+    bundled_bin_row_missing() {
+        case "$1" in
+            bin/*/rjq|bin/*/rjq.exe) ;;
+            *) return 1 ;;
+        esac
+        [ -x "$SOURCE_ROOT/planning/$1" ] && return 1
+        if [ "$rjq_notice_printed" -eq 0 ]; then
+            bundled_rjq_missing_notice
+            rjq_notice_printed=1
+        fi
+        return 0
+    }
+
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
+        fi
+        if [ "$skill" = planning ] && bundled_bin_row_missing "$relative"; then
+            continue
         fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"
@@ -169,6 +190,9 @@ EOF
         [ -n "$relative" ] || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
+        fi
+        if [ "$skill" = planning ] && bundled_bin_row_missing "$relative"; then
+            continue
         fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$relative"

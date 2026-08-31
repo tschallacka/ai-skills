@@ -1,135 +1,8 @@
 {
   "skill": "todo",
-  "skill_version": "1.4.2",
+  "skill_version": "2.0.0-alpha.1",
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
-    {
-      "id": "T70",
-      "title": "Ship the compiled binaries with 2.0.0-alpha: build all five targets, declare them, commit them",
-      "status": "open",
-      "priority": "urgent",
-      "parent": null,
-      "detail": "Tschallacka: the binaries go out with the release. Nothing is shipped today — 'git ls-files planning/bin chat/bin' is empty for both, and planning has no binaries.tsv at all (chat has one declaring all five targets). rust-development-guidelines.md section 6 states the rules: binaries.tsv is MODE: PROD and must appear in skill_files(); the artifact lives at <skill>/bin/<target triple>/<binary> and is marker-exempt on the triple-shaped directory name; a declared-but-unbuilt row is legal, a built-but-undeclared binary is not — so declare before building, never after. The five targets are x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc. This workstation cannot produce all five: a cross-built aarch64-apple-darwin carries no ad-hoc signature and Apple Silicon refuses to exec it, and neither darwin nor msvc links on Linux at all. CI already builds and RUNS each target in the plan-crypt matrix, but no job uploads an artifact — they are built and discarded — so there is no pipeline to collect them from either. That gap is the work: either add upload-artifact to the matrix and collect, or build on real hardware per platform. tests/test-shipped-binaries.sh validates the registry against disk and was built with eleven mutations, so it is the gate that proves this landed.",
-      "blocked_on": null,
-      "refs": [
-        "rust-development-guidelines.md",
-        "chat/binaries.tsv",
-        "tests/test-shipped-binaries.sh",
-        ".github/workflows/ci.yml"
-      ],
-      "note": null,
-      "created_at": "2026-08-28T17:15:01Z",
-      "updated_at": "2026-08-28T17:15:01Z"
-    },
-    {
-      "id": "T51",
-      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
-      "blocked_on": null,
-      "refs": [
-        ".plans/plan-overview-rebuild/adversarial-review.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-08-27T12:37:03Z"
-    },
-    {
-      "id": "T72",
-      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/60-install.sh",
-        "planning/scripts/plan-env.sh",
-        "tests/test-shipped-binaries.sh",
-        "rust-development-guidelines.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-08-31T13:27:55Z"
-    },
-    {
-      "id": "T71",
-      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
-      "note": null,
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/MAINTAINER.md",
-        "planning/docs/README.md"
-      ],
-      "created_at": "2026-08-30T21:50:27Z",
-      "updated_at": "2026-08-30T21:50:27Z"
-    },
-    {
-      "id": "T69",
-      "title": "A postmortem template carrying token accounting and a reviewer-session table",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/create-adversarial-review.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-28T15:33:14Z",
-      "updated_at": "2026-08-28T15:33:14Z"
-    },
-    {
-      "id": "T56",
-      "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "blocked",
-      "priority": "normal",
-      "parent": null,
-      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-28T15:28:39Z"
-    },
-    {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "decided",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "normal",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
-    },
-    {
-      "id": "T38",
-      "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "decided",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
-      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/ai-skills/pull/3"
-      ],
-      "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
-    },
     {
       "id": "T7",
       "title": "Push the branch and read the two macOS legs",
@@ -142,6 +15,25 @@
       "priority": "urgent",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-21T10:55:23Z"
+    },
+    {
+      "id": "T70",
+      "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
+      "status": "open",
+      "priority": "urgent",
+      "parent": null,
+      "detail": "Binaries for the five targets (x86_64/aarch64-unknown-linux-musl, x86_64/aarch64-apple-darwin, x86_64-pc-windows-msvc) ship with the 2.0.0-alpha release as CI artifacts, not as files in git. The rust matrix jobs already build and upload per-target artifacts; what remains is release attachment plus the installer/packaging reconciliation. rust-development-guidelines.md section 6 still governs: binaries.tsv is MODE: PROD, declared-but-unbuilt rows are legal, built-but-undeclared is not, so declare before building. tests/test-shipped-binaries.sh validates the registry against disk and is the gate that proves this landed.",
+      "blocked_on": null,
+      "refs": [
+        "rust-development-guidelines.md",
+        "chat/binaries.tsv",
+        "planning/binaries.tsv",
+        "tests/test-shipped-binaries.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "note": "Decision 2026-08-31 (Tschallacka): no binary blobs in the repo; the original commit-them wording is dropped. The planning/bin blob itself left the index in the T73 execution (goal 01, commit ad21749 then rebased). Re-applied onto master register twice: after 4cfab47 and after c7bb034.",
+      "created_at": "2026-08-28T17:15:01Z",
+      "updated_at": "2026-08-31T14:59:45Z"
     },
     {
       "id": "T10",
@@ -168,6 +60,19 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T17:17:38Z"
+    },
+    {
+      "id": "T12",
+      "title": "This register is gitignored",
+      "status": "obsolete",
+      "parent": null,
+      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
+      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "high",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T16:32:43Z"
     },
     {
       "id": "T18",
@@ -641,6 +546,21 @@
       "updated_at": "2026-08-27T14:18:12Z"
     },
     {
+      "id": "T51",
+      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
+      "blocked_on": null,
+      "refs": [
+        ".plans/plan-overview-rebuild/adversarial-review.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-08-27T12:37:03Z"
+    },
+    {
       "id": "T52",
       "title": "Check the installed planning skill against canonical before a plan is created",
       "status": "done",
@@ -739,6 +659,62 @@
       "updated_at": "2026-08-28T10:49:34Z"
     },
     {
+      "id": "T70a",
+      "title": "Remove the committed rjq binary blob from planning/bin",
+      "status": "done",
+      "priority": "high",
+      "parent": "T70",
+      "detail": "planning/bin/x86_64-unknown-linux-musl/rjq (2.9MB, committed in e8bdaef) was a binary blob in git. Removed from index and working tree; planning/binaries.tsv keeps its rows as declared-but-unbuilt, which the rules make legal. tests/test-shipped-binaries.sh gained the tracked-binary regression guard; the installer skips an absent bundled binary with a notice naming the release asset.",
+      "note": "Done in the T73 execution, goal 01 (installer: untrack the committed rjq blob; bundled artifacts are CI-delivered). Re-recorded onto master register after the c7bb034 rebase.",
+      "blocked_on": null,
+      "refs": [
+        "planning/binaries.tsv",
+        "tests/test-shipped-binaries.sh",
+        "install.sh"
+      ],
+      "created_at": "2026-08-31T14:59:45Z",
+      "updated_at": "2026-08-31T17:05:58Z"
+    },
+    {
+      "id": "T72",
+      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/60-install.sh",
+        "planning/scripts/plan-env.sh",
+        "tests/test-shipped-binaries.sh",
+        "rust-development-guidelines.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-31T13:27:55Z",
+      "updated_at": "2026-08-31T13:27:55Z"
+    },
+    {
+      "id": "T73",
+      "title": "Untrack every generated file; CI builds and delivers them",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "MAINTAINER.md section 2.16 makes it absolute: no generated files tracked, ever. The files: planning/bin rjq blob (done, T70a), the compiled plan-{core,crypt,document,progress,table}-lib.sh outputs of build-plan-libs.sh, PORTABILITY.md, and REVIEWER.md. Each moves in a coordinated change: CI builds and publishes the artifact, the in-repo copy is untracked, and every consumer reading it from the working tree is reconciled in the same change - run-tests bootstrap, npm prepack, installer/build-release.sh, the benchmark capsule, the packaging gates. Approved and executing plan: .plans/untrack-generated-files (38 units, 7 goals). The repository half of the shared-bin work landed separately as PR #7 (master T72 covers the installed half); goal 01 and the rjq bootstrap are already rebased onto it.",
+      "note": " COMPLETE: all 38 work units executed and verified. Whole-suite green on a bootstrap-from-nothing tree (suite5: 108 PASS; the function-length ratchet fix landed mid-run and passes standalone). T70/T72 remain the release-pipeline and installed-half follow-ups.",
+      "blocked_on": null,
+      "refs": [
+        "planning/MAINTAINER.md",
+        "planning/binaries.tsv",
+        "generate-portability.sh",
+        ".github/workflows/ci.yml",
+        "tests/test-shipped-binaries.sh",
+        ".plans/untrack-generated-files",
+        "BUGS.json"
+      ],
+      "created_at": "2026-08-31T14:59:45Z",
+      "updated_at": "2026-08-31T17:05:58Z"
+    },
+    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -799,6 +775,19 @@
       "parent": "T1",
       "detail": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
       "note": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "normal",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T14:53:12Z"
+    },
+    {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "decided",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
@@ -1080,6 +1069,21 @@
       "updated_at": "2026-08-24T09:38:24Z"
     },
     {
+      "id": "T38",
+      "title": "Review record: what was checked on the -ox merge, and what was not",
+      "status": "decided",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
+      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/ai-skills/pull/3"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
       "id": "T40",
       "title": "The python3-shipped rule, its gate and the tree now disagree",
       "status": "done",
@@ -1236,6 +1240,22 @@
       "updated_at": "2026-08-28T15:24:22Z"
     },
     {
+      "id": "T56",
+      "title": "Mark a review rationale superseded when a later cycle replaces it",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
+      "blocked_on": "the review-document format owner: needs a rationale-cycle stamp written when the rationale is written (see note)",
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-31T14:59:45Z"
+    },
+    {
       "id": "T57",
       "title": "Require reviewer reports to carry session id, elapsed time and a cost signal",
       "status": "done",
@@ -1338,6 +1358,23 @@
       "note": "Implemented in 7e2f341. plan_emit_step_testing_reminder now fires only when the companion was already behind the step, decided from git's pre-mutation state — mtime cannot answer it because the reminder runs after the write, so the step is always the newer file. Verified by planning/tests/test-step-testing-reminder.sh across four states: no companion (fires), companion current (silent), companion left behind (fires), companion refreshed (silent). Mutation-proven: reverting to always-fire trips two assertions, inverting the comparison trips the third. test-plan-commands.sh:85 had pinned the old always-fire wording and now asserts the silence instead. Suite 107/107.",
       "created_at": "2026-08-28T10:07:14Z",
       "updated_at": "2026-08-28T10:37:50Z"
+    },
+    {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-08-30T21:50:27Z"
     },
     {
       "id": "T8",
@@ -1492,6 +1529,21 @@
       "updated_at": "2026-08-28T10:37:50Z"
     },
     {
+      "id": "T69",
+      "title": "A postmortem template carrying token accounting and a reviewer-session table",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/create-adversarial-review.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T15:33:14Z",
+      "updated_at": "2026-08-28T15:33:14Z"
+    },
+    {
       "id": "T0",
       "title": "A plan-to-HTML renderer",
       "status": "done",
@@ -1503,19 +1555,6 @@
       "priority": "someday",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T08:47:35Z"
-    },
-    {
-      "id": "T12",
-      "title": "This register is gitignored",
-      "status": "obsolete",
-      "parent": null,
-      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
-      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "high",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T16:32:43Z"
     }
   ]
 }

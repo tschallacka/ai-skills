@@ -43,6 +43,21 @@ t_begin
 work="$(mktemp -d "${TMPDIR:-/tmp}/mode-markers.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
+# The compiled libraries and REVIEWER.md are generated and never tracked
+# (MAINTAINER.md section 2.16), so a clean checkout has none and the marker
+# scans would read missing files. Build/generate-if-missing; a present-but-wrong
+# file still fails its scan.
+libs_missing=0
+for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+    [ -f "$repo_root/planning/scripts/$lib" ] || libs_missing=1
+done
+if [ "$libs_missing" -eq 1 ]; then
+    "$repo_root/planning/scripts/build-plan-libs.sh" >/dev/null
+fi
+if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
+    "$repo_root/planning/scripts/generate-reviewer.sh" >/dev/null
+fi
+
 # shellcheck disable=SC1090
 source "$repo_root/installer/src/05-config.sh"
 # shellcheck disable=SC1090

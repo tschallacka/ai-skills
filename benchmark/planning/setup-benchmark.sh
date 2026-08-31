@@ -154,8 +154,28 @@ mkdir -p "$CAPSULE_ROOT/planning/scripts"
 cp "$SCRIPT_DIR/task-spec.md" "$CAPSULE_ROOT/task-spec.md"
 cp "$SRC_ROOT/planning/SKILL.md" "$CAPSULE_ROOT/planning/SKILL.md"
 cp -R "$SRC_ROOT/planning/scripts/." "$CAPSULE_ROOT/planning/scripts/"
-if [ -f "$SRC_ROOT/planning/REVIEWER.md" ]; then
-    cp "$SRC_ROOT/planning/REVIEWER.md" "$CAPSULE_ROOT/planning/REVIEWER.md"
+# The compiled libraries are generated and never tracked (MAINTAINER.md section
+# 2.15), so a git-archive capsule cannot carry them: build into the capsule from
+# the group sources the copy above brought over.
+libs_missing=0
+for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+    [ -f "$CAPSULE_ROOT/planning/scripts/$lib" ] || libs_missing=1
+done
+if [ "$libs_missing" -eq 1 ]; then
+    # The capsule copy carries lib/ sources and the builder, and the builder
+    # resolves its output paths from its own location, so run the capsule's.
+    ( cd "$CAPSULE_ROOT/planning/scripts" && ./build-plan-libs.sh ) \
+        || { echo "setup-benchmark: building the capsule libraries failed" >&2; exit 1; }
+fi
+if [ ! -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && [ -f "$CAPSULE_ROOT/planning/SKILL.md" ]; then
+    # Generated, never committed (MAINTAINER.md section 2.16): a git-archive
+    # capsule cannot carry it, so the capsule generates its own from the
+    # SKILL.md it already has. The capsule's generator resolves its paths from
+    # its own location, and the capsule lib build above has produced the
+    # plan-crypt library it sources.
+    ( cd "$CAPSULE_ROOT/planning/scripts" \
+        && ./generate-reviewer.sh "$CAPSULE_ROOT/planning" "$CAPSULE_ROOT/planning/REVIEWER.md" ) \
+        || { echo "setup-benchmark: generating the capsule REVIEWER.md failed" >&2; exit 1; }
 fi
 if [ -d "$SRC_ROOT/planning/references" ]; then
     cp "$SRC_ROOT/planning/references/ui-user-story-validation.md" "$CAPSULE_ROOT/planning/references/ui-user-story-validation.md"

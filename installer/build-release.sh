@@ -161,6 +161,54 @@ case "$mode" in
                 exit 66
             }
         fi
+        # The compiled plan libraries are generated and never tracked
+        # (MAINTAINER.md section 2.15), so a clean tree has none. Build-if-missing
+        # here; staleness stays the tests' job. A listed file still missing after
+        # this is the hard error below.
+        libs_missing=0
+        for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+            [ -f "$repo_root/planning/scripts/$lib" ] || libs_missing=1
+        done
+        if [ "$libs_missing" -eq 1 ]; then
+            "$repo_root/planning/scripts/build-plan-libs.sh" \
+                || { printf '%s: build-plan-libs.sh failed\n' "${0##*/}" >&2; exit 66; }
+        fi
+        # REVIEWER.md is generated and never tracked (MAINTAINER.md section
+        # 2.16); generation needs the compiled plan-crypt-lib.sh, so the library
+        # step above must have run first. A present file is left alone - the
+        # projection test owns staleness.
+        if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
+            "$repo_root/planning/scripts/generate-reviewer.sh" "$repo_root/planning" \
+                || { printf '%s: generate-reviewer.sh failed\n' "${0##*/}" >&2; exit 66; }
+        fi
+        # The bundled rjq artifact is CI-delivered and never tracked (MAINTAINER.md
+        # section 2.16). skill_files lists it platform-conditionally, so the
+        # collect() check below requires it for THIS host: take a bootstrap-built
+        # copy from the shared root bin/<triple> first, build from src/rjq when
+        # cargo exists, and fail loudly when neither is there - a release cannot
+        # ship the row silently missing.
+        case "$(uname -s):$(uname -m)" in
+            Linux:x86_64|Linux:amd64) rjq_dir=x86_64-unknown-linux-musl; rjq_bin=rjq ;;
+            Linux:aarch64|Linux:arm64) rjq_dir=aarch64-unknown-linux-musl; rjq_bin=rjq ;;
+            Darwin:x86_64) rjq_dir=x86_64-apple-darwin; rjq_bin=rjq ;;
+            Darwin:arm64) rjq_dir=aarch64-apple-darwin; rjq_bin=rjq ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64) rjq_dir=x86_64-pc-windows-msvc; rjq_bin=rjq.exe ;;
+            *) rjq_dir='' ;;
+        esac
+        if [ -n "$rjq_dir" ] && [ ! -x "$repo_root/planning/bin/$rjq_dir/$rjq_bin" ]; then
+            mkdir -p "$repo_root/planning/bin/$rjq_dir"
+            if [ -x "$repo_root/bin/$rjq_dir/$rjq_bin" ]; then
+                cp "$repo_root/bin/$rjq_dir/$rjq_bin" "$repo_root/planning/bin/$rjq_dir/$rjq_bin"
+            elif command -v cargo >/dev/null 2>&1; then
+                ( cd "$repo_root/src/rjq" && cargo build --release --target "$rjq_dir" ) \
+                    || { printf '%s: cargo build rjq failed\n' "${0##*/}" >&2; exit 66; }
+                cp "$repo_root/src/rjq/target/$rjq_dir/release/$rjq_bin" "$repo_root/planning/bin/$rjq_dir/$rjq_bin"
+            else
+                printf '%s: no rjq at planning/bin/%s/%s, no copy in bin/%s, and no cargo to build one\n' \
+                    "${0##*/}" "$rjq_dir" "$rjq_bin" "$rjq_dir" >&2
+                exit 66
+            fi
+        fi
         count=0
         while IFS= read -r path; do
             [ -n "$path" ] || continue

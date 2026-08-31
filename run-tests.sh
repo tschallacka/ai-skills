@@ -63,6 +63,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Generated artifacts are never committed (MAINTAINER.md section 2.15), so a
+# clean checkout has none of them. Build-if-missing here; staleness detection
+# stays with the tests, so the bootstrap cannot mask drift. A missing rjq is
+# fatal with the fix named: the register tests cannot run without it.
+bootstrap_generated() {
+    local lib missing=0 dir
+    for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+        [ -f "$repo_root/planning/scripts/$lib" ] || missing=1
+    done
+    if [ "$missing" -eq 1 ]; then
+        "$repo_root/planning/scripts/build-plan-libs.sh" >&2
+    fi
+    if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
+        "$repo_root/planning/scripts/generate-reviewer.sh" >&2
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        dir=""
+        if dir="$("$repo_root/bootstrap.sh" rjq --path-only 2>/dev/null)" && [ -n "$dir" ]; then
+            PATH="$dir:$PATH"
+            export PATH
+        elif ! command -v rjq >/dev/null 2>&1; then
+            printf '%s: rjq is still missing; the register tests cannot run.\n' "${0##*/}" >&2
+            exit 69
+        fi
+    fi
+}
+bootstrap_generated
+
 # Tests that require PLANNING_CONTEXT_CACHE (a developer-only legacy context
 # cache). They are documented to fail closed when the fixture is absent; the
 # runner prefers to run them when the fixture is configured and otherwise

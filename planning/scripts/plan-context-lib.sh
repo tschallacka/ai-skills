@@ -342,6 +342,11 @@ context_build_index() {
             printf 'source:SKILL.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/SKILL.md")"
             if [ -f "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" ]; then
                 printf 'source:REVIEWER.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md")"
+            else
+                # Generated, never committed (MAINTAINER.md section 2.16): the
+                # omission is stated so an absent entry reads as a bootstrap
+                # gap, not as a file that does not exist anywhere.
+                printf 'source:REVIEWER.md\t%s\tsource\tabsent - generate with planning/scripts/generate-reviewer.sh\n' '-'
             fi
         fi
     } > "$output"

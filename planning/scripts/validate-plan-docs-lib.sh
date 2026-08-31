@@ -114,6 +114,7 @@ plan_validate_plan_docs() {
         require_heading "$review_file" '## Review scope'
         require_heading "$review_file" '## Findings'
         require_heading "$review_file" '## Verdict'
+        review_approved=true
         grep -Fqx -- '- Status: `✅ approved`' "$review_file" || review_approved=false
         if [ "${review_approved:-true}" = true ]; then
             grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md" || fail "Plan description does not mirror approved adversarial-review status"

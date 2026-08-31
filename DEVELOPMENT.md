@@ -100,6 +100,11 @@ The package contents should include `install.sh`, `package.json`, `README.md`,
 to the existing `install.sh`; do not duplicate the installer in JavaScript or
 move the skills to satisfy npm packaging.
 
+The generated artifacts the package ships — the five compiled plan libraries
+and `planning/REVIEWER.md` — are built by `npm prepack` from the tracked
+sources, never committed (`planning/MAINTAINER.md` §2.15). A pack from a clean
+checkout is therefore complete without any generated file in git.
+
 ## Verifying on both shells
 
 `./verify-both-shells.sh` runs the whole suite twice — local bash and the bash

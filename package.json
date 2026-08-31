@@ -13,7 +13,7 @@
   },
   "scripts": {
     "install-skills": "./install.sh",
-    "prepack": "tests/test-skill-files-manifest.sh >/dev/null && tests/test-register-schemas.sh >/dev/null",
+    "prepack": "planning/scripts/build-plan-libs.sh >/dev/null && planning/scripts/generate-reviewer.sh >/dev/null && { command -v rjq >/dev/null 2>&1 || { d=\"$(./bootstrap.sh rjq --path-only)\" || exit 69; PATH=\"$d:$PATH\"; export PATH; }; } && tests/test-skill-files-manifest.sh >/dev/null && tests/test-register-schemas.sh >/dev/null",
     "verify-manifest": "tests/test-skill-files-manifest.sh"
   },
   "files": [

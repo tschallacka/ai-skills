@@ -17,7 +17,7 @@ the maintainer must behave going forward.
 | `EXECUTION.md` | Phase doc: resume → bounded context → monitor steering → coordinator-subcontractor model → helper mutations → env evolution. | From `SKILL.md` when the task is execution. |
 | `ROLES.md` | Routing index + persona doc matrix (mirror of `role-context.sh` `role_docs()`) + per-role reader allow-list; no full role table (that lives in the contract). | From `SKILL.md`; routes to `roles/*.md`; scope matrix mirrors `role_docs()` in `role-context.sh`. |
 | `roles/planning.md` `roles/execution.md` `roles/cleanup.md` | Phase-scoped role rosters. | From `ROLES.md` per phase. Each lists only that phase's roles. |
-| `REVIEWER.md` | Reviewer contract (generated). | From review docs; loaded by reviewers. |
+| `REVIEWER.md` | Reviewer contract (generated on demand by `scripts/generate-reviewer.sh` from `SKILL.md`, pinned to its hash; never committed, §2.16). | From review docs; loaded by reviewers; consumers generate it when absent. |
 | `MAINTAINER-STYLE-CONTRACT.md` | Canonical roles master + benchmark-domain roles + document-format contract (internal). | Maintainer only; phase docs reference ids, never redefine. |
 | `MAINTAINER.md` | This file (internal). | Maintainer only. |
 | `ARCHITECTURE.md` | The five cross-script flows as mermaid diagrams (plan lifecycle, role handoff and gates, script layering, the validation state machine, plan-directory state files) plus the recorded contradictions and dead ends (internal). | Maintainer only; not shipped, not in the manifest/map, not installed. Read it before changing a flow that crosses more than two scripts. |
@@ -44,7 +44,7 @@ the maintainer must behave going forward.
 | `PACKAGE-MANIFEST.tsv` / `PACKAGE-MAP.tsv` | Ship manifest / source-destination map. | Every installed file must be registered here. |
 | `install.sh` `skill_files()` | Installer file list. | Must match manifest + map. Every name must exist on disk and every tracked skill file must either be listed or parked in `../installer/unshipped-planning-files.txt` — asserted by `../tests/test-skill-files-manifest.sh`, which also runs as npm `prepack`. |
 | `../installer/unshipped-planning-files.txt` | Planning files no install delivers, awaiting a ship-or-not decision. | A ratchet: entries leave by being registered for shipping. Adding one is a decision, and a stale entry fails the test. |
-| Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md`, `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
+| Benchmark capsule copy (`setup-benchmark.sh`) | Copies a fixed set into the worker capsule: `SKILL.md`, `REVIEWER.md` (generated into the capsule when absent), `scripts/`, and the UI reference doc. | New files under `scripts/` and changes to `SKILL.md`/`REVIEWER.md` must be reflected here; `ROLES.md`, `roles/*`, `VOICES.md`, and `MAINTAINER-STYLE-CONTRACT.md` are NOT copied into the capsule. |
 | `../verify-both-shells.sh` | Runs the suite on the working tree under the local bash and the bash 3.2 floor, in a linked worktree in `TMPDIR` so editing can continue. Prints each failing test's own output. | Sweeps its own leftover worktrees; never place one under the repo, or the filesystem scans land machine-specific paths in generated artifacts. |
 | `../blast-radius.sh` | Integration-safety report over a change set: freshness of generated artifacts, missing manifest rows, base drift, and the couplings in `coupling.tsv`. Not a correctness check and not shipped. | Reads `coupling.tsv`; runs `installer/build.sh --check`, `generate-portability.sh --check`, `test-reviewer-projection.sh`. Asserted by `test-blast-radius.sh`. |
 | `../coupling.tsv` | The couplings a change must honour, as data rather than prose: glob, level, consequence, check. | Read by `blast-radius.sh`. Add a row when a new generated artifact or registry appears. |
@@ -161,6 +161,8 @@ library, and `test-plan-libs-build.sh` runs it.
   second source would re-run `00-state.sh` and drop the registered temp files.
 - Group membership is the directory. Moving a function between groups is a `git
   mv` plus a build, and the symbol set must not change.
+- Their committed form is grandfathered, not endorsed: §2.15 makes untracking
+  them the destination, with the build and the artifact moving to CI.
 
 ### 2.8a Fix-key derivation
 
@@ -181,7 +183,9 @@ library, and `test-plan-libs-build.sh` runs it.
   nothing, so shipping one *lowered* the declared requirement. The binary is
   opportunistic, found the way `chat-server.sh`'s `rust_bin()` finds its own —
   `PLAN_CRYPT_BIN`, then `PATH`, then `planning/bin/<target triple>/plan-crypt`
-  and `planning/bin/plan-crypt`. A pin naming a file that does not exist is a
+  and `planning/bin/plan-crypt`. Per-target artifacts are CI-delivered and
+  untracked (§2.15); a local `planning/bin/<triple>` path exists only after a
+  local build. A pin naming a file that does not exist is a
   refusal rather than a fall-through, which is how a test takes the compiled
   rung out of the picture.
 - Two implementations of one algorithm can disagree, so they are pinned to each
@@ -304,11 +308,10 @@ vocabulary, removes the overlap. Until then, never use `trap - EXIT` to
 ### 2.15 A working local tree needs the crates built
 
 Run `../setup-dev-env.sh` once after cloning. It builds every crate under
-`../src/` for this machine's target triple and drops each binary where the skill
-that owns it looks — `planning/bin/<triple>/` for `rjq`, `plan-overview` and
-`plan-crypt`, `chat/bin/<triple>/` for the two chat binaries. Only the host
-triple is built; cross-building the other four is what a release
-(`installer/build-release.sh`) and CI do.
+`../src/` for this machine's target triple into ONE `bin/<target triple>` at
+the repository root — the directory `plan_bin_dir` walks up to find — rather
+than a bin/ inside each skill. Only the host triple is built; cross-building
+the other four is what a release (`installer/build-release.sh`) and CI do.
 
 Why this needs saying: exactly one artifact is committed, and every helper that
 wants a compiled one degrades honestly when it is absent. `plan_crypt_resolve`
@@ -318,13 +321,42 @@ the one a target actually runs — is never exercised locally. A green run on an
 unbuilt tree is not evidence about the code a user gets.
 
 - **The script refuses to run without nix, and does not fall back to a system
-  cargo.** `flake.nix` pins Rust 1.86.0 and the five house targets; another
-  toolchain produces a different artifact from the one CI and a release ship. It
-  exits 69 and prints how to install nix.
+  cargo.** The flake pins the newest stable rust the locked nixpkgs offers,
+  with the five house targets; another toolchain produces a different artifact
+  from the one CI and a release ship. It exits 69 and prints how to install
+  nix.
 - **`rjq` is invoked by name.** Building it is not enough — the planning helpers
-  find it on PATH, so until `planning/bin/<triple>` is on PATH the tree uses
+  find it on PATH, so until the root `bin/<triple>` is on PATH the tree uses
   whatever `rjq` the machine happens to have, or none. The script prints the
   export line; `--check` reports what is present or missing without building.
+
+### 2.16 Generated files are CI's job, not the repo's
+
+- Every binary and compiled output is built by a CI runner and delivered as a
+  release artifact. The repo carries no generated files — nothing
+  machine-produced is committed, ever. A generated file in git is a blob: it
+  cannot be rebuilt on every maintainer box (no darwin or msvc link here), it
+  rots out of sight of the build that produces it, and every clone pays for it
+  forever.
+- This is absolute, and it names the files that are tracked today and must
+  leave: the committed `planning/bin/x86_64-unknown-linux-musl/rjq` binary
+  (T70a), the compiled `plan-*-lib.sh` outputs of `build-plan-libs.sh` (§2.8),
+  `PORTABILITY.md` and `REVIEWER.md`. Each moves to a CI build that publishes
+  the artifact, and its in-repo copy is removed in the same coordinated
+  change. T73 tracks the migration; its per-file work lands as sub-tasks. (An
+  earlier recording of this rule named T71; master had already assigned that
+  id to the planning/SKILL.md phase-doc split before it landed.)
+- Until a file's migration lands, its existing gate keeps running and a stale
+  generated file still fails it. The rule does not downgrade any gate; it adds
+  "not tracked" as the required end state. Declared-but-unbuilt is the legal
+  resting state on disk (`binaries.tsv` rows; rust-development-guidelines.md
+  §6: declare before building — the building happens on the runner).
+- Consumers that read a generated file from the working tree — the installer,
+  npm pack, test harnesses, `blast-radius.sh`'s freshness checks — must be
+  reconciled to fetch the artifact from the release or publish pipeline in the
+  same change that untracks the file. An artifact neither tracked nor
+  delivered is a broken install, which is the failure this rule exists to
+  prevent, so the reconciliation is part of the work, never a follow-up.
 
 ## 3. Pending consolidation (the duplication inventory)
 

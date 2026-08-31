@@ -19,10 +19,11 @@ starting — a defect you are about to rediscover may already be recorded with i
 mechanism — and update it when you finish. Nothing fails if you do not, which is
 why work here has repeatedly had to be reconstructed from diffs.
 
-`PORTABILITY.md` is generated and carries a `<!-- generated: … -->` stamp; if it
-looks stale or a test says so, run `./generate-portability.sh` — never hand-edit
-it, and never hand-resolve a conflict in it. Concurrent edits invalidate it
-routinely; regenerating is the fix.
+`PORTABILITY.md` is generated on demand by `./generate-portability.sh` from
+`portability-rules.json` and is never committed (`planning/MAINTAINER.md`
+§2.16): generate it when you want to read the catalogue, and never hand-edit
+a generated copy. The contract test regenerates to temp paths, so a stale
+local copy can hide nothing.
 
 Read `CODE-STYLE.md` before writing or editing any shell here, `CODE-CONTRACTS.md`
 for what a script owes the documents, artifacts and users it touches, and
@@ -67,6 +68,11 @@ The deterministic whole-repo suite is `./run-tests.sh`:
 ./run-tests.sh --verbose
 ```
 
+- A clean checkout is safe to test directly: the runner bootstraps the
+  generated artifacts first (compiled plan libraries, `REVIEWER.md`, rjq via
+  `./bootstrap.sh`), because generated files are never committed
+  (`planning/MAINTAINER.md` §2.15). `npm prepack` runs the same generators
+  before packaging.
 - It runs every test under `planning/tests/` and `benchmark/planning/tests/`,
   each under `resource-limited-testing/scripts/limited-run.sh`.
 - Some tests are gated behind `PLANNING_CONTEXT_CACHE` and report

@@ -19,6 +19,13 @@ repo_root="$(cd "$tests_dir/.." && pwd)"
 source "$repo_root/planning/tests/lib-test.sh"
 t_begin
 
+# rjq is the reader for every register this test validates. When it is missing,
+# name the fix instead of dying with a bare command-not-found three lines in.
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s\n' "rjq is required: run ./bootstrap.sh (builds it into the gitignored planning/bin path) or download it from the project releases page (queued as T70)." >&2
+    exit 1
+fi
+
 work="$(mktemp -d "${TMPDIR:-/tmp}/register-schemas.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 

@@ -1415,7 +1415,7 @@
     {
       "id": "B95",
       "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
-      "status": "fixed",
+      "status": "confirmed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -1428,12 +1428,12 @@
         "planning/scripts/plan-document-lib.sh",
         "planning/scripts/build-plan-libs.sh"
       ],
-      "fix": "dfd5781 — plan_bin_dir replaces the facade's hand-rolled lookup and finds the tree by walking UP for a bin/<target triple> instead of computing a fixed $(dirname BASH_SOURCE)/../../../.., so the answer no longer depends on which directory the file is read from. Shipped in c7bb034 (PR #7).",
-      "verification": "Mutation: restore the fixed-depth expression in plan_bin_dir.sh, rebuild the libraries with build-plan-libs.sh, then source the compiled planning/scripts/plan-document-lib.sh with AI_SKILLS_BIN_ROOT unset, XDG_CONFIG_HOME pointed at a nonexistent path and PATH reduced to /usr/bin:/bin. With the mutation, command -v rjq prints nothing: B95 reproduced. Restore the walk-up, rebuild, repeat, and it resolves to the tree's own bin/x86_64-unknown-linux-musl/rjq. The three inputs are pinned because each one disables a different rung -- the .env pin, the shared install directory, and the machine's own rjq -- so only the development-tree rung is under test.",
+      "fix": null,
+      "verification": null,
       "found_by": "binary-layout restructure recon",
       "notes": null,
       "created_at": "2026-08-31T13:20:46Z",
-      "updated_at": "2026-08-31T15:14:26Z"
+      "updated_at": "2026-08-31T13:20:46Z"
     },
     {
       "id": "B6",
@@ -2111,6 +2111,28 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B97",
+      "title": "validate-plan reports adversarially approved=no for an approved plan",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Approve a plan end to end (adversarial-review.md Verdict Status line backticked approved, plan-description mirroring it, all findings closed), then run ./planning/scripts/validate-plan.sh --plan-dir <plan>; the gates line prints adversarially approved=no despite zero errors.",
+      "observed": "Plan validation passed with structurally valid=yes yet adversarially approved=no; bash -x shows the docs-lib status grep succeeding and never assigning review_approved.",
+      "expected": "adversarially approved=yes when the review file carries the approved verdict and the plan description mirrors it.",
+      "mechanism": "validate-plan-docs-lib.sh assigned review_approved only on grep failure (false); the success path left it unset, and the two readers defaulted the same unset variable in opposite directions - the docs pass treated unset as approved (default true at the if) while plan_report_gates treated unset as not-approved (default false), so the gate could never print yes.",
+      "surfaces": [
+        "planning/scripts/validate-plan-docs-lib.sh",
+        "planning/scripts/validate-plan.sh"
+      ],
+      "fix": "Working-tree fix: initialize review_approved=true before the Verdict grep in plan_validate_plan_docs so the only assignment left is the failure path; aligns the gate with the docs pass own unset-means-approved semantics. (Recorded as B94 locally before PR #7 landed; master's B94-B96 were unknown then, so it renumbered to B97 at the rebase.)",
+      "verification": "Re-run validate-plan.sh on .plans/untrack-generated-files: gates must read structurally valid=yes, adversarially approved=yes.",
+      "found_by": "T72 plan readiness pass, maintainer session 2026-08-31",
+      "notes": [],
+      "created_at": "2026-08-31T14:05:48Z",
+      "updated_at": "2026-08-31T15:20:00Z"
     }
   ]
 }
