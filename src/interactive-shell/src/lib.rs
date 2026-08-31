@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::fs;
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::RawFd;
@@ -348,7 +349,8 @@ fn remove_unidentified_bound_socket(path: &Path) {
 
 fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
     let parent = path.parent().ok_or("socket needs a parent")?;
-    let device = fs::metadata(parent).map_err(|e| e.to_string())?.dev();
+    let parent_fd = File::open(parent).map_err(|e| e.to_string())?;
+    let device = parent_fd.metadata().map_err(|e| e.to_string())?.dev();
     let name = path.file_name().ok_or("socket needs a filename")?;
     loop {
         match fs::read_dir(parent) {
