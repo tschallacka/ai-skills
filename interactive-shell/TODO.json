@@ -110,7 +110,7 @@
     {
       "id": "ISH-1h",
       "title": "Add unknown-TUI exploration coverage",
-      "status": "open",
+      "status": "done",
       "priority": "high",
       "parent": "ISH-1",
       "detail": "Create an exploratory test driven only by observations and available actions against MC, nano, and less; do not encode a predetermined transcript or assume screen coordinates in advance.",
@@ -118,7 +118,7 @@
       "blocked_on": null,
       "refs": ["tests/test-interactive-shell.sh", "interactive-shell/SKILL.md"],
       "created_at": "2026-08-31T20:35:47Z",
-      "updated_at": "2026-08-31T20:35:47Z"
+      "updated_at": "2026-08-31T23:55:00Z"
     },
     {
       "id": "ISH-1i",

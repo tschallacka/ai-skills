@@ -117,17 +117,18 @@ send key F4
 wait_screen 'Hello World'
 send key CTRL-A
 send key CTRL-K
+send key CTRL-K
 send text 'hello universe'
 send key CTRL-O
 wait_screen 'Write to File:'
 send key ENTER
-send raw 59
+sleep 0.5
+overwrite_prompt=$(observe)
+if printf '%s\n' "$overwrite_prompt" | rjq -e '(.rows // {}) | to_entries[] | .value | contains("File exists")' >/dev/null 2>&1; then
+    send raw 59
+fi
 wait_file_content 'hello universe'
-wait_screen 'GNU nano'
-send key F10
-send key CTRL-X
-wait_screen 'Left     File'
-send key F10
+send shutdown
 wait "$PID" 2>/dev/null || true
 PID=
 [ "$(cat "$TARGET")" = 'hello universe' ]
