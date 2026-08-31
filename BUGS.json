@@ -2089,6 +2089,28 @@
       "notes": null,
       "created_at": "2026-08-31T13:20:46Z",
       "updated_at": "2026-08-31T13:20:46Z"
+    },
+    {
+      "id": "B96",
+      "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Re-run the macOS system bash 3.2 leg of any run that failed it; run 33401864955 failed cargo-plan-overview at watcher_reports_a_real_edit and the identical job passed on rerun with no code change.",
+      "observed": "cargo test --test watch fails with 'test result: FAILED. 2 passed; 1 failed' on the macOS floor leg, taking the whole suite to 119/120. The same job re-run on the same commit passes.",
+      "expected": "The watcher test is deterministic on every supported platform, or declares its timing assumption and skips loudly where it cannot hold.",
+      "mechanism": "Not yet proven. Two candidates, both macOS-specific. (1) Timing: watch_plan_dir sleeps SCAN_INTERVAL 250ms per poll and the test allows 2s, so it needs one of about eight polls to observe the write; a slow or loaded runner can starve that thread. (2) Path identity: the test asserts event.changed == vec![root.join(\"plan.md\")] by exact equality, and std::env::temp_dir() on macOS is /var/folders/... which is a symlink to /private/var/folders/..., so any canonicalisation on the way through makes the two spellings differ on macOS while matching on Linux. Ruled out: timestamp granularity. The snapshot stores a content fingerprint alongside mtime and size, so a same-length 'one'->'two' edit is detectable whatever the filesystem does with mtime.",
+      "surfaces": [
+        "src/plan-overview/tests/watch.rs",
+        "src/plan-overview/src/watch.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "PR #7 CI",
+      "notes": null,
+      "created_at": "2026-08-31T14:50:34Z",
+      "updated_at": "2026-08-31T14:50:34Z"
     }
   ]
 }
