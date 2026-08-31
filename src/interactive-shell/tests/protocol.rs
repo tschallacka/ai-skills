@@ -108,3 +108,40 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
     child.wait().unwrap();
     assert!(!dir.join("socket").exists());
 }
+
+#[test]
+fn invalid_dimensions_fail_before_creating_socket() {
+    let dir = temp_dir("dimensions");
+    let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "--cols",
+            "0",
+            "--rows",
+            "4",
+            "--",
+            "true",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!dir.join("socket").exists());
+}
+
+#[test]
+fn signal_cleanup_removes_socket() {
+    let dir = temp_dir("signal");
+    let mut child = start(&dir, &["sleep", "30"], "30");
+    for _ in 0..100 {
+        if dir.join("socket").exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    unsafe {
+        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+    }
+    child.wait().unwrap();
+    assert!(!dir.join("socket").exists());
+}

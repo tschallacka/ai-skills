@@ -8,9 +8,11 @@ use std::os::fd::RawFd;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const MAX_LINE: usize = 65_536;
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
@@ -67,6 +69,8 @@ enum Parser {
     Csi(Vec<u8>),
     Osc(Vec<u8>),
     Charset,
+    CsiDiscard,
+    OscDiscard(bool),
 }
 
 #[derive(Debug)]
@@ -78,6 +82,17 @@ struct Screen {
     visible: bool,
     line_drawing: bool,
     parser: Parser,
+    saved_primary: Option<ScreenState>,
+}
+
+#[derive(Clone, Debug)]
+struct ScreenState {
+    rows: Vec<Vec<u8>>,
+    dirty: Vec<bool>,
+    row: usize,
+    col: usize,
+    visible: bool,
+    line_drawing: bool,
 }
 
 impl Screen {
@@ -90,6 +105,7 @@ impl Screen {
             visible: true,
             line_drawing: false,
             parser: Parser::Ground,
+            saved_primary: None,
         }
     }
     fn cursor(&self) -> Cursor {
@@ -137,6 +153,8 @@ impl Screen {
                 } else if params.len() < 128 {
                     params.push(byte);
                     self.parser = Parser::Csi(params);
+                } else {
+                    self.parser = Parser::CsiDiscard;
                 }
             }
             Parser::Osc(mut value) => {
@@ -144,6 +162,21 @@ impl Screen {
                 } else if value.len() < 4096 {
                     value.push(byte);
                     self.parser = Parser::Osc(value);
+                } else {
+                    self.parser = Parser::OscDiscard(byte == 0x1b);
+                }
+            }
+            Parser::CsiDiscard => {
+                if !(0x40..=0x7e).contains(&byte) {
+                    self.parser = Parser::CsiDiscard;
+                }
+            }
+            Parser::OscDiscard(mut escaped) => {
+                if byte == 7 || (escaped && byte == b'\\') {
+                    self.parser = Parser::Ground;
+                } else {
+                    escaped = byte == 0x1b;
+                    self.parser = Parser::OscDiscard(escaped);
                 }
             }
         }
@@ -192,19 +225,40 @@ impl Screen {
             }
             b'h' if private && s == "25" => self.visible = true,
             b'l' if private && s == "25" => self.visible = false,
-            b'h' if private && s == "1049" => {
-                for (i, row) in self.rows.iter_mut().enumerate() {
-                    row.fill(b' ');
-                    self.dirty[i] = true;
-                }
-                self.row = 0;
-                self.col = 0;
-            }
+            b'h' if private && s == "1049" => self.enter_alt(),
             b'l' if private && s == "1049" => {
-                self.row = 0;
-                self.col = 0;
+                self.leave_alt();
             }
             _ => {}
+        }
+    }
+    fn enter_alt(&mut self) {
+        if self.saved_primary.is_some() {
+            return;
+        }
+        self.saved_primary = Some(ScreenState {
+            rows: std::mem::take(&mut self.rows),
+            dirty: std::mem::take(&mut self.dirty),
+            row: self.row,
+            col: self.col,
+            visible: self.visible,
+            line_drawing: self.line_drawing,
+        });
+        let rows = self.saved_primary.as_ref().unwrap().rows.len();
+        let cols = self.saved_primary.as_ref().unwrap().rows[0].len();
+        self.rows = vec![vec![b' '; cols]; rows];
+        self.dirty = vec![true; rows];
+        self.row = 0;
+        self.col = 0;
+    }
+    fn leave_alt(&mut self) {
+        if let Some(state) = self.saved_primary.take() {
+            self.rows = state.rows;
+            self.dirty = state.dirty;
+            self.row = state.row;
+            self.col = state.col;
+            self.visible = state.visible;
+            self.line_drawing = state.line_drawing;
         }
     }
     fn delta(&mut self) -> BTreeMap<usize, String> {
@@ -239,7 +293,7 @@ pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
         "BACKSPACE" => Some(b"\x7f"),
         "TAB" => Some(b"\t"),
         "ESC" => Some(b"\x1b"),
-        "META-RIGHT" => Some(b"\x1b[C"),
+        "META-RIGHT" => Some(b"\x1b[1;3C"),
         "UP" => Some(b"\x1b[A"),
         "DOWN" => Some(b"\x1b[B"),
         "LEFT" => Some(b"\x1b[D"),
@@ -283,6 +337,27 @@ fn remove_socket(path: &Path, identity: Option<(u64, u64)>) {
         if (m.dev(), m.ino()) == id {
             let _ = fs::remove_file(path);
         }
+    }
+}
+
+extern "C" fn interrupt_handler(_: libc::c_int) {
+    INTERRUPTED.store(true, Ordering::Relaxed);
+}
+
+struct Cleanup {
+    master: RawFd,
+    pid: libc::pid_t,
+    socket: PathBuf,
+    identity: Option<(u64, u64)>,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        stop(self.pid);
+        unsafe {
+            libc::close(self.master);
+        }
+        remove_socket(&self.socket, self.identity);
     }
 }
 fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t), String> {
@@ -341,11 +416,13 @@ fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t
     }
     unsafe {
         libc::close(slave);
-        libc::fcntl(
-            master,
-            libc::F_SETFL,
-            libc::fcntl(master, libc::F_GETFL) | libc::O_NONBLOCK,
-        )
+        let flags = libc::fcntl(master, libc::F_GETFL);
+        if flags < 0 || libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            libc::kill(-pid, libc::SIGKILL);
+            libc::waitpid(pid, std::ptr::null_mut(), 0);
+            libc::close(master);
+            return Err(io::Error::last_os_error().to_string());
+        }
     };
     Ok((master, pid))
 }
@@ -485,14 +562,31 @@ fn client(
     Ok(())
 }
 fn write_master(fd: RawFd, bytes: &[u8]) -> Result<(), String> {
-    let n = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
-    if n < 0 {
-        Err(io::Error::last_os_error().to_string())
-    } else if n as usize != bytes.len() {
-        Err("short PTY write".into())
-    } else {
-        Ok(())
+    let mut offset = 0;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while offset < bytes.len() {
+        let n = unsafe { libc::write(fd, bytes[offset..].as_ptr().cast(), bytes.len() - offset) };
+        if n > 0 {
+            offset += n as usize;
+            continue;
+        }
+        if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::WouldBlock {
+            if Instant::now() >= deadline {
+                return Err("PTY write timed out".into());
+            }
+            let mut poll = libc::pollfd {
+                fd,
+                events: libc::POLLOUT,
+                revents: 0,
+            };
+            if unsafe { libc::poll(&mut poll, 1, 100) } < 0 {
+                return Err(io::Error::last_os_error().to_string());
+            }
+            continue;
+        }
+        return Err(io::Error::last_os_error().to_string());
     }
+    Ok(())
 }
 
 pub fn run(
@@ -502,14 +596,32 @@ pub fn run(
     idle: u64,
     command: Vec<String>,
 ) -> Result<(), String> {
+    if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
+        return Err("dimensions must be within cols 1..240 and rows 1..100".into());
+    }
+    if command.is_empty() {
+        return Err("command is required".into());
+    }
     valid_dir(socket.parent().ok_or("socket needs parent")?)?;
     if socket.exists() {
         return Err("refusing existing socket".into());
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
-    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
-    let id = fs::metadata(&socket).ok().map(|m| (m.dev(), m.ino()));
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let id = match fs::metadata(&socket) {
+        Ok(m) => Some((m.dev(), m.ino())),
+        Err(error) => {
+            let _ = fs::remove_file(&socket);
+            return Err(error.to_string());
+        }
+    };
+    if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
+        remove_socket(&socket, id);
+        return Err(error.to_string());
+    }
+    if let Err(error) = listener.set_nonblocking(true) {
+        remove_socket(&socket, id);
+        return Err(error.to_string());
+    }
     let (master, pid) = match spawn(&command, cols, rows) {
         Ok(x) => x,
         Err(e) => {
@@ -517,6 +629,22 @@ pub fn run(
             return Err(e);
         }
     };
+    let cleanup = Cleanup {
+        master,
+        pid,
+        socket: socket.clone(),
+        identity: id,
+    };
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            interrupt_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            interrupt_handler as *const () as libc::sighandler_t,
+        );
+    }
     let mut screen = Screen::new(rows as usize, cols as usize);
     let mut out = io::BufWriter::new(io::stdout());
     let start = Instant::now();
@@ -525,7 +653,7 @@ pub fn run(
     let mut reason = "child_exit";
     let mut code = 0;
     let mut seq = 0;
-    while !stopped {
+    while !stopped && !INTERRUPTED.load(Ordering::Relaxed) {
         let mut buf = [0; 8192];
         let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
         if n > 0 {
@@ -556,14 +684,16 @@ pub fn run(
             code = status(st);
         }
         if last.elapsed() >= Duration::from_secs(idle) {
-            stop(pid);
             stopped = true;
             reason = "idle_timeout";
             code = 124;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    stop(pid);
+    if INTERRUPTED.load(Ordering::Relaxed) {
+        reason = "signal";
+        code = 130;
+    }
     json(
         &mut out,
         &Lifecycle {
@@ -574,8 +704,7 @@ pub fn run(
         },
     )
     .map_err(|e| e.to_string())?;
-    unsafe { libc::close(master) };
-    remove_socket(&socket, id);
+    drop(cleanup);
     Ok(())
 }
 
@@ -597,5 +726,32 @@ mod tests {
         s.feed(b"\x1b[");
         s.feed(b"2JX");
         assert_eq!(s.rows[0][0], b'X')
+    }
+    #[test]
+    fn parser_fragments_other_common_sequences() {
+        let mut s = Screen::new(2, 10);
+        s.feed(b"abc\x1b]");
+        s.feed(b"0;title\x07\x1b(");
+        s.feed(b"0q\x0f");
+        s.feed(b"\x1b[?1049");
+        s.feed(b"hALT\x1b[?1049");
+        s.feed(b"l");
+        let mut overlong = vec![0x1b, b'['];
+        overlong.extend(std::iter::repeat_n(b'1', 129));
+        overlong.extend_from_slice(b"mSAFE");
+        s.feed(&overlong);
+        assert_eq!(s.rows[0][3], b'-');
+        assert_eq!(s.rows[0][4], b'S');
+    }
+    #[test]
+    fn alternate_screen_round_trips_primary_content() {
+        let mut s = Screen::new(2, 10);
+        s.feed(b"primary");
+        s.feed(b"\x1b[?1049hALT\x1b[?1049l");
+        assert_eq!(String::from_utf8_lossy(&s.rows[0][..7]), "primary");
+    }
+    #[test]
+    fn meta_right_is_distinct() {
+        assert_ne!(key_bytes("META-RIGHT"), key_bytes("RIGHT"));
     }
 }

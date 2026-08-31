@@ -16,11 +16,17 @@ fn main() {
             }
             "--cols" => {
                 i += 1;
-                cols = a[i].parse().unwrap();
+                cols = a.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("invalid cols");
+                    std::process::exit(2)
+                });
             }
             "--rows" => {
                 i += 1;
-                rows = a[i].parse().unwrap();
+                rows = a.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("invalid rows");
+                    std::process::exit(2)
+                });
             }
             "--idle-timeout" => {
                 i += 1;
