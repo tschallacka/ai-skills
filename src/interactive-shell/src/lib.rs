@@ -594,6 +594,17 @@ pub fn run(
     idle: u64,
     command: Vec<String>,
 ) -> Result<(), String> {
+    INTERRUPTED.store(false, Ordering::Relaxed);
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            interrupt_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            interrupt_handler as *const () as libc::sighandler_t,
+        );
+    }
     if !(1..=240).contains(&cols) || !(1..=100).contains(&rows) {
         return Err("dimensions must be within cols 1..240 and rows 1..100".into());
     }
@@ -630,16 +641,6 @@ pub fn run(
         socket: socket.clone(),
         identity: id,
     };
-    unsafe {
-        libc::signal(
-            libc::SIGTERM,
-            interrupt_handler as *const () as libc::sighandler_t,
-        );
-        libc::signal(
-            libc::SIGINT,
-            interrupt_handler as *const () as libc::sighandler_t,
-        );
-    }
     let mut screen = Screen::new(rows as usize, cols as usize);
     let mut out = io::BufWriter::new(io::stdout());
     let start = Instant::now();

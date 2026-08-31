@@ -104,6 +104,8 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
         .collect();
     let screens: Vec<&Value> = events.iter().filter(|v| v["event"] == "screen").collect();
     assert!(!screens.is_empty());
+    assert_eq!(screens[0]["seq"], 1);
+    assert_eq!(screens[0]["base"], 0);
     for pair in screens.windows(2) {
         assert_eq!(pair[1]["base"].as_u64(), pair[0]["seq"].as_u64());
     }
@@ -134,6 +136,8 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
 "#,
     );
     assert_eq!(error["event"], "error");
+    let malformed = request(&dir, "{\"v\":1,\"op\":\"text\"}\n");
+    assert_eq!(malformed["event"], "error");
     let _ = request(
         &dir,
         r#"{"v":1,"op":"shutdown"}
@@ -161,6 +165,20 @@ fn invalid_dimensions_fail_before_creating_socket() {
         .unwrap();
     assert!(!output.status.success());
     assert!(!dir.join("socket").exists());
+    for (option, value) in [("--rows", "0"), ("--cols", "241"), ("--rows", "101")] {
+        let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+            .args([
+                "--socket",
+                dir.join(format!("{option}-{value}")).to_str().unwrap(),
+                option,
+                value,
+                "--",
+                "true",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+    }
 }
 
 #[test]
