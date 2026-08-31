@@ -20,6 +20,10 @@ fn main() {
                 socket = Some(a[i].clone())
             }
             "text" | "key" | "raw" => {
+                if op.is_some() {
+                    eprintln!("only one operation is allowed");
+                    std::process::exit(2);
+                }
                 op = Some(a[i].clone());
                 if i + 1 >= a.len() {
                     eprintln!("operation requires a value");
@@ -28,7 +32,13 @@ fn main() {
                 i += 1;
                 value = Some(a[i].clone())
             }
-            "shutdown" => op = Some("shutdown".into()),
+            "shutdown" => {
+                if op.is_some() {
+                    eprintln!("only one operation is allowed");
+                    std::process::exit(2);
+                }
+                op = Some("shutdown".into());
+            }
             x => {
                 eprintln!("unknown argument: {x}");
                 std::process::exit(2)

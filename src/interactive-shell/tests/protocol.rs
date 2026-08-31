@@ -112,6 +112,24 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
     assert!(screens
         .iter()
         .any(|v| v["rows"].to_string().contains("primary")));
+    assert!(screens.last().unwrap()["rows"]
+        .to_string()
+        .contains("primary"));
+}
+
+#[test]
+fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
+    let dir = temp_dir("fragmented-osc");
+    let mut child = start(&dir, &["sh", "-c", "printf '\\x1b]'; i=0; while [ $i -lt 4097 ]; do printf x; i=$((i+1)); done; printf '\\007SAFE'; sleep .2"], "5");
+    let mut output = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut output)
+        .unwrap();
+    child.wait().unwrap();
+    assert!(output.lines().any(|line| line.contains("SAFE")));
 }
 
 #[test]
@@ -138,6 +156,17 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
     assert_eq!(error["event"], "error");
     let malformed = request(&dir, "{\"v\":1,\"op\":\"text\"}\n");
     assert_eq!(malformed["event"], "error");
+    let combination = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "text",
+            "x",
+            "shutdown",
+        ])
+        .output()
+        .unwrap();
+    assert!(!combination.status.success());
     let _ = request(
         &dir,
         r#"{"v":1,"op":"shutdown"}
@@ -165,6 +194,22 @@ fn invalid_dimensions_fail_before_creating_socket() {
         .unwrap();
     assert!(!output.status.success());
     assert!(!dir.join("socket").exists());
+    let upper = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .args([
+            "--socket",
+            dir.join("upper").to_str().unwrap(),
+            "--cols",
+            "240",
+            "--rows",
+            "100",
+            "--idle-timeout",
+            "1",
+            "--",
+            "true",
+        ])
+        .output()
+        .unwrap();
+    assert!(upper.status.success());
     for (option, value) in [("--rows", "0"), ("--cols", "241"), ("--rows", "101")] {
         let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
             .args([
