@@ -162,7 +162,8 @@ for t in ${tests[@]+"${tests[@]}"}; do
 done
 
 run_cargo_one() {
-    local crate="$1" label="cargo-${crate##*/}"
+    local crate="$1"
+    local label="cargo-${crate##*/}"
     if ! command -v cargo >/dev/null 2>&1; then
         if [ "${REFUSE_UNCONFIGURED_CARGO:-0}" = 1 ]; then
             failed=$((failed + 1))

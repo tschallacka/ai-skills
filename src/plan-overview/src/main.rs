@@ -13,8 +13,12 @@ use render::router::{route, Route};
 use render::shell::render_shell;
 use std::path::PathBuf;
 
+const USAGE: &str =
+    "usage: plan-overview --plan-dir DIR [--out FILE] [--refresh N] [--watch] [--serve] [--port N]";
+
 #[derive(Debug, Default)]
 struct Args {
+    help: bool,
     plan_dir: PathBuf,
     out: Option<PathBuf>,
     refresh: Option<u32>,
@@ -35,7 +39,12 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--watch" => args.watch = true,
             "--serve" => args.serve = true,
             "--port" => args.port = Some(it.next().ok_or("--port needs a value")?.parse().map_err(|_| "--port is not a port".to_string())?),
-            "--help" | "-h" => return Err("usage: plan-overview --plan-dir DIR [--out FILE] [--refresh N] [--watch] [--serve] [--port N]".into()),
+            // A help request is not a usage error: it prints on stdout and
+            // exits 0, the way every other entry point in this repository does.
+            "--help" | "-h" => {
+                args.help = true;
+                return Ok(args);
+            }
             value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
             value if positional.is_none() => positional = Some(value.to_string()),
             _ => return Err("only one plan directory may be supplied".into()),
@@ -88,6 +97,10 @@ fn run(args: Args) -> Result<(), String> {
 fn main() {
     match parse_args(std::env::args().skip(1)) {
         Ok(args) => {
+            if args.help {
+                println!("{USAGE}");
+                return;
+            }
             if let Err(error) = run(args) {
                 eprintln!("plan-overview: {error}");
                 std::process::exit(66);
