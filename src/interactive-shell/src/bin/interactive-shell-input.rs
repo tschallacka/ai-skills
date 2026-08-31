@@ -12,11 +12,19 @@ fn main() {
     while i < a.len() {
         match a[i].as_str() {
             "--socket" => {
+                if i + 1 >= a.len() {
+                    eprintln!("--socket requires a path");
+                    std::process::exit(2);
+                }
                 i += 1;
                 socket = Some(a[i].clone())
             }
             "text" | "key" | "raw" => {
                 op = Some(a[i].clone());
+                if i + 1 >= a.len() {
+                    eprintln!("operation requires a value");
+                    std::process::exit(2);
+                }
                 i += 1;
                 value = Some(a[i].clone())
             }
@@ -28,8 +36,25 @@ fn main() {
         }
         i += 1
     }
-    let mut s = UnixStream::connect(socket.expect("--socket is required")).expect("connect");
-    let mut req = json!({"v":1,"op":op.expect("operation required")});
+    let socket = match socket {
+        Some(socket) => socket,
+        None => {
+            eprintln!("--socket is required");
+            std::process::exit(2);
+        }
+    };
+    let op = match op {
+        Some(op) => op,
+        None => {
+            eprintln!("operation required");
+            std::process::exit(2);
+        }
+    };
+    let mut s = UnixStream::connect(socket).unwrap_or_else(|error| {
+        eprintln!("connect: {error}");
+        std::process::exit(1);
+    });
+    let mut req = json!({"v":1,"op":op});
     if let Some(v) = value {
         match req["op"].as_str() {
             Some("text") => req["text"] = v.into(),

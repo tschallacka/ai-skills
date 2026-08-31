@@ -11,10 +11,18 @@ fn main() {
     while i < a.len() {
         match a[i].as_str() {
             "--socket" => {
+                if i + 1 >= a.len() {
+                    eprintln!("--socket requires a path");
+                    std::process::exit(2);
+                }
                 i += 1;
                 socket = Some(PathBuf::from(&a[i]));
             }
             "--cols" => {
+                if i + 1 >= a.len() {
+                    eprintln!("--cols requires a value");
+                    std::process::exit(2);
+                }
                 i += 1;
                 cols = a.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
                     eprintln!("invalid cols");
@@ -22,6 +30,10 @@ fn main() {
                 });
             }
             "--rows" => {
+                if i + 1 >= a.len() {
+                    eprintln!("--rows requires a value");
+                    std::process::exit(2);
+                }
                 i += 1;
                 rows = a.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
                     eprintln!("invalid rows");
@@ -29,8 +41,15 @@ fn main() {
                 });
             }
             "--idle-timeout" => {
+                if i + 1 >= a.len() {
+                    eprintln!("--idle-timeout requires a value");
+                    std::process::exit(2);
+                }
                 i += 1;
-                idle = a[i].parse().unwrap();
+                idle = a.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("invalid idle timeout");
+                    std::process::exit(2)
+                });
             }
             "--" => {
                 cmd.extend_from_slice(&a[i + 1..]);
@@ -43,9 +62,14 @@ fn main() {
         }
         i += 1;
     }
-    if let Err(e) =
-        interactive_shell_core::run(socket.expect("--socket is required"), cols, rows, idle, cmd)
-    {
+    let socket = match socket {
+        Some(socket) => socket,
+        None => {
+            eprintln!("--socket is required");
+            std::process::exit(2);
+        }
+    };
+    if let Err(e) = interactive_shell_core::run(socket, cols, rows, idle, cmd) {
         eprintln!("interactive-shell: {e}");
         std::process::exit(1)
     }

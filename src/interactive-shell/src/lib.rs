@@ -88,7 +88,6 @@ struct Screen {
 #[derive(Clone, Debug)]
 struct ScreenState {
     rows: Vec<Vec<u8>>,
-    dirty: Vec<bool>,
     row: usize,
     col: usize,
     visible: bool,
@@ -202,8 +201,8 @@ impl Screen {
         };
         match final_byte {
             b'A' => self.row = self.row.saturating_sub(n(0)),
-            b'B' => self.row = (self.row + n(0)).min(self.rows.len() - 1),
-            b'C' => self.col = (self.col + n(0)).min(self.rows[0].len() - 1),
+            b'B' => self.row = self.row.saturating_add(n(0)).min(self.rows.len() - 1),
+            b'C' => self.col = self.col.saturating_add(n(0)).min(self.rows[0].len() - 1),
             b'D' => self.col = self.col.saturating_sub(n(0)),
             b'G' | b'`' => self.col = n(0).saturating_sub(1).min(self.rows[0].len() - 1),
             b'd' => self.row = n(0).saturating_sub(1).min(self.rows.len() - 1),
@@ -238,7 +237,6 @@ impl Screen {
         }
         self.saved_primary = Some(ScreenState {
             rows: std::mem::take(&mut self.rows),
-            dirty: std::mem::take(&mut self.dirty),
             row: self.row,
             col: self.col,
             visible: self.visible,
@@ -254,7 +252,7 @@ impl Screen {
     fn leave_alt(&mut self) {
         if let Some(state) = self.saved_primary.take() {
             self.rows = state.rows;
-            self.dirty = state.dirty;
+            self.dirty = vec![true; self.rows.len()];
             self.row = state.row;
             self.col = state.col;
             self.visible = state.visible;
@@ -747,8 +745,16 @@ mod tests {
     fn alternate_screen_round_trips_primary_content() {
         let mut s = Screen::new(2, 10);
         s.feed(b"primary");
+        let _ = s.delta();
         s.feed(b"\x1b[?1049hALT\x1b[?1049l");
         assert_eq!(String::from_utf8_lossy(&s.rows[0][..7]), "primary");
+        assert!(s.delta().contains_key(&0));
+    }
+    #[test]
+    fn maximal_cursor_parameters_do_not_overflow() {
+        let mut s = Screen::new(2, 10);
+        s.feed(b"\x1b[999999999999999999999999999999999999999BX");
+        assert_eq!(s.rows[1][0], b'X');
     }
     #[test]
     fn meta_right_is_distinct() {
