@@ -349,8 +349,6 @@ fn remove_unidentified_bound_socket(path: &Path) {
 
 fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
     let parent = path.parent().ok_or("socket needs a parent")?;
-    let parent_fd = File::open(parent).map_err(|e| e.to_string())?;
-    let device = parent_fd.metadata().map_err(|e| e.to_string())?.dev();
     let name = path.file_name().ok_or("socket needs a filename")?;
     loop {
         match fs::read_dir(parent) {
@@ -361,7 +359,10 @@ fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
                         Err(_) => break,
                     };
                     if entry.file_name() == name {
-                        return Ok((device, entry.ino()));
+                        let inode = entry.ino();
+                        let parent_fd = File::open(parent).map_err(|e| e.to_string())?;
+                        let device = parent_fd.metadata().map_err(|e| e.to_string())?.dev();
+                        return Ok((device, inode));
                     }
                 }
                 if !path.exists() {
