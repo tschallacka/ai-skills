@@ -40,9 +40,13 @@ The wrapper allocates a real PTY, applies the requested dimensions, and owns a
 for child exit, client shutdown, or idle timeout and removes only the socket
 inode it created. A child process group is terminated during cleanup.
 
+Screen events expose `styles` as row-based spans for basic ANSI colors, bold,
+and reverse video, plus bounded `scrollback`. These observations are useful for
+navigation but do not claim complete terminal emulation.
+
 The screen model covers common cursor movement, erase, visibility, OSC,
-alternate-screen, charset, and line-drawing controls, including sequences split
-across PTY reads. It is intentionally not a complete terminal emulator: scroll
-regions, insert/delete line operations, colors, and every ncurses extension are
-not represented. For mc or another TUI, use predicates based only on represented
-controls, or extend and test the model before relying on a new control.
+alternate-screen, charset, line-drawing, scroll-region, and insert/delete-line
+controls, including sequences split across PTY reads. Every ncurses extension
+remains a possible unsupported control. For mc or another TUI, use predicates
+based only on represented controls, or extend and test the model before relying
+on a new control.
