@@ -929,6 +929,7 @@ extern "C" fn interrupt_handler(_: libc::c_int) {
 
 struct Cleanup {
     master: RawFd,
+    slave: RawFd,
     pid: libc::pid_t,
     identity: SocketIdentity,
 }
@@ -938,11 +939,12 @@ impl Drop for Cleanup {
         stop(self.pid);
         unsafe {
             libc::close(self.master);
+            libc::close(self.slave);
         }
         remove_socket(&self.identity);
     }
 }
-fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t), String> {
+fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, RawFd, libc::pid_t), String> {
     let mut master = 0;
     let mut slave = 0;
     let size = libc::winsize {
@@ -997,16 +999,16 @@ fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t
         }
     }
     unsafe {
-        libc::close(slave);
         let flags = libc::fcntl(master, libc::F_GETFL);
         if flags < 0 || libc::fcntl(master, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
             libc::kill(-pid, libc::SIGKILL);
             libc::waitpid(pid, std::ptr::null_mut(), 0);
             libc::close(master);
+            libc::close(slave);
             return Err(io::Error::last_os_error().to_string());
         }
     };
-    Ok((master, pid))
+    Ok((master, slave, pid))
 }
 fn stop(pid: libc::pid_t) {
     unsafe {
@@ -1023,6 +1025,58 @@ fn stop(pid: libc::pid_t) {
         libc::waitpid(pid, std::ptr::null_mut(), 0);
     }
 }
+
+fn process_info(pid: libc::pid_t) -> Option<(libc::pid_t, libc::pid_t, u64)> {
+    let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields = text
+        .rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    Some((
+        fields.get(1)?.parse().ok()?,
+        fields.get(2)?.parse().ok()?,
+        fields.get(19)?.parse().ok()?,
+    ))
+}
+
+fn newest_descendant_group(root: libc::pid_t) -> libc::pid_t {
+    let mut processes = Vec::new();
+    for entry in fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|value| value.parse().ok()) else {
+            continue;
+        };
+        if let Some((ppid, pgrp, start)) = process_info(pid) {
+            processes.push((pid, ppid, pgrp, start));
+        }
+    }
+    let mut descendants = vec![root];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (pid, ppid, _, _) in &processes {
+            if descendants.contains(ppid) && !descendants.contains(pid) {
+                descendants.push(*pid);
+                changed = true;
+            }
+        }
+    }
+    processes
+        .into_iter()
+        .filter(|(pid, _, _, _)| descendants.contains(pid))
+        .max_by_key(|(_, _, _, start)| *start)
+        .map(|(_, _, pgrp, _)| pgrp)
+        .unwrap_or(root)
+}
+
+fn activate_foreground(slave: RawFd, root: libc::pid_t) {
+    let group = newest_descendant_group(root);
+    unsafe {
+        let _ = libc::ioctl(slave, libc::TIOCSPGRP, &group);
+    }
+}
+
 fn status(s: i32) -> i32 {
     if s & 0x7f == 0 {
         s >> 8
@@ -1030,9 +1084,12 @@ fn status(s: i32) -> i32 {
         -(s & 0x7f)
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn client(
     mut stream: UnixStream,
     master: RawFd,
+    slave: RawFd,
+    pid: libc::pid_t,
     screen: &mut Screen,
     seq: &mut u64,
     out: &mut impl Write,
@@ -1096,6 +1153,7 @@ fn client(
             return Err(error.to_string());
         }
     };
+    activate_foreground(slave, pid);
     match req {
         Request::Text { v: 1, text } => write_master(master, text.as_bytes())?,
         Request::Key { v: 1, key } => match key_sequence(&key) {
@@ -1382,7 +1440,7 @@ pub fn run(
         remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
     }
-    let (master, pid) = match spawn(&command, cols, rows) {
+    let (master, slave, pid) = match spawn(&command, cols, rows) {
         Ok(x) => x,
         Err(e) => {
             remove_socket(socket_guard.identity.as_ref().unwrap());
@@ -1391,6 +1449,7 @@ pub fn run(
     };
     let cleanup = Cleanup {
         master,
+        slave,
         pid,
         identity: socket_guard.identity.take().unwrap(),
     };
@@ -1430,6 +1489,8 @@ pub fn run(
             if let Err(e) = client(
                 s,
                 master,
+                slave,
+                pid,
                 &mut screen,
                 &mut seq,
                 &mut out,
