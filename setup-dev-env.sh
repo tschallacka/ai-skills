@@ -184,6 +184,16 @@ $(plan)
 EOF
 rm -f "$repo_root/.setup-dev-env.log"
 
+# Wire the repo's pre-push gate (./pre-push-check.sh) as the pre-push hook.
+# Git does not version .git/hooks, so the shim lives in hooks/ and
+# core.hooksPath points there; every clone that runs this script gets the
+# gate. CI runs the same checks server-side regardless.
+if git -C "$repo_root" config core.hooksPath hooks; then
+    printf 'setup-dev-env: pre-push gate wired (git config core.hooksPath hooks)\n'
+else
+    printf 'setup-dev-env: could not set core.hooksPath; the pre-push gate is not wired\n' >&2
+fi
+
 printf '\n%s binary/binaries built.\n' "$built"
 if [ -n "$failed" ]; then
     printf 'failed:%s\n' "$failed" >&2
