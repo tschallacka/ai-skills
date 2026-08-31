@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install the plan-overview toolchain floor
-        uses: dtolnay/rust-toolchain@1.86.0
+        uses: dtolnay/rust-toolchain@1.98
         with:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
           components: rustfmt,clippy
@@ -48,14 +48,14 @@ jobs:
         env:
           REFUSE_UNCONFIGURED_CARGO: 1
         run: |
-          rustc --version | grep '1.86.0'
+          rustc --version | grep "1.98"
           cargo test --manifest-path src/plan-overview/Cargo.toml
 
       - name: Record the bash under test
         run: bash --version
 
       - name: Build and expose the native rjq test binary
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
 
       - name: Add bundled rjq to PATH for the suite
         shell: bash
@@ -68,8 +68,8 @@ jobs:
             aarch64-apple-darwin) target=aarch64-apple-darwin; dir=aarch64-apple-darwin ;;
             *) echo "::error::unsupported rjq test host: $host"; exit 1 ;;
           esac
-          rustup target add --toolchain 1.97.1 "$target"
-          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add --toolchain 1.98 "$target"
+          rustup run 1.98 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$dir"
           cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
           echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
@@ -86,7 +86,7 @@ jobs:
           command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
       - name: Build the compiled chat rung so its assertions run (T62)
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
         with:
           components: rustfmt, clippy
 
@@ -166,7 +166,7 @@ jobs:
         run: echo "/bin" >> "$GITHUB_PATH"
 
       - name: Build and expose the native rjq test binary
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
 
       - name: Add bundled rjq to PATH for the bash 3.2 suite
         shell: bash
@@ -176,8 +176,8 @@ jobs:
             arm64|aarch64) target=aarch64-apple-darwin ;;
             *) echo "::error::unsupported macOS host: $(uname -m)"; exit 1 ;;
           esac
-          rustup target add --toolchain 1.97.1 "$target"
-          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add --toolchain 1.98 "$target"
+          rustup run 1.98 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$target"
           cp "src/rjq/target/$target/release/rjq" "planning/bin/$target/rjq"
           echo "$PWD/planning/bin/$target" >> "$GITHUB_PATH"
@@ -260,13 +260,13 @@ jobs:
           sparse-checkout: src/plan-crypt
 
       - name: Pin the toolchain the crate declares
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add --toolchain 1.97 "${{ matrix.target }}"
+        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/plan-crypt
@@ -375,13 +375,13 @@ jobs:
             src/chat-client-rs
 
       - name: Pin the toolchain the crate declares
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add --toolchain 1.97 "${{ matrix.target }}"
+        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
 
       - name: Install the musl C cross-toolchain (ring needs a C compiler)
         if: contains(matrix.target, 'linux-musl')
@@ -443,23 +443,23 @@ jobs:
           sparse-checkout: src/rjq
 
       - name: Pin the toolchain and target
-        uses: dtolnay/rust-toolchain@1.97
+        uses: dtolnay/rust-toolchain@1.98
         with:
           components: rustfmt, clippy
 
       - name: Install the target for the crate toolchain
-        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
+        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/rjq
         run: |
-          rustup run 1.97.1 cargo fmt --check
-          rustup run 1.97.1 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
-          rustup run 1.97.1 cargo test --target "${{ matrix.target }}"
+          rustup run 1.98 cargo fmt --check
+          rustup run 1.98 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
+          rustup run 1.98 cargo test --target "${{ matrix.target }}"
 
       - name: Build rjq
         working-directory: src/rjq
-        run: rustup run 1.97.1 cargo build --release --target "${{ matrix.target }}"
+        run: rustup run 1.98 cargo build --release --target "${{ matrix.target }}"
 
       - name: Run the built artifact
         shell: bash

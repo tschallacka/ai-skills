@@ -301,6 +301,31 @@ Converting those scripts to `plan_atomic_write`, which is the point of this
 vocabulary, removes the overlap. Until then, never use `trap - EXIT` to
 "release" a per-call handler.
 
+### 2.15 A working local tree needs the crates built
+
+Run `../setup-dev-env.sh` once after cloning. It builds every crate under
+`../src/` for this machine's target triple and drops each binary where the skill
+that owns it looks — `planning/bin/<triple>/` for `rjq`, `plan-overview` and
+`plan-crypt`, `chat/bin/<triple>/` for the two chat binaries. Only the host
+triple is built; cross-building the other four is what a release
+(`installer/build-release.sh`) and CI do.
+
+Why this needs saying: exactly one artifact is committed, and every helper that
+wants a compiled one degrades honestly when it is absent. `plan_crypt_resolve`
+falls through to the shell rungs, the chat server drops to an interpreter tier.
+So a tree with nothing built still passes the suite, and the compiled path —
+the one a target actually runs — is never exercised locally. A green run on an
+unbuilt tree is not evidence about the code a user gets.
+
+- **The script refuses to run without nix, and does not fall back to a system
+  cargo.** `flake.nix` pins Rust 1.86.0 and the five house targets; another
+  toolchain produces a different artifact from the one CI and a release ship. It
+  exits 69 and prints how to install nix.
+- **`rjq` is invoked by name.** Building it is not enough — the planning helpers
+  find it on PATH, so until `planning/bin/<triple>` is on PATH the tree uses
+  whatever `rjq` the machine happens to have, or none. The script prints the
+  export line; `--check` reports what is present or missing without building.
+
 ## 3. Pending consolidation (the duplication inventory)
 
 The single home for "this logic exists in N places and should be one helper".
