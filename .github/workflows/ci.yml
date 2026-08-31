@@ -266,6 +266,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
+        working-directory: src/plan-crypt
         run: rustup target add "${{ matrix.target }}"
 
       - name: Format, lint and test
@@ -381,6 +382,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
+        working-directory: src/chat-server-rs
         run: rustup target add "${{ matrix.target }}"
 
       - name: Install the musl C cross-toolchain (ring needs a C compiler)
@@ -448,6 +450,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install the target for the crate toolchain
+        working-directory: src/rjq
         run: rustup target add "${{ matrix.target }}"
 
       - name: Format, lint and test
