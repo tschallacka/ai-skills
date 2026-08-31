@@ -5,8 +5,10 @@ use std::fs;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
+use std::os::fd::AsRawFd;
 use std::os::fd::RawFd;
-use std::os::unix::fs::{DirEntryExt, FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{DirEntryExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -331,25 +333,34 @@ fn valid_dir(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-fn remove_socket(path: &Path, identity: Option<(u64, u64)>) {
-    if let (Some(id), Ok(m)) = (identity, fs::metadata(path)) {
-        if (m.dev(), m.ino()) == id {
-            let _ = fs::remove_file(path);
+struct SocketIdentity {
+    parent: File,
+    name: CString,
+    inode: u64,
+}
+
+fn remove_socket(identity: &SocketIdentity) {
+    let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+    let same_entry = unsafe {
+        libc::fstatat(
+            identity.parent.as_raw_fd(),
+            identity.name.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        ) == 0
+            && stat.st_ino == identity.inode
+    };
+    if same_entry {
+        unsafe {
+            libc::unlinkat(identity.parent.as_raw_fd(), identity.name.as_ptr(), 0);
         }
     }
 }
 
-fn remove_unidentified_bound_socket(path: &Path) {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if metadata.file_type().is_socket() {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
+fn capture_socket_identity(path: &Path) -> Result<SocketIdentity, String> {
     let parent = path.parent().ok_or("socket needs a parent")?;
     let name = path.file_name().ok_or("socket needs a filename")?;
+    let name_c = CString::new(name.as_bytes()).map_err(|e| e.to_string())?;
     loop {
         match fs::read_dir(parent) {
             Ok(entries) => {
@@ -359,10 +370,11 @@ fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
                         Err(_) => break,
                     };
                     if entry.file_name() == name {
-                        let inode = entry.ino();
-                        let parent_fd = File::open(parent).map_err(|e| e.to_string())?;
-                        let device = parent_fd.metadata().map_err(|e| e.to_string())?.dev();
-                        return Ok((device, inode));
+                        return Ok(SocketIdentity {
+                            parent: File::open(parent).map_err(|e| e.to_string())?,
+                            name: name_c,
+                            inode: entry.ino(),
+                        });
                     }
                 }
                 if !path.exists() {
@@ -377,24 +389,19 @@ fn capture_socket_identity(path: &Path) -> Result<(u64, u64), String> {
 }
 
 struct SocketGuard {
-    path: PathBuf,
-    identity: Option<(u64, u64)>,
+    identity: Option<SocketIdentity>,
 }
 
 impl SocketGuard {
-    fn new(path: PathBuf) -> Self {
-        Self {
-            path,
-            identity: None,
-        }
+    fn new() -> Self {
+        Self { identity: None }
     }
 }
 
 impl Drop for SocketGuard {
     fn drop(&mut self) {
-        match self.identity {
-            Some(identity) => remove_socket(&self.path, Some(identity)),
-            None => remove_unidentified_bound_socket(&self.path),
+        if let Some(identity) = self.identity.as_ref() {
+            remove_socket(identity);
         }
     }
 }
@@ -406,8 +413,7 @@ extern "C" fn interrupt_handler(_: libc::c_int) {
 struct Cleanup {
     master: RawFd,
     pid: libc::pid_t,
-    socket: PathBuf,
-    identity: Option<(u64, u64)>,
+    identity: SocketIdentity,
 }
 
 impl Drop for Cleanup {
@@ -416,7 +422,7 @@ impl Drop for Cleanup {
         unsafe {
             libc::close(self.master);
         }
-        remove_socket(&self.socket, self.identity);
+        remove_socket(&self.identity);
     }
 }
 fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t), String> {
@@ -677,32 +683,27 @@ pub fn run(
         return Err("refusing existing socket".into());
     };
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
-    let mut socket_guard = SocketGuard::new(socket.clone());
-    let id = {
-        let identity = capture_socket_identity(&socket)?;
-        socket_guard.identity = Some(identity);
-        Some(identity)
-    };
+    let mut socket_guard = SocketGuard::new();
+    socket_guard.identity = Some(capture_socket_identity(&socket)?);
     if let Err(error) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
-        remove_socket(&socket, id);
+        remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
     }
     if let Err(error) = listener.set_nonblocking(true) {
-        remove_socket(&socket, id);
+        remove_socket(socket_guard.identity.as_ref().unwrap());
         return Err(error.to_string());
     }
     let (master, pid) = match spawn(&command, cols, rows) {
         Ok(x) => x,
         Err(e) => {
-            remove_socket(&socket, id);
+            remove_socket(socket_guard.identity.as_ref().unwrap());
             return Err(e);
         }
     };
     let cleanup = Cleanup {
         master,
         pid,
-        socket: socket.clone(),
-        identity: id,
+        identity: socket_guard.identity.take().unwrap(),
     };
     std::mem::forget(socket_guard);
     let mut screen = Screen::new(rows as usize, cols as usize);
