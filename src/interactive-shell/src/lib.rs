@@ -87,6 +87,8 @@ struct ScreenEvent {
     rows: BTreeMap<usize, String>,
     cursor: Cursor,
     elements: Vec<Clickable>,
+    styles: BTreeMap<usize, Vec<StyleSpan>>,
+    scrollback: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +99,24 @@ struct Clickable {
     row: usize,
     col: usize,
     width: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+struct StyleSpan {
+    start: usize,
+    width: usize,
+    fg: u8,
+    bg: u8,
+    bold: bool,
+    reverse: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CellStyle {
+    fg: u8,
+    bg: u8,
+    bold: bool,
+    reverse: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -122,6 +142,11 @@ struct Screen {
     saved_primary: Option<ScreenState>,
     active_link: Option<String>,
     elements: Vec<Clickable>,
+    styles: Vec<Vec<CellStyle>>,
+    style: CellStyle,
+    scrollback: Vec<String>,
+    scroll_top: usize,
+    scroll_bottom: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +171,27 @@ impl Screen {
             saved_primary: None,
             active_link: None,
             elements: Vec::new(),
+            styles: vec![
+                vec![
+                    CellStyle {
+                        fg: 0,
+                        bg: 0,
+                        bold: false,
+                        reverse: false
+                    };
+                    cols
+                ];
+                rows
+            ],
+            style: CellStyle {
+                fg: 0,
+                bg: 0,
+                bold: false,
+                reverse: false,
+            },
+            scrollback: Vec::new(),
+            scroll_top: 0,
+            scroll_bottom: rows.saturating_sub(1),
         }
     }
     fn cursor(&self) -> Cursor {
@@ -166,7 +212,7 @@ impl Screen {
             Parser::Ground => match byte {
                 0x1b => self.parser = Parser::Esc,
                 b'\r' => self.col = 0,
-                b'\n' => self.row = (self.row + 1).min(self.rows.len().saturating_sub(1)),
+                b'\n' => self.newline(),
                 0x08 => self.col = self.col.saturating_sub(1),
                 0x0e => self.line_drawing = true,
                 0x0f => self.line_drawing = false,
@@ -232,6 +278,7 @@ impl Screen {
             if self.col < row.len() {
                 row[self.col] = byte;
                 self.dirty[self.row] = true;
+                self.styles[self.row][self.col] = self.style;
             }
         }
         if let Some(uri) = self.active_link.as_ref() {
@@ -266,6 +313,91 @@ impl Screen {
         }
         self.col = (self.col + 1).min(self.rows[0].len().saturating_sub(1));
     }
+    fn newline(&mut self) {
+        if self.row == self.scroll_bottom {
+            self.scroll_up(
+                1,
+                self.scroll_top == 0 && self.scroll_bottom + 1 == self.rows.len(),
+            );
+        } else if self.row + 1 >= self.rows.len() {
+            let removed = self.rows.remove(0);
+            self.scrollback
+                .push(String::from_utf8_lossy(&removed).trim_end().to_string());
+            if self.scrollback.len() > 1000 {
+                self.scrollback.remove(0);
+            }
+            let cols = self.rows[0].len();
+            self.rows.push(vec![b' '; cols]);
+            self.styles.remove(0);
+            self.styles.push(vec![self.style; cols]);
+            self.dirty.fill(true);
+        } else {
+            self.row += 1;
+        }
+    }
+    fn scroll_up(&mut self, count: usize, record: bool) {
+        for _ in 0..count {
+            let removed = self.rows.remove(self.scroll_top);
+            let cols = removed.len();
+            self.rows.insert(self.scroll_bottom, vec![b' '; cols]);
+            self.styles.remove(self.scroll_top);
+            self.styles
+                .insert(self.scroll_bottom, vec![self.style; cols]);
+            if record {
+                self.scrollback
+                    .push(String::from_utf8_lossy(&removed).trim_end().to_string());
+                if self.scrollback.len() > 1000 {
+                    self.scrollback.remove(0);
+                }
+            }
+        }
+        for row in self.scroll_top..=self.scroll_bottom {
+            self.dirty[row] = true;
+        }
+    }
+    fn scroll_down(&mut self, count: usize) {
+        for _ in 0..count {
+            let removed = self.rows.remove(self.scroll_bottom);
+            let cols = removed.len();
+            self.rows.insert(self.scroll_top, vec![b' '; cols]);
+            self.styles.remove(self.scroll_bottom);
+            self.styles.insert(self.scroll_top, vec![self.style; cols]);
+        }
+        for row in self.scroll_top..=self.scroll_bottom {
+            self.dirty[row] = true;
+        }
+    }
+    fn insert_lines(&mut self, count: usize) {
+        if self.row < self.scroll_top || self.row > self.scroll_bottom {
+            return;
+        }
+        for _ in 0..count.min(self.scroll_bottom - self.row + 1) {
+            let cols = self.rows[0].len();
+            self.rows.insert(self.row, vec![b' '; cols]);
+            self.rows.remove(self.scroll_bottom + 1);
+            self.styles.insert(self.row, vec![self.style; cols]);
+            self.styles.remove(self.scroll_bottom + 1);
+        }
+        for row in self.row..=self.scroll_bottom {
+            self.dirty[row] = true;
+        }
+    }
+    fn delete_lines(&mut self, count: usize) {
+        if self.row < self.scroll_top || self.row > self.scroll_bottom {
+            return;
+        }
+        for _ in 0..count.min(self.scroll_bottom - self.row + 1) {
+            let cols = self.rows[0].len();
+            self.rows.remove(self.row);
+            self.rows.insert(self.scroll_bottom, vec![b' '; cols]);
+            self.styles.remove(self.row);
+            self.styles
+                .insert(self.scroll_bottom, vec![self.style; cols]);
+        }
+        for row in self.row..=self.scroll_bottom {
+            self.dirty[row] = true;
+        }
+    }
     fn osc(&mut self, value: &[u8]) {
         let value = String::from_utf8_lossy(value);
         let mut fields = value.splitn(3, ';');
@@ -288,6 +420,21 @@ impl Screen {
                 .unwrap_or(1)
         };
         match final_byte {
+            b'm' => self.sgr(s.as_ref()),
+            b'r' if !private => {
+                self.scroll_top = n(0).saturating_sub(1).min(self.rows.len() - 1);
+                self.scroll_bottom = n(1).saturating_sub(1).min(self.rows.len() - 1);
+                if self.scroll_top >= self.scroll_bottom {
+                    self.scroll_top = 0;
+                    self.scroll_bottom = self.rows.len() - 1;
+                }
+                self.row = self.scroll_top;
+                self.col = 0;
+            }
+            b'S' => self.scroll_up(n(0), false),
+            b'T' => self.scroll_down(n(0)),
+            b'L' => self.insert_lines(n(0)),
+            b'M' => self.delete_lines(n(0)),
             b'A' => self.row = self.row.saturating_sub(n(0)),
             b'B' => self.row = self.row.saturating_add(n(0)).min(self.rows.len() - 1),
             b'C' => self.col = self.col.saturating_add(n(0)).min(self.rows[0].len() - 1),
@@ -317,6 +464,29 @@ impl Screen {
                 self.leave_alt();
             }
             _ => {}
+        }
+    }
+    fn sgr(&mut self, params: &str) {
+        for part in params.split(';').map(|p| p.parse::<u8>().unwrap_or(0)) {
+            match part {
+                0 => {
+                    self.style = CellStyle {
+                        fg: 0,
+                        bg: 0,
+                        bold: false,
+                        reverse: false,
+                    }
+                }
+                1 => self.style.bold = true,
+                22 => self.style.bold = false,
+                7 => self.style.reverse = true,
+                27 => self.style.reverse = false,
+                30..=37 => self.style.fg = part - 29,
+                39 => self.style.fg = 0,
+                40..=47 => self.style.bg = part - 39,
+                49 => self.style.bg = 0,
+                _ => {}
+            }
         }
     }
     fn enter_alt(&mut self) {
@@ -367,14 +537,58 @@ impl Screen {
     fn elements(&self) -> Vec<Clickable> {
         self.elements.clone()
     }
+    fn styles(&self) -> BTreeMap<usize, Vec<StyleSpan>> {
+        let plain = CellStyle {
+            fg: 0,
+            bg: 0,
+            bold: false,
+            reverse: false,
+        };
+        self.styles
+            .iter()
+            .enumerate()
+            .filter_map(|(row, cells)| {
+                let mut spans = Vec::new();
+                let mut start = 0;
+                while start < cells.len() {
+                    let style = cells[start];
+                    let mut end = start + 1;
+                    while end < cells.len() && cells[end] == style {
+                        end += 1;
+                    }
+                    if style != plain {
+                        spans.push(StyleSpan {
+                            start,
+                            width: end - start,
+                            fg: style.fg,
+                            bg: style.bg,
+                            bold: style.bold,
+                            reverse: style.reverse,
+                        });
+                    }
+                    start = end;
+                }
+                (!spans.is_empty()).then_some((row, spans))
+            })
+            .collect()
+    }
+    fn scrollback(&self) -> Vec<String> {
+        self.scrollback.clone()
+    }
     fn resize(&mut self, rows: usize, cols: usize) {
         self.rows.resize_with(rows, || vec![b' '; cols]);
         for row in &mut self.rows {
             row.resize(cols, b' ');
         }
         self.dirty = vec![true; rows];
+        self.styles.resize_with(rows, || vec![self.style; cols]);
+        for row in &mut self.styles {
+            row.resize(cols, self.style);
+        }
         self.row = self.row.min(rows.saturating_sub(1));
         self.col = self.col.min(cols.saturating_sub(1));
+        self.scroll_top = 0;
+        self.scroll_bottom = rows.saturating_sub(1);
     }
 }
 fn line_drawing(b: u8) -> u8 {
@@ -770,6 +984,8 @@ fn client(
                     rows: screen.snapshot(),
                     cursor: screen.cursor(),
                     elements: screen.elements(),
+                    styles: screen.styles(),
+                    scrollback: screen.scrollback(),
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -973,6 +1189,8 @@ pub fn run(
                     rows: screen.delta(),
                     cursor: screen.cursor(),
                     elements: screen.elements(),
+                    styles: screen.styles(),
+                    scrollback: screen.scrollback(),
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -1098,5 +1316,26 @@ mod tests {
     #[test]
     fn meta_right_is_distinct() {
         assert_ne!(key_bytes("META-RIGHT"), key_bytes("RIGHT"));
+    }
+    #[test]
+    fn styles_and_scrollback_are_retained() {
+        let mut s = Screen::new(2, 4);
+        s.feed(b"\x1b[31;1mR\x1b[0ma\nb");
+        let styles = s.styles();
+        assert_eq!(
+            styles[&0][0],
+            StyleSpan {
+                start: 0,
+                width: 1,
+                fg: 2,
+                bg: 0,
+                bold: true,
+                reverse: false
+            }
+        );
+        s.feed(b"\nc");
+        assert_eq!(s.scrollback, vec!["Ra"]);
+        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "  b ");
+        assert_eq!(String::from_utf8_lossy(&s.rows[1]), "   c");
     }
 }
