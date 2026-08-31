@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "chat"
+name = "chat-proto"
 version = "0.1.0"

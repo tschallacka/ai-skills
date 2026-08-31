@@ -1,44 +1,63 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The compiled chat-server rung.
+//! The RFC-1459-grammar TLS chat server.
 //!
-//! Same wire protocol as the interpreter tiers (see chat/runtime/server.py):
-//! NICK, JOIN [#chan [since]] with backlog replay, PRIVMSG, FETCH, PING,
-//! QUIT; log format `MSG <chan> <id> <ts> <nick> :<text>`; next id is
-//! highest+1 (B56); non-MSG log lines are skipped, malformed ones cannot
-//! kill the connection (B57); invalid channel and empty text are separate
-//! errors (B59); the bound port is printed as bare digits — never through
-//! anything that could colour it (B67).
+//! Speaks the standard IRC message grammar (see chat-proto) so a stock IRC
+//! client that supports TLS can connect, register (NICK+USER), join, and
+//! message. Adds one additive extension command, FETCH #chan <since>, for the
+//! agent delta-tail workflow (history replay); a standard client never sends it.
 //!
-//! The point of compiling: a resident process answers each connection
-//! without an interpreter startup, and the lock/id arithmetic runs at native
-//! speed. Zero dependencies, like tony-the-pony: nothing about a chat rung
-//! justifies a runtime.
+//! Communications are TLS-only (rustls, ring provider). The server mints a
+//! self-signed certificate at first run via the openssl CLI and reuses it, so a
+//! client that pins the cert (TOFU) stays stable across restarts.
+//!
+//! Storage layout mirrors the interpreter tiers: a channel is one log file,
+//! `MSG <chan> <id> <ts> <nick> :<text>` per line, and the next id is
+//! highest+1. Non-MSG lines are skipped, malformed ones cannot kill the
+//! connection.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-fn valid_chan(c: &str) -> bool {
-    c.len() > 1
-        && c.len() <= 33
-        && c.starts_with('#')
-        && c[1..].chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+use chat_proto::message::{numeric, numerics, Message, FETCH_END};
+
+struct ConnState {
+    conn: rustls::ServerConnection,
+    tcp: TcpStream,
+    nick: String,
+    user: String,
+    host: String,
+    joined: Vec<String>,
+    closed: bool,
 }
 
-fn valid_nick(n: &str) -> bool {
-    (1..=32).contains(&n.len()) && n.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+impl ConnState {
+    fn write_line(&mut self, s: &str) {
+        let _ = self
+            .conn
+            .writer()
+            .write_all(format!("{}\r\n", s).as_bytes());
+        // Write-only flush: complete_io would block reading for more input,
+        // which deadlocks when the peer is also blocked reading a response.
+        while self.conn.write_tls(&mut self.tcp).unwrap_or(0) > 0 {}
+    }
 }
 
 struct Hub {
     chan_dir: PathBuf,
-    // channel -> highest id seen (the log is the truth; this is the fast path)
     highest: Mutex<HashMap<String, u64>>,
-    // connections: writer halves for broadcast
-    subs: Mutex<Vec<Arc<Mutex<Option<TcpStream>>>>>,
+    channels: Mutex<HashMap<String, Vec<String>>>, // chan -> nicks
+    // Registered nicks, so a nick-in-use check never needs the writers lock
+    // (holding a connection's own slot guard while acquiring writers is an
+    // ABBA deadlock with the broadcast path).
+    nicks: Mutex<HashMap<String, u64>>, // nick -> conn index
+    // zero-sized connection writers: one per live connection, keyed by index
+    writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>,
 }
 
 impl Hub {
@@ -49,7 +68,7 @@ impl Hub {
     fn scan_highest(&self, chan: &str) -> u64 {
         let path = self.chan_path(chan);
         let mut top = 0u64;
-        if let Ok(f) = std::fs::File::open(&path) {
+        if let Ok(f) = fs::File::open(&path) {
             for line in BufReader::new(f).lines().map_while(Result::ok) {
                 let f: Vec<&str> = line.splitn(4, ' ').collect();
                 if f.len() >= 4 && f[0] == "MSG" {
@@ -72,47 +91,58 @@ impl Hub {
 
     fn append(&self, chan: &str, nick: &str, text: &str) -> std::io::Result<(u64, String)> {
         let path = self.chan_path(chan);
-        // mkdir-based channel lock, like every other writer: mkdir is atomic.
+        fs::create_dir_all(&self.chan_dir)?;
         let lock = self.chan_dir.join(format!("{}.lock", chan));
-        std::fs::create_dir_all(&self.chan_dir)?;
         let mut tries = 0;
-        while std::fs::create_dir(&lock).is_err() {
+        while fs::create_dir(&lock).is_err() {
             if lock.join("pid").exists() {
-                // corrupt lock: another writer died holding it
-                let _ = std::fs::remove_dir_all(&lock);
+                let _ = fs::remove_dir_all(&lock);
                 continue;
             }
             tries += 1;
             if tries >= 200 {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, "lock timeout"));
+                return Err(std::io::Error::other("lock timeout"));
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(50));
         }
         let result = (|| -> std::io::Result<(u64, String)> {
             let last = self.scan_highest(chan);
             let id = last + 1;
-            let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let line = format!("MSG {} {} {} {} :{}\n", chan, id, ts, nick, text.replace('\n', " "));
-            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let line = format!(
+                "MSG {} {} {} {} :{}\n",
+                chan,
+                id,
+                ts,
+                nick,
+                text.replace('\n', " ")
+            );
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
             f.write_all(line.as_bytes())?;
             if let Ok(mut h) = self.highest.lock() {
                 h.insert(chan.to_string(), id);
             }
             Ok((id, line))
         })();
-        let _ = std::fs::remove_dir(&lock);
+        let _ = fs::remove_dir(&lock);
         result
     }
 
     fn fetch(&self, chan: &str, since: u64) -> Vec<String> {
         let path = self.chan_path(chan);
         let mut out = Vec::new();
-        if let Ok(f) = std::fs::File::open(&path) {
+        if let Ok(f) = fs::File::open(&path) {
             for line in BufReader::new(f).lines().map_while(Result::ok) {
                 let f: Vec<&str> = line.splitn(4, ' ').collect();
                 if f.len() >= 4 && f[0] == "MSG" && f[1] == chan {
                     if let Ok(id) = f[2].parse::<u64>() {
-                        if id >= since {
+                        if id > since {
                             out.push(line);
                         }
                     }
@@ -122,140 +152,532 @@ impl Hub {
         out
     }
 
-    fn broadcast(&self, line: &str, chan: &str, skip: usize) {
-        if let Ok(mut subs) = self.subs.lock() {
-            for (i, sub) in subs.iter().enumerate() {
-                if i == skip {
-                    continue;
-                }
-                if let Ok(mut guard) = sub.lock() {
-                    if let Some(s) = guard.as_mut() {
-                        let _ = s.write_all(line.as_bytes());
-                        let _ = s.write_all(b"\n");
-                        let _ = s.flush();
+    /// The channel's current maximum message id (0 when empty). A client uses
+    /// this to seed a cursor without reading the whole history.
+    fn last_id(&self, chan: &str) -> u64 {
+        self.scan_highest(chan)
+    }
+
+    /// Like `fetch`, but only rows whose text mentions `@nick` (server-side
+    /// mention tracking, so a client can watch for its name without pulling
+    /// the whole channel).
+    fn fetch_mentions(&self, chan: &str, since: u64, nick: &str) -> Vec<String> {
+        let needle = format!("@{}", nick);
+        let path = self.chan_path(chan);
+        let mut out = Vec::new();
+        if let Ok(f) = fs::File::open(&path) {
+            for line in BufReader::new(f).lines().map_while(Result::ok) {
+                let f: Vec<&str> = line.splitn(4, ' ').collect();
+                if f.len() >= 4 && f[0] == "MSG" && f[1] == chan {
+                    if let Ok(id) = f[2].parse::<u64>() {
+                        if id > since && line.contains(&needle) {
+                            out.push(line);
+                        }
                     }
                 }
             }
         }
-        let _ = chan;
+        out
     }
 }
 
-fn serve(mut stream: TcpStream, hub: Arc<Hub>, slot: Arc<Mutex<Option<TcpStream>>>, idx: usize) {
-    let peer_clone = match stream.try_clone() {
-        Ok(c) => c,
-        Err(_) => return,
+fn valid_chan(c: &str) -> bool {
+    c.len() > 1
+        && c.len() <= 33
+        && c.starts_with('#')
+        && c[1..]
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+}
+
+fn valid_nick(n: &str) -> bool {
+    (1..=32).contains(&n.len())
+        && n.chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn ensure_cert(home: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let crt = home.join("server.crt");
+    let key = home.join("server.key");
+    if crt.exists() && key.exists() {
+        return Ok((crt, key));
+    }
+    fs::create_dir_all(home).map_err(|e| format!("cannot create home: {}", e))?;
+    // Mint a self-signed certificate in Rust (ring-backed) so the server needs
+    // no external binary: no openssl, no PATH dependency.
+    let cn = std::env::var("CHAT_CERT_CN").unwrap_or_else(|_| "localhost".into());
+    let mut params = rcgen::CertificateParams::new(vec![cn.clone()])
+        .map_err(|e| format!("cert params: {}", e))?;
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, cn);
+    let key_pair = rcgen::KeyPair::generate().map_err(|e| format!("keypair: {}", e))?;
+    let cert = params
+        .self_signed(&key_pair)
+        .map_err(|e| format!("self-signed: {}", e))?;
+    fs::write(&crt, cert.pem()).map_err(|e| format!("write cert: {}", e))?;
+    fs::write(&key, key_pair.serialize_pem()).map_err(|e| format!("write key: {}", e))?;
+    Ok((crt, key))
+}
+
+fn server_config(crt: &Path, key: &Path) -> Result<rustls::ServerConfig, String> {
+    use rustls_pki_types::pem::PemObject;
+    let certs = rustls_pki_types::CertificateDer::pem_file_iter(crt)
+        .map_err(|e| format!("read cert: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("parse cert: {}", e))?;
+    let key = rustls_pki_types::PrivateKeyDer::from_pem_file(key)
+        .map_err(|e| format!("read key: {}", e))?;
+    let cfg = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("configure rustls: {}", e))?;
+    // No ALPN: a generic IRC-over-TLS client historically does not negotiate
+    // one, and offering "irc" can cause a HandshakeFailure with some peers.
+    // cfg.alpn_protocols = vec![b"irc".to_vec()];
+    Ok(cfg)
+}
+
+struct Session {
+    server_name: String,
+    nick: String,
+    user: String,
+    host: String,
+    registered: bool,
+    joined: Vec<String>,
+    closed: bool,
+}
+
+fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_name: String) {
+    let mut raw = [0u8; 4096];
+    let mut sess = Session {
+        server_name,
+        nick: String::new(),
+        user: String::new(),
+        host: "localhost".into(),
+        joined: Vec::new(),
+        registered: false,
+        closed: false,
     };
-    let mut reader = BufReader::new(peer_clone);
-    let mut nick = String::new();
-    let mut joined: Vec<String> = Vec::new();
-    let mut line = String::new();
-    loop {
-        line.clear();
-        if reader.read_line(&mut line).unwrap_or(0) == 0 {
-            break;
-        }
-        let input = line.trim_end_matches(['\r', '\n']);
-        let (verb, arg) = match input.split_once(' ') {
-            Some((v, a)) => (v, a),
-            None => (input, ""),
-        };
-        let reply = |s: &str| {
-            if let Ok(mut guard) = slot.lock() {
-                if let Some(w) = guard.as_mut() {
-                    let _ = w.write_all(s.as_bytes());
-                    let _ = w.write_all(b"\n");
-                    let _ = w.flush();
-                }
-            }
-        };
-        match verb {
-            "NICK" => {
-                if !valid_nick(arg) {
-                    reply("ERR invalid nick");
-                } else {
-                    nick = arg.to_string();
-                    reply(&format!("OK nick {}", nick));
-                }
-            }
-            "JOIN" => {
-                let mut it = arg.split_whitespace();
-                let chan = it.next().unwrap_or("");
-                let since: u64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                if !valid_chan(chan) || (it.next().is_some()) {
-                    reply("ERR invalid channel");
-                    continue;
-                }
-                if !joined.iter().any(|c| c == chan) {
-                    joined.push(chan.to_string());
-                }
-                reply(&format!("OK join {}", chan));
-                // B66: backlog replay after subscribing — duplicate-possible,
-                // loss-free.
-                for row in hub.fetch(chan, since) {
-                    reply(&row);
-                }
-            }
-            "LEAVE" => {
-                joined.retain(|c| c != arg);
-                reply(&format!("OK leave {}", arg));
-            }
-            "PRIVMSG" => {
-                let (chan, text) = match arg.split_once(" :") {
-                    Some((c, t)) => (c, t),
-                    None => {
-                        reply("ERR usage: PRIVMSG #chan :text");
-                        continue;
-                    }
-                };
-                if nick.is_empty() {
-                    reply("ERR no nick");
-                    continue;
-                }
-                if !valid_chan(chan) {
-                    reply(&format!("ERR invalid channel: {}", chan));
-                    continue;
-                }
-                if text.is_empty() {
-                    reply("ERR usage: PRIVMSG #chan :text");
-                    continue;
-                }
-                match hub.append(chan, &nick, text) {
-                    Ok((_, line)) => {
-                        reply(line.trim_end_matches('\n'));
-                        hub.broadcast(&line, chan, idx);
-                    }
-                    Err(e) => reply(&format!("ERR {}", e)),
-                }
-            }
-            "FETCH" => {
-                let (chan, since) = match arg.split_once(' ') {
-                    Some((c, s)) => (c, s),
-                    None => {
-                        reply("ERR usage: FETCH #chan <since-id>");
-                        continue;
-                    }
-                };
-                let ok = valid_chan(chan) && since.chars().all(|c| c.is_ascii_digit()) && !since.is_empty();
-                if !ok {
-                    reply("ERR usage: FETCH #chan <since-id>");
-                    continue;
-                }
-                for row in hub.fetch(chan, since.parse().unwrap_or(0)) {
-                    reply(&row);
-                }
-                reply("OK fetch end");
-            }
-            "PING" => reply("PONG"),
-            "QUIT" => {
-                reply("OK bye");
-                break;
-            }
-            _ => reply(&format!("ERR unknown verb {}", verb)),
+
+    // Emit to a connection state's TLS writer. Called while holding the
+    // slot guard, so it never re-locks the same slot (no deadlock).
+    fn w(st: &mut ConnState, s: &str) {
+        if !st.closed {
+            st.write_line(s);
         }
     }
-    if let Ok(mut guard) = slot.lock() {
-        *guard = None; // drop the writer; broadcast skips None
+
+    loop {
+        let mut guard = match slot.lock() {
+            Ok(g) => g,
+            Err(_) => break,
+        };
+        let st = match guard.as_mut() {
+            Some(s) => s,
+            None => break,
+        };
+        // Drive the TLS handshake to completion. complete_io reads and writes
+        // until the handshake is finished; it flushes ServerHello/Finished as
+        // needed and returns once no more TLS progress is required.
+        if st.conn.is_handshaking() {
+            let mut handshake_done = false;
+            while !handshake_done {
+                match st.conn.complete_io(&mut st.tcp) {
+                    Ok(_) => {
+                        handshake_done = !st.conn.is_handshaking();
+                        if st.conn.is_handshaking() {
+                            continue;
+                        }
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            continue;
+                        }
+                        eprintln!("chat-server-rs: handshake error: {:?}", e);
+                        break;
+                    }
+                }
+            }
+        }
+        // After the handshake, catch any further buffered raw bytes and
+        // decrypt them before draining plaintext.
+        let _ = st.conn.read_tls(&mut st.tcp);
+        let _ = st.conn.process_new_packets();
+        while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
+        while let Ok(n) = st.conn.reader().read(&mut raw) {
+            if n == 0 {
+                break;
+            }
+            for chunk in raw[..n].split_inclusive(|&b| b == b'\n') {
+                let line = std::str::from_utf8(chunk).unwrap_or("");
+                let line = line.trim_end_matches(['\r', '\n']);
+                if line.is_empty() {
+                    continue;
+                }
+                let msg = match Message::parse(line) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        w(st, "ERROR :malformed line");
+                        continue;
+                    }
+                };
+                let verb = msg.command.clone();
+                let params = msg.params.clone();
+                let trailing = msg.trailing.clone();
+
+                if verb == "CAP" {
+                    w(st, "CAP * LS :");
+                    continue;
+                }
+                if verb == "PING" {
+                    let tok = params.first().cloned().unwrap_or_default();
+                    w(st, &format!("PONG {}", tok));
+                    continue;
+                }
+                if verb == "NICK" {
+                    let new_nick = trailing
+                        .clone()
+                        .or_else(|| params.first().cloned())
+                        .unwrap_or_default();
+                    if !valid_nick(&new_nick) {
+                        w(st, "ERROR :invalid nick");
+                        continue;
+                    }
+                    if sess.registered || !sess.nick.is_empty() {
+                        sess.nick = new_nick.clone();
+                        st.nick = new_nick.clone();
+                        continue;
+                    }
+                    let in_use = {
+                        if let Ok(nicks) = hub.nicks.lock() {
+                            nicks.contains_key(&new_nick)
+                        } else {
+                            false
+                        }
+                    };
+                    if in_use {
+                        let n = new_nick.clone();
+                        let sn = sess.server_name.clone();
+                        w(
+                            st,
+                            &format!(
+                                ":{} {} {} :Nickname is already in use",
+                                sn,
+                                numerics::ERR_NICKNAMEINUSE,
+                                n
+                            ),
+                        );
+                        continue;
+                    }
+                    sess.nick = new_nick.clone();
+                    st.nick = new_nick.clone();
+                    if let Ok(mut nicks) = hub.nicks.lock() {
+                        nicks.insert(new_nick.clone(), idx as u64);
+                    }
+                    continue;
+                }
+                if verb == "USER" {
+                    // RFC 1459: USER <username> <mode> <unused> :<realname>, but
+                    // clients vary. Use the first parameter as the username and
+                    // the fourth (or "localhost") for the host.
+                    sess.user = params.first().cloned().unwrap_or_else(|| "*.net".into());
+                    sess.host = params
+                        .get(3)
+                        .cloned()
+                        .filter(|h| !h.is_empty())
+                        .unwrap_or_else(|| "localhost".into());
+                    st.user = sess.user.clone();
+                    st.host = sess.host.clone();
+                    // Once both NICK and USER are present, registration is
+                    // complete: send the welcome block now (not on the next
+                    // verb) so the client does not stall waiting for it.
+                    if !sess.registered && !sess.nick.is_empty() {
+                        sess.registered = true;
+                        let sn = sess.server_name.clone();
+                        let n = sess.nick.clone();
+                        for (code, text) in [
+                            (numerics::RPL_WELCOME, "Welcome to the chat server"),
+                            (numerics::RPL_YOURHOST, "Your host is the chat server"),
+                            (
+                                numerics::RPL_CREATED,
+                                "This server was created for agent chat",
+                            ),
+                            (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
+                        ] {
+                            w(st, &numeric(&sn, code, &n, text).serialize());
+                        }
+                        w(
+                            st,
+                            &numeric(
+                                &sn,
+                                numerics::RPL_ISUPPORT,
+                                &n,
+                                "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
+                            )
+                            .serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat")
+                                .serialize(),
+                        );
+                        w(
+                            st,
+                            &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
+                        );
+                    }
+                    continue;
+                }
+                if verb == "QUIT" {
+                    w(st, "ERROR :bye");
+                    st.closed = true;
+                    sess.closed = true;
+                    if let Ok(mut nicks) = hub.nicks.lock() {
+                        nicks.retain(|_, v| *v != idx as u64);
+                    }
+                    drop(guard);
+                    return;
+                }
+
+                if !sess.registered && !sess.nick.is_empty() && !sess.user.is_empty() {
+                    sess.registered = true;
+                    let sn = sess.server_name.clone();
+                    let n = sess.nick.clone();
+                    for (code, text) in [
+                        (numerics::RPL_WELCOME, "Welcome to the chat server"),
+                        (numerics::RPL_YOURHOST, "Your host is the chat server"),
+                        (
+                            numerics::RPL_CREATED,
+                            "This server was created for agent chat",
+                        ),
+                        (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
+                    ] {
+                        w(st, &numeric(&sn, code, &n, text).serialize());
+                    }
+                    w(
+                        st,
+                        &numeric(
+                            &sn,
+                            numerics::RPL_ISUPPORT,
+                            &n,
+                            "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
+                        )
+                        .serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize(),
+                    );
+                    w(
+                        st,
+                        &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
+                    );
+                    // Fall through so a JOIN/PRIVMSG issued in the same burst
+                    // (as real clients do) is not swallowed by registration.
+                }
+                if verb == "NICK" || verb == "USER" {
+                    continue;
+                }
+
+                match verb.as_str() {
+                    "JOIN" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        if !valid_chan(&chan) {
+                            w(st, "ERROR :invalid channel");
+                            continue;
+                        }
+                        let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                        w(st, &format!(":{} JOIN :{}", prefix, chan));
+                        if let Ok(mut ch) = hub.channels.lock() {
+                            ch.entry(chan.clone()).or_default().push(sess.nick.clone());
+                        }
+                        if !sess.joined.contains(&chan) {
+                            sess.joined.push(chan.clone());
+                        }
+                        st.joined = sess.joined.clone();
+                        let members = {
+                            if let Ok(ch) = hub.channels.lock() {
+                                ch.get(&chan).cloned().unwrap_or_default()
+                            } else {
+                                vec![]
+                            }
+                        };
+                        let sn = sess.server_name.clone();
+                        let n = sess.nick.clone();
+                        w(
+                            st,
+                            &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")),
+                        );
+                        w(
+                            st,
+                            &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan),
+                        );
+                    }
+                    "PART" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                        w(st, &format!(":{} PART {} :", prefix, chan));
+                        if let Ok(mut ch) = hub.channels.lock() {
+                            if let Some(v) = ch.get_mut(&chan) {
+                                v.retain(|m| m != &sess.nick);
+                            }
+                        }
+                        sess.joined.retain(|j| j != &chan);
+                    }
+                    "NAMES" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        let members = {
+                            if let Ok(ch) = hub.channels.lock() {
+                                ch.get(&chan).cloned().unwrap_or_default()
+                            } else {
+                                vec![]
+                            }
+                        };
+                        let sn = sess.server_name.clone();
+                        let n = sess.nick.clone();
+                        w(
+                            st,
+                            &format!(":{} 353 {} = {} :{}", sn, n, chan, members.join(" ")),
+                        );
+                        w(
+                            st,
+                            &format!(":{} 366 {} {} :End of /NAMES list", sn, n, chan),
+                        );
+                    }
+                    "PRIVMSG" | "NOTICE" => {
+                        let (chan, text) = match (params.first().cloned(), trailing.clone()) {
+                            (Some(c), Some(t)) => (c, t),
+                            _ => {
+                                w(st, "ERROR :usage: PRIVMSG #chan :text");
+                                continue;
+                            }
+                        };
+                        if !valid_chan(&chan) {
+                            let sn = sess.server_name.clone();
+                            w(st, &format!(":{} ERROR :invalid channel", sn));
+                            continue;
+                        }
+                        if text.is_empty() {
+                            w(st, "ERROR :usage: PRIVMSG #chan :text");
+                            continue;
+                        }
+                        match hub.append(&chan, &sess.nick, &text) {
+                            Ok(_) => {
+                                let m = Message {
+                                    prefix: Some(format!(
+                                        "{}!{}@{}",
+                                        sess.nick, sess.user, sess.host
+                                    )),
+                                    command: verb.clone(),
+                                    params: vec![chan.clone()],
+                                    trailing: Some(text.clone()),
+                                };
+                                let out = m.serialize();
+                                w(st, &out);
+                                // broadcast to OTHER connections (their slots are
+                                // different mutexes, so locking them here is safe).
+                                if let Ok(writers) = hub.writers.lock() {
+                                    for (i, s) in writers.iter().enumerate() {
+                                        if i == idx {
+                                            continue;
+                                        }
+                                        if let Ok(mut g) = s.lock() {
+                                            if let Some(c) = g.as_mut() {
+                                                if !c.closed && c.joined.iter().any(|j| j == &chan)
+                                                {
+                                                    c.write_line(&out);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => w(st, &format!("ERROR :{}", e)),
+                        }
+                    }
+                    "LASTID" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        if !valid_chan(&chan) {
+                            w(st, "ERROR :usage: LASTID #chan");
+                            continue;
+                        }
+                        let id = hub.last_id(&chan);
+                        // Private numeric 999: `:server 999 <nick> #chan <id>`.
+                        let sn = sess.server_name.clone();
+                        let n = sess.nick.clone();
+                        w(st, &format!(":{} 999 {} {} {}", sn, n, chan, id));
+                    }
+                    "FETCH" => {
+                        let (chan, since) = match (params.first().cloned(), params.get(1).cloned())
+                        {
+                            (Some(c), Some(s)) => (c, s),
+                            _ => {
+                                w(st, "ERROR :usage: FETCH #chan <since-id> [mentions]");
+                                continue;
+                            }
+                        };
+                        let ok = valid_chan(&chan)
+                            && since.chars().all(|c| c.is_ascii_digit())
+                            && !since.is_empty();
+                        if !ok {
+                            w(st, "ERROR :usage: FETCH #chan <since-id> [mentions]");
+                            continue;
+                        }
+                        let since_id: u64 = since.parse().unwrap_or(0);
+                        // Optional third param `mentions` filters to rows that
+                        // mention the requesting nick (server-side tracking).
+                        let only_mentions = params.get(2).map(|s| s.as_str()) == Some("mentions");
+                        let rows = if only_mentions {
+                            hub.fetch_mentions(&chan, since_id, &sess.nick)
+                        } else {
+                            hub.fetch(&chan, since_id)
+                        };
+                        for row in rows {
+                            w(st, row.trim_end_matches('\n'));
+                        }
+                        w(st, &format!("{} {}", FETCH_END, chan));
+                    }
+                    _ => {
+                        w(st, "ERROR :unknown command");
+                    }
+                }
+            }
+            if st.closed {
+                break;
+            }
+        }
+        drop(guard);
+    }
+}
+fn announce_loop(port: u16, name: String, interval_secs: u64, beacon_port: u16, bcast: String) {
+    let started = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let beacon = format!(
+        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"port\":{},\"started\":{}}}",
+        name, port, started
+    );
+    let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if sock.set_broadcast(true).is_err() {
+        return;
+    }
+    let addr = format!("{}:{}", bcast, beacon_port);
+    loop {
+        let _ = sock.send_to(beacon.as_bytes(), &addr);
+        std::thread::sleep(Duration::from_secs(interval_secs));
     }
 }
 
@@ -267,12 +689,33 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let port: u16 = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
+    let server_name = std::env::var("CHAT_SERVER_NAME").unwrap_or_else(|_| "server".into());
 
-    let chan_dir = Path::new(&home).join("channels");
-    if let Err(e) = std::fs::create_dir_all(&chan_dir) {
-        eprintln!("chat-server-rs: cannot create {}: {}", chan_dir.display(), e);
+    let home_path = Path::new(&home);
+    let chan_dir = home_path.join("channels");
+    if let Err(e) = fs::create_dir_all(&chan_dir) {
+        eprintln!(
+            "chat-server-rs: cannot create {}: {}",
+            chan_dir.display(),
+            e
+        );
         std::process::exit(66);
     }
+
+    let (crt, key) = match ensure_cert(home_path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-server-rs: {}", e);
+            std::process::exit(69);
+        }
+    };
+    let tls_config = match server_config(&crt, &key) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("chat-server-rs: {}", e);
+            std::process::exit(69);
+        }
+    };
 
     let listener = match TcpListener::bind((bind.as_str(), port)) {
         Ok(l) => l,
@@ -282,36 +725,75 @@ fn main() {
         }
     };
     let actual = listener.local_addr().map(|a| a.port()).unwrap_or(port);
-    // The port file is the contract every launcher polls (B63: it must be
-    // THIS run's answer); bare digits because a colour-formatted number on
-    // another runtime poisoned exactly this line once (B67).
-    std::fs::write(Path::new(&home).join("server.port"), format!("{}\n", actual))
-        .expect("write server.port");
+    fs::write(home_path.join("server.port"), format!("{}\n", actual)).expect("write server.port");
     println!("{}", actual);
 
     let hub = Arc::new(Hub {
         chan_dir,
         highest: Mutex::new(HashMap::new()),
-        subs: Mutex::new(Vec::new()),
+        channels: Mutex::new(HashMap::new()),
+        nicks: Mutex::new(HashMap::new()),
+        writers: Mutex::new(Vec::new()),
     });
+
+    if std::env::var("CHAT_ANNOUNCE").unwrap_or_else(|_| "0".into()) == "1" {
+        let interval: u64 = std::env::var("CHAT_ANNOUNCE_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2);
+        let beacon_port: u16 = std::env::var("CHAT_BEACON_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7780);
+        let bcast = std::env::var("CHAT_BCAST").unwrap_or_else(|_| "255.255.255.255".into());
+        let name =
+            std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", "localhost"));
+        std::thread::spawn(move || announce_loop(actual, name, interval, beacon_port, bcast));
+    }
 
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(s) => s,
             Err(_) => continue,
         };
-        // The reader half is cloned before the original moves into the
-        // broadcast slot; serve reads its clone and replies through the slot.
-        let peer = match stream.try_clone() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
+        // A short read timeout lets each serve thread release its slot guard
+        // frequently instead of holding it across an indefinitely-blocking
+        // read_tls (which would stall broadcasters trying to deliver a message
+        // to an idle member).
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok();
         let hub = Arc::clone(&hub);
-        let mut subs = hub.subs.lock().unwrap();
-        let idx = subs.len();
-        let slot = Arc::new(Mutex::new(Some(stream)));
-        subs.push(Arc::clone(&slot));
-        drop(subs);
-        std::thread::spawn(move || serve(peer, hub, slot, idx));
+        let tls_config = Arc::clone(&tls_config);
+        let mut writers = hub.writers.lock().unwrap();
+        let idx = writers.len();
+        let slot = Arc::new(Mutex::new(None));
+        writers.push(Arc::clone(&slot));
+        drop(writers);
+        let server_name = server_name.clone();
+        std::thread::spawn(move || {
+            let conn = match rustls::ServerConnection::new(tls_config) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let state = ConnState {
+                conn,
+                tcp: stream.try_clone().unwrap_or_else(|_| {
+                    // Unreachable in practice on a live socket; if it fails the
+                    // connection is unusable. Provide the original stream so the
+                    // rest of the setup still compiles; serve will drop it on EOF.
+                    stream.try_clone().unwrap()
+                }),
+                nick: String::new(),
+                user: String::new(),
+                host: "localhost".into(),
+                joined: Vec::new(),
+                closed: false,
+            };
+            if let Ok(mut g) = slot.lock() {
+                *g = Some(state);
+            }
+            serve(slot, hub, idx, server_name);
+        });
     }
 }

@@ -294,9 +294,7 @@ Two details that are load-bearing. `. as $task`, because inside the inner
 `select` a bare `.id` is the inner task's id, so `.parent == .id` is never true
 and the filter passes everything. And `.priority // ""` inside the rank map,
 because `{...}[null]` is a rjq error rather than a miss: one row without a
-priority would otherwise kill the whole render. Inside the inner `select`, `.id` is the inner
-task's id, so `.parent == .id` compares each task's parent to its own id, is
-never true, and the filter silently passes everything.
+priority would otherwise kill the whole render.
 
 One task in full:
 

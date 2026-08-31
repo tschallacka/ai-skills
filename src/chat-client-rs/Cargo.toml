@@ -1,0 +1,22 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "chat-client-rs"
+version = "0.1.0"
+edition = "2021"
+description = "The TLS chat client: discovers, connects (TOFU), sends, reads deltas, and tails an IRC-grammar chat server"
+license = "MIT"
+
+[dependencies]
+chat-proto = { path = "../chat-proto" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+# No webpki-roots: TOFU pins the server cert directly.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

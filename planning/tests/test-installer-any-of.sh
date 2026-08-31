@@ -46,92 +46,23 @@ build_hidden_path() {
     done < <(printf '%s\n' "$PATH" | tr ':' '\n')
 }
 
-# Throwaway runtimes: presence without a real install, so any one member can be
-# added to a hidden PATH without touching this machine.
-fake_bin="$temporary_root/fake"
-mkdir -p "$fake_bin"
-for member in python3 node perl socat; do
-    printf '#!/bin/sh\nexit 0\n' > "$fake_bin/$member"
-    chmod +x "$fake_bin/$member"
-done
-
-run_installer() { # <target> -- <PATH>
-    local target="$1" path="$2"
-    set +e
-    PATH="$path" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
-        --skill chat --target "$target" --yes >"$temporary_root/out" 2>"$temporary_root/err" </dev/null
-    RUN_RC=$?
-    set -e
-    RUN_ERR="$(cat "$temporary_root/err")"
-    RUN_OUT="$(cat "$temporary_root/out")"
-}
-
-# ── all four members absent: exactly one warning naming set and capability ──
-none_bin="$temporary_root/bin-none"
-build_hidden_path "$none_bin" python3 node perl socat
-if PATH="$none_bin" command -v python3 >/dev/null 2>&1 ||
-    PATH="$none_bin" command -v node >/dev/null 2>&1 ||
-    PATH="$none_bin" command -v perl >/dev/null 2>&1 ||
-    PATH="$none_bin" command -v socat >/dev/null 2>&1; then
-    printf 'installer-anyof: UNCONFIGURED (a chat runtime could not be hidden from PATH)\n' >&2
-    exit 0
-fi
-target_none="$temporary_root/target-none"
-mkdir -p "$target_none"
-run_installer "$target_none" "$none_bin"
-[ "$RUN_RC" -eq 0 ] || note_fail "a soft group miss changed the exit status: rc=$RUN_RC"
-warnings="$(grep -c 'degraded form' "$temporary_root/err" || true)"
-[ "$warnings" -eq 1 ] || note_fail "expected exactly one degraded warning, got $warnings"
-case "$RUN_ERR" in
-    *'any of python3, node, perl, socat (soft requirement of chat)'*) ;;
-    *) note_fail "the warning did not name the member set: $RUN_ERR" ;;
-esac
-case "$RUN_ERR" in
-    *'listening socket'*) ;;
-    *) note_fail "the warning did not name the lost capability: $RUN_ERR" ;;
-esac
-[ -f "$target_none/chat/SKILL.md" ] || note_fail 'a soft group miss blocked the chat install'
-
-# The hint for the missing group must name a usable command and prefer the head
-# of the chain (python3), whatever platform prints it.
-hint_block="$(sed -n '/install one of them with:/,$p' "$temporary_root/err")"
-[ -n "$hint_block" ] || note_fail 'the group miss printed no install hint'
-first_hint_word="$(printf '%s\n' "$hint_block" | sed -n '2s/^[[:space:]]*\([A-Za-z0-9._-]*\).*/\1/p')"
-if [ "$first_hint_word" != "install" ]; then
-    if ! command -v "$first_hint_word" >/dev/null 2>&1; then
-        note_fail "the group hint named '$first_hint_word', which does not exist here"
-    fi
-fi
-case "$hint_block" in
-    *python3*) ;;
-    *) note_fail "the group hint did not recommend the chain head: $hint_block" ;;
-esac
-
-# ── one member present: no warning at all, whichever member that is ─────────
-one_bin="$temporary_root/bin-one"
-build_hidden_path "$one_bin" python3 node perl socat
-target_one="$temporary_root/target-one"
-mkdir -p "$target_one"
-run_installer "$target_one" "$one_bin:$fake_bin"
-[ "$RUN_RC" -eq 0 ] || note_fail "installing with python3 present exited $RUN_RC"
-warnings="$(grep -c 'degraded form' "$temporary_root/err" || true)"
-[ "$warnings" -eq 0 ] || note_fail "a satisfied group still warned ($warnings time(s))"
-
-node_only_bin="$temporary_root/bin-node"
-build_hidden_path "$node_only_bin" python3 node perl socat
-rm -f "$fake_bin/python3"
-target_node="$temporary_root/target-node"
-mkdir -p "$target_node"
-run_installer "$target_node" "$node_only_bin:$fake_bin"
-[ "$RUN_RC" -eq 0 ] || note_fail "installing with only node present exited $RUN_RC"
-warnings="$(grep -c 'degraded form' "$temporary_root/err" || true)"
-[ "$warnings" -eq 0 ] || note_fail "a satisfied group (second member) still warned"
-
-restore_python3() {
-    printf '#!/bin/sh\nexit 0\n' > "$fake_bin/python3"
-    chmod +x "$fake_bin/python3"
-}
-restore_python3
+# ── chat needs no runtime tool: it installs cleanly with a minimal PATH ─────
+# The rust chat server mints its own certificate in-crate (rcgen) and the
+# client pins it (TOFU), so chat has no runtime requirement at all. Installing
+# it under a PATH with every tool hidden must succeed with no warning.
+none_bin="$temporary_root/bin-chat-none"
+build_hidden_path "$none_bin" openssl python3 node perl socat
+target_chat="$temporary_root/target-chat"
+mkdir -p "$target_chat"
+set +e
+PATH="$none_bin" AI_SKILLS_NO_SPLASH=1 "$BASH" "$installer" \
+    --skill chat --target "$target_chat" --yes >"$temporary_root/out-chat" 2>"$temporary_root/err-chat" </dev/null
+chat_rc=$?
+set -e
+[ "$chat_rc" -eq 0 ] || note_fail "chat with no runtime tool installed exited $chat_rc"
+grep -qi 'degraded\|warning.*missing.*tool\|requires' "$temporary_root/err-chat" \
+    && note_fail "chat warned about a runtime tool it does not need: $(cat "$temporary_root/err-chat")"
+[ -f "$target_chat/chat/SKILL.md" ] || note_fail 'chat install did not place SKILL.md'
 
 # ── T48a: planning declares no any-of runtime group any more ─────────────────
 # Serve mode is served by the shipped plan-overview binary, so python3, node,

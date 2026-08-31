@@ -38,7 +38,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -47,9 +47,10 @@ SKILL_DESCRIPTIONS=(
     'After-the-fact review and proposed fixes for built code.'
     'A nested queue of work in one JSON file, read with rjq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
-    'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
+    'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
+    'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -90,10 +91,10 @@ Not for the steps of a task already in progress, and not for defects -- those be
 One defect per entry: if stating it needs the word "and", it is two entries that reference each other.
 An entry closes only with a fix and a verification naming the mutation that fails without it, so a closure cannot be a claim.
 Written only through its helpers -- an out-of-enum value makes the register unsound and every later write refuses.'
-    'An IRC-basis message bus for agents: channels they register, join and leave, with deltas since an id and live tails.
-Two agents in different sessions or on different machines exchange messages without either knowing about the other.
-The log is the source of truth and the server is optional: local mode appends under a lock and needs no runtime at all.
-Reading takes a cursor rather than the whole channel, so a long conversation does not flood a context window.'
+    'An IRC-over-TLS message bus for agents: a rust server that a standard TLS IRC client could join, and a rust client.
+The server speaks the RFC 1459 grammar over TLS and mints its self-signed certificate at first run.
+The client discovers servers over UDP, pins the certificate (TOFU), and sends / reads a delta since an id / tails.
+History is additive: an agent fetches the messages after id N via the FETCH extension, instead of re-reading a whole channel.'
     'Gives a task its own checkout, so several agents can work at once without seeing each other half-finished edits.
 Also isolates a long verification from later commits, and keeps a risky change off the main checkout.
 Covers the concurrency hazard that silently fails a long-running command when two runs share a tree.
@@ -102,6 +103,10 @@ And the part that is usually learned late: the order to merge the branches back 
 The body names the defect, the cause and the change, and stops there: no headings for their own sake, no restating the diff.
 The reasoning is derived from git log for the branch, so a description never explains what a commit message should have said.
 Chat transcripts never travel, and a collapsible block is allowed only for evidence the commits genuinely cannot carry.'
+    'Tells an agent how to talk everywhere verbosity creeps in: chat with agents, dev talk with the developer, and its own thinking prose.
+The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
+Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
+The reader may always ask for plain english; the register bends only where brevity would cost understanding.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

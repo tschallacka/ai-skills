@@ -1,0 +1,10 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "chat-proto"
+version = "0.1.0"
+edition = "2021"
+description = "The shared IRC-grammar message and numeric-tag model for the chat server and client crates"
+license = "MIT"
+
+[dependencies]

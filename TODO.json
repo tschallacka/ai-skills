@@ -1481,6 +1481,23 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T16:32:43Z"
+    },
+    {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-08-30T21:50:27Z"
     }
   ]
 }

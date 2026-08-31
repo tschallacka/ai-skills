@@ -8,7 +8,8 @@ description: Use when writing or revising the description of a merge request or 
 
 A merge request description is read by a reviewer deciding whether to approve, and
 later by whoever is bisecting a regression. Both want the same thing: what changed,
-what it fixes, and nothing else.
+what it fixes, and nothing else. Chat and review-comment prose runs on the
+`text-etiquette` skill's register; this one governs only the description.
 
 ## The description is written in the driving human's voice
 
@@ -127,7 +128,7 @@ it would drown the description if inlined.
 Put that, and only that, in a collapsible block. GitLab and GitHub both render HTML
 `<details>`:
 
-```markdown
+````markdown
 <details>
 <summary>View Magento update log</summary>
 
@@ -138,7 +139,7 @@ DB CHANGE WARNING: ! lib/internal/Magento/Framework/Setup/...
 ```
 
 </details>
-```
+````
 
 Three conditions, all of them:
 

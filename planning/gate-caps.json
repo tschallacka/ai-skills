@@ -1,5 +1,5 @@
 {
-  "function_length_cap": 64,
+  "function_length_cap": 63,
   "duplication_caps": {
     "hand-rolled .tmp.$$ temp sites": 43,
     "tests not sourcing lib-test.sh": 7,

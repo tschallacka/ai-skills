@@ -102,7 +102,19 @@ mod tests {
             let mut buf = vec![0u8; len];
             fill(&mut buf).expect("OS CSPRNG unavailable");
             assert_eq!(buf.len(), len);
-            assert!(buf.iter().any(|b| *b != 0), "all-zero draw of {len} bytes");
+            // A 1-byte draw is all-zero with probability 1/256, so the
+            // stub-detection assertion retries instead of gambling: a zeroed
+            // buffer stub fails every retry, a healthy CSPRNG passes all but
+            // (1/256)^32 of the time.
+            let retries = if len == 1 { 32 } else { 1 };
+            let mut nonzero = buf.iter().any(|b| *b != 0);
+            let mut drawn = 1;
+            while !nonzero && drawn < retries {
+                fill(&mut buf).expect("OS CSPRNG unavailable");
+                nonzero = buf.iter().any(|b| *b != 0);
+                drawn += 1;
+            }
+            assert!(nonzero, "all-zero draw of {len} bytes across {drawn} draws");
         }
     }
 
