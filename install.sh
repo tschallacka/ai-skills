@@ -3146,6 +3146,11 @@ bin/aarch64-unknown-linux-musl/plan-overview
 bin/x86_64-apple-darwin/plan-overview
 bin/aarch64-apple-darwin/plan-overview
 bin/x86_64-pc-windows-msvc/plan-overview.exe
+bin/x86_64-unknown-linux-musl/rjq
+bin/aarch64-unknown-linux-musl/rjq
+bin/x86_64-apple-darwin/rjq
+bin/aarch64-apple-darwin/rjq
+bin/x86_64-pc-windows-msvc/rjq.exe
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
