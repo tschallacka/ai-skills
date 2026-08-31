@@ -38,7 +38,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -49,6 +49,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )

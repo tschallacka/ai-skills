@@ -76,7 +76,7 @@ SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees merge-request-etiquette text-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -87,6 +87,7 @@ SKILL_DESCRIPTIONS=(
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat over TLS: a rust server and client, UDP discovery, deltas.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
+    'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
 )
@@ -425,6 +426,9 @@ runtime_requirements() {
             ;;
         chat)
             ;;
+        git-merge-resolving)
+            case "$platform" in *:*) printf '%s\n' git ;; esac
+            ;;
         git-worktrees)
             ;;
         merge-request-etiquette)
@@ -454,6 +458,7 @@ runtime_requirement_strength() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
@@ -467,6 +472,7 @@ runtime_requirement_why() {
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
         bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none' ;; esac ;;
+        git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'every command the guidance names reads history or a conflicted index through git; without it the reasoning still reads but nothing can be checked' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
@@ -3159,11 +3165,6 @@ bin/aarch64-unknown-linux-musl/plan-overview
 bin/x86_64-apple-darwin/plan-overview
 bin/aarch64-apple-darwin/plan-overview
 bin/x86_64-pc-windows-msvc/plan-overview.exe
-bin/x86_64-unknown-linux-musl/rjq
-bin/aarch64-unknown-linux-musl/rjq
-bin/x86_64-apple-darwin/rjq
-bin/aarch64-apple-darwin/rjq
-bin/x86_64-pc-windows-msvc/rjq.exe
 references/plan-read-contract.md
 references/ui-user-story-validation.md
 references/comment-discipline-contract.md
@@ -3503,6 +3504,9 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         git-worktrees)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        git-merge-resolving)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         merge-request-etiquette)

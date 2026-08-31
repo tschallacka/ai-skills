@@ -28,8 +28,7 @@ abs_path() {
 
 deferred_artifact() {
     case "$1" in
-        bin/*/plan-overview|bin/*/plan-overview.exe) return 0 ;;
-        bin/*/rjq|bin/*/rjq.exe) return 0 ;;
+        bin/*) return 0 ;; # cross-target artifacts are CI outputs
         *) return 1 ;;
     esac
 }

@@ -27,6 +27,7 @@
     "bug-report",
     "chat",
     "git-worktrees",
+    "git-merge-resolving",
     "planning/bin",
     "merge-request-etiquette",
     "text-etiquette",

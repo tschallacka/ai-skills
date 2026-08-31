@@ -1,0 +1,22 @@
+# MODE: PROD
+# What this skill needs on the target machine at runtime, and how badly.
+#
+# installer/build.sh generates install.sh's dependency tables from every skill's
+# copy of this file; the shared installer/tools.tsv says how to verify a tool and
+# how to install it, so the install instructions are written once, not per skill.
+#
+# Columns, tab-separated:
+#   tool       tool id; must have a row in installer/tools.tsv
+#   condition  <uname -s glob>:<uname -m glob> the row applies to, e.g. *:* or
+#              Darwin:arm64 — a bash case pattern, so | may join alternatives
+#   strength   hard = the skill does not work without the tool, so the installer
+#              refuses to install this skill and exits non-zero
+#              soft = the skill degrades honestly, so the installer installs it
+#              and warns which capability is lost
+#   why        one line naming the capability that is lost without the tool
+#
+# Line-oriented TSV rather than JSON on purpose: rjq is itself declared here, so a
+# format that needed rjq to read it could not be read on the machine that is
+# missing it. awk and sed parse this.
+tool	condition	strength	why
+git	*:*	soft	every command the guidance names reads history or a conflicted index through git; without it the reasoning still reads but nothing can be checked

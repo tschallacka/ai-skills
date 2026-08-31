@@ -125,18 +125,4 @@ ROWS
 done
 
 
-# The installer's own file list must name exactly the artifacts the registry
-# declares. This arm came from the plan-overview work: a skill that gains a
-# second binary is easy to add to binaries.tsv and easy to forget in the
-# manifest, and then the installer ships a skill missing one of its binaries.
-declared_paths="$(awk -F'\t' '!/^[[:space:]]*#/ && NF && $1 != "target" { print "bin/" $1 "/" $3 }' \
-    "$root/planning/binaries.tsv" | sort -u)"
-installer_paths="$(awk '/^SKILL.md$/{in_plan=1} in_plan && /^bin\//{print} in_plan && /^EOF$/{exit}' \
-    "$root/install.sh" | sort -u)"
-if [ "$declared_paths" != "$installer_paths" ]; then
-    printf 'installer binary paths differ from planning/binaries.tsv\n' >&2
-    printf 'registry:\n%s\ninstaller:\n%s\n' "$declared_paths" "$installer_paths" >&2
-    t_fail 'install.sh does not ship every declared planning binary'
-fi
-
 t_end

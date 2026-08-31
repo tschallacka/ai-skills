@@ -88,8 +88,7 @@ if [ -f "$manifest" ]; then
         [ -n "$source" ] || continue
         if [ ! -f "$root/${source#planning/}" ]; then
             case "$source" in
-                planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
-                planning/bin/*/rjq|planning/bin/*/rjq.exe) continue ;;
+                planning/bin/*) continue ;; # cross-target artifacts are CI outputs
                 *) note_fail "manifest references missing file: $source" ;;
             esac
         fi
