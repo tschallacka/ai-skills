@@ -658,14 +658,21 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
         drop(guard);
     }
 }
-fn announce_loop(port: u16, name: String, interval_secs: u64, beacon_port: u16, bcast: String) {
+fn announce_loop(
+    port: u16,
+    name: String,
+    host: String,
+    interval_secs: u64,
+    beacon_port: u16,
+    bcast: String,
+) {
     let started = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let beacon = format!(
-        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"port\":{},\"started\":{}}}",
-        name, port, started
+        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"host\":\"{}\",\"port\":{},\"started\":{}}}",
+        name, host, port, started
     );
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) {
         Ok(s) => s,
@@ -679,6 +686,37 @@ fn announce_loop(port: u16, name: String, interval_secs: u64, beacon_port: u16, 
         let _ = sock.send_to(beacon.as_bytes(), &addr);
         std::thread::sleep(Duration::from_secs(interval_secs));
     }
+}
+
+// The address a LAN peer should dial. std has no interface enumeration, so
+// this uses the classic route trick: a UDP connect to a routable address
+// sends no packet, but the kernel picks the primary interface's source, and
+// local_addr reports it. Falls back to the hostname, then to localhost - a
+// name that still tells a LAN peer "this is not an address, look elsewhere".
+fn announce_host() -> String {
+    if let Ok(h) = std::env::var("CHAT_ANNOUNCE_HOST") {
+        if !h.trim().is_empty() {
+            return h;
+        }
+    }
+    if let Ok(s) = std::net::UdpSocket::bind(("0.0.0.0", 0)) {
+        if s.connect("8.8.8.8:80").is_ok() {
+            if let Ok(local) = s.local_addr() {
+                if !local.ip().is_loopback() {
+                    return local.ip().to_string();
+                }
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("hostname").output() {
+        if out.status.success() {
+            let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+    }
+    "localhost".to_string()
 }
 
 fn main() {
@@ -746,9 +784,12 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(7780);
         let bcast = std::env::var("CHAT_BCAST").unwrap_or_else(|_| "255.255.255.255".into());
+        let host = announce_host();
         let name =
-            std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", "localhost"));
-        std::thread::spawn(move || announce_loop(actual, name, interval, beacon_port, bcast));
+            std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", host));
+        std::thread::spawn(move || {
+            announce_loop(actual, name, host, interval, beacon_port, bcast)
+        });
     }
 
     for stream in listener.incoming() {

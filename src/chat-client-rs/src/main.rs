@@ -490,17 +490,35 @@ fn discover(args: &[String]) {
     let mut buf = [0u8; 4096];
     while SystemTime::now() < deadline {
         match sock.recv_from(&mut buf) {
-            Ok((n, _addr)) => {
+            Ok((n, addr)) => {
                 let s = String::from_utf8_lossy(&buf[..n]).to_string();
                 if let Some(name) = json_field(&s, "name") {
-                    let key = format!("{}|{}", name, json_field(&s, "port").unwrap_or_default());
+                    // The beacon's own host field is what a peer should dial;
+                    // the packet's source address is the fallback when an
+                    // older server does not carry it. A bare "localhost"
+                    // names the server but is not connectable, so the
+                    // source address wins over it.
+                    let host = match json_field(&s, "host") {
+                        Some(h) if !h.is_empty() && h != "localhost" => h,
+                        _ => addr.ip().to_string(),
+                    };
+                    let port = json_field(&s, "port").unwrap_or_default();
+                    let key = format!("{}|{}|{}", name, host, port);
                     if !seen.contains(&key) {
                         seen.push(key.clone());
                         if json {
-                            println!("{}", s.trim());
+                            let mut out = s.trim().to_string();
+                            if json_field(&s, "host").is_none() {
+                                out = format!(
+                                    "{},\"host\":\"{}\"",
+                                    &out[..out.len() - 1],
+                                    host
+                                );
+                                out.push('}');
+                            }
+                            println!("{}", out);
                         } else {
-                            println!("{}", key.replace('|', "  (port "));
-                            // print with closing paren
+                            println!("{}  (port {}, host {})", name, port, host);
                         }
                     }
                 }
