@@ -204,6 +204,154 @@ impl Session {
 /// Fill missing command options from the session (if a session is active).
 /// Returns (server, nick) with the session's values where the caller left them
 /// empty, and whether the session was consulted.
+// ---- server resolution ----------------------------------------------------
+// One ladder, tried in order until something answers a TCP connect:
+//   1. an explicit --server (used as-is; failures surface at connect)
+//   2. the session's saved server
+//   3. the last-discovered cache (fast track, most recent first)
+//   4. a fresh UDP discovery pass, LAN addresses before loopback
+// Nothing at the end is an error the caller reports.
+
+fn tcp_alive(server: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    if let Ok(addrs) = server.to_socket_addrs() {
+        for a in addrs {
+            if std::net::TcpStream::connect_timeout(&a, Duration::from_millis(400)).is_ok() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn cache_file(state_dir: &std::path::Path) -> std::path::PathBuf {
+    state_dir.join("discovered-servers.txt")
+}
+
+fn cache_load(state_dir: &std::path::Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(t) = fs::read_to_string(cache_file(state_dir)) {
+        for line in t.lines() {
+            let s = line.trim();
+            if !s.is_empty() && !out.contains(&s.to_string()) {
+                out.push(s.to_string());
+            }
+        }
+    }
+    out
+}
+
+// Move the server to the front of the cache (most recent first), capped.
+fn cache_record(state_dir: &std::path::Path, server: &str) {
+    let mut list = cache_load(state_dir);
+    list.retain(|s| s != server);
+    list.insert(0, server.to_string());
+    list.truncate(8);
+    let body = list.join("\n");
+    let _ = fs::write(cache_file(state_dir), body + "\n");
+}
+
+// Listen for beacons and return candidate servers, LAN addresses before
+// loopback ones: a beacon whose host (or sender) is 127.0.0.1 is only
+// interesting when nothing routable announces.
+fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
+    let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, beacon_port)) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    sock.set_read_timeout(Some(Duration::from_secs(1))).ok();
+    let deadline = SystemTime::now() + Duration::from_secs(wait_s);
+    let mut lan: Vec<String> = Vec::new();
+    let mut local: Vec<String> = Vec::new();
+    let mut buf = [0u8; 4096];
+    while SystemTime::now() < deadline {
+        match sock.recv_from(&mut buf) {
+            Ok((n, addr)) => {
+                let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                let port = match json_field(&s, "port") {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let beacon_host = json_field(&s, "host").unwrap_or_default();
+                let host = if !beacon_host.is_empty() && beacon_host != "localhost" {
+                    beacon_host
+                } else {
+                    addr.ip().to_string()
+                };
+                let cand = format!("{}:{}", host, port);
+                let is_local =
+                    addr.ip().is_loopback() || host == "localhost" || host.starts_with("127.");
+                let seen = lan.contains(&cand) || local.contains(&cand);
+                if !seen {
+                    if is_local {
+                        local.push(cand);
+                    } else {
+                        lan.push(cand);
+                    }
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    lan.extend(local);
+    lan
+}
+
+// The resolution ladder; returns the server to dial.
+fn resolve_server(
+    arg_server: &str,
+    sess_server: &str,
+    state_dir: &std::path::Path,
+    no_session: bool,
+) -> String {
+    // An explicit --server wins without probing; failures surface at connect.
+    if !arg_server.is_empty() {
+        return arg_server.to_string();
+    }
+    // The session's saved address is probed: one that no longer answers must
+    // not stand between the caller and the ladder below.
+    if !no_session && !sess_server.is_empty() && tcp_alive(sess_server) {
+        return sess_server.to_string();
+    }
+    if !no_session && !sess_server.is_empty() {
+        eprintln!(
+            "chat-client-rs: session server {} is not answering; trying known servers",
+            sess_server
+        );
+    }
+    for cand in cache_load(state_dir) {
+        if tcp_alive(&cand) {
+            cache_record(state_dir, &cand);
+            return cand;
+        }
+    }
+    let beacon_port: u16 = std::env::var("AI_CHAT_BEACON_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_BEACON_PORT);
+    let cands = discover_candidates(beacon_port, 3);
+    if cands.is_empty() {
+        eprintln!(
+            "chat-client-rs: no announce beacon received on UDP port {} within 3s",
+            beacon_port
+        );
+    }
+    for cand in cands {
+        if tcp_alive(&cand) {
+            cache_record(state_dir, &cand);
+            return cand;
+        }
+    }
+    // Nothing answered: dial the session address anyway so the caller's own
+    // connect error names something the human saved rather than an empty
+    // string.
+    if no_session {
+        String::new()
+    } else {
+        sess_server.to_string()
+    }
+}
+
 fn apply_session(
     server: &str,
     nick: &str,
@@ -509,11 +657,7 @@ fn discover(args: &[String]) {
                         if json {
                             let mut out = s.trim().to_string();
                             if json_field(&s, "host").is_none() {
-                                out = format!(
-                                    "{},\"host\":\"{}\"",
-                                    &out[..out.len() - 1],
-                                    host
-                                );
+                                out = format!("{},\"host\":\"{}\"", &out[..out.len() - 1], host);
                                 out.push('}');
                             }
                             println!("{}", out);
@@ -539,14 +683,31 @@ fn json_field(s: &str, key: &str) -> Option<String> {
     let idx = s.find(&marker)?;
     let rest = &s[idx + marker.len()..];
     let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    if let Some(r) = rest.strip_prefix('"') {
+        // String value: read to the closing quote.
+        let end = r.find('"')?;
+        Some(r[..end].to_string())
+    } else {
+        // Bare literal (the beacon's port and started are numbers): read to
+        // the next delimiter.
+        let end = rest.find([',', '}'])?;
+        Some(rest[..end].trim().to_string())
+    }
 }
 
 fn send(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() {
+        eprintln!(
+            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+        );
+        std::process::exit(70);
+    }
+    let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() || o.text.is_empty() {
         eprintln!("chat-client-rs: send needs --server --nick --chan --text (or a saved session)");
         std::process::exit(64);
@@ -558,7 +719,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(70);
         }
     };
-    if !used_session {
+    if !session_current {
         save_session(state_dir, &server, &nick);
     }
     // drain to registration complete
@@ -656,7 +817,17 @@ fn read_last_id(
 /// channel's current end so later read/tail resume from "now".
 fn join_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() {
+        eprintln!(
+            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+        );
+        std::process::exit(70);
+    }
+    let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
         eprintln!("chat-client-rs: join needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
@@ -668,7 +839,7 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(70);
         }
     };
-    if !used_session {
+    if !session_current {
         save_session(state_dir, &server, &nick);
     }
     let _ = wait_for_welcome(&mut tls, &nick);
@@ -694,7 +865,17 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
 /// Leave a channel: send PART and drop the channel cursor from the session.
 fn leave_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() {
+        eprintln!(
+            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+        );
+        std::process::exit(70);
+    }
+    let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
         eprintln!("chat-client-rs: leave needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
@@ -706,7 +887,7 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(70);
         }
     };
-    if !used_session {
+    if !session_current {
         save_session(state_dir, &server, &nick);
     }
     let _ = wait_for_welcome(&mut tls, &nick);
@@ -723,7 +904,17 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
 
 fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() {
+        eprintln!(
+            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+        );
+        std::process::exit(70);
+    }
+    let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
         eprintln!("chat-client-rs: read needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
@@ -746,7 +937,7 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(70);
         }
     };
-    if !used_session {
+    if !session_current {
         save_session(state_dir, &server, &nick);
     }
     let _ = wait_for_welcome(&mut tls, &nick);
@@ -798,7 +989,17 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
 
 fn tail(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
-    let (server, nick, used_session) = apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() {
+        eprintln!(
+            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+        );
+        std::process::exit(70);
+    }
+    let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
         eprintln!("chat-client-rs: tail needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
@@ -810,7 +1011,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(70);
         }
     };
-    if !used_session {
+    if !session_current {
         save_session(state_dir, &server, &nick);
     }
     let _ = wait_for_welcome(&mut tls, &nick);
