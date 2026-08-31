@@ -86,7 +86,7 @@ write_manifest() {
 }
 
 global_env_path() {
-    printf '%s/.env\n' "${1:-${PLANS_ROOT:-$HOME/.plans}}"
+    printf '%s/.env\n' "${1:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}"
 }
 
 plan_env_path() {
@@ -171,7 +171,7 @@ write_global() {
 write_plan() {
     local plan_root plans_root planning_root global_file snapshot_repo
     plan_root=$(absolute_path "$1")
-    plans_root=$(absolute_path "${2:-${PLANS_ROOT:-$HOME/.plans}}")
+    plans_root=$(absolute_path "${2:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}")
     planning_root=$(cd "$(dirname "$0")/.." && pwd -P)
     global_file=$(global_env_path "$plans_root")
     # The repository that owns this plan's pre-mutation snapshots, decided once
@@ -210,7 +210,7 @@ write_plan() {
 
 check_manifests() {
     local plan_root="$1"
-    local plans_root="${2:-${PLANS_ROOT:-$HOME/.plans}}"
+    local plans_root="${2:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}"
     plan_root=$(absolute_path "$plan_root")
     plans_root=$(absolute_path "$plans_root")
     manifest_check "$(global_env_path "$plans_root")" \
@@ -269,7 +269,7 @@ case "${1:-}" in
     path)
         [ "$#" -ge 3 ] && [ "$#" -le 4 ] || usage
         case "$2" in
-            global) global_env_path "${4:-${PLANS_ROOT:-$HOME/.plans}}" ;;
+            global) global_env_path "${4:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}" ;;
             plan) plan_env_path "$3" ;;
             *) usage ;;
         esac
@@ -277,7 +277,7 @@ case "${1:-}" in
     print)
         [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
         check_manifests "$2" "${3:-}"
-        cat "$(global_env_path "${3:-${PLANS_ROOT:-$HOME/.plans}}")" "$(plan_env_path "$2")"
+        cat "$(global_env_path "${3:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}")" "$(plan_env_path "$2")"
         ;;
     *) usage ;;
 esac

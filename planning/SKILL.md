@@ -25,7 +25,7 @@ export PLANNING_SKILL_DIR
 ```
 
 Plans live under a **plans root**, resolved by `scripts/plan-root.sh` (see
-section 2): `PLANS_ROOT` if set, else `<project>/.plans`, else `~/.plans`. Set
+section 2): `PLANS_ROOT` if set, else `<project>/.plans`, else `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/plans`. Set
 `PLANS_ROOT` explicitly when automation must never prompt. Angle-bracket
 placeholders such as `<plan-directory>`, `<planname>`, `<goal>`, `<step>`,
 `<WNN>`, and `<text>` are literal tokens to be substituted with real values,
@@ -294,7 +294,7 @@ Create the plan under the user-owned `.plans/` root resolved by the helper:
 <plans-root>/<planname>/
 ```
 
-For a normal Unix home directory the default is `~/.plans/<planname>/`. Set
+For a normal Unix home directory the global default is `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/plans/<planname>/`. Set
 `PLANS_ROOT` to pin a different root (automation always sets it and never
 prompts). Keep the planning skill installation and durable plan storage
 separate.
@@ -323,11 +323,11 @@ PLANNING_SKILL_DIR="<installed-planning-skill-directory>"
 2. `<project>/.plans` when it is consistent with the skill (its `.env`
    records that `.plans` as the plans root) — default, never prompted.
 3. A global directory that already matches a format for this project:
-   `~/.plans/<owner>/<repo>` (from the git remote) or
-   `~/.plans/<user>/<projectdir>`. Recognition is purely by directory format;
+   `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/plans/<owner>/<repo>` (from the git remote) or
+   `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/plans/<user>/<projectdir>`. Recognition is purely by directory format;
    no marker file is written or read.
 4. Otherwise this is the first plan in the project: on an interactive
-   terminal the user is asked whether to store globally under `~/.plans` or
+   terminal the user is asked whether to store globally under the tsch-ai-skills XDG home or
    in the project's `./.plans`. When project storage is chosen the user is
    then asked whether to add `/.plans` to the project's `.gitignore`. On a
    non-interactive run the installer defaults to project storage and prints a
