@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::render::tiers::{emit_tier_table, Tier, TierController, TierPolicy};
 
 #[test]

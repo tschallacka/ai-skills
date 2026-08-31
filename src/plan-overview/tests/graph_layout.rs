@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::graph::layout_nodes;
 use plan_overview::plan::state::parse_state;
 

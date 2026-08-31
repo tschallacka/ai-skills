@@ -46,6 +46,10 @@ done
 
 # ── the expected set, derived from the rule rather than from the builder ─────
 declares_prod() { # <path>
+    # A fixture's bytes are test input, not a declaration: a captured render
+    # carries whatever marker its producer wrote. The same exemption is in
+    # installer/build-release.sh and tests/test-mode-markers.sh.
+    case "$1" in */tests/fixtures/*) return 1 ;; esac
     case "$(sed -n '1,25p' "$repo_root/$1" 2>/dev/null)" in
         *'# MODE: PROD'*|*'<!-- MODE: PROD -->'*) return 0 ;;
     esac

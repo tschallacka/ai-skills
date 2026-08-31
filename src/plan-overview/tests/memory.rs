@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::plan::state::{Identity, State};
 use plan_overview::render::shell::render_shell_with_stats;
 

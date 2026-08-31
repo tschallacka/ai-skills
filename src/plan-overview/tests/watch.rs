@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::watch::{
     coalesce_events, scan_plan_dir, snapshot, watch_plan_dir, ChangeEvent, DEBOUNCE_WINDOW,
 };

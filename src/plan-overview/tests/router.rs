@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::plan::state::parse_state;
 use plan_overview::render::router::{route, Route};
 

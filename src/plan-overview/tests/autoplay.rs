@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::autoplay::{active_states, autoplay_status, autoplay_subject};
 use plan_overview::plan::mode::{derive_mode, Mode};
 use plan_overview::plan::state::parse_state;

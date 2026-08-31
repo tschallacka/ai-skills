@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::serve::state_stream;
 use std::time::Duration;
 

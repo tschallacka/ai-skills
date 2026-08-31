@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::{coverage, findings, goal, graph, history, overview, tests, unit};
 use plan_overview::plan::state::parse_state;
 

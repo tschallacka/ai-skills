@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::plan::derive::{derive_counts, derive_geometry};
 use plan_overview::plan::state::parse_state;
 use plan_overview::plan::tree::read_plan_tree;

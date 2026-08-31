@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::history::{render_discarded, render_history, render_superseded};
 use plan_overview::plan::state::parse_state;
 

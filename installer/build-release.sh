@@ -57,6 +57,11 @@ version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".
 # these strings, and a test that plants one would otherwise ship itself.
 declares_prod() { # <path>
     [ -f "$repo_root/$1" ] || return 1
+    # A fixture's bytes are test input, not a declaration. A captured render
+    # carries whatever marker the thing that produced it wrote, so reading it
+    # as self-declaration ships the fixture. tests/test-mode-markers.sh exempts
+    # the same paths for the same reason.
+    case "$1" in */tests/fixtures/*) return 1 ;; esac
     case "$(sed -n '1,25p' "$repo_root/$1" 2>/dev/null)" in
         *'# MODE: PROD'*|*'<!-- MODE: PROD -->'*) return 0 ;;
     esac

@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::{goal::render_goal, overview::render_overview, unit::render_unit};
 use plan_overview::plan::state::parse_state;
 use plan_overview::render::router::{route, Route};

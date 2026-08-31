@@ -105,6 +105,9 @@ compiler_input() { # <path>
         # A crate under src/ is compiled into a shipped binary (CODE-STYLE 1b):
         # the file is never delivered, its content is.
         src/*/src/*.rs | src/*/Cargo.toml) return 0 ;;
+        # Assets are embedded into the binary with include_str!, so the same
+        # rule applies: the file is never delivered, its content is.
+        src/*/assets/*) return 0 ;;
     esac
     return 1
 }

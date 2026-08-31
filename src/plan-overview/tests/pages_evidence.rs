@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 use plan_overview::pages::{
     coverage::render_coverage, findings::render_finding, tests::render_test,
 };
