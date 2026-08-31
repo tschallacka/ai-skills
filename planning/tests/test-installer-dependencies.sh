@@ -6,8 +6,8 @@
 #
 # Usage: test-installer-dependencies.sh
 #
-# jq is made absent by running the installer under a PATH of symlinks to every
-# executable on the real PATH except jq, so the shipped runtime_tool_verify() is
+# rjq is made absent by running the installer under a PATH of symlinks to every
+# executable on the real PATH except rjq, so the shipped runtime_tool_verify() is
 # what decides, not a paraphrase of it.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
@@ -23,7 +23,7 @@ trap 'rm -rf "$temporary_root"' EXIT
 
 note_fail() { printf 'installer-deps: %s\n' "$1" >&2; t_record "$1"; }
 
-# A PATH without jq. Symlinking rather than copying keeps it cheap, and the
+# A PATH without rjq. Symlinking rather than copying keeps it cheap, and the
 # per-directory glob keeps it to what this machine actually has.
 jqless_bin="$temporary_root/bin"
 mkdir -p "$jqless_bin"
@@ -33,14 +33,14 @@ build_jqless_path() {
         [ -d "$dir" ] || continue
         for entry in "$dir"/*; do
             [ -x "$entry" ] || continue
-            [ "${entry##*/}" = jq ] && continue
+            [ "${entry##*/}" = rjq ] && continue
             ln -sf "$entry" "$jqless_bin/${entry##*/}" 2>/dev/null || true
         done
     done < <(printf '%s\n' "$PATH" | tr ':' '\n')
 }
 build_jqless_path
-if PATH="$jqless_bin" command -v jq >/dev/null 2>&1; then
-    printf 'installer-deps: UNCONFIGURED (jq could not be hidden from PATH)\n' >&2
+if PATH="$jqless_bin" command -v rjq >/dev/null 2>&1; then
+    printf 'installer-deps: UNCONFIGURED (rjq could not be hidden from PATH)\n' >&2
     exit 0
 fi
 
@@ -57,22 +57,18 @@ run_without_jq() {
     RUN_ERR="$(cat "$err")"
 }
 
-# ── --all: planning is blocked, the other four still install ─────────────────
+# ── --all: the bundled rjq works even when PATH has no rjq ───────────────────
 target="$temporary_root/all"
 mkdir -p "$target"
 run_without_jq --all --target "$target" --yes
-[ "$RUN_RC" -ne 0 ] || note_fail 'a blocked skill did not make the run exit non-zero'
-[ ! -e "$target/planning" ] || note_fail 'the blocked skill was written anyway'
+[ "$RUN_RC" -eq 0 ] || note_fail 'the bundled rjq did not make the run succeed'
+[ -e "$target/planning" ] || note_fail 'the planning skill was not written'
 for ready in project-specificies resource-limited-testing brainstorm post-implementation-review; do
     [ -f "$target/$ready/SKILL.md" ] \
         || note_fail "a hard requirement of planning blocked $ready as well"
 done
 case "$RUN_OUT" in
-    *'== Summary =='*'Skipped:   planning'*) ;;
-    *) note_fail "the summary did not report the blocked skill: $RUN_OUT" ;;
-esac
-case "$RUN_OUT" in
-    *"Installed: $target/brainstorm"*) ;;
+    *"Installed: $target/planning"*) ;;
     *) note_fail "the summary did not report what was installed: $RUN_OUT" ;;
 esac
 # The summary is one contiguous block on stdout; the diagnostics stay on stderr.
@@ -80,55 +76,12 @@ case "$RUN_ERR" in
     *'== Summary =='*) note_fail 'the summary leaked onto stderr' ;;
 esac
 
-# ── The replay command carries the run's target and flags, and works ─────────
-replay="$(printf '%s\n' "$RUN_OUT" | sed -n 's/^  \(.*--skill planning .*\)$/\1/p' | head -n 1)"
-[ -n "$replay" ] || note_fail 'the summary printed no replay command for the blocked skill'
-case "$replay" in
-    *"--target $target"*) ;;
-    *) note_fail "the replay dropped the target the user chose: $replay" ;;
-esac
-case "$replay" in
-    *--yes*) ;;
-    *) note_fail "the replay dropped --yes: $replay" ;;
-esac
-
-# Executed verbatim with jq present it must install planning. The exit status is
-# not asserted here: the planning permission step needs a tty, which this test
-# does not have; the YES_ALL run below covers the status.
-replay_target="$temporary_root/replay"
-mkdir -p "$replay_target"
-set +e
-eval "${replay/$target/$replay_target}" >/dev/null 2>&1 </dev/null
-set -e
-[ -f "$replay_target/planning/SKILL.md" ] \
-    || note_fail 'the printed replay command did not install planning'
-
-# ── Mutations: the assertions above must be able to fail ────────────────────
-mutated_target="$temporary_root/mutated"
-mkdir -p "$mutated_target"
-set +e
-eval "${replay/$target/$mutated_target}" >/dev/null 2>&1 </dev/null
-eval "${replay/--skill planning/--skill no-such-skill}" >/dev/null 2>&1 </dev/null
-bad_skill_rc=$?
-set -e
-[ -f "$mutated_target/planning/SKILL.md" ] \
-    || note_fail 'the replay ignored --target, so a broken target would go unnoticed'
-[ "$bad_skill_rc" -ne 0 ] || note_fail 'a replay naming an unknown skill still succeeded'
-
-# ── One requested skill, blocked: a refusal, not a silent no-op ──────────────
+# ── One requested skill succeeds without an external jq installation ─────────
 single="$temporary_root/single"
 mkdir -p "$single"
 run_without_jq --skill planning --target "$single" --yes
-[ "$RUN_RC" -ne 0 ] || note_fail 'blocking the only requested skill exited 0'
-[ -z "$(ls -A "$single")" ] || note_fail 'the refused single-skill run wrote files'
-case "$RUN_ERR" in
-    *'Nothing was installed'*) ;;
-    *) note_fail "the single blocked skill was not refused clearly: $RUN_ERR" ;;
-esac
-case "$RUN_OUT" in
-    *'1. install jq:'*) ;;
-    *) note_fail "the summary did not say how to install jq: $RUN_OUT" ;;
-esac
+[ "$RUN_RC" -eq 0 ] || note_fail 'the bundled rjq did not install the requested skill'
+[ -f "$single/planning/SKILL.md" ] || note_fail 'the requested skill was not written'
 
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf '%s\n' 'test-installer-dependencies: PASS'

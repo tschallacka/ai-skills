@@ -13,7 +13,7 @@
 #       [--status reported|confirmed] [--found-by <text>]
 #   add-planning-bug.sh --help
 #
-# The file follows the bug-report skill's schema, so its jq recipes read a plan's
+# The file follows the bug-report skill's schema, so its rjq recipes read a plan's
 # register unchanged. Defects about the work the plan describes belong here; a
 # defect in the planning skill itself belongs in the repository's own BUGS.json.
 
@@ -84,8 +84,8 @@ plan_dir="$1"
 
 # ---- validate before touching the file -------------------------------------
 plan_require_directory "$plan_dir"
-command -v jq >/dev/null 2>&1 \
-    || plan_die "jq is required to write planning-bugs.json; the planning skill declares it in requires.tsv" 69
+command -v rjq >/dev/null 2>&1 \
+    || plan_die "rjq is required to write planning-bugs.json; the planning skill declares it in requires.tsv" 69
 [ -n "$bug_id" ] || plan_die "--id is required (a plan-local id such as PB-01)"
 [[ "$bug_id" =~ ^PB-[0-9]+$ ]] || plan_die "Bug id must match PB-NN: $bug_id"
 for field in title reproduce observed expected; do
@@ -109,9 +109,9 @@ esac
 
 register="$plan_dir/planning-bugs.json"
 if [ -f "$register" ]; then
-    jq -e . "$register" >/dev/null 2>&1 \
+    rjq -e . "$register" >/dev/null 2>&1 \
         || plan_die "$register is not valid JSON; repair it before appending" 65
-    if jq -e --arg id "$bug_id" 'any(.bugs[]?; .id == $id)' "$register" >/dev/null 2>&1; then
+    if rjq -e --arg id "$bug_id" 'any(.bugs[]?; .id == $id)' "$register" >/dev/null 2>&1; then
         plan_die "$bug_id is already recorded in planning-bugs.json; use a new id, or edit that entry" 73
     fi
 fi
@@ -119,7 +119,7 @@ fi
 plan_git_snapshot "$plan_dir"
 
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# The current register, or an empty object on first use. Not /dev/null: jq given
+# The current register, or an empty object on first use. Not /dev/null: rjq given
 # no input never runs the filter and writes nothing at all, which produced a
 # zero-byte register and still reported success.
 if [ -f "$register" ]; then
@@ -128,8 +128,8 @@ else
     current='{}'
 fi
 # --arg everywhere: a title or a reproduction holding a quote, a backslash or a
-# brace is ordinary here, and jq is what makes it survive into the file intact.
-jq --arg id "$bug_id" --arg title "$title" --arg status "$status" \
+# brace is ordinary here, and rjq is what makes it survive into the file intact.
+rjq --arg id "$bug_id" --arg title "$title" --arg status "$status" \
    --arg severity "$severity" --arg priority "$priority" \
    --arg reproduce "$reproduce" --arg observed "$observed" --arg expected "$expected" \
    --arg found_by "$found_by" --arg now "$now" '
@@ -149,10 +149,10 @@ JSON
 
 # A writer that reports success having written nothing is worse than one that
 # fails: the caller believes the defect is recorded. The emptiness check is
-# ours, not jq's: jq -e on empty input exits 0 through 1.6 and 4 from 1.7, so
-# a guard keyed on that status flips with the jq version. Read the result back.
+# ours, not rjq's: rjq -e on empty input exits 0 through 1.6 and 4 from 1.7, so
+# a guard keyed on that status flips with the rjq version. Read the result back.
 [ -s "$register" ] || plan_die "wrote $register but $bug_id is not in it; the register may be damaged" 70
-jq -e --arg id "$bug_id" 'any(.bugs[]?; .id == $id)' "$register" >/dev/null 2>&1 \
+rjq -e --arg id "$bug_id" 'any(.bugs[]?; .id == $id)' "$register" >/dev/null 2>&1 \
     || plan_die "wrote $register but $bug_id is not in it; the register may be damaged" 70
 
 printf 'Recorded %s in %s\n' "$bug_id" "${register#"$plan_dir"/}"

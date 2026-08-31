@@ -199,7 +199,7 @@ assert_eq 'a malformed token is a usage error, not a silent full read' "$?" '2'
 # It used to do that with ${var//$'"'/...}, which bash 3.2 cannot parse at all
 # (PORTABILITY.md: pattern-substitution-quote), so on the floor every json read
 # died instead of returning a document. Pin the escaped forms directly rather
-# than through jq, which is not guaranteed present.
+# than through rjq, which is not guaranteed present.
 printf '%s\n' '| AR-ESC | a backslash \ and a "quoted" phrase | N/A | open | N/A |' >> "$review"
 escaped="$("$reader" read --plan-dir "$plan" --document adversarial-review --read-only \
     --max-records 100000 --format json)"

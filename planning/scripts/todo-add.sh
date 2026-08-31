@@ -27,10 +27,10 @@ esac
 
 id="" title="" parent="null" priority="normal" status="open" blocked_on="null" detail="null"
 declare -a refs=()
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-running when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it reads and writes the JSON registers); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -54,7 +54,7 @@ done
 # Duplicate ids are refused before anything is written: appending first and
 # validating after left a poisoned register behind every refused add.
 items_key="tasks"
-jq -e --arg id "$id" --arg k "$items_key" \
+rjq -e --arg id "$id" --arg k "$items_key" \
     '.tasks[] | select(.id == $id)' "$file" >/dev/null 2>&1 && {
     printf '%s: duplicate ids\n' "${0##*/}" >&2
     exit 65
@@ -63,10 +63,10 @@ jq -e --arg id "$id" --arg k "$items_key" \
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 refs_json="[]"
 if [ "${#refs[@]}" -gt 0 ]; then
-    refs_json="$(printf '%s\n' "${refs[@]}" | jq -R . | jq -s .)"
+    refs_json="$(printf '%s\n' "${refs[@]}" | rjq -R . | rjq -s .)"
 fi
 
-jq --arg id "$id" --arg title "$title" --arg now "$now" \
+rjq --arg id "$id" --arg title "$title" --arg now "$now" \
    --argjson parent "$parent" --arg priority "$priority" --arg status "$status" \
    --argjson blocked_on "$blocked_on" --argjson detail "$detail" --argjson refs "$refs_json" '
    .tasks += [{id: $id, title: $title, status: $status, priority: $priority,

@@ -37,7 +37,7 @@ plan_validate_artifact_comparisons() {
         return 0
     }
     local legal nondet companion section artifact comparison extension reason line
-    legal=" $(jq -r '.comparisons | keys[]' "$artifact_comparison_registry" 2>/dev/null | tr '\n' ' ')"
+    legal=" $(rjq -r '.comparisons | keys[]' "$artifact_comparison_registry" 2>/dev/null | tr '\n' ' ')"
     [ "$legal" != " " ] || { fail "Artifact comparison registry lists no comparisons"; return 0; }
 
     while IFS= read -r companion; do
@@ -73,7 +73,7 @@ plan_validate_artifact_comparisons() {
             extension="${artifact##*.}"
             [ "$extension" != "$artifact" ] || continue
             extension="$(printf '%s' "$extension" | tr '[:upper:]' '[:lower:]')"
-            reason="$(jq -r --arg e "$extension" '.nondeterministic_extensions[$e] // empty' \
+            reason="$(rjq -r --arg e "$extension" '.nondeterministic_extensions[$e] // empty' \
                 "$artifact_comparison_registry" 2>/dev/null)"
             [ -n "$reason" ] || continue
             fail "$companion: $artifact cannot be compared 'exact' -- $reason. Use one of the non-exact comparisons in artifact-comparisons.json and say what tolerance the proof allows."

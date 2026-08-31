@@ -97,9 +97,9 @@ in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
 | Tool | Status |
 |---|---|
 | `bash`, POSIX `coreutils`, `awk`, `sed`, `grep`, `git` | assumed present |
-| `jq` | allowed — the furthest a runtime dependency may go. Declared `hard` in `planning/requires.tsv`, so the installer refuses to install *that skill* up front with a per-platform hint rather than failing halfway |
+| `rjq` | allowed — the furthest a runtime dependency may go. Declared `hard` in `planning/requires.tsv`, so the installer refuses to install *that skill* up front with a per-platform hint rather than failing halfway |
 | `openssl` | **no longer used, and no longer declared**. It was the last rung of the planning skill's SHA-256 chain and its only source of random bytes. Both are now the shipped `plan-crypt` binary (section 1b), so the `soft` row left `planning/requires.tsv`: a static binary asks the target machine for nothing. A new `openssl` call needs the row back, and `installer/build.sh` fails the build if one appears without it |
-| `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `jq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
+| `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `rjq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 
 This table governs what the target machine must already **have**. It does not
@@ -128,15 +128,15 @@ may depend on it. It is declared `soft` rather than `hard` because
 enforced and still limits CPU through `nice` and `cpulimit`. That is the line
 between the two strengths, and it is also why `python3` stays banned rather than
 guarded: a guard is unacceptable when it turns a documented feature into one that
-silently does not exist, and `jq` is `hard` for the planning skill for exactly
+silently does not exist, and `rjq` is `hard` for the planning skill for exactly
 that reason — `validate-plan.sh` exits 69 without it.
 
 `python3` is banned here rather than merely guarded because a guard turns a
 documented feature into one that silently does not exist on a machine without
-the interpreter. Text and line processing goes to `awk`; JSON goes to `jq`.
+the interpreter. Text and line processing goes to `awk`; JSON goes to `rjq`.
 Neither of the two former python sites needed it: `install.sh`'s permission
-editors became `jq` (already guaranteed present — the permission step only runs
-when `planning` was selected, and `planning` requires `jq`), and
+editors became `rjq` (already guaranteed present — the permission step only runs
+when `planning` was selected, and `planning` requires `rjq`), and
 `plan-content.sh diff` became `awk`, which is its natural home since it is
 parsing `git diff -U0` hunk headers line by line.
 
@@ -840,7 +840,7 @@ each of the failures listed here was eventually caught.
 `planning/document-sections.json`, `coupling.tsv` and `planning/PACKAGE-MAP.tsv`
 exist because scraping prose or source for structure resolved 29 of 36 sections
 and reported success. If a check needs to know something about the code, record
-it as data and read it with `jq` or `cut`; scan only for what a registry cannot
+it as data and read it with `rjq` or `cut`; scan only for what a registry cannot
 hold.
 
 ---

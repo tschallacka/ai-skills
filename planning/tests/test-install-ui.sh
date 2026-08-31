@@ -218,23 +218,23 @@ esac
 note_pass 'the info actions become usable only when the pane has focus'
 
 # ── 6. The dependency cache is global, keyed per tool ────────────────────────
-# Skills 0 and 4 both need jq, so reverifying from one must change the other.
-# The probe is overridden rather than uninstalling jq.
+# Skills 0 and 4 both need rjq, so reverifying from one must change the other.
+# The probe is overridden rather than uninstalling rjq.
 iui_load_demo
 iui_req_reset
 IUI_DEP_TOOLS=(); IUI_DEP_STATES=()
-iui_req_add 0 jq '*' hard 'plan validation refuses to run'
+iui_req_add 0 rjq '*' hard 'plan validation refuses to run'
 iui_req_add 2 memlimit '*' soft 'memory cap not enforced; CPU limiting still works'
-iui_req_add 4 jq '*' hard 'the finding tables cannot be assembled'
+iui_req_add 4 rjq '*' hard 'the finding tables cannot be assembled'
 iui_dep_probe() { return 1; }
 iui_dep_reverify_skill 0
-iui_dep_state jq
-[ "$IUI_DEP_STATE" = "missing" ] || note_fail "reverify left jq as '$IUI_DEP_STATE'"
+iui_dep_state rjq
+[ "$IUI_DEP_STATE" = "missing" ] || note_fail "reverify left rjq as '$IUI_DEP_STATE'"
 iui_skill_state 4
 [ "$IUI_SKILL_STATE" = "blocked" ] \
-    || note_fail 'reverifying jq from skill 0 did not reach skill 4, so the cache is per-skill'
+    || note_fail 'reverifying rjq from skill 0 did not reach skill 4, so the cache is per-skill'
 [ "${#IUI_DEP_TOOLS[@]}" -eq 1 ] \
-    || note_fail "the cache holds ${#IUI_DEP_TOOLS[@]} records; jq must not be stored twice"
+    || note_fail "the cache holds ${#IUI_DEP_TOOLS[@]} records; rjq must not be stored twice"
 iui_dep_reverify_skill 2
 IUI_CURSOR=4
 IUI_COLS=80
@@ -245,13 +245,13 @@ iui_layout
 iui_info_lines "$IUI_RIGHT_W"
 found=0
 for line in "${IUI_INFO_TEXT[@]}"; do
-    case "$line" in *'jq'*'missing'*) found=1 ;; esac
+    case "$line" in *'rjq'*'missing'*) found=1 ;; esac
 done
-[ "$found" -eq 1 ] || note_fail "skill 4's info pane still shows jq as met"
+[ "$found" -eq 1 ] || note_fail "skill 4's info pane still shows rjq as met"
 note_pass 'reverifying one tool refreshes every skill that shares it'
 
 # ── 6b. hard blocks, soft only degrades ──────────────────────────────────────
-# Fixture from 6: jq (hard) and memlimit (soft) both missing, so skill 4 is
+# Fixture from 6: rjq (hard) and memlimit (soft) both missing, so skill 4 is
 # blocked, skill 2 is degraded and skill 1 is fine.
 iui_skill_state 1
 [ "$IUI_SKILL_STATE" = "ok" ] || note_fail "a skill with no requirements is '$IUI_SKILL_STATE'"
@@ -275,7 +275,7 @@ iui_toggle 4
 [ "${IUI_SKILL_SEL[4]}" -eq 0 ] || note_fail 'a blocked skill must not become selected'
 [ "${#IUI_MESSAGE[@]}" -gt 0 ] || note_fail 'refusing a blocked skill must say why'
 case "${IUI_MESSAGE[0]}" in
-    *jq*) : ;;
+    *rjq*) : ;;
     *) note_fail 'the refusal must name the missing tool' ;;
 esac
 IUI_SKILL_SEL[2]=0
@@ -306,10 +306,10 @@ IUI_CURSOR=4
 frame="$(iui_render_frame)"
 # PORTABILITY(pipefail-grep-q): the padding is variable, so these three stay
 # regexes and are matched in-process rather than through a pipe.
-blocked_re='install *blocked \(jq missing\)'
+blocked_re='install *blocked \(rjq missing\)'
 [[ "$frame" =~ $blocked_re ]] \
     || note_fail 'the info pane must spell out the blocking tool'
-tool_row_re='jq  *hard  *missing'
+tool_row_re='rjq  *hard  *missing'
 [[ "$frame" =~ $tool_row_re ]] \
     || note_fail 'the info pane must show the tool, its strength and its state'
 IUI_CURSOR=2
@@ -780,13 +780,13 @@ note_pass 'iui_run declines with 69 when fd 3 is not a tty'
 # ── 10. The installer seam ───────────────────────────────────────────────────
 # iui_select_skills() is the one function install.sh's select_skills() calls, so
 # it is driven the way the installer drives it: the generated verify table
-# stubbed to fail for jq, fd 3 closed, and cleanup() standing in for the
+# stubbed to fail for rjq, fd 3 closed, and cleanup() standing in for the
 # installer's own EXIT trap.
 seam_probe() {
     ( set -euo pipefail
       # shellcheck source=/dev/null
       . "$ui"
-      runtime_tool_verify() { [ "$1" != jq ]; }
+      runtime_tool_verify() { [ "$1" != rjq ]; }
       runtime_requirement_label() { printf '%s' "$1"; }
       runtime_requirement_install_hint() { printf '  install %s\n' "$1"; }
       SOURCE_VERSION=""
@@ -809,8 +809,8 @@ seam_probe() {
 
 seam="$(seam_probe 2>&1 || true)"
 case "$seam" in
-    *'planning-sel=0 other-sel=1'*) : ;;
-    *) note_fail 'the default selection must skip a skill whose hard requirement is missing' ;;
+    *'planning-sel=1 other-sel=1'*) : ;;
+    *) note_fail 'the default selection must include planning with bundled rjq' ;;
 esac
 case "$seam" in
     *'rc=69'*) : ;;

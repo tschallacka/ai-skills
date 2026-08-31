@@ -12,7 +12,7 @@
 # script that unticks and never ticks.
 #
 # This file is shipped, so it holds to the shipped-runtime dependency rule in
-# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, jq only. No python3.
+# CODE-STYLE.md §1: bash, POSIX coreutils, awk, sed, grep, rjq only. No python3.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh

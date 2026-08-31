@@ -4,11 +4,11 @@
 # filtered set, report what is open or what changed, count, or name the next id.
 #
 # The writers went through helpers from the start; reading did not, so every
-# caller wrote its own jq at the call site and every caller could get it wrong.
+# caller wrote its own rjq at the call site and every caller could get it wrong.
 # Two did in one session (T60): reading .todos instead of .tasks reported a
 # register as nearly empty while an open task sat in the other array, and a
 # hand-rolled next-id crashed on the existing id T1e, which reg_next_id has
-# always handled. jq stays the reading language (T41); it is written once here,
+# always handled. rjq stays the reading language (T41); it is written once here,
 # where a test can hold it, instead of once per caller.
 #
 # Usage:
@@ -21,7 +21,7 @@
 #
 # The register file comes from BUGS_JSON / TODO_JSON, or --file PATH.
 #
-# Exit codes: 64 bad invocation, 66 register missing, 69 jq missing, 1 no match
+# Exit codes: 64 bad invocation, 66 register missing, 69 rjq missing, 1 no match
 # for show.
 
 set -euo pipefail
@@ -93,19 +93,19 @@ jq_args=(--arg status "$status" --arg priority "$priority"
 case "$command" in
     show)
         [ -n "$id" ] || usage
-        __k="$items_key" jq -e --arg id "$id" '.[env.__k][] | select(.id == $id)' "$file" || {
+        __k="$items_key" rjq -e --arg id "$id" '.[env.__k][] | select(.id == $id)' "$file" || {
             printf '%s: no %s entry with id %s in %s\n' "${0##*/}" "$kind" "$id" "$file" >&2
             exit 1
         }
         ;;
     list)
-        __k="$items_key" jq -r "${jq_args[@]}" '
+        __k="$items_key" rjq -r "${jq_args[@]}" '
             .[env.__k] as $items | $items '"$select_expr"'
             | [.id, (.status // "-"), (.priority // "-"), (.severity // "-"), .title]
             | @tsv' "$file"
         ;;
     count)
-        __k="$items_key" jq -r "${jq_args[@]}" '
+        __k="$items_key" rjq -r "${jq_args[@]}" '
             [.[env.__k] '"$select_expr"'] | length' "$file"
         ;;
     next-id)
@@ -114,7 +114,7 @@ case "$command" in
     report)
         # Worst-first is the register's own sort order, so a report reads the
         # file as stored rather than imposing a second opinion on urgency.
-        __k="$items_key" jq -r "${jq_args[@]}" '
+        __k="$items_key" rjq -r "${jq_args[@]}" '
             .[env.__k] as $items
             | ($items | map(select((.status // "") | test("^(open|reported|confirmed|blocked|partly)$"))) ) as $live
             | ($since == "" or ((.updated_at // .created_at // "") >= $since)) as $_

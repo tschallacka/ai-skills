@@ -38,53 +38,53 @@ out="$(OVERVIEW_NOW=2026-08-22T1200Z bash "$state" --plan-dir "$plan")"
 
 # ---- every top-level key exists ----------------------------------------------
 for key in identity goals steps edges testingMarks coverage findings cycles reviewTarget generatedBy; do
-    jq -e --arg k "$key" 'has($k)' <<<"$out" >/dev/null \
+    rjq -e --arg k "$key" 'has($k)' <<<"$out" >/dev/null \
         || fail "top-level key '$key' missing from state JSON"
 done
 
 # ---- identity carries title, ui flag, review status ---------------------------
-jq -e '.identity.title == "State extraction fixture"' <<<"$out" >/dev/null \
+rjq -e '.identity.title == "State extraction fixture"' <<<"$out" >/dev/null \
     || fail "identity.title wrong"
-jq -e '.identity.uiAffected | startswith("yes") or startswith("no")' <<<"$out" >/dev/null \
+rjq -e '.identity.uiAffected | startswith("yes") or startswith("no")' <<<"$out" >/dev/null \
     || fail "identity.uiAffected missing"
 
 # ---- goals carry id, outcome, testing requirement -----------------------------
-jq -e '.goals | length == 1' <<<"$out" >/dev/null || fail "expected exactly one goal"
-jq -e '.goals[0].id == "01-build"' <<<"$out" >/dev/null || fail "goal id wrong"
-jq -e '(.goals[0].outcome | length) > 0' <<<"$out" >/dev/null \
+rjq -e '.goals | length == 1' <<<"$out" >/dev/null || fail "expected exactly one goal"
+rjq -e '.goals[0].id == "01-build"' <<<"$out" >/dev/null || fail "goal id wrong"
+rjq -e '(.goals[0].outcome | length) > 0' <<<"$out" >/dev/null \
     || fail "goal outcome missing"
-jq -e '.goals[0].testingRequirement | contains("yes")' <<<"$out" >/dev/null \
+rjq -e '.goals[0].testingRequirement | contains("yes")' <<<"$out" >/dev/null \
     || fail "per-goal testing requirement missing (AR-15)"
 
 # ---- steps carry instructions, criteria, status, unit, companion --------------
-jq -e '.steps | length == 2' <<<"$out" >/dev/null || fail "expected two steps"
-jq -e '[.steps[].unit] == ["W01","W02"]' <<<"$out" >/dev/null || fail "step units wrong order or value"
-jq -e '.steps[0].companion == "01-step-render-testing.md"' <<<"$out" >/dev/null \
+rjq -e '.steps | length == 2' <<<"$out" >/dev/null || fail "expected two steps"
+rjq -e '[.steps[].unit] == ["W01","W02"]' <<<"$out" >/dev/null || fail "step units wrong order or value"
+rjq -e '.steps[0].companion == "01-step-render-testing.md"' <<<"$out" >/dev/null \
     || fail "companion for 01-step-render missing"
-jq -e '.steps[1].companion == null' <<<"$out" >/dev/null || fail "unexpected companion on verify step"
-jq -e '.steps[0].instructions | length > 0' <<<"$out" >/dev/null || fail "instructions missing"
-jq -e '.steps[0].criteria | length > 0' <<<"$out" >/dev/null || fail "acceptance criteria missing"
+rjq -e '.steps[1].companion == null' <<<"$out" >/dev/null || fail "unexpected companion on verify step"
+rjq -e '.steps[0].instructions | length > 0' <<<"$out" >/dev/null || fail "instructions missing"
+rjq -e '.steps[0].criteria | length > 0' <<<"$out" >/dev/null || fail "acceptance criteria missing"
 
 # ---- dependency edges reference existing units --------------------------------
-jq -e '.edges | length == 1' <<<"$out" >/dev/null || fail "expected one edge"
-jq -e '.edges[0].from == "W02"' <<<"$out" >/dev/null || fail "edge from wrong"
-jq -e '.edges[0].to == "W01"' <<<"$out" >/dev/null || fail "edge to wrong"
+rjq -e '.edges | length == 1' <<<"$out" >/dev/null || fail "expected one edge"
+rjq -e '.edges[0].from == "W02"' <<<"$out" >/dev/null || fail "edge from wrong"
+rjq -e '.edges[0].to == "W01"' <<<"$out" >/dev/null || fail "edge to wrong"
 
 # ---- coverage rows present -----------------------------------------------------
-jq -e '.coverage | length >= 1' <<<"$out" >/dev/null || fail "coverage rows missing"
-jq -e '.coverage[0].units == "W01,W02"' <<<"$out" >/dev/null || fail "coverage units wrong"
+rjq -e '.coverage | length >= 1' <<<"$out" >/dev/null || fail "coverage rows missing"
+rjq -e '.coverage[0].units == "W01,W02"' <<<"$out" >/dev/null || fail "coverage units wrong"
 
 # ---- findings: empty live table still yields the array -------------------------
-jq -e '.findings | type == "array"' <<<"$out" >/dev/null || fail "findings array missing"
+rjq -e '.findings | type == "array"' <<<"$out" >/dev/null || fail "findings array missing"
 
 # ---- review baseline of two (T43e) --------------------------------------------
-jq -e '.reviewTarget == 2' <<<"$out" >/dev/null || fail "review target must be 2"
+rjq -e '.reviewTarget == 2' <<<"$out" >/dev/null || fail "review target must be 2"
 
 # ---- escaping: angle brackets survive as data, never break the JSON -----------
 "$BASH" "$scripts/add-adversarial-finding.sh" "$plan" AR-05 '<script>alert(1)</script>' 'escape it' resolved --work-unit W01 >/dev/null 2>&1 || true
 out="$(OVERVIEW_NOW=2026-08-22T1200Z bash "$state" --plan-dir "$plan")"
-jq -e '.findings | length >= 1' <<<"$out" >/dev/null || fail "finding not extracted after landing"
-if jq -e . <<<"$out" >/dev/null 2>&1; then :; else fail "state JSON broken after adversarial content landed"; fi
+rjq -e '.findings | length >= 1' <<<"$out" >/dev/null || fail "finding not extracted after landing"
+if rjq -e . <<<"$out" >/dev/null 2>&1; then :; else fail "state JSON broken after adversarial content landed"; fi
 
 [ "$FAILED" -eq 0 ] || exit 1
 printf '%s\n' 'test-overview-state: PASS'

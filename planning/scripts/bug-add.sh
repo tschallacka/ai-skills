@@ -29,10 +29,10 @@ esac
 
 title="" reproduce="" observed="" expected="" severity="major" priority="normal"
 status="reported" mechanism="null" parent="null" found_by="register writer" surfaces=""
-# jq is the ceiling of the required runtime: refuse with 69 rather than
+# rjq is the ceiling of the required runtime: refuse with 69 rather than
 # half-running when it is missing (mirrors validate-plan.sh).
-if ! command -v jq >/dev/null 2>&1; then
-    printf '%s: jq is required (it reads and writes the JSON registers); install jq and re-run\n' \
+if ! command -v rjq >/dev/null 2>&1; then
+    printf '%s: rjq is required (it reads and writes the JSON registers); install rjq and re-run\n' \
         "${0##*/}" >&2
     exit 69
 fi
@@ -47,7 +47,7 @@ while [ "$#" -gt 0 ]; do
         --severity) [ "$#" -ge 2 ] || exit 64; severity="$2"; shift 2 ;;
         --priority) [ "$#" -ge 2 ] || exit 64; priority="$2"; shift 2 ;;
         --status) [ "$#" -ge 2 ] || exit 64; status="$2"; shift 2 ;;
-        --mechanism) [ "$#" -ge 2 ] || exit 64; mechanism="$(printf '%s' "$2" | jq -Rs .)"; shift 2 ;;
+        --mechanism) [ "$#" -ge 2 ] || exit 64; mechanism="$(printf '%s' "$2" | rjq -Rs .)"; shift 2 ;;
         --parent) [ "$#" -ge 2 ] || exit 64; parent="\"$2\""; shift 2 ;;
         --found-by) [ "$#" -ge 2 ] || exit 64; found_by="$2"; shift 2 ;;
         --surfaces) [ "$#" -ge 2 ] || exit 64; surfaces="$2"; shift 2 ;;
@@ -61,10 +61,10 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 id="B$(reg_next_id bug "$file")"
 surfaces_json="[]"
 if [ -n "$surfaces" ]; then
-    surfaces_json="$(printf '%s' "$surfaces" | tr ',' '\n' | jq -R . | jq -s .)"
+    surfaces_json="$(printf '%s' "$surfaces" | tr ',' '\n' | rjq -R . | rjq -s .)"
 fi
 
-jq --arg id "$id" --arg title "$title" --arg now "$now" \
+rjq --arg id "$id" --arg title "$title" --arg now "$now" \
    --arg reproduce "$reproduce" --arg observed "$observed" --arg expected "$expected" \
    --arg severity "$severity" --arg priority "$priority" --arg status "$status" \
    --argjson mechanism "$mechanism" --argjson parent "$parent" \

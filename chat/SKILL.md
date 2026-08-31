@@ -261,7 +261,7 @@ chose would be worse than not asking, because the file would then look like a
 decision.
 
 The file is `key=value`, one per line, `#` comments — not JSON, because the bash
-helpers read it too and `jq` is this repository's ceiling for a runtime
+helpers read it too and `rjq` is this repository's ceiling for a runtime
 dependency:
 
 ```

@@ -18,13 +18,12 @@
 #              row sharing the id, so the installer warns once for the set
 #              instead of once per member. Ids must be unique across skills.
 #
-# Line-oriented TSV rather than JSON on purpose: jq is itself declared here, so a
-# format that needed jq to read it could not be read on the machine that is
-# missing it. awk and sed parse this.
+# Line-oriented TSV rather than JSON on purpose: this file says what the box must
+# already have, so a format needing a JSON reader to parse it could not be read
+# on a box that is missing one. awk and sed parse this.
+#
+# The JSON runtime (rjq) and the overview renderer (plan-overview) are SHIPPED as
+# prebuilt artifacts — see binaries.tsv — so they ask nothing of the target box
+# and are deliberately absent here.
 tool	condition	strength	why	group
 bash	*:*	hard	every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine
-jq	*:*	hard	reads the placeholder and state-change registries and edits agent permission config; validate-plan.sh refuses to run without it
-python3	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
-node	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
-perl	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes
-socat	*:*	soft	serve mode is unavailable without a local overview runtime	overview-runtimes

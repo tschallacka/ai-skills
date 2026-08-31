@@ -54,6 +54,26 @@ jobs:
       - name: Record the bash under test
         run: bash --version
 
+      - name: Build and expose the native rjq test binary
+        uses: dtolnay/rust-toolchain@1.97
+
+      - name: Add bundled rjq to PATH for the suite
+        shell: bash
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          case "$host" in
+            x86_64-unknown-linux-*) target=x86_64-unknown-linux-musl; dir=x86_64-unknown-linux-musl ;;
+            aarch64-unknown-linux-*) target=aarch64-unknown-linux-musl; dir=aarch64-unknown-linux-musl ;;
+            x86_64-apple-darwin) target=x86_64-apple-darwin; dir=x86_64-apple-darwin ;;
+            aarch64-apple-darwin) target=aarch64-apple-darwin; dir=aarch64-apple-darwin ;;
+            *) echo "::error::unsupported rjq test host: $host"; exit 1 ;;
+          esac
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          mkdir -p "planning/bin/$dir"
+          cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
+          echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
+
       - name: Install socat so the served-overview rung is exercised (B48)
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -130,6 +150,23 @@ jobs:
       - name: Put /bin first on PATH so bash resolves to system bash 3.2
         run: echo "/bin" >> "$GITHUB_PATH"
 
+      - name: Build and expose the native rjq test binary
+        uses: dtolnay/rust-toolchain@1.97
+
+      - name: Add bundled rjq to PATH for the bash 3.2 suite
+        shell: bash
+        run: |
+          case "$(uname -m)" in
+            x86_64) target=x86_64-apple-darwin ;;
+            arm64|aarch64) target=aarch64-apple-darwin ;;
+            *) echo "::error::unsupported macOS host: $(uname -m)"; exit 1 ;;
+          esac
+          rustup target add --toolchain 1.97.1 "$target"
+          rustup run 1.97.1 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          mkdir -p "planning/bin/$target"
+          cp "src/rjq/target/$target/release/rjq" "planning/bin/$target/rjq"
+          echo "$PWD/planning/bin/$target" >> "$GITHUB_PATH"
+
       - name: Record the bash under test (must be 3.2.x)
         run: |
           command -v bash
@@ -195,7 +232,7 @@ jobs:
             target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -307,7 +344,7 @@ jobs:
             target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -347,6 +384,83 @@ jobs:
             src/chat/target/${{ matrix.target }}/release/chat
             src/chat/target/${{ matrix.target }}/release/chat.exe
           if-no-files-found: error
+
+  rjq-binary:
+    name: rjq builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.required == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            required: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            required: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            required: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            required: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            required: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/rjq
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.97
+        with:
+          components: rustfmt, clippy
+
+      - name: Install the target for the crate toolchain
+        run: rustup target add --toolchain 1.97.1 "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/rjq
+        run: |
+          rustup run 1.97.1 cargo fmt --check
+          rustup run 1.97.1 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
+          rustup run 1.97.1 cargo test --target "${{ matrix.target }}"
+
+      - name: Build rjq
+        working-directory: src/rjq
+        run: rustup run 1.97.1 cargo build --release --target "${{ matrix.target }}"
+
+      - name: Run the built artifact
+        shell: bash
+        working-directory: src/rjq
+        run: |
+          bin="target/${{ matrix.target }}/release/rjq"
+          [ -x "$bin" ] || bin="$bin.exe"
+          output="$(printf '{"a":1}' | "$bin" '.a')"
+          [ "$output" = "1" ] || { echo "::error::rjq output was $output"; exit 1; }
+
+      - name: Stage the target artifact for suite jobs
+        shell: bash
+        run: |
+          mkdir -p "rjq-artifacts/${{ matrix.target }}"
+          if [ -f "src/rjq/target/${{ matrix.target }}/release/rjq" ]; then
+            cp "src/rjq/target/${{ matrix.target }}/release/rjq" \
+              "rjq-artifacts/${{ matrix.target }}/rjq"
+          else
+            cp "src/rjq/target/${{ matrix.target }}/release/rjq.exe" \
+              "rjq-artifacts/${{ matrix.target }}/rjq.exe"
+          fi
+
+      - name: Upload the target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rjq-${{ matrix.target }}
+          path: rjq-artifacts
+          if-no-files-found: error
+
   shellcheck:
     # Proves: no `error`-severity shellcheck finding exists in any tracked live
     # shell script, and reports the full finding count so it can be ratcheted.

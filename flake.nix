@@ -124,7 +124,6 @@
               runOne32
               pkgs.shellcheck
               pkgs.actionlint
-              pkgs.jq
               pkgs.git
               # The build toolchain for the crates under src/ (CODE-STYLE 1b).
               # This was development-only while nothing shipped was Rust; that
@@ -170,7 +169,6 @@
           benchmark = pkgs.mkShell {
             packages = [
               (pkgs.python3.withPackages (pythonPackages: [ pythonPackages.pyyaml ]))
-              pkgs.jq
               pkgs.shellcheck
             ];
           };

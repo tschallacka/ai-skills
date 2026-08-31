@@ -58,6 +58,8 @@ unshipped_reason() { # <skill> <path> → prints the reason, or nothing
         # are not, or every install would carry both copies.
         planning/scripts/lib/* | planning/scripts/build-plan-libs.sh)
             printf 'a compiler input; the compiled library is what ships\n' ;;
+        planning/bin/*)
+            printf 'a compiled artifact for another supported platform\n' ;;
         *)
             # Nothing else is exempt. Every file in a skill directory is in the
             # prod arm of skill_files() or its dev arm, so one in neither is a

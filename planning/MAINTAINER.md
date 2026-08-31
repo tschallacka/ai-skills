@@ -251,7 +251,7 @@ Rules 1–3 are the only entry points: arguments strengthen a qualifying span bu
 never qualify one on their own. It is **disqualified** regardless when —
 
 5. its last segment carries a never-executable data/markup extension (the
-   jq-matched list in `never-executable-extensions.json`);
+   rjq-matched list in `never-executable-extensions.json`);
 6. it ends in a `:line` / `#Lnn` citation;
 7. it is route- or prose-shaped (a leading `/` without a bin-like segment whose
    first token is not command-shaped, or a leading-`/` argument after a

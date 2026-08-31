@@ -89,6 +89,7 @@ if [ -f "$manifest" ]; then
         if [ ! -f "$root/${source#planning/}" ]; then
             case "$source" in
                 planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
+                planning/bin/*/rjq|planning/bin/*/rjq.exe) continue ;;
                 *) note_fail "manifest references missing file: $source" ;;
             esac
         fi

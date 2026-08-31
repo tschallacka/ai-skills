@@ -1,8 +1,14 @@
 # MODE: PROD
-# Prebuilt plan-overview artifacts shipped with the planning skill.
+# Prebuilt artifacts shipped with the planning skill: the plan-overview
+# renderer and the rjq JSON runtime. One row per target per binary.
 target	condition	binary	why
 x86_64-unknown-linux-musl	Linux:x86_64|amd64	plan-overview	Static 64-bit x86 Linux overview renderer
 aarch64-unknown-linux-musl	Linux:aarch64|arm64	plan-overview	Static 64-bit ARM Linux overview renderer
 x86_64-apple-darwin	Darwin:x86_64	plan-overview	Intel macOS overview renderer
 aarch64-apple-darwin	Darwin:arm64	plan-overview	Apple Silicon macOS overview renderer
 x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	plan-overview.exe	64-bit Windows and POSIX-layer overview renderer
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	rjq	Static 64-bit x86 Linux rjq-compatible runtime
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	rjq	Static 64-bit ARM Linux rjq-compatible runtime
+x86_64-apple-darwin	Darwin:x86_64	rjq	Intel macOS rjq-compatible runtime
+aarch64-apple-darwin	Darwin:arm64	rjq	Apple Silicon macOS rjq-compatible runtime
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	rjq.exe	64-bit Windows and POSIX-layer rjq-compatible runtime

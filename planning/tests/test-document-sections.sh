@@ -21,8 +21,8 @@ registry="$repo_root/planning/document-sections.json"
 source "$tests_dir/lib-test.sh"
 t_begin
 
-command -v jq >/dev/null 2>&1 || {
-    printf 'test-document-sections: UNCONFIGURED (jq) — the registry is JSON\n' >&2
+command -v rjq >/dev/null 2>&1 || {
+    printf 'test-document-sections: UNCONFIGURED (rjq) — the registry is JSON\n' >&2
     exit 0
 }
 [ -f "$registry" ] || t_fail "the section registry is missing: $registry"
@@ -32,7 +32,7 @@ for kind in plan goal step testing review; do
     list="$(sed -n "s/^        $kind) valid=\"\([^\"]*\)\".*/\1/p" \
         "$scripts_dir/plan-document-lib.sh")"
     for section in $list; do
-        shape="$(jq -r --arg k "$kind" --arg s "$section" \
+        shape="$(rjq -r --arg k "$kind" --arg s "$section" \
             '.documents[$k][$s].shape // "UNREGISTERED"' "$registry")"
         case "$shape" in
             narrative|empty) ;;
@@ -92,7 +92,7 @@ while IFS="$(printf '\t')" read -r key shape heading; do
         t_fail "$key is $seen in the document but document-sections.json records $shape"
     fi
 done <<REGISTRY
-$(jq -r '.documents | to_entries[] | .key as $k | .value | to_entries[]
+$(rjq -r '.documents | to_entries[] | .key as $k | .value | to_entries[]
          | "\($k)/\(.key)\t\(.value.shape)\t\(.value.heading)"' "$registry")
 REGISTRY
 [ "$checked" -ge 30 ] \
@@ -123,7 +123,7 @@ t_assert_eq 'every section-form label yields an id-and-heading pair' "$pair_coun
 while IFS="$(printf '\t')" read -r key heading; do
     [ -n "${key:-}" ] || continue
     kind="${key%%/*}"; section="${key#*/}"
-    recorded="$(jq -r --arg k "$kind" --arg s "$section" \
+    recorded="$(rjq -r --arg k "$kind" --arg s "$section" \
         '.documents[$k][$s].heading // "UNREGISTERED"' "$registry")"
     case "$recorded" in
         UNREGISTERED) t_fail "$key is a section-form target with no entry in document-sections.json" ;;

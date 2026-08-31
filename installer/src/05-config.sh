@@ -45,7 +45,7 @@ SKILL_DESCRIPTIONS=(
     'Caps CPU and memory for demanding tool runs.'
     'Shapes an idea into a recorded, agreed picture before planning.'
     'After-the-fact review and proposed fixes for built code.'
-    'A nested queue of work in one JSON file, read with jq.'
+    'A nested queue of work in one JSON file, read with rjq.'
     'Defects with their reproduction, mechanism and verification, in JSON.'
     'IRC-basis agent chat: channels, deltas, live tails; runtime falls back.'
     'Separate checkouts so parallel work and long verifications cannot collide.'
@@ -82,7 +82,7 @@ Skip it for small or fully specified changes, where the discussion costs more th
 The implementer analyses its own work, an independent agent proposes alternatives, and a critical agent attacks both.
 It ends in concrete proposed fixes rather than a verdict.
 Not a substitute for the pre-implementation adversarial review, which asks a different question: this one sees the code that exists.'
-    'A nested queue of work in one JSON file, read and written with jq.
+    'A nested queue of work in one JSON file, read and written with rjq.
 For work that outlives the conversation and must survive a restart, a handoff or a compaction.
 Every task carries its status and its detail, so a cold reader knows what was intended and what is left.
 Not for the steps of a task already in progress, and not for defects -- those belong in the bug register.'

@@ -9,11 +9,11 @@
 # reg_findings <kind> <file>: print every structural finding as one line.
 # kind is "bug" or "todo". Empty output means the register is sound.
 
-# jq is the ceiling of the required runtime; every public helper refuses with
+# rjq is the ceiling of the required runtime; every public helper refuses with
 # 69 rather than half-writing a register when it is missing.
 reg_require_jq() {
-    command -v jq >/dev/null 2>&1 || {
-        printf 'register: jq is required (it reads and writes the JSON registers); install jq and re-run\n' >&2
+    command -v rjq >/dev/null 2>&1 || {
+        printf 'register: rjq is required (it reads and writes the JSON registers); install rjq and re-run\n' >&2
         exit 69
     }
 }
@@ -21,7 +21,7 @@ reg_require_jq() {
 reg_findings() {
     reg_require_jq
     local kind="$1" file="$2"
-    jq -r --arg kind "$kind" '
+    rjq -r --arg kind "$kind" '
         def st_enum:
             if $kind == "bug"
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
@@ -72,12 +72,12 @@ reg_sort() {
     local kind="$1" file="$2" tmp
     tmp="$(mktemp "${TMPDIR:-/tmp}/register-sort.XXXXXX")"
     if [ "$kind" = bug ]; then
-        jq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
+        rjq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
             def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
             .bugs |= sort_by(prank, srank, (.id | idnum))' "$file" > "$tmp"
     else
-        jq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
+        rjq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
             def srank: {open:0, blocked:1, partly:2, decided:3, done:4, obsolete:5}[.status // "open"] // 6;
             .tasks |= sort_by(srank, prank, (.id | idnum))' "$file" > "$tmp"
@@ -89,8 +89,8 @@ reg_sort() {
 reg_next_id() {
     local kind="$1" file="$2" prefix="B"
     [ "$kind" = todo ] && prefix="T"
-    jq -r --arg p "$prefix" '
-        [(if $p == "B" then .bugs else .tasks end)[].id | scan("^[A-Z]*(\\d+)$") | .[0] | tonumber] | max // 0 | . + 1
+    rjq -r --arg p "$prefix" '
+        [(if $p == "B" then .bugs else .tasks end)[].id | capture("^[A-Z]*(?<number>\\d+)$").number | tonumber] | max // 0 | . + 1
     ' "$file"
 }
 
