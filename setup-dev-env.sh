@@ -6,8 +6,9 @@
 # committed, and the skills look for compiled helpers that are not there. The
 # suite still passes, because every one of them degrades honestly — which is
 # exactly what hides the fact that the compiled path is never being exercised.
-# This builds each crate for THIS machine and drops the result where the skill
-# that owns it looks, so a local tree runs the same code a target does.
+# This builds each crate for THIS machine into one bin/<target triple> at the
+# repository root, which is where the skills look, so a local tree runs the same
+# code a target does.
 #
 # Usage:
 #   setup-dev-env.sh              # build everything for this host
@@ -53,9 +54,10 @@ require_nix() {
     cat >&2 <<'NONIX'
 setup-dev-env: nix is required and is not installed.
 
-The crates are built by the toolchain flake.nix pins (Rust 1.86.0 with the five
-house targets). Any other cargo produces a different artifact from the one CI
-and a release ship, so this script will not fall back to one.
+The crates are built by the toolchain flake.nix pins -- the newest stable rust
+the locked nixpkgs offers, with the five house targets. Any other cargo produces
+a different artifact from the one CI and a release ship, so this script will not
+fall back to one.
 
 Install nix, then re-run this script:
 
@@ -109,16 +111,21 @@ host_triple() {
     esac
 }
 
-# What to build, and who wants it: <crate> <binary> <destination skill dir>.
+# What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
+# repository root, not in a bin/ inside each skill. rjq alone is a hard
+# requirement of planning, todo and bug-report, so a per-skill layout means the
+# same binary copied three times -- or, as it was, shipped by one skill and
+# missing from the other two, which the installer then refuses to install.
+#
 # chat-proto is a library the two chat crates depend on and produces no binary,
 # so it is absent here and built as a dependency of theirs.
 plan() {
     cat <<'PLAN'
-rjq	rjq	planning
-plan-overview	plan-overview	planning
-plan-crypt	plan-crypt	planning
-chat-server-rs	chat-server-rs	chat
-chat-client-rs	chat-client-rs	chat
+rjq	rjq
+plan-overview	plan-overview
+plan-crypt	plan-crypt
+chat-server-rs	chat-server-rs
+chat-client-rs	chat-client-rs
 PLAN
 }
 
@@ -132,9 +139,9 @@ case "$triple" in *windows-msvc) exe='.exe' ;; esac
 
 if [ "$mode" = list ] || [ "$mode" = check ]; then
     printf 'host target: %s\n\n' "$triple"
-    while IFS="$(printf '\t')" read -r crate binary skill; do
+    while IFS="$(printf '\t')" read -r crate binary; do
         [ -n "$crate" ] || continue
-        dest="$skill/bin/$triple/$binary$exe"
+        dest="bin/$triple/$binary$exe"
         if [ "$mode" = check ]; then
             state=$([ -x "$repo_root/$dest" ] && echo present || echo MISSING)
             printf '  %-16s -> %-52s %s\n' "$crate" "$dest" "$state"
@@ -151,7 +158,7 @@ require_nix
 
 printf 'setup-dev-env: building for %s\n\n' "$triple"
 built=0 failed=''
-while IFS="$(printf '\t')" read -r crate binary skill; do
+while IFS="$(printf '\t')" read -r crate binary; do
     [ -n "$crate" ] || continue
     src="$repo_root/src/$crate"
     [ -f "$src/Cargo.toml" ] || { printf '  %-16s no crate at src/%s; skipped\n' "$crate" "$crate"; continue; }
@@ -161,11 +168,11 @@ while IFS="$(printf '\t')" read -r crate binary skill; do
     if nix develop "$repo_root" --command \
         cargo build --release --manifest-path "$src/Cargo.toml" --target "$triple" \
         >"$repo_root/.setup-dev-env.log" 2>&1; then
-        dest_dir="$repo_root/$skill/bin/$triple"
+        dest_dir="$repo_root/bin/$triple"
         mkdir -p "$dest_dir"
         cp "$src/target/$triple/release/$binary$exe" "$dest_dir/$binary$exe"
         chmod +x "$dest_dir/$binary$exe"
-        printf 'ok -> %s/bin/%s/%s%s\n' "$skill" "$triple" "$binary" "$exe"
+        printf 'ok -> bin/%s/%s%s\n' "$triple" "$binary" "$exe"
         built=$((built + 1))
     else
         printf 'FAILED\n'
@@ -183,16 +190,13 @@ if [ -n "$failed" ]; then
     exit 70
 fi
 
-# rjq is called by name from the planning helpers, so a built copy that is not
-# on PATH still leaves the tree using whatever rjq the machine happens to have —
-# or none. Say so rather than assume the shell was configured.
+# plan_bin_dir finds this directory on its own, so nothing needs configuring for
+# the skills themselves. The export line is for a human's own shell.
 cat <<PATHNOTE
 
-The planning helpers invoke rjq by name, so put this tree's copy on PATH:
+The helpers put this directory on PATH themselves when they load, so rjq and
+plan-crypt resolve here with nothing further to do. For an interactive shell
+that wants them too:
 
-  export PATH="$repo_root/planning/bin/$triple:\$PATH"
-
-Check it resolves here rather than to another install:
-
-  command -v rjq
+  export PATH="$repo_root/bin/$triple:\$PATH"
 PATHNOTE
