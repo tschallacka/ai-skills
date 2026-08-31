@@ -20,9 +20,13 @@ tar -tzf "$repo_root/$tarball" | LC_ALL=C sort | while IFS= read -r path; do
     size="$(tar -xOf "$repo_root/$tarball" "$path" | wc -c | tr -d ' ')"
     printf '%s\t%s\n' "$path" "$size"
 done >>"$actual"
-printf 'tarball_bytes\t%s\n' "$(wc -c < "$repo_root/$tarball" | tr -d ' ')" >>"$actual"
+# The gzipped tarball's own size is deliberately NOT pinned: it varies with the
+# zlib and npm version on the machine, so it fails on a runner whose toolchain
+# differs from the one that wrote the baseline while the package is identical.
+# What ships, and how big each file is, are both content-derived and portable.
 cmp -s "$baseline" "$actual" || {
     printf 'npm package differs from owned baseline %s\n' "$baseline" >&2
+    diff -u "$baseline" "$actual" >&2 || true
     exit 1
 }
 
