@@ -68,8 +68,8 @@ jobs:
             aarch64-apple-darwin) target=aarch64-apple-darwin; dir=aarch64-apple-darwin ;;
             *) echo "::error::unsupported rjq test host: $host"; exit 1 ;;
           esac
-          rustup target add --toolchain 1.98 "$target"
-          rustup run 1.98 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add "$target"
+          cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$dir"
           cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
           echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
@@ -176,8 +176,8 @@ jobs:
             arm64|aarch64) target=aarch64-apple-darwin ;;
             *) echo "::error::unsupported macOS host: $(uname -m)"; exit 1 ;;
           esac
-          rustup target add --toolchain 1.98 "$target"
-          rustup run 1.98 cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
+          rustup target add "$target"
+          cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$target"
           cp "src/rjq/target/$target/release/rjq" "planning/bin/$target/rjq"
           echo "$PWD/planning/bin/$target" >> "$GITHUB_PATH"
@@ -266,7 +266,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
+        run: rustup target add "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/plan-crypt
@@ -381,7 +381,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Ensure the target standard library is installed
-        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
+        run: rustup target add "${{ matrix.target }}"
 
       - name: Install the musl C cross-toolchain (ring needs a C compiler)
         if: contains(matrix.target, 'linux-musl')
@@ -448,18 +448,18 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install the target for the crate toolchain
-        run: rustup target add --toolchain 1.98 "${{ matrix.target }}"
+        run: rustup target add "${{ matrix.target }}"
 
       - name: Format, lint and test
         working-directory: src/rjq
         run: |
-          rustup run 1.98 cargo fmt --check
-          rustup run 1.98 cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
-          rustup run 1.98 cargo test --target "${{ matrix.target }}"
+          cargo fmt --check
+          cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
+          cargo test --target "${{ matrix.target }}"
 
       - name: Build rjq
         working-directory: src/rjq
-        run: rustup run 1.98 cargo build --release --target "${{ matrix.target }}"
+        run: cargo build --release --target "${{ matrix.target }}"
 
       - name: Run the built artifact
         shell: bash
