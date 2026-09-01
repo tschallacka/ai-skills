@@ -1,42 +1,81 @@
 # Interactive-shell testing protocol
 
-This protocol verifies that an agent can operate an unfamiliar interactive
-terminal by observing the current screen and choosing the next action. It is
-not a transcript replay: the test must use the wrapper's observations,
-structured actions, and discovered element labels.
+This protocol verifies that an AI agent can start a fresh subworker and have
+that subworker operate unfamiliar interactive terminals by observing the
+current screen and choosing the next action. The subworker is the driver; no
+shell script may perform the interactive workflow on its behalf.
+
+The required test file is `/tmp/tmpfilename.txt`. The subworker must create it
+with `nano`, later find it through `mc`, edit it to `hello universe`, and read
+it through `less`. The workflow is not a transcript replay: the subworker must
+use the wrapper's observations, structured actions, and discovered element
+labels.
 
 ## Scope
 
-The isolated test covers one PTY wrapper session at a time and exercises:
+The agent-driven test covers separate PTY wrapper sessions and exercises:
 
-1. `nano` creates a new file and saves `Hello World`.
-2. `mc` discovers the file in its visible screen, selects it, and opens it
+1. The parent agent starts a fresh subworker with only the task and the
+   interactive-shell tool instructions.
+2. The subworker uses `nano` to create `/tmp/tmpfilename.txt` and saves
+   `Hello World`.
+3. The subworker uses `mc` to discover the file in its visible screen, selects
+   it, and opens it
    through the editor action (`F4`).
-3. The editor replaces the content with `hello universe` and handles the
+4. The editor replaces the content with `hello universe` and handles the
    overwrite prompt.
-4. `less` displays the resulting file and exits with `q`.
+5. `less` displays the resulting file and exits with `q`.
 
-The test uses a private temporary directory for all files and sockets. It must
-not write to the repository or to a user's real home directory.
+The wrapper's sockets and event logs use a private temporary directory. The
+agent scenario intentionally uses `/tmp/tmpfilename.txt` as its single named
+file and must remove it during cleanup. It must not write to the repository or
+to a user's real home directory.
 
 ## Preconditions
 
 Run from the repository root in the Nix development environment. The isolated
 crate must have been built with the current Rust toolchain, and `nano`, `mc`,
 `less`, and `rjq` must be available. If any interactive dependency is missing,
-the exploration test reports `SKIP` rather than claiming success.
+the agent test cannot claim success.
 
 ## Procedure
 
-Build and run the observation-driven test:
+Build the isolated tool and its protocol tests:
 
 ```sh
 nix develop .#default --command cargo test --locked \
   --manifest-path src/interactive-shell/Cargo.toml
-nix develop .#default --command tests/test-interactive-shell-exploration.sh
 ```
 
-For a resource-capped validation run, use the repository's test wrapper:
+Then have the parent AI agent start a fresh subworker. The subworker prompt
+must identify `/tmp/tmpfilename.txt` as the goal, provide access to the
+interactive-shell wrapper and input command, and require the subworker to
+inspect `observe` output before every consequential action. The parent must
+collect the subworker's action log and observations as evaluation evidence.
+
+The subworker must independently launch `nano`, use `mc` to locate the file by
+its observed label/elements, edit it, handle save and overwrite prompts from
+observed screens, then launch `less`, verify the visible content, and exit it
+based on its observed state. The parent must reject a run where a shell script
+sends the workflow's keys, where the subworker is given a fixed transcript, or
+where the subworker cannot show the observations that justified its actions.
+
+The existing shell exploration script is only a deterministic fixture smoke
+test for PTY integration. It is useful for regression checking, but it is not
+evidence that an AI subworker can perform this protocol.
+
+### Current evidence boundary
+
+The latest successful run exercised the wrapper against real Linux `nano`,
+`mc`, and `less` processes, with the wrapper's PTY, Unix socket, screen parser,
+observation, element discovery, and input paths in the loop. Its driver was a
+hard-coded Bash script, however, so it demonstrates wrapper integration and
+the happy-path oracle only. It does not measure an AI model's planning,
+observation use, recovery, or ability to select unknown controls. No live
+subworker performance result should be reported until the parent-agent-driven
+procedure above has been run.
+
+For a resource-capped fixture validation run, use the repository's test wrapper:
 
 ```sh
 nix develop .#default --command \
@@ -44,24 +83,26 @@ nix develop .#default --command \
   tests/test-interactive-shell-exploration.sh
 ```
 
-The shell test starts each application through `interactive-shell`, waits for
+The fixture starts each application through `interactive-shell`, waits for
 observed screen text, and sends actions through `interactive-shell-input`.
-For the `mc` step it reads an `observe` snapshot, finds `test.txt` by its
-reported label in `elements`, and clicks the discovered element. It may page
-down while searching, but it must not assume a fixed row or column.
+It does not replace the required subworker evaluation.
 
 ## Pass criteria
 
 The run passes only when all of the following are true:
 
-- `nano` visibly reaches its save flow and `/tmp`-scoped test data contains
-  exactly `Hello World` after the first save.
+- A fresh subworker, started by the parent agent, visibly reaches its save flow
+  and `/tmp/tmpfilename.txt` contains exactly `Hello World` after the first
+  save.
 - `mc` is navigated using an observed file label and opens that file via the
   discovered screen state.
 - The second editor flow reaches and confirms the overwrite prompt.
 - The final file content is exactly `hello universe`.
-- `less` visibly shows `hello universe` and exits cleanly after `q`.
-- The test prints:
+- `less` visibly shows `hello universe` and the subworker exits it cleanly
+  after observing the relevant screen.
+- The parent records the subworker's observations, selected actions, process
+  outcomes, and final file contents.
+- The fixture smoke test may additionally print:
 
   `interactive-shell observation-driven nano/mc/less exploration passed`
 
@@ -106,3 +147,4 @@ nix develop .#default --command shellcheck -s bash --severity=error \
 The test's temporary directory is removed by its cleanup trap. If a run is
 interrupted, inspect and remove only the specific test process and directory
 left by that run; do not use broad recursive deletion targets.
+The MC subprocess path is part of this validation: the parent agent must keep the wrapper socket usable while the editor child owns the terminal.
