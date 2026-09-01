@@ -132,72 +132,77 @@ the moment an entry exists. `mechanism`, `fix` and `verification` fill in as it 
 ## Recording one
 
 ```sh
-now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-rjq --arg now "$now" '.bugs += [{
-      "id": "B12", "title": "A colonless heading silently ignores a rename",
-      "status": "confirmed", "severity": "minor", "priority": "normal", "parent": null,
-      "reproduce": "printf \\"# NoColon\\\\n\\" > d.md; plan_replace_title d.md New; head -1 d.md",
-      "observed": "# NoColon, and exit 0.",
-      "expected": "Either the heading is rewritten, or the call refuses.",
-      "mechanism": "It rewrites with sub(/:.*/, ...), so a heading with no colon matches nothing.",
-      "surfaces": ["planning/scripts/lib/document/plan_replace_title.sh"],
-      "fix": null, "verification": null,
-      "found_by": "unit test written against the function alone",
-      "notes": null,
-      "created_at": $now, "updated_at": $now
-    }]' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
+bugs add --title "A colonless heading silently ignores a rename" \
+         --reproduce 'printf "# NoColon\n" > d.md; plan_replace_title d.md New; head -1 d.md' \
+         --observed "# NoColon, and exit 0." \
+         --expected "Either the heading is rewritten, or the call refuses." \
+         --severity minor --priority normal --status confirmed \
+         --mechanism "It rewrites with sub(/:.*/, ...), so a heading with no colon matches nothing." \
+         --surfaces planning/scripts/lib/document/plan_replace_title.sh \
+         --found-by "unit test written against the function alone"
 ```
 
-Write to a temp file and rename. `rjq ... BUGS.json > BUGS.json` truncates the
-file before `rjq` reads it. `date -u +%Y-%m-%dT%H:%M:%SZ` is the one spelling that
-works on both GNU and BSD date.
+It prints the id it allocated. `--title`, `--reproduce`, `--observed` and
+`--expected` are required and the command refuses without them: a defect nobody
+can reproduce is a rumour, and one with no stated expectation is an opinion.
+
+`bugs` is a single prebuilt binary that ships with this skill. It needs no shell
+and no other tool — not `rjq`, not `date` — so it behaves the same under bash,
+zsh or anything else, and the register can be written on a machine that has
+none of them.
+
+The vocabulary is fixed and the binary will not accept anything outside it:
+
+| Field | Accepted |
+|---|---|
+| `--severity` | `blocking`, `major`, `minor`, `cosmetic` |
+| `--priority` | `urgent`, `high`, `normal`, `low`, `someday` |
+| `--status` | `reported`, `confirmed`, `fixed`, `not-a-defect`, `wont-fix`, `obsolete` |
+
+An out-of-vocabulary value is refused when the register is *read*, not by a
+separate check that a writer could skip. That is deliberate: a register once
+reached a merge carrying `"severity": "critical"` because validation was its own
+step and the writing path had gone around it.
 
 ## Closing one
 
 A fix and its verification land together. A `fixed` entry with no `verification`
-is a claim that the defect is gone.
+is a claim that the defect is gone, so the command refuses it.
 
 ```sh
-now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-rjq --arg id B12 --arg now "$now" '
-    (.bugs[] | select(.id == $id) | .status) = "fixed"
-  | (.bugs[] | select(.id == $id) | .fix) = "a1b2c3d — refuses a heading it cannot rewrite"
-  | (.bugs[] | select(.id == $id) | .verification) = "Reproduction now exits 65; mutation removing the guard fails the test"
-  | (.bugs[] | select(.id == $id) | .updated_at) = $now' \
-  BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
+bugs update B12 --status fixed \
+    --fix "a1b2c3d — refuses a heading it cannot rewrite" \
+    --verification "Reproduction now exits 65; mutation removing the guard fails the test"
 ```
 
-**Every write sets `updated_at`**, including a priority change. A timestamp
-maintained only sometimes is worse than none: a reader cannot tell a quiet entry
-from a stale field.
+Dismissing one needs its reasoning instead:
 
-**`not-a-defect` is a real outcome, and worth as much as a fix.** Set it with the
-reasoning in `verification`, so the next person who trips over the same behaviour
-finds out it was investigated.
+```sh
+bugs update B12 --status not-a-defect --reason "documented behaviour; the caller was wrong"
+```
+
+**`not-a-defect` is a real outcome, and worth as much as a fix.** The reason is
+appended to `notes`, so the next person who trips over the same behaviour finds
+out it was investigated.
+
+`updated_at` is set on every write, including a priority change — a timestamp
+maintained only sometimes is worse than none, because a reader cannot tell a
+quiet entry from a stale field.
+
+A refused update changes nothing. The register is left exactly as it was, rather
+than written and then reported as broken.
 
 ## Reading it
 
 These commands print what the user reads. Pass the output through unchanged.
 
-The register, worst first, grouped by status:
+The register, worst first, children under their parent:
 
 ```sh
-rjq -r '
-  def glyph: {reported:"💤", confirmed:"⛔", fixed:"✅",
-              "not-a-defect":"✔️", "wont-fix":"🚫", obsolete:"🚫"}[.status] // "❔";
-  def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-  def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
-  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
-  def render($parent; $depth):
-    ([.bugs[] | select(.parent == $parent)] | sort_by(prank, srank, (.id | idkey)))[] as $bug
-    | ("  " * $depth) + ($bug | glyph) + " " + $bug.id
-      + "  [" + ($bug.priority // "?") + "/" + ($bug.severity // "?") + "]  " + $bug.title,
-      render($bug.id; $depth + 1);
-  render(null; 0)' BUGS.json
+bugs tree
 ```
 
 ```
-✅ B7    [urgent/blocking]  The first finding of every review cycle becomes the table header
 ⛔ B12   [high/minor]       A colonless heading silently ignores a rename
   ✅ B12a  [normal/minor]     The same shape in the goal writer
 ✔️ B3    [someday/minor]    --in review uses a retired vocabulary
@@ -207,77 +212,39 @@ Priority first, then severity, then id. The pairing is deliberate: a reader need
 both to judge an entry, and seeing them together is what stops a blocking defect
 nobody can reach outranking a cosmetic one on every screen.
 
-What is open and confirmed, which is the work queue:
+What is open, which is the work queue:
 
 ```sh
-rjq -r 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-  def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
-  def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
-  [.bugs[] | select(.status == "reported" or .status == "confirmed")]
-  | sort_by(prank, srank, (.id | idkey))[]
-  | "\(.priority)\t\(.severity)\t\(.id)\t\(.title)"' BUGS.json \
-  | column -t -s "$(printf '\t')"
+bugs report
 ```
 
-One entry as a report a person can act on:
+One entry in full, as stored:
 
 ```sh
-rjq -r --arg id B7 '.bugs[] | select(.id == $id) | "
-\(.id)  \(.title)
-Status:   \(.status)   Severity: \(.severity)   Found by: \(.found_by // "unrecorded")
-
-Reproduce:
-  \(.reproduce)
-
-Observed:  \(.observed)
-Expected:  \(.expected)
-Mechanism: \(.mechanism // "not yet established")
-Surfaces:  \(.surfaces | join(", "))
-
-Fix:          \(.fix // "none yet")
-Verification: \(.verification // "none yet")
-\(if .notes then "\nNotes: " + .notes else "" end)"' BUGS.json
+bugs show B12
 ```
 
-Entries nobody can act on, which is the register's own health check:
+A filtered table, one tab-separated row per entry, for feeding to something else:
 
 ```sh
-rjq -r '.bugs[] | select(.reproduce == null or .reproduce == "")
-       | "\(.id) has no reproduction"' BUGS.json
+bugs list --status confirmed
+bugs list --severity blocking
+bugs list --surface planning/scripts     # matches within the surfaces list
+bugs list --since 2026-08-01T00:00:00Z
+bugs count --status reported
+bugs next-id
 ```
 
-Fixed without verification, and confirmed without a mechanism:
-
-```sh
-rjq -r '.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
-                 | "\(.id) is fixed with nothing proving it",
-       .bugs[] | select(.status == "confirmed" and (.mechanism == null or .mechanism == ""))
-                 | "\(.id) is confirmed with no mechanism"' BUGS.json
-```
-
-A severity roll-up of what is still open:
-
-```sh
-rjq -r '[.bugs[] | select(.status == "reported" or .status == "confirmed")]
-       | group_by(.priority)[] | "\(.[0].priority): \(length)  \(map(.id) | join(" "))"' BUGS.json
-```
+An absent filter matches everything rather than matching the empty string, so
+`list` with no flags is the whole register and not an empty one.
 
 ## Keeping the file in priority order
 
-The renders sort, so the file's order never changes an answer. Sorting the file
-itself is for the human reading a diff: a new urgent entry appearing at the top is
-visible, and appended at the bottom it is not.
+Nothing to do: every write re-sorts. The order is priority, then severity, then
+the numeric part of the id, so `B10` follows `B9` rather than preceding it.
 
-```sh
-rjq 'def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-    def srank: {blocking:0, major:1, minor:2, cosmetic:3}[.severity // ""] // 4;
-    def idkey: [(. | scan("[0-9]+") | tonumber)?, .];
-    .bugs |= sort_by(prank, srank, (.id | idkey))' \
-  BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
-```
-
-Run it after adding entries. It is a pure reordering: nothing but the sequence of
-the array changes, so a diff shows only movement.
+The stored order **is** the reading order. No command re-sorts on output, so a
+report never imposes a second opinion on urgency over the one the file records.
 
 ## Rules that keep it honest
 
@@ -311,29 +278,63 @@ behaviour will be reported again.
 ## Validating the file
 
 ```sh
-findings="$(rjq -r '
-  (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
-  (if (.skill // "") == "" then "the file does not name its schema" else empty end),
-  ([.bugs[].id]) as $ids
-  | if ([.bugs[].id] | length) != ([.bugs[].id] | unique | length) then "duplicate ids" else empty end,
-    (.bugs[] | select(.parent != null and (.parent | IN($ids[]) | not))
-             | "\(.id) names a parent that does not exist: \(.parent)"),
-    (.bugs[] | select(.status | IN("reported","confirmed","fixed","not-a-defect","wont-fix","obsolete") | not)
-             | "\(.id) has an unknown status: \(.status)"),
-    (.bugs[] | select(.severity | IN("blocking","major","minor","cosmetic") | not)
-             | "\(.id) has an unknown severity: \(.severity)"),
-    (.bugs[] | select(.priority | IN("urgent","high","normal","low","someday") | not)
-             | "\(.id) has an unknown priority: \(.priority)"),
-    (.bugs[] | select(.created_at == null or .updated_at == null)
-             | "\(.id) is missing a timestamp"),
-    (.bugs[] | select(.reproduce == null or .reproduce == "") | "\(.id) has no reproduction"),
-    (.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
-             | "\(.id) is fixed with no verification")
-' BUGS.json)"
-[ -z "$findings" ] && echo 'BUGS.json is sound' || printf '%s\n' "$findings"
+bugs check
 ```
 
-`rjq -e` is wrong here: it exits 4 on empty output, which is the sound case.
+Prints `<n> entries, sound`, or every rule the file breaks — and exits non-zero
+in that case, so it fits a hook or a CI job.
+
+A finding here means more than "the file is malformed". Every writer refuses
+what `check` reports, so an entry that breaks a rule **did not come from the
+tools**: the file was edited by hand, or by something imitating their output.
+That is worth knowing, because it is how a register once reached a merge with
+three duplicated entries and a severity outside the vocabulary.
+
+Most of the rules are not checked at all any more — they cannot be broken. The
+status, severity and priority vocabularies are types, so an out-of-vocabulary
+value fails when the file is *read*, naming the field and the line:
+
+```
+unknown variant `critical`, expected one of `blocking`, `major`, `minor`, `cosmetic` at line 10 column 28
+```
+
+What `check` still reports is the set of rules that need more than one field to
+decide: unique ids, a `parent` that resolves, a reproduction present, and the
+evidence a closure owes.
+
+### A register written by an older version
+
+`bugs` refuses to read one in place and says so. Convert it:
+
+```sh
+bugs migrate
+```
+
+That copies the file to a versioned `BUGS.<version>.back.json` **before parsing
+anything**, carries the entries that still fit the current shape and are still
+open, leaves the closed ones in the backup, and reports anything it could not
+convert with the commands to move it by hand.
+
+There is no compatibility layer and there will not be one. An entry the
+converter does not understand is handed back to you — with the backup to read it
+from and `bugs add` to re-file it — rather than guessed at. Nothing is lost by
+leaving one unconverted: the backup keeps it.
+
+### A merge conflict in the register
+
+Two branches that both file a defect both take the same next id, so the conflict
+is semantic: one id, two unrelated defects, and neither side wrong.
+
+```sh
+bugs resolve                                  # what has to be decided
+bugs resolve theirs:B97:B125 > preview.json   # decide it; nothing is written
+CONFIRM=<the token it printed> bugs resolve theirs:B97:B125
+```
+
+It reads both clean sides out of the git index, so it works mid-conflict with
+nothing checked out. It follows a rename into `parent`, reports ids left in prose
+rather than rewriting them, refuses a register whose own side is already unsound,
+and writes nothing until the token it printed comes back.
 
 ## When not to use this
 

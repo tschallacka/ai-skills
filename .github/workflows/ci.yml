@@ -505,6 +505,228 @@ jobs:
           path: rjq-artifacts
           if-no-files-found: error
 
+
+  bug-report-binary:
+    # Proves: the register's tools are built AND exercised on every platform
+    # they ship to. The register is the repository's own memory, so a writer
+    # that is subtly wrong on one platform corrupts the record rather than
+    # failing loudly -- which is why the artifact is run here, against a real
+    # register, rather than merely produced.
+    #
+    # One runner per target for the same reason as plan-crypt: an
+    # aarch64-apple-darwin binary cross-built on Linux carries no ad-hoc
+    # signature and Apple Silicon refuses to exec it, and neither the darwin nor
+    # the msvc target links on a Linux runner.
+    name: bug-report builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/bug-report
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Ensure the target standard library is installed
+        working-directory: src/bug-report
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/bug-report
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/bug-report
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run it against a register, on this platform
+        shell: bash
+        working-directory: src/bug-report
+        run: |
+          # A round trip has to be byte-identical: the register is a tracked
+          # file, so a writer that reformats it produces a diff on every entry.
+          # This is the assertion that lets the tool replace the shell writers.
+          bin="target/${{ matrix.target }}/release/bugs"
+          [ -f "$bin" ] || bin="target/${{ matrix.target }}/release/bugs.exe"
+          # printf rather than a heredoc: a heredoc terminator cannot be
+          # indented, and YAML block scalars indent every line.
+          printf '%s\n' '{ "skill": "bug-report", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "bugs": [] }' > /tmp/reg.json
+          export BUGS_JSON=/tmp/reg.json
+          "$bin" check
+          "$bin" add --title "a CI defect" --reproduce "run the leg" \
+                     --observed "it was observed" --expected "it was expected" \
+                     --severity major --priority high
+          "$bin" count | grep -qx 1
+          "$bin" next-id | grep -qx B2
+          cp /tmp/reg.json /tmp/reg.copy.json
+          "$bin" fmt >/dev/null
+          cmp /tmp/reg.json /tmp/reg.copy.json
+
+          # Closing without evidence must be refused: the register's whole value
+          # is that a closure carries proof.
+          if "$bin" update B1 --status fixed --fix "some commit"; then
+            echo "::error::a closure with no verification was accepted"
+            exit 1
+          fi
+          "$bin" update B1 --status fixed --fix "abc123 — the change" \
+                          --verification "mutation-tested: reverted, saw it fail"
+          "$bin" report | grep -q "0 open of 1 total"
+
+          # An out-of-vocabulary severity must fail at parse, which is the point
+          # of the types replacing a validation pass.
+          sed 's/"major"/"critical"/' /tmp/reg.json > /tmp/bad.json
+          if BUGS_JSON=/tmp/bad.json "$bin" check; then
+            echo "::error::an out-of-enum severity was accepted"
+            exit 1
+          fi
+
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bugs-${{ matrix.target }}
+          path: |
+            src/bug-report/target/${{ matrix.target }}/release/bugs
+            src/bug-report/target/${{ matrix.target }}/release/bugs.exe
+          if-no-files-found: error
+
+
+  todo-binary:
+    # Proves: the queue's tools are built AND exercised on every platform they
+    # ship to. TODO.json is the repository's own work queue, so a writer that is
+    # subtly wrong on one platform corrupts the record rather than failing
+    # loudly -- which is why the artifact is run here, against a real queue,
+    # rather than merely produced.
+    #
+    # A separate leg from bug-report-binary, and not a matrix dimension of it:
+    # the two crates have different rules and different failure modes, and a
+    # shared leg would report one crate's red under the other's name.
+    #
+    # One runner per target for the same reason as plan-crypt: an
+    # aarch64-apple-darwin binary cross-built on Linux carries no ad-hoc
+    # signature and Apple Silicon refuses to exec it, and neither the darwin nor
+    # the msvc target links on a Linux runner.
+    name: todo builds and runs on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/todo
+
+      - name: Pin the toolchain the crate declares
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Ensure the target standard library is installed
+        working-directory: src/todo
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Format, lint and test
+        working-directory: src/todo
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+          cargo test --target ${{ matrix.target }}
+
+      - name: Build the release artifact
+        working-directory: src/todo
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run it against a queue, on this platform
+        shell: bash
+        working-directory: src/todo
+        run: |
+          # A round trip has to be byte-identical: the queue is a tracked file,
+          # so a writer that reformats it produces a diff on every task. This is
+          # the assertion that lets the tool replace the shell writers.
+          bin="target/${{ matrix.target }}/release/todo"
+          [ -f "$bin" ] || bin="target/${{ matrix.target }}/release/todo.exe"
+          # printf rather than a heredoc: a heredoc terminator cannot be
+          # indented, and YAML block scalars indent every line.
+          printf '%s\n' '{ "skill": "todo", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "tasks": [] }' > /tmp/queue.json
+          export TODO_JSON=/tmp/queue.json
+          "$bin" check
+          "$bin" add --title "a CI task" --detail "run the leg" --priority high
+          "$bin" count | grep -qx 1
+          "$bin" next-id | grep -qx T2
+          cp /tmp/queue.json /tmp/queue.copy.json
+          "$bin" fmt >/dev/null
+          cmp /tmp/queue.json /tmp/queue.copy.json
+
+          # Closing without evidence must be refused: the queue's whole value is
+          # that a closure says what happened.
+          if "$bin" update T1 --status done; then
+            echo "::error::a closure with no note was accepted"
+            exit 1
+          fi
+          "$bin" update T1 --status done --note "abc123 — did the thing, suite green"
+          "$bin" report | grep -q "0 open of 1 total"
+
+          # Pruning writes nothing without the token it printed, and keeps what
+          # it removes.
+          "$bin" prune >/dev/null
+          "$bin" count | grep -qx 1
+          token="$("$bin" prune 2>&1 >/dev/null | sed -n 's/^  CONFIRM=//p')"
+          [ -n "$token" ] || { echo "::error::prune printed no confirmation token"; exit 1; }
+          CONFIRM="$token" "$bin" prune >/dev/null
+          "$bin" count | grep -qx 0
+          archive="/tmp/queue.$(date -u +%Y-%m-%d).archive.json"
+          [ -f "$archive" ] || { echo "::error::prune deleted the task instead of archiving it"; exit 1; }
+          TODO_JSON="$archive" "$bin" count | grep -qx 1
+
+          # An out-of-vocabulary status must fail at parse, which is the point of
+          # the types replacing a validation pass.
+          sed 's/"high"/"critical"/' "$archive" > /tmp/bad.json
+          if TODO_JSON=/tmp/bad.json "$bin" check; then
+            echo "::error::an out-of-enum priority was accepted"
+            exit 1
+          fi
+
+      - name: Upload the release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-${{ matrix.target }}
+          path: |
+            src/todo/target/${{ matrix.target }}/release/todo
+            src/todo/target/${{ matrix.target }}/release/todo.exe
+          if-no-files-found: error
   shellcheck:
     # Proves: no `warning`-severity shellcheck finding exists in any live shell
     # script, and reports the full finding count so it can be ratcheted.

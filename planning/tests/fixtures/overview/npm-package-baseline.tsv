@@ -6,9 +6,10 @@ package/README.md	14623
 package/brainstorm/SKILL.md	11440
 package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
-package/bug-report/SKILL.md	16397
+package/bug-report/SKILL.md	15581
+package/bug-report/binaries.tsv	945
 package/bug-report/docs/README.md	1312
-package/bug-report/requires.tsv	1300
+package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
 package/chat/SKILL.md	5394
@@ -24,7 +25,7 @@ package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	182620
+package/install.sh	184271
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
@@ -146,8 +147,9 @@ package/resource-limited-testing/scripts/limited-run.sh	4459
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187
-package/todo/SKILL.md	16581
-package/todo/docs/README.md	1315
-package/todo/requires.tsv	1301
+package/todo/SKILL.md	14946
+package/todo/binaries.tsv	1127
+package/todo/docs/README.md	1637
+package/todo/requires.tsv	1625
 package/todo/schema.1.4.2.json	3046
 package/todo/schema.2.0.0-alpha.1.json	2968

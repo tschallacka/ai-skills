@@ -407,10 +407,50 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
+                schema.1.4.2.json schema.2.0.0-alpha.1.json
+            # The queue's tools ship as one prebuilt binary per target, so an
+            # installed skill can actually write its queue instead of being told
+            # to hand-edit JSON. Only the host's row is emitted, the way
+            # bug-report, planning and chat do it.
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/todo' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/todo' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/todo' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/todo' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/todo.exe' ;;
+                *)
+                    printf 'skill_files: no todo artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             ;;
         bug-report)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
+                schema.1.4.2.json schema.2.0.0-alpha.1.json
+            # The register's tools ship as one prebuilt binary per target, so an
+            # installed skill can actually write its register instead of being
+            # told to hand-edit JSON. Only the host's row is emitted, the way
+            # planning and chat do it.
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/bugs' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/bugs' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/bugs' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/bugs' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/bugs.exe' ;;
+                *)
+                    printf 'skill_files: no bugs artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv

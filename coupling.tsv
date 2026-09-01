@@ -30,3 +30,7 @@ todo/schema.*.json	fail	a register schema ships for the package version and its 
 bug-report/schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh
 installer/build-release.sh	fail	the release tarball must hold exactly the files marked for production, byte for byte	bash tests/test-release-package.sh
 */schema.*.json	fail	a register schema ships for the package version and its upgrade recipes run	bash tests/test-register-schemas.sh
+src/bug-report/src/cli.rs	fail	src/todo/src/cli.rs is a byte-identical copy; a fix must land in both	bash tests/test-register-crate-parity.sh
+src/bug-report/src/clock.rs	fail	src/todo/src/clock.rs is a byte-identical copy; a fix must land in both	bash tests/test-register-crate-parity.sh
+src/todo/src/cli.rs	fail	src/bug-report/src/cli.rs is a byte-identical copy; a fix must land in both	bash tests/test-register-crate-parity.sh
+src/todo/src/clock.rs	fail	src/bug-report/src/clock.rs is a byte-identical copy; a fix must land in both	bash tests/test-register-crate-parity.sh

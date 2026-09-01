@@ -170,8 +170,11 @@ rc=0
 ( cd "$extracted" && printf 'n\n' | "$BASH" ./install.sh --skill todo \
     --target "$work/installed" --yes ) >/dev/null 2>&1 || rc=$?
 t_assert_eq 'the extracted package installs a skill' "$rc" '0'
+# bin and binaries.tsv are part of a complete install now: the queue's tools ship
+# as a prebuilt binary, so a skill installed without bin/ can read its own rules
+# and do nothing with them.
 t_assert_eq 'and the installed skill is complete' \
     "$(ls "$work/installed/todo" 2>/dev/null | sort | tr '\n' ' ')" \
-     "SKILL.md docs requires.tsv schema.1.4.2.json schema.$version.json "
+     "SKILL.md bin binaries.tsv docs requires.tsv schema.1.4.2.json schema.$version.json "
 
 t_end

@@ -112,10 +112,12 @@ host_triple() {
 }
 
 # What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
-# repository root, not in a bin/ inside each skill. rjq alone is a hard
+# repository root, not in a bin/ inside each skill. rjq alone was a hard
 # requirement of planning, todo and bug-report, so a per-skill layout means the
 # same binary copied three times -- or, as it was, shipped by one skill and
 # missing from the other two, which the installer then refuses to install.
+# todo and bug-report no longer declare rjq at all: their own binaries replaced
+# every rjq call, so only planning still needs it.
 #
 # chat-proto is a library the two chat crates depend on and produces no binary,
 # so it is absent here and built as a dependency of theirs.
@@ -126,6 +128,8 @@ plan-overview	plan-overview
 plan-crypt	plan-crypt
 chat-server-rs	chat-server-rs
 chat-client-rs	chat-client-rs
+bug-report	bugs
+todo	todo
 PLAN
 }
 
