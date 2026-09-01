@@ -1117,6 +1117,10 @@ pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
         "PAGEDOWN" => Some(b"\x1b[6~"),
         "INSERT" => Some(b"\x1b[2~"),
         "DELETE" => Some(b"\x1b[3~"),
+        "CTRL-PAGEUP" => Some(b"\x1b[5;5~"),
+        "CTRL-PAGEDOWN" => Some(b"\x1b[6;5~"),
+        "CTRL-INSERT" => Some(b"\x1b[2;5~"),
+        "CTRL-DELETE" => Some(b"\x1b[3;5~"),
         "F1" => Some(b"\x1bOP"),
         "F2" => Some(b"\x1bOQ"),
         "F3" => Some(b"\x1bOR"),
@@ -2067,6 +2071,10 @@ mod tests {
             "PAGEDOWN",
             "INSERT",
             "DELETE",
+            "CTRL-PAGEUP",
+            "CTRL-PAGEDOWN",
+            "CTRL-INSERT",
+            "CTRL-DELETE",
             "F1",
             "F2",
             "F3",
@@ -2247,6 +2255,7 @@ mod tests {
         assert_eq!(key_sequence("ALT-LEFT"), None);
         assert_eq!(key_sequence("META-LEFT"), Some(b"\x1b[1;3D".to_vec()));
         assert_eq!(key_sequence("F10"), Some(b"\x1b[21~".to_vec()));
+        assert_eq!(key_sequence("CTRL-DELETE"), Some(b"\x1b[3;5~".to_vec()));
         assert!(decode_hex("éé").is_err());
     }
 

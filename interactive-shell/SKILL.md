@@ -80,7 +80,8 @@ not assume that typing a visible filename selects it.
 
 Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
 TAB, ESC, META-LEFT, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
-DELETE, SHIFT/CTRL cursor variants, and F1 through F12. Use `raw` for an
+DELETE, CTRL-PAGEUP, CTRL-PAGEDOWN, CTRL-INSERT, CTRL-DELETE, SHIFT/CTRL
+cursor variants, and F1 through F12. Use `raw` for an
 explicit byte sequence, encoded as non-empty even-length hexadecimal. Use
 `combo` when the needed modifier combination is not in the named-key list;
 for example, `combo h ctrl alt shift` sends Alt followed by Ctrl-H, while

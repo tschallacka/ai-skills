@@ -2760,6 +2760,28 @@
       "notes": "wait remains a synchronous request; the documented timeout and output-idle semantics are intentionally separate.",
       "created_at": "2026-09-01T20:00:00Z",
       "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B124",
+      "title": "interactive-shell rejects direct names for modified tilde keys",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Request key CTRL-DELETE (or another documented modified paging/editing key) through the input CLI.",
+      "observed": "The dynamic combo path could encode Ctrl-Delete, but the direct named-key path returned unknown key.",
+      "expected": "Common documented modified tilde keys are available directly as well as through combo.",
+      "mechanism": "key_bytes listed only unmodified tilde keys while key_combo_sequence handled modifiers separately.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Working tree change — add direct CTRL-PAGEUP, CTRL-PAGEDOWN, CTRL-INSERT, and CTRL-DELETE aliases using the same xterm encodings.",
+      "verification": "The key stability test includes all aliases and asserts the exact CTRL-DELETE sequence.",
+      "found_by": "fresh acceptance validation, subworker Dalton",
+      "notes": "Whether the current application acts on a correctly encoded key remains application-defined and must be verified from the screen.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
     }
   ]
 }
