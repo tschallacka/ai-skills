@@ -31,8 +31,11 @@ exercises:
    selects it, and opens it through the editor action (`F4`).
 6. The editor replaces the content with `hello universe`, saves it, handles
    any overwrite prompt from the observed screen, and exits back to `mc`.
-7. The subworker exits `mc` back to the same Bash prompt, reports the final
-   file contents, and cleans up the dynamically named file.
+7. The subworker exits `mc` back to the same Bash prompt, runs `less` on the
+   dynamically named file, observes `hello universe`, exits `less` with `q`,
+   and returns to that Bash prompt.
+8. The subworker reports the final file contents and cleans up the dynamically
+   named file.
 
 The wrapper's socket and event log use a private temporary directory. The
 agent scenario intentionally uses one dynamically generated `/tmp/*.txt`
@@ -113,6 +116,8 @@ The run passes only when all of the following are true:
 - The second editor flow reaches and confirms the overwrite prompt.
 - The final file content is exactly `hello universe`.
 - `mc` exits back to the same interactive Bash session after the edit.
+- `less` is launched from that same Bash session, visibly shows
+  `hello universe`, and exits cleanly with `q`.
 - The parent records the subworker's observations, selected actions, process
   outcomes, and final file contents.
 - The fixture smoke test may additionally print:
