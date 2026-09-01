@@ -651,7 +651,11 @@ fn malformed_cli_arguments_do_not_panic() {
         .output()
         .unwrap();
     assert!(wrapper_help.status.success());
-    assert!(String::from_utf8_lossy(&wrapper_help.stdout).contains("usage:"));
+    let wrapper_text = String::from_utf8_lossy(&wrapper_help.stdout);
+    assert!(wrapper_text.contains("usage:"));
+    assert!(wrapper_text.contains("--session ID"));
+    assert!(wrapper_text.contains("default 80x24"));
+    assert!(wrapper_text.contains("does not know application keybindings"));
     let wrapper = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
         .arg("--socket")
         .output()
@@ -675,7 +679,12 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
         .output()
         .unwrap();
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stdout).contains("operations:"));
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    assert!(help_text.contains("operations:"));
+    assert!(help_text.contains("view 10-15"));
+    assert!(help_text.contains("rgbview"));
+    assert!(help_text.contains("elements [ROWS...]"));
+    assert!(help_text.contains("Application keybindings are unknown"));
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args([
             "--socket",
