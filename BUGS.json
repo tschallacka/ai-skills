@@ -2653,6 +2653,113 @@
       "notes": "This improves evidence weighting; it does not claim to identify the active mc pane.",
       "created_at": "2026-09-01T20:00:00Z",
       "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B119",
+      "title": "interactive-shell named navigation omits META-LEFT",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Request the common META-LEFT editor navigation key through the named input interface.",
+      "observed": "META-RIGHT was available but META-LEFT returned an unknown-key error.",
+      "expected": "The named key surface provides symmetric modified horizontal navigation.",
+      "mechanism": "key_bytes contained only the rightward meta sequence.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Working tree change — add META-LEFT as ESC[1;3D and assert its exact bytes.",
+      "verification": "The key stability and encoding tests pass with META-LEFT included.",
+      "found_by": "independent post-implementation review, subworker Halley",
+      "notes": null,
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B120",
+      "title": "raw hex input can panic on non-ASCII text",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Call the raw input operation with an even-byte-length non-ASCII string such as éé.",
+      "observed": "decode_hex sliced the UTF-8 string at byte offsets and could panic instead of returning a controlled invalid-hex error.",
+      "expected": "Malformed raw input returns a protocol error and never terminates the wrapper through a panic.",
+      "mechanism": "The decoder checked byte length but not ASCII before slicing two-byte ranges.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Working tree change — reject non-ASCII hex strings before byte slicing.",
+      "verification": "A unit test asserts decode_hex(éé) returns an error.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": null,
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B121",
+      "title": "cleanup can signal a child process group after reaping",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Allow the PTY child to exit naturally and reach Cleanup::drop after the main loop has already reaped it.",
+      "observed": "Cleanup unconditionally called stop(pid), leaving a PID-reuse window in which kill(-pid) could target an unrelated process group.",
+      "expected": "A confirmed-reaped child is never signalled again during cleanup.",
+      "mechanism": "Cleanup did not retain whether waitpid had already reaped the child.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Working tree change — track reaped state and skip process-group termination after waitpid confirms exit.",
+      "verification": "Rust protocol and lifecycle tests pass with the guarded cleanup path.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": null,
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B122",
+      "title": "screen coordinates are approximate for non-ASCII terminal cells",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Display a multi-byte or wide Unicode glyph and use locate or coordinate hints to target adjacent text.",
+      "observed": "The screen model stores PTY bytes one byte per cell, so glyph width and coordinate metadata may not match the rendered terminal.",
+      "expected": "The agent-facing documentation states this boundary instead of promising full Unicode cell behavior.",
+      "mechanism": "Screen storage and cursor movement are byte-oriented; implementing Unicode width would require a larger cell-model change.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Documented limitation — no universal Unicode-cell rewrite in this iteration.",
+      "verification": "The skill explicitly marks non-ASCII glyph widths and coordinates as approximate.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": "A future Unicode-cell implementation should be separately designed and tested for combining and wide characters.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B123",
+      "title": "wait output did not refresh the wrapper idle clock",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run a child that emits output while an agent has an active wait request and compare the output-idle timeout with ordinary screen-event handling.",
+      "observed": "The wait path fed output into the screen and published deltas but did not refresh the main loop's last-output timestamp.",
+      "expected": "PTY output received while satisfying wait counts as output activity for idle-timeout purposes.",
+      "mechanism": "The wait reader lived inside client() and had no access to the main loop's output clock.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Working tree change — pass the output timestamp into client() and refresh it whenever wait reads PTY bytes.",
+      "verification": "The interactive-shell protocol suite passes with the shared output clock wired through the wait path.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": "wait remains a synchronous request; the documented timeout and output-idle semantics are intentionally separate.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
     }
   ]
 }
