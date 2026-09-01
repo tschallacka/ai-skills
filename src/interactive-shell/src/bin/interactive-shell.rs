@@ -6,7 +6,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell [--session ID | --agent ID] [--socket PATH] [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions: --cols N --rows N --idle-timeout SECONDS\nThe command runs in a PTY and is controlled through the Unix socket.\nA session stores the socket and command; --agent uses INTERACTIVE_SHELL_AGENT, CODEX_AGENT_ID, or AGENT_ID when set.\nWithout --socket, a session gets a private runtime socket directory automatically. Explicit socket parents must be private owner-only directories."
+            "usage: interactive-shell [--session ID | --agent ID] [--socket PATH] [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions:\n  --session ID             Save and reuse the command, socket, and terminal size\n  --agent ID               Use an agent-keyed saved session\n  --socket PATH            Use an explicit Unix socket (parent must be private)\n  --cols N --rows N        PTY dimensions (default 80x24; prefer smaller when practical)\n  --idle-timeout SECONDS   Stop after inactivity (default 300)\n\nThe command runs in a real PTY. Control it with interactive-shell-input. Start\nwith --session or --agent so later input commands need no socket/configuration\narguments. Without --socket, session sockets are created in a private runtime\ndirectory. The wrapper does not know application keybindings; discover those\nfrom the current screen, built-in help, or a manpage."
         );
         return;
     }
