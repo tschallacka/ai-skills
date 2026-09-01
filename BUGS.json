@@ -2566,6 +2566,71 @@
       "notes": "Targeted row ranges, rgbview, and locate reduce context cost, but fresh agents still found mc's path/status header clipped at small sizes. A generic title/region query may help, but application path semantics must not be fabricated by the wrapper.",
       "created_at": "2026-09-01T18:00:00Z",
       "updated_at": "2026-09-01T19:00:00Z"
+    },
+    {
+      "id": "B115",
+      "title": "interactive-shell combo cannot encode modified paging keys",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "From an agent-driven mc session, discover that the application documents Ctrl-PageUp for pane navigation and try to send it through the named input interface.",
+      "observed": "The combo encoder supported modified cursor and function keys, but not PAGEUP or PAGEDOWN, forcing the agent to construct a raw escape sequence.",
+      "expected": "An agent can request a documented modified paging key through combo without knowing terminal escape encoding.",
+      "mechanism": "key_combo_sequence only classified cursor keys and function keys before falling back to printable ASCII.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Working tree change — encode modified INSERT, DELETE, PAGEUP, and PAGEDOWN keys with xterm tilde sequences.",
+      "verification": "Unit coverage asserts Ctrl-PageUp and Ctrl-PageDown byte sequences; the skill documents combo PAGEUP/PAGEDOWN usage.",
+      "found_by": "fresh unknown-TUI validation, subworker Laplace",
+      "notes": "This removes terminal-encoding knowledge from the agent while leaving application key meanings to screen/help/manpage discovery.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B116",
+      "title": "interactive-shell can leave a stale socket when stdout closes",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start the wrapper with a continuously producing PTY command, wait for its socket, close the wrapper stdout reader, and inspect the socket after the process exits.",
+      "observed": "A broken output pipe could deliver SIGPIPE before Rust cleanup ran, leaving the socket inode behind and making a later session appear occupied.",
+      "expected": "The wrapper always removes its owned socket before terminating, including when its output consumer disappears.",
+      "mechanism": "The process used the default SIGPIPE disposition, so Drop-based socket cleanup was bypassed by signal termination.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/tests/protocol.rs"
+      ],
+      "fix": "Working tree change — ignore SIGPIPE so the output error unwinds through Cleanup and removes the identity-checked socket.",
+      "verification": "closed_output_removes_socket_before_exit drops a live stdout reader and asserts the process exits with no socket remaining.",
+      "found_by": "fresh unknown-TUI validation, subworker Laplace",
+      "notes": "Socket removal remains identity-checked, so this does not unlink a replacement entry.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B117",
+      "title": "mc assigns application-specific meaning to otherwise standard paging keys",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "In an unknown mc session, discover and send a named PAGEUP or PAGEDOWN key, then inspect the resulting pane selection and directory state.",
+      "observed": "The key was delivered, but mc's application behavior did not match a generic scrolling expectation; the agent needed to consult mc documentation and use a modified paging key for pane navigation.",
+      "expected": "The skill makes clear that named terminal keys describe byte delivery only; their action remains application-defined and must be verified from the next screen.",
+      "mechanism": "The wrapper cannot infer whether a TUI uses paging keys for scrolling, selection, or directory operations.",
+      "surfaces": [
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh unknown-TUI validation, subworker Laplace",
+      "notes": "This is not evidence that PAGEUP/PAGEDOWN encoding is wrong. B115 removes the need to hand-build modified sequences; agents still must verify application semantics after every input.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
     }
   ]
 }

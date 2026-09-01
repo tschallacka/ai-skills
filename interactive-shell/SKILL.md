@@ -83,6 +83,11 @@ named cursor/function keys use xterm modifier encoding.
 coordinates and sends an xterm mouse event. `resize` changes both the PTY and
 the screen model, and rejects dimensions outside the wrapper bounds.
 
+`combo` also accepts PAGEUP, PAGEDOWN, INSERT, and DELETE. For example,
+`combo PAGEUP ctrl` sends the standard Ctrl-PageUp sequence; this is useful
+when the current application documents a modified navigation key that is not
+listed as a standalone named key.
+
 The wrapper allocates a real PTY, applies the requested dimensions, and owns a
 0600 socket inside a private 0700 directory. It emits a final lifecycle event
 for child exit, client shutdown, or idle timeout and removes only the socket
