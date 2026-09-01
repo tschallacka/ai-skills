@@ -394,6 +394,9 @@ jobs:
         run: sudo apt-get install -y -qq musl-tools
 
       - name: Format, lint and test
+        # bash explicitly: this matrix includes a Windows runner, whose default
+        # shell is pwsh, and the loop below is shell syntax pwsh rejects.
+        shell: bash
         run: |
           # Both crates, not just the server. The client is built below but was
           # never formatted, linted or unit-tested, so a clippy error and its
