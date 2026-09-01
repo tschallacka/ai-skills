@@ -102,7 +102,7 @@ move the skills to satisfy npm packaging.
 
 The generated artifacts the package ships — the five compiled plan libraries
 and `planning/REVIEWER.md` — are built by `npm prepack` from the tracked
-sources, never committed (`planning/MAINTAINER.md` §2.15). A pack from a clean
+sources, never committed (`planning/MAINTAINER.md` §2.16). A pack from a clean
 checkout is therefore complete without any generated file in git.
 
 ## Verifying on both shells

@@ -71,7 +71,7 @@ The deterministic whole-repo suite is `./run-tests.sh`:
 - A clean checkout is safe to test directly: the runner bootstraps the
   generated artifacts first (compiled plan libraries, `REVIEWER.md`, rjq via
   `./bootstrap.sh`), because generated files are never committed
-  (`planning/MAINTAINER.md` §2.15). `npm prepack` runs the same generators
+  (`planning/MAINTAINER.md` §2.16). `npm prepack` runs the same generators
   before packaging.
 - It runs every test under `planning/tests/` and `benchmark/planning/tests/`,
   each under `resource-limited-testing/scripts/limited-run.sh`.

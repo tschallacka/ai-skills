@@ -2133,6 +2133,32 @@
       "notes": [],
       "created_at": "2026-08-31T14:05:48Z",
       "updated_at": "2026-08-31T15:20:00Z"
+    },
+    {
+      "id": "B98",
+      "title": "docblock-served --help prints the MODE marker as its first line",
+      "status": "reported",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Run ./bootstrap.sh --help, or planning/scripts/monitor-read.sh --help, or planning/scripts/role-context.sh --help. The first line of help output is the file's mode marker (MODE: DEV or MODE: PROD).",
+      "observed": "Help output opens with 'MODE: DEV' (bootstrap.sh) or 'MODE: PROD' (monitor-read.sh, role-context.sh, supervision-frame.sh) before the script's one-line purpose.",
+      "expected": "Help output starts at the script's purpose line. The mode marker is delivery metadata for the release gates (CODE-CONTRACTS.md contract 10a), not interface text, and contract 10a already states that generators strip the markers they read.",
+      "mechanism": "The shared usage() awk skips only NR==1 (the shebang) and then prints every leading comment line with '# ' stripped. The MODE marker sits on line 2, inside that window, so it prints as help. CODE-STYLE.md section 4 bans printing raw comment syntax and tests/test-comment-format.sh asserts no help line is '# '-prefixed - the marker passes both because stripping leaves a bare word, so nothing catches it.",
+      "surfaces": [
+        "bootstrap.sh",
+        "planning/scripts/monitor-read.sh",
+        "planning/scripts/role-context.sh",
+        "planning/scripts/supervision-frame.sh"
+      ],
+      "fix": "Not fixed here. One shared awk change (skip a leading MODE:/PACKAGE: marker line the same way the quoted-fence dividers are skipped) plus an assertion in test-comment-format.sh that no help output names a marker keyword. Deliberately left out of the untrack-generated-files change: it is pre-existing on master, spans four scripts and a test, and is unrelated to that change's subject.",
+      "verification": "After the fix, `--help` on each of the four scripts must start at the purpose line, and test-comment-format.sh must fail when a marker is reintroduced into help output.",
+      "found_by": "PR #9 review, maintainer session 2026-09-01",
+      "notes": [
+        "Found while adding bootstrap.sh, whose usage() copies the existing idiom verbatim; the new script inherited the wart rather than introducing it."
+      ],
+      "created_at": "2026-09-01T00:00:00Z",
+      "updated_at": "2026-09-01T00:00:00Z"
     }
   ]
 }

@@ -161,7 +161,7 @@ library, and `test-plan-libs-build.sh` runs it.
   second source would re-run `00-state.sh` and drop the registered temp files.
 - Group membership is the directory. Moving a function between groups is a `git
   mv` plus a build, and the symbol set must not change.
-- Their committed form is grandfathered, not endorsed: §2.15 makes untracking
+- Their committed form is grandfathered, not endorsed: §2.16 makes untracking
   them the destination, with the build and the artifact moving to CI.
 
 ### 2.8a Fix-key derivation
@@ -184,7 +184,7 @@ library, and `test-plan-libs-build.sh` runs it.
   opportunistic, found the way `chat-server.sh`'s `rust_bin()` finds its own —
   `PLAN_CRYPT_BIN`, then `PATH`, then `planning/bin/<target triple>/plan-crypt`
   and `planning/bin/plan-crypt`. Per-target artifacts are CI-delivered and
-  untracked (§2.15); a local `planning/bin/<triple>` path exists only after a
+  untracked (§2.16); a local `planning/bin/<triple>` path exists only after a
   local build. A pin naming a file that does not exist is a
   refusal rather than a fall-through, which is how a test takes the compiled
   rung out of the picture.
@@ -357,6 +357,21 @@ unbuilt tree is not evidence about the code a user gets.
   same change that untracks the file. An artifact neither tracked nor
   delivered is a broken install, which is the failure this rule exists to
   prevent, so the reconciliation is part of the work, never a follow-up.
+- The lint gate is one of those consumers, and not an obvious one. shellcheck
+  resolves a `source=` directive only against files named on the same command
+  line, so an untracked library drops out of `git ls-files` and every variable
+  a sourcing script reads from it reads as unassigned (SC2154). The CI job
+  therefore builds the libraries and appends them to the file list; a
+  generated file that is linted, or sourced by something linted, belongs in
+  that list.
+- **`install.sh` is the one standing exception, and it stays committed.** It is
+  fetched and run standalone (`curl … | bash`) and is the npm `bin`, so at
+  runtime it has no siblings to source and no pipeline to fetch it from — the
+  artifact *is* the entry point. It keeps its generator (`installer/build.sh`)
+  and its freshness gate (`installer/build.sh --check`, the `installer-build`
+  CI job) instead. Read the rule above as "nothing machine-produced is
+  committed except the one artifact whose whole purpose is to be downloaded on
+  its own", and see `CONTRIBUTING.md` and `RELEASE.md`, which say the same.
 
 ## 3. Pending consolidation (the duplication inventory)
 

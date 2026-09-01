@@ -63,7 +63,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Generated artifacts are never committed (MAINTAINER.md section 2.15), so a
+# Generated artifacts are never committed (MAINTAINER.md section 2.16), so a
 # clean checkout has none of them. Build-if-missing here; staleness detection
 # stays with the tests, so the bootstrap cannot mask drift. A missing rjq is
 # fatal with the fix named: the register tests cannot run without it.

@@ -84,18 +84,15 @@ usage() {
     awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -euo/{ exit }' "$0"
 }
 
-path_only=0
-if [ "${2:-}" = "--path-only" ]; then
-    path_only=1
-    shift 2>/dev/null || true
-fi
-
+# One flag loop, no pre-scan of "$@" (CODE-STYLE.md section 6): the pre-scan
+# this replaced shifted the arm off "$@" whenever --path-only was the second
+# argument, so `bootstrap.sh rjq --path-only` silently fell through to --all.
 arm=""
 path_only=0
 for arg in "$@"; do
     case "$arg" in
         --path-only) path_only=1 ;;
-        rjq|--all) [ -z "$arm" ] && arm="$arg" ;;
+        rjq|--all) [ -n "$arm" ] || arm="$arg" ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'bootstrap: unknown argument: %s (see --help)\n' "$arg" >&2; exit 64 ;;
     esac
