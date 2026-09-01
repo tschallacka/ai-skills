@@ -39,7 +39,7 @@ export LC_ALL=C
 # would have to be either documented (defeating the point) or exempted from
 # tests/test-flag-coverage.sh's every-flag-is-documented contract.
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=planning/scripts/plan-document-lib.sh
 source "$script_dir/plan-document-lib.sh"
 # shellcheck source=planning/scripts/register-lib.sh
@@ -127,7 +127,7 @@ if [ "$kind" = bug ]; then entries_key=bugs; id_prefix=B; fi
 # ─────────────────────────────────────────────────────────────────────────────
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || plan_die "not inside a git work tree: $register" 65
-register_abs="$(cd "$(dirname "$register")" && pwd)/$(basename "$register")"
+register_abs="$(cd "$(dirname "$register")" && pwd -P)/$(basename "$register")"
 case "$register_abs" in
     "$repo_root"/*) register_rel="${register_abs#"$repo_root"/}" ;;
     *) plan_die "register is outside the work tree at $repo_root: $register" 65 ;;
@@ -199,14 +199,10 @@ esac
 # so a register carrying the same id twice under-reports here. That is not this
 # report's job to catch: the soundness check below refuses on `duplicate ids`.
 # ─────────────────────────────────────────────────────────────────────────────
-since_base() {
-    rjq -n -r \
-        --slurpfile base "$base_file" \
-        --slurpfile ours "$ours_file" \
-        --slurpfile theirs "$theirs_file" \
-        --arg key "$entries_key" \
-        --arg ours_label "$ours_label" \
-        --arg theirs_label "$theirs_label" '
+# The filter is a module-level constant so since_base() stays under the
+# 40-line function cap (CODE-STYLE.md); the interpolations are jq's \(...),
+# which a quoted here-doc leaves alone.
+SINCE_BASE_JQ=$(cat <<'JQ'
         def byid($d): (($d[0][$key]) // []) | map({key: .id, value: .}) | from_entries;
         def changed_keys($a; $b):
             [ ((($a | keys) + ($b | keys)) | unique)[] as $k
@@ -247,7 +243,18 @@ since_base() {
           (if ($t_mod | length) > 0
            then "  modified on \($theirs_label) ONLY — read these keys:" else empty end),
           ($t_mod[] | "      \(.id): \(.keys | join(", "))")
-    '
+JQ
+)
+
+since_base() {
+    rjq -n -r \
+        --slurpfile base "$base_file" \
+        --slurpfile ours "$ours_file" \
+        --slurpfile theirs "$theirs_file" \
+        --arg key "$entries_key" \
+        --arg ours_label "$ours_label" \
+        --arg theirs_label "$theirs_label" \
+        "$SINCE_BASE_JQ"
 }
 note "changed since the merge base:"
 since_base >&2
