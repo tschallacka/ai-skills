@@ -416,6 +416,33 @@ fn rgbview_preserves_styles_without_json_wrapping() {
 }
 
 #[test]
+fn locate_returns_visible_coordinates_without_sending_input() {
+    let dir = temp_dir("locate");
+    let mut child = start(&dir, &["sh", "-c", "printf TARGET; sleep 1"], "5");
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"TARGET"}
+"#,
+    );
+    let matches = request_all(
+        &dir,
+        r#"{"v":1,"op":"locate","query":"TARGET"}
+"#,
+    );
+    assert_eq!(matches[0]["event"], "locate");
+    assert_eq!(matches[0]["matches"][0]["row"], 1);
+    assert_eq!(matches[0]["matches"][0]["col"], 1);
+    assert_eq!(matches[0]["matches"][0]["width"], 6);
+    assert_eq!(matches[1]["event"], "ack");
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+#[test]
 fn wait_returns_a_snapshot_after_a_screen_predicate() {
     let dir = temp_dir("wait");
     let mut child = start(
@@ -682,6 +709,7 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
     let help_text = String::from_utf8_lossy(&help.stdout);
     assert!(help_text.contains("operations:"));
     assert!(help_text.contains("view 10-15"));
+    assert!(help_text.contains("locate TEXT"));
     assert!(help_text.contains("rgbview"));
     assert!(help_text.contains("elements [ROWS...]"));
     assert!(help_text.contains("Application keybindings are unknown"));

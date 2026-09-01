@@ -138,6 +138,8 @@ enum Request {
         #[serde(default)]
         rows: Vec<usize>,
     },
+    #[serde(rename = "locate")]
+    Locate { v: u8, query: String },
     #[serde(rename = "view")]
     View {
         v: u8,
@@ -259,6 +261,22 @@ struct ElementsEvent {
     event: &'static str,
     seq: u64,
     elements: Vec<Clickable>,
+}
+
+#[derive(Serialize)]
+struct LocateMatch {
+    text: String,
+    row: usize,
+    col: usize,
+    width: usize,
+}
+
+#[derive(Serialize)]
+struct LocateEvent {
+    v: u8,
+    event: &'static str,
+    seq: u64,
+    matches: Vec<LocateMatch>,
 }
 
 fn default_wait_timeout() -> u64 {
@@ -1593,6 +1611,37 @@ fn client(
                     event: "elements",
                     seq: *seq,
                     elements,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::Locate { v: 1, query } => {
+            if query.is_empty() {
+                return Err("locate query must not be empty".into());
+            }
+            let matches = screen
+                .rows
+                .iter()
+                .enumerate()
+                .flat_map(|(row, cells)| {
+                    let line = String::from_utf8_lossy(cells).into_owned();
+                    line.match_indices(&query)
+                        .map(move |(col, text)| LocateMatch {
+                            text: text.to_owned(),
+                            row: row + 1,
+                            col: col + 1,
+                            width: text.chars().count(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            json(
+                &mut stream,
+                &LocateEvent {
+                    v: 1,
+                    event: "locate",
+                    seq: *seq,
+                    matches,
                 },
             )
             .map_err(|e| e.to_string())?;

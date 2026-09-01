@@ -10,7 +10,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations:\n  text TEXT                 Send literal text\n  key KEY                   Send a named key or printable key\n  combo KEY [MODIFIERS...]  Send an on-the-fly Ctrl/Alt/Shift combination\n  raw HEX                   Send an explicit byte sequence\n  paste TEXT                Send bracketed paste text\n  view [ROWS...]            Plain text, e.g. view 10-15\n  view-delta [ROWS...]      Only rows changed since the previous view\n  rgbview [ROWS...]         Plain text with ANSI colors preserved\n  rgbview-delta [ROWS...]   Colored changed rows only\n  elements [ROWS...]        Only verified actionable elements\n  observe                   Full structured screen snapshot\n  wait TEXT [TIMEOUT_MS]    Wait for visible text and return a snapshot\n  mouse, click-*, resize, shutdown\n\nview rows are 1-based and are labeled LINE [START-END] TEXT. Row ranges such\nas 10-15 are inclusive. Use observe for cursor/styles/coordinate hints and\nelements for semantic clickable labels. Application keybindings are unknown to\nthis helper: discover them from the screen, built-in help, or a manpage. The\nsocket is read from the session file when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations:\n  text TEXT                 Send literal text\n  locate TEXT               Find visible text and return 1-based coordinates\n  key KEY                   Send a named key or printable key\n  combo KEY [MODIFIERS...]  Send an on-the-fly Ctrl/Alt/Shift combination\n  raw HEX                   Send an explicit byte sequence\n  paste TEXT                Send bracketed paste text\n  view [ROWS...]            Plain text, e.g. view 10-15\n  view-delta [ROWS...]      Only rows changed since the previous view\n  rgbview [ROWS...]         Plain text with ANSI colors preserved\n  rgbview-delta [ROWS...]   Colored changed rows only\n  elements [ROWS...]        Only verified actionable elements\n  observe                   Full structured screen snapshot\n  wait TEXT [TIMEOUT_MS]    Wait for visible text and return a snapshot\n  mouse, click-*, resize, shutdown\n\nview rows are 1-based and are labeled LINE [START-END] TEXT. Row ranges such\nas 10-15 are inclusive. Use locate to find visible text without typing it. Use\nobserve for cursor/styles/coordinate hints and elements for semantic clickable\nlabels. Application keybindings are unknown to this helper: discover them from\nthe screen, built-in help, or a manpage. The socket is read from the session\nfile when --session or --agent is used."
         );
         return;
     }
@@ -43,7 +43,7 @@ fn main() {
                     agent = Some(a[i].clone());
                 }
             }
-            "text" | "paste" => {
+            "text" | "paste" | "locate" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
@@ -182,6 +182,7 @@ fn main() {
     if let Some(v) = value {
         match req["op"].as_str() {
             Some("text") | Some("paste") => req["text"] = v.into(),
+            Some("locate") => req["query"] = v.into(),
             Some("key") => req["key"] = v.into(),
             Some("raw") => req["hex"] = v.into(),
             _ => {}

@@ -23,6 +23,9 @@ Use `observe` when you need structured JSON for cursor state, styles, scrollback
 or all screen metadata. Use `elements [<ROW>...]` when you need only verified
 actionable elements and their labels/coordinates; row ranges such as `10-15`
 are accepted. Send one request at a time with
+`interactive-shell-input --socket <SOCKET> locate '<TEXT>'` to find visible text
+and receive 1-based row/column matches; it does not type, navigate, or assert
+that the match is clickable. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
 `mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
 `click-id <ID> <BUTTON>`, `click-label '<LABEL>' <BUTTON>`, `click-at <X> <Y> <BUTTON>`, or
