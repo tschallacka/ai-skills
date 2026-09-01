@@ -16,9 +16,10 @@ for a compact plain-text
 screen view labeled with terminal rows and rendered column spans; use
 `view-delta [<ROW>...]` for only rows changed since the previous view request.
 Use `observe` when you need structured JSON for cursor state, styles, scrollback,
-or interactive elements. Send one request at a time with
+or all screen metadata. Use `elements` when you need only verified actionable
+elements and their labels/coordinates. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
-`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
+`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `elements`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
 `click-id <ID> <BUTTON>`, `click-label '<LABEL>' <BUTTON>`, `click-at <X> <Y> <BUTTON>`, or
 `shutdown`.
 
