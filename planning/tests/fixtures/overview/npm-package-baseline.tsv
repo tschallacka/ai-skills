@@ -110,6 +110,7 @@ package/planning/scripts/register-command.sh	4423
 package/planning/scripts/register-lib.sh	5320
 package/planning/scripts/register-read.sh	5446
 package/planning/scripts/register-rebuild.sh	2919
+package/planning/scripts/register-resolve.sh	25527
 package/planning/scripts/remove-coverage.sh	3611
 package/planning/scripts/remove-plan.sh	2363
 package/planning/scripts/remove-work-unit.sh	5842

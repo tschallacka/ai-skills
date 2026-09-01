@@ -400,6 +400,7 @@ tests/test-report18-regressions.sh
 tests/test-report20-regressions.sh
 tests/test-reviewer-projection.sh
 tests/test-register-helpers.sh
+tests/test-register-resolve.sh
 tests/test-register-read.sh
 tests/test-resolve-finding.sh
 tests/test-validate-gates.sh
@@ -414,6 +415,7 @@ tests/test-platform-selection.sh
 tests/test-npm-package.sh
 tests/test-overview-fixtures.sh
 scripts/register-lib.sh
+scripts/register-resolve.sh
 scripts/todo-add.sh
 scripts/todo-update.sh
 scripts/bug-add.sh
