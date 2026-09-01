@@ -2376,7 +2376,7 @@
     {
       "id": "B106",
       "title": "interactive-shell help omits the private socket-parent directory requirement",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -2388,8 +2388,8 @@
         "src/interactive-shell/src/lib.rs",
         "src/interactive-shell/src/bin/interactive-shell.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Working tree change — document the private socket-parent requirement in wrapper help",
+      "verification": "Wrapper help now states that the socket path must be inside an owner-only private directory; cargo protocol tests pass.",
       "found_by": "fresh agent protocol run, subworker Gauss",
       "notes": null,
       "created_at": "2026-09-01T15:10:00Z",
