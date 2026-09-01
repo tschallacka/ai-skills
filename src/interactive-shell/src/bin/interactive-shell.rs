@@ -131,7 +131,9 @@ fn main() {
             rows,
             idle_timeout: idle,
             command: cmd.clone(),
-            agent: agent.unwrap_or_default(),
+            agent: interactive_shell_core::session_identity(None, agent.as_deref())
+                .or_else(|| saved.as_ref().map(|session| session.agent.clone()))
+                .unwrap_or_default(),
         };
         if let Err(error) = interactive_shell_core::save_session(&id, &session) {
             eprintln!("interactive-shell: {error}");

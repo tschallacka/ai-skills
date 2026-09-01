@@ -352,6 +352,7 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
     let state = temp_dir("session-state");
     let mut child = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
         .env("INTERACTIVE_SHELL_HOME", &state)
+        .env("INTERACTIVE_SHELL_AGENT", "session-agent")
         .args([
             "--session",
             "resume-case",
@@ -381,6 +382,19 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
     let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
     let socket = PathBuf::from(session["socket"].as_str().unwrap());
     assert!(socket.ends_with("term.sock"));
+    assert_eq!(
+        fs::metadata(&session_file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(socket.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(session["agent"], "session-agent");
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
         .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
