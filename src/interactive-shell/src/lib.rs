@@ -133,7 +133,11 @@ enum Request {
     #[serde(rename = "observe")]
     Observe { v: u8 },
     #[serde(rename = "elements")]
-    Elements { v: u8 },
+    Elements {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
     #[serde(rename = "view")]
     View {
         v: u8,
@@ -1565,18 +1569,25 @@ fn client(
             )
             .map_err(|e| e.to_string())?;
         }
-        Request::Elements { v: 1 } => {
+        Request::Elements { v: 1, rows } => {
+            let elements = screen
+                .elements()
+                .into_iter()
+                .filter(|element| element.actionable)
+                .filter(|element| {
+                    rows.is_empty()
+                        || rows
+                            .iter()
+                            .any(|requested| *requested == element.row.saturating_add(1))
+                })
+                .collect();
             json(
                 &mut stream,
                 &ElementsEvent {
                     v: 1,
                     event: "elements",
                     seq: *seq,
-                    elements: screen
-                        .elements()
-                        .into_iter()
-                        .filter(|element| element.actionable)
-                        .collect(),
+                    elements,
                 },
             )
             .map_err(|e| e.to_string())?;

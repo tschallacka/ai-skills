@@ -10,7 +10,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], rgbview [ROW...], rgbview-delta [ROW...], elements, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nrgbview preserves ANSI colors; elements returns only verified actionable elements; observe returns the full structured screen.\nThe socket is read from the session file when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], rgbview [ROW...], rgbview-delta [ROW...], elements [ROW...], observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nrgbview preserves ANSI colors; elements returns only verified actionable elements and accepts row ranges; observe returns the full structured screen.\nThe socket is read from the session file when --session or --agent is used."
         );
         return;
     }
@@ -87,7 +87,7 @@ fn main() {
                 op = Some(a[i].clone());
                 if matches!(
                     a[i].as_str(),
-                    "view" | "view-delta" | "rgbview" | "rgbview-delta"
+                    "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements"
                 ) && i + 1 < a.len()
                 {
                     args.extend_from_slice(&a[i + 1..]);
@@ -285,6 +285,26 @@ fn main() {
                 });
                 if first == 0 || last == 0 || first > last {
                     eprintln!("invalid view row range: {spec}");
+                    std::process::exit(2);
+                }
+                rows.extend(first..=last);
+            }
+            req["rows"] = rows.into();
+        }
+        "elements" => {
+            let mut rows = Vec::new();
+            for spec in &args {
+                let (first, last) = spec.split_once('-').unwrap_or((spec, spec));
+                let first = first.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("invalid elements row: {spec}");
+                    std::process::exit(2)
+                });
+                let last = last.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("invalid elements row: {spec}");
+                    std::process::exit(2)
+                });
+                if first == 0 || last == 0 || first > last {
+                    eprintln!("invalid elements row range: {spec}");
                     std::process::exit(2);
                 }
                 rows.extend(first..=last);
