@@ -391,6 +391,40 @@ fn observe_exposes_osc8_elements_and_click_targets() {
 }
 
 #[test]
+fn observe_drops_osc8_elements_after_their_cells_are_erased() {
+    let dir = temp_dir("stale-elements");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 0.2; printf '\\033[2J'; sleep 2",
+        ],
+        "5",
+    );
+    thread::sleep(Duration::from_millis(500));
+    let snapshot = request_all(
+        &dir,
+        r#"{"v":1,"op":"observe"}
+"#,
+    )
+    .into_iter()
+    .find(|event| event["event"] == "snapshot")
+    .unwrap();
+    assert!(snapshot["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|element| element["uri"] != "https://example.test"));
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+#[test]
 fn malformed_cli_arguments_do_not_panic() {
     let wrapper = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
         .arg("--socket")
