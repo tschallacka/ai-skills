@@ -25,7 +25,10 @@ trap 'rm -rf "$work"' EXIT
 install_planning() { # <home>
     local home="$1"
     mkdir -p "$home/.config/opencode"
-    HOME="$home" "$BASH" "$installer" --skill planning \
+    # XDG_CONFIG_HOME is unset, not merely HOME redirected: the plans directory
+    # the grant names resolves under it when set, so inheriting the developer's
+    # would grant a path outside the fixture.
+    env -u XDG_CONFIG_HOME HOME="$home" "$BASH" "$installer" --skill planning \
         --target "$home/.config/opencode/skills" --yes \
         >"$work/out" 2>&1 </dev/null
 }
@@ -43,7 +46,7 @@ rc=0
 install_planning "$home" || rc=$?
 t_assert_eq 'a jsonc-only config installs cleanly' "$rc" '0'
 t_assert_eq 'the plans grant landed in the jsonc file' \
-    "$(grant_state "$home/.config/opencode/opencode.jsonc" read "$home/.plans/**")" 'allow'
+    "$(grant_state "$home/.config/opencode/opencode.jsonc" read "$home/.config/tsch-ai-skills/plans/**")" 'allow'
 t_assert_eq 'the pre-existing model field survived' \
     "$(rjq -r '.model' "$home/.config/opencode/opencode.jsonc")" 'opencode/big-pickle'
 t_assert_eq 'and no parallel opencode.json appeared' \

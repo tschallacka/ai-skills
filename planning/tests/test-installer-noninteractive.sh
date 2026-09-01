@@ -3,8 +3,8 @@
 # test-installer-noninteractive.sh — --yes answers every prompt, and without it a
 # prompt refuses cleanly.
 #
-# Installing planning under --yes used to die on "Create ~/.plans as the global
-# plans directory?": confirm honoured YES_ALL, which only the interactive "a"
+# Installing planning under --yes used to die on "Create <the plans directory>
+# as the global plans directory?": confirm honoured YES_ALL, which only the "a"
 # answer sets, and never YES. A --yes that stops on a question is broken for the
 # one job it has.
 #
@@ -28,7 +28,11 @@ trap 'rm -rf "$work"' EXIT
 run_planning() { # <fresh-home> <target> [extra args...]
     local home="$1" target="$2"; shift 2
     mkdir -p "$home"
-    HOME="$home" "$BASH" "$installer" --skill planning --target "$target" "$@" \
+    # XDG_CONFIG_HOME is unset, not merely HOME redirected: the plans directory
+    # resolves under it when set, so inheriting the developer's would send the
+    # installer outside the fixture and into their real config.
+    env -u XDG_CONFIG_HOME HOME="$home" \
+        "$BASH" "$installer" --skill planning --target "$target" "$@" \
         >"$work/out" 2>&1 </dev/null
 }
 
@@ -41,7 +45,7 @@ t_assert_eq 'and nothing asked for interactive input' \
 # The permission step is the one that used to die, so assert it did its work
 # rather than only that the run survived.
 t_assert_eq 'the plans directory was created' \
-    "$([ -d "$work/home-yes/.plans" ] && printf yes || printf no)" 'yes'
+    "$([ -d "$work/home-yes/.config/tsch-ai-skills/plans" ] && printf yes || printf no)" 'yes'
 t_assert_eq 'the skill was installed' \
     "$([ -f "$work/target-yes/planning/SKILL.md" ] && printf yes || printf no)" 'yes'
 
