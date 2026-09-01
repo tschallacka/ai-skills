@@ -132,6 +132,8 @@ enum Request {
     Raw { v: u8, hex: String },
     #[serde(rename = "observe")]
     Observe { v: u8 },
+    #[serde(rename = "elements")]
+    Elements { v: u8 },
     #[serde(rename = "view")]
     View {
         v: u8,
@@ -233,6 +235,14 @@ struct ViewEvent {
     event: &'static str,
     seq: u64,
     text: String,
+}
+
+#[derive(Serialize)]
+struct ElementsEvent {
+    v: u8,
+    event: &'static str,
+    seq: u64,
+    elements: Vec<Clickable>,
 }
 
 fn default_wait_timeout() -> u64 {
@@ -1441,6 +1451,22 @@ fn client(
                     elements: screen.elements(),
                     styles: screen.styles(),
                     scrollback: screen.scrollback(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::Elements { v: 1 } => {
+            json(
+                &mut stream,
+                &ElementsEvent {
+                    v: 1,
+                    event: "elements",
+                    seq: *seq,
+                    elements: screen
+                        .elements()
+                        .into_iter()
+                        .filter(|element| element.actionable)
+                        .collect(),
                 },
             )
             .map_err(|e| e.to_string())?;

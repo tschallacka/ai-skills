@@ -10,7 +10,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nThe socket is read from the session file when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], elements, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nelements returns only verified actionable elements; observe returns the full structured screen.\nThe socket is read from the session file when --session or --agent is used."
         );
         return;
     }
@@ -78,7 +78,7 @@ fn main() {
                 args.extend_from_slice(&a[i + 1..]);
                 i = a.len() - 1;
             }
-            "view" | "view-delta" | "observe" | "shutdown" => {
+            "view" | "view-delta" | "elements" | "observe" | "shutdown" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
