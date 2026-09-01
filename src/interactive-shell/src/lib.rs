@@ -176,6 +176,7 @@ struct Screen {
     visible: bool,
     application_cursor: bool,
     wrap_pending: bool,
+    saved_cursor: Option<(usize, usize)>,
     line_drawing: bool,
     parser: Parser,
     saved_primary: Option<ScreenState>,
@@ -196,6 +197,7 @@ struct ScreenState {
     visible: bool,
     application_cursor: bool,
     wrap_pending: bool,
+    saved_cursor: Option<(usize, usize)>,
     styles: Vec<Vec<CellStyle>>,
     line_drawing: bool,
 }
@@ -210,6 +212,7 @@ impl Screen {
             visible: true,
             application_cursor: false,
             wrap_pending: false,
+            saved_cursor: None,
             line_drawing: false,
             parser: Parser::Ground,
             saved_primary: None,
@@ -277,6 +280,13 @@ impl Screen {
                 b'[' => self.parser = Parser::Csi(Vec::new()),
                 b']' => self.parser = Parser::Osc(Vec::new()),
                 b'(' | b')' => self.parser = Parser::Charset,
+                b'7' => self.saved_cursor = Some((self.row, self.col)),
+                b'8' => {
+                    if let Some((row, col)) = self.saved_cursor {
+                        self.row = row.min(self.rows.len().saturating_sub(1));
+                        self.col = col.min(self.rows[0].len().saturating_sub(1));
+                    }
+                }
                 0x1b => self.parser = Parser::Esc,
                 _ => {}
             },
@@ -504,6 +514,13 @@ impl Screen {
                 self.row = n(0).saturating_sub(1).min(self.rows.len() - 1);
                 self.col = n(1).saturating_sub(1).min(self.rows[0].len() - 1);
             }
+            b's' => self.saved_cursor = Some((self.row, self.col)),
+            b'u' => {
+                if let Some((row, col)) = self.saved_cursor {
+                    self.row = row.min(self.rows.len().saturating_sub(1));
+                    self.col = col.min(self.rows[0].len().saturating_sub(1));
+                }
+            }
             b'J' => self.erase_display(s),
             b'K' => self.erase_line(s),
             b'h' if private && s == "25" => self.visible = true,
@@ -585,6 +602,7 @@ impl Screen {
             visible: self.visible,
             application_cursor: self.application_cursor,
             wrap_pending: self.wrap_pending,
+            saved_cursor: self.saved_cursor,
             styles: std::mem::take(&mut self.styles),
             line_drawing: self.line_drawing,
         });
@@ -596,6 +614,7 @@ impl Screen {
         self.row = 0;
         self.col = 0;
         self.wrap_pending = false;
+        self.saved_cursor = None;
     }
     fn leave_alt(&mut self) {
         if let Some(state) = self.saved_primary.take() {
@@ -606,6 +625,7 @@ impl Screen {
             self.visible = state.visible;
             self.application_cursor = state.application_cursor;
             self.wrap_pending = state.wrap_pending;
+            self.saved_cursor = state.saved_cursor;
             self.styles = state.styles;
             self.line_drawing = state.line_drawing;
         }
@@ -1659,6 +1679,16 @@ mod tests {
         assert_eq!(s.styles[0][0].fg, 2);
         s.feed(b"\x1b[1Gabcdef\x1b[1G\x1b[K");
         assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
+    }
+    #[test]
+    fn cursor_save_and_restore_sequences_round_trip() {
+        let mut screen = Screen::new(3, 8);
+        screen.feed(b"\x1b[2;3H\x1b[s\x1b[3;5H\x1b[uX");
+        assert_eq!(screen.row, 1);
+        assert_eq!(screen.col, 3);
+        assert_eq!(screen.rows[1][2], b'X');
+        screen.feed(b"\x1b7\x1b[1;1H\x1b8Y");
+        assert_eq!(screen.rows[1][3], b'Y');
     }
     #[test]
     fn maximal_cursor_parameters_do_not_overflow() {
