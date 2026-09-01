@@ -2216,10 +2216,10 @@
         "src/interactive-shell/src/lib.rs",
         "src/interactive-shell/src/bin/interactive-shell-input.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Working tree change — expose reverse-video selection as highlighted=true on observed text hints",
+      "verification": "Screen elements now distinguish verified actionability from reverse-video highlight state; unit coverage verifies a highlighted text run. Active-pane semantics remain intentionally heuristic.",
       "found_by": "fresh agent protocol run, subworker Godel",
-      "notes": "This is specifically an unknown-TUI navigation defect; the application can be functioning while the agent lacks enough state to choose its next action.",
+      "notes": "This is specifically an unknown-TUI navigation defect; the new highlight hint improves selection discovery, but the generic model still cannot prove application focus.",
       "created_at": "2026-09-01T12:40:00Z",
       "updated_at": "2026-09-01T12:40:00Z"
     },

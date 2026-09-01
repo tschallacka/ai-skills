@@ -320,6 +320,68 @@ fn structured_observe_paste_mouse_and_resize_requests_work() {
 }
 
 #[test]
+fn view_is_compact_numbered_and_supports_rows_and_deltas() {
+    let dir = temp_dir("view");
+    let mut child = start(
+        &dir,
+        &["sh", "-c", "printf ONE; sleep .1; printf '\\rTWO'; sleep 1"],
+        "5",
+    );
+    let first_wait = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"ONE"}
+"#,
+    );
+    assert!(first_wait.iter().any(|event| event["matched"] == true));
+    let view = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "view",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(view.status.success());
+    assert_eq!(
+        String::from_utf8(view.stdout).unwrap(),
+        "001 [001-003] ONE\n"
+    );
+    let range = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "view",
+            "1-2",
+        ])
+        .output()
+        .unwrap();
+    assert!(range.status.success());
+    assert!(String::from_utf8(range.stdout)
+        .unwrap()
+        .starts_with("001 [001-003] ONE\n002 "));
+    let second_wait = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"TWO"}
+"#,
+    );
+    assert!(second_wait.iter().any(|event| event["matched"] == true));
+    let delta = request_all(
+        &dir,
+        r#"{"v":1,"op":"view-delta","rows":[1]}
+"#,
+    );
+    assert_eq!(delta[0]["event"], "view");
+    assert_eq!(delta[0]["text"], "001 [001-003] TWO");
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+#[test]
 fn wait_returns_a_snapshot_after_a_screen_predicate() {
     let dir = temp_dir("wait");
     let mut child = start(
@@ -463,6 +525,7 @@ fn observe_exposes_osc8_elements_and_click_targets() {
     assert_eq!(element["label"], "LINK");
     assert_eq!(element["uri"], "https://example.test");
     assert_eq!(element["actionable"], true);
+    assert_eq!(element["highlighted"], false);
     assert!(screen["elements"]
         .as_array()
         .unwrap()
