@@ -364,7 +364,7 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
             "--",
             "sh",
             "-c",
-            "printf SESSION_READY; sleep 2",
+            "printf SESSION_READY; sleep 5",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -379,7 +379,8 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
     }
     assert!(session_file.exists());
     let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
-    assert!(session["socket"].as_str().unwrap().ends_with("/term.sock"));
+    let socket = PathBuf::from(session["socket"].as_str().unwrap());
+    assert!(socket.ends_with("term.sock"));
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
         .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
@@ -402,6 +403,13 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    for _ in 0..100 {
+        if socket.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists());
     let resumed = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
         .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
