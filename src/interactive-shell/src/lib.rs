@@ -175,6 +175,7 @@ struct Screen {
     col: usize,
     visible: bool,
     application_cursor: bool,
+    wrap_pending: bool,
     line_drawing: bool,
     parser: Parser,
     saved_primary: Option<ScreenState>,
@@ -194,6 +195,7 @@ struct ScreenState {
     col: usize,
     visible: bool,
     application_cursor: bool,
+    wrap_pending: bool,
     line_drawing: bool,
 }
 
@@ -206,6 +208,7 @@ impl Screen {
             col: 0,
             visible: true,
             application_cursor: false,
+            wrap_pending: false,
             line_drawing: false,
             parser: Parser::Ground,
             saved_primary: None,
@@ -250,8 +253,14 @@ impl Screen {
         let parser = std::mem::replace(&mut self.parser, Parser::Ground);
         match parser {
             Parser::Ground => match byte {
-                0x1b => self.parser = Parser::Esc,
-                b'\r' => self.col = 0,
+                0x1b => {
+                    self.wrap_pending = false;
+                    self.parser = Parser::Esc;
+                }
+                b'\r' => {
+                    self.wrap_pending = false;
+                    self.col = 0;
+                }
                 b'\n' => self.newline(),
                 0x08 => self.col = self.col.saturating_sub(1),
                 0x0e => self.line_drawing = true,
@@ -314,6 +323,11 @@ impl Screen {
         }
     }
     fn put(&mut self, byte: u8) {
+        if self.wrap_pending {
+            self.wrap_pending = false;
+            self.col = 0;
+            self.newline();
+        }
         if let Some(row) = self.rows.get_mut(self.row) {
             if self.col < row.len() {
                 row[self.col] = byte;
@@ -351,7 +365,11 @@ impl Screen {
                 });
             }
         }
-        self.col = (self.col + 1).min(self.rows[0].len().saturating_sub(1));
+        if self.col + 1 >= self.rows[0].len() {
+            self.wrap_pending = true;
+        } else {
+            self.col += 1;
+        }
     }
     fn newline(&mut self) {
         if self.row == self.scroll_bottom {
@@ -541,6 +559,7 @@ impl Screen {
             col: self.col,
             visible: self.visible,
             application_cursor: self.application_cursor,
+            wrap_pending: self.wrap_pending,
             line_drawing: self.line_drawing,
         });
         let rows = self.saved_primary.as_ref().unwrap().rows.len();
@@ -549,6 +568,7 @@ impl Screen {
         self.dirty = vec![true; rows];
         self.row = 0;
         self.col = 0;
+        self.wrap_pending = false;
     }
     fn leave_alt(&mut self) {
         if let Some(state) = self.saved_primary.take() {
@@ -558,6 +578,7 @@ impl Screen {
             self.col = state.col;
             self.visible = state.visible;
             self.application_cursor = state.application_cursor;
+            self.wrap_pending = state.wrap_pending;
             self.line_drawing = state.line_drawing;
         }
     }
@@ -667,6 +688,7 @@ impl Screen {
         self.col = self.col.min(cols.saturating_sub(1));
         self.scroll_top = 0;
         self.scroll_bottom = rows.saturating_sub(1);
+        self.wrap_pending = false;
     }
 }
 fn line_drawing(b: u8) -> u8 {
@@ -1560,6 +1582,14 @@ mod tests {
         s.feed(b"\x1b[");
         s.feed(b"2JX");
         assert_eq!(s.rows[0][0], b'X')
+    }
+    #[test]
+    fn printable_output_wraps_at_the_terminal_width() {
+        let mut screen = Screen::new(2, 4);
+        screen.feed(b"abcde");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[0]), "abcd");
+        assert_eq!(String::from_utf8_lossy(&screen.rows[1]), "e   ");
+        assert_eq!(screen.col, 1);
     }
     #[test]
     fn parser_fragments_other_common_sequences() {
