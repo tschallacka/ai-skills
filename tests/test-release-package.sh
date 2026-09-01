@@ -110,7 +110,16 @@ t_assert_eq 'nothing unexpected is in the tarball' \
 t_assert_eq "the builder's --list matches the derived set" \
     "$(comm -3 "$work/expected" "$work/listed" | tr '\n' ' ')" ''
 
-# ── property 2: every file byte-identical to the repository copy ────────────
+# ── property 2: every file byte-identical to its source of truth ────────────
+# For the generated compiled libraries that source of truth is a fresh build,
+# not a repository copy: they are never tracked (MAINTAINER.md section 2.16),
+# so a clean tree has none, and a stale present one must not silently pass
+# here - the lib test owns staleness, this test owns what the tarball carries.
+fresh_scripts="$work/fresh-scripts"
+mkdir -p "$fresh_scripts"
+cp -R "$repo_root/planning/scripts/." "$fresh_scripts/"
+( cd "$fresh_scripts" && ./build-plan-libs.sh ) >/dev/null 2>&1 \
+    || t_fail 'building the compiled libraries for comparison failed'
 mkdir -p "$work/extract"
 tar -xzf "$tarball" -C "$work/extract"
 extracted="$work/extract/ai-skills-$version"
@@ -118,9 +127,16 @@ differing='' compared=0
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     compared=$((compared + 1))
-    cmp -s "$repo_root/$path" "$extracted/$path" || differing="$differing $path"
+    case "$path" in
+        planning/scripts/plan-core-lib.sh|planning/scripts/plan-crypt-lib.sh| \
+planning/scripts/plan-document-lib.sh|planning/scripts/plan-progress-lib.sh| \
+planning/scripts/plan-table-lib.sh)
+            reference="$fresh_scripts/$(basename "$path")" ;;
+        *) reference="$repo_root/$path" ;;
+    esac
+    cmp -s "$reference" "$extracted/$path" || differing="$differing $path"
 done < "$work/expected"
-t_assert_eq 'every packed file is byte-identical to the repository copy' "${differing# }" ''
+t_assert_eq 'every packed file is byte-identical to its source of truth' "${differing# }" ''
 t_assert_eq 'and every expected file was actually compared' "$compared" "$expected_count"
 
 # ── property 3: nothing marked MODE: DEV is inside it ──────────────────────

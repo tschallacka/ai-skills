@@ -4,8 +4,9 @@
 #
 # planning/scripts/lib/<group>/*.sh is the maintained form, one function per
 # file; the five plan-*-lib.sh files are compiled from it and are what ships.
-# That makes them generated artifacts under CODE-CONTRACTS.md contract 7:
-# regenerated, never hand-edited, and a stale one has to fail rather than drift.
+# That makes them generated artifacts under CODE-CONTRACTS.md contract 7 and
+# MAINTAINER.md section 2.15: regenerated, never hand-edited, never committed,
+# and a stale one has to fail rather than drift.
 #
 # Also pins the properties that make the split worth having: every function file
 # is sourceable on its own, every library stays under the 500-line cap
@@ -34,10 +35,21 @@ trap 'rm -rf "$work"' EXIT
 
 libraries='plan-core-lib.sh plan-document-lib.sh plan-table-lib.sh plan-progress-lib.sh plan-crypt-lib.sh'
 
-# ---- the committed libraries are what the sources compile to ----------------
+# ---- the libraries are what the sources compile to, with no committed copy --
+# The libraries are generated and never tracked (MAINTAINER.md section 2.15), so
+# this test builds them when missing and then lets --check prove determinism:
+# --check rebuilds prod to a temp path and compares, so two builds agreeing is
+# the freshness contract, not a comparison against a committed file.
+libs_missing=0
+for library in $libraries; do
+    [ -f "$scripts_dir/$library" ] || libs_missing=1
+done
+if [ "$libs_missing" -eq 1 ]; then
+    "$builder" >/dev/null 2>&1
+fi
 rc=0
 "$builder" --check >/dev/null 2>&1 || rc=$?
-t_assert_eq 'the committed libraries are up to date' "$rc" 0
+t_assert_eq 'a fresh build reproduces the built libraries byte for byte' "$rc" 0
 
 # ---- and --check has teeth --------------------------------------------------
 # A one-byte edit to a compiled library must be reported, or the guard proves

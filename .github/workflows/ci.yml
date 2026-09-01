@@ -493,14 +493,15 @@ jobs:
           if-no-files-found: error
 
   shellcheck:
-    # Proves: no `error`-severity shellcheck finding exists in any tracked live
-    # shell script, and reports the full finding count so it can be ratcheted.
+    # Proves: no `warning`-severity shellcheck finding exists in any live shell
+    # script, and reports the full finding count so it can be ratcheted.
     #
     # shellcheck is preinstalled on the ubuntu-latest image, so it is invoked
     # directly rather than through ludeeus/action-shellcheck: that keeps the
-    # exact file list (tracked *.sh minus archived benchmark output), the
-    # severity gate, and the informational report under this workflow's control
-    # and adds no third-party action to the supply chain.
+    # exact file list (tracked *.sh minus archived benchmark output, plus the
+    # generated libraries), the severity gate, and the informational report
+    # under this workflow's control and adds no third-party action to the
+    # supply chain.
     name: No warning-level shellcheck findings in live shell scripts
     runs-on: ubuntu-latest
     steps:
@@ -517,11 +518,26 @@ jobs:
           fi
           shellcheck --version
 
-      - name: Collect the tracked live shell scripts
+      - name: Build the generated shell libraries
+        run: ./planning/scripts/build-plan-libs.sh
+
+      - name: Collect the live shell scripts
         run: |
           # benchmark/results/** holds archived output snapshots of past runs,
           # not live code, so it is excluded.
-          git ls-files '*.sh' | grep -v '^benchmark/results/' > /tmp/sh-files.txt
+          #
+          # The compiled plan libraries are generated and untracked (§2.16), so
+          # `git ls-files` cannot see them, and shellcheck resolves a
+          # `source=` directive ONLY against files given on the same command
+          # line. Omitting them does not merely skip linting those files: it
+          # makes every variable a sourcing script reads from them look
+          # unassigned (SC2154). Append them so the sources stay resolvable.
+          {
+            git ls-files '*.sh' | grep -v '^benchmark/results/'
+            for lib in core crypt document progress table; do
+              echo "planning/scripts/plan-$lib-lib.sh"
+            done
+          } | LC_ALL=C sort -u > /tmp/sh-files.txt
           echo "linting $(wc -l < /tmp/sh-files.txt) files"
 
       - name: Full report (informational — the count to ratchet down)
@@ -534,7 +550,7 @@ jobs:
           printf 'notes:    %s\n' "$(grep -c ': note:' /tmp/shellcheck.txt || true)"
           printf 'total:    %s\n' "$(wc -l < /tmp/shellcheck.txt)"
 
-      - name: Fail on error-severity findings
+      - name: Fail on warning-severity findings
         run: xargs shellcheck -s bash --severity=warning < /tmp/sh-files.txt
 
   installer-build:

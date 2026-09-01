@@ -25,7 +25,7 @@ if [ -n "$offenders" ]; then
 fi
 
 command -v rjq >/dev/null 2>&1 || {
-    printf '%s\n' 'active reference test: rjq is not on PATH' >&2
+    printf '%s\n' 'active reference test: rjq is not on PATH - run ./bootstrap.sh (builds it into the gitignored planning/bin path) or download it from the project releases page (queued as T70)' >&2
     exit 1
 }
 printf '%s\n' 'active reference test: PASS'

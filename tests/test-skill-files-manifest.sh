@@ -29,6 +29,20 @@ t_begin
 work="$(mktemp -d "${TMPDIR:-/tmp}/skill-files.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
+# The five compiled libraries are generated and never tracked (MAINTAINER.md
+# section 2.15), so a clean checkout has none. Build-if-missing so prepack on
+# an unbuilt tree passes; this test asserts presence, the lib test owns content.
+libs_missing=0
+for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+    [ -f "$repo_root/planning/scripts/$lib" ] || libs_missing=1
+done
+if [ "$libs_missing" -eq 1 ]; then
+    "$repo_root/planning/scripts/build-plan-libs.sh" >/dev/null
+fi
+if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
+    "$repo_root/planning/scripts/generate-reviewer.sh" >/dev/null
+fi
+
 # SOURCE_ROOT is assigned after sourcing, because 05-config.sh declares it empty.
 # skill_files() reads it for the globbed arms, so an empty root silently yields a
 # short list -- which is why the count assertions below are not decoration.
@@ -107,6 +121,22 @@ for skill in "${SKILL_NAMES[@]}"; do
         }
     done < "$work/listed"
     t_assert_eq "$skill: every file skill_files() promises exists on disk" "${absent# }" ''
+    # A present cross-target artifact must be a regular executable file: the
+    # installer copies and execs it, so a stub or a wrong-arch file here fails
+    # at install time in ways the suite would not see. Absent rows are
+    # CI-delivered and skipped above.
+    invalid=''
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        case "$skill/$path" in
+            planning/bin/*) ;;
+            *) continue ;;
+        esac
+        p="$repo_root/$skill/$path"
+        [ -e "$p" ] || continue
+        { [ -f "$p" ] && [ -x "$p" ]; } || invalid="$invalid $path"
+    done < "$work/listed"
+    t_assert_eq "$skill: every present bundled artifact is a regular executable" "${invalid# }" ''
     # The dev arm is inclusive, so between them the two arms must account for
     # every tracked file. A file in neither is one no install can deliver.
     unexplained=''

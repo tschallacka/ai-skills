@@ -48,6 +48,12 @@ in_allowlist() {
         ./planning/scripts/plan-env.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:stat-format) return 0 ;;
         ./planning/tests/lib-test.sh:sha256-tool) return 0 ;;
+        # role-context verifies the REVIEWER.md pin against SKILL.md at read
+        # time (the freshness gate moved to the consumer when nothing committed
+        # carries the fresh copy). It cannot source plan_sha256_hex - the
+        # compiled library is itself generated and may be absent - so it is a
+        # probe-defining file: it names both forms in one guarded probe.
+        ./planning/scripts/role-context.sh:sha256-tool) return 0 ;;
         # This test forces each branch of the chain, so it has to name all three.
         ./planning/tests/test-sha256-fallbacks.sh:sha256-tool) return 0 ;;
         # The T48b gate's known-runtime universe is a word LIST the build
@@ -105,9 +111,10 @@ documents_the_format() {
     return 1
 }
 
-# 1. Freshness.
+# 1. Determinism. Nothing is committed to compare against (MAINTAINER.md
+#    section 2.16), so the freshness contract is two fresh builds agreeing.
 if ! "$generator" --check >/dev/null 2>&1; then
-    note_fail 'PORTABILITY.md is stale; run ./generate-portability.sh'
+    note_fail 'generation is not deterministic; the catalogue cannot be trusted'
 fi
 
 # 2 and 3. Marker hygiene.

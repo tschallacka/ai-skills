@@ -21,11 +21,11 @@ package/git-worktrees/SKILL.md	8012
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	181009
+package/install.sh	182516
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	1238
+package/package.json	1470
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	12839
 package/planning/REVIEWER.md	22954
@@ -77,7 +77,7 @@ package/planning/scripts/monitor-read.sh	5513
 package/planning/scripts/overview-state.sh	10008
 package/planning/scripts/plan-content-diff-lib.sh	7070
 package/planning/scripts/plan-content.sh	22408
-package/planning/scripts/plan-context-lib.sh	23333
+package/planning/scripts/plan-context-lib.sh	23697
 package/planning/scripts/plan-context-wrapper.sh	1259
 package/planning/scripts/plan-context.sh	23287
 package/planning/scripts/plan-core-lib.sh	17735
@@ -102,7 +102,7 @@ package/planning/scripts/remove-plan.sh	2363
 package/planning/scripts/remove-work-unit.sh	5842
 package/planning/scripts/render-plans-board.sh	20515
 package/planning/scripts/resolve-finding.sh	6629
-package/planning/scripts/role-context.sh	9191
+package/planning/scripts/role-context.sh	10743
 package/planning/scripts/run-adversary-probe.sh	5445
 package/planning/scripts/supervision-frame.sh	6204
 package/planning/scripts/todo-add.sh	3481
@@ -117,7 +117,7 @@ package/planning/scripts/update-work-unit.sh	13891
 package/planning/scripts/validate-plan-commands-lib.sh	7402
 package/planning/scripts/validate-plan-common-lib.sh	1810
 package/planning/scripts/validate-plan-comparisons-lib.sh	3912
-package/planning/scripts/validate-plan-docs-lib.sh	8788
+package/planning/scripts/validate-plan-docs-lib.sh	8817
 package/planning/scripts/validate-plan-goals-lib.sh	13658
 package/planning/scripts/validate-plan-inventory-lib.sh	11249
 package/planning/scripts/validate-plan-placeholders-lib.sh	4687

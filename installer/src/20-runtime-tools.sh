@@ -75,21 +75,37 @@ plan_overview_selected_artifact() {
     printf '%s\n' "$path"
 }
 
+# The bundled rjq artifact path for this host, or nothing when the host matches
+# no row. PATH prepending and the install-time skip both read this, so the case
+# table lives here once.
+bundled_rjq_artifact() {
+    case "$(uname -s):$(uname -m)" in
+        Linux:x86_64|Linux:amd64) printf '%s\n' 'bin/x86_64-unknown-linux-musl/rjq' ;;
+        Linux:aarch64|Linux:arm64) printf '%s\n' 'bin/aarch64-unknown-linux-musl/rjq' ;;
+        Darwin:x86_64) printf '%s\n' 'bin/x86_64-apple-darwin/rjq' ;;
+        Darwin:arm64) printf '%s\n' 'bin/aarch64-apple-darwin/rjq' ;;
+        MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+            printf '%s\n' 'bin/x86_64-pc-windows-msvc/rjq.exe' ;;
+    esac
+}
+
+bundled_rjq_missing_notice() {
+    printf 'Note: no bundled rjq for this host; the register helpers need rjq.\n' >&2
+    printf '  Download the artifact from the project releases page (queued as T70), run ./setup-dev-env.sh,\n' >&2
+    printf '  or build src/rjq with ./bootstrap.sh when nix is unavailable.\n' >&2
+}
+
 # Make the source bundle available before dependency checks. This keeps installs
 # independent of a system jq/rjq package while preserving PATH lookup semantics.
 prepend_bundled_rjq() {
-    local artifact=''
-    case "$(uname -s):$(uname -m)" in
-        Linux:x86_64|Linux:amd64) artifact='bin/x86_64-unknown-linux-musl/rjq' ;;
-        Linux:aarch64|Linux:arm64) artifact='bin/aarch64-unknown-linux-musl/rjq' ;;
-        Darwin:x86_64) artifact='bin/x86_64-apple-darwin/rjq' ;;
-        Darwin:arm64) artifact='bin/aarch64-apple-darwin/rjq' ;;
-        MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-            artifact='bin/x86_64-pc-windows-msvc/rjq.exe' ;;
-    esac
-    if [ -n "$artifact" ] && [ -x "$SOURCE_ROOT/planning/$artifact" ]; then
+    local artifact
+    artifact="$(bundled_rjq_artifact)" || return 0
+    [ -n "$artifact" ] || return 0
+    if [ -x "$SOURCE_ROOT/planning/$artifact" ]; then
         PATH="$SOURCE_ROOT/planning/$(dirname "$artifact"):$PATH"
         export PATH
+    else
+        bundled_rjq_missing_notice
     fi
 }
 

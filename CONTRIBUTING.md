@@ -94,21 +94,24 @@ registry:
 # PORTABILITY(<rule-id>): <one line, why this local code is shaped this way>
 ```
 
-`PORTABILITY.md` carries a `<!-- generated: … -->` stamp. It is cheap to
-rebuild, so **regenerate rather than reason about it**: `./generate-portability.sh`.
-`--check` compares content while ignoring the stamp, and separately warns when a
-scanned file was committed after the stamp — that warning means the "In the tree"
-lists may be behind, not that anything is broken.
+`PORTABILITY.md` is **not committed** (`planning/MAINTAINER.md` §2.16): it is
+generated on demand, so a fresh clone does not have one. Run
+`./generate-portability.sh` when you want to read the catalogue, and never
+hand-edit the copy you generated. `--check` proves the generator is
+deterministic rather than diffing against a tracked file, which is what an
+untracked artifact can still be held to.
 
-When several people or agents edit at once, each of them invalidates it. That is
-expected and harmless. Never hand-edit it, and never resolve a merge conflict in
-it by hand: take either side and re-run the generator.
+Because nothing is tracked, nothing can conflict and nothing can go stale in
+the index — the two failure modes this file used to warn about are gone with
+the committed copy.
 
-`planning/tests/test-portability-contract.sh` enforces all of it: the doc must be
-fresh, every marker id must resolve, the untagged `# PORTABILITY:` form is
-rejected, and **no script may contain a banned construct** unless it is
-allowlisted. That last assertion is the point — a gotcha caught once stays
-caught, so the next person does not rediscover it three files away.
+`planning/tests/test-portability-contract.sh` enforces all of it: generation
+must be deterministic (two fresh builds agreeing, which is what replaces a
+freshness diff once nothing is committed), every marker id must resolve, the
+untagged `# PORTABILITY:` form is rejected, and **no script may contain a
+banned construct** unless it is allowlisted. That last assertion is the point —
+a gotcha caught once stays caught, so the next person does not rediscover it
+three files away.
 
 `planning/tests/lib-test.sh` holds the test-side shims (`t_sed_i`, `t_stat_mode`,
 `t_unique_suffix`, `t_copy_tree`). Use them rather than reintroducing `sed -i`
@@ -120,13 +123,15 @@ or `stat -c` in a test.
 shellcheck -s bash --severity=error $(git ls-files '*.sh' | grep -v '^benchmark/results/')
 ```
 
-Zero `error`-severity findings is the gate CI enforces. Lower severities are a
-ratchet — do not add to them. `.shellcheckrc` disables exactly three checks
-(SC1091, SC2016, SC2034), each with a comment saying why; do not add a fourth
-without one.
+CI gates at `--severity=warning`, so the line above (at `error`) is the looser
+local check, not the gate — see the pull-request checklist below for the
+invocation that matches CI. Notes remain a ratchet: do not add to them.
+`.shellcheckrc` disables exactly three checks (SC1091, SC2016, SC2034), each
+with a comment saying why; do not add a fourth without one.
 
 Note that `git ls-files` only sees tracked files, so `git add` new scripts
-before trusting a clean lint run.
+before trusting a clean lint run — and generated scripts are never tracked at
+all (§2.16), which is why the checklist invocation names them explicitly.
 
 ## Before you open a pull request
 
@@ -139,6 +144,22 @@ git diff --check
 ```
 
 Then, specific to this repo:
+
+- **Lint the generated libraries alongside the tracked scripts.** shellcheck
+  resolves a `source=` directive only against files named on the same command
+  line, and the five compiled `plan-*-lib.sh` are generated, so `git ls-files`
+  does not list them. Leave them out and every variable a sourcing script
+  reads from them reads as unassigned (SC2154) — a finding about the lint
+  invocation, not about the code. Build them first, then include them:
+
+  ```bash
+  ./planning/scripts/build-plan-libs.sh
+  { git ls-files '*.sh' | grep -v '^benchmark/results/'
+    for lib in core crypt document progress table; do
+      echo "planning/scripts/plan-$lib-lib.sh"
+    done
+  } | LC_ALL=C sort -u | xargs shellcheck -s bash --severity=warning
+  ```
 
 - **A behavioural change needs a before/after diff, not an assertion.** The
   convention here is to capture a script's stdout, stderr and exit code across

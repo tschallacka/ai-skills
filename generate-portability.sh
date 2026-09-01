@@ -172,37 +172,22 @@ emit() {
 
 # Warn when a scanned file was committed after the recorded generation time.
 # git, not mtime: a fresh clone rewrites every mtime and would look stale.
-report_age() {
-    local stamp doc_at src_at
-    stamp="$(sed -n 's/^<!-- generated: \(.*\) -->$/\1/p' "$output" | head -1)"
-    [ -n "$stamp" ] || { printf '%s: no generation stamp; regenerate\n' "${0##*/}" >&2; return 0; }
-    command -v git >/dev/null 2>&1 || return 0
-    git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1 || return 0
-    # Commit ordering in epoch seconds, not the stamp against a commit time: the
-    # stamp is written before the commit that carries it, so any commit touching
-    # a scanned file would otherwise always look newer. Equal means the same
-    # commit, which is fresh.
-    doc_at="$(git -C "$repo_root" log -1 --format=%ct -- PORTABILITY.md 2>/dev/null || true)"
-    src_at="$(git -C "$repo_root" log -1 --format=%ct -- '*.sh' portability-rules.json 2>/dev/null || true)"
-    [ -n "$doc_at" ] && [ -n "$src_at" ] || return 0
-    if [ "$src_at" -gt "$doc_at" ]; then
-        printf '%s: a scanned file was committed after PORTABILITY.md (stamp %s); regenerate\n' \
-            "${0##*/}" "$stamp" >&2
-    fi
-}
 
 if [ "$check_only" = true ]; then
-    temporary="$(mktemp "${TMPDIR:-/tmp}/portability.XXXXXX")"
-    trap 'rm -f "$temporary"' EXIT
-    emit > "$temporary"
-    # Compare content, not the stamp: it changes every run by design.
-    if ! diff -u <(grep -v '^<!-- generated: ' "$output") \
-                 <(grep -v '^<!-- generated: ' "$temporary"); then
-        printf '%s: PORTABILITY.md is stale; run %s\n' "${0##*/}" "${0##*/}" >&2
+    # Nothing is committed to compare against (MAINTAINER.md section 2.16), so
+    # --check proves determinism: two fresh builds must agree byte for byte.
+    # The stamp is excluded from the comparison: it changes every run by design.
+    temporary_a="$(mktemp "${TMPDIR:-/tmp}/portability.XXXXXX")"
+    temporary_b="$(mktemp "${TMPDIR:-/tmp}/portability.XXXXXX")"
+    trap 'rm -f "$temporary_a" "$temporary_b"' EXIT
+    emit > "$temporary_a"
+    emit > "$temporary_b"
+    if ! diff -u <(grep -v '^<!-- generated: ' "$temporary_a") \
+                 <(grep -v '^<!-- generated: ' "$temporary_b") >/dev/null; then
+        printf '%s: two fresh builds disagree; generation is not deterministic\n' "${0##*/}" >&2
         exit 1
     fi
-    report_age
-    printf '%s\n' 'PORTABILITY.md is up to date'
+    printf '%s\n' 'generation is deterministic (nothing is committed to compare against)'
     exit 0
 fi
 

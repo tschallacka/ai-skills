@@ -679,9 +679,11 @@ A portability workaround gets a marker, because without one the next reader
 - `# PORTABILITY(empty-array-setu)` with no text is a complete marker.
 - The untagged `# PORTABILITY:` form is rejected: it cannot be indexed.
 
-`generate-portability.sh` harvests these into `PORTABILITY.md`, so the marker
-does double duty — a local warning and the catalogue's index. That is also how
-the cross-file information stays out of comments: it is generated, not written.
+`generate-portability.sh` harvests these into `PORTABILITY.md` — generated on
+demand and never committed (`planning/MAINTAINER.md` §2.16), so run the
+generator to read the catalogue — and the marker does double duty: a local
+warning and the catalogue's index. That is also how the cross-file
+information stays out of comments: it is generated, not written.
 
 **The file docblock is the deliberate exception** to the three-line limit. Its
 cap is 20 lines **of prose** — a fenced quoted block never counts toward any
