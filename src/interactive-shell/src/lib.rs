@@ -196,6 +196,7 @@ struct ScreenState {
     visible: bool,
     application_cursor: bool,
     wrap_pending: bool,
+    styles: Vec<Vec<CellStyle>>,
     line_drawing: bool,
 }
 
@@ -503,18 +504,8 @@ impl Screen {
                 self.row = n(0).saturating_sub(1).min(self.rows.len() - 1);
                 self.col = n(1).saturating_sub(1).min(self.rows[0].len() - 1);
             }
-            b'J' if s.is_empty() || s == "2" => {
-                for (i, row) in self.rows.iter_mut().enumerate() {
-                    row.fill(b' ');
-                    self.dirty[i] = true;
-                }
-            }
-            b'K' => {
-                if let Some(row) = self.rows.get_mut(self.row) {
-                    row[self.col..].fill(b' ');
-                    self.dirty[self.row] = true;
-                }
-            }
+            b'J' => self.erase_display(s),
+            b'K' => self.erase_line(s),
             b'h' if private && s == "25" => self.visible = true,
             b'l' if private && s == "25" => self.visible = false,
             b'h' if private && s == "1" => self.application_cursor = true,
@@ -525,6 +516,40 @@ impl Screen {
             }
             _ => {}
         }
+    }
+    fn erase_display(&mut self, mode: &str) {
+        let mode = if mode.is_empty() {
+            0
+        } else {
+            mode.parse().unwrap_or(0)
+        };
+        let (start, end) = match mode {
+            0 => (self.row, self.rows.len()),
+            1 => (0, self.row + 1),
+            2 => (0, self.rows.len()),
+            _ => return,
+        };
+        for row in start..end {
+            self.rows[row].fill(b' ');
+            self.styles[row].fill(self.style);
+            self.dirty[row] = true;
+        }
+    }
+    fn erase_line(&mut self, mode: &str) {
+        let mode = if mode.is_empty() {
+            0
+        } else {
+            mode.parse().unwrap_or(0)
+        };
+        let (start, end) = match mode {
+            0 => (self.col, self.rows[self.row].len()),
+            1 => (0, self.col + 1),
+            2 => (0, self.rows[self.row].len()),
+            _ => return,
+        };
+        self.rows[self.row][start..end].fill(b' ');
+        self.styles[self.row][start..end].fill(self.style);
+        self.dirty[self.row] = true;
     }
     fn sgr(&mut self, params: &str) {
         for part in params.split(';').map(|p| p.parse::<u8>().unwrap_or(0)) {
@@ -560,11 +585,13 @@ impl Screen {
             visible: self.visible,
             application_cursor: self.application_cursor,
             wrap_pending: self.wrap_pending,
+            styles: std::mem::take(&mut self.styles),
             line_drawing: self.line_drawing,
         });
         let rows = self.saved_primary.as_ref().unwrap().rows.len();
         let cols = self.saved_primary.as_ref().unwrap().rows[0].len();
         self.rows = vec![vec![b' '; cols]; rows];
+        self.styles = vec![vec![self.style; cols]; rows];
         self.dirty = vec![true; rows];
         self.row = 0;
         self.col = 0;
@@ -579,6 +606,7 @@ impl Screen {
             self.visible = state.visible;
             self.application_cursor = state.application_cursor;
             self.wrap_pending = state.wrap_pending;
+            self.styles = state.styles;
             self.line_drawing = state.line_drawing;
         }
     }
@@ -1616,11 +1644,21 @@ mod tests {
     #[test]
     fn alternate_screen_round_trips_primary_content() {
         let mut s = Screen::new(2, 10);
-        s.feed(b"primary");
+        s.feed(b"\x1b[31mprimary");
         let _ = s.delta();
         s.feed(b"\x1b[?1049hALT\x1b[?1049l");
         assert_eq!(String::from_utf8_lossy(&s.rows[0][..7]), "primary");
+        assert_eq!(s.styles[0][0].fg, 2);
         assert!(s.delta().contains_key(&0));
+    }
+    #[test]
+    fn erase_sequences_clear_text_and_styles_by_mode() {
+        let mut s = Screen::new(2, 6);
+        s.feed(b"\x1b[31mabcdef\x1b[2K");
+        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
+        assert_eq!(s.styles[0][0].fg, 2);
+        s.feed(b"\x1b[1Gabcdef\x1b[1G\x1b[K");
+        assert_eq!(String::from_utf8_lossy(&s.rows[0]), "      ");
     }
     #[test]
     fn maximal_cursor_parameters_do_not_overflow() {
