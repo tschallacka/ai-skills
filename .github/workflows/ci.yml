@@ -390,11 +390,17 @@ jobs:
         run: sudo apt-get install -y -qq musl-tools
 
       - name: Format, lint and test
-        working-directory: src/chat-server-rs
         run: |
-          cargo fmt --check
-          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
-          cargo test --target ${{ matrix.target }}
+          # Both crates, not just the server. The client is built below but was
+          # never formatted, linted or unit-tested, so a clippy error and its
+          # unit tests rode through green for as long as the leg has existed.
+          for crate in src/chat-server-rs src/chat-client-rs; do
+            printf '==> %s\n' "$crate"
+            ( cd "$crate" \
+              && cargo fmt --check \
+              && cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings \
+              && cargo test --target ${{ matrix.target }} )
+          done
 
       - name: Build the release artifact (server)
         working-directory: src/chat-server-rs

@@ -216,9 +216,6 @@ impl Session {
     }
 }
 
-/// Fill missing command options from the session (if a session is active).
-/// Returns (server, nick) with the session's values where the caller left them
-/// empty, and whether the session was consulted.
 // ---- server resolution ----------------------------------------------------
 // One ladder, tried in order until something answers a TCP connect:
 //   1. an explicit --server (used as-is; failures surface at connect)
@@ -367,6 +364,9 @@ fn resolve_server(
     }
 }
 
+/// Fill missing command options from the session (if a session is active).
+/// Returns (server, nick) with the session's values where the caller left them
+/// empty, and whether the session was consulted.
 fn apply_session(
     server: &str,
     nick: &str,
@@ -718,9 +718,9 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
     if server.is_empty() {
         eprintln!(
-            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+            "chat-client-rs: no chat server found; pass --server HOST:PORT, or run `chat-client-rs session set --server HOST:PORT --nick NAME` (nothing answered: no --server, no saved session, no known server, no beacon)"
         );
-        std::process::exit(70);
+        std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() || o.text.is_empty() {
@@ -838,9 +838,9 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
     server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
     if server.is_empty() {
         eprintln!(
-            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+            "chat-client-rs: no chat server found; pass --server HOST:PORT, or run `chat-client-rs session set --server HOST:PORT --nick NAME` (nothing answered: no --server, no saved session, no known server, no beacon)"
         );
-        std::process::exit(70);
+        std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
@@ -886,9 +886,9 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
     server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
     if server.is_empty() {
         eprintln!(
-            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+            "chat-client-rs: no chat server found; pass --server HOST:PORT, or run `chat-client-rs session set --server HOST:PORT --nick NAME` (nothing answered: no --server, no saved session, no known server, no beacon)"
         );
-        std::process::exit(70);
+        std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
@@ -925,9 +925,9 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
     if server.is_empty() {
         eprintln!(
-            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+            "chat-client-rs: no chat server found; pass --server HOST:PORT, or run `chat-client-rs session set --server HOST:PORT --nick NAME` (nothing answered: no --server, no saved session, no known server, no beacon)"
         );
-        std::process::exit(70);
+        std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
@@ -1010,9 +1010,9 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
     if server.is_empty() {
         eprintln!(
-            "chat-client-rs: no chat server found (no --server, session, known servers or beacons)"
+            "chat-client-rs: no chat server found; pass --server HOST:PORT, or run `chat-client-rs session set --server HOST:PORT --nick NAME` (nothing answered: no --server, no saved session, no known server, no beacon)"
         );
-        std::process::exit(70);
+        std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
     if server.is_empty() || nick.is_empty() || o.chan.is_empty() {

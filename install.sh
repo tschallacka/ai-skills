@@ -3571,6 +3571,7 @@ CHATEOF
             [ "$package" = dev ] || return 0
             cat <<'CHATEOF'
 tests/test-chat.sh
+tests/test-chat-resolution.sh
 CHATEOF
             ;;
     esac
