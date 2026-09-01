@@ -33,7 +33,6 @@ wait_screen() {
         i=$((i + 1))
     done
     echo "exploration timeout waiting for: $needle" >&2
-    tail -5 "$EVENTS" >&2
     return 1
 }
 
@@ -99,13 +98,18 @@ while [ "$attempt" -lt 40 ]; do
 $snapshot
 EOF
     then
-        target_id=$(rjq -r --arg file "$TARGET_NAME" '
-            (.elements // [])[] | select(.label == $file) | .id
+        target_coords=$(rjq -r --arg file "$TARGET_NAME" '
+            (.elements // [])[]
+            | select(.label == $file)
+            | "\(.row + 1) \(.col + 1)"
         ' <<EOF
 $snapshot
 EOF
         )
-        send click-id "$target_id" 0
+        target_coords=$(printf '%s\n' "$target_coords" | sed -n '1p')
+        target_row=${target_coords%% *}
+        target_col=${target_coords#* }
+        send click-at "$target_col" "$target_row" 0
         found=yes
         break
     fi
