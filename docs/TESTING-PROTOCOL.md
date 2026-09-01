@@ -26,17 +26,23 @@ exercises:
    `nano`.
 4. From the same interactive Bash prompt, the subworker runs `mc` without
    supplying `/tmp` as a startup argument.
-5. The subworker uses `mc`'s own navigation controls to navigate a panel to
-   `/tmp`, observes the directory listing, finds the dynamically named file,
-   selects it, and discovers how to open it in the editor. It may use visible
-   labels, built-in help, or a manpage, but no shortcut is supplied by this
-   protocol.
-6. The editor replaces the content with `hello universe`, saves it, handles
+5. The subworker uses `mc`'s visible file-pane UI to navigate a panel from its
+   current directory to `/tmp`, observing each directory and focus change.
+   It must use the file pane's normal directory entries and parent entry; it
+   must not use a quick-directory command, shell escape, or startup argument to
+   jump directly to `/tmp`.
+6. The subworker observes the `/tmp` listing, finds the dynamically named file,
+   selects it, and discovers how to open it in the configured editor. It should
+   use visible UI elements where possible and ordinary keyboard navigation when
+   that is more appropriate. This protocol supplies no application-specific
+   controls.
+7. `mc`'s configured internal `mcedit` editor subprocess replaces the content with
+   `hello universe`, saves it, handles
    any overwrite prompt from the observed screen, and exits back to `mc`.
-7. The subworker exits `mc` back to the same Bash prompt, runs `less` on the
+8. The subworker exits `mc` back to the same Bash prompt, runs `less` on the
    dynamically named file, observes `hello universe`, discovers how to exit
    `less` from its visible UI, built-in help, or manpage, and returns to Bash.
-8. The subworker reports the final file contents and cleans up the dynamically
+9. The subworker reports the final file contents and cleans up the dynamically
    named file.
 
 The wrapper's socket and event log use a private temporary directory. The
@@ -46,7 +52,6 @@ to a user's real home directory.
 
 ## Preconditions
 
-Run from the repository root in the Nix development environment. The isolated
 Run from the repository root in the Nix development environment. The isolated
 crate must have been built with the current Rust toolchain, and `nano`, `mc`,
 `less`, and `rjq` must be available. If any interactive dependency is missing,
@@ -72,16 +77,18 @@ evidence.
 
 The subworker must independently launch interactive Bash, launch `nano` from
 that Bash, and discover how to enter text, save, and exit `nano` from its
-observations or documentation. It must use `mc` from that same Bash to
-navigate to `/tmp`, locate the file by its observed label/elements, discover
-how to open the editor, edit the file, handle save and overwrite prompts, and
-exit back to Bash. It must then discover how to exit `less` after verifying
-the content. The parent must reject a run where a shell script sends the
-workflow's keys, where separate wrapper sessions are used for the
-applications, where `/tmp` is passed as `mc`'s startup directory, where the
-subworker is given a fixed transcript or application shortcut, or where the
-subworker cannot show the observations or documentation that justified its
-actions.
+observations or documentation. It must use `mc` from that same Bash, move
+focus between its panels using the UI's focus affordances or keyboard focus
+navigation, and traverse directory entries in a file pane until it reaches
+`/tmp`. It must locate the file by its observed label/elements, use the
+configured `mcedit` subprocess, edit the file, handle save and overwrite
+prompts, and exit back to Bash. It must then discover how to exit `less` after
+verifying the content. The parent must reject a run where a shell script sends
+the workflow's keys, where separate wrapper sessions are used for the
+applications, where a quick-directory command, shell escape, or startup path
+is used to reach `/tmp`, where the subworker is given a fixed transcript or
+application controls, or where the subworker cannot show the observations or
+documentation that justified its actions.
 
 The existing shell exploration script is only a deterministic fixture smoke
 test for PTY integration. It is useful for regression checking, but it is not
@@ -117,8 +124,10 @@ The run passes only when all of the following are true:
 - A fresh subworker, started by the parent agent, dynamically generates a
   `/tmp/*.txt` path, visibly reaches the `nano` save flow, and that file
   contains exactly `Hello World` after the first save.
-- `mc` navigates a panel to `/tmp`, uses an observed file label, and opens that
-  dynamically named file using a control discovered by the subworker.
+- `mc` navigates a file pane through visible directory entries to `/tmp`, uses
+  an observed file label, and opens that dynamically named file in the
+  `mc`'s configured internal `mcedit` subprocess using a control discovered by
+  the subworker.
 - The second editor flow reaches and confirms the overwrite prompt.
 - The final file content is exactly `hello universe`.
 - `mc` exits back to the same interactive Bash session after the edit.
@@ -146,7 +155,7 @@ replay a known keystroke transcript. An agent should be able to:
 - inspect `elements` and choose by label or id when semantic metadata exists;
 - fall back to coordinates only after observing them;
 - discover application controls from visible labels, built-in help, or
-  manpages instead of relying on shortcuts supplied by the test;
+  manpages and discover the interactive elements and controls itself;
 - issue arbitrary `key`, `combo`, `text`, `paste`, `mouse`, `click`, `resize`,
   and `raw` actions as needed;
 - recover with a fresh snapshot after missing screen events; and
