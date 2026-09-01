@@ -1106,6 +1106,7 @@ pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
         "TAB" => Some(b"\t"),
         "ESC" => Some(b"\x1b"),
         "META-RIGHT" => Some(b"\x1b[1;3C"),
+        "META-LEFT" => Some(b"\x1b[1;3D"),
         "UP" => Some(b"\x1b[A"),
         "DOWN" => Some(b"\x1b[B"),
         "LEFT" => Some(b"\x1b[D"),
@@ -1273,7 +1274,7 @@ pub fn key_combo_sequence(key: &str, modifiers: KeyModifiers) -> Result<Vec<u8>,
     Ok(result)
 }
 fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
-    if s.is_empty() || !s.len().is_multiple_of(2) {
+    if s.is_empty() || !s.len().is_multiple_of(2) || !s.is_ascii() {
         return Err("hex must be non-empty and even-length");
     }
     (0..s.len())
@@ -1383,11 +1384,14 @@ struct Cleanup {
     master: RawFd,
     pid: libc::pid_t,
     identity: SocketIdentity,
+    reaped: bool,
 }
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        stop(self.pid);
+        if !self.reaped {
+            stop(self.pid);
+        }
         unsafe {
             libc::close(self.master);
         }
@@ -1490,6 +1494,7 @@ fn client(
     screen: &mut Screen,
     seq: &mut u64,
     out: &mut impl Write,
+    last: &mut Instant,
     stopped: &mut bool,
     reason: &mut &'static str,
 ) -> Result<(), String> {
@@ -1746,6 +1751,7 @@ fn client(
                 let mut buf = [0; 8192];
                 let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
                 if n > 0 {
+                    *last = Instant::now();
                     screen.feed(&buf[..n as usize]);
                     *seq += 1;
                     let event = ScreenEvent {
@@ -1959,10 +1965,11 @@ pub fn run(
             return Err(e);
         }
     };
-    let cleanup = Cleanup {
+    let mut cleanup = Cleanup {
         master,
         pid,
         identity: socket_guard.identity.take().unwrap(),
+        reaped: false,
     };
     std::mem::forget(socket_guard);
     let mut screen = Screen::new(rows as usize, cols as usize);
@@ -2003,6 +2010,7 @@ pub fn run(
                 &mut screen,
                 &mut seq,
                 &mut out,
+                &mut last,
                 &mut stopped,
                 &mut reason,
             ) {
@@ -2013,6 +2021,7 @@ pub fn run(
         if unsafe { libc::waitpid(pid, &mut st, libc::WNOHANG) } == pid {
             stopped = true;
             code = status(st);
+            cleanup.reaped = true;
         }
         if last.elapsed() >= Duration::from_secs(idle) {
             stopped = true;
@@ -2053,6 +2062,7 @@ mod tests {
             "RIGHT",
             "HOME",
             "END",
+            "META-LEFT",
             "PAGEUP",
             "PAGEDOWN",
             "INSERT",
@@ -2235,6 +2245,9 @@ mod tests {
     fn alt_graphic_keys_are_encoded_without_raw_bytes() {
         assert_eq!(key_sequence("ALT-X"), Some(vec![0x1b, b'X']));
         assert_eq!(key_sequence("ALT-LEFT"), None);
+        assert_eq!(key_sequence("META-LEFT"), Some(b"\x1b[1;3D".to_vec()));
+        assert_eq!(key_sequence("F10"), Some(b"\x1b[21~".to_vec()));
+        assert!(decode_hex("éé").is_err());
     }
 
     #[test]

@@ -68,7 +68,10 @@ may also flag decorative regions such as scrollbars. Parse those JSON fields;
 do not grep terminal output or acknowledgements. An acknowledgement means only
 that input was accepted by the wrapper, not that the program completed the
 resulting action. Wait for a screen predicate or lifecycle event after every
-state-changing request.
+state-changing request. Function-key bytes can be correct while an application
+still treats them as text when a modal field or unfocused pane owns input; use
+the next screen to verify interpretation. The idle timeout measures PTY output
+inactivity, not agent input or a pending `wait` request.
 
 In file managers, typing a filename may enter the application's command line
 instead of searching the active pane. Discover the pane's own search or
@@ -76,7 +79,7 @@ navigation control from the current screen, built-in help, or its manpage; do
 not assume that typing a visible filename selects it.
 
 Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
-TAB, ESC, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
+TAB, ESC, META-LEFT, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
 DELETE, SHIFT/CTRL cursor variants, and F1 through F12. Use `raw` for an
 explicit byte sequence, encoded as non-empty even-length hexadecimal. Use
 `combo` when the needed modifier combination is not in the named-key list;
@@ -101,6 +104,8 @@ Screen events expose `styles` as row-based spans for basic ANSI colors, bold,
 and reverse video, plus bounded `scrollback`. These observations are useful for
 navigation but do not claim complete terminal emulation.
 
+The screen model stores PTY text as terminal bytes rather than full Unicode
+cells; non-ASCII glyph widths and coordinates may therefore be approximate.
 The screen model covers common cursor movement, erase, visibility, OSC,
 alternate-screen, charset, line-drawing, scroll-region, and insert/delete-line
 controls, including sequences split across PTY reads. Every ncurses extension
