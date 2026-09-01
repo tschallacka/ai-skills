@@ -2547,7 +2547,7 @@
     {
       "id": "B114",
       "title": "compact view can omit enough status context for unknown TUIs",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -2560,8 +2560,8 @@
         "src/interactive-shell/src/bin/interactive-shell-input.rs",
         "interactive-shell/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Working tree change — include terminal dimensions in compact view responses and document resizing when a title or path is clipped.",
+      "verification": "The view protocol test verifies the CLI emits terminal=20x4 before numbered rows; the skill explains how to use the dimensions to choose a larger resize.",
       "found_by": "fresh unknown-TUI validation, subworker Wegener",
       "notes": "Targeted row ranges, rgbview, and locate reduce context cost, but fresh agents still found mc's path/status header clipped at small sizes. A generic title/region query may help, but application path semantics must not be fabricated by the wrapper.",
       "created_at": "2026-09-01T18:00:00Z",

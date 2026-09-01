@@ -252,6 +252,8 @@ struct ViewEvent {
     v: u8,
     event: &'static str,
     seq: u64,
+    cols: usize,
+    rows: usize,
     text: String,
 }
 
@@ -1668,6 +1670,8 @@ fn client(
                     v: 1,
                     event: "view",
                     seq: *seq,
+                    cols: screen.rows.first().map_or(0, Vec::len),
+                    rows: screen.rows.len(),
                     text: screen.view(false, &rows),
                 },
             )
@@ -1680,6 +1684,8 @@ fn client(
                     v: 1,
                     event: "view",
                     seq: *seq,
+                    cols: screen.rows.first().map_or(0, Vec::len),
+                    rows: screen.rows.len(),
                     text: screen.view(true, &rows),
                 },
             )
@@ -1692,6 +1698,8 @@ fn client(
                     v: 1,
                     event: "view",
                     seq: *seq,
+                    cols: screen.rows.first().map_or(0, Vec::len),
+                    rows: screen.rows.len(),
                     text: screen.rgbview(false, &rows),
                 },
             )
@@ -1704,6 +1712,8 @@ fn client(
                     v: 1,
                     event: "view",
                     seq: *seq,
+                    cols: screen.rows.first().map_or(0, Vec::len),
+                    rows: screen.rows.len(),
                     text: screen.rgbview(true, &rows),
                 },
             )

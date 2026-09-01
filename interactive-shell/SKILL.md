@@ -15,6 +15,8 @@ allows it, and resize only when the UI needs more space. Use `view [<ROW>...]`
 for a compact plain-text
 screen view labeled with terminal rows and rendered column spans; use
 `view-delta [<ROW>...]` for only rows changed since the previous view request.
+Compact view responses also include the current `cols` and `rows`, so an agent
+can recognize that a title or path may be clipped and request a larger resize.
 Use `rgbview [<ROW>...]` or `rgbview-delta [<ROW>...]` when ANSI foreground,
 background, bold, or reverse styling is useful; these still omit JSON but emit
 terminal SGR sequences for a color-capable consumer. `view` is preferable for
