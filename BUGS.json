@@ -2415,6 +2415,27 @@
       "notes": "The autowrap fix addresses one renderer corruption mechanism but does not yet prove subprocess-transition synchronization is correct.",
       "created_at": "2026-09-01T16:20:00Z",
       "updated_at": "2026-09-01T16:20:00Z"
+    },
+    {
+      "id": "B108",
+      "title": "interactive-shell skill examples make placeholders look like literal input",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B97",
+      "reproduce": "Give a fresh agent the skill and ask it to send text using the documented `text TEXT` form.",
+      "observed": "The agent submitted the literal token TEXT as part of a shell command, causing a command-not-found error and corrupting the visible command line.",
+      "expected": "Examples distinguish placeholders from literal arguments and show a copyable quoted payload for text containing spaces.",
+      "mechanism": "The skill used unmarked words such as PATH, TEXT, and COMMAND in shell-shaped examples, so an agent could reasonably copy them literally.",
+      "surfaces": [
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Working tree change — mark placeholders with angle brackets and document a quoted text example",
+      "verification": "The skill now uses <SOCKET>, <COMMAND>, and quoted <TEXT> placeholders and states that angle-bracketed words are not literal arguments.",
+      "found_by": "fresh agent protocol run, subworker Socrates",
+      "notes": null,
+      "created_at": "2026-09-01T16:30:00Z",
+      "updated_at": "2026-09-01T16:30:00Z"
     }
   ]
 }
