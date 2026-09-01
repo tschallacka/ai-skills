@@ -80,8 +80,8 @@ that Bash, and discover how to enter text, save, and exit `nano` from its
 observations or documentation. It must use `mc` from that same Bash, move
 focus between its panels using the UI's focus affordances or keyboard focus
 navigation, and traverse directory entries in a file pane until it reaches
-`/tmp`. It must locate the file by its observed label/elements, use the
-configured `mcedit` subprocess, edit the file, handle save and overwrite
+`/tmp`. It must locate the file by its observed label/elements, use `mc`'s
+configured internal `mcedit` editor, edit the file, handle save and overwrite
 prompts, and exit back to Bash. It must then discover how to exit `less` after
 verifying the content. The parent must reject a run where a shell script sends
 the workflow's keys, where separate wrapper sessions are used for the
