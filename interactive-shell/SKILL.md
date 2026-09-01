@@ -36,11 +36,12 @@ waits up to the optional timeout (default 30 seconds) for visible screen text,
 publishes intervening deltas, and returns a full snapshot with `matched` true
 or false. Snapshot and screen
 events also contain `elements`: OSC 8 hyperlinks appear as elements with an id,
-label, URI, row, column, and width; visible non-whitespace text runs are also
-reported as stable coordinate targets for TUIs that expose no semantic metadata.
-Use `click-id` or `click-label` for those; use `click-at` when the TUI exposes
-only a coordinate-based action. Text targets are a heuristic, not proof that a
-TUI will respond to a mouse click. Parse those JSON fields;
+label, URI, row, column, width, and `actionable: true`; visible non-whitespace
+text runs are reported as `actionable: false` coordinate hints for TUIs that
+expose no semantic metadata. Use `click-id` or `click-label` only for
+actionable elements; use `click-at` when the TUI exposes only a
+coordinate-based action. Text targets are hints, not proof that a TUI will
+respond to a mouse click. Parse those JSON fields;
 do not grep terminal output or acknowledgements. An acknowledgement means only
 that input was accepted by the wrapper, not that the program completed the
 resulting action. Wait for a screen predicate or lifecycle event after every

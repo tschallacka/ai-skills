@@ -224,6 +224,7 @@ struct Clickable {
     id: String,
     label: String,
     uri: String,
+    actionable: bool,
     row: usize,
     col: usize,
     width: usize,
@@ -451,6 +452,7 @@ impl Screen {
                         id,
                         label: (byte as char).to_string(),
                         uri: uri.clone(),
+                        actionable: true,
                         row: self.row,
                         col: self.col,
                         width: 1,
@@ -461,6 +463,7 @@ impl Screen {
                     id: "link-1".into(),
                     label: (byte as char).to_string(),
                     uri: uri.clone(),
+                    actionable: true,
                     row: self.row,
                     col: self.col,
                     width: 1,
@@ -766,6 +769,7 @@ impl Screen {
                         id: format!("text-{row}-{start}"),
                         label,
                         uri: "terminal://visible-text".into(),
+                        actionable: false,
                         row,
                         col: start,
                         width: col - start,
@@ -1453,6 +1457,9 @@ fn client(
                     || label.as_deref() == Some(element.label.as_str())
             });
             let (x, y) = match target {
+                Some(element) if !element.actionable => {
+                    return Err("target is visible text, not a verified clickable element; use click-at for a deliberate coordinate click".into());
+                }
                 Some(element) => (element.col as u16 + 1, element.row as u16 + 1),
                 None => match (x, y) {
                     (Some(x), Some(y)) => (x, y),
