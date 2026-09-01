@@ -1,12 +1,18 @@
 ---
 name: interactive-shell
-description: Drive a generic interactive terminal program through a PTY wrapper and local Unix socket.
+description: Operate unknown full-screen and interactive terminal programs through a PTY-backed wrapper, compact screen observations, and a local Unix-socket input client.
 ---
 
 # Interactive shell
 
-Use this skill when an agent must operate a full-screen or interactive program
-such as nano, Midnight Commander, a pager, or a terminal menu. Start
+Use this skill when an agent must discover and operate a full-screen or
+interactive program such as nano, Midnight Commander, Lynx, a pager, a shell,
+or a terminal menu. This is an agent-driven interface: never replace the
+interaction with a replayed shell script or assume that a program has the
+shortcuts used in an example.
+
+Read [README.md](README.md) for the command reference and an end-to-end
+workflow. Start
 `interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 and observe its JSONL stdout. Use the smallest practical `--cols` and `--rows`
@@ -21,6 +27,12 @@ Use `rgbview [<ROW>...]` or `rgbview-delta [<ROW>...]` when ANSI foreground,
 background, bold, or reverse styling is useful; these still omit JSON but emit
 terminal SGR sequences for a color-capable consumer. `view` is preferable for
 minimum token cost.
+For an unknown interface, identify the current focus, visible labels, selection
+state, and available navigation controls before acting. Prefer visible UI
+elements and keyboard navigation, including TAB to move focus and arrows or
+page keys to move within a pane. Ask the application's built-in help or a
+manpage when the screen does not explain an operation. Re-observe after each
+action and branch on what is actually shown.
 Use `observe` when you need structured JSON for cursor state, styles, scrollback,
 or all screen metadata. Use `elements [<ROW>...]` when you need only verified
 actionable elements and their labels/coordinates; row ranges such as `10-15`
@@ -95,6 +107,13 @@ the screen model, and rejects dimensions outside the wrapper bounds.
 `combo PAGEUP ctrl` sends the standard Ctrl-PageUp sequence; this is useful
 when the current application documents a modified navigation key that is not
 listed as a standalone named key.
+
+Do not treat a successful socket acknowledgement as proof that the application
+accepted the key. A screen delta, changed selection, prompt, or lifecycle event
+is the evidence for the next decision. When output is large, request a row
+range or a delta instead of repeatedly asking for the whole screen. Use
+`rgbview` only when color is semantically useful; it preserves SGR while still
+avoiding the JSON metadata overhead.
 
 The wrapper allocates a real PTY, applies the requested dimensions, and owns a
 0600 socket inside a private 0700 directory. It emits a final lifecycle event
