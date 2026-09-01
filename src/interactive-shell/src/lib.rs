@@ -572,7 +572,17 @@ impl Screen {
             .collect()
     }
     fn elements(&self) -> Vec<Clickable> {
-        let mut elements = self.elements.clone();
+        let mut elements = self
+            .elements
+            .iter()
+            .filter(|element| {
+                self.rows
+                    .get(element.row)
+                    .and_then(|row| row.get(element.col..element.col.saturating_add(element.width)))
+                    .is_some_and(|cells| cells == element.label.as_bytes())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         for (row, cells) in self.rows.iter().enumerate() {
             let mut col = 0;
             while col < cells.len() {
