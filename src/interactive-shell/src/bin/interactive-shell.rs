@@ -6,7 +6,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell --socket PATH [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions: --cols N --rows N --idle-timeout SECONDS\nThe command runs in a PTY and is controlled through the Unix socket."
+            "usage: interactive-shell --socket PATH [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions: --cols N --rows N --idle-timeout SECONDS\nThe command runs in a PTY and is controlled through the Unix socket.\nPATH must be inside a private directory owned by the current user (mode 700)."
         );
         return;
     }
