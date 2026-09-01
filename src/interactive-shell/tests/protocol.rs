@@ -210,7 +210,7 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
         .args([
             "--socket",
             dir.join("socket").to_str().unwrap(),
-            "text",
+            "key",
             "x",
             "shutdown",
         ])
@@ -426,6 +426,12 @@ fn observe_drops_osc8_elements_after_their_cells_are_erased() {
 
 #[test]
 fn malformed_cli_arguments_do_not_panic() {
+    let wrapper_help = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(wrapper_help.status.success());
+    assert!(String::from_utf8_lossy(&wrapper_help.stdout).contains("usage:"));
     let wrapper = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
         .arg("--socket")
         .output()
@@ -438,6 +444,44 @@ fn malformed_cli_arguments_do_not_panic() {
         .unwrap();
     assert!(!input.status.success());
     assert!(!String::from_utf8_lossy(&input.stderr).contains("panicked"));
+}
+
+#[test]
+fn cli_text_preserves_spaces_and_input_help_is_available() {
+    let dir = temp_dir("cli-text");
+    let mut child = start(&dir, &["sh", "-c", "sleep 3"], "5");
+    let help = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args(["--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("operations:"));
+    let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "text",
+            "Hello",
+            "World",
+        ])
+        .output()
+        .unwrap();
+    assert!(input.status.success());
+    let snapshot = request_all(
+        &dir,
+        r#"{"v":1,"op":"observe"}
+"#,
+    )
+    .into_iter()
+    .find(|event| event["event"] == "snapshot")
+    .unwrap();
+    assert!(snapshot["rows"].to_string().contains("Hello World"));
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
 }
 
 #[test]

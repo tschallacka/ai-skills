@@ -742,6 +742,9 @@ pub fn key_sequence(key: &str) -> Option<Vec<u8>> {
     if let Some(bytes) = key_bytes(key) {
         return Some(bytes.to_vec());
     }
+    if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() {
+        return Some(key.as_bytes().to_vec());
+    }
     if let Some(letter) = key.strip_prefix("ALT-") {
         let bytes = letter.as_bytes();
         if bytes.len() == 1 && bytes[0].is_ascii_graphic() {
@@ -1567,6 +1570,11 @@ mod tests {
     #[test]
     fn meta_right_is_distinct() {
         assert_ne!(key_bytes("META-RIGHT"), key_bytes("RIGHT"));
+    }
+    #[test]
+    fn printable_keys_are_accepted() {
+        assert_eq!(key_sequence("Q"), Some(vec![b'Q']));
+        assert_eq!(key_sequence("q"), Some(vec![b'q']));
     }
     #[test]
     fn styles_and_scrollback_are_retained() {

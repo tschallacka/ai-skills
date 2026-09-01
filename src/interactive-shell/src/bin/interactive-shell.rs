@@ -4,6 +4,12 @@ use std::env;
 use std::path::PathBuf;
 fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
+    if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
+        println!(
+            "usage: interactive-shell --socket PATH [OPTIONS] -- COMMAND [ARGUMENTS...]\n\noptions: --cols N --rows N --idle-timeout SECONDS\nThe command runs in a PTY and is controlled through the Unix socket."
+        );
+        return;
+    }
     let mut socket = None;
     let mut cols = 80;
     let mut rows = 24;
