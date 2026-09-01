@@ -45,6 +45,11 @@ exercises:
 9. The subworker reports the final file contents and cleans up the dynamically
    named file.
 
+After completing the task, the subworker must review the interactive-shell
+skill and tool as an agent-facing interface. The review must be verbose where
+there is useful evidence, but it must not contain praise, progress narration,
+or a list of behavior that merely worked as expected.
+
 The wrapper's socket and event log use a private temporary directory. The
 agent scenario intentionally uses one dynamically generated `/tmp/*.txt`
 file and must remove it during cleanup. It must not write to the repository or
@@ -90,6 +95,37 @@ is used to reach `/tmp`, where the subworker is given a fixed transcript or
 application controls, or where the subworker cannot show the observations or
 documentation that justified its actions.
 
+## Required evaluation report
+
+The subworker's final report must focus on friction and actionable findings.
+For every difficulty, suspected defect, or missing capability, it should
+record:
+
+- the exact screen state, observation, or tool response involved;
+- the action it attempted and what it expected to happen;
+- what actually happened, including any recovery or workaround;
+- whether the cause appears to be the wrapper, input command, terminal model,
+  application behavior, or evaluation setup;
+- severity and impact on an agent operating an unknown TTY; and
+- a concrete improvement proposal, ideally with a minimal reproduction.
+
+The subworker should specifically assess whether observations were sufficient
+to choose the next action, whether interactive elements and labels were
+discoverable, whether pane focus and keyboard navigation were understandable,
+whether the internal editor subprocess remained controllable, whether waits
+and snapshots supported recovery, and whether errors were clear enough to
+correct course.
+
+It must distinguish a real defect from an application-specific behavior and
+must say when it could not determine the cause. It should include failed or
+awkward attempts, ambiguity, unnecessary manual work, stale or missing screen
+state, confusing protocol responses, and capabilities it needed but could not
+find. It must not silently work around a problem without reporting it.
+
+When a step works normally and presents no friction, omit it from the findings.
+The report is successful when it gives the maintainer concrete evidence for
+improving the agent experience, not when it confirms that the tool is useful.
+
 The existing shell exploration script is only a deterministic fixture smoke
 test for PTY integration. It is useful for regression checking, but it is not
 evidence that an AI subworker can perform this protocol.
@@ -101,9 +137,10 @@ The latest successful run exercised the wrapper against real Linux `nano`,
 observation, element discovery, and input paths in the loop. Its driver was a
 hard-coded Bash script, however, so it demonstrates wrapper integration and
 the happy-path oracle only. It does not measure an AI model's planning,
-observation use, recovery, or ability to select unknown controls. No live
-subworker performance result should be reported until the parent-agent-driven
-procedure above has been run.
+observation use, recovery, or ability to select unknown controls. The later
+subworker run is evidence of agent operation, but it predates the stricter
+file-pane navigation and internal-editor requirements; it should not be
+treated as a complete result for this revised protocol.
 
 For a resource-capped fixture validation run, use the repository's test wrapper:
 
