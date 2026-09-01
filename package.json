@@ -32,6 +32,7 @@
     "merge-request-etiquette",
     "text-etiquette",
     "post-implementation-review",
+    ".agents",
     "README.md",
     "LICENSE",
     "!planning/tests/**",
