@@ -2308,6 +2308,92 @@
       "notes": null,
       "created_at": "2026-09-01T15:00:00Z",
       "updated_at": "2026-09-01T15:00:00Z"
+    },
+    {
+      "id": "B103",
+      "title": "interactive-shell-input named cursor keys are case-sensitive and ignore application cursor mode",
+      "status": "fixed",
+      "severity": "critical",
+      "priority": "urgent",
+      "parent": "B98",
+      "reproduce": "Run mc in the wrapper, then submit key up or key UP while mc has enabled application cursor mode.",
+      "observed": "Lowercase names were rejected. Uppercase cursor names were acknowledged but sent the normal cursor sequence, which mc rendered as literal input instead of moving the selected row.",
+      "expected": "Named keys are discoverable without case assumptions and cursor sequences match the terminal mode requested by the active application.",
+      "mechanism": "key_sequence only recognized uppercase names, and the screen parser did not retain the private cursor-mode flag set by applications with DECSET.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": "Working tree change — normalize named keys and encode cursor keys as SS3 when application cursor mode is active",
+      "verification": "Unit tests cover lowercase named keys and DECSET/DECRST application cursor mode; cargo test --locked passes.",
+      "found_by": "fresh agent protocol run, subworker Gauss",
+      "notes": "This was the direct blocker for navigating mc's visible file pane.",
+      "created_at": "2026-09-01T15:10:00Z",
+      "updated_at": "2026-09-01T15:10:00Z"
+    },
+    {
+      "id": "B104",
+      "title": "generic text click targets are advertised as clickable but do not guarantee application activation",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B98",
+      "reproduce": "Observe an mc screen, select a generated text-* element, and submit click-id <id> 0.",
+      "observed": "The request was acknowledged, but mc did not activate the visible row; in one run the action instead left unexpected input in the parent command line.",
+      "expected": "An element is advertised as clickable only when its action semantics are known, or the observation identifies that it is merely visible text and click behavior is application-dependent.",
+      "mechanism": "Screen tokenization labels every multi-character visible word as terminal://visible-text and click dispatch blindly emits a mouse event, without knowing whether the application enabled mouse reporting or whether the target is actionable.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh agent protocol run, subworker Gauss",
+      "notes": "Do not solve this by removing useful text elements; the agent needs a clear distinction between hyperlink targets, visible text, and application-defined mouse targets.",
+      "created_at": "2026-09-01T15:10:00Z",
+      "updated_at": "2026-09-01T15:10:00Z"
+    },
+    {
+      "id": "B105",
+      "title": "first interactive-shell snapshot can contain stale prompt text before the initial screen is synchronized",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start a wrapper-owned Bash and observe immediately while submitting the first command.",
+      "observed": "The first rendered command row contained stale prompt fragments prepended to the current command, even though the command executed successfully.",
+      "expected": "The first observation is a clean full snapshot of the PTY screen, with no bytes from an unsynchronized initial render.",
+      "mechanism": "The initial screen state and first PTY output are published as deltas without an explicit synchronization boundary, so prompt redraw bytes can be combined with stale model content.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh agent protocol run, subworker Gauss",
+      "notes": "This is a screen-driven evaluation defect even when the child process receives the correct input.",
+      "created_at": "2026-09-01T15:10:00Z",
+      "updated_at": "2026-09-01T15:10:00Z"
+    },
+    {
+      "id": "B106",
+      "title": "interactive-shell help omits the private socket-parent directory requirement",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run interactive-shell --socket /tmp/interactive-shell.sock -- sh and follow the printed error.",
+      "observed": "The wrapper rejects the socket because /tmp is not a private directory, but help does not state the ownership and mode requirement or suggest a safe directory.",
+      "expected": "Help documents the socket-parent constraint and gives an agent a safe, generic way to choose a runtime directory.",
+      "mechanism": "Socket validation enforces a private owner-only parent, while the help text only describes the socket path argument.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/src/bin/interactive-shell.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh agent protocol run, subworker Gauss",
+      "notes": null,
+      "created_at": "2026-09-01T15:10:00Z",
+      "updated_at": "2026-09-01T15:10:00Z"
     }
   ]
 }
