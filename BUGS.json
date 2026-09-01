@@ -2631,6 +2631,28 @@
       "notes": "This is not evidence that PAGEUP/PAGEDOWN encoding is wrong. B115 removes the need to hand-build modified sequences; agents still must verify application semantics after every input.",
       "created_at": "2026-09-01T20:00:00Z",
       "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B118",
+      "title": "highlighted terminal text does not identify the heuristic source",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B98",
+      "reproduce": "Observe a TUI whose selected row is represented by reverse video or by a color difference from adjacent rows.",
+      "observed": "The observation exposed only highlighted=true, so an agent could not distinguish a direct reverse-video signal from the weaker color-outlier inference.",
+      "expected": "The observation identifies the source of a heuristic highlight while remaining explicit that application focus is unknown.",
+      "mechanism": "The terminal model collapsed two different style tests into one boolean field.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Working tree change — add optional highlight_source metadata with reverse-video and color-outlier values.",
+      "verification": "Unit tests assert both highlight sources and the skill documents their non-authoritative meaning.",
+      "found_by": "fresh unknown-TUI validation, subworker Pauli",
+      "notes": "This improves evidence weighting; it does not claim to identify the active mc pane.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
     }
   ]
 }

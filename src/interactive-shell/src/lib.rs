@@ -292,6 +292,8 @@ struct Clickable {
     uri: String,
     actionable: bool,
     highlighted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlight_source: Option<&'static str>,
     row: usize,
     col: usize,
     width: usize,
@@ -525,6 +527,7 @@ impl Screen {
                         uri: uri.clone(),
                         actionable: true,
                         highlighted: false,
+                        highlight_source: None,
                         row: self.row,
                         col: self.col,
                         width: 1,
@@ -537,6 +540,7 @@ impl Screen {
                     uri: uri.clone(),
                     actionable: true,
                     highlighted: false,
+                    highlight_source: None,
                     row: self.row,
                     col: self.col,
                     width: 1,
@@ -931,6 +935,7 @@ impl Screen {
                         uri: "terminal://visible-text".into(),
                         actionable: false,
                         highlighted: false,
+                        highlight_source: None,
                         row,
                         col: start,
                         width: col - start,
@@ -939,10 +944,18 @@ impl Screen {
             }
         }
         for element in &mut elements {
-            element.highlighted = self.styles[element.row]
+            let reverse = self.styles[element.row]
                 .get(element.col..element.col.saturating_add(element.width))
-                .is_some_and(|styles| styles.iter().any(|style| style.reverse))
-                || self.color_outlier(element.row, element.col, element.width);
+                .is_some_and(|styles| styles.iter().any(|style| style.reverse));
+            let color_outlier = self.color_outlier(element.row, element.col, element.width);
+            element.highlighted = reverse || color_outlier;
+            element.highlight_source = if reverse {
+                Some("reverse-video")
+            } else if color_outlier {
+                Some("color-outlier")
+            } else {
+                None
+            };
         }
         elements
     }
@@ -2142,6 +2155,7 @@ mod tests {
             .unwrap();
         assert!(!element.actionable);
         assert!(element.highlighted);
+        assert_eq!(element.highlight_source, Some("reverse-video"));
     }
     #[test]
     fn compact_view_reports_the_actual_rendered_columns() {
@@ -2161,6 +2175,7 @@ mod tests {
             .find(|element| element.label == "SELECT")
             .unwrap();
         assert!(element.highlighted);
+        assert_eq!(element.highlight_source, Some("color-outlier"));
     }
     #[test]
     fn maximal_cursor_parameters_do_not_overflow() {
