@@ -2,7 +2,7 @@
 // PACKAGE: PROD
 use serde_json::json;
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nThe socket is read from the session file when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nThe socket is read from the session file when --session or --agent is used."
         );
         return;
     }
@@ -78,12 +78,16 @@ fn main() {
                 args.extend_from_slice(&a[i + 1..]);
                 i = a.len() - 1;
             }
-            "observe" | "shutdown" => {
+            "view" | "view-delta" | "observe" | "shutdown" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
                 }
                 op = Some(a[i].clone());
+                if a[i].starts_with("view") && i + 1 < a.len() {
+                    args.extend_from_slice(&a[i + 1..]);
+                    i = a.len() - 1;
+                }
             }
             "wait" => {
                 if op.is_some() || i + 1 >= a.len() {
@@ -262,6 +266,26 @@ fn main() {
                 })
                 .into();
         }
+        "view" | "view-delta" => {
+            let mut rows = Vec::new();
+            for spec in &args {
+                let (first, last) = spec.split_once('-').unwrap_or((spec, spec));
+                let first = first.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("invalid view row: {spec}");
+                    std::process::exit(2)
+                });
+                let last = last.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("invalid view row: {spec}");
+                    std::process::exit(2)
+                });
+                if first == 0 || last == 0 || first > last {
+                    eprintln!("invalid view row range: {spec}");
+                    std::process::exit(2);
+                }
+                rows.extend(first..=last);
+            }
+            req["rows"] = rows.into();
+        }
         "click-id" | "click-label" => {
             if args.len() != 2 {
                 eprintln!("click target requires a value and button");
@@ -313,6 +337,30 @@ fn main() {
     }
     writeln!(s, "{req}").unwrap();
     s.shutdown(Shutdown::Write).unwrap();
+    if operation == "view" || operation == "view-delta" {
+        let mut response = String::new();
+        s.read_to_string(&mut response).unwrap_or_else(|error| {
+            eprintln!("read response: {error}");
+            std::process::exit(1);
+        });
+        let mut printed = false;
+        for line in response.lines() {
+            let event: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|error| {
+                eprintln!("invalid view response: {error}");
+                std::process::exit(1);
+            });
+            if event["event"] == "view" {
+                print!("{}", event["text"].as_str().unwrap_or_default());
+                println!();
+                printed = true;
+            }
+        }
+        if !printed {
+            eprintln!("view response did not contain a view event");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(error) = io::copy(&mut s, &mut io::stdout()) {
         if error.kind() != io::ErrorKind::ConnectionReset {
             eprintln!("read response: {error}");

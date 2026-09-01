@@ -132,6 +132,18 @@ enum Request {
     Raw { v: u8, hex: String },
     #[serde(rename = "observe")]
     Observe { v: u8 },
+    #[serde(rename = "view")]
+    View {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
+    #[serde(rename = "view-delta")]
+    ViewDelta {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
     #[serde(rename = "wait")]
     Wait {
         v: u8,
@@ -215,6 +227,14 @@ struct WaitEvent {
     scrollback: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct ViewEvent {
+    v: u8,
+    event: &'static str,
+    seq: u64,
+    text: String,
+}
+
 fn default_wait_timeout() -> u64 {
     30_000
 }
@@ -225,6 +245,7 @@ struct Clickable {
     label: String,
     uri: String,
     actionable: bool,
+    highlighted: bool,
     row: usize,
     col: usize,
     width: usize,
@@ -277,6 +298,7 @@ struct Screen {
     styles: Vec<Vec<CellStyle>>,
     style: CellStyle,
     scrollback: Vec<String>,
+    last_view: Option<Vec<String>>,
     scroll_top: usize,
     scroll_bottom: usize,
 }
@@ -329,6 +351,7 @@ impl Screen {
                 reverse: false,
             },
             scrollback: Vec::new(),
+            last_view: None,
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
         }
@@ -453,6 +476,7 @@ impl Screen {
                         label: (byte as char).to_string(),
                         uri: uri.clone(),
                         actionable: true,
+                        highlighted: false,
                         row: self.row,
                         col: self.col,
                         width: 1,
@@ -464,6 +488,7 @@ impl Screen {
                     label: (byte as char).to_string(),
                     uri: uri.clone(),
                     actionable: true,
+                    highlighted: false,
                     row: self.row,
                     col: self.col,
                     width: 1,
@@ -741,6 +766,43 @@ impl Screen {
             .map(|(i, row)| (i, String::from_utf8_lossy(row).trim_end().to_string()))
             .collect()
     }
+    fn view(&mut self, delta: bool, requested_rows: &[usize]) -> String {
+        let current = self
+            .rows
+            .iter()
+            .map(|row| String::from_utf8_lossy(row).trim_end().to_string())
+            .collect::<Vec<_>>();
+        let previous = self.last_view.replace(current.clone());
+        let requested = if requested_rows.is_empty() {
+            (0..current.len()).collect::<Vec<_>>()
+        } else {
+            requested_rows
+                .iter()
+                .copied()
+                .filter(|row| *row > 0 && *row <= current.len())
+                .map(|row| row - 1)
+                .collect::<Vec<_>>()
+        };
+        requested
+            .into_iter()
+            .filter(|row| {
+                !delta
+                    || previous
+                        .as_ref()
+                        .is_none_or(|old| old[*row] != current[*row])
+            })
+            .map(|row| {
+                let text = &current[row];
+                let end = text.chars().count();
+                format!(
+                    "{line:03} [{start:03}-{end:03}] {text}",
+                    line = row + 1,
+                    start = 1
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
     fn elements(&self) -> Vec<Clickable> {
         let mut elements = self
             .elements
@@ -770,12 +832,18 @@ impl Screen {
                         label,
                         uri: "terminal://visible-text".into(),
                         actionable: false,
+                        highlighted: false,
                         row,
                         col: start,
                         width: col - start,
                     });
                 }
             }
+        }
+        for element in &mut elements {
+            element.highlighted = self.styles[element.row]
+                .get(element.col..element.col.saturating_add(element.width))
+                .is_some_and(|styles| styles.iter().any(|style| style.reverse));
         }
         elements
     }
@@ -1377,6 +1445,30 @@ fn client(
             )
             .map_err(|e| e.to_string())?;
         }
+        Request::View { v: 1, rows } => {
+            json(
+                &mut stream,
+                &ViewEvent {
+                    v: 1,
+                    event: "view",
+                    seq: *seq,
+                    text: screen.view(false, &rows),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::ViewDelta { v: 1, rows } => {
+            json(
+                &mut stream,
+                &ViewEvent {
+                    v: 1,
+                    event: "view",
+                    seq: *seq,
+                    text: screen.view(true, &rows),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Request::Wait {
             v: 1,
             contains,
@@ -1787,6 +1879,18 @@ mod tests {
         assert_eq!(screen.rows[1][2], b'X');
         screen.feed(b"\x1b7\x1b[1;1H\x1b8Y");
         assert_eq!(screen.rows[1][3], b'Y');
+    }
+    #[test]
+    fn visible_text_reports_reverse_video_as_a_highlight_hint() {
+        let mut screen = Screen::new(1, 12);
+        screen.feed(b"\x1b[7mSELECT\x1b[27m");
+        let element = screen
+            .elements()
+            .into_iter()
+            .find(|element| element.label == "SELECT")
+            .unwrap();
+        assert!(!element.actionable);
+        assert!(element.highlighted);
     }
     #[test]
     fn maximal_cursor_parameters_do_not_overflow() {
