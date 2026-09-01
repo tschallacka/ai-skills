@@ -583,6 +583,19 @@ fn observe_exposes_osc8_elements_and_click_targets() {
     assert_eq!(elements[0]["elements"].as_array().unwrap().len(), 1);
     assert_eq!(elements[1]["event"], "ack");
     assert_eq!(elements[0]["elements"][0]["label"], "LINK");
+    let filtered = request_all(
+        &dir,
+        r#"{"v":1,"op":"elements","rows":[1]}
+"#,
+    );
+    assert_eq!(filtered[0]["event"], "elements");
+    assert_eq!(filtered[0]["elements"].as_array().unwrap().len(), 1);
+    let empty = request_all(
+        &dir,
+        r#"{"v":1,"op":"elements","rows":[2]}
+"#,
+    );
+    assert!(empty[0]["elements"].as_array().unwrap().is_empty());
     let id = element["id"].as_str().unwrap();
     let body = format!(
         r#"{{"v":1,"op":"click","id":"{id}","button":0}}
