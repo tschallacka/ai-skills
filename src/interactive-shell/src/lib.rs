@@ -1626,10 +1626,10 @@ fn client(
                 .flat_map(|(row, cells)| {
                     let line = String::from_utf8_lossy(cells).into_owned();
                     line.match_indices(&query)
-                        .map(move |(col, text)| LocateMatch {
+                        .map(|(col, text)| LocateMatch {
                             text: text.to_owned(),
                             row: row + 1,
-                            col: col + 1,
+                            col: line[..col].chars().count() + 1,
                             width: text.chars().count(),
                         })
                         .collect::<Vec<_>>()
