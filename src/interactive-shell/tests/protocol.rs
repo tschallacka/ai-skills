@@ -362,7 +362,7 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
     assert!(view.status.success());
     assert_eq!(
         String::from_utf8(view.stdout).unwrap(),
-        "001 [001-003] ONE\n"
+        "terminal=20x4\n001 [001-003] ONE\n"
     );
     let range = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args([
@@ -376,7 +376,7 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
     assert!(range.status.success());
     assert!(String::from_utf8(range.stdout)
         .unwrap()
-        .starts_with("001 [001-003] ONE\n002 "));
+        .starts_with("terminal=20x4\n001 [001-003] ONE\n002 "));
     let second_wait = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"TWO"}

@@ -379,6 +379,13 @@ fn main() {
                 std::process::exit(1);
             });
             if event["event"] == "view" {
+                if !printed {
+                    println!(
+                        "terminal={}x{}",
+                        event["cols"].as_u64().unwrap_or(0),
+                        event["rows"].as_u64().unwrap_or(0)
+                    );
+                }
                 print!("{}", event["text"].as_str().unwrap_or_default());
                 println!();
                 printed = true;
