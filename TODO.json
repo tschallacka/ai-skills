@@ -4,19 +4,6 @@
   "comment": "Queued work for the ai-skills repository. Schema: todo/SKILL.md. Kept sorted by priority. created_at was backfilled at 2026-08-20 for rows that predate the field.",
   "tasks": [
     {
-      "id": "T7",
-      "title": "Push the branch and read the two macOS legs",
-      "status": "done",
-      "parent": null,
-      "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
-      "note": "CI run 32474258670 at a8d1285 is green on all seven jobs, both macOS legs included -- the first green BSD userland this branch has had. That closes the blocker the workflow macos-known-failures job lists, so continue-on-error can come off both macOS legs; recorded as T37.",
-      "blocked_on": "the maintainer",
-      "refs": [],
-      "priority": "urgent",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-21T10:55:23Z"
-    },
-    {
       "id": "T70",
       "title": "Ship the 2.0.0-alpha binaries as release assets, not committed blobs",
       "status": "open",
@@ -34,6 +21,375 @@
       "note": "Decision 2026-08-31 (Tschallacka): no binary blobs in the repo; the original commit-them wording is dropped. The planning/bin blob itself left the index in the T73 execution (goal 01, commit ad21749 then rebased). Re-applied onto master register twice: after 4cfab47 and after c7bb034.",
       "created_at": "2026-08-28T17:15:01Z",
       "updated_at": "2026-08-31T14:59:45Z"
+    },
+    {
+      "id": "T51",
+      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
+      "blocked_on": null,
+      "refs": [
+        ".plans/plan-overview-rebuild/adversarial-review.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-08-27T12:37:03Z"
+    },
+    {
+      "id": "T72",
+      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/60-install.sh",
+        "planning/scripts/plan-env.sh",
+        "tests/test-shipped-binaries.sh",
+        "rust-development-guidelines.md"
+      ],
+      "note": null,
+      "created_at": "2026-08-31T13:27:55Z",
+      "updated_at": "2026-08-31T13:27:55Z"
+    },
+    {
+      "id": "T81",
+      "title": "The bug-report and todo skills ship no readers or writers, so an installed skill has rules as prose only",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Both SKILL.md files teach an agent to maintain the register with hand-written rjq recipes, while this repository's own agents use validated helpers that refuse a bad entry. The helper family lives in planning/scripts and is all MODE: DEV, so it reaches nobody: register-lib.sh, register-read.sh, register-rebuild.sh, bug-add.sh, bug-update.sh, todo-add.sh, todo-update.sh (671 lines). PR #13 is the evidence that prose rules do not hold - its BUGS.json carried an out-of-enum severity and three duplicate ids, written by authors who had the tools available. Each skill needs its own copies carrying only its own rules, because the two registers do not share them: bugs have a severity enum, a required reproduction, and evidence requirements on confirmed/fixed; tasks have none of those, a different status enum, a parent tree, and legitimately suffixed sub-task ids.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T15:57:41Z"
+    },
+    {
+      "id": "T81f",
+      "title": "Traps already paid for while building the resolver — read before touching this code",
+      "status": "open",
+      "priority": "high",
+      "parent": "T81",
+      "detail": "1) jq/rjq rebinds '.' inside a pipe. 'select($t | has(.id))' asks whether $t has a key named by $t.id, not by the entry's id, so it silently matches nothing; and 'if ($map | has(.id))' silently renames nothing. Bind first: '(.id) as $i | ... has($i)'. This produced two separate silent no-ops in one afternoon, each of which looked like working code. 2) plan_register_temp_file records a path and PRINTS NOTHING, so 'x=$(plan_register_temp_file $(mktemp))' yields an empty path; assign first, register second. 3) A merge conflict cannot be faked: the tool reads git index stages :1 base, :2 ours, :3 theirs, so a fixture with hand-written conflict markers exercises none of it. Build real conflicts in throwaway repos. 4) An entry changed on ONE side only is not a divergence - the changed side wins, the way git merges a line one branch edited. Taking ours-first for every id silently DROPPED a theirs-only edit; that was a real data-loss bug my own test caught. A divergence is both sides changing a base entry differently. 5) from_entries keeps the LAST of a repeated id, so any id-keyed comparison under-reports a register that carries duplicates - check soundness separately. 6) test-flag-coverage.sh requires every accepted flag to appear in --help, which is why the confirmation is the CONFIRM environment variable and not a flag. Its 'every flag has a test' check uses grep -w, and '-' is a non-word character, so a flag that is a hyphen-prefix of another (--confirm inside --confirm-cascade) passes without a test of its own.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:04:38Z",
+      "updated_at": "2026-09-01T16:04:38Z"
+    },
+    {
+      "id": "T82",
+      "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Blocking faults are filed as B103 through B107; read those first, they carry the evidence. Order of work: (1) fix the branch's own BUGS.json before touching the merge - dedupe B94, B95 and B96, keeping for B95 the 'fixed' copy because master closed it in PR #8, and remap B103's severity 'critical' to a value in the enum (blocking/major/minor/cosmetic; the author paired it with priority urgent, so blocking is the faithful reading). No renaming tool will touch an unsound register, by design. (2) Register the skill: SKILL_NAMES in installer/src/05-config.sh, both arms of skill_files() in installer/src/50-manifest.sh, then ./installer/build.sh; add requires.tsv, docs/README.md, a README.md table row, a package.json files entry, and binaries.tsv if its three-binary crate ships. (3) Add MODE markers to the six unmarked files. (4) Then merge origin/master into the branch and resolve BUGS.json with planning/scripts/register-resolve.sh (PR #15) - master's ids are the published ones and do not move, so rename the branch's side; expect six collisions, B97 through B102. (5) Regenerate planning/tests/fixtures/overview/npm-package-baseline.tsv and run the full suite plus bash32-run-tests.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:11:53Z",
+      "updated_at": "2026-09-01T16:11:53Z"
+    },
+    {
+      "id": "T71",
+      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
+      "note": null,
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md",
+        "planning/docs/README.md"
+      ],
+      "created_at": "2026-08-30T21:50:27Z",
+      "updated_at": "2026-08-30T21:50:27Z"
+    },
+    {
+      "id": "T81g",
+      "title": "What the resolver already does, so it is ported rather than redesigned",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "planning/scripts/register-resolve.sh is working, mutation-tested and bash-3.2 clean; its test is planning/tests/test-register-resolve.sh (7 sections). Behaviour worth keeping verbatim: reads the three index stages rather than branch names, so it works mid-conflict with no checkout; --check exits 1 on a conflicted register and 0 on a clean one, for use in a pre-push or CI hook; lists each collision with BOTH sides' titles plus a suggested free id taken from the high-water mark of both sides; refuses when a decision is missing, naming which; reports what each side changed since the merge base, separating 'modified on one side ONLY - read these keys' from 'modified identically on both sides, so the base is simply older' so nothing is falsely suspected; refuses a divergence with an explanation of why renaming would not help; checks EACH SIDE for soundness before asking for decisions, so an already-unsound branch is reported as that branch's fault rather than blamed on the decisions; follows renames into parent and into blocked_on when its whole value is the id; REPORTS prose mentions and never rewrites them, because an id inside a sentence may be a prefix of a longer id or belong to the other register; prints the resolved register to stdout and the confirmation to stderr; writes nothing until CONFIRM=<hash> is handed back, and the hash is identical under bash 5.3 and 3.2. Verified against the real conflict in PR #13, where it correctly refused because that branch's own register is unsound (B105).",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:04:38Z",
+      "updated_at": "2026-09-01T16:04:38Z"
+    },
+    {
+      "id": "T81h",
+      "title": "Packaging and registration rules a new shipped script must satisfy",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "1) Every file declares MODE: PROD (the user receives it) or MODE: DEV (only a maintainer does); an unmarked tracked file fails tests/test-mode-markers.sh. Syntax follows the format: '# MODE: X' in shell, '<!-- MODE: X -->' in Markdown, and AFTER any YAML frontmatter. No comment line may BEGIN with the marker keyword or the generators strip it. 2) install.sh is generated - never edit it; edit installer/src/NN-*.sh and run ./installer/build.sh, which the installer-build CI job verifies byte-for-byte. 3) A new file under planning/ needs PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv rows too, compared byte-for-byte so ROW ORDER matters; a file under bug-report/ or todo/ needs only the skill_files() arm, because those two registries are planning-only. 4) package.json's files array ships whole skill directories, and npm's rule is that a path included that way CANNOT be excluded by .npmignore or .gitignore - that is how untracked local notes nearly got published (B100), and it is why a register inside a skill directory would ship (B107). 5) After adding a shipped file, planning/tests/fixtures/overview/npm-package-baseline.tsv must be regenerated: the test compares npm pack output against it byte-size by byte-size. 6) test-flag-coverage.sh requires every accepted flag to be documented in --help AND referenced by a test. 7) Both skills already declare rjq hard in requires.tsv, so a shipped helper may rely on it; nothing else may be added to that budget - python3 is banned outright, not even guarded.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:05:03Z",
+      "updated_at": "2026-09-01T16:05:03Z"
+    },
+    {
+      "id": "T81i",
+      "title": "How to verify this work, and what a green run does not prove",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Run in this order: bash -n on every edited script; shellcheck at the severity CI uses, which is --severity=warning and NOT --severity=error as AGENTS.md still says (T75) - and the five generated plan-*-lib.sh must be built and NAMED on the command line, because shellcheck resolves a source= directive only against files given to it, so omitting them reports every variable read from them as unassigned; then the targeted tests; then ./run-tests.sh (123 test files, about 6-7 minutes); then bash32-run-tests for the bash 3.2 floor, which matters because 'bash32 ./run-tests.sh' is NOT the same test - children resolve to whatever bash PATH offers, so the wrapper that prepends a 3.2 bin dir is the only honest form. Known-failing on a developer box and NOT caused by your change: test-runtime-dependencies (fails identically on unmodified master here, passes in CI) and test-npm-package (fails whenever the working tree has uncommitted shipped-file changes, and aborts early via npm pack's prepack hook when the per-target chat binaries are absent - build them with ./setup-dev-env.sh or the baseline comparison never runs at all). Mutation-test every assertion added: revert the fix, watch the test fail, restore. An assertion never seen to fail is not verified, and a passing test after a mutation that changed no file is not evidence.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:05:03Z",
+      "updated_at": "2026-09-01T16:05:03Z"
+    },
+    {
+      "id": "T83",
+      "title": "Tools available for register work, and where they came from (PR #15)",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:12:10Z",
+      "updated_at": "2026-09-01T16:12:10Z"
+    },
+    {
+      "id": "T69",
+      "title": "A postmortem template carrying token accounting and a reviewer-session table",
+      "status": "open",
+      "priority": "low",
+      "parent": null,
+      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
+      "blocked_on": null,
+      "refs": [
+        "planning/scripts/create-adversarial-review.sh"
+      ],
+      "note": null,
+      "created_at": "2026-08-28T15:33:14Z",
+      "updated_at": "2026-08-28T15:33:14Z"
+    },
+    {
+      "id": "T56",
+      "title": "Mark a review rationale superseded when a later cycle replaces it",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": null,
+      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
+      "blocked_on": "the review-document format owner: needs a rationale-cycle stamp written when the rationale is written (see note)",
+      "refs": [
+        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
+        "planning/scripts/update-adversarial-review.sh"
+      ],
+      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
+      "created_at": "2026-08-27T22:38:42Z",
+      "updated_at": "2026-08-31T14:59:45Z"
+    },
+    {
+      "id": "T74",
+      "title": "Re-verify the stale-documentation findings after the documentation reorganisation lands",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Six documents made claims that did not match the tree when measured at 11f4cef on 2026-09-01. The reorganisation may fix, move or re-word any of them, so each gets re-checked against the code rather than assumed fixed or assumed still broken. Sub-tasks carry the individual claims. Found while fact-checking for the GitHub wiki; none is blocking.",
+      "blocked_on": "the documentation reorganisation currently in progress",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:13:37Z",
+      "updated_at": "2026-09-01T15:13:37Z"
+    },
+    {
+      "id": "T81a",
+      "title": "Ship bug-report/scripts: bug-lib (bug rules only), bug-read, bug-add, bug-update, bug-rebuild, resolve-conflict; MODE PROD, registered in the prod arm",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Files to create in bug-report/scripts/, seeded from the proven originals in planning/scripts/ (671 lines total across the family): bug-lib.sh from register-lib.sh keeping ONLY the bug arms of reg_findings and reg_sort; bug-read.sh from register-read.sh; bug-add.sh and bug-update.sh as-is; bug-rebuild.sh from register-rebuild.sh; resolve-conflict.sh from planning/scripts/register-resolve.sh. The bug rules to keep: status enum [reported confirmed fixed not-a-defect wont-fix obsolete]; severity enum [blocking major minor cosmetic]; priority enum [urgent high normal low someday]; reproduce required; status=confirmed requires mechanism; status=fixed requires verification; parent must resolve to an existing id; ids unique. Drop every todo arm. Mark all MODE: PROD and add them to the bug-report prod arm of skill_files() in installer/src/50-manifest.sh, then run ./installer/build.sh. bug-report/ currently ships SKILL.md, docs/README.md, requires.tsv and two schema files and NO scripts, so scripts/ is a new subdirectory for it.",
+      "blocked_on": "T81",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T16:04:15Z"
+    },
+    {
+      "id": "T81b",
+      "title": "Ship todo/scripts with the todo register's own rules, including whichever way B102 (status 'dropped') is settled",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Same shape as T81a but for todo/scripts/, keeping ONLY the todo arms. The todo rules differ and must not be copied from the bug side: there is NO severity field at all; the status enum in register-lib.sh is [open done blocked partly decided obsolete] while todo/schema.*.json also lists 'dropped' - that disagreement is B102 and has to be settled before this is written, or the new copy inherits it. Also: 38 tasks use parent and it forms a tree; blocked_on is free text that SOMETIMES holds an id ('T74') and sometimes prose ('the documentation reorganisation currently in progress'), so only an exact-id match may be treated as a reference; and 28 task ids carry letter suffixes (T1e, T41a, T70a) because todo-add.sh takes --id from the caller and only SUGGESTS the next number, so there is no id-shape rule to enforce. A shape check I wrote flagged all 28 as invalid on its first run.",
+      "blocked_on": "T81",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T16:04:15Z"
+    },
+    {
+      "id": "T81c",
+      "title": "Make the shipped helpers self-contained: they may use rjq (hard for both skills) but must not source planning/scripts/plan-document-lib.sh, so replace plan_die, plan_require_file, plan_atomic_write and plan_sha256_hex with local equivalents",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "The four planning helpers to replace, with what each does: plan_die MESSAGE [CODE] prints '<script>: <message>' to stderr and exits; plan_require_file PATH exits 66 when absent; plan_atomic_write PATH reads stdin, writes via mktemp in the TARGET's own directory so the rename is same-filesystem, chmods to match and mv -f's; plan_sha256_hex reads stdin and prints lowercase hex, walking the plan-crypt binary then sha256sum then shasum -a 256 then refusing 69. For a shipped skill the honest chain is sha256sum then shasum then exit 69 - do not add a fourth arm, and note that plan-crypt itself does not ship (B101). rjq needs no fallback: both skills already declare it hard in requires.tsv, so the installer refuses to install them without it.",
+      "blocked_on": "T81",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T16:04:15Z"
+    },
+    {
+      "id": "T81d",
+      "title": "Rewrite both SKILL.md files to name the shipped tools where they currently teach raw rjq; the existing section headings already map one-to-one onto the helpers",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "bug-report/SKILL.md and todo/SKILL.md already have the right section headings and they map one-to-one onto the helpers: 'Recording one'/'Adding a task' -> add, 'Closing one'/'Closing a task' -> update, 'Reading it' -> read, 'Keeping the file in priority order' -> the sort inside write, 'Validating the file' -> the findings check and rebuild. Each section currently teaches a raw rjq recipe; replace the recipe with the helper call and keep the rules prose, because the rules are what a reader needs when a helper refuses. Both files are MODE: PROD. The planning/scripts strings already in them are example DATA inside JSON samples, not tool references - do not mistake them for existing documentation of the helpers.",
+      "blocked_on": "T81",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T16:04:15Z"
+    },
+    {
+      "id": "T81e",
+      "title": "Split the tests per skill and retire planning/scripts/register-resolve.sh in favour of the two shipped resolvers, so there is one way to do the job",
+      "status": "blocked",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Retire planning/scripts/register-resolve.sh and planning/tests/test-register-resolve.sh once the two shipped resolvers exist, so there is one way to do the job. planning/tests/test-register-helpers.sh currently exercises the whole family and needs splitting per skill. tests/test-register-soundness.sh stays where it is: it gates the repository's OWN two registers and is not part of either skill. Only 12 files reference the helper family by path, and most are the helpers themselves, so the rename surface is small: TODO.json, BUGS.json, the helpers, planning/tests/test-register-helpers.sh, tests/test-register-soundness.sh and planning/tests/fixtures/overview/npm-package-baseline.tsv.",
+      "blocked_on": "T81",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-01T16:04:15Z"
+    },
+    {
+      "id": "T75",
+      "title": "AGENTS.md states the shellcheck gate is error severity; both gates are warning",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "AGENTS.md says the pre-push gate and CI use shellcheck at error severity. pre-push-check.sh and the ci.yml shellcheck job both run --severity=warning. CONTRIBUTING.md was corrected already and flags its own looser local line; AGENTS.md and the flake shell banner were not.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T76",
+      "title": "DEVELOPMENT.md and CODE-STYLE.md state a test count of 30; the real count is 123",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "DEVELOPMENT.md says 'all 30 tests' and CODE-STYLE.md section 13 says '30+ PASS'. Measured at 11f4cef: 123 test-*.sh files across the four directories run-tests.sh discovers (planning/tests 106, benchmark/planning/tests 9, tests 6, chat/tests 2), reported as 122 gate cases plus one cargo case. DEVELOPMENT.md and AGENTS.md also describe run-tests.sh as covering two directories; it covers four.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T77",
+      "title": "RELEASE.md miscounts the compiled libraries and the test scripts",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "RELEASE.md step 4 says 'the four plan-*-lib.sh'; there are five since crypt was split out of core when core hit 506 lines against the 500-line cap. RELEASE.md also says 'the 70 test scripts'.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T78",
+      "title": "CODE-CONTRACTS.md contract 7 still describes committed generated artifacts",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Contract 7's table lists PORTABILITY.md and REVIEWER.md as freshness-checked by diffing against a committed copy, and instructs regenerating PORTABILITY.md last because 'its staleness signal is commit ordering'. Neither file is committed since the generated-files migration, the commit-ordering report_age function was deleted, and the five compiled libraries are absent from the table entirely.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T79",
+      "title": "planning/MAINTAINER.md cites a Rust pin and two chat symbols that no longer exist",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "Section 2.15 says the flake pins Rust 1.86.0; the flake takes the newest stable the locked nixpkgs offers and all seven rust-toolchain.toml files under src/ pin 1.98. Sections 2.8a and 2.15 refer to chat-server.sh's rust_bin() and to the chat server dropping to an interpreter tier; the chat skill ships no scripts at all and rust_bin appears nowhere tracked.",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T80",
+      "title": "flake.nix's dev-shell banner probes the removed cargo186 and advertises the old lint line",
+      "status": "blocked",
+      "priority": "low",
+      "parent": "T74",
+      "detail": "The shellHook echoes a cargo186 version, but the floor toolchain was deliberately removed, so every nix develop prints 'cargo186: command not found'. The same banner's last line advertises the shellcheck invocation at --severity=error over git ls-files alone, which is neither the severity CI gates at nor the file set it uses (the generated libraries must be named on the command line for source= to resolve).",
+      "blocked_on": "T74",
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T15:14:23Z",
+      "updated_at": "2026-09-01T15:14:23Z"
+    },
+    {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "decided",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "normal",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T14:53:12Z"
+    },
+    {
+      "id": "T38",
+      "title": "Review record: what was checked on the -ox merge, and what was not",
+      "status": "decided",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
+      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
+      "blocked_on": null,
+      "refs": [
+        "https://github.com/tschallacka/ai-skills/pull/3"
+      ],
+      "created_at": "2026-08-24T12:17:47Z",
+      "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T7",
+      "title": "Push the branch and read the two macOS legs",
+      "status": "done",
+      "parent": null,
+      "detail": "90 commits sit on `refactor/portability-and-installer` and nothing has reached `origin`. `.github/workflows/ci.yml` already runs `test` and `test-bash32` on `macos-latest` with `continue-on-error`, plus a `macos-known-failures` job that checks in the blocker list. Blockers 1-7 are cleared and each is enforced by a test; **blocker 8 is the only one left and cannot be cleared here**: the suite must pass twice in a row on a macOS runner under both `/bin/bash` 3.2 and the runner's default bash. A real bash 3.2 proves the shell floor (green on 3.2.57 via the flake, verified all night), but **BSD userland is still verified by reading, not by execution.** Push, read those two legs, then remove `continue-on-error` from both. Yours to trigger: it is the first outward-facing step in this work.",
+      "note": "CI run 32474258670 at a8d1285 is green on all seven jobs, both macOS legs included -- the first green BSD userland this branch has had. That closes the blocker the workflow macos-known-failures job lists, so continue-on-error can come off both macOS legs; recorded as T37.",
+      "blocked_on": "the maintainer",
+      "refs": [],
+      "priority": "urgent",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-21T10:55:23Z"
     },
     {
       "id": "T10",
@@ -60,19 +416,6 @@
       "priority": "high",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-20T17:17:38Z"
-    },
-    {
-      "id": "T12",
-      "title": "This register is gitignored",
-      "status": "obsolete",
-      "parent": null,
-      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
-      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "high",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T16:32:43Z"
     },
     {
       "id": "T18",
@@ -546,21 +889,6 @@
       "updated_at": "2026-08-27T14:18:12Z"
     },
     {
-      "id": "T51",
-      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
-      "blocked_on": null,
-      "refs": [
-        ".plans/plan-overview-rebuild/adversarial-review.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-08-27T12:37:03Z"
-    },
-    {
       "id": "T52",
       "title": "Check the installed planning skill against canonical before a plan is created",
       "status": "done",
@@ -676,24 +1004,6 @@
       "updated_at": "2026-08-31T17:05:58Z"
     },
     {
-      "id": "T72",
-      "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Second half of the shared-binary work. The repo side is done (one bin/<triple> at the root, plan_bin_dir resolving it). What remains is the installed side and everything that declares the old layout. The installer must place binaries in ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin -- the directory custom-locations and the project-specificies notes already use -- and record it as AI_SKILLS_BIN_ROOT in the global .env, which plan_bin_dir already reads first. That is a schema 2->3 bump: plan-env.sh validates a CLOSED key set in three places (write_global, the check_manifests allow-list, and the version gate), values may not contain a tilde so the path must be expanded before writing, and planning/SKILL.md pins the version too. Then: drop the tracked planning/bin/<triple>/rjq and the per-skill bin from binaries.tsv semantics; declare plan-crypt, which is built and resolved but appears in no binaries.tsv and no manifest row, which rust-development-guidelines.md:199 calls illegal and test-shipped-binaries misses because it validates directory names rather than filenames; fix B94 by collapsing the remaining copies of the uname->triple table onto one resolver. Tests to rework: test-shipped-binaries.sh:104 hard-wires the artifact to the registry's own directory and is the assumption the move breaks, plus test-skill-files-manifest, test-persona-drift, test-installer-manifest, test-platform-selection and test-release-package. Packaging: package.json files[], the generated .npmignore, installer/build-release.sh, and the ten rows each in PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv. Docs stating the old rule: rust-development-guidelines.md section 6 (the authority), CODE-STYLE.md 117-121 and 200-207, planning/MAINTAINER.md 2.15 and 181-184, and chat/SKILL.md:84 which already names a path that does not exist.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/60-install.sh",
-        "planning/scripts/plan-env.sh",
-        "tests/test-shipped-binaries.sh",
-        "rust-development-guidelines.md"
-      ],
-      "note": null,
-      "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-08-31T13:27:55Z"
-    },
-    {
       "id": "T73",
       "title": "Untrack every generated file; CI builds and delivers them",
       "status": "done",
@@ -775,19 +1085,6 @@
       "parent": "T1",
       "detail": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
       "note": "DONE — 69f033b; capped at 7 tests not sourcing lib-test.sh, and it caught a 44th temp site the same day. The duplication is untracked: `test-duplication-ratchet.sh` has five rows — hand-rolled per-PID temp files, inline `awk -F'|'`, the progress-bar literal, percent/bar/icon derivation, the status `case` map — and none counts test reporters, which is how six copies accumulated. Add a sixth row counting test files that define their own `fail`/`note_fail`, capped at whatever remains once T1a lands (3: the T1b and T1c variants). The cap can only be lowered, so it makes T1b and T1c the only way to change that number instead of optional cleanup, and a seventh copy fails the suite instead of passing unnoticed. Count it by brace-matching the reporter's own body, not with an `awk` range — see CODE-STYLE.md §12.",
-      "blocked_on": null,
-      "refs": [],
-      "priority": "normal",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
-    },
-    {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "decided",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
       "blocked_on": null,
       "refs": [],
       "priority": "normal",
@@ -1069,21 +1366,6 @@
       "updated_at": "2026-08-24T09:38:24Z"
     },
     {
-      "id": "T38",
-      "title": "Review record: what was checked on the -ox merge, and what was not",
-      "status": "decided",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Historical record of the review of the 46 commits on refactor/portability-and-installer-ox (merge base 885cba2, head 8a6b830, 88 files, 3982 insertions, 411 deletions). VERIFIED: verify-both-shells 96/96 on bash 5.3 and bash 3.2 with 2 unconfigured; installer/build.sh --check, build-plan-libs.sh --check and generate-portability.sh --check all fresh; test-mode-markers, test-skill-files-manifest, test-release-package and test-register-schemas pass; blast-radius 0 failures 0 warnings; every fixed bug entry names a fix and a verification and every entry has a reproduction. CHECKED AGAINST THE TREE rather than against the commit message: T37 both macOS legs blocking and the surviving continue-on-error belongs to the shellcheck informational step; T27 rename complete in live code with only registers and archived benchmark evidence naming the old file; T22 colonless heading refuses with 64; T32 one kill_process_tree in lib-process.sh; T16 openssl demoted to a soft third rung of the SHA-256 chain rather than accepted as a dependency; T0 renderer present and registered; B16 fix proven by planted worktree fixtures including a pid-write race; B17 explained as the file being edited mid-run.",
-      "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
-      "blocked_on": null,
-      "refs": [
-        "https://github.com/tschallacka/ai-skills/pull/3"
-      ],
-      "created_at": "2026-08-24T12:17:47Z",
-      "updated_at": "2026-08-24T12:17:47Z"
-    },
-    {
       "id": "T40",
       "title": "The python3-shipped rule, its gate and the tree now disagree",
       "status": "done",
@@ -1240,22 +1522,6 @@
       "updated_at": "2026-08-28T15:24:22Z"
     },
     {
-      "id": "T56",
-      "title": "Mark a review rationale superseded when a later cycle replaces it",
-      "status": "blocked",
-      "priority": "normal",
-      "parent": null,
-      "detail": "codex postmortem recommendation 6. The Verdict rationale is a single field rewritten by hand each cycle; across four cycles here I replaced it four times, and nothing would have flagged it had I forgotten. A stale rationale is worse than an absent one because it reads as current: it names findings by id and asserts a verdict that the findings table may already contradict. Either stamp the rationale with the cycle it was written for and warn when the archived cycle count moves past it, or fold the rationale into the same helper that rewrites the findings table.",
-      "blocked_on": "the review-document format owner: needs a rationale-cycle stamp written when the rationale is written (see note)",
-      "refs": [
-        "https://github.com/tschallacka/close-abandoned-tab-groups/blob/master/PLANNING-POSTMORTEM.md",
-        "planning/scripts/update-adversarial-review.sh"
-      ],
-      "note": "Attempted and reverted, deliberately. I built the staleness signal on the archived cycle number and it does not carry the meaning the entry assumed: archive 'Cycle N' names the state BEFORE run N, while a rationale saying 'Cycle N' names the review cycle whose findings just landed. Measured on a fixture — after two update runs the archive holds Cycle 1 and Cycle 2 while the rationale legitimately still reads Cycle 1 — so a warning keyed on the difference fires on the normal path, which is the T67 failure I had just fixed elsewhere. Correcting for the off-by-one then made it silent on the real case. B44 records that the numbering breaks after gaps and is closed as not-a-defect, so the counter is not a sound basis for this and no arithmetic on it will be. What would work is a stamp recording which cycle a rationale describes, written when the rationale is written rather than inferred from prose — that is a review-document format change and belongs with whoever owns the format. Reverted rather than shipping a warning that misfires in both directions.",
-      "created_at": "2026-08-27T22:38:42Z",
-      "updated_at": "2026-08-31T14:59:45Z"
-    },
-    {
       "id": "T57",
       "title": "Require reviewer reports to carry session id, elapsed time and a cost signal",
       "status": "done",
@@ -1358,23 +1624,6 @@
       "note": "Implemented in 7e2f341. plan_emit_step_testing_reminder now fires only when the companion was already behind the step, decided from git's pre-mutation state — mtime cannot answer it because the reminder runs after the write, so the step is always the newer file. Verified by planning/tests/test-step-testing-reminder.sh across four states: no companion (fires), companion current (silent), companion left behind (fires), companion refreshed (silent). Mutation-proven: reverting to always-fire trips two assertions, inverting the comparison trips the third. test-plan-commands.sh:85 had pinned the old always-fire wording and now asserts the silence instead. Suite 107/107.",
       "created_at": "2026-08-28T10:07:14Z",
       "updated_at": "2026-08-28T10:37:50Z"
-    },
-    {
-      "id": "T71",
-      "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "planning/SKILL.md is 1500 lines against MAINTAINER.md section 4.5 (keep SKILL.md small); every other skill keeps its SKILL.md under 400 and pushes detail into docs. Move section detail into docs/ phase files (setup, operating rules, tool discipline, hard gates, sections 1-4) and leave SKILL.md a short dispatcher carrying the trigger, the hard gates and an index. Reconcile in the same change: role_docs() in role-context.sh, tests that reference sections (test-persona-drift, test-reviewer-projection), setup-benchmark.sh capsule copy, and the shipped-set gates (test-skill-files-manifest, test-mode-markers).",
-      "note": null,
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/MAINTAINER.md",
-        "planning/docs/README.md"
-      ],
-      "created_at": "2026-08-30T21:50:27Z",
-      "updated_at": "2026-08-30T21:50:27Z"
     },
     {
       "id": "T8",
@@ -1529,21 +1778,6 @@
       "updated_at": "2026-08-28T10:37:50Z"
     },
     {
-      "id": "T69",
-      "title": "A postmortem template carrying token accounting and a reviewer-session table",
-      "status": "open",
-      "priority": "low",
-      "parent": null,
-      "detail": "The unbuilt half of T58, separated rather than folded into its close. codex's postmortem recommendation 10, and the artifact that made their run legible in the first place: seventeen cycles, 109 findings and 41.7 million tokens, with a per-cycle table of session id, elapsed time and findings count. That data existed only because they went and collected it by hand afterwards. T57 now seeds the per-cycle fields in the review-scope block, so a template would have something to read rather than asking someone to reconstruct it. It has no natural home in the plan documents — a postmortem is written after the plan is finished and describes the process rather than the work — so it needs a decision about where it lives before it is written.",
-      "blocked_on": null,
-      "refs": [
-        "planning/scripts/create-adversarial-review.sh"
-      ],
-      "note": null,
-      "created_at": "2026-08-28T15:33:14Z",
-      "updated_at": "2026-08-28T15:33:14Z"
-    },
-    {
       "id": "T0",
       "title": "A plan-to-HTML renderer",
       "status": "done",
@@ -1555,6 +1789,19 @@
       "priority": "someday",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T08:47:35Z"
+    },
+    {
+      "id": "T12",
+      "title": "This register is gitignored",
+      "status": "obsolete",
+      "parent": null,
+      "detail": "`.gitignore:25` excludes `MEMORY.md`, so T0-T12 exist on one machine only. That was right while it held half-formed findings; it is wrong now that it is the only record of what is queued. Decide where this lives: a tracked `TODO.md`, issues on the remote, or accept that it is a scratch file and re-derive the list from the code when needed.",
+      "note": "Resolved by moving the register out of the gitignored MEMORY.md into a tracked TODO.json (and BUGS.json for defects). Both are committed and pushed as of 4ac69f3; .gitignore:25 still excludes MEMORY.md, which is correct for a scratch file and no longer where the queue lives.",
+      "blocked_on": null,
+      "refs": [],
+      "priority": "high",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T16:32:43Z"
     }
   ]
 }

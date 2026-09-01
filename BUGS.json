@@ -1038,6 +1038,142 @@
       "updated_at": "2026-08-28T11:43:29Z"
     },
     {
+      "id": "B97",
+      "title": "validate-plan reports adversarially approved=no for an approved plan",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Approve a plan end to end (adversarial-review.md Verdict Status line backticked approved, plan-description mirroring it, all findings closed), then run ./planning/scripts/validate-plan.sh --plan-dir <plan>; the gates line prints adversarially approved=no despite zero errors.",
+      "observed": "Plan validation passed with structurally valid=yes yet adversarially approved=no; bash -x shows the docs-lib status grep succeeding and never assigning review_approved.",
+      "expected": "adversarially approved=yes when the review file carries the approved verdict and the plan description mirrors it.",
+      "mechanism": "validate-plan-docs-lib.sh assigned review_approved only on grep failure (false); the success path left it unset, and the two readers defaulted the same unset variable in opposite directions - the docs pass treated unset as approved (default true at the if) while plan_report_gates treated unset as not-approved (default false), so the gate could never print yes.",
+      "surfaces": [
+        "planning/scripts/validate-plan-docs-lib.sh",
+        "planning/scripts/validate-plan.sh"
+      ],
+      "fix": "Working-tree fix: initialize review_approved=true before the Verdict grep in plan_validate_plan_docs so the only assignment left is the failure path; aligns the gate with the docs pass own unset-means-approved semantics. (Recorded as B94 locally before PR #7 landed; master's B94-B96 were unknown then, so it renumbered to B97 at the rebase.)",
+      "verification": "Re-run validate-plan.sh on .plans/untrack-generated-files: gates must read structurally valid=yes, adversarially approved=yes.",
+      "found_by": "T72 plan readiness pass, maintainer session 2026-08-31",
+      "notes": [],
+      "created_at": "2026-08-31T14:05:48Z",
+      "updated_at": "2026-08-31T15:20:00Z"
+    },
+    {
+      "id": "B100",
+      "title": "npm pack ships gitignored project-specificies deviation notes",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a checkout that has any project-specificies/*-deviations.md on disk (they are untracked and gitignored), run: npm pack --dry-run 2>&1 | grep deviations",
+      "observed": "The notes are listed in the pack. On this workstation that was two files totalling ~18 kB of client-specific notes, which npm publish would have pushed to the public registry.",
+      "expected": "Nothing gitignored and untracked reaches the published package. The deviation notes are workstation-only by design.",
+      "mechanism": "package.json's files array whitelists the whole project-specificies directory, and npm's rule is that a path included via files cannot be excluded by .npmignore or .gitignore. So the existing .npmignore and the staged-file gate are both powerless here: the gate protects commits, not packs. A negation entry in files does work - verified that adding !project-specificies/*-deviations.md removes them from npm pack --dry-run - and the array already uses negations for planning/tests and others.",
+      "surfaces": [
+        "package.json",
+        ".npmignore",
+        "installer/build-release.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "wiki fact-check, maintainer session 2026-09-01",
+      "notes": "Fixed on the branch in PR #15: package.json's files array gains !project-specificies/*-deviations.md, verified with npm pack --dry-run before and after.",
+      "created_at": "2026-09-01T15:15:04Z",
+      "updated_at": "2026-09-01T16:12:19Z"
+    },
+    {
+      "id": "B103",
+      "title": "PR #13's interactive-shell skill is registered nowhere, so the installer cannot see it",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "git fetch origin refs/pull/13/head:pr-13; git show pr-13:installer/src/05-config.sh | grep SKILL_NAMES   # 12 skills, interactive-shell absent. Then: git show pr-13 --stat | grep interactive-shell",
+      "observed": "The branch adds interactive-shell/{SKILL.md,README.md,TODO.json,agents/openai.yaml}, a src/interactive-shell crate with three binaries, and two tests, while SKILL_NAMES still lists the same 12 skills. There is no skill_files() arm, no README.md skills-table row, no package.json files entry, no requires.tsv, no docs/README.md and no binaries.tsv for the crate.",
+      "expected": "A new skill is installable: named in SKILL_NAMES, listed in skill_files() prod and dev arms, given a requires.tsv and docs/README.md, added to README.md's table and package.json's files, and if it ships binaries, declared per target in its own binaries.tsv.",
+      "mechanism": "Not diagnosed as a fault in the branch's own code — the skill's content may be complete. This is the registration surface the repository requires around a skill, listed in CONTRIBUTING.md and AGENTS.md, which the branch has not touched.",
+      "surfaces": [
+        "installer/src/05-config.sh",
+        "installer/src/50-manifest.sh",
+        "README.md",
+        "package.json",
+        "interactive-shell/"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "merge review of PR #13, maintainer session 2026-09-01",
+      "notes": "Registration recipe is T82 step 2. B104 explains why the existing gates stayed quiet about this.",
+      "created_at": "2026-09-01T16:02:57Z",
+      "updated_at": "2026-09-01T16:12:19Z"
+    },
+    {
+      "id": "B104",
+      "title": "The marker and manifest gates cannot see an unregistered skill directory, so PR #13's six unmarked files pass",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On PR #13's branch: bash tests/test-mode-markers.sh   # reports exactly one unmarked file, tests/test-interactive-shell.sh. Then check the other five: for f in docs/TESTING-PROTOCOL.md interactive-shell/README.md interactive-shell/SKILL.md interactive-shell/TODO.json interactive-shell/agents/openai.yaml; do head -12 $f | grep -c MODE:; done   # all zero.",
+      "observed": "Six new tracked files carry no MODE marker. test-mode-markers.sh names only the one under tests/, and test-skill-files-manifest.sh reports 'accounted for 145 listed file(s) across 12 skill(s)' without noticing a thirteenth skill directory exists.",
+      "expected": "A tracked file with no MODE marker fails, wherever it lives; and a skill directory that no arm of skill_files() mentions is itself a failure rather than something the gates skip.",
+      "mechanism": "Both gates iterate the skills they already know: test-mode-markers.sh cross-checks markers against skill_files(), and test-skill-files-manifest.sh loops the same declared set. An unregistered directory is therefore outside both scans, so the more complete the omission the quieter the gates are. That is the inverse of what a registration gate should do, and it is why B103 produced almost no signal.",
+      "surfaces": [
+        "tests/test-mode-markers.sh",
+        "tests/test-skill-files-manifest.sh",
+        "installer/src/50-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "merge review of PR #13, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T16:03:12Z",
+      "updated_at": "2026-09-01T16:03:12Z"
+    },
+    {
+      "id": "B105",
+      "title": "PR #13's BUGS.json duplicates three entries and carries a severity outside the enum",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "git show pr-13:BUGS.json | rjq -r '[.bugs[].id] | group_by(.) | map(select(length>1) | .[0]) | tostring'   # [\"B94\",\"B95\",\"B96\"]. And: git show pr-13:BUGS.json | rjq -r '.bugs[] | select(.id==\"B103\") | .severity'   # critical",
+      "observed": "B94, B95 and B96 each appear twice in the one array. B95's two copies differ: one status fixed, one status confirmed. B103 carries severity 'critical', which is not one of blocking/major/minor/cosmetic, so every writer would refuse the entry.",
+      "expected": "One entry per id, and a severity from the enum. bug-add.sh and bug-update.sh both refuse otherwise, so a register in this state did not come from them.",
+      "mechanism": "The duplicate trio is the signature of an earlier conflict resolved by keeping both sides: master had closed B95 (status fixed) while the branch still carried it as confirmed, and the resolution kept both rather than choosing. The invalid severity is a separate hand-authoring artifact - 'critical' with priority urgent reads as an author reaching for the top of a scale whose vocabulary is blocking/major/minor/cosmetic. Neither could have been written by the helpers: verified that bug-add.sh refuses severity=critical with 'entry refused; nothing was written'.",
+      "surfaces": [
+        "BUGS.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "merge review of PR #13, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T16:03:33Z",
+      "updated_at": "2026-09-01T16:03:33Z"
+    },
+    {
+      "id": "B106",
+      "title": "PR #13 collides with master on six register ids, so its BUGS.json cannot merge as-is",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In a worktree on PR #13's branch: git merge origin/master; then planning/scripts/register-resolve.sh BUGS.json",
+      "observed": "The resolver reports collisions on B97 and B98 and, since master now also carries B99 through B102, the branch's B99-B124 block overlaps four more. It then refuses to resolve at all, because the branch's own side is unsound (see the duplicate-ids and severity entry).",
+      "expected": "The branch's new entries take ids master has not used, so the merge is a union rather than a contest. Master's ids are the published ones and do not move.",
+      "mechanism": "Both sides allocated from the same high-water mark independently: the branch took B97 onward while master took B97, B98 (this session) and then B99-B102. Nothing coordinates the two, which is the standing shape of this conflict rather than a fault in either branch. Renumbering the branch's side is the resolution, once its register is sound enough for a tool to touch.",
+      "surfaces": [
+        "BUGS.json",
+        "planning/scripts/register-resolve.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "merge review of PR #13, maintainer session 2026-09-01",
+      "notes": "Resolution recipe is T82. The tool that reports and renames these is planning/scripts/register-resolve.sh from PR #15; it currently refuses this merge because the branch side is unsound (B105), which has to be fixed on the branch first.",
+      "created_at": "2026-09-01T16:03:33Z",
+      "updated_at": "2026-09-01T16:12:19Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1979,6 +2115,98 @@
       "updated_at": "2026-08-31T14:50:34Z"
     },
     {
+      "id": "B99",
+      "title": "plan-overview accepts --watch and --refresh and ignores both",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "plan-overview --plan-dir <a plan> --watch --refresh 5 --out /tmp/o.html; then edit a file in the plan and observe that nothing re-renders, and that the emitted page carries no auto-reload.",
+      "observed": "Both flags parse without complaint and have no effect. run() reads only plan_dir, serve, port and out; neither the watch flag nor the refresh interval is ever consulted. watch.rs is live code (SCAN_INTERVAL, DEBOUNCE_WINDOW, MAX_FILES) reached only from the crate's own tests, and serve.rs exposes no watch hook.",
+      "expected": "Either the flags drive the behaviour they name, or they are rejected. A flag that is accepted silently and does nothing is worse than an unknown-option error, because the caller believes the feature is on.",
+      "mechanism": "Not yet diagnosed beyond the call graph: the argument parser grew the two flags and the Args struct carries them, but run() was never wired to them. The watch module exists and is unit-tested, so the gap is the CLI path rather than the capability.",
+      "surfaces": [
+        "src/plan-overview/src/main.rs",
+        "src/plan-overview/src/watch.rs",
+        "src/plan-overview/src/serve.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "wiki fact-check, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T15:14:52Z",
+      "updated_at": "2026-09-01T15:14:52Z"
+    },
+    {
+      "id": "B101",
+      "title": "plan-crypt is built and CI-tested but shipped by nothing, while MAINTAINER calls it shipped",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "awk -F'\\t' '!/^#/ && NF>1 {print $3}' planning/binaries.tsv | sort -u   # lists plan-overview and rjq only. Then read planning/MAINTAINER.md section 2.8a, which says plan_sha256_hex 'walks the shipped plan-crypt binary first'.",
+      "observed": "planning/binaries.tsv declares only plan-overview and rjq, and skill_files() names no plan-crypt artifact, so an installed planning skill receives the shell fallback chain only (sha256sum, then shasum -a 256, then refuse with 69). The crate is nonetheless built by setup-dev-env.sh and has a five-target CI job that executes it against the NIST vector and the platform's own tool. .gitignore also still carries a comment claiming tracked per-target planning/bin/<triple>/plan-crypt artifacts; none are tracked.",
+      "expected": "One of the two: either plan-crypt ships and binaries.tsv plus skill_files() carry its rows, or it does not ship and MAINTAINER section 2.8a and the .gitignore comment stop describing it as shipped. Which way is a decision, not a bug - but the tree currently asserts both.",
+      "mechanism": "Not a code fault. The digest chain's first rung resolves an opportunistic binary, which is correct behaviour whether or not one is delivered; the defect is that the delivery registry and the maintainer documentation disagree about whether delivery happens, so a reader cannot tell which rung a user's machine actually takes.",
+      "surfaces": [
+        "planning/binaries.tsv",
+        "installer/src/50-manifest.sh",
+        "planning/MAINTAINER.md",
+        ".gitignore"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "wiki fact-check, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T15:15:18Z",
+      "updated_at": "2026-09-01T15:15:18Z"
+    },
+    {
+      "id": "B102",
+      "title": "todo status 'dropped' is in the shipped schema but every writer rejects it",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cp TODO.json /tmp/p.json; TODO_JSON=/tmp/p.json planning/scripts/todo-update.sh T74 --status dropped   # refused. Control: the same call with --status blocked succeeds.",
+      "observed": "'T74: unknown status dropped' followed by 'update refused; nothing was written'. The same call with 'blocked' writes fine, so the refusal is specific to this value.",
+      "expected": "Either the writers accept 'dropped', or the schema stops offering it. A status a shipped schema documents must be reachable through the tools that write the register.",
+      "mechanism": "reg_findings in planning/scripts/register-lib.sh carries the todo status enum as [open, done, blocked, partly, decided, obsolete] — 'dropped' is absent. todo/schema.2.0.0-alpha.1.json lists [open, partly, blocked, decided, done, dropped, obsolete]. Every writer routes through reg_write, which refuses on any reg_findings output, so the schema's seventh value cannot be set. Latent rather than active: no task currently uses it, which is why nothing has failed.",
+      "surfaces": [
+        "planning/scripts/register-lib.sh",
+        "todo/schema.2.0.0-alpha.1.json",
+        "todo/schema.1.4.2.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "building the register conflict resolver, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T15:54:24Z",
+      "updated_at": "2026-09-01T15:54:24Z"
+    },
+    {
+      "id": "B107",
+      "title": "PR #13 ships a TODO.json inside the interactive-shell skill, which would deliver a task list to users",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git show pr-13 --stat | grep 'interactive-shell/TODO.json'; git show pr-13:interactive-shell/TODO.json | rjq -r '.tasks | length'",
+      "observed": "interactive-shell/TODO.json is a tracked file inside a skill directory. package.json's files array ships whole skill directories, and npm's rule is that a path included that way cannot be excluded by .npmignore or .gitignore, so once the skill is registered this register would be published to end users.",
+      "expected": "A skill's own development queue lives in the repository's root TODO.json, which is what that register is for. A skill directory holds what a user receives.",
+      "mechanism": "Not diagnosed - it may be a deliberate per-skill register or a file that was meant to stay untracked. Raised because the packaging consequence is the same either way and is the mechanism already recorded in B100: the files array beats both ignore files.",
+      "surfaces": [
+        "interactive-shell/TODO.json",
+        "package.json"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "merge review of PR #13, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T16:03:47Z",
+      "updated_at": "2026-09-01T16:03:47Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -2089,52 +2317,6 @@
       "updated_at": "2026-08-27T20:56:51Z"
     },
     {
-      "id": "B93",
-      "title": "project-specificies directory and registry name misspells specifics as specificies",
-      "status": "reported",
-      "severity": "cosmetic",
-      "priority": "someday",
-      "parent": null,
-      "reproduce": "ls -d project-specificies; grep -o specificies installer/src/05-config.sh package.json | head -2",
-      "observed": "The skill directory, SKILL_NAMES, skill_files(), package.json, README and every installed path spell the name project-specificies; the word is specifics.",
-      "expected": "project-specifics everywhere, or the misspelling documented as deliberate so nobody fixes one registry and forks the name.",
-      "mechanism": "A typo in the original directory name propagated into every registry that keys on it. Fixing is a breaking rename across SKILL_NAMES, skill_files(), package.json, README, and installed paths - legal under the no-backwards-compat rule, but only as one coordinated change.",
-      "surfaces": [
-        "project-specificies",
-        "installer/src/05-config.sh",
-        "package.json",
-        "README.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "skill review, maintainer session 2026-08-30",
-      "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
-      "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B97",
-      "title": "validate-plan reports adversarially approved=no for an approved plan",
-      "status": "reported",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "Approve a plan end to end (adversarial-review.md Verdict Status line backticked approved, plan-description mirroring it, all findings closed), then run ./planning/scripts/validate-plan.sh --plan-dir <plan>; the gates line prints adversarially approved=no despite zero errors.",
-      "observed": "Plan validation passed with structurally valid=yes yet adversarially approved=no; bash -x shows the docs-lib status grep succeeding and never assigning review_approved.",
-      "expected": "adversarially approved=yes when the review file carries the approved verdict and the plan description mirrors it.",
-      "mechanism": "validate-plan-docs-lib.sh assigned review_approved only on grep failure (false); the success path left it unset, and the two readers defaulted the same unset variable in opposite directions - the docs pass treated unset as approved (default true at the if) while plan_report_gates treated unset as not-approved (default false), so the gate could never print yes.",
-      "surfaces": [
-        "planning/scripts/validate-plan-docs-lib.sh",
-        "planning/scripts/validate-plan.sh"
-      ],
-      "fix": "Working-tree fix: initialize review_approved=true before the Verdict grep in plan_validate_plan_docs so the only assignment left is the failure path; aligns the gate with the docs pass own unset-means-approved semantics. (Recorded as B94 locally before PR #7 landed; master's B94-B96 were unknown then, so it renumbered to B97 at the rebase.)",
-      "verification": "Re-run validate-plan.sh on .plans/untrack-generated-files: gates must read structurally valid=yes, adversarially approved=yes.",
-      "found_by": "T72 plan readiness pass, maintainer session 2026-08-31",
-      "notes": [],
-      "created_at": "2026-08-31T14:05:48Z",
-      "updated_at": "2026-08-31T15:20:00Z"
-    },
-    {
       "id": "B98",
       "title": "docblock-served --help prints the MODE marker as its first line",
       "status": "reported",
@@ -2159,6 +2341,30 @@
       ],
       "created_at": "2026-09-01T00:00:00Z",
       "updated_at": "2026-09-01T00:00:00Z"
+    },
+    {
+      "id": "B93",
+      "title": "project-specificies directory and registry name misspells specifics as specificies",
+      "status": "reported",
+      "severity": "cosmetic",
+      "priority": "someday",
+      "parent": null,
+      "reproduce": "ls -d project-specificies; grep -o specificies installer/src/05-config.sh package.json | head -2",
+      "observed": "The skill directory, SKILL_NAMES, skill_files(), package.json, README and every installed path spell the name project-specificies; the word is specifics.",
+      "expected": "project-specifics everywhere, or the misspelling documented as deliberate so nobody fixes one registry and forks the name.",
+      "mechanism": "A typo in the original directory name propagated into every registry that keys on it. Fixing is a breaking rename across SKILL_NAMES, skill_files(), package.json, README, and installed paths - legal under the no-backwards-compat rule, but only as one coordinated change.",
+      "surfaces": [
+        "project-specificies",
+        "installer/src/05-config.sh",
+        "package.json",
+        "README.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "skill review, maintainer session 2026-08-30",
+      "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
+      "created_at": "2026-08-30T21:50:11Z",
+      "updated_at": "2026-08-30T21:50:11Z"
     }
   ]
 }
