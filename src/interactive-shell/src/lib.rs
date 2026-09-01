@@ -19,6 +19,84 @@ use std::time::{Duration, Instant};
 const MAX_LINE: usize = 65_536;
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Session {
+    pub socket: PathBuf,
+    pub cols: u16,
+    pub rows: u16,
+    pub idle_timeout: u64,
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub agent: String,
+}
+
+fn session_root() -> PathBuf {
+    if let Ok(root) = std::env::var("INTERACTIVE_SHELL_HOME") {
+        return PathBuf::from(root);
+    }
+    if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime).join("interactive-shell");
+    }
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".interactive-shell")
+}
+
+pub fn session_identity(session: Option<&str>, agent: Option<&str>) -> Option<String> {
+    session
+        .or(agent)
+        .map(str::to_owned)
+        .or_else(|| std::env::var("INTERACTIVE_SHELL_AGENT").ok())
+        .or_else(|| std::env::var("CODEX_AGENT_ID").ok())
+        .or_else(|| std::env::var("AGENT_ID").ok())
+}
+
+fn validate_session_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err("session id must contain only letters, numbers, '.', '_', or '-'".into());
+    }
+    Ok(())
+}
+
+pub fn session_path(id: &str) -> Result<PathBuf, String> {
+    validate_session_id(id)?;
+    Ok(session_root().join("sessions").join(format!("{id}.json")))
+}
+
+pub fn load_session(id: &str) -> Result<Option<Session>, String> {
+    let path = session_path(id)?;
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("read session {}: {error}", path.display())),
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|error| format!("session file {} is malformed: {error}", path.display()))
+}
+
+pub fn save_session(id: &str, session: &Session) -> Result<(), String> {
+    let path = session_path(id)?;
+    let parent = path.parent().ok_or("session path has no parent")?;
+    fs::create_dir_all(parent).map_err(|error| format!("create session directory: {error}"))?;
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("set session directory permissions: {error}"))?;
+    let json = serde_json::to_string_pretty(session).map_err(|error| error.to_string())?;
+    fs::write(&path, json).map_err(|error| format!("write session {}: {error}", path.display()))
+}
+
+pub fn session_socket(id: &str) -> Result<PathBuf, String> {
+    validate_session_id(id)?;
+    let dir = session_root().join("sockets").join(id);
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("create session socket directory: {error}"))?;
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("set session socket directory permissions: {error}"))?;
+    Ok(dir.join("term.sock"))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 enum Request {

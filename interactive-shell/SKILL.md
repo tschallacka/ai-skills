@@ -7,7 +7,8 @@ description: Drive a generic interactive terminal program through a PTY wrapper 
 
 Use this skill when an agent must operate a full-screen or interactive program
 such as nano, Midnight Commander, a pager, or a terminal menu. Start
-`interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
+`interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
+or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 and observe its JSONL stdout. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
 `mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
@@ -18,6 +19,14 @@ Angle-bracketed words are placeholders, not literal arguments. For example,
 `text 'hello world'` sends one payload containing a space. Mouse coordinates are
 1-based; button `0` is the primary button and buttons `1` through `7` are the
 remaining protocol button codes.
+
+`--session <ID>` stores the socket, dimensions, timeout, and command in a
+private session file. Later wrapper starts and every input operation can use
+`--session <ID>` without repeating those arguments. `--agent <ID>` is an alias
+that selects an agent-keyed session; when omitted, the wrapper checks
+`INTERACTIVE_SHELL_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID` in that order.
+Session files live below `$INTERACTIVE_SHELL_HOME`, or below the private
+`$XDG_RUNTIME_DIR/interactive-shell` directory when that variable is set.
 
 Screen events contain only rows changed since the previous event, a monotonically
 increasing `seq`, the preceding `base`, and the cursor. An `observe` request

@@ -5,15 +5,18 @@ use std::env;
 use std::io::{self, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input --socket PATH OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown"
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nThe socket is read from the session file when --session or --agent is used."
         );
         return;
     }
     let mut socket = None;
+    let mut session = None;
+    let mut agent = None;
     let mut op = None;
     let mut value = None;
     let mut args = Vec::new();
@@ -27,6 +30,18 @@ fn main() {
                 }
                 i += 1;
                 socket = Some(a[i].clone())
+            }
+            "--session" | "--agent" => {
+                if i + 1 >= a.len() {
+                    eprintln!("{} requires an id", a[i]);
+                    std::process::exit(2);
+                }
+                i += 1;
+                if a[i - 1] == "--session" {
+                    session = Some(a[i].clone());
+                } else {
+                    agent = Some(a[i].clone());
+                }
             }
             "text" | "paste" => {
                 if op.is_some() {
@@ -118,12 +133,25 @@ fn main() {
         }
         i += 1
     }
+    let session_id = interactive_shell_core::session_identity(session.as_deref(), agent.as_deref());
     let socket = match socket {
-        Some(socket) => socket,
-        None => {
-            eprintln!("--socket is required");
-            std::process::exit(2);
-        }
+        Some(socket) => PathBuf::from(socket),
+        None => match session_id.as_deref() {
+            Some(id) => interactive_shell_core::load_session(id)
+                .unwrap_or_else(|error| {
+                    eprintln!("interactive-shell-input: {error}");
+                    std::process::exit(2)
+                })
+                .map(|s| s.socket)
+                .unwrap_or_else(|| {
+                    eprintln!("interactive-shell-input: session does not exist");
+                    std::process::exit(2)
+                }),
+            None => {
+                eprintln!("--socket or --session/--agent is required");
+                std::process::exit(2);
+            }
+        },
     };
     let op = match op {
         Some(op) => op,

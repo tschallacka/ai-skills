@@ -348,6 +348,75 @@ fn wait_returns_a_snapshot_after_a_screen_predicate() {
 }
 
 #[test]
+fn session_file_reuses_socket_and_command_without_repeating_arguments() {
+    let state = temp_dir("session-state");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args([
+            "--session",
+            "resume-case",
+            "--cols",
+            "20",
+            "--rows",
+            "4",
+            "--idle-timeout",
+            "5",
+            "--",
+            "sh",
+            "-c",
+            "printf SESSION_READY; sleep 2",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let session_file = state.join("sessions/resume-case.json");
+    for _ in 0..100 {
+        if session_file.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(session_file.exists());
+    let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
+    assert!(session["socket"].as_str().unwrap().ends_with("/term.sock"));
+    let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
+        .output()
+        .unwrap();
+    assert!(input.status.success());
+    assert!(String::from_utf8_lossy(&input.stdout).contains("\"matched\":true"));
+    let shutdown = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "resume-case", "shutdown"])
+        .output()
+        .unwrap();
+    assert!(shutdown.status.success());
+    child.wait().unwrap();
+
+    let mut restarted = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "resume-case"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let resumed = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
+        .output()
+        .unwrap();
+    assert!(resumed.status.success());
+    assert!(String::from_utf8_lossy(&resumed.stdout).contains("\"matched\":true"));
+    let _ = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .env("INTERACTIVE_SHELL_HOME", &state)
+        .args(["--session", "resume-case", "shutdown"])
+        .output();
+    restarted.wait().unwrap();
+}
+
+#[test]
 fn observe_exposes_osc8_elements_and_click_targets() {
     let dir = temp_dir("elements");
     let mut child = start(
