@@ -1,4 +1,6 @@
 package_path	byte_size
+package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
+package/.agents/MAINTAINER.md	7619
 package/LICENSE	1068
 package/README.md	14623
 package/brainstorm/SKILL.md	11440
@@ -26,7 +28,7 @@ package/install.sh	182620
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	1470
+package/package.json	1485
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	12839
 package/planning/REVIEWER.md	22954

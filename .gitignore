@@ -1,7 +1,12 @@
 .idea/
 .codegraph/
-.agents/
 .codex/
+
+# Agent-facing configuration and docs: the whole directory is ignored except
+# the committed generic contract files that this repository ships for agents.
+.agents/*
+!.agents/MAINTAINER.md
+!.agents/MAINTAINER-STYLE-CONTRACT.md
 
 # Benchmark runner staging area: setup-benchmark.sh writes each agent's run
 # here under benchmark/results/<agent>/.staging/ and atomically moves it into
