@@ -179,6 +179,11 @@ defaults verbatim.
 
 ## PR and commit hygiene
 
+- The mechanical per-change gates live in `./pre-push-check.sh` (whitespace,
+  `bash -n`, shellcheck at error severity, `cargo fmt --check`/`cargo test`
+  for touched crates, register soundness). `setup-dev-env.sh` wires it as the
+  pre-push hook via `git config core.hooksPath hooks`; hooks are client-side
+  and bypassable, so CI remains the authoritative gate for everyone else.
 - Before committing: inspect `git status`/`git diff`; run `bash -n`,
   `git diff --check`, and the relevant tests; confirm no generated archives,
   npm cache, or temporary targets are staged.

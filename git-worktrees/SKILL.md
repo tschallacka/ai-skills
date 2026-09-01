@@ -14,6 +14,19 @@ that you want the main checkout untouched.
 The rules below are the ones that cost real debugging time. They are cheap to follow
 and expensive to rediscover.
 
+## Where worktrees live
+
+**Agent worktrees go under `~/.config/tsch-ai-skills/worktrees/`, one named
+directory each** (`.../worktrees/<branch-or-task>/`), created with `mkdir -p`
+if missing. Never `/tmp`: a checkout there dies with the machine's sweep — one
+agent lost real work exactly that way — and a worktree under the repository
+itself confuses the repo's own filesystem scans and cleanup tools. The central
+location matches the shared install layout (`~/.config/tsch-ai-skills/bin`),
+survives reboots and tmp sweeps, and keeps every agent's checkout findable in
+one listing (`git worktree list` from anywhere). Throwaway verification
+checkouts that a script creates, uses and sweeps itself within one run may
+still use `TMPDIR` — the rule covers work an agent expects to find later.
+
 ## Several agents at once
 
 **One worktree per agent, one branch per worktree.** Two agents in one checkout

@@ -18,7 +18,7 @@ package/chat/tests/test-chat.sh	10580
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
-package/git-worktrees/SKILL.md	8012
+package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
