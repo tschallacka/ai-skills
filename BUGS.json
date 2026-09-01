@@ -2443,6 +2443,27 @@
       "updated_at": "2026-09-01T16:03:47Z"
     },
     {
+      "id": "B120",
+      "title": "pre-push-check runs a crate's whole test suite once per changed file in it",
+      "status": "obsolete",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Change several files in one crate under src/ (this change touched 11 in src/todo), stage them, then ./pre-push-check.sh",
+      "observed": "'ok cargo fmt --check: todo' and 'ok cargo test: todo' printed 11 times — one pair per changed file in the crate, each a full cargo run.",
+      "expected": "One fmt and one test run per crate the change touches, however many of its files moved.",
+      "mechanism": "pre-push-check.sh:139-141 builds a pipe-separated seen-list and tests membership with case \"\\n$crates\" in *\"|$crate\\n\"*. The sentinel newline is on the WRONG side of each string: the haystack carries it before the first entry, the needle expects one after the crate name, and the accumulator never contains a newline after an entry. So the pattern cannot match for any crate and every file appends its crate again. The gate stays correct — it just repeats the work — but a failing crate is also reported once per file, which overstates the number of distinct failures. The idiom wants $crates| as the haystack and |$crate| as the needle.",
+      "surfaces": [
+        "pre-push-check.sh"
+      ],
+      "fix": null,
+      "verification": "Read at the rebase against pre-push-check.sh:183-186 on master: the accumulator is `... done | LC_ALL=C sort -u` and the `case` membership test the entry's mechanism describes is not present anywhere in the file.",
+      "found_by": "watching the gate's output while pushing the register binaries; read as literal strings with cat -A",
+      "notes": "Filed on feature/ship-register-helpers as B109; master had already taken B109 for an unrelated defect, so it is renumbered to B120 at the rebase. Closed obsolete in the same step: the pipe-separated seen-list this entry describes no longer exists. pre-push-check.sh section 4 now builds the crate list with `| LC_ALL=C sort -u` and iterates that, so each crate is visited once however many of its files changed, and the broken membership pattern is gone rather than fixed. Kept as a record because the idiom is the reusable part: a pipe-separated seen-list needs $list| as the haystack and |$item| as the needle, and a sentinel on the wrong side of either string makes the test silently unmatchable.",
+      "created_at": "2026-09-01T21:34:45Z",
+      "updated_at": "2026-09-03T00:00:00Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
