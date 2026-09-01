@@ -43,7 +43,7 @@ case "$plan_arg" in
         # The directory that holds this plan, not the global default. Everything
         # downstream reads plans_root as "this plan and its siblings": the
         # duplicate-step scan, the git and snapshot repository decisions, and the
-        # .env manifest write-global places *inside* it. Naming ~/.plans for a
+        # .env manifest write-global places *inside* it. Naming the global root for a
         # plan created elsewhere pointed all of that at the wrong directory, and
         # at one that need not exist -- a fresh machine, or a user who declined
         # the installer's offer to create it, got a raw `cd` error with no remedy.

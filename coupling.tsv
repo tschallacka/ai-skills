@@ -13,6 +13,8 @@ planning/scripts/plan-context-lib.sh	warn	entry ids and view names are documente
 planning/scripts/plan-inventory-lib.sh	warn	the nine-field TSV order is a contract for every caller of plan_inventory_split	
 planning/scripts/plan-document-lib.sh	warn	plan_die exit codes are a contract callers branch on (CODE-STYLE §5)	
 planning/scripts/plan-map-lib.sh	warn	the hex key encoding must keep AR-01 distinct from AR_01	
+planning/scripts/lib/core/plan_default_root.sh	fail	plan-root.sh home_plans is a second copy of this resolver (it sources no library); the two must agree	bash planning/tests/test-plans-root-parity.sh
+planning/scripts/plan-root.sh	fail	home_plans mirrors plan_default_root in lib/core; the two must agree	bash planning/tests/test-plans-root-parity.sh
 planning/scripts/mint-fix-keys.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	
 planning/scripts/verify-fix-keys.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	
 planning/scripts/add-fix-claim.sh	warn	gated-pair parsing must stay the shared plan_review_gated_pairs call, so minter, verifier and claim-writer agree on one Findings-row grammar (MAINTAINER.md §1)	

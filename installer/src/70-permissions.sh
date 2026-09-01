@@ -274,7 +274,7 @@ PROMPT
 }
 
 planning_permission_step() {
-    local plans="$HOME/.plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
+    local plans="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
     echo >&2
     echo "== Step 2: planning runtime permissions ==" >&2
     if confirm "Create $plans as the global plans directory?"; then

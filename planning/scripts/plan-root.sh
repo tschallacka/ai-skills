@@ -14,12 +14,12 @@
 #   2. If <project>/.plans exists and is "consistent" (its .env records that
 #      .plans as the plans root), return it as the default (no prompt).
 #   3. If a directory matching a global format for this project already exists
-#      (~/.plans/<owner>/<repo> or ~/.plans/<user>/<projectdir>), return it as
+#      (<global>/tsch-ai-skills/plans/<owner>/<repo> or <global>/tsch-ai-skills/plans/<user>/<projectdir>, with <global> = ${XDG_CONFIG_HOME:-~/.config}), return it as
 #      the recognized root (no prompt). No marker file is written; recognition
 #      is purely by matching the directory format.
 #   4. Otherwise this is the first plan in the project: when run on an
 #      interactive terminal ask the human whether to store globally under
-#      ~/.plans or in the project's ./.plans; when non-interactive, default to
+#      the tsch-ai-skills XDG home or in the project's ./.plans; when non-interactive, default to
 #      project storage and print a note.
 
 set -euo pipefail
@@ -70,11 +70,17 @@ project_root_for() {
     (cd "$dir" && pwd -P)
 }
 
+# Mirrors plan_default_root in lib/core (the resolver sources no library):
+# the global plans root is the tsch-ai-skills XDG home, not ~/.plans.
 home_plans() {
-    local home_dir="${HOME:-}"
-    [ -n "$home_dir" ] || home_dir="${USERPROFILE:-}"
-    [ -n "$home_dir" ] || die "unable to resolve home directory; set PLANS_ROOT"
-    printf '%s/.plans\n' "${home_dir%/}"
+    local base="${XDG_CONFIG_HOME:-}"
+    if [ -z "$base" ]; then
+        local home_dir="${HOME:-}"
+        [ -n "$home_dir" ] || home_dir="${USERPROFILE:-}"
+        [ -n "$home_dir" ] || die "unable to resolve home directory; set PLANS_ROOT"
+        base="$home_dir/.config"
+    fi
+    printf '%s/tsch-ai-skills/plans\n' "${base%/}"
 }
 
 project_has_consistent_plans() {
@@ -91,8 +97,8 @@ project_has_consistent_plans() {
 }
 
 # Candidate global roots for this project, in format-match order:
-#   ~/.plans/<owner>/<repo>  (from the git remote, when it exists)
-#   ~/.plans/<user>/<projectdir>
+#   <global>/tsch-ai-skills/plans/<owner>/<repo>  (from the git remote, when it exists)
+#   <global>/tsch-ai-skills/plans/<user>/<projectdir>
 global_scoped_root() {
     local project="$1" home_plans owner="" repo="" base user
     home_plans="$(home_plans)"
@@ -132,7 +138,7 @@ add_to_gitignore() {
 choose_root() {
     local project="$1" piped=""
     if interactive; then
-        ask "Store plans globally under ~/.plans, or in this project's ./.plans? [g/p] (default: p) "
+        ask "Store plans globally under the tsch-ai-skills XDG home, or in this project's ./.plans? [g/p] (default: p) "
         case "$REPLY" in
             g|G|global) printf '%s\n' "$(global_scoped_root "$project")"; return 0 ;;
             p|P|project|"") printf '%s\n' "$project/.plans"; return 0 ;;

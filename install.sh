@@ -3445,6 +3445,7 @@ tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
 tests/test-plans-board.sh
+tests/test-plans-root-parity.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh
@@ -4269,7 +4270,7 @@ PROMPT
 }
 
 planning_permission_step() {
-    local plans="$HOME/.plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
+    local plans="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
     echo >&2
     echo "== Step 2: planning runtime permissions ==" >&2
     if confirm "Create $plans as the global plans directory?"; then

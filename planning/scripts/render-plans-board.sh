@@ -45,7 +45,8 @@ Renders one board page covering every plan under the plans root: lifecycle,
 step progress, findings, review status and last activity, with a link into
 each plan's own overview page.
 
-  --root DIR     plans root to scan (default: \$PLANS_ROOT, else ~/.plans)
+  --root DIR     plans root to scan (default: \$PLANS_ROOT, else the
+                 tsch-ai-skills XDG plans home)
   --out FILE     write here (default: <plans-root>/board.html)
   --refresh N    page auto-reload seconds, 0 to disable (default 0)
 

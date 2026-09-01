@@ -19,13 +19,13 @@
 # board_find_plans ROOT — print each plan directory under ROOT, one per line.
 #
 # A plan is a directory holding plan-description.md. Depth matters: plan-root.sh
-# resolves a global root as ~/.plans/<owner>/<repo>, so plans live at depth 1 or
-# depth 3 depending on how the project was set up. A top-level glob would find
-# the first and silently miss the second.
+# scopes a global root as <root>/<owner>/<repo>, so plans live at depth 1 or
+# depth 3 below ROOT depending on how the project was set up. A top-level glob
+# would find the first and silently miss the second.
 board_find_plans() {
     [ -n "${1:-}" ] || { printf 'board_find_plans: root required\n' >&2; return 1; }
     [ -d "$1" ] || return 0
-    # -maxdepth 5 covers ~/.plans/<owner>/<sub>/<repo>/plan-description.md.
+    # -maxdepth 5 covers <root>/<owner>/<sub>/<repo>/plan-description.md.
     find "$1" -maxdepth 5 -name plan-description.md -print 2>/dev/null \
         | sed 's#/plan-description\.md$##' \
         | LC_ALL=C sort
