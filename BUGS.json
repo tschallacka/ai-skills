@@ -2111,6 +2111,182 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B94",
+      "title": "normalize_platform matches only Windows_NT, so plan-overview is reported unavailable under Git Bash, MSYS2 and Cygwin",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "PLAN_OVERVIEW_TEST_MODE=1 PLAN_OVERVIEW_TEST_OS=MINGW64_NT-10.0-19045 PLAN_OVERVIEW_TEST_ARCH=x86_64 bash -c 'source installer/src/20-runtime-tools.sh; normalize_platform; echo rc=$?'",
+      "observed": "normalize_platform returns 1 and prints nothing, so plan_overview_selected_artifact calls plan_overview_unavailable and the installer reports 'Plan overview unavailable on this platform'.",
+      "expected": "It returns x86_64-pc-windows-msvc, the row rust-development-guidelines.md:129 declares serves 'Windows, and Git Bash / MSYS2 / Cygwin on it'.",
+      "mechanism": "installer/src/20-runtime-tools.sh:57 matches only Windows_NT:AMD64|Windows_NT:x86_64, but uname -s prints MINGW64_NT-... under Git Bash, MSYS_NT-... under MSYS2 and CYGWIN_NT-... under Cygwin. Two sibling copies of the same table already match those: prepend_bundled_rjq at 20-runtime-tools.sh:88 and skill_files() in 50-manifest.sh both accept MINGW*|MSYS*|CYGWIN*|Windows*, and plan_crypt_target_triple accepts MINGW*|MSYS*|CYGWIN* but not Windows_NT. So on a real Windows bash rjq resolves from the arm directly below the one that refuses plan-overview.",
+      "surfaces": [
+        "installer/src/20-runtime-tools.sh",
+        "planning/scripts/lib/crypt/plan_crypt_target_triple.sh",
+        "installer/src/50-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:02Z",
+      "updated_at": "2026-08-31T13:20:02Z"
+    },
+    {
+      "id": "B95",
+      "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd $(git rev-parse --show-toplevel); echo \"source: $(cd planning/scripts/lib/document && cd ../../../.. && pwd)\"; echo \"compiled: $(cd planning/scripts && cd ../../../.. && pwd)\"",
+      "observed": "The source file resolves the repo root; the compiled library resolves two directories above it (…/git/ai-skills/.claude here). rjq_dir therefore names a path that holds no binaries, the [ -x ] guard fails, and PATH is never prepended.",
+      "expected": "Both resolve the root that holds bin/<triple>, so a tree or an install carrying its own rjq uses it.",
+      "mechanism": "scripts/build-plan-libs.sh concatenates each scripts/lib/<group>/*.sh verbatim into planning/scripts/<group>-lib.sh. The block in lib/document/99-facade.sh computes plan_root as $(dirname BASH_SOURCE)/../../../.., which is correct from planning/scripts/lib/document but wrong from planning/scripts, where the compiled copy lands: it is two segments shallower, so the same literal climbs two directories too far. A relative-depth expression cannot survive being copied between directories, and nothing asserts the resolved path exists.",
+      "surfaces": [
+        "planning/scripts/lib/document/99-facade.sh",
+        "planning/scripts/plan-document-lib.sh",
+        "planning/scripts/build-plan-libs.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "binary-layout restructure recon",
+      "notes": null,
+      "created_at": "2026-08-31T13:20:46Z",
+      "updated_at": "2026-08-31T13:20:46Z"
+    },
+    {
+      "id": "B96",
+      "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Re-run the macOS system bash 3.2 leg of any run that failed it; run 33401864955 failed cargo-plan-overview at watcher_reports_a_real_edit and the identical job passed on rerun with no code change.",
+      "observed": "cargo test --test watch fails with 'test result: FAILED. 2 passed; 1 failed' on the macOS floor leg, taking the whole suite to 119/120. The same job re-run on the same commit passes.",
+      "expected": "The watcher test is deterministic on every supported platform, or declares its timing assumption and skips loudly where it cannot hold.",
+      "mechanism": "Not yet proven. Two candidates, both macOS-specific. (1) Timing: watch_plan_dir sleeps SCAN_INTERVAL 250ms per poll and the test allows 2s, so it needs one of about eight polls to observe the write; a slow or loaded runner can starve that thread. (2) Path identity: the test asserts event.changed == vec![root.join(\"plan.md\")] by exact equality, and std::env::temp_dir() on macOS is /var/folders/... which is a symlink to /private/var/folders/..., so any canonicalisation on the way through makes the two spellings differ on macOS while matching on Linux. Ruled out: timestamp granularity. The snapshot stores a content fingerprint alongside mtime and size, so a same-length 'one'->'two' edit is detectable whatever the filesystem does with mtime.",
+      "surfaces": [
+        "src/plan-overview/tests/watch.rs",
+        "src/plan-overview/src/watch.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "PR #7 CI",
+      "notes": null,
+      "created_at": "2026-08-31T14:50:34Z",
+      "updated_at": "2026-08-31T14:50:34Z"
+    },
+    {
+      "id": "B97",
+      "title": "interactive-shell-input text rejects spaces instead of sending one text payload",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "src/interactive-shell/target/debug/interactive-shell-input --socket <socket> text 'Hello World'",
+      "observed": "The helper rejects the second word with 'unknown argument: World'. Sending separate text requests produces 'HelloWorld', so the agent cannot enter ordinary spaced text through the documented text operation.",
+      "expected": "A text operation accepts one complete payload, including spaces, and writes that payload to the interactive process.",
+      "mechanism": "The CLI parser treats every token after the operation as a new top-level argument; it does not preserve the caller's intended text payload as the remainder of the command.",
+      "surfaces": [
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": "77c29cb — text and paste consume the remaining CLI payload and preserve spaces",
+      "verification": "Protocol test cli_text_preserves_spaces_and_input_help_is_available invokes interactive-shell-input text Hello World against a live PTY and observes the spaced payload; cargo test passes.",
+      "found_by": "fresh agent protocol run, subworker Halley/Godel evaluation",
+      "notes": "This blocked creation of the required test content and forced a workaround. Quoting alone does not help because the helper receives already-split process arguments.",
+      "created_at": "2026-09-01T12:40:00Z",
+      "updated_at": "2026-09-01T14:10:00Z"
+    },
+    {
+      "id": "B98",
+      "title": "interactive-shell screen observations do not expose mc pane focus or selection changes reliably",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Start interactive Bash through the wrapper, run mc without a startup directory, navigate a file pane toward /tmp with keyboard navigation, and observe after each acknowledged request.",
+      "observed": "Several navigation requests returned an acknowledgement but no screen delta that identified the changed selection or focused pane. The agent reached the root listing but could not reliably activate /tmp from the observed state.",
+      "expected": "An observation after an accepted navigation action makes the active pane, current directory, selected row, and focus change inferable, even when the application redraws only a cursor or attribute.",
+      "mechanism": "The terminal model publishes changed row text, but does not expose cursor/focus semantics for TUI selections when the visible text remains unchanged or when the redraw is encoded primarily through terminal attributes.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh agent protocol run, subworker Godel",
+      "notes": "This is specifically an unknown-TUI navigation defect; the application can be functioning while the agent lacks enough state to choose its next action.",
+      "created_at": "2026-09-01T12:40:00Z",
+      "updated_at": "2026-09-01T12:40:00Z"
+    },
+    {
+      "id": "B99",
+      "title": "less can remain visually empty after a subprocess transition despite the file being present",
+      "status": "not-a-defect",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "From the wrapper-owned interactive Bash, launch less on the generated file after exiting mc, then request observe while less is active.",
+      "observed": "The agent received a screen observation with empty rows while less was active, so it could not verify the file content from the terminal even though external inspection showed the file existed.",
+      "expected": "After a child TUI takes over the PTY, observe returns a current full-screen snapshot containing the application's visible content.",
+      "mechanism": "The original report used an immediate observation during a subprocess transition. The wrapper's supported wait operation reads until the predicate is visible and then returns a full snapshot; no wrapper defect was reproduced.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Documented usage — use wait for a visible predicate before relying on a subprocess screen snapshot.",
+      "verification": "A direct less reproduction with hello universe used wait 'hello universe' 5000 and returned matched=true with rows containing hello universe; a subsequent observe returned the same visible content.",
+      "found_by": "fresh agent protocol run, subworker Godel",
+      "notes": "The defect prevents an agent from verifying a visible result and may be a wrapper timing/model issue rather than a less issue. Reproduce with a focused fixture before finalizing the mechanism.",
+      "created_at": "2026-09-01T12:40:00Z",
+      "updated_at": "2026-09-01T14:10:00Z"
+    },
+    {
+      "id": "B100",
+      "title": "interactive-shell-input has no discoverable help for wrapper invocation and operations",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "src/interactive-shell/target/debug/interactive-shell-input --help; src/interactive-shell/target/debug/interactive-shell --help",
+      "observed": "The commands reject --help as an unknown argument instead of describing the socket option, command separator, operations, and payload forms. The agent had to infer invocation syntax from errors and experimentation.",
+      "expected": "Both binaries provide concise usage information, including how to start a command, connect to its private socket, observe state, and submit actions.",
+      "mechanism": "Argument parsing handles required operational arguments but has no help branch or usage renderer.",
+      "surfaces": [
+        "src/interactive-shell/src/bin/interactive-shell.rs",
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": "77c29cb — both binaries accept --help and print invocation and operation guidance",
+      "verification": "Protocol test cli_text_preserves_spaces_and_input_help_is_available checks input help, and malformed_cli_arguments_do_not_panic checks wrapper help; cargo test passes.",
+      "found_by": "fresh agent protocol run, subworker Godel",
+      "notes": "Discoverability is part of the agent-facing contract; a worker should not need prior knowledge of the wrapper's separator and socket conventions.",
+      "created_at": "2026-09-01T12:40:00Z",
+      "updated_at": "2026-09-01T14:10:00Z"
+    },
+    {
+      "id": "B101",
+      "title": "named printable keys are inconsistent with text input for single-character controls",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "src/interactive-shell/target/debug/interactive-shell-input --socket <socket> key Q",
+      "observed": "The helper rejects the named printable key with 'unknown key'; the agent had to send lowercase q through the text operation to leave less.",
+      "expected": "The input interface clearly and consistently accepts printable characters either through the key operation or explicitly directs agents to the text operation in help.",
+      "mechanism": "The named-key table covers control and navigation names but not printable alphabetic keys, while the text operation is currently unable to accept a complete spaced payload.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": "77c29cb — single printable ASCII characters are accepted by key_sequence",
+      "verification": "Unit test printable_keys_are_accepted verifies both uppercase and lowercase printable keys; cargo test passes.",
+      "found_by": "fresh agent protocol run, subworker Godel",
+      "notes": "This is lower severity than B97 but increases friction precisely when an agent is discovering an unfamiliar application's exit control.",
+      "created_at": "2026-09-01T12:40:00Z",
+      "updated_at": "2026-09-01T14:10:00Z"
     }
   ]
 }
