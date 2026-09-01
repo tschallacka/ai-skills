@@ -1191,6 +1191,21 @@ pub fn key_combo_sequence(key: &str, modifiers: KeyModifiers) -> Result<Vec<u8>,
             + 4 * u8::from(modifiers.ctrl);
         return Ok(format!("\x1b[1;{modifier}{final_byte}").into_bytes());
     }
+    let tilde_key = match upper.as_str() {
+        "INSERT" => Some("2~"),
+        "DELETE" => Some("3~"),
+        "PAGEUP" => Some("5~"),
+        "PAGEDOWN" => Some("6~"),
+        _ => None,
+    };
+    if let Some(base) = tilde_key {
+        let (number, suffix) = base.split_at(base.len() - 1);
+        let modifier = 1
+            + u8::from(modifiers.shift)
+            + 2 * u8::from(modifiers.alt)
+            + 4 * u8::from(modifiers.ctrl);
+        return Ok(format!("\x1b[{number};{modifier}{suffix}").into_bytes());
+    }
     if let Some(function) = upper.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
         if (1..=12).contains(&function) {
             let base = match function {
@@ -1879,6 +1894,7 @@ pub fn run(
 ) -> Result<(), String> {
     INTERRUPTED.store(false, Ordering::Relaxed);
     unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
         libc::signal(
             libc::SIGTERM,
             interrupt_handler as *const () as libc::sighandler_t,
@@ -2219,6 +2235,28 @@ mod tests {
                 }
             ),
             Ok(b"\x1b[1;8C".to_vec())
+        );
+        assert_eq!(
+            key_combo_sequence(
+                "PAGEUP",
+                KeyModifiers {
+                    ctrl: true,
+                    alt: false,
+                    shift: false
+                }
+            ),
+            Ok(b"\x1b[5;5~".to_vec())
+        );
+        assert_eq!(
+            key_combo_sequence(
+                "PAGEDOWN",
+                KeyModifiers {
+                    ctrl: true,
+                    alt: false,
+                    shift: false
+                }
+            ),
+            Ok(b"\x1b[6;5~".to_vec())
         );
     }
 }

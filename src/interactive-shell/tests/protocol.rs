@@ -227,6 +227,23 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
 }
 
 #[test]
+fn closed_output_removes_socket_before_exit() {
+    let dir = temp_dir("closed-output");
+    let mut child = start(&dir, &["yes"], "30");
+    for _ in 0..100 {
+        if dir.join("socket").exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(dir.join("socket").exists());
+    drop(child.stdout.take());
+    let status = child.wait().unwrap();
+    assert!(!status.success());
+    assert!(!dir.join("socket").exists());
+}
+
+#[test]
 fn invalid_dimensions_fail_before_creating_socket() {
     let dir = temp_dir("dimensions");
     let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
