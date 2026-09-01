@@ -57,6 +57,11 @@ that input was accepted by the wrapper, not that the program completed the
 resulting action. Wait for a screen predicate or lifecycle event after every
 state-changing request.
 
+In file managers, typing a filename may enter the application's command line
+instead of searching the active pane. Discover the pane's own search or
+navigation control from the current screen, built-in help, or its manpage; do
+not assume that typing a visible filename selects it.
+
 Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
 TAB, ESC, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
 DELETE, SHIFT/CTRL cursor variants, and F1 through F12. Use `raw` for an

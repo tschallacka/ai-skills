@@ -2499,6 +2499,73 @@
       "notes": null,
       "created_at": "2026-09-01T17:00:00Z",
       "updated_at": "2026-09-01T17:00:00Z"
+    },
+    {
+      "id": "B112",
+      "title": "interactive-shell observations do not identify color-based TUI selection",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": "B98",
+      "reproduce": "Start mc through an interactive Bash wrapper, navigate its file pane, and request view or observe after a selection change.",
+      "observed": "mc changes foreground/background attributes for the selected row rather than reverse video. The agent receives changed text or styles but no reliable selected-row or focus hint.",
+      "expected": "The observation makes a probable visual selection distinguishable, with an explicit heuristic/confidence marker that does not claim application-level certainty.",
+      "mechanism": "The wrapper exposes raw style spans and only maps reverse video to highlighted=true; it does not compare row-level color changes or identify pane boundaries.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh unknown-TUI validation, subworker Wegener",
+      "notes": "This is an app-agnostic inference problem. Any fix must remain a heuristic and expose confidence rather than asserting mc semantics.",
+      "created_at": "2026-09-01T18:00:00Z",
+      "updated_at": "2026-09-01T18:00:00Z"
+    },
+    {
+      "id": "B113",
+      "title": "large TUI file panes are costly to search from compact observations",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Use a small terminal to navigate mc's file pane through a large /tmp listing while relying on view and view-delta.",
+      "observed": "The target file was not reached before the agent run ended; repeated pane navigation consumed interaction turns and did not provide structured file entries.",
+      "expected": "The generic wrapper provides enough compact state to let an agent navigate an unknown large TUI without an application-specific script or shortcut assumption.",
+      "mechanism": "The wrapper models terminal cells only and cannot infer a file manager's pane entries, search mode, or directory semantics.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh unknown-TUI validation, subworker Wegener",
+      "notes": "Likely requires an explicit generic navigation/search contract or an app adapter; do not implement filename injection as a universal solution.",
+      "created_at": "2026-09-01T18:00:00Z",
+      "updated_at": "2026-09-01T18:00:00Z"
+    },
+    {
+      "id": "B114",
+      "title": "compact view can omit enough status context for unknown TUIs",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run mc at 60x16 and inspect only compact view output while navigating its panes.",
+      "observed": "The current directory/status header was visually truncated, leaving the agent unable to confirm context without a larger observation.",
+      "expected": "An agent can request a small, targeted status/path region or metadata view without receiving the complete JSON snapshot.",
+      "mechanism": "view can select rows but has no semantic status/title query, and the terminal model does not retain application meaning for clipped headers.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "src/interactive-shell/src/bin/interactive-shell-input.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fresh unknown-TUI validation, subworker Wegener",
+      "notes": "A generic title/region query may help, but application path semantics must not be fabricated by the wrapper.",
+      "created_at": "2026-09-01T18:00:00Z",
+      "updated_at": "2026-09-01T18:00:00Z"
     }
   ]
 }
