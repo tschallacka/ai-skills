@@ -174,6 +174,7 @@ struct Screen {
     row: usize,
     col: usize,
     visible: bool,
+    application_cursor: bool,
     line_drawing: bool,
     parser: Parser,
     saved_primary: Option<ScreenState>,
@@ -192,6 +193,7 @@ struct ScreenState {
     row: usize,
     col: usize,
     visible: bool,
+    application_cursor: bool,
     line_drawing: bool,
 }
 
@@ -203,6 +205,7 @@ impl Screen {
             row: 0,
             col: 0,
             visible: true,
+            application_cursor: false,
             line_drawing: false,
             parser: Parser::Ground,
             saved_primary: None,
@@ -496,6 +499,8 @@ impl Screen {
             }
             b'h' if private && s == "25" => self.visible = true,
             b'l' if private && s == "25" => self.visible = false,
+            b'h' if private && s == "1" => self.application_cursor = true,
+            b'l' if private && s == "1" => self.application_cursor = false,
             b'h' if private && s == "1049" => self.enter_alt(),
             b'l' if private && s == "1049" => {
                 self.leave_alt();
@@ -535,6 +540,7 @@ impl Screen {
             row: self.row,
             col: self.col,
             visible: self.visible,
+            application_cursor: self.application_cursor,
             line_drawing: self.line_drawing,
         });
         let rows = self.saved_primary.as_ref().unwrap().rows.len();
@@ -551,6 +557,7 @@ impl Screen {
             self.row = state.row;
             self.col = state.col;
             self.visible = state.visible;
+            self.application_cursor = state.application_cursor;
             self.line_drawing = state.line_drawing;
         }
     }
@@ -742,6 +749,12 @@ pub fn key_sequence(key: &str) -> Option<Vec<u8>> {
     if let Some(bytes) = key_bytes(key) {
         return Some(bytes.to_vec());
     }
+    let normalized = key.to_ascii_uppercase();
+    if normalized != key {
+        if let Some(bytes) = key_bytes(&normalized) {
+            return Some(bytes.to_vec());
+        }
+    }
     if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() {
         return Some(key.as_bytes().to_vec());
     }
@@ -752,6 +765,22 @@ pub fn key_sequence(key: &str) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+fn key_sequence_for_screen(key: &str, application_cursor: bool) -> Option<Vec<u8>> {
+    if application_cursor {
+        let sequence = match key.to_ascii_uppercase().as_str() {
+            "UP" => Some(b"\x1bOA".as_slice()),
+            "DOWN" => Some(b"\x1bOB".as_slice()),
+            "RIGHT" => Some(b"\x1bOC".as_slice()),
+            "LEFT" => Some(b"\x1bOD".as_slice()),
+            _ => None,
+        };
+        if let Some(bytes) = sequence {
+            return Some(bytes.to_vec());
+        }
+    }
+    key_sequence(key)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1113,21 +1142,23 @@ fn client(
     };
     match req {
         Request::Text { v: 1, text } => write_master(master, text.as_bytes())?,
-        Request::Key { v: 1, key } => match key_sequence(&key) {
-            Some(bytes) => write_master(master, &bytes)?,
-            None => {
-                json(
-                    &mut stream,
-                    &ErrorEvent {
-                        v: 1,
-                        event: "error",
-                        message: "unknown key",
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-                return Ok(());
+        Request::Key { v: 1, key } => {
+            match key_sequence_for_screen(&key, screen.application_cursor) {
+                Some(bytes) => write_master(master, &bytes)?,
+                None => {
+                    json(
+                        &mut stream,
+                        &ErrorEvent {
+                            v: 1,
+                            event: "error",
+                            message: "unknown key",
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                    return Ok(());
+                }
             }
-        },
+        }
         Request::Combo {
             v: 1,
             key,
@@ -1575,6 +1606,24 @@ mod tests {
     fn printable_keys_are_accepted() {
         assert_eq!(key_sequence("Q"), Some(vec![b'Q']));
         assert_eq!(key_sequence("q"), Some(vec![b'q']));
+        assert_eq!(key_sequence("enter"), Some(vec![b'\r']));
+        assert_eq!(key_sequence("up"), Some(b"\x1b[A".to_vec()));
+    }
+    #[test]
+    fn application_cursor_mode_uses_ss3_cursor_sequences() {
+        let mut screen = Screen::new(2, 10);
+        screen.feed(b"\x1b[?1h");
+        assert!(screen.application_cursor);
+        assert_eq!(
+            key_sequence_for_screen("up", screen.application_cursor),
+            Some(b"\x1bOA".to_vec())
+        );
+        screen.feed(b"\x1b[?1l");
+        assert!(!screen.application_cursor);
+        assert_eq!(
+            key_sequence_for_screen("up", screen.application_cursor),
+            Some(b"\x1b[A".to_vec())
+        );
     }
     #[test]
     fn styles_and_scrollback_are_retained() {
