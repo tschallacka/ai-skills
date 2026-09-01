@@ -169,6 +169,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bug-report"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bug-update"
 version = "0.1.0"
 dependencies = [
@@ -1372,6 +1380,14 @@ name = "todo-add"
 version = "0.1.0"
 dependencies = [
  "planning-register",
+ "serde_json",
+]
+
+[[package]]
+name = "todo-register"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "serde_json",
 ]
 

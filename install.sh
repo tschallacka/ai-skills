@@ -451,7 +451,6 @@ runtime_requirements() {
         brainstorm)
             ;;
         bug-report)
-            case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
         chat)
             ;;
@@ -477,7 +476,6 @@ runtime_requirements() {
         text-etiquette)
             ;;
         todo)
-            case "$platform" in *:*) printf '%s\n' rjq ;; esac
             ;;
     esac
 }
@@ -486,13 +484,11 @@ runtime_requirement_strength() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
-        bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'soft' ;; esac ;;
-        todo:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
     esac
 }
 
@@ -500,13 +496,11 @@ runtime_requirement_why() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
-        bug-report:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none' ;; esac ;;
         git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'every command the guidance names reads history or a conflicted index through git; without it the reasoning still reads but nothing can be checked' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
         resource-limited-testing:bash) case "$platform" in *:*) printf '%s\n' 'the wrapper that applies the resource cap is a bash script, so without bash there is nothing to run the capped command' ;; esac ;;
         resource-limited-testing:memlimit) case "$platform" in Darwin:arm64) printf '%s\n' 'enforces the RAM cap on Apple Silicon macOS; without it limited-run.sh caps CPU only' ;; esac ;;
-        todo:rjq) case "$platform" in *:*) printf '%s\n' 'reads and writes TODO.json; every command in this skill is a rjq call, and a queue that cannot be read is worse than no queue' ;; esac ;;
     esac
 }
 
@@ -3621,10 +3615,50 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
+                schema.1.4.2.json schema.2.0.0-alpha.1.json
+            # The queue's tools ship as one prebuilt binary per target, so an
+            # installed skill can actually write its queue instead of being told
+            # to hand-edit JSON. Only the host's row is emitted, the way
+            # bug-report, planning and chat do it.
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/todo' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/todo' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/todo' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/todo' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/todo.exe' ;;
+                *)
+                    printf 'skill_files: no todo artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             ;;
         bug-report)
-            printf '%s\n' SKILL.md docs/README.md requires.tsv schema.1.4.2.json schema.2.0.0-alpha.1.json
+            printf '%s\n' SKILL.md docs/README.md requires.tsv binaries.tsv \
+                schema.1.4.2.json schema.2.0.0-alpha.1.json
+            # The register's tools ship as one prebuilt binary per target, so an
+            # installed skill can actually write its register instead of being
+            # told to hand-edit JSON. Only the host's row is emitted, the way
+            # planning and chat do it.
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/bugs' ;;
+                Linux:aarch64|Linux:arm64)
+                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/bugs' ;;
+                Darwin:x86_64)
+                    printf '%s\n' 'bin/x86_64-apple-darwin/bugs' ;;
+                Darwin:arm64)
+                    printf '%s\n' 'bin/aarch64-apple-darwin/bugs' ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/bugs.exe' ;;
+                *)
+                    printf 'skill_files: no bugs artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
             ;;
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv

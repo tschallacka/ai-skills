@@ -1,6 +1,6 @@
 {
   "skill": "bug-report",
-  "skill_version": "1.4.2",
+  "skill_version": "2.0.0-alpha.1",
   "comment": "Defects found in this repository's own skills and installer.",
   "bugs": [
     {
@@ -230,7 +230,7 @@
       "fix": "pre-push-check.sh section 5 deletes its own copy and delegates to reg_findings, and a check that cannot run is now a failure rather than silence. bug-report/SKILL.md and todo/SKILL.md express the same rules with index(...) instead of IN/1, bind each entry with `as $e` first, and test the command status before trusting empty output.",
       "verification": "Both snippets extracted verbatim from their SKILL.md and run under rjq against copies: the real BUGS.json and TODO.json report sound (exit 0), and a register carrying a duplicate id, a dangling parent and invalid status/severity/priority yields all five findings. Before the fix the same expressions exited 5 with empty stdout, which every caller read as sound. The pre-push half was mutation-tested separately: a duplicate id in BUGS.json now yields \"BUGS.json: duplicate ids\" where the old check printed \"ok ... ids unique, statuses known\". The mutation that fails without the fix is restoring IN/1: rjq exits 5, and the added status guard turns that into an explicit failure instead of a false pass -- which is how the first attempt at this fix was caught, since `A | index(B)` evaluates B against A and a bare index(.status) dies with \"cannot index\".",
       "found_by": "running the skill's own validation after adding B115 and B116; it reported sound while rjq was erroring",
-      "notes": "Found in bug-report/SKILL.md while validating B115 and B116, then found live in pre-push-check.sh, which carried its own jq-flavoured copy behind 2>/dev/null and || true. That gate had never fired on any machine using rjq -- which is every machine following the register contract, since reg_require_jq refuses with 69 without it. Held at blocking for that reason: a gate that always passes is worse than no gate, and this one runs before every push. All three surfaces are now fixed. The durable lesson is the shape rather than the builtin: empty output means sound ONLY if the command ran, so any check of this form has to test the status too. Went unnoticed because a passing gate looks identical either way.",
+      "notes": "Found in bug-report/SKILL.md while validating B115 and B116, then found live in pre-push-check.sh, which carried its own jq-flavoured copy behind 2>/dev/null and || true. That gate had never fired on any machine using rjq -- which is every machine following the register contract, since reg_require_jq refuses with 69 without it. Held at blocking for that reason: a gate that always passes is worse than no gate, and this one runs before every push. All three surfaces are now fixed. The durable lesson is the shape rather than the builtin: empty output means sound ONLY if the command ran, so any check of this form has to test the status too. Went unnoticed because a passing gate looks identical either way. Since the fix, feature/ship-register-helpers replaced both documented snippets with `bugs check` and `todo check`, so bug-report/SKILL.md and todo/SKILL.md no longer carry an rjq expression to get wrong. The index(...) form and the status guard survive where they still run: reg_findings in planning/scripts/register-lib.sh, which pre-push-check.sh section 5 delegates to, and the two SKILL.md files now point at that oracle and restate why IN/1 cannot be used in it.",
       "created_at": "2026-09-03T08:54:56Z",
       "updated_at": "2026-09-03T10:32:05Z"
     },
@@ -631,24 +631,24 @@
     {
       "id": "B37",
       "title": "validate_requires_groups grew past the 40-line cap, so the ratchet gate is red on every leg",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
-      "status": "fixed",
-      "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
-      "created_at": "2026-08-24T14:27:49Z",
-      "updated_at": "2026-08-24T14:44:04Z",
+      "parent": null,
       "reproduce": "bash planning/tests/test-function-length-ratchet.sh",
-      "expected": "exit 0: the over-cap count stays at or below CAP=67",
       "observed": "exit 1: \"function-length-ratchet: 68 function(s) exceed the 40-line cap (cap 67). New over-cap code must be split or the cap lowered deliberately.\" — installer/build.sh:99 validate_requires_groups() is listed at 45 lines. Fails on all three CI legs (ubuntu-latest, macos-latest, macOS bash 3.2).",
+      "expected": "exit 0: the over-cap count stays at or below CAP=67",
       "mechanism": "4befd4e (installer: the verification reds name themselves, and the gates accept the group tables) grew validate_requires_groups() from 24 to 45 lines. Confirmed: `git show 89ec358:installer/build.sh` measures the function at 24 lines, HEAD at 45. Crossing 40 adds a new over-cap site, taking the count 67 -> 68. test-function-length-ratchet pins CAP=67 and documents that the count may shrink but never grow, so the new site is a hard fail. The same commit fixed test-install-ui and test-portability-contract, which is why this is the only remaining new red.",
       "surfaces": [
         "installer/build.sh",
         "planning/tests/test-function-length-ratchet.sh"
       ],
-      "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
-      "parent": null,
       "fix": "fa97d9f and follow-ups — validate_one_requires_manifest carries the per-skill checks (24 lines back under cap) and run_reviewer split into five helpers; cap follows the count down to 66",
-      "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD."
+      "verification": "test-function-length-ratchet passes at CAP=66 and its growth branch still fails on a planted 45-line function (mutation from the ratchet landing); validate_requires_groups measures under 40 at HEAD.",
+      "found_by": "watch tick on CI run 32737475241 (head 7028a9b)",
+      "notes": "The ratchet header says a genuine split lowers the cap in the same commit and the cap is never raised, so the fix is to split validate_requires_groups, not to bump CAP to 68.",
+      "created_at": "2026-08-24T14:27:49Z",
+      "updated_at": "2026-08-24T14:44:04Z"
     },
     {
       "id": "B38",
@@ -671,31 +671,31 @@
       "verification": "test-plan-freshness: control silent, drift named with unit and dates, catch-up silent, outside-repo target skipped. Mutation inverted comparison fails the drift-named assertion.",
       "found_by": "user, health-app order-split execution sessions, August 2026 — drift caught manually twice after REST-verifying completed work",
       "notes": "Deliberate non-actions in the same session are honest decisions, not defects: W05 rewritten to what this repo controls (its trigger lives behind DownloadInvoice::execute() curling Profortool), reviews left pending to avoid self-approval. The defect is the silent drift class. Related trust surface: B34 — an overview that undercounts review rounds is the same failure family, records disagreeing with reality while looking authoritative.",
-      "updated_at": "2026-08-24T18:08:32Z",
-      "created_at": "2026-08-24T15:00:31Z"
+      "created_at": "2026-08-24T15:00:31Z",
+      "updated_at": "2026-08-24T18:08:32Z"
     },
     {
       "id": "B39",
       "title": "install.sh with no --target exits 1 printing nothing at all, so a headless install fails silently",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
-      "status": "fixed",
-      "found_by": "installing the new git-worktrees skill without --target",
-      "created_at": "2026-08-24T16:30:16Z",
-      "updated_at": "2026-08-24T18:58:14Z",
+      "parent": null,
       "reproduce": "bash install.sh --skill git-worktrees --yes; echo \"exit $?\"   # exit 1, zero bytes\nbash install.sh --skill git-worktrees --target \"$HOME/.claude/skills\" --yes; echo \"exit $?\"   # exit 0, installs",
-      "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
       "observed": "exit 1 with 0 bytes captured from 2>&1, both with stdout on a pipe and redirected to /dev/null. The same command with an explicit --target exits 0 and prints 400 bytes ending 'Installed: /home/mdibbets/.claude/skills/git-worktrees'.",
+      "expected": "either the default target is used and the skill installs, or a diagnostic names what is missing; a non-zero exit with no message is never acceptable",
       "mechanism": "Not the target logic. install.sh:3552 calls show_splash only when SKILL_SELECTION or TARGET_SELECTION is empty, which is why passing --target hides the bug. show_splash (install.sh:1077) starts with a bare 'return' guarded by a tty test on fd 3; with no tty the test fails and the bare return propagates status 1. show_splash is the last command in that then-branch, so under set -euo pipefail (install.sh:5) the script aborts there, before select_targets runs, printing nothing. Isolated proof: a function whose body is the same tty test plus bare return exits 1 and never reaches the next statement, while the same function with 'return 0' reaches it.",
       "surfaces": [
         "install.sh",
         "installer/src (the show_splash source and its call site)",
         "tests/test-install-ui.sh"
       ],
-      "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
-      "parent": null,
       "fix": "this session — show_splash says return 0 on every early exit, and a --yes run with no interactive channel takes the target menu default (first listed root) with a printed note instead of dying in ask",
-      "verification": "Sandboxed headless install without --target exits 0, prints the no-channel note and Installed: path. Regression pinned in planning/tests/test-installer-noninteractive.sh: exit must be 0, output non-empty."
+      "verification": "Sandboxed headless install without --target exits 0, prints the no-channel note and Installed: path. Regression pinned in planning/tests/test-installer-noninteractive.sh: exit must be 0, output non-empty.",
+      "found_by": "installing the new git-worktrees skill without --target",
+      "notes": "Hits every headless install that omits --target: CI, the one-liner, an agent installing for a user. Same family as B15, the non-interactive path is not exercised by the suite. A regression test should assert that a --yes install with no --target either succeeds or prints a diagnostic, and should fail if a bare return is reintroduced in show_splash.",
+      "created_at": "2026-08-24T16:30:16Z",
+      "updated_at": "2026-08-24T18:58:14Z"
     },
     {
       "id": "B40",
@@ -1280,16 +1280,16 @@
       "observed": "Every cycle from 2 to 6 was gated by at least one BLOCKING finding that was purely an intra-document inconsistency, each in a surface the previous fix had not touched. Cycle 2: unit Objectives corrected, Instructions and Acceptance criteria left stale - 12 of 20 findings unresolved for that reason alone. Cycle 3: the inverse - Instructions and criteria corrected, inventory row and Objective left stale, so W20 read 'leave dropship buckets unchanged' in its Objective while its own Instructions called that wording 'an earlier version'. Cycle 5: a testing companion whose backend-verification section demanded a rule count its own automated-tests section explained was impossible. Cycle 6: a companion whose browser-verification section told the worker to run and record three user stories the same step's criterion forbids it from recording. Findings ran 20, 12, 5, 8, 3 with blocking 14, 6, 1, 1, 1 - converging, but roughly 800k reviewer tokens across six cycles. A mechanical self-sweep over all 133 step and companion documents, run afterwards, then found two further defects no reviewer had named: a handoff claiming 'the following four steps each add one public method' after a fifth moved in, and a handoff routing per-customer filtering to a goal that no longer performed it.",
       "expected": "The coordinator performs its own coherence pass and resolves what it finds BEFORE spending a reviewer cycle, so the reviewer is spent on judgement - whether a criterion can be satisfied by construction, whether a premise holds against the repository - rather than on consistency sweeps a script can do exhaustively.",
       "mechanism": "SKILL.md section 3 documents the seven surfaces a fix must reach and says to search the plan for the OLD wording, but that discipline is advisory prose inside the finding-resolution guidance. The mandated execution order is write the draft, invoke the fresh reviewer, resolve every finding, invoke a fresh reviewer again - with no self-check gate between resolving and re-dispatching. validate-plan.sh checks structure, ownership, dependency edges and rosters, but nothing intra-document: it cannot see a paragraph that contradicts another paragraph of the same file. The --stale gate is the closest existing mechanism and does not close the loop - it only matches a phrase list the agent supplies from memory, and every hit is a WARN that never changes exit status.",
+      "surfaces": [
+        "planning/SKILL.md",
+        "planning/scripts/validate-plan.sh"
+      ],
       "fix": null,
       "verification": null,
       "found_by": "Tschallacka, during the Loki checkout migration plan on Sanitairkamer; he stopped the loop and told the agent to check every file itself before dispatching another reviewer.",
       "notes": "Proposed fix has two halves that belong together. First, SKILL.md: make a coordinator self-coherence pass a required step in the execution order, between resolving findings and re-invoking a reviewer. Second, validate-plan.sh: add a mechanical intra-document coherence check, which is the half that makes the requirement enforceable rather than aspirational. Three checks caught every instance seen here and are cheap - flag a document where one paragraph declares wording stale (an earlier version ... said X) while another paragraph of the SAME document still carries X; flag a spelled-out count adjacent to method, limitation, rule, item, type, cart or story, since those drift whenever a unit moves between goals; and flag a testing companion whose sections disagree, which is where cycles 5 and 6 both failed. Why it went unnoticed: each cycle the reviewer correctly reported the inconsistency it found, so the loop looked like it was working. Nobody measured that the SAME defect class was recurring in a new surface each time, which is the signal that the process rather than the plan was at fault. The skill already warns about this in the abstract - it notes a comparable run reaching seventeen cycles and 41.7 million tokens before anyone asked whether the plan was the thing at fault - so the gap is enforcement, not awareness. Coordinator's own retrospective, recorded at Tschallacka's instruction after the reviewer round that followed: (1) I focused my first audits on validator-detectable structure - stale state, propagation, dependencies, rosters and helper consistency. (2) I did not initially perform a complete semantic ownership sweep asking, for every acceptance criterion, which exact executable test proves this and whether that test is owned by exactly one unit. (3) That omission allowed the reviewer to find gaps that were visible from the plan itself; Tschallacka was right to call it out. (4) Process change: before every reviewer dispatch, audit every affected unit's objective, instructions, acceptance, inventory row, companion, dependency, coverage and concrete executable owner - not just run validators. Note that this names a defect class distinct from the intra-document one above: the checks described earlier compare a document against itself, whereas this one asks whether each criterion maps to a single named executable test. validate-plan.sh already checks ownership structurally, so the missing half is semantic - criterion to concrete test, exactly one owner.",
       "created_at": "2026-09-02T12:12:18Z",
-      "updated_at": "2026-09-02T12:49:07Z",
-      "surfaces": [
-        "planning/SKILL.md",
-        "planning/scripts/validate-plan.sh"
-      ]
+      "updated_at": "2026-09-02T12:49:07Z"
     },
     {
       "id": "B112",
@@ -1959,15 +1959,13 @@
     {
       "id": "B46",
       "title": "planning's serve mode needs one of four runtimes but declares none, so the installer never mentions them",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
-      "status": "fixed",
-      "found_by": "fresh review of the 72-commit pull",
-      "created_at": "2026-08-27T07:06:48Z",
-      "updated_at": "2026-08-27T08:00:16Z",
+      "parent": null,
       "reproduce": "awk -F'\\t' '!/^#/ && NF>2' planning/requires.tsv   # only jq (hard) and openssl (soft)\nawk -F'\\t' '!/^#/ && NF>2' chat/requires.tsv    # four runtimes, soft, group server-runtimes\nbash planning/scripts/overview-serve.sh --help   # names python3, node, perl, socat",
-      "expected": "planning declares the serve runtimes as a soft any-of group, the way chat does, so the installer's dependency table names them and warns which capability is lost",
       "observed": "planning/requires.tsv declares only jq and openssl. overview-serve.sh:52 loops 'for r in python3 node perl socat' and refuses with 'no suitable runtime found' when none is present, but nothing in install.sh associates those tools with planning. A machine with none of the four installs planning silently and loses serve mode with no prior warning.",
+      "expected": "planning declares the serve runtimes as a soft any-of group, the way chat does, so the installer's dependency table names them and warns which capability is lost",
       "mechanism": "The any-of mechanism already exists and works: chat/requires.tsv lines 15-18 give each runtime a fifth column naming the group 'server-runtimes', and install.sh generates '@server-runtimes) ... printf python3 node perl socat' from it. planning gained the same four-rung server (overview-serve.sh, plus runtime/overview-server.{py,pl} and the socat bash handler) without gaining the matching rows, so the group is declared by exactly one skill while two skills depend on it.",
       "surfaces": [
         "planning/requires.tsv",
@@ -1975,10 +1973,12 @@
         "install.sh (generated dependency tables)",
         "planning/tests/test-runtime-dependencies.sh"
       ],
-      "notes": "Fix is four rows in planning/requires.tsv mirroring chat's, with a why line naming serve mode rather than chat, then regenerate install.sh. Worth also asking whether a test should assert that every runtime a skill's scripts probe with 'command -v' has a row in that skill's requires.tsv — this class of omission is invisible until someone lacks the tool. | Follow-up (unenforced fix): no test asserts that a runtime a skill probes with command -v has a row in that skill's requires.tsv, so deleting these four rows and rebuilding is invisible to the suite. The check the register wanted in the original notes is still missing. Follow-up queued as T48 (with T48a/T48b): this fix is unenforced — deleting all four rows and regenerating leaves the suite green, measured across four mutations.",
-      "parent": null,
       "fix": "this session — planning/requires.tsv gained four soft rows (python3, node, perl, socat) sharing one any-of group, and install.sh was regenerated so runtime_requirements/planning emits @overview-server-runtimes, runtime_requirement_strength/why carry the soft strength and the serve-mode why, and runtime_requirement_members resolves the group to the four runtimes. The group id is overview-server-runtimes, NOT chat's server-runtimes: installer/build.sh:128 validate_requires_groups refuses a group id declared by more than one skill (the generated members table is keyed by the id alone), so reusing the name fails the build with exit 65 — verified.",
-      "verification": "Generated tables shown to name planning: @overview-server-runtimes in runtime_requirements, planning:@overview-server-runtimes in both field tables, @overview-server-runtimes -> python3 node perl socat in runtime_requirement_members. Green after the change (exit 0 each): planning/tests/test-runtime-dependencies.sh, test-installer-any-of.sh, test-installer-build.sh, test-portability-contract.sh, tests/test-mode-markers.sh, tests/test-skill-files-manifest.sh. NO TEST COVERS THE DECLARATION ITSELF: deleting the socat row and regenerating, and deleting all four rows and regenerating (an exact revert of the fix), both leave all six tests at exit 0. The only mutations that bite are freshness and uniqueness, not correctness: editing planning/requires.tsv without regenerating fails test-installer-build.sh test_check_mode_clean (rc=1, \"install.sh is stale\"), and setting the group id to chat's server-runtimes fails test_check_mode_clean and test_check_mode_detects_edit (rc=2, build.sh exit 65). So this fix is unenforced against silent removal — see notes."
+      "verification": "Generated tables shown to name planning: @overview-server-runtimes in runtime_requirements, planning:@overview-server-runtimes in both field tables, @overview-server-runtimes -> python3 node perl socat in runtime_requirement_members. Green after the change (exit 0 each): planning/tests/test-runtime-dependencies.sh, test-installer-any-of.sh, test-installer-build.sh, test-portability-contract.sh, tests/test-mode-markers.sh, tests/test-skill-files-manifest.sh. NO TEST COVERS THE DECLARATION ITSELF: deleting the socat row and regenerating, and deleting all four rows and regenerating (an exact revert of the fix), both leave all six tests at exit 0. The only mutations that bite are freshness and uniqueness, not correctness: editing planning/requires.tsv without regenerating fails test-installer-build.sh test_check_mode_clean (rc=1, \"install.sh is stale\"), and setting the group id to chat's server-runtimes fails test_check_mode_clean and test_check_mode_detects_edit (rc=2, build.sh exit 65). So this fix is unenforced against silent removal — see notes.",
+      "found_by": "fresh review of the 72-commit pull",
+      "notes": "Fix is four rows in planning/requires.tsv mirroring chat's, with a why line naming serve mode rather than chat, then regenerate install.sh. Worth also asking whether a test should assert that every runtime a skill's scripts probe with 'command -v' has a row in that skill's requires.tsv — this class of omission is invisible until someone lacks the tool. | Follow-up (unenforced fix): no test asserts that a runtime a skill probes with command -v has a row in that skill's requires.tsv, so deleting these four rows and rebuilding is invisible to the suite. The check the register wanted in the original notes is still missing. Follow-up queued as T48 (with T48a/T48b): this fix is unenforced — deleting all four rows and regenerating leaves the suite green, measured across four mutations.",
+      "created_at": "2026-08-27T07:06:48Z",
+      "updated_at": "2026-08-27T08:00:16Z"
     },
     {
       "id": "B50",
@@ -2620,6 +2620,29 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B119",
+      "title": "test-runtime-dependencies' rjq-less PATH is refilled from the shared install directory",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a machine that has installed the skills (~/.config/tsch-ai-skills/bin/rjq present): bash planning/tests/test-runtime-dependencies.sh",
+      "observed": "runtime-deps: register-command.sh without rjq exited 0, expected 69 — and the output is 'Registered build = make all (when building)', so the command SUCCEEDED with no rjq on the PATH the test built. Reproduced on a clean worktree of HEAD after build-plan-libs.sh, with planning/bin and bin/ moved aside, so no local change is involved.",
+      "expected": "The rjq-less run refuses with 69 and names rjq, the way the validate-plan.sh case in the same test does.",
+      "mechanism": "The test builds a PATH without rjq but passes HOME through: env -i PATH=$jqless_bin HOME=$HOME. plan-document-lib.sh, which every entry point sources, prepends plan_bin_dir when rjq is missing from PATH, and plan_bin_dir's second candidate is ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin — the shared install location. rjq is restored from HOME, so the guard correctly does not fire and the assertion is wrong rather than the code. The gate therefore reports on whether the host has an install, not on the code under test: green on a clean CI runner, red on a maintainer's machine.",
+      "surfaces": [
+        "planning/tests/test-runtime-dependencies.sh",
+        "planning/scripts/lib/crypt/plan_bin_dir.sh",
+        "planning/scripts/plan-document-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "full suite run while shipping the todo binary; isolated with a clean-HEAD worktree control",
+      "notes": "Filed on feature/ship-register-helpers as B108; master had taken B108 and B109 for unrelated defects before this branch rebased, so the entry was renumbered to B119 at the rebase rather than displacing either.",
+      "created_at": "2026-09-01T21:19:58Z",
+      "updated_at": "2026-09-01T21:19:58Z"
     }
   ]
 }

@@ -106,3 +106,7 @@ project-specificies/*-deviations.md
 
 # CI builds plan-crypt here for the suite; never committed.
 .ci-bin/
+
+# The bug-report register tools, built per target by CI and setup-dev-env.sh.
+bug-report/bin/*/
+todo/bin/*/
