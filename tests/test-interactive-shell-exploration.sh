@@ -60,8 +60,8 @@ observe() {
     "$BIN/interactive-shell-input" --socket "$SOCKET" observe | sed -n '1p'
 }
 
-if ! command -v mc >/dev/null 2>&1 || ! command -v nano >/dev/null 2>&1 || ! command -v less >/dev/null 2>&1; then
-    echo "SKIP: mc, nano, and less are required"
+if ! command -v mc >/dev/null 2>&1 || ! command -v nano >/dev/null 2>&1 || ! command -v less >/dev/null 2>&1 || ! command -v rjq >/dev/null 2>&1; then
+    echo "SKIP: mc, nano, less, and rjq are required"
     exit 0
 fi
 

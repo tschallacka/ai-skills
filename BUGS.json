@@ -2287,6 +2287,27 @@
       "notes": "This is lower severity than B97 but increases friction precisely when an agent is discovering an unfamiliar application's exit control.",
       "created_at": "2026-09-01T12:40:00Z",
       "updated_at": "2026-09-01T14:10:00Z"
+    },
+    {
+      "id": "B102",
+      "title": "interactive-shell exploration test uses rjq without guarding its dependency",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "PATH=<directory-without-rjq>:$PATH bash tests/test-interactive-shell-exploration.sh",
+      "observed": "The test passes the mc, nano, and less dependency check, then reaches an rjq invocation and exits with command-not-found status instead of reporting a clean skip.",
+      "expected": "The test declares every required external command before starting the interactive scenario and skips with an actionable message when one is absent.",
+      "mechanism": "The initial dependency guard checked mc, nano, and less but omitted rjq, although later snapshot and element checks invoke it.",
+      "surfaces": [
+        "tests/test-interactive-shell-exploration.sh"
+      ],
+      "fix": "Working tree change — include rjq in the exploration test dependency guard",
+      "verification": "The dependency guard now checks mc, nano, less, and rjq together; shell syntax validation passes.",
+      "found_by": "post-implementation adversarial review",
+      "notes": null,
+      "created_at": "2026-09-01T15:00:00Z",
+      "updated_at": "2026-09-01T15:00:00Z"
     }
   ]
 }
