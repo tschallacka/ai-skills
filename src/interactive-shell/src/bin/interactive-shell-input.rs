@@ -10,7 +10,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], elements, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nelements returns only verified actionable elements; observe returns the full structured screen.\nThe socket is read from the session file when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, view [ROW...], view-delta [ROW...], rgbview [ROW...], rgbview-delta [ROW...], elements, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown\nview prints rows as LINE [START-END] TEXT; view-delta prints only rows changed since the previous view.\nrgbview preserves ANSI colors; elements returns only verified actionable elements; observe returns the full structured screen.\nThe socket is read from the session file when --session or --agent is used."
         );
         return;
     }
@@ -78,13 +78,18 @@ fn main() {
                 args.extend_from_slice(&a[i + 1..]);
                 i = a.len() - 1;
             }
-            "view" | "view-delta" | "elements" | "observe" | "shutdown" => {
+            "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements" | "observe"
+            | "shutdown" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
                 }
                 op = Some(a[i].clone());
-                if a[i].starts_with("view") && i + 1 < a.len() {
+                if matches!(
+                    a[i].as_str(),
+                    "view" | "view-delta" | "rgbview" | "rgbview-delta"
+                ) && i + 1 < a.len()
+                {
                     args.extend_from_slice(&a[i + 1..]);
                     i = a.len() - 1;
                 }
@@ -266,7 +271,7 @@ fn main() {
                 })
                 .into();
         }
-        "view" | "view-delta" => {
+        "view" | "view-delta" | "rgbview" | "rgbview-delta" => {
             let mut rows = Vec::new();
             for spec in &args {
                 let (first, last) = spec.split_once('-').unwrap_or((spec, spec));
@@ -337,7 +342,10 @@ fn main() {
     }
     writeln!(s, "{req}").unwrap();
     s.shutdown(Shutdown::Write).unwrap();
-    if operation == "view" || operation == "view-delta" {
+    if matches!(
+        operation.as_str(),
+        "view" | "view-delta" | "rgbview" | "rgbview-delta"
+    ) {
         let mut response = String::new();
         s.read_to_string(&mut response).unwrap_or_else(|error| {
             eprintln!("read response: {error}");
