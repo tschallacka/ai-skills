@@ -3445,6 +3445,7 @@ tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
 tests/test-plans-board.sh
+tests/test-plans-root-parity.sh
 tests/test-persona-drift.sh
 tests/test-plan-commands.sh
 tests/test-plan-context-arguments.sh

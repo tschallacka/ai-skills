@@ -40,7 +40,7 @@ flowchart TD
     ROOT["plan-root.sh resolve"] --> D3{"Which root wins?"}
     D3 -->|"PLANS_ROOT exported"| CREATE
     D3 -->|"project .plans consistent with its .env"| CREATE
-    D3 -->|"format match under ~/.plans"| CREATE
+    D3 -->|"format match under the tsch-ai-skills XDG plans home"| CREATE
     D3 -->|"first plan, prompt or non-interactive default"| CREATE
     CREATE["create-plan.sh writes plan-description.md, work-unit-inventory.md, commands.json"] --> ENV["plan-env.sh write-global and write-plan write the two .env manifests"]
     ENV --> GITINIT["create-plan.sh git init plus initial commit"]
