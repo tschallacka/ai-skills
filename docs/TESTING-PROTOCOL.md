@@ -28,12 +28,14 @@ exercises:
    supplying `/tmp` as a startup argument.
 5. The subworker uses `mc`'s own navigation controls to navigate a panel to
    `/tmp`, observes the directory listing, finds the dynamically named file,
-   selects it, and opens it through the editor action (`F4`).
+   selects it, and discovers how to open it in the editor. It may use visible
+   labels, built-in help, or a manpage, but no shortcut is supplied by this
+   protocol.
 6. The editor replaces the content with `hello universe`, saves it, handles
    any overwrite prompt from the observed screen, and exits back to `mc`.
 7. The subworker exits `mc` back to the same Bash prompt, runs `less` on the
-   dynamically named file, observes `hello universe`, exits `less` with `q`,
-   and returns to that Bash prompt.
+   dynamically named file, observes `hello universe`, discovers how to exit
+   `less` from its visible UI, built-in help, or manpage, and returns to Bash.
 8. The subworker reports the final file contents and cleans up the dynamically
    named file.
 
@@ -69,13 +71,17 @@ parent must collect the subworker's action log and observations as evaluation
 evidence.
 
 The subworker must independently launch interactive Bash, launch `nano` from
-that Bash, use `mc` from that same Bash to navigate to `/tmp` and locate the
-file by its observed label/elements, edit it, handle save and overwrite prompts
-from observed screens, and exit back to Bash. The parent must reject a run
-where a shell script sends the workflow's keys, where separate wrapper
-sessions are used for the applications, where `/tmp` is passed as `mc`'s
-startup directory, where the subworker is given a fixed transcript, or where
-the subworker cannot show the observations that justified its actions.
+that Bash, and discover how to enter text, save, and exit `nano` from its
+observations or documentation. It must use `mc` from that same Bash to
+navigate to `/tmp`, locate the file by its observed label/elements, discover
+how to open the editor, edit the file, handle save and overwrite prompts, and
+exit back to Bash. It must then discover how to exit `less` after verifying
+the content. The parent must reject a run where a shell script sends the
+workflow's keys, where separate wrapper sessions are used for the
+applications, where `/tmp` is passed as `mc`'s startup directory, where the
+subworker is given a fixed transcript or application shortcut, or where the
+subworker cannot show the observations or documentation that justified its
+actions.
 
 The existing shell exploration script is only a deterministic fixture smoke
 test for PTY integration. It is useful for regression checking, but it is not
@@ -112,12 +118,13 @@ The run passes only when all of the following are true:
   `/tmp/*.txt` path, visibly reaches the `nano` save flow, and that file
   contains exactly `Hello World` after the first save.
 - `mc` navigates a panel to `/tmp`, uses an observed file label, and opens that
-  dynamically named file via the discovered screen state.
+  dynamically named file using a control discovered by the subworker.
 - The second editor flow reaches and confirms the overwrite prompt.
 - The final file content is exactly `hello universe`.
 - `mc` exits back to the same interactive Bash session after the edit.
 - `less` is launched from that same Bash session, visibly shows
-  `hello universe`, and exits cleanly with `q`.
+  `hello universe`, and exits cleanly using a control discovered by the
+  subworker.
 - The parent records the subworker's observations, selected actions, process
   outcomes, and final file contents.
 - The fixture smoke test may additionally print:
@@ -138,6 +145,8 @@ replay a known keystroke transcript. An agent should be able to:
 - use `wait` for a meaningful visible predicate rather than a fixed sleep;
 - inspect `elements` and choose by label or id when semantic metadata exists;
 - fall back to coordinates only after observing them;
+- discover application controls from visible labels, built-in help, or
+  manpages instead of relying on shortcuts supplied by the test;
 - issue arbitrary `key`, `combo`, `text`, `paste`, `mouse`, `click`, `resize`,
   and `raw` actions as needed;
 - recover with a fresh snapshot after missing screen events; and
