@@ -821,12 +821,8 @@ impl Screen {
             })
             .map(|row| {
                 let text = &current[row];
-                let end = text.chars().count();
-                format!(
-                    "{line:03} [{start:03}-{end:03}] {text}",
-                    line = row + 1,
-                    start = 1
-                )
+                let (start, end) = rendered_span(text.as_bytes());
+                format!("{line:03} [{start:03}-{end:03}] {text}", line = row + 1,)
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -841,7 +837,8 @@ impl Screen {
                     .iter()
                     .rposition(|cell| *cell != b' ')
                     .map_or(0, |index| index + 1);
-                let mut text = format!("{line:03} [001-{end:03}] ", line = row + 1);
+                let (start, end) = rendered_span(&cells[..end]);
+                let mut text = format!("{line:03} [{start:03}-{end:03}] ", line = row + 1);
                 let mut previous = CellStyle {
                     fg: 0,
                     bg: 0,
@@ -1016,6 +1013,14 @@ fn line_drawing(b: u8) -> u8 {
         b'j' | b'k' | b'l' | b'm' | b'n' => b'+',
         _ => b,
     }
+}
+
+fn rendered_span(row: &[u8]) -> (usize, usize) {
+    let Some(start) = row.iter().position(|cell| *cell != b' ') else {
+        return (0, 0);
+    };
+    let end = row.iter().rposition(|cell| *cell != b' ').unwrap_or(start);
+    (start + 1, end + 1)
 }
 
 fn style_sgr(style: CellStyle) -> String {
@@ -2062,6 +2067,12 @@ mod tests {
             .unwrap();
         assert!(!element.actionable);
         assert!(element.highlighted);
+    }
+    #[test]
+    fn compact_view_reports_the_actual_rendered_columns() {
+        let mut screen = Screen::new(1, 12);
+        screen.feed(b"  PAD");
+        assert_eq!(screen.view(false, &[]), "001 [003-005]   PAD");
     }
     #[test]
     fn visible_text_reports_a_color_outlier_as_a_selection_hint() {
