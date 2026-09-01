@@ -853,9 +853,35 @@ impl Screen {
         for element in &mut elements {
             element.highlighted = self.styles[element.row]
                 .get(element.col..element.col.saturating_add(element.width))
-                .is_some_and(|styles| styles.iter().any(|style| style.reverse));
+                .is_some_and(|styles| styles.iter().any(|style| style.reverse))
+                || self.color_outlier(element.row, element.col, element.width);
         }
         elements
+    }
+    fn color_outlier(&self, row: usize, col: usize, width: usize) -> bool {
+        if row == 0 || row + 1 >= self.styles.len() {
+            return false;
+        }
+        let Some(current) = self.styles[row].get(col..col.saturating_add(width)) else {
+            return false;
+        };
+        let Some(above) = self.styles[row - 1].get(col..col.saturating_add(width)) else {
+            return false;
+        };
+        let Some(below) = self.styles[row + 1].get(col..col.saturating_add(width)) else {
+            return false;
+        };
+        let comparable = current
+            .iter()
+            .zip(above.iter().zip(below.iter()))
+            .filter(|(_, (above, below))| above == below)
+            .count();
+        let different = current
+            .iter()
+            .zip(above.iter().zip(below.iter()))
+            .filter(|(current, (above, below))| above == below && *current != *above)
+            .count();
+        comparable >= 2 && different * 2 >= comparable
     }
     fn styles(&self) -> BTreeMap<usize, Vec<StyleSpan>> {
         let plain = CellStyle {
@@ -1916,6 +1942,19 @@ mod tests {
             .find(|element| element.label == "SELECT")
             .unwrap();
         assert!(!element.actionable);
+        assert!(element.highlighted);
+    }
+    #[test]
+    fn visible_text_reports_a_color_outlier_as_a_selection_hint() {
+        let mut screen = Screen::new(3, 12);
+        screen.feed(
+            b"\x1b[31;44mNORMAL\x1b[0m\r\n\x1b[32;45mSELECT\x1b[0m\r\n\x1b[31;44mNORMAL\x1b[0m",
+        );
+        let element = screen
+            .elements()
+            .into_iter()
+            .find(|element| element.label == "SELECT")
+            .unwrap();
         assert!(element.highlighted);
     }
     #[test]
