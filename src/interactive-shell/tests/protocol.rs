@@ -462,11 +462,21 @@ fn observe_exposes_osc8_elements_and_click_targets() {
     let element = &screen["elements"][0];
     assert_eq!(element["label"], "LINK");
     assert_eq!(element["uri"], "https://example.test");
+    assert_eq!(element["actionable"], true);
     assert!(screen["elements"]
         .as_array()
         .unwrap()
         .iter()
         .any(|candidate| candidate["id"] == "text-0-0"));
+    assert_eq!(
+        screen["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| candidate["id"] == "text-0-0")
+            .unwrap()["actionable"],
+        false
+    );
     let id = element["id"].as_str().unwrap();
     let body = format!(
         r#"{{"v":1,"op":"click","id":"{id}","button":0}}

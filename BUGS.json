@@ -2334,7 +2334,7 @@
     {
       "id": "B104",
       "title": "generic text click targets are advertised as clickable but do not guarantee application activation",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B98",
@@ -2345,8 +2345,8 @@
       "surfaces": [
         "src/interactive-shell/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Working tree change — distinguish verified actionable elements from visible text hints and reject click-id/click-label for the latter",
+      "verification": "OSC 8 elements serialize actionable=true, text runs serialize actionable=false, and protocol tests assert both categories; cargo test passes.",
       "found_by": "fresh agent protocol run, subworker Gauss",
       "notes": "Do not solve this by removing useful text elements; the agent needs a clear distinction between hyperlink targets, visible text, and application-defined mouse targets.",
       "created_at": "2026-09-01T15:10:00Z",
