@@ -7,6 +7,12 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
+    if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
+        println!(
+            "usage: interactive-shell-input --socket PATH OPERATION [ARGUMENTS...]\n\noperations: text, key, combo, raw, paste, observe, wait, mouse, click-id, click-label, click-at, resize, shutdown"
+        );
+        return;
+    }
     let mut socket = None;
     let mut op = None;
     let mut value = None;
@@ -22,7 +28,20 @@ fn main() {
                 i += 1;
                 socket = Some(a[i].clone())
             }
-            "text" | "key" | "raw" | "paste" => {
+            "text" | "paste" => {
+                if op.is_some() {
+                    eprintln!("only one operation is allowed");
+                    std::process::exit(2);
+                }
+                op = Some(a[i].clone());
+                if i + 1 >= a.len() {
+                    eprintln!("operation requires a value");
+                    std::process::exit(2);
+                }
+                value = Some(a[i + 1..].join(" "));
+                i = a.len() - 1;
+            }
+            "key" | "raw" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
@@ -120,7 +139,7 @@ fn main() {
     let mut req = json!({"v":1,"op":op});
     if let Some(v) = value {
         match req["op"].as_str() {
-            Some("text") => req["text"] = v.into(),
+            Some("text") | Some("paste") => req["text"] = v.into(),
             Some("key") => req["key"] = v.into(),
             Some("raw") => req["hex"] = v.into(),
             _ => {}
