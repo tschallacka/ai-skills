@@ -2436,6 +2436,69 @@
       "notes": null,
       "created_at": "2026-09-01T16:30:00Z",
       "updated_at": "2026-09-01T16:30:00Z"
+    },
+    {
+      "id": "B109",
+      "title": "interactive-shell session state is created with group-readable permissions",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start interactive-shell --session ID with INTERACTIVE_SHELL_HOME set, then inspect the session directory and session.json modes.",
+      "observed": "The session file was mode 0664 and the shared socket directory was mode 0775, exposing session metadata beyond the owning agent.",
+      "expected": "Session metadata and all session directories are owner-only, matching the private socket boundary.",
+      "mechanism": "create_dir_all and fs::write inherited the process umask without explicitly tightening the state root, socket root, or JSON file permissions.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Working tree change — enforce 0700 state/socket directories and 0600 session files",
+      "verification": "The session integration test asserts 0700 per-session state and 0600 session-file modes; cargo test passes.",
+      "found_by": "fresh agent session validation, subworker Newton",
+      "notes": null,
+      "created_at": "2026-09-01T17:00:00Z",
+      "updated_at": "2026-09-01T17:00:00Z"
+    },
+    {
+      "id": "B110",
+      "title": "session input reports an opaque connect failure after the saved wrapper has stopped",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Stop a session-backed wrapper, then run interactive-shell-input --session ID observe.",
+      "observed": "The helper returned only connect: No such file or directory with exit status 1.",
+      "expected": "The helper explains that the session is inactive and tells the agent to start the wrapper with the same session ID.",
+      "mechanism": "Session lookup resolved the saved socket path but did not distinguish a missing active socket from a direct socket-connect error.",
+      "surfaces": [
+        "src/interactive-shell/src/bin/interactive-shell-input.rs"
+      ],
+      "fix": "Working tree change — detect an inactive session before connecting and emit a recovery instruction",
+      "verification": "Session-only input checks the resolved socket path and reports the start-with-session recovery message when it is absent.",
+      "found_by": "fresh agent session validation, subworker Newton",
+      "notes": null,
+      "created_at": "2026-09-01T17:00:00Z",
+      "updated_at": "2026-09-01T17:00:00Z"
+    },
+    {
+      "id": "B111",
+      "title": "environment-resolved agent identity is not retained in the session file",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Set INTERACTIVE_SHELL_AGENT=agent-name and start interactive-shell --session ID, then inspect session.json.",
+      "observed": "The session worked through environment lookup but stored an empty agent field.",
+      "expected": "The session records the resolved agent identity and preserves it on later session-only restarts.",
+      "mechanism": "Session serialization used only the explicit --agent option and discarded identity resolved from environment variables.",
+      "surfaces": [
+        "src/interactive-shell/src/bin/interactive-shell.rs"
+      ],
+      "fix": "Working tree change — persist resolved environment identity and retain it on session restart",
+      "verification": "The session integration test sets INTERACTIVE_SHELL_AGENT and asserts the saved agent value; cargo test passes.",
+      "found_by": "fresh agent session validation, subworker Newton",
+      "notes": null,
+      "created_at": "2026-09-01T17:00:00Z",
+      "updated_at": "2026-09-01T17:00:00Z"
     }
   ]
 }

@@ -134,6 +134,7 @@ fn main() {
         i += 1
     }
     let session_id = interactive_shell_core::session_identity(session.as_deref(), agent.as_deref());
+    let socket_from_session = socket.is_none() && session_id.is_some();
     let socket = match socket {
         Some(socket) => PathBuf::from(socket),
         None => match session_id.as_deref() {
@@ -153,6 +154,10 @@ fn main() {
             }
         },
     };
+    if socket_from_session && !socket.exists() {
+        eprintln!("interactive-shell-input: session is not active; start interactive-shell --session <ID> first");
+        std::process::exit(1);
+    }
     let op = match op {
         Some(op) => op,
         None => {

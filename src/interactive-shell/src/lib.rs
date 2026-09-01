@@ -80,16 +80,29 @@ pub fn load_session(id: &str) -> Result<Option<Session>, String> {
 pub fn save_session(id: &str, session: &Session) -> Result<(), String> {
     let path = session_path(id)?;
     let parent = path.parent().ok_or("session path has no parent")?;
+    let root = parent.parent().ok_or("session path has no root")?;
+    fs::create_dir_all(root).map_err(|error| format!("create session root: {error}"))?;
+    fs::set_permissions(root, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("set session root permissions: {error}"))?;
     fs::create_dir_all(parent).map_err(|error| format!("create session directory: {error}"))?;
     fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
         .map_err(|error| format!("set session directory permissions: {error}"))?;
     let json = serde_json::to_string_pretty(session).map_err(|error| error.to_string())?;
-    fs::write(&path, json).map_err(|error| format!("write session {}: {error}", path.display()))
+    fs::write(&path, json).map_err(|error| format!("write session {}: {error}", path.display()))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("set session file permissions: {error}"))
 }
 
 pub fn session_socket(id: &str) -> Result<PathBuf, String> {
     validate_session_id(id)?;
-    let dir = session_root().join("sockets").join(id);
+    let root = session_root();
+    let sockets = root.join("sockets");
+    fs::create_dir_all(&sockets).map_err(|error| format!("create session socket root: {error}"))?;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("set session root permissions: {error}"))?;
+    fs::set_permissions(&sockets, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("set session socket root permissions: {error}"))?;
+    let dir = sockets.join(id);
     fs::create_dir_all(&dir)
         .map_err(|error| format!("create session socket directory: {error}"))?;
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
