@@ -382,6 +382,40 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
 }
 
 #[test]
+fn rgbview_preserves_styles_without_json_wrapping() {
+    let dir = temp_dir("rgbview");
+    let mut child = start(
+        &dir,
+        &["sh", "-c", "printf '\\033[31mRED\\033[0m'; sleep 1"],
+        "5",
+    );
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"RED"}
+"#,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "rgbview",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("\x1b[0;31mRED"));
+    assert!(!text.contains("\"event\""));
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
+#[test]
 fn wait_returns_a_snapshot_after_a_screen_predicate() {
     let dir = temp_dir("wait");
     let mut child = start(

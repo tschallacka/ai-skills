@@ -146,6 +146,18 @@ enum Request {
         #[serde(default)]
         rows: Vec<usize>,
     },
+    #[serde(rename = "rgbview")]
+    RgbView {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
+    #[serde(rename = "rgbview-delta")]
+    RgbViewDelta {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
     #[serde(rename = "wait")]
     Wait {
         v: u8,
@@ -309,6 +321,7 @@ struct Screen {
     style: CellStyle,
     scrollback: Vec<String>,
     last_view: Option<Vec<String>>,
+    last_rgb_view: Option<Vec<String>>,
     scroll_top: usize,
     scroll_bottom: usize,
 }
@@ -362,6 +375,7 @@ impl Screen {
             },
             scrollback: Vec::new(),
             last_view: None,
+            last_rgb_view: None,
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
         }
@@ -813,6 +827,59 @@ impl Screen {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    fn rgbview(&mut self, delta: bool, requested_rows: &[usize]) -> String {
+        let current = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(row, cells)| {
+                let end = cells
+                    .iter()
+                    .rposition(|cell| *cell != b' ')
+                    .map_or(0, |index| index + 1);
+                let mut text = format!("{line:03} [001-{end:03}] ", line = row + 1);
+                let mut previous = CellStyle {
+                    fg: 0,
+                    bg: 0,
+                    bold: false,
+                    reverse: false,
+                };
+                for (cell, style) in cells.iter().zip(&self.styles[row]).take(end) {
+                    if *style != previous {
+                        text.push_str(&style_sgr(*style));
+                        previous = *style;
+                    }
+                    text.push(*cell as char);
+                }
+                if previous.fg != 0 || previous.bg != 0 || previous.bold || previous.reverse {
+                    text.push_str("\x1b[0m");
+                }
+                text
+            })
+            .collect::<Vec<_>>();
+        let previous = self.last_rgb_view.replace(current.clone());
+        let requested = if requested_rows.is_empty() {
+            (0..current.len()).collect::<Vec<_>>()
+        } else {
+            requested_rows
+                .iter()
+                .copied()
+                .filter(|row| *row > 0 && *row <= current.len())
+                .map(|row| row - 1)
+                .collect::<Vec<_>>()
+        };
+        requested
+            .into_iter()
+            .filter(|row| {
+                !delta
+                    || previous
+                        .as_ref()
+                        .is_none_or(|old| old[*row] != current[*row])
+            })
+            .map(|row| current[row].clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
     fn elements(&self) -> Vec<Clickable> {
         let mut elements = self
             .elements
@@ -945,6 +1012,23 @@ fn line_drawing(b: u8) -> u8 {
         b'j' | b'k' | b'l' | b'm' | b'n' => b'+',
         _ => b,
     }
+}
+
+fn style_sgr(style: CellStyle) -> String {
+    let mut codes = vec!["0".to_owned()];
+    if style.bold {
+        codes.push("1".to_owned());
+    }
+    if style.reverse {
+        codes.push("7".to_owned());
+    }
+    if (1..=8).contains(&style.fg) {
+        codes.push((29 + style.fg).to_string());
+    }
+    if (1..=8).contains(&style.bg) {
+        codes.push((39 + style.bg).to_string());
+    }
+    format!("\x1b[{}m", codes.join(";"))
 }
 
 pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
@@ -1517,6 +1601,30 @@ fn client(
                     event: "view",
                     seq: *seq,
                     text: screen.view(true, &rows),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::RgbView { v: 1, rows } => {
+            json(
+                &mut stream,
+                &ViewEvent {
+                    v: 1,
+                    event: "view",
+                    seq: *seq,
+                    text: screen.rgbview(false, &rows),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Request::RgbViewDelta { v: 1, rows } => {
+            json(
+                &mut stream,
+                &ViewEvent {
+                    v: 1,
+                    event: "view",
+                    seq: *seq,
+                    text: screen.rgbview(true, &rows),
                 },
             )
             .map_err(|e| e.to_string())?;

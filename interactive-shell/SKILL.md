@@ -15,11 +15,15 @@ allows it, and resize only when the UI needs more space. Use `view [<ROW>...]`
 for a compact plain-text
 screen view labeled with terminal rows and rendered column spans; use
 `view-delta [<ROW>...]` for only rows changed since the previous view request.
+Use `rgbview [<ROW>...]` or `rgbview-delta [<ROW>...]` when ANSI foreground,
+background, bold, or reverse styling is useful; these still omit JSON but emit
+terminal SGR sequences for a color-capable consumer. `view` is preferable for
+minimum token cost.
 Use `observe` when you need structured JSON for cursor state, styles, scrollback,
 or all screen metadata. Use `elements` when you need only verified actionable
 elements and their labels/coordinates. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
-`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `elements`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
+`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
 `click-id <ID> <BUTTON>`, `click-label '<LABEL>' <BUTTON>`, `click-at <X> <Y> <BUTTON>`, or
 `shutdown`.
 
