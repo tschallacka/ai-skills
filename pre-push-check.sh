@@ -8,8 +8,8 @@
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
 #   bash -n                 every changed shell script
-#   static shell gate       every tracked script, error severity - the same
-#                           invocation CI gates on
+#   static shell gate       every live script plus the generated libraries, at
+#                           warning severity - the invocation CI gates on
 #   cargo fmt --check +     each crate under src/ touched by the change
 #   cargo test              (skipped with a note when no crate changed)
 #   register soundness      TODO.json and BUGS.json parse, unique ids, known
@@ -19,9 +19,9 @@
 # pre-push helper deliberately does not guess at.
 #
 # Usage:
-#   pre-push-check.sh           # the gates above
-#   pre-push-check.sh --full    # also run ./run-tests.sh (the whole suite,
-#                               # under the resource wrapper)
+#   pre-push-check.sh           the gates above
+#   pre-push-check.sh --full    also run ./run-tests.sh (the whole suite,
+#                               under the resource wrapper)
 #   pre-push-check.sh --help
 #
 # Exit codes: 0 = every gate passed; 1 = at least one gate failed; 64 = bad
@@ -83,8 +83,11 @@ git diff --cached --check >/dev/null 2>&1 || ws_rc=1
 if [ -n "$base" ]; then
     git diff --check "$base..HEAD" >/dev/null 2>&1 || ws_rc=1
 fi
-[ "$ws_rc" -eq 0 ] && ok "git diff --check (worktree, index, branch diff)" \
-    || bad "whitespace errors: git diff --check"
+if [ "$ws_rc" -eq 0 ]; then
+    ok "git diff --check (worktree, index, branch diff)"
+else
+    bad "whitespace errors: git diff --check"
+fi
 
 # ---- 2. syntax on changed shell scripts ------------------------------------
 sh_changed="$(changed '\.sh$')"
@@ -100,13 +103,26 @@ else
 fi
 
 # ---- 3. shellcheck, the CI invocation --------------------------------------
-tracked_sh="$(git ls-files '*.sh' | grep -v '^benchmark/results/' || true)"
+# The generated libraries are untracked, so `git ls-files` cannot see them. A
+# `source=` directive resolves only against files on the linter's own command
+# line, so leaving them out reports every variable a sourcing script reads from
+# them as unassigned. Build them, then name them (CONTRIBUTING.md).
+if [ -x planning/scripts/build-plan-libs.sh ]; then
+    planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
+fi
+tracked_sh="$(
+    { git ls-files '*.sh' | grep -v '^benchmark/results/'
+      for lib in core crypt document progress table; do
+          printf 'planning/scripts/plan-%s-lib.sh\n' "$lib"
+      done
+    } 2>/dev/null | LC_ALL=C sort -u || true
+)"
 if command -v shellcheck >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    if shellcheck -s bash --severity=error $tracked_sh >/dev/null 2>&1; then
-        ok "shellcheck -s bash --severity=error ($(printf '%s' "$tracked_sh" | wc -l | tr -d ' ') scripts)"
+    if shellcheck -s bash --severity=warning $tracked_sh >/dev/null 2>&1; then
+        ok "shellcheck -s bash --severity=warning ($(printf '%s\n' "$tracked_sh" | wc -l | tr -d ' ') scripts)"
     else
-        bad "shellcheck findings at error severity (CI gates on these)"
+        bad "shellcheck findings at warning severity (CI gates on these)"
     fi
 else
     note "shellcheck not installed locally; CI still gates on it"
@@ -114,7 +130,9 @@ fi
 
 # ---- 4. rust crates under src/ touched by the change -----------------------
 crates=""
-for f in $(changed '^src/[^/]+/'); do
+# -E: `+` is a literal in a BRE, so the pattern matched nothing and the rust
+# gates below reported "skipped" however many crates the change touched.
+for f in $(changed -E '^src/[^/]+/'); do
     crate="${f#src/}"; crate="${crate%%/*}"
     case "$crate" in
         '') ;;
