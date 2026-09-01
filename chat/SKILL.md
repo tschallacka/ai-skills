@@ -13,7 +13,7 @@ the cert, and sends / reads deltas / tails. Communications are TLS-only.
 
 ## Layout on disk
 
-`$AI_CHAT_HOME` (default `~/.ai-chat`) holds everything:
+`$AI_CHAT_HOME` (default: the tsch-ai-skills XDG chat directory, `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/chat`) holds everything:
 
 - `channels/<chan>.log` — the channel's messages, one `MSG` line each
 - `server.port` — the port this server actually bound (bare digits)

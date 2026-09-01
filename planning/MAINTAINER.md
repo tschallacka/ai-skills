@@ -424,7 +424,11 @@ before and after, and diff. `test-progress-bar-shape.sh` and
    reconcile), `test-plan-env.sh`, the plan validator, and — after any
    role/reader/VOICES change — `test-persona-drift.sh`,
    `test-voice-artifact-drift.sh`, `test-supervision-frame.sh`,
-   `test-progress-bar-shape.sh`, and `test-reviewer-projection.sh`.
+   `test-progress-bar-shape.sh`, and `test-reviewer-projection.sh`. For
+   every change under `src/`, also `cargo fmt --check` and `cargo test`
+   on each touched crate before pushing: CI runs fmt first and test per
+   target leg, so unformatted or failing rust turns four chat legs red
+   and burns a cycle.
 8. Update the registers, which nothing else will. A defect this change fixes is
    closed in `../BUGS.json` with the commit and the mutation that proves it; a
    defect it *finds* and does not fix is added there rather than left in a commit

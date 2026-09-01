@@ -21,6 +21,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -52,6 +53,9 @@ struct Hub {
     chan_dir: PathBuf,
     highest: Mutex<HashMap<String, u64>>,
     channels: Mutex<HashMap<String, Vec<String>>>, // chan -> nicks
+    // Channel topics, in memory only: a standard IRC client sends TOPIC on
+    // join and displays it; persistence is not part of the message bus.
+    topics: Mutex<HashMap<String, String>>, // chan -> topic
     // Registered nicks, so a nick-in-use check never needs the writers lock
     // (holding a connection's own slot guard while acquiring writers is an
     // ABBA deadlock with the broadcast path).
@@ -190,6 +194,15 @@ fn valid_chan(c: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
 }
 
+// A umode set a client may send at connect or with /mode <self>: the letters
+// a standard client expects to be accepted (i invisible, w WALLOPS, s server
+// notices) with optional +/- prefixes. There is no behavior behind them; the
+// point is that the set succeeds so the client's startup reads as clean.
+fn valid_umode_set(flags: &str) -> bool {
+    let body = flags.trim_start_matches(['+', '-']);
+    !body.is_empty() && body.chars().all(|ch| matches!(ch, 'i' | 'w' | 's'))
+}
+
 fn valid_nick(n: &str) -> bool {
     (1..=32).contains(&n.len())
         && n.chars()
@@ -294,7 +307,40 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             continue;
                         }
-                        eprintln!("chat-server-rs: handshake error: {:?}", e);
+                        // A plaintext client retrying against the TLS listener
+                        // loops this path thousands of times a minute; logging
+                        // each attempt once filled tens of megabytes in
+                        // minutes. Time-gated, not count-gated: at most one
+                        // line per minute no matter how hard the flood runs,
+                        // carrying the running total.
+                        let n = HANDSHAKE_ERRORS.fetch_add(1, Ordering::Relaxed);
+                        let due = {
+                            let mut last = LAST_LOG.lock().unwrap_or_else(|p| p.into_inner());
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            if now.saturating_sub(last.1) >= 60 || last.1 == 0 {
+                                last.0 = n;
+                                last.1 = now;
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if due {
+                            let peer = st
+                                .tcp
+                                .peer_addr()
+                                .map(|a| a.to_string())
+                                .unwrap_or_else(|_| "unknown".into());
+                            eprintln!(
+                                "chat-server-rs: handshake error #{} so far from {} (one line per minute): {:?}",
+                                n + 1,
+                                peer,
+                                e
+                            );
+                        }
                         break;
                     }
                 }
@@ -646,8 +692,231 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         }
                         w(st, &format!("{} {}", FETCH_END, chan));
                     }
+                    "WHO" => {
+                        // A standard client sends WHO after JOIN and on channel
+                        // open; without a 352/315 pair it leaves the nick list
+                        // "unknown". The row shape is the RFC minimum.
+                        let target = params.first().cloned().unwrap_or_default();
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        let mut rows = String::new();
+                        if valid_chan(&target) {
+                            let members = {
+                                if let Ok(ch) = hub.channels.lock() {
+                                    ch.get(&target).cloned().unwrap_or_default()
+                                } else {
+                                    vec![]
+                                }
+                            };
+                            for m in &members {
+                                rows.push_str(&format!(
+                                    ":{} 352 {} {} {} {} {} {} H :0 {}\n",
+                                    sn, me, target, m, m, sn, m, m
+                                ));
+                            }
+                        } else if hub
+                            .nicks
+                            .lock()
+                            .map(|n| n.contains_key(&target))
+                            .unwrap_or(false)
+                        {
+                            rows.push_str(&format!(
+                                ":{} 352 {} {} {} {} {} {} H :0 {}\n",
+                                sn, me, target, target, target, sn, target, target
+                            ));
+                        }
+                        for row in rows.lines() {
+                            w(st, row);
+                        }
+                        w(
+                            st,
+                            &format!(":{} 315 {} {} :End of WHO list", sn, me, target),
+                        );
+                    }
+                    "WHOIS" => {
+                        let target = params
+                            .first()
+                            .or(params.get(1))
+                            .cloned()
+                            .unwrap_or_default();
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        let known = hub
+                            .nicks
+                            .lock()
+                            .map(|n| n.contains_key(&target))
+                            .unwrap_or(false);
+                        if known && !target.is_empty() {
+                            w(
+                                st,
+                                &format!(
+                                    ":{} 311 {} {} {} {} * :{}",
+                                    sn, me, target, target, target, target
+                                ),
+                            );
+                            w(
+                                st,
+                                &format!(":{} 312 {} {} {} :ai-chat server", sn, me, target, sn),
+                            );
+                        } else {
+                            w(
+                                st,
+                                &format!(":{} 401 {} {} :No such nick/channel", sn, me, target),
+                            );
+                        }
+                        w(
+                            st,
+                            &format!(":{} 318 {} {} :End of /WHOIS list", sn, me, target),
+                        );
+                    }
+                    "MODE" => {
+                        // Queries are answered, and the umode set a standard
+                        // client sends at connect (Konversation: `MODE <nick>
+                        // +i`) is accepted with a confirmation so it does not
+                        // read as an error. Unknown flags are still 501.
+                        let target = params.first().cloned().unwrap_or_default();
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        if params.len() > 1 {
+                            let flags = params.get(1).cloned().unwrap_or_default();
+                            if target == sess.nick && valid_umode_set(&flags) {
+                                let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                                w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
+                            } else if valid_chan(&target) {
+                                // Channel modes need an operator model the bus
+                                // does not have; refuse rather than pretend.
+                                w(
+                                    st,
+                                    &format!(
+                                        ":{} 482 {} {} :You're not a channel operator",
+                                        sn, me, target
+                                    ),
+                                );
+                            } else {
+                                w(st, &format!(":{} 501 {} :Unknown MODE flag", sn, me));
+                            }
+                        } else if valid_chan(&target) {
+                            w(st, &format!(":{} 324 {} {} +", sn, me, target));
+                        } else if target == sess.nick {
+                            w(st, &format!(":{} 221 {} +", sn, me));
+                        } else {
+                            w(
+                                st,
+                                &format!(":{} 401 {} {} :No such nick/channel", sn, me, target),
+                            );
+                        }
+                    }
+                    "TOPIC" => {
+                        let chan = params.first().cloned().unwrap_or_default();
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        if !valid_chan(&chan) {
+                            w(st, "ERROR :invalid channel");
+                            continue;
+                        }
+                        match &trailing {
+                            None => {
+                                let t = hub.topics.lock().ok().and_then(|t| t.get(&chan).cloned());
+                                match t {
+                                    Some(topic) => {
+                                        w(st, &format!(":{} 332 {} {} :{}", sn, me, chan, topic))
+                                    }
+                                    None => w(
+                                        st,
+                                        &format!(":{} 331 {} {} :No topic is set", sn, me, chan),
+                                    ),
+                                }
+                            }
+                            Some(topic) => {
+                                if let Ok(mut t) = hub.topics.lock() {
+                                    if topic.is_empty() {
+                                        t.remove(&chan);
+                                    } else {
+                                        t.insert(chan.clone(), topic.clone());
+                                    }
+                                }
+                                let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
+                                w(st, &format!(":{} TOPIC {} :{}", prefix, chan, topic));
+                            }
+                        }
+                    }
+                    "LIST" => {
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        if let Ok(ch) = hub.channels.lock() {
+                            for (chan, members) in ch.iter() {
+                                let topic = hub
+                                    .topics
+                                    .lock()
+                                    .ok()
+                                    .and_then(|t| t.get(chan).cloned())
+                                    .unwrap_or_default();
+                                w(
+                                    st,
+                                    &format!(
+                                        ":{} 322 {} {} {} :{}",
+                                        sn,
+                                        me,
+                                        chan,
+                                        members.len(),
+                                        topic
+                                    ),
+                                );
+                            }
+                        }
+                        w(st, &format!(":{} 323 {} :End of /LIST", sn, me));
+                    }
+                    "AWAY" => {
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        match &trailing {
+                            Some(t) if !t.is_empty() => w(
+                                st,
+                                &format!(":{} 306 {} :You have been marked as being away", sn, me),
+                            ),
+                            _ => w(
+                                st,
+                                &format!(
+                                    ":{} 305 {} :You are no longer marked as being away",
+                                    sn, me
+                                ),
+                            ),
+                        }
+                    }
+                    "ISON" => {
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        let present: Vec<String> = params
+                            .iter()
+                            .filter(|p| {
+                                hub.nicks
+                                    .lock()
+                                    .map(|n| n.contains_key(*p))
+                                    .unwrap_or(false)
+                            })
+                            .cloned()
+                            .collect();
+                        w(st, &format!(":{} 303 {} :{}", sn, me, present.join(" ")));
+                    }
+                    "USERHOST" => {
+                        let sn = sess.server_name.clone();
+                        let me = sess.nick.clone();
+                        let mut rows: Vec<String> = Vec::new();
+                        for p in &params {
+                            let known =
+                                hub.nicks.lock().map(|n| n.contains_key(p)).unwrap_or(false);
+                            if known {
+                                rows.push(format!("{}=+{}@{}", p, p, p));
+                            }
+                        }
+                        w(st, &format!(":{} 302 {} :{}", sn, me, rows.join(" ")));
+                    }
                     _ => {
-                        w(st, "ERROR :unknown command");
+                        let sn = sess.server_name.clone();
+                        w(
+                            st,
+                            &format!(":{} 421 {} {} :Unknown command", sn, sess.nick, verb),
+                        );
                     }
                 }
             }
@@ -658,14 +927,21 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
         drop(guard);
     }
 }
-fn announce_loop(port: u16, name: String, interval_secs: u64, beacon_port: u16, bcast: String) {
+fn announce_loop(
+    port: u16,
+    name: String,
+    host: String,
+    interval_secs: u64,
+    beacon_port: u16,
+    bcast: String,
+) {
     let started = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let beacon = format!(
-        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"port\":{},\"started\":{}}}",
-        name, port, started
+        "{{\"proto\":\"ai-chat/1\",\"name\":\"{}\",\"host\":\"{}\",\"port\":{},\"started\":{}}}",
+        name, host, port, started
     );
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) {
         Ok(s) => s,
@@ -681,13 +957,58 @@ fn announce_loop(port: u16, name: String, interval_secs: u64, beacon_port: u16, 
     }
 }
 
+// The address a LAN peer should dial. std has no interface enumeration, so
+// this uses the classic route trick: a UDP connect to a routable address
+// sends no packet, but the kernel picks the primary interface's source, and
+// local_addr reports it. Falls back to the hostname, then to localhost - a
+// name that still tells a LAN peer "this is not an address, look elsewhere".
+fn announce_host() -> String {
+    if let Ok(h) = std::env::var("CHAT_ANNOUNCE_HOST") {
+        if !h.trim().is_empty() {
+            return h;
+        }
+    }
+    if let Ok(s) = std::net::UdpSocket::bind(("0.0.0.0", 0)) {
+        if s.connect("8.8.8.8:80").is_ok() {
+            if let Ok(local) = s.local_addr() {
+                if !local.ip().is_loopback() {
+                    return local.ip().to_string();
+                }
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("hostname").output() {
+        if out.status.success() {
+            let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !h.is_empty() {
+                return h;
+            }
+        }
+    }
+    "localhost".to_string()
+}
+
+// Failed TLS handshakes since start, and the second the last one was logged:
+// the log-spam gate reads both.
+static HANDSHAKE_ERRORS: AtomicU64 = AtomicU64::new(0);
+static LAST_LOG: Mutex<(u64, u64)> = Mutex::new((0, 0));
+
 fn main() {
+    // Same central default as the client: the tsch-ai-skills XDG home.
     let home = std::env::var("AI_CHAT_HOME").unwrap_or_else(|_| {
-        eprintln!("chat-server-rs: AI_CHAT_HOME must be set");
-        std::process::exit(64);
+        let xdg = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|v| !v.is_empty());
+        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        match xdg {
+            Some(v) => format!("{}/tsch-ai-skills/chat", v.trim_end_matches('/')),
+            None => format!(
+                "{}/.config/tsch-ai-skills/chat",
+                home_dir.trim_end_matches('/')
+            ),
+        }
     });
     let args: Vec<String> = std::env::args().collect();
-    let port: u16 = args.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
     let server_name = std::env::var("CHAT_SERVER_NAME").unwrap_or_else(|_| "server".into());
 
@@ -717,11 +1038,54 @@ fn main() {
         }
     };
 
+    // Port preference, in order: an explicit argv port wins; otherwise the
+    // session's last bound port (server.port) is preferred so a restart keeps
+    // the address peers already know; only when nothing is recorded - or the
+    // recorded port is taken - does the kernel pick an ephemeral one. The
+    // file is both the record and the session config: one source of truth.
+    let port: u16 = match args.get(1).and_then(|p| p.parse().ok()) {
+        Some(p) => p,
+        None => {
+            let last = fs::read_to_string(home_path.join("server.port"))
+                .ok()
+                .and_then(|s| s.trim().parse::<u16>().ok())
+                .unwrap_or(0);
+            if last == 0 {
+                0
+            } else if std::net::TcpListener::bind((bind.as_str(), last)).is_ok() {
+                // Bind succeeded, but the probe socket owns the port: drop it
+                // so the real listener can take the same port below.
+                last
+            } else {
+                eprintln!(
+                    "chat-server-rs: session port {} is taken; picking an ephemeral port",
+                    last
+                );
+                0
+            }
+        }
+    };
     let listener = match TcpListener::bind((bind.as_str(), port)) {
         Ok(l) => l,
-        Err(e) => {
+        Err(e) if port == 0 => {
             eprintln!("chat-server-rs: cannot bind {}: {}", bind, e);
             std::process::exit(69);
+        }
+        Err(e) => {
+            // An explicitly requested or session port can be taken between
+            // the probe and the bind; fall back to ephemeral rather than die,
+            // and say so - the recorded port is rewritten below.
+            eprintln!(
+                "chat-server-rs: port {} taken ({}); picking an ephemeral port",
+                port, e
+            );
+            match TcpListener::bind((bind.as_str(), 0)) {
+                Ok(l) => l,
+                Err(e2) => {
+                    eprintln!("chat-server-rs: cannot bind {}: {}", bind, e2);
+                    std::process::exit(69);
+                }
+            }
         }
     };
     let actual = listener.local_addr().map(|a| a.port()).unwrap_or(port);
@@ -732,6 +1096,7 @@ fn main() {
         chan_dir,
         highest: Mutex::new(HashMap::new()),
         channels: Mutex::new(HashMap::new()),
+        topics: Mutex::new(HashMap::new()),
         nicks: Mutex::new(HashMap::new()),
         writers: Mutex::new(Vec::new()),
     });
@@ -746,9 +1111,9 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(7780);
         let bcast = std::env::var("CHAT_BCAST").unwrap_or_else(|_| "255.255.255.255".into());
-        let name =
-            std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", "localhost"));
-        std::thread::spawn(move || announce_loop(actual, name, interval, beacon_port, bcast));
+        let host = announce_host();
+        let name = std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", host));
+        std::thread::spawn(move || announce_loop(actual, name, host, interval, beacon_port, bcast));
     }
 
     for stream in listener.incoming() {

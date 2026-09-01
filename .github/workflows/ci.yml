@@ -7,10 +7,14 @@ on:
     branches: [master, nextupdate]
   pull_request:
 
-# A CI result is only meaningful for the newest request. Keep one run for this
-# workflow globally so a newer pull-request commit cancels stale work.
+# A CI result is only meaningful for the newest commit ON ITS OWN REF, so the
+# group is keyed by ref rather than being one global lane. A literal shared
+# group means any push cancels every other pull request's in-flight run: the
+# victim's board reads cancelled through no fault of its own, and the only way
+# to get a verdict is to push again and hope nobody else does. That happened to
+# three open pull requests before this was keyed.
 concurrency:
-  group: ci-latest
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -390,11 +394,20 @@ jobs:
         run: sudo apt-get install -y -qq musl-tools
 
       - name: Format, lint and test
-        working-directory: src/chat-server-rs
+        # bash explicitly: this matrix includes a Windows runner, whose default
+        # shell is pwsh, and the loop below is shell syntax pwsh rejects.
+        shell: bash
         run: |
-          cargo fmt --check
-          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
-          cargo test --target ${{ matrix.target }}
+          # Both crates, not just the server. The client is built below but was
+          # never formatted, linted or unit-tested, so a clippy error and its
+          # unit tests rode through green for as long as the leg has existed.
+          for crate in src/chat-server-rs src/chat-client-rs; do
+            printf '==> %s\n' "$crate"
+            ( cd "$crate" \
+              && cargo fmt --check \
+              && cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings \
+              && cargo test --target ${{ matrix.target }} )
+          done
 
       - name: Build the release artifact (server)
         working-directory: src/chat-server-rs
