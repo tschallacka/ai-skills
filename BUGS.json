@@ -1244,6 +1244,31 @@
       ]
     },
     {
+      "id": "B112",
+      "title": "A fix-key secret evicted from the temp dir makes every minted key and recorded claim permanently unverifiable, so the plan can never be approved",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "p=.plans/<plan-with-gated-findings>; planning/scripts/mint-fix-keys.sh \"$p\"; s=$(sed -n 's/.*\"session_id\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$p/fix-keys.json\" | head -1); rm -rf \"${TMPDIR:-/tmp}/planning-agent/review-fix-keys/$s\"; planning/scripts/verify-fix-keys.sh \"$p\" --claimed-by fixer; echo \"exit=$?\"",
+      "observed": "verify-fix-keys.sh: session secret missing: /tmp/planning-agent/review-fix-keys/<session>/secret (was the session invalidated at approval?) and exit=64. The keys still in fix-keys.json and the claims still in fixes.md can never be verified again, so --review-status approved refuses for the rest of the plan's life.",
+      "expected": "A mint that survives an ordinary temp-dir eviction, or a documented recovery that restores verifiability without discarding the review. At minimum the refusal should distinguish an evicted secret from a forged key and name the recovery command, rather than asking whether the session was invalidated at approval.",
+      "mechanism": "A key is SHA-256(secret || \"<session_id>|<finding>|<work unit>\") and the 64-hex secret exists only at $(planning_tmpdir)/review-fix-keys/<session>/secret. planning_tmpdir.sh puts that under ${TMPDIR:-/tmp} and its own comment states the intent: it lives there 'so it is fresh per boot'. So the store is designed to be evicted while the protocol it holds spans sessions: minting is the reviewer's step and claiming must be a different session. Once the dir is gone the secret is unrecoverable, verify_fix_keys dies at its secret-file check before the claim loop, and ensure_session_secret silently mints a NEW session on the next call, rewriting fix-keys.json wholesale so prior claims read as stale-key mismatches.",
+      "surfaces": [
+        "planning/scripts/lib/core/planning_tmpdir.sh",
+        "planning/scripts/mint-fix-keys.sh",
+        "planning/scripts/verify-fix-keys.sh",
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "coordinator session resuming the plan-overview-rebuild plan; hit twice, first on the 63 keys of cycles 1 to 7 and again on cycle 8's fresh mint across a pause of a few hours",
+      "notes": "Unnoticed because every test mints and verifies inside one run, so the secret always exists; nothing exercises a verify whose secret is gone. The error text makes it worse by naming approval-time invalidation as the cause, which is the one documented way the dir disappears, so an ordinary temp eviction reads as a protocol event. The practical consequence for anyone using the gate today is that mint, claim and approve must all complete in one sitting. Recovery is mint-fix-keys.sh, which mints a new session and rewrites the keys, at the cost of every recorded claim and the audit trail of which session claimed which key. The reproduction above is the deliberate form of an eviction that was twice observed accidentally; the observed text and exit code are quoted from those two runs, not from running that command, because deleting a live session secret would break whatever fixer is mid-claim.",
+      "created_at": "2026-09-02T19:06:39Z",
+      "updated_at": "2026-09-02T19:07:06Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1640,6 +1665,30 @@
       "notes": null,
       "created_at": "2026-08-31T13:20:46Z",
       "updated_at": "2026-08-31T13:20:46Z"
+    },
+    {
+      "id": "B111",
+      "title": "No test catches a shipped script whose sourced library is not shipped, so B108 passed every consistency check",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With B108 live and unfixed on master, run the two manifest consistency tests: bash tests/test-skill-files-manifest.sh and bash tests/test-mode-markers.sh. Then confirm the defect they failed to catch: bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod' | grep register- lists scripts/register-read.sh without scripts/register-lib.sh, while master's register-read.sh sources that library unconditionally at line 32.",
+      "observed": "Measured on master at 170332f on 2026-09-02, not inferred. Both tests PASS: test-skill-files-manifest.sh reports 'accounted for 145 listed file(s) across 12 skill(s)' and exits 0; test-mode-markers.sh reports PASS and exits 0. Meanwhile the installed prod copy of register-read.sh dies on --help with 'line 32: .../scripts/register-lib.sh: No such file or directory'. Note also that tests/test-installer-manifest.sh, named in an earlier review as the other test that should have caught this, DOES NOT EXIST - the only two manifest-consistency tests are the pair above.",
+      "expected": "A shipped script's source directives should be resolved against the shipped file set, so shipping a reader without the library it sources fails a test rather than reaching a user.",
+      "mechanism": "HYPOTHESIS, needs investigating - this is why the entry is 'reported' rather than 'confirmed'. The two tests appear to check invariants that the broken pair satisfies individually. test-mode-markers.sh compares each file's MODE marker against skill_files membership, and both files are individually consistent by that rule: the reader is MODE PROD and sits in the prod arm, the library is MODE DEV and sits in the dev arm. B108's own mechanism note already says exactly this. test-skill-files-manifest.sh accounts for files that ARE listed, and register-lib.sh is absent from planning/PACKAGE-MANIFEST.tsv altogether, so an omitted file has nothing to account for and is invisible to an all-listed-files-are-accounted-for check. If that holds, no existing test reads a script's source directives at all, and the gap is a missing check rather than a broken one. Verify before fixing.",
+      "surfaces": [
+        "tests/test-skill-files-manifest.sh",
+        "tests/test-mode-markers.sh",
+        "planning/PACKAGE-MANIFEST.tsv",
+        "installer/src/50-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Surfaced while re-confirming B108 during the Loki checkout migration on Sanitairkamer, 2026-09-02. An adversarial reviewer asserted these tests 'should be failing and are not'; the assertion was then checked by running them, which is what turned it into this entry. Tschallacka asked for it to be recorded for investigation rather than fixed now.",
+      "notes": "B108 is the live instance and the fastest way to test any fix: whatever check gets added must fail while B108 is unfixed and pass once it is. Do not close this by fixing B108 - the point of the entry is that the packaging defect was invisible to the suite, so fixing the instance would hide the gap again. Related: B108 also revealed that PACKAGE-MANIFEST.tsv omits register-rebuild.sh, so any new check should cover scripts that are in neither package manifest as well as scripts whose dependencies land in a different arm.",
+      "created_at": "2026-09-02T12:59:13Z",
+      "updated_at": "2026-09-02T12:59:13Z"
     },
     {
       "id": "B6",
@@ -2433,30 +2482,6 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B111",
-      "title": "No test catches a shipped script whose sourced library is not shipped, so B108 passed every consistency check",
-      "status": "reported",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "With B108 live and unfixed on master, run the two manifest consistency tests: bash tests/test-skill-files-manifest.sh and bash tests/test-mode-markers.sh. Then confirm the defect they failed to catch: bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod' | grep register- lists scripts/register-read.sh without scripts/register-lib.sh, while master's register-read.sh sources that library unconditionally at line 32.",
-      "observed": "Measured on master at 170332f on 2026-09-02, not inferred. Both tests PASS: test-skill-files-manifest.sh reports 'accounted for 145 listed file(s) across 12 skill(s)' and exits 0; test-mode-markers.sh reports PASS and exits 0. Meanwhile the installed prod copy of register-read.sh dies on --help with 'line 32: .../scripts/register-lib.sh: No such file or directory'. Note also that tests/test-installer-manifest.sh, named in an earlier review as the other test that should have caught this, DOES NOT EXIST - the only two manifest-consistency tests are the pair above.",
-      "expected": "A shipped script's source directives should be resolved against the shipped file set, so shipping a reader without the library it sources fails a test rather than reaching a user.",
-      "mechanism": "HYPOTHESIS, needs investigating - this is why the entry is 'reported' rather than 'confirmed'. The two tests appear to check invariants that the broken pair satisfies individually. test-mode-markers.sh compares each file's MODE marker against skill_files membership, and both files are individually consistent by that rule: the reader is MODE PROD and sits in the prod arm, the library is MODE DEV and sits in the dev arm. B108's own mechanism note already says exactly this. test-skill-files-manifest.sh accounts for files that ARE listed, and register-lib.sh is absent from planning/PACKAGE-MANIFEST.tsv altogether, so an omitted file has nothing to account for and is invisible to an all-listed-files-are-accounted-for check. If that holds, no existing test reads a script's source directives at all, and the gap is a missing check rather than a broken one. Verify before fixing.",
-      "surfaces": [
-        "tests/test-skill-files-manifest.sh",
-        "tests/test-mode-markers.sh",
-        "planning/PACKAGE-MANIFEST.tsv",
-        "installer/src/50-manifest.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "Surfaced while re-confirming B108 during the Loki checkout migration on Sanitairkamer, 2026-09-02. An adversarial reviewer asserted these tests 'should be failing and are not'; the assertion was then checked by running them, which is what turned it into this entry. Tschallacka asked for it to be recorded for investigation rather than fixed now.",
-      "notes": "B108 is the live instance and the fastest way to test any fix: whatever check gets added must fail while B108 is unfixed and pass once it is. Do not close this by fixing B108 - the point of the entry is that the packaging defect was invisible to the suite, so fixing the instance would hide the gap again. Related: B108 also revealed that PACKAGE-MANIFEST.tsv omits register-rebuild.sh, so any new check should cover scripts that are in neither package manifest as well as scripts whose dependencies land in a different arm.",
-      "created_at": "2026-09-02T12:59:13Z",
-      "updated_at": "2026-09-02T12:59:13Z"
     }
   ]
 }
