@@ -187,6 +187,31 @@
       "updated_at": "2026-09-02T12:54:57Z"
     },
     {
+      "id": "B114",
+      "title": "No helper can set a UI story's Status or Evidence, so a story can be run but never recorded and the completion gate can never pass",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "t=$(mktemp -d)/plan; cp -r .plans/<a plan with ui-user-stories.md> \"$t\"; chmod 600 \"$t/.env\"; s=planning/scripts; \"$s/update-ui-story.sh\" \"$t\" US-01 --expected probe; awk -F'|' '/^\\| US-01 /{print \"status cell:\" $7}' \"$t/ui-user-stories.md\"; \"$s/update-plan-content.sh\" -tp \"$t\" stories 1.1 9 '\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"'; \"$s/update-plan-content.sh\" -f \"$t\" stories Status passed",
+      "observed": "update-ui-story.sh prints 'Updated US-01' and the status cell still reads '💤 untested' -- it writes only persona, actions, interaction and expected. update-plan-content.sh -tp refuses with 'Paragraph was not found exactly once: § 1.1', because ui-user-stories.md is a bare heading plus a table with no numbered paragraph to address. -f refuses with 'Field was not found exactly once: Status', because Status is a table column and not a field line. No other helper writes the file.",
+      "expected": "A sanctioned writer for the two columns that record a run: Status, from the documented vocabulary (untested, in progress, passed, bug found, user-approved excluded), and Evidence. The natural home is update-ui-story.sh, which already addresses a story by id and rewrites its row.",
+      "mechanism": "ui-user-stories.md is written by add-ui-story.sh and amended by update-ui-story.sh, whose flags are --persona, --actions, --interaction and --expected only. The generic content writers cannot reach it: -tp addresses a numbered paragraph and the file has none, and -f addresses a '- Label: value' field line while Status is a table cell. The run cache at ui-story-runs/US-NN.md is worse off -- it has a 'Run result' section with its own '- Status:' line, and no document id at all in plan-document-lib.sh, so no content writer can address it either. Meanwhile the UI reference makes every applicable story passing a condition of completion and validate-plan --complete enforces it, so the gate depends on a value nothing can set. SKILL.md 4.5 forbids hand-editing a plan artifact, which closes the last route.",
+      "surfaces": [
+        "planning/scripts/update-ui-story.sh",
+        "planning/scripts/create-ui-story-run-cache.sh",
+        "planning/scripts/plan-document-lib.sh",
+        "planning/references/ui-user-story-validation.md",
+        "planning/scripts/validate-plan-ui-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "attempting to run the 84 browser stories of plan-overview-rebuild and finding nowhere to record a pass",
+      "notes": "This is why every one of that plan's 84 stories still reads untested after eight review cycles and a full session of implementation: not because nobody ran them, but because a run cannot be written down. Reproduced on a throwaway copy of the plan rather than the plan itself, so the refusals above are from a real invocation and no plan artifact was touched. The three claims were each checked separately, because two of them look like they should work: 'stories' IS a resolvable document id in plan-document-lib.sh line 150, so -tp looks addressable until it asks for a paragraph label the file has never had; and update-ui-story.sh reports success while leaving the cell alone, which is the most misleading of the three. Whoever fixes this should cover the run cache too, and should decide whether an excluded story needs the user-approval reason the reference requires recorded alongside it.",
+      "created_at": "2026-09-02T21:51:15Z",
+      "updated_at": "2026-09-02T21:51:15Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
