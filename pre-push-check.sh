@@ -34,6 +34,18 @@ export LC_ALL=C
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 full=false
 
+# Git runs hooks with the caller's environment, which may provide a different
+# Cargo than the repository's pinned toolchain. Re-enter the flake once; the
+# marker prevents recursion inside the development shell.
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
+    command -v nix >/dev/null 2>&1 || {
+        printf '%s: nix develop .#default is required for Rust pre-push checks\n' "${0##*/}" >&2
+        exit 69
+    }
+    exec nix develop "$repo_root" --command env \
+        AI_SKILLS_PREPUSH_IN_NIX=1 "$repo_root/pre-push-check.sh" "$@"
+fi
+
 usage() {
     awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -u/{ exit }' "$0"
     exit "${1:-64}"
