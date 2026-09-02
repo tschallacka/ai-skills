@@ -69,6 +69,43 @@ impl Hub {
         self.chan_dir.join(format!("{}.log", chan))
     }
 
+    /// Release everything one connection held: its nick, its channel
+    /// memberships, and its writer slot.
+    ///
+    /// Without this a disconnect left the nick registered for the life of the
+    /// server, so the SECOND agent on a machine could never register that nick
+    /// again — it got ERR_NICKNAMEINUSE against a connection that no longer
+    /// existed, which is why only one client at a time could be connected.
+    /// The nick is only surrendered when the registry still points at THIS
+    /// connection index; a later connection that took the nick over keeps it.
+    fn deregister(&self, nick: &str, idx: usize, chans: &[String]) {
+        if !nick.is_empty() {
+            if let Ok(mut nicks) = self.nicks.lock() {
+                if nicks.get(nick).copied() == Some(idx as u64) {
+                    nicks.remove(nick);
+                }
+            }
+        }
+        if let Ok(mut channels) = self.channels.lock() {
+            for chan in chans {
+                if let Some(members) = channels.get_mut(chan) {
+                    members.retain(|m| m != nick);
+                }
+            }
+        }
+        // The slot itself stays in `writers` so live connections keep their
+        // index (broadcast addresses members by index). It now holds None, so
+        // it is a few bytes rather than a socket, and the broadcast path
+        // already skips an empty slot.
+        if let Ok(writers) = self.writers.lock() {
+            if let Some(slot) = writers.get(idx) {
+                if let Ok(mut g) = slot.lock() {
+                    *g = None;
+                }
+            }
+        }
+    }
+
     fn scan_highest(&self, chan: &str) -> u64 {
         let path = self.chan_path(chan);
         let mut top = 0u64;
@@ -281,6 +318,14 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
         }
     }
 
+    // Set the moment this connection is finished — a dead peer, a failed
+    // handshake, or QUIT. The outer loop used to have no exit at all: every
+    // `break` inside it left only the inner read loop, so a thread went on
+    // re-reading a closed socket at full CPU for the life of the process. One
+    // aborted client was measured holding a core for nine minutes, and enough
+    // of them starve `accept` until the listener stops answering entirely.
+    let mut done = false;
+
     loop {
         let mut guard = match slot.lock() {
             Ok(g) => g,
@@ -341,18 +386,27 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                                 e
                             );
                         }
+                        // A handshake that cannot complete never will on this
+                        // socket; retrying it is the spin this flag ends.
+                        done = true;
                         break;
                     }
                 }
             }
         }
         // After the handshake, catch any further buffered raw bytes and
-        // decrypt them before draining plaintext.
-        let _ = st.conn.read_tls(&mut st.tcp);
+        // decrypt them before draining plaintext. read_tls returning Ok(0) is
+        // the peer's TCP close: the authoritative "this connection is over"
+        // signal, and discarding it was how dead sockets stayed in CLOSE-WAIT.
+        if let Ok(0) = st.conn.read_tls(&mut st.tcp) {
+            done = true;
+        }
         let _ = st.conn.process_new_packets();
         while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
         while let Ok(n) = st.conn.reader().read(&mut raw) {
             if n == 0 {
+                // Clean TLS EOF.
+                done = true;
                 break;
             }
             for chunk in raw[..n].split_inclusive(|&b| b == b'\n') {
@@ -921,10 +975,29 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                 }
             }
             if st.closed {
+                done = true;
                 break;
             }
         }
+
+        // Tear down exactly once, and gather what deregistration needs while
+        // the borrow of `st` is still alive.
+        if !done {
+            drop(guard);
+            continue;
+        }
+        st.closed = true;
+        let _ = st.tcp.shutdown(std::net::Shutdown::Both);
+        let leaving_nick = st.nick.clone();
+        let leaving_chans = st.joined.clone();
+        // Drop the ConnState so the socket closes rather than lingering in
+        // CLOSE-WAIT, then release the slot guard BEFORE taking any hub lock:
+        // holding a slot while acquiring `writers` is the ABBA deadlock the
+        // Hub comments warn about.
+        *guard = None;
         drop(guard);
+        hub.deregister(&leaving_nick, idx, &leaving_chans);
+        break;
     }
 }
 fn announce_loop(
@@ -993,7 +1066,85 @@ fn announce_host() -> String {
 static HANDSHAKE_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LAST_LOG: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
+const USAGE: &str = "\
+chat-server-rs — the chat message bus server (IRC-shaped, TLS)
+
+usage:
+  chat-server-rs [PORT]
+  chat-server-rs --help
+
+  PORT  bind this port. Omitted, the port recorded in <home>/server.port is
+        reused so a restart keeps the address peers already know; if that one
+        is taken, the kernel picks an ephemeral port. The chosen port is
+        printed on stdout and written back to <home>/server.port.
+
+environment:
+  AI_CHAT_HOME          state home (default $XDG_CONFIG_HOME/tsch-ai-skills/chat)
+  AI_CHAT_BIND          bind address (default 127.0.0.1)
+  CHAT_SERVER_NAME      name used in numeric replies (default \"server\")
+  CHAT_ANNOUNCE=1       broadcast a UDP discovery beacon
+  CHAT_ANNOUNCE_HOST    address to advertise (default: the primary interface)
+  CHAT_ANNOUNCE_INTERVAL  beacon interval in seconds (default 2)
+  CHAT_BEACON_PORT      beacon UDP port (default 7780)
+  CHAT_BCAST            broadcast address (default 255.255.255.255)
+  CHAT_NAME             advertised server name (default ai-chat/<host>)
+
+exit codes:
+  0 help; 64 bad invocation; 66 cannot create the channel directory;
+  69 no usable certificate or no bindable address
+";
+
+/// What the command line asks for, decided before anything binds.
+#[derive(Debug, PartialEq, Eq)]
+enum ArgAction {
+    /// Print usage, exit 0.
+    Help,
+    /// Serve. `Some(port)` for an explicit port, `None` to resolve one.
+    Serve(Option<u16>),
+    /// Refuse with this message, exit 64.
+    Reject(String),
+}
+
+/// Classify argv WITHOUT touching the filesystem or a socket.
+///
+/// The server had no `--help` at all: argv[1] was parsed straight as a port,
+/// so `--help` failed to parse, yielded None, fell through to the recorded
+/// session port, and stood up a REAL server. A `chat-server-rs --help | head`
+/// probe therefore left a live bus on the shared port that refused everyone
+/// else. Deciding this up front, as pure data, is what keeps help and serve
+/// from ever being the same code path again.
+fn classify_args(argv: &[String]) -> ArgAction {
+    for a in argv {
+        if a == "--help" || a == "-h" {
+            return ArgAction::Help;
+        }
+    }
+    match argv.len() {
+        0 => ArgAction::Serve(None),
+        1 => match argv[0].parse::<u16>() {
+            Ok(p) => ArgAction::Serve(Some(p)),
+            // A typo must not be read as "no port given".
+            Err(_) => ArgAction::Reject(format!("not a port: {}", argv[0])),
+        },
+        _ => ArgAction::Reject(format!("unexpected argument: {}", argv[1])),
+    }
+}
+
 fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let explicit_port = match classify_args(&argv) {
+        ArgAction::Help => {
+            print!("{}", USAGE);
+            std::process::exit(0);
+        }
+        ArgAction::Reject(message) => {
+            eprintln!("chat-server-rs: {}", message);
+            eprintln!("chat-server-rs: run with --help for usage");
+            std::process::exit(64);
+        }
+        ArgAction::Serve(port) => port,
+    };
+
     // Same central default as the client: the tsch-ai-skills XDG home.
     let home = std::env::var("AI_CHAT_HOME").unwrap_or_else(|_| {
         let xdg = std::env::var("XDG_CONFIG_HOME")
@@ -1008,7 +1159,6 @@ fn main() {
             ),
         }
     });
-    let args: Vec<String> = std::env::args().collect();
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
     let server_name = std::env::var("CHAT_SERVER_NAME").unwrap_or_else(|_| "server".into());
 
@@ -1043,7 +1193,7 @@ fn main() {
     // the address peers already know; only when nothing is recorded - or the
     // recorded port is taken - does the kernel pick an ephemeral one. The
     // file is both the record and the session config: one source of truth.
-    let port: u16 = match args.get(1).and_then(|p| p.parse().ok()) {
+    let port: u16 = match explicit_port {
         Some(p) => p,
         None => {
             let last = fs::read_to_string(home_path.join("server.port"))
@@ -1160,5 +1310,79 @@ fn main() {
             }
             serve(slot, hub, idx, server_name);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn help_is_recognised_and_never_becomes_a_serve() {
+        // The defect: --help was not a flag at all, so it fell through to the
+        // port resolution and started a real server on the shared port.
+        assert_eq!(classify_args(&argv(&["--help"])), ArgAction::Help);
+        assert_eq!(classify_args(&argv(&["-h"])), ArgAction::Help);
+        // Help wins wherever it appears, and never resolves a port.
+        assert_eq!(classify_args(&argv(&["1234", "--help"])), ArgAction::Help);
+        for a in [
+            argv(&["--help"]),
+            argv(&["-h"]),
+            argv(&["1234", "--help"]),
+            argv(&["--help", "extra"]),
+        ] {
+            assert!(
+                !matches!(classify_args(&a), ArgAction::Serve(_)),
+                "{:?} must not serve",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn no_argument_serves_with_an_unresolved_port() {
+        assert_eq!(classify_args(&[]), ArgAction::Serve(None));
+    }
+
+    #[test]
+    fn a_bare_port_serves_on_exactly_that_port() {
+        assert_eq!(
+            classify_args(&argv(&["7717"])),
+            ArgAction::Serve(Some(7717))
+        );
+        assert_eq!(classify_args(&argv(&["0"])), ArgAction::Serve(Some(0)));
+        assert_eq!(
+            classify_args(&argv(&["65535"])),
+            ArgAction::Serve(Some(65535))
+        );
+    }
+
+    #[test]
+    fn a_bad_argument_is_refused_not_read_as_no_port() {
+        // Silently treating a typo as "no port given" is how --help booted a
+        // server; every unparseable first argument is now a refusal.
+        for bad in ["--porrt", "abc", "-1", "65536", "70000", "12.5", ""] {
+            match classify_args(&argv(&[bad])) {
+                ArgAction::Reject(m) => assert!(
+                    m.contains("not a port"),
+                    "{} rejected with the wrong message: {}",
+                    bad,
+                    m
+                ),
+                other => panic!("{} was not refused: {:?}", bad, other),
+            }
+        }
+    }
+
+    #[test]
+    fn a_second_argument_is_refused() {
+        match classify_args(&argv(&["7717", "extra"])) {
+            ArgAction::Reject(m) => assert!(m.contains("unexpected argument"), "message: {}", m),
+            other => panic!("expected a refusal, got {:?}", other),
+        }
     }
 }
