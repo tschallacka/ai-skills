@@ -1,0 +1,14 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "create-ui-story-run-cache"
+version = "0.1.0"
+edition = "2021"
+description = "Create a planning UI story browser run cache"
+license = "MIT"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

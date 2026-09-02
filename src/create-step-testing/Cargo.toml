@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "create-step-testing"
+version = "0.1.0"
+edition = "2021"
+description = "Create a planning step testing companion"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

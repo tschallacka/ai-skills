@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-progress"
+version = "0.1.0"
+edition = "2021"
+description = "Progress-table logic shared by planning Rust helpers"
+license = "MIT"
+
+[lib]
+name = "planning_progress"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

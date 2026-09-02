@@ -1,0 +1,19 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-goal"
+version = "0.1.0"
+edition = "2021"
+description = "Add a planning goal"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }
+planning-table = { path = "../planning-table" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

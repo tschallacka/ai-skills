@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-content"
+version = "0.1.0"
+edition = "2021"
+description = "Read-only plan document and dependency queries"
+license = "MIT"
+
+[[bin]]
+name = "plan-content"
+path = "src/main.rs"
+
+[dependencies]
+planning-map = { path = "../planning-map" }
+planning-table = { path = "../planning-table" }

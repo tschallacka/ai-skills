@@ -50,6 +50,7 @@ SKILL.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
+RUST-ARTIFACT-MANIFEST.md
 bin/x86_64-unknown-linux-musl/plan-overview
 bin/aarch64-unknown-linux-musl/plan-overview
 bin/x86_64-apple-darwin/plan-overview
@@ -149,6 +150,54 @@ scripts/validate-plan-comparisons-lib.sh
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
+scripts/add-adversarial-finding
+scripts/add-coverage
+scripts/add-fix-claim
+scripts/add-goal
+scripts/add-planning-bug
+scripts/add-ui-story
+scripts/add-ui-story-links
+scripts/add-work-unit
+scripts/cleanup-plans
+scripts/configure-ui-story-cache
+scripts/create-adversarial-review
+scripts/create-plan
+scripts/create-plan-progress
+scripts/create-progress
+scripts/create-step-testing
+scripts/create-ui-story-run-cache
+scripts/create-ui-validation
+scripts/create-work-unit-inventory
+scripts/generate-reviewer
+scripts/mint-fix-keys
+scripts/monitor-read
+scripts/overview-state
+scripts/plan-content
+scripts/plan-context
+scripts/plan-context-wrapper
+scripts/plan-env
+scripts/plan-mutate
+scripts/plan-root
+scripts/rebuild-plan-progress
+scripts/register-command
+scripts/register-read
+scripts/remove-coverage
+scripts/remove-plan
+scripts/remove-work-unit
+scripts/resolve-finding
+scripts/role-context
+scripts/run-adversary-probe
+scripts/supervision-frame
+scripts/update-adversarial-review
+scripts/update-plan-content
+scripts/update-plan-progress
+scripts/update-progress
+scripts/update-step
+scripts/update-ui-story
+scripts/update-work-unit
+scripts/validate-plan
+scripts/verify-fix-keys
+scripts/verify-target
 EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
@@ -449,5 +498,23 @@ CHATEOF
 source_file() {
     local skill="$1"
     local relative="$2"
-    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$relative"
+    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$(platform_relative_path "$skill" "$relative")"
+}
+
+# Manifest entries keep the command name users invoke, without a platform
+# suffix. Windows still needs the executable suffix on disk. Only generated
+# planning commands use this logical-name rule; ordinary files and shell
+# helpers retain their manifest path exactly.
+platform_relative_path() {
+    local skill="$1"
+    local relative="$2"
+    case "$skill:$relative" in
+        planning:scripts/*.sh) : ;;
+        planning:scripts/*)
+            case "$(uname -s)" in
+                MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+            esac
+            ;;
+    esac
+    printf '%s\n' "$relative"
 }

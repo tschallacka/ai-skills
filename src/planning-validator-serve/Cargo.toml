@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-serve"
+version = "0.1.0"
+edition = "2021"
+description = "Live-application serve validation for planning goals"
+license = "MIT"
+
+[lib]
+name = "planning_validator_serve"
+path = "src/lib.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }
+serde_json = { version = "1", features = ["preserve_order"] }

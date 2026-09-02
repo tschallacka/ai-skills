@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-step"
+version = "0.1.0"
+edition = "2021"
+description = "Update a planning step progress tracker"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }

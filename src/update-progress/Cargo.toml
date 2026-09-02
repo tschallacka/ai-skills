@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-progress"
+version = "0.1.0"
+edition = "2021"
+description = "Recompute a planning goal progress tracker"
+license = "MIT"
+
+[dependencies]
+planning-progress = { path = "../planning-progress" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

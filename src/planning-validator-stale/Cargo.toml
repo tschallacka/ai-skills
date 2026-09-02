@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-stale"
+version = "0.1.0"
+edition = "2021"
+description = "Stale-wording validation for planning documents"
+license = "MIT"
+
+[lib]
+name = "planning_validator_stale"
+path = "src/lib.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }

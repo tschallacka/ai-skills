@@ -4,7 +4,7 @@ use super::state::{Coverage, Edge, Finding, Goal, Identity, State, Step, Testing
 use super::tree::{PlanDocument, PlanTree};
 use std::path::Path;
 
-fn section<'a>(text: &'a str, heading: &str) -> String {
+fn section(text: &str, heading: &str) -> String {
     let marker = format!("## {heading}");
     let mut active = false;
     let mut result = Vec::new();
@@ -20,14 +20,50 @@ fn section<'a>(text: &'a str, heading: &str) -> String {
             result.push(line);
         }
     }
-    result.join("\n").trim().to_string()
+    result.join("\n").trim_end().to_string()
 }
 
 fn field(text: &str, name: &str) -> String {
     text.lines()
-        .find_map(|line| line.strip_prefix(&format!("- {name}: ")))
-        .map(|value| value.trim_matches('`').trim().to_string())
+        .find_map(|line| line.strip_prefix(&format!("- {name}: `")))
+        .map(|value| {
+            value
+                .chars()
+                .filter(|character| *character != '`')
+                .collect()
+        })
         .unwrap_or_default()
+}
+
+fn testing_requirement(text: &str) -> String {
+    let mut inside = false;
+    let mut result = String::new();
+    for line in text.lines() {
+        if line.contains("Testing requirement") || line.contains("Testing-requirement") {
+            inside = true;
+            continue;
+        }
+        if inside && line.starts_with("## ") {
+            break;
+        }
+        if !inside || !line.starts_with('|') || line.contains("Goal") || line.contains("---") {
+            continue;
+        }
+        let cells: Vec<_> = line.split('|').collect();
+        let Some(raw_key) = cells.get(1) else {
+            continue;
+        };
+        let Some(value) = cells.get(2) else {
+            continue;
+        };
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(raw_key);
+        result.push_str(": ");
+        result.push_str(value.trim());
+    }
+    result
 }
 
 fn cells(line: &str) -> Vec<String> {
@@ -41,16 +77,11 @@ fn document<'a>(tree: &'a PlanTree, path: &Path) -> Option<&'a PlanDocument> {
     tree.documents.iter().find(|doc| doc.path == path)
 }
 
-fn markdown_documents<'a>(
-    tree: &'a PlanTree,
-    suffix: &'a str,
-) -> impl Iterator<Item = &'a PlanDocument> + 'a {
-    tree.documents
-        .iter()
-        .filter(move |doc| doc.path.to_string_lossy().ends_with(suffix))
+pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
+    extract_state_as(tree, "plan-overview")
 }
 
-pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
+pub fn extract_state_as(tree: &PlanTree, generated_by: &str) -> Result<String, String> {
     let description = document(tree, &tree.root.join("plan-description.md"))
         .ok_or_else(|| "plan-description.md not found".to_string())?;
     let review = document(tree, &tree.root.join("adversarial-review.md"));
@@ -69,10 +100,9 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
         .to_string();
     let review_status = review
         .and_then(|doc| {
-            doc.contents.lines().find_map(|line| {
-                line.strip_prefix("- Status: `")
-                    .and_then(|value| value.strip_suffix('`'))
-            })
+            doc.contents
+                .lines()
+                .find_map(|line| line.strip_prefix("- Status: `"))
         })
         .unwrap_or_default()
         .to_string();
@@ -84,17 +114,7 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
         let components: Vec<_> = relative.components().collect();
         if components.len() == 2 && components[1].as_os_str() == "goal.md" {
             let id = components[0].as_os_str().to_string_lossy().to_string();
-            let testing_requirement = doc
-                .contents
-                .lines()
-                .find(|line| {
-                    line.contains("| Testing requirement") || line.contains("| Testing-requirement")
-                })
-                .and_then(|line| {
-                    let row = cells(line);
-                    row.get(1).or_else(|| row.get(2)).cloned()
-                })
-                .unwrap_or_default();
+            let testing_requirement = testing_requirement(&doc.contents);
             goals.push(Goal {
                 id,
                 outcome: section(&doc.contents, "Outcome and definition of done"),
@@ -104,9 +124,13 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
     }
     goals.sort_by(|a, b| a.id.cmp(&b.id));
 
-    for doc in markdown_documents(tree, "/steps/")
-        .filter(|doc| !doc.path.to_string_lossy().ends_with("-testing.md"))
-    {
+    for doc in tree.documents.iter().filter(|doc| {
+        let relative = doc.path.strip_prefix(&tree.root).unwrap_or(&doc.path);
+        let components: Vec<_> = relative.components().collect();
+        components.len() >= 3
+            && components[components.len() - 2].as_os_str() == "steps"
+            && !doc.path.to_string_lossy().ends_with("-testing.md")
+    }) {
         let relative = doc.path.strip_prefix(&tree.root).unwrap_or(&doc.path);
         let mut parts = relative.components();
         let goal = parts
@@ -126,11 +150,11 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
                     .find(|line| line.contains(&format!("| {step} |")))
             })
             .map(|line| {
-                if line.contains("completed") {
+                if line.contains("✅ completed") {
                     "completed"
-                } else if line.contains("in progress") {
-                    "in_progress"
-                } else if line.contains("incomplete") {
+                } else if line.contains("⏳ in progress") {
+                    "in-progress"
+                } else if line.contains("💤 incomplete") {
                     "incomplete"
                 } else {
                     "unknown"
@@ -156,7 +180,7 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
             criteria: section(&doc.contents, "Acceptance criteria"),
         });
     }
-    steps.sort_by(|a, b| a.unit.cmp(&b.unit));
+    steps.sort_by(|a, b| a.goal.cmp(&b.goal).then_with(|| a.step.cmp(&b.step)));
 
     let inventory = document(tree, &tree.root.join("work-unit-inventory.md"));
     let mut edges = Vec::new();
@@ -167,7 +191,12 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
             .filter(|line| line.starts_with("| W"))
         {
             let row = cells(line);
-            if row.len() < 7 || row[0].is_empty() || row[6].is_empty() || row[6] == "—" {
+            if line.chars().filter(|character| *character == '|').count() + 1 < 10
+                || row.len() < 7
+                || row[0].is_empty()
+                || row[6].is_empty()
+                || row[6] == "—"
+            {
                 continue;
             }
             for dependency in row[6]
@@ -242,7 +271,17 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
                     change: row[2].clone(),
                     status: row[3].clone(),
                     work_unit: row[4].clone(),
-                    cycle: "current".into(),
+                    cycle: if tree.document("adversarial-review-history.md").is_some_and(
+                        |history| {
+                            history.contents.lines().any(|history_line| {
+                                history_line.contains(&format!("| {} |", row[0]))
+                            })
+                        },
+                    ) {
+                        "archived".into()
+                    } else {
+                        "current".into()
+                    },
                 });
             }
         }
@@ -277,8 +316,8 @@ pub fn extract_state(tree: &PlanTree) -> Result<String, String> {
         findings,
         cycles,
         review_target: 2,
-        generated_at: std::env::var("OVERVIEW_NOW").unwrap_or_else(|_| "generated".into()),
-        generated_by: "plan-overview".into(),
+        generated_at: std::env::var("OVERVIEW_NOW").unwrap_or_else(|_| "serve-live".into()),
+        generated_by: generated_by.into(),
     };
     serde_json::to_string(&state).map_err(|error| error.to_string())
 }

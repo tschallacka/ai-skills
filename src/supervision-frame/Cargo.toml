@@ -1,0 +1,9 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "supervision-frame"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+planning-register = { path = "../planning-register" }

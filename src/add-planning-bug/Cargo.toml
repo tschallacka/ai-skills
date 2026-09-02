@@ -1,0 +1,18 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-planning-bug"
+version = "0.1.0"
+edition = "2021"
+description = "Record a planning defect"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

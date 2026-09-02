@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-context-wrapper"
+version = "0.1.0"
+edition = "2021"
+description = "Load per-worker planning context and launch the bounded reader"
+license = "MIT"
+
+[[bin]]
+name = "plan-context-wrapper"
+path = "src/main.rs"

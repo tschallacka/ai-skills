@@ -20,8 +20,8 @@ fail() { t_fail "$*"; }
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/chat-test.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
-SERVER="$repo/src/chat-server-rs/target/release/chat-server-rs"
-CLIENT="$repo/src/chat-client-rs/target/release/chat-client-rs"
+SERVER="$repo/target/release/chat-server-rs"
+CLIENT="$repo/target/release/chat-client-rs"
 
 if ! command -v cargo >/dev/null 2>&1; then
     prebuilt_server="$(ls "$root"/bin/*/chat-server-rs 2>/dev/null | head -1 || true)"

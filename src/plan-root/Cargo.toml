@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-root"
+version = "0.1.0"
+edition = "2021"
+description = "Resolve the planning skill's plans root"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

@@ -1,0 +1,144 @@
+# MODE: DEV
+# path\tkind\tcandidate\tmigration note
+# The plans-board HTML renderer is inventoried for completeness but is excluded
+# from this branch; another agent owns its Rust replacement.
+planning/scripts/add-adversarial-finding.sh	runtime-binary	add-adversarial-finding	preserve CLI and observable behavior
+planning/scripts/add-coverage.sh	runtime-binary	add-coverage	preserve CLI and observable behavior
+planning/scripts/add-fix-claim.sh	runtime-binary	add-fix-claim	preserve CLI and observable behavior
+planning/scripts/add-goal.sh	runtime-binary	add-goal	preserve CLI and observable behavior
+planning/scripts/add-planning-bug.sh	runtime-binary	add-planning-bug	preserve CLI and observable behavior
+planning/scripts/add-ui-story-links.sh	runtime-binary	add-ui-story-links	preserve CLI and observable behavior
+planning/scripts/add-ui-story.sh	runtime-binary	add-ui-story	preserve CLI and observable behavior
+planning/scripts/add-work-unit.sh	runtime-binary	add-work-unit	preserve CLI and observable behavior
+planning/scripts/bug-add.sh	dev-binary	bug-add	in scope; decide install/package status explicitly
+planning/scripts/bug-update.sh	dev-binary	bug-update	in scope; decide install/package status explicitly
+planning/scripts/build-plan-libs.sh	absorbed-build	cargo-workspace	replace with Cargo artifact/build configuration
+planning/scripts/cleanup-plans.sh	runtime-binary	cleanup-plans	preserve CLI and observable behavior
+planning/scripts/configure-ui-story-cache.sh	runtime-binary	configure-ui-story-cache	preserve CLI and observable behavior
+planning/scripts/create-adversarial-review.sh	runtime-binary	create-adversarial-review	preserve CLI and observable behavior
+planning/scripts/create-plan-progress.sh	runtime-binary	create-plan-progress	preserve CLI and observable behavior
+planning/scripts/create-plan.sh	runtime-binary	create-plan	preserve CLI and observable behavior
+planning/scripts/create-progress.sh	runtime-binary	create-progress	preserve CLI and observable behavior
+planning/scripts/create-step-testing.sh	runtime-binary	create-step-testing	preserve CLI and observable behavior
+planning/scripts/create-ui-story-run-cache.sh	runtime-binary	create-ui-story-run-cache	preserve CLI and observable behavior
+planning/scripts/create-ui-validation.sh	runtime-binary	create-ui-validation	preserve CLI and observable behavior
+planning/scripts/create-work-unit-inventory.sh	runtime-binary	create-work-unit-inventory	preserve CLI and observable behavior
+planning/scripts/generate-reviewer.sh	build-generator	generate-reviewer	inventory projection contract; choose Cargo tool or dev binary
+planning/scripts/lib/core/00-state.sh	library-crate	core-00-state	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_atomic_write.sh	library-crate	core-plan_atomic_write	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_awk_trim.sh	library-crate	core-plan_awk_trim	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_cleanup.sh	library-crate	core-plan_cleanup	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_count_units.sh	library-crate	core-plan_count_units	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_cycle_count.sh	library-crate	core-plan_cycle_count	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_decode_escaped_newlines.sh	library-crate	core-plan_decode_escaped_newlines	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_default_root.sh	library-crate	core-plan_default_root	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_die.sh	library-crate	core-plan_die	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_duplicate_step_numbers.sh	library-crate	core-plan_duplicate_step_numbers	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_ensure_root_permissions.sh	library-crate	core-plan_ensure_root_permissions	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_fail.sh	library-crate	core-plan_fail	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_git_snapshot.sh	library-crate	core-plan_git_snapshot	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_hoist_plan_dir.sh	library-crate	core-plan_hoist_plan_dir	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_progress_is_complete.sh	library-crate	core-plan_progress_is_complete	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_refuse_existing.sh	library-crate	core-plan_refuse_existing	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_register_temp_file.sh	library-crate	core-plan_register_temp_file	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_require_bash.sh	library-crate	core-plan_require_bash	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_require_directory.sh	library-crate	core-plan_require_directory	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_require_file.sh	library-crate	core-plan_require_file	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_require_safe_value.sh	library-crate	core-plan_require_safe_value	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_resolve_symlink.sh	library-crate	core-plan_resolve_symlink	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_skill_provenance.sh	library-crate	core-plan_skill_provenance	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_snapshot_repo.sh	library-crate	core-plan_snapshot_repo	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_stat_probe.sh	library-crate	core-plan_stat_probe	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_track_tmp.sh	library-crate	core-plan_track_tmp	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_warn.sh	library-crate	core-plan_warn	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/plan_warn_skill_drift.sh	library-crate	core-plan_warn_skill_drift	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/planning_ensure_tmpdir.sh	library-crate	core-planning_ensure_tmpdir	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/core/planning_tmpdir.sh	library-crate	core-planning_tmpdir	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_bin_dir.sh	library-crate	crypt-plan_bin_dir	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_crypt_bin.sh	library-crate	crypt-plan_crypt_bin	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_crypt_resolve.sh	library-crate	crypt-plan_crypt_resolve	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_crypt_target_triple.sh	library-crate	crypt-plan_crypt_target_triple	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_fix_key.sh	library-crate	crypt-plan_fix_key	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_random_hex.sh	library-crate	crypt-plan_random_hex	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_sha256_chain.sh	library-crate	crypt-plan_sha256_chain	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/crypt/plan_sha256_hex.sh	library-crate	crypt-plan_sha256_hex	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/99-facade.sh	library-crate	document-99-facade	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_delete_paragraph.sh	library-crate	document-plan_delete_paragraph	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_document_kind.sh	library-crate	document-plan_document_kind	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_document_path.sh	library-crate	document-plan_document_path	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_insert_paragraph.sh	library-crate	document-plan_insert_paragraph	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_missing_section_message.sh	library-crate	document-plan_missing_section_message	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_refuse_field_section.sh	library-crate	document-plan_refuse_field_section	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_render_paragraphs.sh	library-crate	document-plan_render_paragraphs	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_replace_field.sh	library-crate	document-plan_replace_field	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_replace_paragraph.sh	library-crate	document-plan_replace_paragraph	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_replace_section.sh	library-crate	document-plan_replace_section	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_replace_title.sh	library-crate	document-plan_replace_title	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_section_spec.sh	library-crate	document-plan_section_spec	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/document/plan_unknown_section.sh	library-crate	document-plan_unknown_section	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_count_progress_rows.sh	library-crate	progress-plan_count_progress_rows	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_emit_step_testing_reminder.sh	library-crate	progress-plan_emit_step_testing_reminder	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_progress_bar.sh	library-crate	progress-plan_progress_bar	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_progress_icon.sh	library-crate	progress-plan_progress_icon	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_progress_percent.sh	library-crate	progress-plan_progress_percent	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_status_label.sh	library-crate	progress-plan_status_label	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/progress/plan_step_objective.sh	library-crate	progress-plan_step_objective	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_goal_definition_of_done.sh	library-crate	table-plan_goal_definition_of_done	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_render_csv_table.sh	library-crate	table-plan_render_csv_table	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_replace_testing_requirement.sh	library-crate	table-plan_replace_testing_requirement	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_review_finding_ids.sh	library-crate	table-plan_review_finding_ids	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_review_gated_pairs.sh	library-crate	table-plan_review_gated_pairs	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_table_cell.sh	library-crate	table-plan_table_cell	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_testing_requirement_for_goal.sh	library-crate	table-plan_testing_requirement_for_goal	map functions, shared state, consumers, and failure behavior
+planning/scripts/lib/table/plan_testing_requirement_row.sh	library-crate	table-plan_testing_requirement_row	map functions, shared state, consumers, and failure behavior
+planning/scripts/mint-fix-keys.sh	runtime-binary	mint-fix-keys	preserve CLI and observable behavior
+planning/scripts/monitor-read.sh	runtime-binary	monitor-read	preserve CLI and observable behavior
+planning/scripts/overview-state.sh	runtime-binary	overview-state	preserve CLI and observable behavior
+planning/scripts/plan-content-diff-lib.sh	library-crate	plan-content-diff-lib	map exports and consumers before choosing crate boundary
+planning/scripts/plan-content.sh	runtime-binary	plan-content	preserve CLI and observable behavior
+planning/scripts/plan-context-lib.sh	library-crate	plan-context-lib	map exports and consumers before choosing crate boundary
+planning/scripts/plan-context-wrapper.sh	runtime-binary	plan-context-wrapper	preserve CLI and observable behavior
+planning/scripts/plan-context.sh	runtime-binary	plan-context	preserve CLI and observable behavior
+planning/scripts/plan-env.sh	runtime-binary	plan-env	preserve CLI and observable behavior
+planning/scripts/plan-inventory-lib.sh	library-crate	plan-inventory-lib	map exports and consumers before choosing crate boundary
+planning/scripts/plan-map-lib.sh	library-crate	planning-map	ordered map API is implemented and consumed by plan-content
+planning/scripts/plan-mutate.sh	runtime-binary	plan-mutate	preserve CLI and observable behavior
+planning/scripts/plan-reconcile-lib.sh	library-crate	plan-reconcile-lib	map exports and consumers before choosing crate boundary
+planning/scripts/plan-root.sh	runtime-binary	plan-root	preserve CLI and observable behavior
+planning/scripts/plans-board-lib.sh	library-crate	plans-board-lib	map exports and consumers before choosing crate boundary
+planning/scripts/rebuild-plan-progress.sh	runtime-binary	rebuild-plan-progress	preserve CLI and observable behavior
+planning/scripts/register-command.sh	runtime-binary	register-command	preserve CLI and observable behavior
+planning/scripts/register-lib.sh	library-crate	register-lib	map exports and consumers before choosing crate boundary
+planning/scripts/register-read.sh	runtime-binary	register-read	preserve CLI and observable behavior
+planning/scripts/register-rebuild.sh	dev-binary	register-rebuild	in scope; decide install/package status explicitly
+planning/scripts/remove-coverage.sh	runtime-binary	remove-coverage	preserve CLI and observable behavior
+planning/scripts/remove-plan.sh	runtime-binary	remove-plan	preserve CLI and observable behavior
+planning/scripts/remove-work-unit.sh	runtime-binary	remove-work-unit	preserve CLI and observable behavior
+planning/scripts/render-plans-board.sh	runtime-binary	render-plans-board	preserve CLI and observable behavior
+planning/scripts/resolve-finding.sh	runtime-binary	resolve-finding	preserve CLI and observable behavior
+planning/scripts/role-context.sh	runtime-binary	role-context	preserve CLI and observable behavior
+planning/scripts/run-adversary-probe.sh	runtime-binary	run-adversary-probe	preserve CLI and observable behavior
+planning/scripts/supervision-frame.sh	runtime-binary	supervision-frame	preserve CLI and observable behavior
+planning/scripts/todo-add.sh	dev-binary	todo-add	in scope; decide install/package status explicitly
+planning/scripts/todo-update.sh	dev-binary	todo-update	in scope; decide install/package status explicitly
+planning/scripts/update-adversarial-review.sh	runtime-binary	update-adversarial-review	preserve CLI and observable behavior
+planning/scripts/update-plan-content.sh	runtime-binary	update-plan-content	preserve CLI and observable behavior
+planning/scripts/update-plan-progress.sh	runtime-binary	update-plan-progress	preserve CLI and observable behavior
+planning/scripts/update-progress.sh	runtime-binary	update-progress	preserve CLI and observable behavior
+planning/scripts/update-step.sh	runtime-binary	update-step	preserve CLI and observable behavior
+planning/scripts/update-ui-story.sh	runtime-binary	update-ui-story	preserve CLI and observable behavior
+planning/scripts/update-work-unit.sh	runtime-binary	update-work-unit	preserve CLI and observable behavior
+planning/scripts/validate-plan-commands-lib.sh	library-crate	validate-plan-commands-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-common-lib.sh	library-crate	validate-plan-common-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-comparisons-lib.sh	library-crate	validate-plan-comparisons-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-docs-lib.sh	library-crate	validate-plan-docs-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-goals-lib.sh	library-crate	validate-plan-goals-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-inventory-lib.sh	library-crate	validate-plan-inventory-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-placeholders-lib.sh	library-crate	validate-plan-placeholders-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-propagation-lib.sh	library-crate	validate-plan-propagation-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-serve-lib.sh	library-crate	validate-plan-serve-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-stale-lib.sh	library-crate	validate-plan-stale-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan-ui-lib.sh	library-crate	validate-plan-ui-lib	map exports and consumers before choosing crate boundary
+planning/scripts/validate-plan.sh	runtime-binary	validate-plan	preserve CLI and observable behavior
+planning/scripts/verify-fix-keys.sh	runtime-binary	verify-fix-keys	preserve CLI and observable behavior
+planning/scripts/verify-target.sh	runtime-binary	verify-target	preserve CLI and observable behavior

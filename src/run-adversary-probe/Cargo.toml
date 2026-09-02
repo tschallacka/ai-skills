@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "run-adversary-probe"
+version = "0.1.0"
+edition = "2021"
+description = "Materialize and sanity-check the adversarial review probe"
+license = "MIT"
+
+[[bin]]
+name = "run-adversary-probe"
+path = "src/main.rs"
+
+[dependencies]
+planning-validator-inventory = { path = "../planning-validator-inventory" }

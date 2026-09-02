@@ -31,7 +31,7 @@ cli_install_skill() {
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
         if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
             printf 'Collision: %s\n' "$destination_file" >&2
             collision=1
@@ -53,11 +53,10 @@ cli_install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }
-

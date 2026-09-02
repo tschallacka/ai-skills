@@ -1,0 +1,8 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-mutate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]

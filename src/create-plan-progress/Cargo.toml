@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "create-plan-progress"
+version = "0.1.0"
+edition = "2021"
+description = "Create a planning plan-level progress tracker"
+license = "MIT"
+
+[dependencies]
+planning-table = { path = "../planning-table" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

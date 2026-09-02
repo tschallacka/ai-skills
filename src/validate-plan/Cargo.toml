@@ -1,0 +1,25 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "validate-plan"
+version = "0.1.0"
+edition = "2021"
+description = "Validate a planning directory"
+license = "MIT"
+
+[[bin]]
+name = "validate-plan"
+path = "src/main.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }
+planning-validator-docs = { path = "../planning-validator-docs" }
+planning-validator-placeholders = { path = "../planning-validator-placeholders" }
+planning-validator-stale = { path = "../planning-validator-stale" }
+planning-validator-inventory = { path = "../planning-validator-inventory" }
+planning-validator-goals = { path = "../planning-validator-goals" }
+planning-validator-serve = { path = "../planning-validator-serve" }
+planning-validator-commands = { path = "../planning-validator-commands" }
+planning-validator-propagation = { path = "../planning-validator-propagation" }
+planning-validator-comparisons = { path = "../planning-validator-comparisons" }
+planning-validator-ui = { path = "../planning-validator-ui" }

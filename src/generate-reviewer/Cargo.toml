@@ -1,0 +1,9 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "generate-reviewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plan-crypt = { path = "../plan-crypt" }

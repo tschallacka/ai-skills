@@ -67,11 +67,18 @@ unshipped_reason() { # <skill> <path> → prints the reason, or nothing
         # list by planning/tests/test-installer-manifest.sh.
         planning/ARCHITECTURE.md | planning/MAINTAINER.md | planning/PACKAGE-MAP.tsv | planning/.gitignore)
             printf 'developer documentation, not part of the installed skill\n' ;;
+        planning/rust-migration.tsv)
+            printf 'developer migration inventory, not part of the installed skill\n' ;;
         # The per-function sources and the compiler that turns them into the
         # shipped plan-*-lib.sh. The compiled libraries are listed; their inputs
         # are not, or every install would carry both copies.
         planning/scripts/lib/* | planning/scripts/build-plan-libs.sh)
             printf 'a compiler input; the compiled library is what ships\n' ;;
+        planning/scripts/*)
+            case "$2" in
+                *.sh) : ;;
+                *) printf 'a generated extensionless Rust command; the build pipeline stages it\n' ;;
+            esac ;;
         planning/bin/*)
             printf 'a compiled artifact for another supported platform\n' ;;
         *)
@@ -115,7 +122,7 @@ for skill in "${SKILL_NAMES[@]}"; do
         [ -n "$path" ] || continue
         [ -e "$repo_root/$skill/$path" ] || {
             case "$skill/$path" in
-                planning/bin/*) continue ;; # cross-target artifacts are CI outputs
+                planning/bin/*|chat/bin/*) continue ;; # cross-target artifacts are CI outputs
                 *) absent="$absent $path" ;;
             esac
         }

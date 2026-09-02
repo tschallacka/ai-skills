@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-ui"
+version = "0.1.0"
+edition = "2021"
+description = "UI story and browser-cache validation for planning documents"
+license = "MIT"
+
+[lib]
+name = "planning_validator_ui"
+path = "src/lib.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }

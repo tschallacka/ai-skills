@@ -81,7 +81,7 @@ REPO_REF='test'
                     planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
                 esac
             fi
-            printf '%s/%s\n' "$skill" "$path"
+            printf '%s/%s\n' "$skill" "$(platform_relative_path "$skill" "$path")"
         done <<EOF
 $(skill_files "$skill")
 EOF
@@ -158,6 +158,10 @@ t_assert_eq 'the compiled libraries are' \
     "$(grep -c '^planning/scripts/plan-core-lib\.sh$' "$work/actual")" '1'
 t_assert_eq 'and the compiler is not' \
     "$(grep -c 'build-plan-libs\.sh' "$work/actual" || true)" '0'
+t_assert_eq 'the Rust planning command is executable in the release' \
+    "$([ -x "$extracted/planning/scripts/plan-content" ] && printf present)" 'present'
+t_assert_eq 'the Rust artifact verification contract is in the release' \
+    "$([ -f "$extracted/planning/RUST-ARTIFACT-MANIFEST.md" ] && printf present)" 'present'
 
 # ── property 4: two builds of one tree produce the same bytes ───────────────
 "$builder" --out "$work/dist2" >/dev/null

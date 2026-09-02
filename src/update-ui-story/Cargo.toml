@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-ui-story"
+version = "0.1.0"
+edition = "2021"
+description = "Update a planning UI story narrative"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

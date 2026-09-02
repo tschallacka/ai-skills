@@ -505,6 +505,152 @@ jobs:
           path: rjq-artifacts
           if-no-files-found: error
 
+  planning-command-binary:
+    # The planning command registry is the source of truth for the migrated
+    # runtime and build-generator surface. Each leg builds and executes the
+    # actual target binaries on its native house runner, so a cross-build that
+    # cannot launch is not mistaken for platform coverage.
+    name: planning commands build and run on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout the planning command sources
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            planning/rust-migration.tsv
+            src
+            Cargo.toml
+            Cargo.lock
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Install the target standard library
+        shell: bash
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Install the musl C toolchain
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
+      - name: Format, lint, test, build and execute every registered command
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "planning-rust-artifacts/${{ matrix.target }}"
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
+          cargo test --workspace --all-targets --target "${{ matrix.target }}"
+          while IFS=$'\t' read -r path kind candidate note; do
+            [ -n "$candidate" ] || continue
+            case "$candidate" in
+              render-plans-board)
+                # The renderer is explicitly owned by another Rust migration.
+                continue
+                ;;
+              overview-state)
+                crate=plan-overview
+                ;;
+              *)
+                crate="$candidate"
+                ;;
+            esac
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
+            echo "==> $candidate ($crate)"
+            cargo fmt --manifest-path "$manifest" --check
+            cargo clippy --manifest-path "$manifest" --target "${{ matrix.target }}" --all-targets -- -D warnings
+            cargo test --manifest-path "$manifest" --target "${{ matrix.target }}"
+            cargo build --manifest-path "$manifest" --release --target "${{ matrix.target }}"
+            suffix=''
+            case "${{ matrix.target }}" in *windows-msvc) suffix=.exe ;; esac
+            binary="target/${{ matrix.target }}/release/$crate$suffix"
+            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
+            output="planning-rust-artifacts/${{ matrix.target }}/$candidate$suffix"
+            cp "$binary" "$output"
+            chmod +x "$output"
+            "$output" --help >/dev/null
+          done < <({
+            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
+          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
+
+      - name: Upload the target command artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-commands-${{ matrix.target }}
+          path: planning-rust-artifacts
+          if-no-files-found: error
+
+      - name: Verify the Linux command artifacts are static
+        if: contains(matrix.target, 'linux-musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(ldd "planning-rust-artifacts/${{ matrix.target }}/plan-content" 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::planning command artifact is dynamically linked"; exit 1 ;;
+          esac
+
+  rust-artifact-manifest:
+    name: publish Rust artifact hashes
+    runs-on: ubuntu-latest
+    needs: planning-command-binary
+    steps:
+      - name: Download every native target bundle
+        uses: actions/download-artifact@v4
+        with:
+          pattern: planning-commands-*
+          path: planning-rust-artifacts
+          merge-multiple: true
+
+      - name: Generate the per-target hash manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > RUST-ARTIFACTS.tsv
+          printf 'target\tfile\tsha256\n' >> RUST-ARTIFACTS.tsv
+          : > SHA256SUMS
+          while IFS= read -r file; do
+            relative="${file#planning-rust-artifacts/}"
+            target="${relative%%/*}"
+            target_file="${relative#*/}"
+            digest="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s\t%s\t%s\n' "$target" "$target_file" "$digest" >> RUST-ARTIFACTS.tsv
+            printf '%s  %s\n' "$digest" "$file" >> SHA256SUMS
+          done < <(find planning-rust-artifacts -type f | LC_ALL=C sort)
+          [ "$(wc -l < RUST-ARTIFACTS.tsv)" -gt 1 ]
+          sha256sum -c SHA256SUMS
+
+      - name: Upload the verified artifact bundle and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-rust-artifacts-manifest
+          path: |
+            planning-rust-artifacts
+            RUST-ARTIFACTS.tsv
+            SHA256SUMS
+          if-no-files-found: error
+
   shellcheck:
     # Proves: no `warning`-severity shellcheck finding exists in any live shell
     # script, and reports the full finding count so it can be ratcheted.

@@ -1,0 +1,10 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-common"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "planning_validator_common"
+path = "src/lib.rs"

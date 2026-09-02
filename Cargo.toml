@@ -1,0 +1,10 @@
+# MODE: DEV
+[workspace]
+resolver = "2"
+members = ["src/*"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

@@ -15,6 +15,7 @@
 #
 # Usage:
 #   build-release.sh                  # write dist/ai-skills-<version>.tar.gz
+#   build-release.sh --prepare        # stage host planning Rust commands only
 #   build-release.sh --list           # print what would go in, one path per line
 #   build-release.sh --out <dir>      # somewhere other than dist/
 #   build-release.sh --help
@@ -30,6 +31,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="$repo_root/dist"
 mode=build
 
+# The release collector and its pipeline use the same logical-to-physical path
+# resolver as the generated installer. Load it in the parent shell as well as
+# in listed_by_installer(), because pipeline subshells do not inherit functions
+# defined by a sibling subshell.
+# shellcheck disable=SC1090
+source "$repo_root/installer/src/05-config.sh"
+# shellcheck disable=SC1090
+source "$repo_root/installer/src/50-manifest.sh"
+SOURCE_ROOT="$repo_root"
+
 usage() {
     sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-64}"
@@ -39,6 +50,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --list) mode=list ;;
         --npmignore) mode=npmignore ;;
+        --prepare) mode=prepare ;;
         --out)
             [ "$#" -ge 2 ] || { printf '%s: --out needs a directory\n' "${0##*/}" >&2; usage; }
             out_dir="$2"; shift ;;
@@ -52,6 +64,63 @@ done
 version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     "$repo_root/package.json" | head -1)"
 [ -n "$version" ] || { printf '%s: package.json states no version\n' "${0##*/}" >&2; exit 65; }
+
+host_target() {
+    case "$(uname -s):$(uname -m)" in
+        Linux:x86_64|Linux:amd64) printf '%s\n' x86_64-unknown-linux-musl ;;
+        Linux:aarch64|Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
+        Darwin:x86_64) printf '%s\n' x86_64-apple-darwin ;;
+        Darwin:arm64|Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
+        MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+            printf '%s\n' x86_64-pc-windows-msvc ;;
+        *) return 1 ;;
+    esac
+}
+
+# Stage extensionless planning commands beside their shell oracles. The
+# migration registry is the source of truth for the command-to-crate mapping;
+# the renderer is deliberately omitted because another agent owns it. A root
+# bin artifact from setup-dev-env.sh is reused, while a clean release build
+# compiles the individual crate in the pinned target environment.
+prepare_planning_rust_commands() {
+    local target exe candidate artifact source
+    target="$(host_target)" || {
+        printf '%s: unsupported host for planning Rust commands\n' "${0##*/}" >&2
+        return 66
+    }
+    exe=''
+    case "$target" in *windows-msvc) exe='.exe' ;; esac
+    while IFS= read -r candidate; do
+        [ -n "$candidate" ] || continue
+        [ -f "$repo_root/planning/scripts/$candidate.sh" ] || continue
+        artifact="$repo_root/bin/$target/$candidate$exe"
+        if [ ! -x "$artifact" ]; then
+            source="$candidate"
+            [ "$candidate" = overview-state ] && source=plan-overview
+            [ -f "$repo_root/src/$source/Cargo.toml" ] || {
+                # render-plans-board is intentionally absent from this branch.
+                [ "$candidate" = render-plans-board ] && continue
+                printf '%s: no crate for planning command %s\n' "${0##*/}" "$candidate" >&2
+                return 66
+            }
+            command -v cargo >/dev/null 2>&1 || {
+                printf '%s: cargo is required to build planning command %s\n' "${0##*/}" "$candidate" >&2
+                return 66
+            }
+            ( cd "$repo_root" && cargo build --release \
+                --manifest-path "$repo_root/src/$source/Cargo.toml" --target "$target" ) \
+                || { printf '%s: cargo build %s failed\n' "${0##*/}" "$candidate" >&2; return 66; }
+            artifact="$repo_root/target/$target/release/$candidate$exe"
+        fi
+        [ -x "$artifact" ] || {
+            printf '%s: no executable artifact for planning command %s\n' "${0##*/}" "$candidate" >&2
+            return 66
+        }
+        cp "$artifact" "$repo_root/planning/scripts/$candidate$exe"
+        chmod +x "$repo_root/planning/scripts/$candidate$exe"
+    done < <(awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" { print $3 }' \
+        "$repo_root/planning/rust-migration.tsv" | LC_ALL=C sort -u)
+}
 
 # A file's own header decides. Read the top only: a heredoc further down mentions
 # these strings, and a test that plants one would otherwise ship itself.
@@ -73,16 +142,12 @@ declares_prod() { # <path>
 # what skill_files() already says, so they are taken from there rather than
 # guessed at here.
 listed_by_installer() {
-    # shellcheck disable=SC1090
-    source "$repo_root/installer/src/05-config.sh"
-    # shellcheck disable=SC1090
-    source "$repo_root/installer/src/50-manifest.sh"
-    SOURCE_ROOT="$repo_root"
-    local skill path
+    local skill path source
     for skill in "${SKILL_NAMES[@]}"; do
         while IFS= read -r path; do
             [ -n "$path" ] || continue
-            if [ ! -f "$repo_root/$skill/$path" ]; then
+            source="$(source_file "$skill" "$path")"
+            if [ ! -f "$source" ]; then
                 case "$skill/$path" in
                     planning/bin/*/plan-overview|planning/bin/*/plan-overview.exe) continue ;;
                 esac
@@ -105,10 +170,19 @@ collect() {
             planning project-specificies resource-limited-testing brainstorm \
             post-implementation-review todo bug-report)
         listed_by_installer
-    } | sort -u
+    } | while IFS= read -r path; do
+        case "$path" in
+            planning/scripts/*)
+                printf 'planning/%s\n' "$(platform_relative_path planning "${path#planning/}")" ;;
+            *) printf '%s\n' "$path" ;;
+        esac
+    done | sort -u
 }
 
 case "$mode" in
+    prepare)
+        prepare_planning_rust_commands
+        ;;
     list)
         collect
         ;;
@@ -127,6 +201,8 @@ case "$mode" in
         }
         ;;
     build)
+        prepare_planning_rust_commands \
+            || { printf '%s: planning Rust command preparation failed\n' "${0##*/}" >&2; exit 66; }
         mkdir -p "$out_dir"
         stage="$(mktemp -d "${TMPDIR:-/tmp}/ai-skills-release.XXXXXX")"
         trap 'rm -rf "$stage"' EXIT
@@ -138,9 +214,9 @@ case "$mode" in
         # (skill_files resolves the host's platform to one triple dir). If cargo
         # is absent the build fails loudly rather than producing an empty package.
         if command -v cargo >/dev/null 2>&1; then
-            ( cd "$repo_root/src/chat-server-rs" && cargo build --release ) \
+            ( cd "$repo_root" && cargo build --release --package chat-server-rs ) \
                 || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
-            ( cd "$repo_root/src/chat-client-rs" && cargo build --release ) \
+            ( cd "$repo_root" && cargo build --release --package chat-client-rs ) \
                 || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
@@ -151,8 +227,8 @@ case "$mode" in
                 *) printf '%s: unsupported host for chat binaries\n' "${0##*/}" >&2; exit 66 ;;
             esac
             mkdir -p "$repo_root/chat/bin/$chat_dir"
-            cp "$repo_root/src/chat-server-rs/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
-            cp "$repo_root/src/chat-client-rs/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
+            cp "$repo_root/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
+            cp "$repo_root/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \

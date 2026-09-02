@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "role-context"
+version = "0.1.0"
+edition = "2021"
+description = "Role-gated planning context reader"
+license = "MIT"
+
+[dependencies]
+plan-crypt = { path = "../plan-crypt" }

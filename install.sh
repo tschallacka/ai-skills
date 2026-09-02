@@ -3181,6 +3181,7 @@ SKILL.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
+RUST-ARTIFACT-MANIFEST.md
 bin/x86_64-unknown-linux-musl/plan-overview
 bin/aarch64-unknown-linux-musl/plan-overview
 bin/x86_64-apple-darwin/plan-overview
@@ -3280,6 +3281,54 @@ scripts/validate-plan-comparisons-lib.sh
 scripts/remove-plan.sh
 scripts/cleanup-plans.sh
 scripts/run-adversary-probe.sh
+scripts/add-adversarial-finding
+scripts/add-coverage
+scripts/add-fix-claim
+scripts/add-goal
+scripts/add-planning-bug
+scripts/add-ui-story
+scripts/add-ui-story-links
+scripts/add-work-unit
+scripts/cleanup-plans
+scripts/configure-ui-story-cache
+scripts/create-adversarial-review
+scripts/create-plan
+scripts/create-plan-progress
+scripts/create-progress
+scripts/create-step-testing
+scripts/create-ui-story-run-cache
+scripts/create-ui-validation
+scripts/create-work-unit-inventory
+scripts/generate-reviewer
+scripts/mint-fix-keys
+scripts/monitor-read
+scripts/overview-state
+scripts/plan-content
+scripts/plan-context
+scripts/plan-context-wrapper
+scripts/plan-env
+scripts/plan-mutate
+scripts/plan-root
+scripts/rebuild-plan-progress
+scripts/register-command
+scripts/register-read
+scripts/remove-coverage
+scripts/remove-plan
+scripts/remove-work-unit
+scripts/resolve-finding
+scripts/role-context
+scripts/run-adversary-probe
+scripts/supervision-frame
+scripts/update-adversarial-review
+scripts/update-plan-content
+scripts/update-plan-progress
+scripts/update-progress
+scripts/update-step
+scripts/update-ui-story
+scripts/update-work-unit
+scripts/validate-plan
+scripts/verify-fix-keys
+scripts/verify-target
 EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
@@ -3580,7 +3629,25 @@ CHATEOF
 source_file() {
     local skill="$1"
     local relative="$2"
-    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$relative"
+    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$(platform_relative_path "$skill" "$relative")"
+}
+
+# Manifest entries keep the command name users invoke, without a platform
+# suffix. Windows still needs the executable suffix on disk. Only generated
+# planning commands use this logical-name rule; ordinary files and shell
+# helpers retain their manifest path exactly.
+platform_relative_path() {
+    local skill="$1"
+    local relative="$2"
+    case "$skill:$relative" in
+        planning:scripts/*.sh) : ;;
+        planning:scripts/*)
+            case "$(uname -s)" in
+                MINGW*|MSYS*|CYGWIN*|Windows*) relative="$relative.exe" ;;
+            esac
+            ;;
+    esac
+    printf '%s\n' "$relative"
 }
 # ---------------------------------------------------------------
 # 10. CLI-mode handlers
@@ -3613,7 +3680,7 @@ cli_install_skill() {
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
         if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
             printf 'Collision: %s\n' "$destination_file" >&2
             collision=1
@@ -3635,14 +3702,13 @@ cli_install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
     done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }
-
 # ---------------------------------------------------------------
 # 11. Interactive install, backup, and merge
 # ---------------------------------------------------------------
@@ -3668,14 +3734,15 @@ content_digest() {
 # manifest and the next run treats the untouched files as ours (correct) and the
 # half-written ones as modified (a needless backup, never a lost edit).
 record_digests() {
-    local destination="$1" files="$2" relative manifest temporary
+    local destination="$1" skill="$2" files="$3" relative physical manifest temporary
     manifest="$(digest_manifest "$destination")"
     temporary="$manifest.tmp.$$"
     : > "$temporary"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
-        [ -f "$destination/$relative" ] || continue
-        printf '%s %s\n' "$(content_digest "$destination/$relative")" "$relative" >> "$temporary"
+        physical="$(platform_relative_path "$skill" "$relative")"
+        [ -f "$destination/$physical" ] || continue
+        printf '%s %s\n' "$(content_digest "$destination/$physical")" "$relative" >> "$temporary"
     done <<RECORD
 $files
 RECORD
@@ -3739,7 +3806,7 @@ install_skill() {
     local skill="$1"
     local root="$2"
     local destination="$root/$skill"
-    local relative source destination_file
+    local relative physical source destination_file
     local changed=0
     local missing=0
     local managed_version_transition=0
@@ -3771,6 +3838,7 @@ install_skill() {
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -3778,7 +3846,7 @@ install_skill() {
             continue
         fi
         source="$(source_file "$skill" "$relative")"
-        destination_file="$destination/$relative"
+        destination_file="$destination/$physical"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
             echo "Skipping $root/$skill: existing symlink requires manual review." >&2
             summary_add "Skipped:   $destination — existing symlink requires manual review"
@@ -3831,6 +3899,7 @@ EOF
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -3838,7 +3907,7 @@ EOF
             continue
         fi
         source="$(source_file "$skill" "$relative")"
-        destination_file="$destination/$relative"
+        destination_file="$destination/$physical"
         # Back up unless we can prove the file is ours and untouched. A version
         # transition no longer suppresses this: the marker says the version
         # changed, not that the user's edits are expendable.
@@ -3858,7 +3927,7 @@ EOF
         backup_file "$destination/.version"
     fi
     version_marker_content > "$destination/.version"
-    record_digests "$destination" "$files"
+    record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }

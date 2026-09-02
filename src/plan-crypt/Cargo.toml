@@ -7,6 +7,9 @@ edition = "2021"
 description = "The planning skill's cryptographic helper: SHA-256 digests and OS-entropy hex for the adversarial-review fix-key gate"
 license = "MIT"
 
+[lib]
+name = "plan_crypt"
+
 [dependencies]
 
 [profile.release]

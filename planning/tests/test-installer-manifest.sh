@@ -16,6 +16,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 map_file="$repo_dir/planning/PACKAGE-MAP.tsv"
 manifest_file="$repo_dir/planning/PACKAGE-MANIFEST.tsv"
+# Load the generated installer helper so the platform-path contract is tested
+# at the same implementation boundary used by install.sh.
+# shellcheck disable=SC1090
+source "$repo_dir/installer/src/50-manifest.sh"
 
 # Normalise a path without requiring GNU `realpath -m` (absent on macOS).
 # Both callers pass paths that exist, so resolving the parent is sufficient.
@@ -29,6 +33,9 @@ abs_path() {
 deferred_artifact() {
     case "$1" in
         bin/*) return 0 ;; # cross-target artifacts are CI outputs
+        scripts/*)
+            case "$1" in *.sh) return 1 ;; esac
+            return 0 ;; # extensionless Rust commands are build outputs
         *) return 1 ;;
     esac
 }
@@ -115,5 +122,51 @@ EOF
     printf '%s\n' 'test_skill_files_matches_manifest: PASS'
 }
 
+test_windows_command_paths() {
+    # The manifest deliberately names Rust commands without a suffix. The
+    # installer must add the Windows suffix only to the physical path, while
+    # leaving shell helpers and ordinary files untouched.
+    uname() { printf '%s\n' Windows_NT; }
+    [ "$(platform_relative_path planning scripts/plan-content)" = \
+        scripts/plan-content.exe ]
+    [ "$(platform_relative_path planning scripts/plan-content.sh)" = \
+        scripts/plan-content.sh ]
+    [ "$(platform_relative_path planning SKILL.md)" = SKILL.md ]
+    unset -f uname
+    printf '%s\n' 'test_windows_command_paths: PASS'
+}
+
+test_rust_migration_registry() {
+    local runtime generator dev excluded path kind candidate crate
+    runtime="$(awk -F '\t' '$2 == "runtime-binary" { n++ } END { print n + 0 }' \
+        "$repo_dir/planning/rust-migration.tsv")"
+    generator="$(awk -F '\t' '$2 == "build-generator" { n++ } END { print n + 0 }' \
+        "$repo_dir/planning/rust-migration.tsv")"
+    dev="$(awk -F '\t' '$2 == "dev-binary" { n++ } END { print n + 0 }' \
+        "$repo_dir/planning/rust-migration.tsv")"
+    excluded="$(awk -F '\t' '$2 == "runtime-binary" && $3 == "render-plans-board" { n++ } END { print n + 0 }' \
+        "$repo_dir/planning/rust-migration.tsv")"
+    [ "$runtime" -eq 48 ]
+    [ "$generator" -eq 1 ]
+    [ "$dev" -eq 5 ]
+    [ "$excluded" -eq 1 ]
+
+    while IFS=$'\t' read -r path kind candidate _; do
+        [ -n "$candidate" ] || continue
+        case "$kind" in
+            runtime-binary|build-generator|dev-binary)
+                [ "$candidate" = render-plans-board ] && continue
+                [ -f "$repo_dir/$path" ]
+                crate="$candidate"
+                [ "$candidate" = overview-state ] && crate=plan-overview
+                [ -f "$repo_dir/src/$crate/Cargo.toml" ]
+                ;;
+        esac
+    done < "$repo_dir/planning/rust-migration.tsv"
+    printf '%s\n' 'test_rust_migration_registry: PASS'
+}
+
 test_manifest_emission "$@"
 test_skill_files_matches_manifest "$@"
+test_windows_command_paths "$@"
+test_rust_migration_registry "$@"

@@ -112,7 +112,9 @@ host_triple() {
 }
 
 # What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
-# repository root, not in a bin/ inside each skill. rjq alone is a hard
+# repository root, not in a bin/ inside each skill. Planning commands also get
+# a second, untracked copy beside their shell oracle as scripts/<binary>; that
+# is the extensionless command layout users invoke after the migration. rjq alone is a hard
 # requirement of planning, todo and bug-report, so a per-skill layout means the
 # same binary copied three times -- or, as it was, shipped by one skill and
 # missing from the other two, which the installer then refuses to install.
@@ -120,12 +122,76 @@ host_triple() {
 # chat-proto is a library the two chat crates depend on and produces no binary,
 # so it is absent here and built as a dependency of theirs.
 plan() {
+    plan_primary
+    plan_secondary
+}
+
+plan_primary() {
     cat <<'PLAN'
-rjq	rjq
-plan-overview	plan-overview
-plan-crypt	plan-crypt
-chat-server-rs	chat-server-rs
+add-adversarial-finding	add-adversarial-finding
+add-coverage	add-coverage
+add-fix-claim	add-fix-claim
+add-goal	add-goal
+add-planning-bug	add-planning-bug
+add-ui-story	add-ui-story
+add-ui-story-links	add-ui-story-links
+add-work-unit	add-work-unit
 chat-client-rs	chat-client-rs
+chat-server-rs	chat-server-rs
+configure-ui-story-cache	configure-ui-story-cache
+create-adversarial-review	create-adversarial-review
+create-plan	create-plan
+create-plan-progress	create-plan-progress
+update-plan-progress	update-plan-progress
+rebuild-plan-progress	rebuild-plan-progress
+register-read	register-read
+register-command	register-command
+register-rebuild	register-rebuild
+plan-mutate	plan-mutate
+todo-add	todo-add
+todo-update	todo-update
+bug-add	bug-add
+bug-update	bug-update
+supervision-frame	supervision-frame
+generate-reviewer	generate-reviewer
+cleanup-plans	cleanup-plans
+verify-target	verify-target
+update-step	update-step
+verify-fix-keys	verify-fix-keys
+update-work-unit	update-work-unit
+validate-plan	validate-plan
+run-adversary-probe	run-adversary-probe
+update-plan-content	update-plan-content
+monitor-read	monitor-read
+create-progress	create-progress
+create-step-testing	create-step-testing
+create-ui-story-run-cache	create-ui-story-run-cache
+create-ui-validation	create-ui-validation
+create-work-unit-inventory	create-work-unit-inventory
+PLAN
+}
+
+plan_secondary() {
+    cat <<'PLAN'
+mint-fix-keys	mint-fix-keys
+plan-crypt	plan-crypt
+plan-env	plan-env
+plan-content	plan-content
+plan-context-wrapper	plan-context-wrapper
+plan-context	plan-context
+role-context	role-context
+plan-overview	plan-overview
+plan-overview	overview-state
+plan-root	plan-root
+remove-coverage	remove-coverage
+remove-plan	remove-plan
+remove-work-unit	remove-work-unit
+resolve-finding	resolve-finding
+tony-the-pony	tony-the-pony
+update-adversarial-review	update-adversarial-review
+update-progress	update-progress
+update-ui-story	update-ui-story
+rjq	rjq
 PLAN
 }
 
@@ -145,8 +211,16 @@ if [ "$mode" = list ] || [ "$mode" = check ]; then
         if [ "$mode" = check ]; then
             state=$([ -x "$repo_root/$dest" ] && echo present || echo MISSING)
             printf '  %-16s -> %-52s %s\n' "$crate" "$dest" "$state"
+            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+                sibling="planning/scripts/$binary$exe"
+                state=$([ -x "$repo_root/$sibling" ] && echo present || echo MISSING)
+                printf '  %-16s -> %-52s %s\n' "$crate" "$sibling" "$state"
+            fi
         else
             printf '  %-16s -> %s\n' "$crate" "$dest"
+            if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+                printf '  %-16s -> %s\n' "$crate" "planning/scripts/$binary$exe"
+            fi
         fi
     done <<EOF
 $(plan)
@@ -170,9 +244,15 @@ while IFS="$(printf '\t')" read -r crate binary; do
         >"$repo_root/.setup-dev-env.log" 2>&1; then
         dest_dir="$repo_root/bin/$triple"
         mkdir -p "$dest_dir"
-        cp "$src/target/$triple/release/$binary$exe" "$dest_dir/$binary$exe"
+        cp "$repo_root/target/$triple/release/$binary$exe" "$dest_dir/$binary$exe"
         chmod +x "$dest_dir/$binary$exe"
         printf 'ok -> bin/%s/%s%s\n' "$triple" "$binary" "$exe"
+        if [ -f "$repo_root/planning/scripts/$binary.sh" ]; then
+            cp "$repo_root/target/$triple/release/$binary$exe" \
+                "$repo_root/planning/scripts/$binary$exe"
+            chmod +x "$repo_root/planning/scripts/$binary$exe"
+            printf '   -> planning/scripts/%s%s\n' "$binary" "$exe"
+        fi
         built=$((built + 1))
     else
         printf 'FAILED\n'

@@ -1,0 +1,13 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-work-unit"
+version = "0.1.0"
+edition = "2021"
+description = "Update a planning work-unit inventory row"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-inventory = { path = "../planning-inventory" }
+planning-progress = { path = "../planning-progress" }

@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-context-core"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable cache, document, and view primitives for plan-context"
+license = "MIT"
+
+[lib]
+name = "plan_context_core"
+
+[dependencies]
+plan-crypt = { path = "../plan-crypt" }
+planning-table = { path = "../planning-table" }

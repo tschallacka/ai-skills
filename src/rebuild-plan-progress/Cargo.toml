@@ -1,0 +1,13 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "rebuild-plan-progress"
+version = "0.1.0"
+edition = "2021"
+description = "Regenerate the plan-level progress tracker"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }
+planning-table = { path = "../planning-table" }

@@ -1,0 +1,14 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-ui-story"
+version = "0.1.0"
+edition = "2021"
+description = "Add a planning UI user story and browser cache"
+license = "MIT"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

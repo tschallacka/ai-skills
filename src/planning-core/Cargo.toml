@@ -1,0 +1,17 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-core"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable Rust primitives for the planning skill"
+license = "MIT"
+
+[lib]
+name = "planning_core"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
