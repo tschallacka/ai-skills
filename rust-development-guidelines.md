@@ -217,6 +217,15 @@ greps `ldd` output to prove the musl build is actually static.
 3. `cargo test --workspace`.
 4. Per-target build matrix.
 
+The planning-command CI matrix also publishes `RUST-ARTIFACTS.tsv` and
+`SHA256SUMS` with the target bundles. Run the Rust checks and release tooling
+inside `nix develop .#default`; that shell supplies the pinned Cargo toolchain
+used by CI. From a downloaded bundle, verify the recorded bytes with:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
 ## 8. Verification standard
 
 The same rule as the rest of this repository, and it is not negotiable: **a

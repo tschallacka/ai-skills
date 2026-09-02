@@ -129,24 +129,15 @@ else
 fi
 
 # ---- 4. rust crates under src/ touched by the change -----------------------
-crates=""
-# -E: `+` is a literal in a BRE, so the pattern matched nothing and the rust
-# gates below reported "skipped" however many crates the change touched.
-for f in $(changed -E '^src/[^/]+/'); do
+crates="$(for f in $(changed -E '^src/[^/]+/'); do
     crate="${f#src/}"; crate="${crate%%/*}"
-    case "$crate" in
-        '') ;;
-        *) case "
-$crates" in *"|$crate
-"*) ;; *) crates="$crates|$crate" ;; esac ;;
-    esac
-done
-crates="${crates#|}"
+    [ -n "$crate" ] && printf '%s\n' "$crate"
+done | LC_ALL=C sort -u)"
 if [ -n "$crates" ]; then
     if ! command -v cargo >/dev/null 2>&1; then
         note "src/ changed but cargo is not on PATH (nix develop); CI still runs fmt and test"
     else
-        for crate in $(printf '%s' "$crates" | tr '|' ' '); do
+        while IFS= read -r crate; do
             m="src/$crate/Cargo.toml"
             [ -f "$m" ] || continue
             if cargo fmt --check --manifest-path "$m" >/dev/null 2>&1; then
@@ -159,7 +150,9 @@ if [ -n "$crates" ]; then
             else
                 bad "cargo test: $crate"
             fi
-        done
+        done <<EOF
+$crates
+EOF
     fi
 else
     note "no crates under src/ changed; rust gates skipped"
