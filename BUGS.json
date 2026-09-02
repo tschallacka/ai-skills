@@ -160,6 +160,30 @@
       "updated_at": "2026-08-28T16:52:20Z"
     },
     {
+      "id": "B108",
+      "title": "register-read.sh ships to users but the library it sources does not, so it dies on first use",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Build the prod file list and copy just those files, then run the reader: bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod' | grep register-   # lists scripts/register-read.sh and NOT scripts/register-lib.sh. Copy the prod list into an empty tree and run: BUGS_JSON=/tmp/b.json scripts/register-read.sh bug count",
+      "observed": "register-read.sh: line 32: <dir>/register-lib.sh: No such file or directory. The reader is MODE: PROD and sits in the planning prod arm; register-lib.sh is MODE: DEV and sits in the dev arm, so a prod install receives the reader without it.",
+      "expected": "A shipped script's dependencies ship with it. Either register-lib.sh becomes MODE: PROD and joins the prod arm, or register-read.sh stops being shipped.",
+      "mechanism": "The two markers disagree and nothing cross-checks a shipped script against what it sources. tests/test-mode-markers.sh compares each file's marker against skill_files() membership, which both files satisfy individually - the reader is PROD and listed prod, the library is DEV and listed dev - so the pair is consistent by that test's rule while being unusable together. CODE-STYLE.md's own instruction is that a missing library is a broken install and must fail loudly, which is exactly what happens; nobody had run the shipped copy.",
+      "surfaces": [
+        "planning/scripts/register-read.sh",
+        "planning/scripts/register-lib.sh",
+        "installer/src/50-manifest.sh",
+        "tests/test-mode-markers.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T81 work, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T19:02:00Z",
+      "updated_at": "2026-09-01T19:02:00Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -1055,7 +1079,7 @@
       "fix": "Working-tree fix: initialize review_approved=true before the Verdict grep in plan_validate_plan_docs so the only assignment left is the failure path; aligns the gate with the docs pass own unset-means-approved semantics. (Recorded as B94 locally before PR #7 landed; master's B94-B96 were unknown then, so it renumbered to B97 at the rebase.)",
       "verification": "Re-run validate-plan.sh on .plans/untrack-generated-files: gates must read structurally valid=yes, adversarially approved=yes.",
       "found_by": "T72 plan readiness pass, maintainer session 2026-08-31",
-      "notes": [],
+      "notes": null,
       "created_at": "2026-08-31T14:05:48Z",
       "updated_at": "2026-08-31T15:20:00Z"
     },
@@ -1172,6 +1196,49 @@
       "notes": "Resolution recipe is T82. The tool that reports and renames these is planning/scripts/register-resolve.sh from PR #15; it currently refuses this merge because the branch side is unsound (B105), which has to be fixed on the branch first.",
       "created_at": "2026-09-01T16:03:33Z",
       "updated_at": "2026-09-01T16:12:19Z"
+    },
+    {
+      "id": "B109",
+      "title": "A refused bug-update still writes, leaving BUGS.json unsound",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "cp BUGS.json /tmp/upd.json; BUGS_JSON=/tmp/upd.json planning/scripts/bug-update.sh B96 --priority bogus; then read B96's priority back. Control: the same shape against todo-update.sh leaves the file untouched.",
+      "observed": "Refused with 'B96: unknown priority bogus' plus advice to run register-rebuild.sh, but the value is already written: B96's priority reads 'bogus' afterwards and reg_findings reports the register unsound.",
+      "expected": "A refused update leaves the register as it was, which is what todo-update.sh already does.",
+      "mechanism": "bug-update.sh does 'mv $tmp $file' and only then calls reg_write, where validation lives, so the irreversible step precedes the check (CODE-CONTRACTS.md contract 2). todo-update.sh and bug-add.sh both validate first, so the family disagrees with itself.",
+      "surfaces": [
+        "planning/scripts/bug-update.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T81 work, maintainer session 2026-09-01",
+      "notes": null,
+      "created_at": "2026-09-01T19:11:22Z",
+      "updated_at": "2026-09-01T19:11:22Z"
+    },
+    {
+      "id": "B110",
+      "title": "Nothing requires the coordinator to sanity-check its own plan before dispatching a reviewer, so reviewer cycles are spent on mechanical surface inconsistencies",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Draft a plan, get an adversarial review, resolve the findings with update-work-unit.sh and update-plan-content.sh, then dispatch a fresh reviewer. Repeat. Observed over six cycles on .plans/loki-shippinglogic-rewrite (67 work units, 10 goals).",
+      "observed": "Every cycle from 2 to 6 was gated by at least one BLOCKING finding that was purely an intra-document inconsistency, each in a surface the previous fix had not touched. Cycle 2: unit Objectives corrected, Instructions and Acceptance criteria left stale - 12 of 20 findings unresolved for that reason alone. Cycle 3: the inverse - Instructions and criteria corrected, inventory row and Objective left stale, so W20 read 'leave dropship buckets unchanged' in its Objective while its own Instructions called that wording 'an earlier version'. Cycle 5: a testing companion whose backend-verification section demanded a rule count its own automated-tests section explained was impossible. Cycle 6: a companion whose browser-verification section told the worker to run and record three user stories the same step's criterion forbids it from recording. Findings ran 20, 12, 5, 8, 3 with blocking 14, 6, 1, 1, 1 - converging, but roughly 800k reviewer tokens across six cycles. A mechanical self-sweep over all 133 step and companion documents, run afterwards, then found two further defects no reviewer had named: a handoff claiming 'the following four steps each add one public method' after a fifth moved in, and a handoff routing per-customer filtering to a goal that no longer performed it.",
+      "expected": "The coordinator performs its own coherence pass and resolves what it finds BEFORE spending a reviewer cycle, so the reviewer is spent on judgement - whether a criterion can be satisfied by construction, whether a premise holds against the repository - rather than on consistency sweeps a script can do exhaustively.",
+      "mechanism": "SKILL.md section 3 documents the seven surfaces a fix must reach and says to search the plan for the OLD wording, but that discipline is advisory prose inside the finding-resolution guidance. The mandated execution order is write the draft, invoke the fresh reviewer, resolve every finding, invoke a fresh reviewer again - with no self-check gate between resolving and re-dispatching. validate-plan.sh checks structure, ownership, dependency edges and rosters, but nothing intra-document: it cannot see a paragraph that contradicts another paragraph of the same file. The --stale gate is the closest existing mechanism and does not close the loop - it only matches a phrase list the agent supplies from memory, and every hit is a WARN that never changes exit status.",
+      "fix": null,
+      "verification": null,
+      "found_by": "Tschallacka, during the Loki checkout migration plan on Sanitairkamer; he stopped the loop and told the agent to check every file itself before dispatching another reviewer.",
+      "notes": "Proposed fix has two halves that belong together. First, SKILL.md: make a coordinator self-coherence pass a required step in the execution order, between resolving findings and re-invoking a reviewer. Second, validate-plan.sh: add a mechanical intra-document coherence check, which is the half that makes the requirement enforceable rather than aspirational. Three checks caught every instance seen here and are cheap - flag a document where one paragraph declares wording stale (an earlier version ... said X) while another paragraph of the SAME document still carries X; flag a spelled-out count adjacent to method, limitation, rule, item, type, cart or story, since those drift whenever a unit moves between goals; and flag a testing companion whose sections disagree, which is where cycles 5 and 6 both failed. Why it went unnoticed: each cycle the reviewer correctly reported the inconsistency it found, so the loop looked like it was working. Nobody measured that the SAME defect class was recurring in a new surface each time, which is the signal that the process rather than the plan was at fault. The skill already warns about this in the abstract - it notes a comparable run reaching seventeen cycles and 41.7 million tokens before anyone asked whether the plan was the thing at fault - so the gap is enforcement, not awareness.",
+      "created_at": "2026-09-02T12:12:18Z",
+      "updated_at": "2026-09-02T12:12:18Z",
+      "surfaces": [
+        "planning/SKILL.md",
+        "planning/scripts/validate-plan.sh"
+      ]
     },
     {
       "id": "B14",
@@ -2336,9 +2403,7 @@
       "fix": "Not fixed here. One shared awk change (skip a leading MODE:/PACKAGE: marker line the same way the quoted-fence dividers are skipped) plus an assertion in test-comment-format.sh that no help output names a marker keyword. Deliberately left out of the untrack-generated-files change: it is pre-existing on master, spans four scripts and a test, and is unrelated to that change's subject.",
       "verification": "After the fix, `--help` on each of the four scripts must start at the purpose line, and test-comment-format.sh must fail when a marker is reintroduced into help output.",
       "found_by": "PR #9 review, maintainer session 2026-09-01",
-      "notes": [
-        "Found while adding bootstrap.sh, whose usage() copies the existing idiom verbatim; the new script inherited the wart rather than introducing it."
-      ],
+      "notes": "Found while adding bootstrap.sh, whose usage() copies the existing idiom verbatim; the new script inherited the wart rather than introducing it.",
       "created_at": "2026-09-01T00:00:00Z",
       "updated_at": "2026-09-01T00:00:00Z"
     },
