@@ -44,11 +44,9 @@ bugs-found-by-ox-alpha.md
 
 # Rust build artifacts for the crates under src/ (CODE-STYLE 1b).
 # Never tracked: they are per-platform, large, and rebuilt by CI.
-src/target/
-src/*/target/
 /target/
+src/*/target/
 chat/runtime/chat-server-rs
-src/chat-server-rs/target/
 
 # The development tree's compiled helpers, built by ./setup-dev-env.sh into one
 # bin/<target triple> for every skill to share. Never committed: they are

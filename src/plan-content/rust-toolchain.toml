@@ -1,3 +1,0 @@
-# MODE: DEV
-toolchain = "1.86.0"
-profile = "minimal"

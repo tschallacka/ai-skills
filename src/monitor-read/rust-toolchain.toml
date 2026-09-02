@@ -1,3 +1,0 @@
-# MODE: DEV
-channel = "1.96.0"
-components = ["rustfmt", "clippy"]

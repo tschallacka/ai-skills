@@ -292,7 +292,6 @@ mod tests {
         csv_to_markdown, replace_testing_requirement, review_gated_pairs, table_cell, CsvError,
     };
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn cells_use_the_shell_library_one_based_columns() {
@@ -313,7 +312,14 @@ mod tests {
 
     #[test]
     fn gated_pairs_stop_at_verdict() {
-        let path = PathBuf::from(format!("/tmp/planning-table-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "planning-table-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         fs::write(&path, "## Findings\n| ID | Missing | Required | Status | Work unit |\n| AR-01 | x | y | open | W01 |\n## Verdict\n| AR-02 | x | y | open | W02 |\n").unwrap();
         assert_eq!(
             review_gated_pairs(&path).unwrap(),

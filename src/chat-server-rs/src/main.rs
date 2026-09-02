@@ -1009,6 +1009,11 @@ fn main() {
         }
     });
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("chat-server-rs [PORT]");
+        println!("  Start the TLS chat server on PORT or its remembered port.");
+        return;
+    }
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
     let server_name = std::env::var("CHAT_SERVER_NAME").unwrap_or_else(|_| "server".into());
 

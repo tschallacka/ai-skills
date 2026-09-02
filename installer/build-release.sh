@@ -278,7 +278,7 @@ case "$mode" in
             elif command -v cargo >/dev/null 2>&1; then
                 ( cd "$repo_root/src/rjq" && cargo build --release --target "$rjq_dir" ) \
                     || { printf '%s: cargo build rjq failed\n' "${0##*/}" >&2; exit 66; }
-                cp "$repo_root/src/rjq/target/$rjq_dir/release/$rjq_bin" "$repo_root/planning/bin/$rjq_dir/$rjq_bin"
+                cp "$repo_root/target/$rjq_dir/release/$rjq_bin" "$repo_root/planning/bin/$rjq_dir/$rjq_bin"
             else
                 printf '%s: no rjq at planning/bin/%s/%s, no copy in bin/%s, and no cargo to build one\n' \
                     "${0##*/}" "$rjq_dir" "$rjq_bin" "$rjq_dir" >&2

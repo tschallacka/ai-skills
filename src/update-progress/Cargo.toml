@@ -9,9 +9,3 @@ license = "MIT"
 
 [dependencies]
 planning-progress = { path = "../planning-progress" }
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

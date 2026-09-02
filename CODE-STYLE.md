@@ -182,7 +182,8 @@ A shipped binary gets **one directory per binary under `src/`**, sitting beside
 the skill directories rather than inside one:
 
 ```
-src/tony-the-pony/      Cargo.toml, rust-toolchain.toml, src/*.rs
+Cargo.toml              workspace manifest and shared toolchain profile
+src/tony-the-pony/      Cargo.toml, src/*.rs
 src/<next-binary>/      likewise
 ```
 
@@ -196,8 +197,9 @@ same reason: the file itself is never delivered, but its content ends up inside
 something that is. Put both markers on the **first two lines**, before any `//!`
 module documentation. `marker_of` reads only the head of a file, so a marker
 placed after a long doc comment silently falls out of the window and the file
-reads as unmarked. `rust-toolchain.toml` is `MODE: DEV` alone: it configures the
-build and is compiled into nothing. `Cargo.lock` is generated and exempt.
+reads as unmarked. The root `rust-toolchain.toml` is `MODE: DEV` alone: it
+configures the workspace build and is compiled into nothing. `Cargo.lock` is
+generated and exempt.
 
 **This does not widen the dependency budget in section 1.** That budget governs
 what the *target machine must already have*; a static binary asks it for

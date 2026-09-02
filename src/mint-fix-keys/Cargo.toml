@@ -10,9 +10,3 @@ license = "MIT"
 [dependencies]
 planning-core = { path = "../planning-core" }
 plan-crypt = { path = "../plan-crypt" }
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

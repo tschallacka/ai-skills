@@ -317,10 +317,6 @@ fn current_uid() -> u32 {
     use std::os::unix::fs::MetadataExt;
     fs::metadata(".").unwrap().uid()
 }
-#[cfg(not(unix))]
-fn current_uid() -> u32 {
-    0
-}
 
 fn main() {
     let args: Vec<String> = env::args().collect();

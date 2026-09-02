@@ -6,6 +6,9 @@ on:
     branches: [master, nextupdate]
   pull_request:
 
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
 jobs:
   build:
     name: plan-overview ${{ matrix.target }}
@@ -49,18 +52,16 @@ jobs:
 
       - name: Execute artifact
         if: runner.os != 'Windows'
-        working-directory: src/plan-overview
-        run: target/${{ matrix.target }}/release/${{ matrix.package }} --help
+        run: ${{ github.workspace }}/target/${{ matrix.target }}/release/${{ matrix.package }} --help
 
       - name: Execute artifact on Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: src/plan-overview
-        run: .\target\${{ matrix.target }}\release\${{ matrix.package }} --help
+        run: '& "${{ github.workspace }}\target\${{ matrix.target }}\release\${{ matrix.package }}" --help'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: plan-overview-${{ matrix.target }}
-          path: src/plan-overview/target/${{ matrix.target }}/release/${{ matrix.package }}
+          path: ${{ github.workspace }}/target/${{ matrix.target }}/release/${{ matrix.package }}
           if-no-files-found: error

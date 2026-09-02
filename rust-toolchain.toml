@@ -3,3 +3,4 @@
 # The Nix flake supplies the same stable compiler in development and CI.
 channel = "1.98"
 profile = "minimal"
+components = ["rustfmt", "clippy"]

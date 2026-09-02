@@ -11,9 +11,3 @@ license = "MIT"
 name = "plan_crypt"
 
 [dependencies]
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

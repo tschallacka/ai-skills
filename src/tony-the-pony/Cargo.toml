@@ -8,9 +8,3 @@ description = "A tool-call gate that interrupts the text-search reflex, for agen
 license = "MIT"
 
 [dependencies]
-
-[profile.release]
-strip = true
-opt-level = "z"
-lto = true
-panic = "abort"

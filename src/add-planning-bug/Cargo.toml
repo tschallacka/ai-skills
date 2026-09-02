@@ -10,9 +10,3 @@ license = "MIT"
 [dependencies]
 planning-core = { path = "../planning-core" }
 serde_json = { version = "1", features = ["preserve_order"] }
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

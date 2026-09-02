@@ -9,9 +9,3 @@ license = "MIT"
 
 [dependencies]
 planning-table = { path = "../planning-table" }
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

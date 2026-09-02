@@ -117,7 +117,6 @@ fn is_paragraph_label(line: &str) -> bool {
 mod tests {
     use super::{count_progress_rows, progress_bar, progress_icon, progress_percent, status_label};
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn percentage_uses_half_up_rounding() {
@@ -137,7 +136,14 @@ mod tests {
 
     #[test]
     fn count_skips_headers_and_separator_rows() {
-        let path = PathBuf::from(format!("/tmp/planning-progress-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "planning-progress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         fs::write(&path, "| Goalname | Stepname | Description | Completion status |\n| --- | --- | --- | --- |\n| G1 | one | x | ✅ completed |\n| G2 | two | x | ⏳ in progress |\n").unwrap();
         assert_eq!(count_progress_rows(&path, 5).unwrap(), (1, 2));
         fs::remove_file(path).unwrap();

@@ -11,9 +11,3 @@ license = "MIT"
 planning-core = { path = "../planning-core" }
 planning-progress = { path = "../planning-progress" }
 planning-table = { path = "../planning-table" }
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"

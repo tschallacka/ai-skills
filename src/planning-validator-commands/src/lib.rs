@@ -263,11 +263,11 @@ fn bin_under(token: &str) -> bool {
         )
     })
 }
-fn is_executable(path: &str) -> bool {
+fn is_executable(_path: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+        fs::metadata(_path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
     }
     #[cfg(not(unix))]
     {

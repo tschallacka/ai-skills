@@ -9,9 +9,3 @@ license = "MIT"
 
 [lib]
 name = "planning_core"
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-panic = "abort"
