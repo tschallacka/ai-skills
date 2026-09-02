@@ -155,8 +155,14 @@ esac
 cli sess send --chan '#sess' --text 'second session' --insecure >/dev/null 2>&1 || true
 cursor="$(cli sess session show 2>/dev/null | grep 'cursor #sess' | awk '{print $NF}' || true)"
 [ "$cursor" = "2" ] || t_fail "session cursor did not advance to 2: [$cursor]"
-# A malformed session.json must recover (warning + empty session), not crash.
-printf '{ broken json !!!' > "$temporary_root/c_sess/session.json"
+# A malformed session file must recover (warning + empty session), not crash.
+# Sessions are per-owner under sessions/<owner>.json, so corrupt whatever file
+# the client actually wrote rather than a fixed name — writing session.json
+# would corrupt nothing and let this assertion pass without testing anything.
+session_file="$(ls "$temporary_root/c_sess/sessions/"*.json 2>/dev/null | head -1 || true)"
+[ -n "$session_file" ] \
+    || t_fail "no per-owner session file was written under $temporary_root/c_sess/sessions/"
+printf '{ broken json !!!' > "$session_file"
 recovered="$(cli sess session show 2>/dev/null || true)"
 case "$recovered" in
     *'server='*) : ;;
@@ -215,7 +221,115 @@ grep -q '!! MENTION !!' "$temporary_root/ment.log" \
     || t_fail "mention was not surfaced: [$(cat "$temporary_root/ment.log")]"
 wait "$ment_pid" 2>/dev/null || true
 
+# Two agents on ONE machine must each keep their own identity. A single shared
+# session file used to mean the second agent's nick replaced the first's, so
+# the first then read and posted as the second - and only one of them could
+# stay connected at all.
+two_home="$temporary_root/two"
+mkdir -p "$two_home"
+CHAT_SESSION_ID=agent-one AI_CHAT_HOME="$two_home" "$CLIENT" session set \
+    --server 127.0.0.1:"$port" --nick one >/dev/null 2>&1 || true
+CHAT_SESSION_ID=agent-two AI_CHAT_HOME="$two_home" "$CLIENT" session set \
+    --server 127.0.0.1:"$port" --nick two >/dev/null 2>&1 || true
+one_nick="$(CHAT_SESSION_ID=agent-one AI_CHAT_HOME="$two_home" "$CLIENT" session show 2>/dev/null \
+    | awk -F= '/^nick=/{print $2}')"
+two_nick="$(CHAT_SESSION_ID=agent-two AI_CHAT_HOME="$two_home" "$CLIENT" session show 2>/dev/null \
+    | awk -F= '/^nick=/{print $2}')"
+[ "$one_nick" = one ] \
+    || t_fail "agent-one's session nick was clobbered: [$one_nick] (want one)"
+[ "$two_nick" = two ] \
+    || t_fail "agent-two's session nick was clobbered: [$two_nick] (want two)"
+
+# Both must be able to hold a nick at the same time: a disconnect has to
+# release its nick registration, or the second agent gets ERR_NICKNAMEINUSE
+# against a connection that no longer exists.
+CHAT_SESSION_ID=agent-one AI_CHAT_HOME="$two_home" "$CLIENT" send --chan '#two' \
+    --text 'from one' --insecure >/dev/null 2>&1 \
+    || t_fail "agent-one could not send"
+CHAT_SESSION_ID=agent-two AI_CHAT_HOME="$two_home" "$CLIENT" send --chan '#two' \
+    --text 'from two' --insecure >/dev/null 2>&1 \
+    || t_fail "agent-two could not send (nick released on disconnect?)"
+# And the same nick must be able to come back, repeatedly.
+for _ in 1 2 3; do
+    CHAT_SESSION_ID=agent-one AI_CHAT_HOME="$two_home" "$CLIENT" send --chan '#two' \
+        --text 'again' --insecure >/dev/null 2>&1 \
+        || t_fail "reconnecting as the same nick was refused"
+done
+
+# Taking over another agent's session must WARN, not happen silently.
+takeover_err="$temporary_root/takeover.err"
+CHAT_SESSION_ID=agent-one AI_CHAT_HOME="$two_home" "$CLIENT" send --chan '#two' \
+    --text 'takeover' --nick someone-else --insecure >/dev/null 2>"$takeover_err" || true
+grep -q "already belongs to nick" "$takeover_err" \
+    || t_fail "a session takeover was silent: [$(cat "$takeover_err")]"
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions)\n' >&2
+
+# --- with the server STOPPED ------------------------------------------------
+# read --local must still work: the channel log is the storage format, so a
+# local read returns the rows a FETCH would. Without this there is no supported
+# way to see a channel when no server is running, and the only recourse is
+# opening the log by hand.
+local_out="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 0 --no-session 2>/dev/null || true)"
+case "$local_out" in
+    *'MSG #sess'*'session message'*) : ;;
+    *) t_fail "read --local returned nothing with the server stopped: [$local_out]" ;;
+esac
+# --since must bound a local read the same way it bounds a FETCH.
+bounded="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 1 --no-session 2>/dev/null | grep -c '^MSG ' || true)"
+unbounded="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 0 --no-session 2>/dev/null | grep -c '^MSG ' || true)"
+[ "$bounded" -lt "$unbounded" ] \
+    || t_fail "read --local ignored --since (bounded=$bounded unbounded=$unbounded)"
+# An unknown channel is an actionable error, not a crash or silence.
+rc=0
+AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#nosuchchannel' --no-session \
+    >/dev/null 2>"$temporary_root/nochan.err" || rc=$?
+[ "$rc" -eq 66 ] \
+    || t_fail "read --local on a missing channel exited $rc (want 66)"
+
+# The server must answer --help WITHOUT binding: it used to parse argv[1] as a
+# port, so --help fell through and stood up a real server on the shared port.
+help_home="$temporary_root/helphome"
+mkdir -p "$help_home"
+AI_CHAT_HOME="$help_home" "$SERVER" --help >"$temporary_root/help.out" 2>&1 &
+help_pid=$!
+sleep 2
+if kill -0 "$help_pid" 2>/dev/null; then
+    kill -9 "$help_pid" 2>/dev/null || true
+    t_fail "server --help did not exit; it is still running (it bound a socket)"
+else
+    wait "$help_pid" 2>/dev/null
+    help_rc=$?
+    [ "$help_rc" -eq 0 ] || t_fail "server --help exited $help_rc (want 0)"
+fi
+[ -s "$temporary_root/help.out" ] || t_fail "server --help printed nothing"
+[ -f "$help_home/server.port" ] \
+    && t_fail "server --help wrote server.port; it must not touch the home"
+# A typo must be refused, not silently read as "no port given".
+rc=0
+AI_CHAT_HOME="$help_home" "$SERVER" --porrt 1234 >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || t_fail "server with a bad argument exited $rc (want 64)"
+
+# The client's --state must actually be honoured: it was documented but had no
+# case in the parser, so it was silently discarded and every call fell back to
+# $AI_CHAT_HOME - two agents told to keep separate state shared one directory.
+state_dir="$temporary_root/explicit-state"
+AI_CHAT_HOME="$temporary_root/ignored" "$CLIENT" session set --state "$state_dir" \
+    --server 127.0.0.1:1 --nick stateful >/dev/null 2>&1 || true
+[ -d "$state_dir/sessions" ] \
+    || t_fail "--state was ignored: nothing was written under $state_dir"
+[ -d "$temporary_root/ignored/sessions" ] \
+    && t_fail "--state was ignored: the session went to AI_CHAT_HOME instead"
+# An unknown option must be an error, not silently swallowed.
+rc=0
+"$CLIENT" session show --state "$state_dir" --nosuchflag >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || t_fail "an unknown client option exited $rc (want 64)"
+# --help is a request, not a mistake: stdout, exit 0.
+"$CLIENT" --help >"$temporary_root/clienthelp.out" 2>/dev/null \
+    || t_fail "client --help did not exit 0"
+[ -s "$temporary_root/clienthelp.out" ] \
+    || t_fail "client --help printed nothing on stdout"
+
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions, nick release, local reads, --help, --state)\n' >&2
 t_end

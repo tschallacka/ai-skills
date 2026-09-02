@@ -14,7 +14,7 @@
 //! for testing.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,8 +25,22 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 const DEFAULT_BEACON_PORT: u16 = 7780;
 
 fn usage() {
-    eprintln!(
-        "chat-client-rs\n\n\
+    eprintln!("{}", USAGE);
+    std::process::exit(64);
+}
+
+/// The same text on stdout with exit 0, for an explicit `--help`.
+///
+/// A caller who ASKED for help has not made a mistake, so help must not arrive
+/// on stderr behind a failure code. The server had no `--help` at all and
+/// parsed argv[1] as a port, which is how a `--help | head` probe stood up a
+/// live server on a shared port; this side keeps the two paths distinct.
+fn help() {
+    println!("{}", USAGE);
+    std::process::exit(0);
+}
+
+const USAGE: &str = "chat-client-rs\n\n\
          usage:\n\
          \x20 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]\n\
          \x20 chat-client-rs send [--server HOST:PORT] [--nick N] --chan #c --text MSG [--insecure]\n\
@@ -39,22 +53,32 @@ fn usage() {
          \x20 --state DIR     client state dir (default $AI_CHAT_HOME or the tsch-ai-skills XDG chat dir)\n\
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
-         \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
-         \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\n\
+         \x20 --session ID    which session to use (default: this agent's own)\n\
+         \x20 --local         read/tail the channel log directly, with no server\n\
+         \x20 --mentions      only messages mentioning your nick\n\
+         \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\
+         \x20 --help          print this and exit 0\n\n\
          The session remembers the default server+nick and per-channel cursors\n\
          (last seen message id). join seeds the cursor to the channel's current\n\
          end (so read/tail never dump old history); leave PARTs and drops the\n\
-         cursor. A malformed session.json is reset with a warning."
-    );
-    std::process::exit(64);
-}
+         cursor. A malformed session file is reset with a warning.\n\n\
+         Sessions are PER AGENT, not per directory: two agents sharing one\n\
+         $AI_CHAT_HOME get their own session under sessions/<owner>.json, keyed\n\
+         by $CHAT_SESSION_ID or the parent process. Pass --session ID to name\n\
+         one explicitly.\n\n\
+         read --local and tail --local need no server at all: they walk\n\
+         channels/<chan>.log, the same file the server appends to, so a channel\n\
+         stays readable when no server is running.";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         usage();
     }
-    let state_dir = client_state_dir();
+    if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+        help();
+    }
+    let state_dir = state_dir_from(&args[1..]);
     match args[1].as_str() {
         "discover" => discover(&args[2..]),
         "send" => send(&args[2..], &state_dir),
@@ -70,6 +94,34 @@ fn main() {
     }
 }
 
+/// Refuse a flag nobody handles.
+///
+/// Every parser here used to end in `_ => {}`, so a mistyped or unsupported
+/// option was silently discarded and the command ran as if it had not been
+/// passed — indistinguishable from the option being broken. `--state` was
+/// exactly that: documented, never implemented, silently dropped.
+fn reject_unknown_option(arg: &str) {
+    if arg.starts_with('-') {
+        eprintln!("chat-client-rs: unknown option: {}", arg);
+        eprintln!("chat-client-rs: run with --help for usage");
+        std::process::exit(64);
+    }
+}
+
+/// Reject any unhandled flag among these arguments.
+fn reject_unknown_options(args: &[String], allowed: &[&str]) {
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if allowed.contains(&a) {
+            i += 2; // the flag and its value
+            continue;
+        }
+        reject_unknown_option(a);
+        i += 1;
+    }
+}
+
 /// Manage the persisted session (default server+nick and channel cursors).
 /// Subcommands: `show`, `set --server H --nick N`, `clear [--cursors]`,
 /// `cursor #chan [ID]`.
@@ -77,6 +129,7 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("show");
     match sub {
         "show" => {
+            reject_unknown_options(&args[1..], &["--state", "--session"]);
             let s = Session::load(state_dir);
             println!("server={}", s.server);
             println!("nick={}", s.nick);
@@ -101,7 +154,9 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
                             s.nick = v.clone();
                         }
                     }
-                    _ => {}
+                    // Consumed before dispatch, skipped here.
+                    "--state" | "--session" => i += 1,
+                    other => reject_unknown_option(other),
                 }
                 i += 1;
             }
@@ -113,6 +168,7 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
             println!("server={} nick={}", s.server, s.nick);
         }
         "clear" => {
+            reject_unknown_options(&args[1..], &["--state", "--session", "--cursors"]);
             if args.iter().any(|a| a == "--cursors") {
                 let mut s = Session::load(state_dir);
                 s.cursors.clear();
@@ -149,6 +205,30 @@ fn client_state_dir() -> PathBuf {
         .unwrap_or_else(|_| chat_default_home())
 }
 
+/// `--state DIR` beats `$AI_CHAT_HOME`, which beats the XDG default.
+///
+/// `--state` was documented in the usage text but had no case in the option
+/// parser, so it fell into the catch-all and was silently discarded: every
+/// call that passed one still used `$AI_CHAT_HOME`. Two agents told to keep
+/// separate state therefore shared one directory anyway, which is half of why
+/// they trampled each other.
+fn state_dir_from(args: &[String]) -> PathBuf {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--state" {
+            if let Some(dir) = args.get(i + 1) {
+                if !dir.is_empty() {
+                    return PathBuf::from(dir);
+                }
+            }
+            eprintln!("chat-client-rs: --state needs a directory");
+            std::process::exit(64);
+        }
+        i += 1;
+    }
+    client_state_dir()
+}
+
 // The central state home everything global shares: the XDG config home's
 // tsch-ai-skills directory, beside the shared bin/ and the global plans.
 fn chat_default_home() -> PathBuf {
@@ -177,11 +257,77 @@ struct Session {
     nick: String,
     #[serde(default)]
     cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
+    /// The owner this file was written for. A pid is recycled eventually, so
+    /// the name in the path is not proof of ownership on its own: a session
+    /// whose stamp disagrees with the current owner is treated as stale and
+    /// discarded rather than adopted, which is what stops a fresh agent
+    /// inheriting a dead agent's nick and cursors.
+    #[serde(default)]
+    owner: String,
+}
+
+/// The session owner for THIS process, resolved once.
+///
+/// Two agents on one machine share `$AI_CHAT_HOME`, and a single
+/// `session.json` in it made them share one identity: whoever wrote last set
+/// the nick and the cursors for both, so the second agent read the first's
+/// messages under the first's name — and in practice only one of them could
+/// stay connected. Sessions are therefore per-owner, and the owner is a
+/// process, not the directory.
+static SESSION_OWNER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// `--session ID` wins, then `$CHAT_SESSION_ID`, otherwise `default`.
+///
+/// The owner is deliberately NOT derived from the process tree. The parent pid
+/// looks like the natural answer — one agent's shell, many short client calls —
+/// but any wrapper breaks it: run the client under `timeout`, `env`, `nohup` or
+/// a shell function and the parent is a fresh pid on every call, so each
+/// invocation gets a brand-new session and the cursors the session exists to
+/// keep are lost. There is no portable, wrapper-proof way to ask "which agent
+/// am I", so the honest design is an explicit id with a shared fallback, plus
+/// a loud warning when two identities are seen trampling one session.
+fn session_owner() -> &'static str {
+    SESSION_OWNER.get_or_init(|| {
+        if let Ok(v) = std::env::var("CHAT_SESSION_ID") {
+            let v = v.trim().to_string();
+            if !v.is_empty() {
+                return sanitize_owner(&v);
+            }
+        }
+        "default".to_string()
+    })
+}
+
+fn set_session_owner(id: &str) {
+    let _ = SESSION_OWNER.set(sanitize_owner(id));
+}
+
+/// One path segment: an owner id reaches the filesystem, so it may not carry a
+/// separator or a parent-directory hop.
+fn sanitize_owner(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches('.').to_string();
+    if cleaned.is_empty() {
+        "default".to_string()
+    } else {
+        cleaned
+    }
 }
 
 impl Session {
     fn path(state_dir: &std::path::Path) -> PathBuf {
-        state_dir.join("session.json")
+        state_dir
+            .join("sessions")
+            .join(format!("{}.json", session_owner()))
     }
 
     /// Load the session, recovering from a missing or malformed file. A
@@ -193,22 +339,37 @@ impl Session {
             Ok(s) => s,
             Err(_) => return Session::default(), // no file yet
         };
-        match serde_json::from_str(&raw) {
+        let parsed: Session = match serde_json::from_str(&raw) {
             Ok(s) => s,
             Err(_) => {
                 eprintln!(
                     "chat-client-rs: session file {} is malformed; starting a fresh session",
                     path.display()
                 );
-                Session::default()
+                return Session::default();
             }
+        };
+        // A stamp from a different owner means the pid was recycled: the file
+        // is another agent's history, not ours. Start clean instead.
+        if !parsed.owner.is_empty() && parsed.owner != session_owner() {
+            return Session::default();
         }
+        parsed
     }
 
     fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
-        fs::create_dir_all(state_dir)?;
-        let json = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
-        fs::write(Session::path(state_dir), json)
+        let path = Session::path(state_dir);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let stamped = Session {
+            server: self.server.clone(),
+            nick: self.nick.clone(),
+            cursors: self.cursors.clone(),
+            owner: session_owner().to_string(),
+        };
+        let json = serde_json::to_string_pretty(&stamped).unwrap_or_else(|_| "{}".into());
+        fs::write(path, json)
     }
 
     fn cursor(&self, chan: &str) -> u64 {
@@ -385,6 +546,21 @@ fn apply_session(
     let nick = if nick.is_empty() {
         s.nick.clone()
     } else {
+        // An explicit nick that disagrees with the stored one is the two-agent
+        // collision as it happens. Warn here rather than only on the save
+        // path: a call that reuses the recorded server never reaches a save,
+        // so the takeover would otherwise be completely silent.
+        if !s.nick.is_empty() && s.nick != nick {
+            eprintln!(
+                "chat-client-rs: session '{}' already belongs to nick '{}'; using '{}' for this call. \
+                 If these are two different agents, give each one its own session \
+                 (CHAT_SESSION_ID=<id>, or --session <id>) or they will keep \
+                 overwriting each other's nick and cursors.",
+                session_owner(),
+                s.nick,
+                nick
+            );
+        }
         nick.to_string()
     };
     let used = !s.server.is_empty() || !s.nick.is_empty();
@@ -401,6 +577,7 @@ struct Opts {
     no_session: bool,
     mentions: bool,
     mention_exit: bool,
+    local: bool,
 }
 
 fn parse_opts(args: &[String]) -> Opts {
@@ -414,6 +591,7 @@ fn parse_opts(args: &[String]) -> Opts {
         no_session: false,
         mentions: false,
         mention_exit: false,
+        local: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -442,7 +620,26 @@ fn parse_opts(args: &[String]) -> Opts {
             "--no-session" => o.no_session = true,
             "--mentions" => o.mentions = true,
             "--mention-exit" => o.mention_exit = true,
-            _ => {}
+            "--local" => o.local = true,
+            // Consumed by state_dir_from before dispatch; skipped here so its
+            // value is not mistaken for a positional argument.
+            "--state" => i += 1,
+            "--session" => {
+                i += 1;
+                if let Some(id) = args.get(i) {
+                    set_session_owner(id);
+                }
+            }
+            other => {
+                // Silently ignoring an unknown flag turns a typo into
+                // "you did not pass it", which is indistinguishable from the
+                // option not working (MAINTAINER 1.4: actionable errors).
+                if other.starts_with('-') {
+                    eprintln!("chat-client-rs: unknown option: {}", other);
+                    eprintln!("chat-client-rs: run with no arguments for usage");
+                    std::process::exit(64);
+                }
+            }
         }
         i += 1;
     }
@@ -464,6 +661,22 @@ fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: boo
 /// Remember the server+nick for later calls.
 fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
     let mut s = Session::load(state_dir);
+    // Two agents sharing one session is the failure this warns about: the
+    // second one's nick silently replaced the first's, so the first then read
+    // and posted as the second. It cannot be prevented without an id only the
+    // caller knows, but it must not be silent — say whose nick is being
+    // replaced, and name the fix.
+    if !nick.is_empty() && !s.nick.is_empty() && s.nick != nick {
+        eprintln!(
+            "chat-client-rs: session '{}' already belongs to nick '{}'; taking it over as '{}'. \
+             If these are two different agents, give each one its own session \
+             (CHAT_SESSION_ID=<id>, or --session <id>) or they will keep \
+             overwriting each other's nick and cursors.",
+            session_owner(),
+            s.nick,
+            nick
+        );
+    }
     if !server.is_empty() {
         s.server = server.to_string();
     }
@@ -917,8 +1130,138 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
     let _ = write_line(&mut tls, "QUIT");
 }
 
+/// The channel log a local read walks: the same file the server appends to.
+fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
+    home.join("channels").join(format!("{}.log", chan))
+}
+
+/// Where the CHANNEL LOGS live, which is not the same place as `--state`.
+///
+/// Channel logs are the server's shared storage; `--state` is one client's own
+/// certificate pins and sessions. An agent given its own `--state` directory
+/// must still read the channels everyone shares, so a local read resolves the
+/// home from `$AI_CHAT_HOME` (or the XDG default) exactly as the server does,
+/// and ignores `--state`.
+fn channels_home() -> PathBuf {
+    client_state_dir()
+}
+
+/// One stored `MSG #chan <id> ...` line's id, or None for anything else.
+fn msg_line_id(line: &str) -> Option<u64> {
+    if !line.starts_with("MSG ") {
+        return None;
+    }
+    line.split_whitespace().nth(2)?.parse::<u64>().ok()
+}
+
+/// The highest stored id in a channel log, or 0 when there is none.
+///
+/// Taken from the maximum over all rows rather than the last line: a truncated
+/// or interleaved final write must not make the cursor go backwards.
+fn local_last_id(state_dir: &std::path::Path, chan: &str) -> u64 {
+    let path = local_chan_log(state_dir, chan);
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut top = 0u64;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        if let Some(id) = msg_line_id(&line) {
+            if id > top {
+                top = id;
+            }
+        }
+    }
+    top
+}
+
+/// Print stored messages with id > `since`, straight from the channel log.
+/// Returns the highest id printed.
+///
+/// This is the reader the skill was missing. Every read path required a live
+/// server, so when a server was unreachable the only way to see a channel was
+/// to open its log by hand — which is exactly what happened, and it bypasses
+/// mention filtering and cursors entirely. Reading the log is lossless: the
+/// log IS the storage format, so a local read returns the same lines a FETCH
+/// would.
+fn local_read(
+    state_dir: &std::path::Path,
+    chan: &str,
+    since: u64,
+    mentions_for: Option<&str>,
+) -> u64 {
+    let path = local_chan_log(state_dir, chan);
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "chat-client-rs: cannot read {}: {} (no such channel locally; a channel exists once its first message is stored)",
+                path.display(),
+                e
+            );
+            std::process::exit(66);
+        }
+    };
+    let mut max_id = 0u64;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let id = match msg_line_id(&line) {
+            Some(id) => id,
+            None => continue, // a malformed line is skipped, never fatal
+        };
+        if id <= since {
+            continue;
+        }
+        if let Some(nick) = mentions_for {
+            if !line.contains(&format!("@{}", nick)) {
+                continue;
+            }
+        }
+        println!("{}", line);
+        if id > max_id {
+            max_id = id;
+        }
+    }
+    max_id
+}
+
 fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    if o.local {
+        if o.chan.is_empty() {
+            eprintln!("chat-client-rs: read --local needs --chan #c");
+            std::process::exit(64);
+        }
+        // --since wins; otherwise the session cursor; otherwise everything.
+        // A local read defaults to the whole log rather than the current end:
+        // without a server there is no LASTID to ask, and silently printing
+        // nothing is the worst of the available answers.
+        let since = if !o.since.is_empty() {
+            o.since.parse::<u64>().unwrap_or(0)
+        } else if o.no_session {
+            0
+        } else {
+            Session::load(state_dir).cursor(&o.chan)
+        };
+        let mentions_for = if o.mentions {
+            let nick = if o.nick.is_empty() {
+                Session::load(state_dir).nick
+            } else {
+                o.nick.clone()
+            };
+            if nick.is_empty() {
+                eprintln!("chat-client-rs: --mentions needs --nick (or a saved session nick)");
+                std::process::exit(64);
+            }
+            Some(nick)
+        } else {
+            None
+        };
+        let max_id = local_read(&channels_home(), &o.chan, since, mentions_for.as_deref());
+        if max_id > 0 {
+            save_cursor(state_dir, &o.chan, max_id, o.no_session);
+        }
+        return;
+    }
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1004,6 +1347,50 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
 
 fn tail(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    if o.local {
+        if o.chan.is_empty() {
+            eprintln!("chat-client-rs: tail --local needs --chan #c");
+            std::process::exit(64);
+        }
+        let nick = if o.nick.is_empty() {
+            Session::load(state_dir).nick
+        } else {
+            o.nick.clone()
+        };
+        if o.mentions && nick.is_empty() {
+            eprintln!("chat-client-rs: --mentions needs --nick (or a saved session nick)");
+            std::process::exit(64);
+        }
+        let mentions_for = if o.mentions {
+            Some(nick.as_str())
+        } else {
+            None
+        };
+        // A local tail starts at the log's current end unless told otherwise:
+        // a watcher wants what arrives next, not the backlog.
+        let mut since = if !o.since.is_empty() {
+            o.since.parse::<u64>().unwrap_or(0)
+        } else {
+            local_last_id(&channels_home(), &o.chan)
+        };
+        // Same step-down cadence as the socket tail: responsive while a
+        // conversation is live, near-silent when nothing is happening.
+        let mut wait = 1u64;
+        loop {
+            let max_id = local_read(&channels_home(), &o.chan, since, mentions_for);
+            if max_id > since {
+                since = max_id;
+                save_cursor(state_dir, &o.chan, max_id, o.no_session);
+                wait = 1;
+                if o.mention_exit {
+                    return;
+                }
+            } else if wait < 60 {
+                wait = (wait * 2).min(60);
+            }
+            std::thread::sleep(Duration::from_secs(wait));
+        }
+    }
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1320,6 +1707,7 @@ mod tests {
             server: "127.0.0.1:1234".into(),
             nick: "agent".into(),
             cursors: std::collections::HashMap::from([("#ops".to_string(), 7)]),
+            owner: String::new(),
         };
         s.save(&d).unwrap();
 
@@ -1344,6 +1732,7 @@ mod tests {
     #[test]
     fn session_malformed_json_recovers_to_empty() {
         let d = tmp_state("session_malformed_json_recovers_to_empty");
+        fs::create_dir_all(Session::path(&d).parent().unwrap()).unwrap();
         fs::write(Session::path(&d), "{ not valid json !!!").unwrap();
         let s = Session::load(&d);
         assert_eq!(s.server, "");
@@ -1354,6 +1743,7 @@ mod tests {
             server: "h:1".into(),
             nick: String::new(),
             cursors: Default::default(),
+            owner: String::new(),
         };
         s2.save(&d).unwrap();
         let reloaded = Session::load(&d);
@@ -1366,6 +1756,7 @@ mod tests {
         // A JSON object missing the cursors key must still deserialize
         // (serde default) rather than failing the whole file.
         let d = tmp_state("session_partial_json_keeps_what_parses_or_resets");
+        fs::create_dir_all(Session::path(&d).parent().unwrap()).unwrap();
         fs::write(Session::path(&d), "{\"server\":\"h:1\",\"nick\":\"n\"}").unwrap();
         let s = Session::load(&d);
         assert_eq!(s.server, "h:1");
@@ -1416,6 +1807,7 @@ mod tests {
             server: "h:1".into(),
             nick: "me".into(),
             cursors: std::collections::HashMap::from([("#a".to_string(), 3)]),
+            owner: String::new(),
         };
         s.save(&d).unwrap();
         s.cursors.clear();
@@ -1445,5 +1837,179 @@ mod tests {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
         assert_eq!(id2, 0);
+    }
+
+    // ---- per-owner sessions -------------------------------------------------
+
+    #[test]
+    fn owner_id_cannot_escape_the_state_dir() {
+        // An owner id reaches the filesystem as a path segment, so a separator
+        // or a parent hop must not survive it.
+        assert_eq!(sanitize_owner("a/b"), "a_b");
+        assert_eq!(sanitize_owner(".."), "default");
+        assert_eq!(sanitize_owner(""), "default");
+        assert_eq!(sanitize_owner("ppid-1234"), "ppid-1234");
+        // The property that matters is not the exact spelling but that the
+        // result is one ordinary path segment: no separator survives, and it
+        // never resolves upwards out of the state dir.
+        for raw in ["../../etc/passwd", "../x", "a/b/c", "..", "we:ird nick"] {
+            let cleaned = sanitize_owner(raw);
+            let path = std::path::Path::new(&cleaned);
+            assert_eq!(
+                path.components().count(),
+                1,
+                "{} sanitized to {} which is not a single segment",
+                raw,
+                cleaned
+            );
+            assert!(!cleaned.contains('/'), "{} kept a separator", cleaned);
+            assert!(
+                !cleaned.contains(std::path::MAIN_SEPARATOR),
+                "{} kept a separator",
+                cleaned
+            );
+            assert_ne!(cleaned, "..", "{} stayed a parent hop", raw);
+            // Joining it must land inside the base, never above it.
+            let joined = std::path::Path::new("/base").join(&cleaned);
+            assert!(joined.starts_with("/base"), "{} escaped", cleaned);
+        }
+    }
+
+    #[test]
+    fn session_path_is_per_owner_not_one_shared_file() {
+        // The whole point: two owners in ONE state dir get two files, so the
+        // second agent cannot overwrite the first's nick and cursors.
+        let d = tmp_state("session_path_is_per_owner");
+        let mine = Session::path(&d);
+        assert!(
+            mine.starts_with(d.join("sessions")),
+            "session must live under sessions/, got {}",
+            mine.display()
+        );
+        let theirs = d.join("sessions").join("ppid-999999.json");
+        assert_ne!(mine, theirs);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn session_from_a_different_owner_is_not_adopted() {
+        // A recycled pid must not inherit the previous owner's identity: the
+        // stamp inside the file decides, not the name of the file.
+        let d = tmp_state("session_from_a_different_owner_is_not_adopted");
+        fs::create_dir_all(Session::path(&d).parent().unwrap()).unwrap();
+        fs::write(
+            Session::path(&d),
+            "{\"server\":\"h:1\",\"nick\":\"someone-else\",\"owner\":\"ppid-424242\"}",
+        )
+        .unwrap();
+        let loaded = Session::load(&d);
+        assert_eq!(
+            loaded.nick, "",
+            "a foreign owner's nick must not be adopted"
+        );
+        assert_eq!(loaded.server, "");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn session_save_then_load_round_trips_under_our_own_owner() {
+        // The control for the test above: our OWN stamp must load back.
+        let d = tmp_state("session_save_then_load_round_trips_owner");
+        let s = Session {
+            server: "h:2".into(),
+            nick: "willie".into(),
+            cursors: Default::default(),
+            owner: String::new(),
+        };
+        s.save(&d).unwrap();
+        let loaded = Session::load(&d);
+        assert_eq!(loaded.nick, "willie");
+        assert_eq!(loaded.owner, session_owner());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // ---- the local channel reader ------------------------------------------
+
+    #[test]
+    fn msg_line_id_reads_only_stored_message_rows() {
+        assert_eq!(msg_line_id("MSG #ops 7 1788 nick :hello"), Some(7));
+        assert_eq!(msg_line_id("MSG #ops 0 1788 nick :hello"), Some(0));
+        // Not a stored row, or no parsable id: skipped, never fatal.
+        assert_eq!(msg_line_id(":server 000 end-of-history #ops"), None);
+        assert_eq!(msg_line_id("MSG #ops notanid 1788 n :x"), None);
+        assert_eq!(msg_line_id(""), None);
+        assert_eq!(msg_line_id("MSG"), None);
+    }
+
+    fn write_log(dir: &std::path::Path, chan: &str, lines: &[&str]) {
+        let path = local_chan_log(dir, chan);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut body = String::new();
+        for l in lines {
+            body.push_str(l);
+            body.push('\n');
+        }
+        fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn local_last_id_takes_the_maximum_not_the_final_line() {
+        // A truncated or interleaved final write must not move the cursor
+        // backwards, so the highest id wins rather than the last row.
+        let d = tmp_state("local_last_id_takes_the_maximum");
+        write_log(
+            &d,
+            "#ops",
+            &[
+                "MSG #ops 1 1 a :one",
+                "MSG #ops 9 1 a :nine",
+                "MSG #ops 4 1 a :four",
+                "garbage",
+            ],
+        );
+        assert_eq!(local_last_id(&d, "#ops"), 9);
+        // A channel with no log at all is 0, not an error.
+        assert_eq!(local_last_id(&d, "#missing"), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn local_read_returns_only_rows_after_the_cursor() {
+        let d = tmp_state("local_read_returns_only_rows_after_cursor");
+        write_log(
+            &d,
+            "#ops",
+            &[
+                "MSG #ops 1 1 a :one",
+                "MSG #ops 2 1 a :two",
+                "MSG #ops 3 1 a :three",
+            ],
+        );
+        // Highest id printed is the new cursor.
+        assert_eq!(local_read(&d, "#ops", 1, None), 3);
+        // Nothing newer than the end: cursor unchanged (0 = printed nothing).
+        assert_eq!(local_read(&d, "#ops", 3, None), 0);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn local_read_mention_filter_matches_only_the_named_nick() {
+        let d = tmp_state("local_read_mention_filter");
+        write_log(
+            &d,
+            "#ops",
+            &[
+                "MSG #ops 1 1 a :plain line",
+                "MSG #ops 2 1 a :hey @willie look",
+                "MSG #ops 3 1 a :@rusty not you",
+            ],
+        );
+        // Only the row naming willie counts, so the cursor stops at 2.
+        assert_eq!(local_read(&d, "#ops", 0, Some("willie")), 2);
+        // And the control: rusty's own mention is found instead.
+        assert_eq!(local_read(&d, "#ops", 0, Some("rusty")), 3);
+        // A nick nobody mentioned yields nothing.
+        assert_eq!(local_read(&d, "#ops", 0, Some("nobody")), 0);
+        let _ = fs::remove_dir_all(&d);
     }
 }
