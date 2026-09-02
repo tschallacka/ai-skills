@@ -1269,6 +1269,30 @@
       "updated_at": "2026-09-02T19:07:06Z"
     },
     {
+      "id": "B113",
+      "title": "validate-plan never checks a handoff's ordering claims against the dependency graph, so a step can promise a later unit something the graph does not order",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "p=.plans/plan-overview-rebuild; s=planning/scripts; \"$s/validate-plan.sh\" \"$p\"; echo \"validator exit=$?\"; \"$s/plan-context.sh\" read --plan-dir \"$p\" --unit W81 --view inventory-row; \"$s/plan-context.sh\" read --plan-dir \"$p\" --document step:13-removal-declared-surface/01-step-remove-template --view full | awk '/^## Handoff/{h=1;next} /^## /{h=0} h'",
+      "observed": "The validator exits 0 with the review-not-approved WARN as its only complaint, and --propagation is on by default. W81's inventory row reads Depends-on W17,W110,W113 -- no W78, and no transitive path to it either. W78's handoff paragraph 7.1 reads: 'W81 and W82 can remove the manifest row and the map entry knowing the file they describe is genuinely gone rather than pending, so their freshness checks are measuring the tree and not anticipating it.' So W81's freshness check is free to execute before W78 removes the file, which is the exact case its own handoff says must not happen, and nothing in the suite objects.",
+      "expected": "The propagation pass should WARN when a handoff names a work unit that has no ordering relation to the unit whose handoff it is, in either direction. It cannot tell a consumption claim from a bare cross-reference by reading prose, so WARN is the right strength -- the same judgement already made for the rule that flags a unit's instructions naming a project symbol no inventory row owns.",
+      "mechanism": "validate-plan-propagation-lib.sh carries six checks -- completion, symbols, reach, companion, leaves, freshness, roster -- and not one of them reads a step's `## Handoff` prose. The primitive the check needs is already there and already used: dep_reaches() at validate-plan-propagation-lib.sh:184 computes memoised transitive reachability over the inventory's Depends-on column for the verification-grades-sibling check. So the gap is not missing machinery but a missing application of it: extract the WNN references from each handoff paragraph and run each through dep_reaches in both directions, warning when neither direction reaches. SKILL.md's seven-surface rule names dependency edges (surface 6) and the handoff as separate surfaces to sweep, and nothing cross-checks either against the other.",
+      "surfaces": [
+        "planning/scripts/validate-plan-propagation-lib.sh",
+        "planning/scripts/validate-plan.sh",
+        "planning/SKILL.md",
+        "planning/MAINTAINER.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "coordinator self-sweep while re-baselining plan-overview-rebuild, run after the cycle-8 reviewer called one instance the fifth recurrence of the class",
+      "notes": "Measured, not estimated: 58 of the plan's 118 units carry at least one such handoff claim, spread across 14 of its 17 goals (01-engine-core 11, 02-page-shell 9, 12-adaptive-cinematics 7, 17-build-toolchain 5, 11-visual-language 5, and the rest in ones to fours). Five were read in full to judge precision and all five were genuine consumption claims, not bare references: W02 'W03 and W50 derive from these values'; W101 'W83 and W84 have a flag contract to quote, W14 has the serve and port flags it is invoked through'; W109 'W64, W65 and W66 can carry the marker their audience requires', which is only true after W109 teaches the marker reader the CSS comment form; W78 as quoted above; and W69 'These numbers justify the tier thresholds W71 declares', the one arguable case. Why it went unnoticed: successive reviewers found instances one at a time -- AR-07, AR-21, AR-25, AR-32, AR-53 and AR-67 across six cycles -- and each was correctly reported and closed, so the loop looked healthy while the class was never measured. This is the same failure shape B110 records, and the two are peers rather than parent and child: B110 is about a document contradicting itself and about there being no required coordinator self-check before a reviewer is dispatched, and its proposed checks (stale wording, spelled-out counts, companion sections disagreeing) do not include this one, which compares a document against the dependency graph rather than against itself. A caution for whoever implements it, because two obvious spellings are both wrong and were both tried: comparing against direct Depends-on edges only reports 126 hits on this plan, because ordering is frequently transitive; and a single-pass Floyd-Warshall style relaxation over an awk associative array returned a complete graph (118 squared pairs) whose zero findings looked like a pass. Use real reachability, memoised as dep_reaches already is, and exclude pairs ordered in EITHER direction -- a handoff legitimately names its own upstream, and not excluding upstream adds about thirty false positives. The reproduction above was run as written and produced the quoted observed output verbatim, including validator exit 0.",
+      "created_at": "2026-09-02T20:05:33Z",
+      "updated_at": "2026-09-02T20:06:39Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
