@@ -174,14 +174,17 @@
         "planning/scripts/register-read.sh",
         "planning/scripts/register-lib.sh",
         "installer/src/50-manifest.sh",
-        "tests/test-mode-markers.sh"
+        "tests/test-mode-markers.sh",
+        "planning/PACKAGE-MANIFEST.tsv",
+        "tests/test-skill-files-manifest.sh",
+        "tests/test-installer-manifest.sh"
       ],
       "fix": null,
       "verification": null,
       "found_by": "T81 work, maintainer session 2026-09-01",
-      "notes": null,
+      "notes": "Re-confirmed on master at f4e7239 on 2026-09-02, still unfixed, and it is live on this machine rather than theoretical: /home/mdibbets/ai/agents/skills/planning/scripts/register-read.sh --help dies with \"line 32: .../scripts/register-lib.sh: No such file or directory\", and register-lib.sh is absent from the installed tree. Found again independently during an adversarial review round, which means it will bite the next helper call any agent makes. Confirmed with the repository's own manifest function, which is the authoritative split: `bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod'` lists scripts/register-command.sh and scripts/register-read.sh and NOT scripts/register-lib.sh, while the dev arm lists register-lib.sh and register-rebuild.sh. Master's register-read.sh still sources the library unconditionally at line 32, so a prod install cannot work. NEW SURFACE not in the list above: planning/PACKAGE-MANIFEST.tsv holds exactly two register rows - register-command.sh and register-read.sh - and omits register-lib.sh AND register-rebuild.sh entirely. So the pair is inconsistent in three places, not two, and CODE-STYLE.md section 3's rule that the four places move together is broken. That also means tests/test-skill-files-manifest.sh and tests/test-installer-manifest.sh should be failing on this pair and are not, which is a second defect worth checking while fixing this one. Installing the newest planning helper from the repository does NOT resolve it, since master reproduces the arms exactly as described.",
       "created_at": "2026-09-01T19:02:00Z",
-      "updated_at": "2026-09-01T19:02:00Z"
+      "updated_at": "2026-09-02T12:54:57Z"
     },
     {
       "id": "B3",
