@@ -1,6 +1,7 @@
 // MODE: DEV
 use serde_json::Value;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
@@ -29,6 +30,32 @@ const READY_POLLS: usize = 3000;
 /// budget above is what bounds the wait.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Where a wrapper's stderr is kept, inside the test's own directory.
+///
+/// It was `Stdio::null()`. That is why a wrapper that failed before it could
+/// bind produced seventeen "socket did not appear" panics on the macOS runner
+/// and not one line saying what went wrong -- the diagnosis had to be guessed
+/// at from which tests failed. A FILE and not a pipe, because the wrapper
+/// outlives the assertion and a pipe nobody drains blocks it once the buffer
+/// fills; opened for append so several wrappers in one directory accumulate
+/// rather than truncating each other.
+fn stderr_path(dir: &Path) -> PathBuf {
+    dir.join("wrapper.stderr")
+}
+
+/// Whatever the wrapper said, ready to append to a panic message.
+fn wrapper_stderr(dir: &Path) -> String {
+    match fs::read(stderr_path(dir)) {
+        Ok(bytes) if !bytes.is_empty() => {
+            format!(
+                "wrapper stderr:\n{}",
+                String::from_utf8_lossy(&bytes).trim_end()
+            )
+        }
+        _ => "wrapper stderr: (empty)".to_string(),
+    }
+}
+
 fn temp_dir(label: &str) -> PathBuf {
     let path =
         std::env::temp_dir().join(format!("interactive-shell-{label}-{}", std::process::id()));
@@ -56,7 +83,13 @@ fn start_binary(binary: &str, dir: &Path, command: &[&str], idle: &str) -> Child
         ])
         .args(command)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(stderr_path(dir))
+                .unwrap(),
+        ))
         .spawn()
         .unwrap()
 }
@@ -82,9 +115,10 @@ fn request(dir: &Path, body: &str) -> Value {
         thread::sleep(POLL_INTERVAL);
     }
     panic!(
-        "socket did not appear at {} within {:?}",
+        "socket did not appear at {} within {:?}\n{}",
         dir.join("socket").display(),
-        POLL_INTERVAL * READY_POLLS as u32
+        POLL_INTERVAL * READY_POLLS as u32,
+        wrapper_stderr(dir)
     )
 }
 
@@ -103,9 +137,10 @@ fn request_all(dir: &Path, body: &str) -> Vec<Value> {
         thread::sleep(POLL_INTERVAL);
     }
     panic!(
-        "socket did not appear at {} within {:?}",
+        "socket did not appear at {} within {:?}\n{}",
         dir.join("socket").display(),
-        POLL_INTERVAL * READY_POLLS as u32
+        POLL_INTERVAL * READY_POLLS as u32,
+        wrapper_stderr(dir)
     )
 }
 
@@ -162,7 +197,11 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
     let screens: Vec<&Value> = events.iter().filter(|v| v["event"] == "screen").collect();
-    assert!(!screens.is_empty());
+    assert!(
+        !screens.is_empty(),
+        "no screen events\n{}",
+        wrapper_stderr(&dir)
+    );
     assert_eq!(screens[0]["seq"], 1);
     assert_eq!(screens[0]["base"], 0);
     for pair in screens.windows(2) {
@@ -204,7 +243,11 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("CSI_SAFE"));
+    assert!(
+        rows.contains("CSI_SAFE"),
+        "CSI_SAFE never reached the screen\n{}",
+        wrapper_stderr(&dir)
+    );
     assert!(rows.contains("OSC_SAFE"));
     assert!(!rows.contains(&"1".repeat(129)));
     assert!(!rows.contains(&"x".repeat(4097)));
@@ -221,7 +264,7 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
         thread::sleep(POLL_INTERVAL);
     }
     let mode = fs::metadata(dir.join("socket"))
-        .unwrap()
+        .unwrap_or_else(|e| panic!("no socket to inspect: {e}\n{}", wrapper_stderr(&dir)))
         .permissions()
         .mode()
         & 0o777;
@@ -264,7 +307,11 @@ fn closed_output_removes_socket_before_exit() {
         }
         thread::sleep(POLL_INTERVAL);
     }
-    assert!(dir.join("socket").exists());
+    assert!(
+        dir.join("socket").exists(),
+        "the socket was never created\n{}",
+        wrapper_stderr(&dir)
+    );
     drop(child.stdout.take());
     let status = child.wait().unwrap();
     assert!(!status.success());
@@ -304,7 +351,11 @@ fn invalid_dimensions_fail_before_creating_socket() {
         ])
         .output()
         .unwrap();
-    assert!(upper.status.success());
+    assert!(
+        upper.status.success(),
+        "the upper-bound wrapper failed: {}",
+        String::from_utf8_lossy(&upper.stderr).trim_end()
+    );
     for (option, value) in [("--rows", "0"), ("--cols", "241"), ("--rows", "101")] {
         let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell"))
             .args([
@@ -568,7 +619,12 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
         .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
         .output()
         .unwrap();
-    assert!(input.status.success());
+    assert!(
+        input.status.success(),
+        "session wait failed: {}\n{}",
+        String::from_utf8_lossy(&input.stderr).trim_end(),
+        wrapper_stderr(socket.parent().unwrap())
+    );
     assert!(String::from_utf8_lossy(&input.stdout).contains("\"matched\":true"));
     let shutdown = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
@@ -768,7 +824,12 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
         ])
         .output()
         .unwrap();
-    assert!(input.status.success());
+    assert!(
+        input.status.success(),
+        "text send failed: {}\n{}",
+        String::from_utf8_lossy(&input.stderr).trim_end(),
+        wrapper_stderr(&dir)
+    );
     let snapshot = request_all(
         &dir,
         r#"{"v":1,"op":"observe"}
@@ -815,9 +876,14 @@ fn idle_timeout_reports_status_124() {
         .read_to_string(&mut output)
         .unwrap();
     child.wait().unwrap();
-    assert!(output.lines().any(
-        |line| line.contains("\"reason\":\"idle_timeout\"") && line.contains("\"status\":124")
-    ));
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("\"reason\":\"idle_timeout\"")
+                && line.contains("\"status\":124")),
+        "no idle_timeout lifecycle line\n{}",
+        wrapper_stderr(&dir)
+    );
     assert!(!dir.join("socket").exists());
 }
 

@@ -1967,7 +1967,17 @@ pub fn run(
     unsafe {
         libc::umask(old_umask);
     }
-    let listener = listener_result.map_err(|e| e.to_string())?;
+    // The path is in the message, not just the errno. A bare "No such file or
+    // directory" from a bind is unactionable: bind_path is derived from a
+    // /proc or /dev/fd entry that the caller never sees, so the error has to
+    // say which path the kernel rejected and which socket it stood for.
+    let listener = listener_result.map_err(|e| {
+        format!(
+            "bind {} (for {}) failed: {e}",
+            bind_path.display(),
+            socket.display()
+        )
+    })?;
     let mut socket_guard = SocketGuard::new();
     socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
     if let Err(error) = listener.set_nonblocking(true) {
