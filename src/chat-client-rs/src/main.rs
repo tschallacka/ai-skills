@@ -35,9 +35,11 @@ fn usage() {
          \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
-         options (after the subcommand, like every other flag):\n\
+         options (after the subcommand, unless noted):\n\
          \x20 --state DIR     client state dir, beats $AI_CHAT_HOME (default: $AI_CHAT_HOME\n\
          \x20                 or the tsch-ai-skills XDG chat dir)\n\
+         \x20 --session ID    which session this agent owns (default: inferred, see below);\n\
+         \x20                 the one flag also accepted BEFORE the subcommand\n\
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
@@ -45,13 +47,27 @@ fn usage() {
          The session remembers the default server+nick and per-channel cursors\n\
          (last seen message id). join seeds the cursor to the channel's current\n\
          end (so read/tail never dump old history); leave PARTs and drops the\n\
-         cursor. A malformed session.json is reset with a warning."
+         cursor. A malformed session file is reset with a warning.\n\n\
+         Each agent gets its own session file, so several agents can share one\n\
+         AI_CHAT_HOME without sharing a nick or a cursor. Which session an\n\
+         invocation owns is the first of these that applies:\n\
+         \x20 1. --session ID, else $CHAT_SESSION_ID\n\
+         \x20 2. a session id the harness exports (Claude Code, codex, opencode)\n\
+         \x20 3. the git worktree root\n\
+         \x20 4. otherwise one shared session\n\
+         `session show` prints which rung decided and which file it is."
     );
     std::process::exit(64);
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+    // --session is a global option, so it is accepted before the subcommand as
+    // well as after it. session_key() reads it straight out of argv either way;
+    // dropping the pair here keeps it from being read as the subcommand.
+    if args.len() > 2 && args[1] == "--session" {
+        args.drain(1..3);
+    }
     if args.len() < 2 {
         usage();
     }
@@ -79,6 +95,9 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
     match sub {
         "show" => {
             let s = Session::load(state_dir);
+            let (key, source) = session_key();
+            println!("session={} source={}", key, source.as_str());
+            println!("file={}", Session::path(state_dir).display());
             println!("server={}", s.server);
             println!("nick={}", s.nick);
             for (chan, id) in &s.cursors {
@@ -184,9 +203,191 @@ fn dirs_home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
 }
 
+// ---- per-agent session identity -------------------------------------------
+
+/// Where the session key came from, so `session show` can say which rung of the
+/// ladder decided and an agent can tell a shared key from its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum KeySource {
+    /// `--session ID` or `$CHAT_SESSION_ID`.
+    Explicit,
+    /// A session id the coding harness itself exports.
+    Harness,
+    /// The git worktree root: the zero-config default for agents that each
+    /// work in their own checkout of one project.
+    Worktree,
+    /// Nothing distinguished this agent, so it shares one session.
+    Shared,
+}
+
+impl KeySource {
+    fn as_str(self) -> &'static str {
+        match self {
+            KeySource::Explicit => "explicit",
+            KeySource::Harness => "harness",
+            KeySource::Worktree => "worktree",
+            KeySource::Shared => "shared",
+        }
+    }
+}
+
+/// Harness-exported identity variables, most specific first. Each was measured
+/// on this machine to be identical across repeated invocations of one agent
+/// (including through `env`, `timeout` and a shell-function wrapper) and to
+/// differ between genuinely different agents:
+///
+/// - `CLAUDE_CODE_SESSION_ID` -- Claude Code, one per session and per subagent.
+/// - `CODEX_SESSION_ID` -- codex; `CODEX_THREAD_ID` was measured equal to it,
+///   so it adds nothing.
+/// - `OPENCODE_PID` -- opencode exports no session id, only the pid of the
+///   opencode process. That is instance granularity, not session granularity:
+///   several sessions inside one opencode process share it, and a recycled pid
+///   can adopt a dead instance's cursors. It is still the only thing opencode
+///   offers, and it is a value the harness exports rather than something read
+///   back out of the process tree, so it does not move per invocation.
+///
+/// Every variable that is set contributes to the key, rather than the first one
+/// winning. Harnesses nest: a codex launched from a Claude Code agent inherits
+/// that agent's `CLAUDE_CODE_SESSION_ID` unchanged and adds its own
+/// `CODEX_SESSION_ID` (measured). Taking only the first match would give the
+/// inner codex the outer agent's session; combining them keeps the two apart
+/// whichever way round they are nested.
+const HARNESS_ID_VARS: [&str; 3] = ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "OPENCODE_PID"];
+
+/// FNV-1a, 64-bit. Not a cryptographic hash and does not need to be: it only
+/// turns an identity string into a short, stable, filename-safe key.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Reduce a caller-chosen id to something safe to use as a filename, keeping it
+/// readable so `ls sessions/` still says whose session is whose.
+fn safe_key(raw: &str) -> String {
+    let mut out = String::new();
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    // "." and ".." would name a directory rather than a session.
+    if out.is_empty() || out.chars().all(|c| c == '.') {
+        return String::new();
+    }
+    out
+}
+
+/// Resolve which session this invocation owns, as a precedence ladder. Pure:
+/// the environment and the worktree root are handed in, so each rung can be
+/// tested without an actual agent, an actual harness, or an actual repository.
+///
+/// Deliberately absent: anything read out of the process tree. `pid`, `ppid`
+/// and `getsid` were all measured to change between two invocations by the same
+/// agent (a runner such as `timeout` or `env`, or the harness re-execing, gives
+/// a fresh pid every call), which would mint a new session per call and lose the
+/// cursors the session exists to keep. Inside codex's sandbox they are worse
+/// than unstable: they are pinned at 3/2/1 for every session on the machine, so
+/// they are stable and identical, which would merge every codex agent into one.
+fn resolve_session_key(
+    explicit: Option<&str>,
+    env: &dyn Fn(&str) -> Option<String>,
+    worktree_root: Option<&str>,
+) -> (String, KeySource) {
+    // 1. What Tschallacka asked for by name always wins; no inference.
+    let chosen = explicit
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| env("CHAT_SESSION_ID").filter(|s| !s.is_empty()));
+    if let Some(id) = chosen {
+        let key = safe_key(&id);
+        if !key.is_empty() {
+            return (key, KeySource::Explicit);
+        }
+    }
+
+    // 2. Whatever identity the harness already knows about itself.
+    let mut material = String::new();
+    for name in HARNESS_ID_VARS.iter() {
+        if let Some(v) = env(name).filter(|v| !v.is_empty()) {
+            material.push_str(name);
+            material.push('=');
+            material.push_str(&v);
+            material.push('\u{1f}');
+        }
+    }
+    if !material.is_empty() {
+        return (
+            format!("h-{:016x}", fnv1a64(material.as_bytes())),
+            KeySource::Harness,
+        );
+    }
+
+    // 3. The worktree root. Agents on one project in separate worktrees are the
+    //    case this skill exists for, and the root is already unique per
+    //    checkout on a machine, so the shared repository directory would add
+    //    nothing to distinctness -- two checkouts of one repo have different
+    //    roots, and sibling worktrees must NOT share a session.
+    if let Some(root) = worktree_root.filter(|r| !r.is_empty()) {
+        return (
+            format!("w-{:016x}", fnv1a64(root.as_bytes())),
+            KeySource::Worktree,
+        );
+    }
+
+    // 4. Nothing to go on -- outside a repository, with no harness and no
+    //    explicit id. One shared session, which is the behaviour that predates
+    //    this ladder, under a name that says so.
+    ("shared".to_string(), KeySource::Shared)
+}
+
+/// The session this process owns, resolved once. Reading `--session` straight
+/// out of argv keeps every existing call site unchanged: the session key is a
+/// property of the invocation, like argv itself.
+fn session_key() -> &'static (String, KeySource) {
+    static KEY: std::sync::OnceLock<(String, KeySource)> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        let args: Vec<String> = std::env::args().collect();
+        let explicit = parse_flag(&args, "--session");
+        resolve_session_key(
+            explicit.as_deref(),
+            &|name| std::env::var(name).ok(),
+            git_worktree_root().as_deref(),
+        )
+    })
+}
+
+/// The current worktree root, or None outside a git repository (or where git is
+/// not installed, which must degrade to the next rung rather than fail).
+fn git_worktree_root() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if root.is_empty() {
+        None
+    } else {
+        Some(root)
+    }
+}
+
 /// Persistent session state: the default server+nick and per-channel message
 /// cursors, so an agent does not repeat `--server host:port --nick me` (and a
-/// since-id) on every call. Stored as `<state>/session.json`.
+/// since-id) on every call. Stored as `<state>/sessions/<key>.json`, one file
+/// per agent, so agents sharing an `AI_CHAT_HOME` do not share a nick or a
+/// cursor.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct Session {
     server: String,
@@ -197,14 +398,35 @@ struct Session {
 
 impl Session {
     fn path(state_dir: &std::path::Path) -> PathBuf {
+        Session::path_for(state_dir, &session_key().0)
+    }
+
+    fn path_for(state_dir: &std::path::Path, key: &str) -> PathBuf {
+        state_dir.join("sessions").join(format!("{}.json", key))
+    }
+
+    /// The pre-ladder location: one session for the whole state dir.
+    fn legacy_path(state_dir: &std::path::Path) -> PathBuf {
         state_dir.join("session.json")
     }
 
     /// Load the session, recovering from a missing or malformed file. A
     /// malformed file is reported on stderr (so an agent knows the cursors were
     /// reset) and an empty session is returned; the next save overwrites it.
+    ///
+    /// An agent that has no session file of its own yet inherits the old shared
+    /// `session.json` if one is there, so an upgrade mid-conversation does not
+    /// drop the nick and cursors an agent was already using. The shared file is
+    /// only read, never moved or rewritten: every agent still holding state in
+    /// it needs it to stay put, and each writes to its own file from then on.
     fn load(state_dir: &std::path::Path) -> Session {
-        let path = Session::path(state_dir);
+        let mut path = Session::path(state_dir);
+        if !path.exists() {
+            let legacy = Session::legacy_path(state_dir);
+            if legacy.exists() {
+                path = legacy;
+            }
+        }
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(_) => return Session::default(), // no file yet
@@ -222,9 +444,12 @@ impl Session {
     }
 
     fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
-        fs::create_dir_all(state_dir)?;
+        let path = Session::path(state_dir);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let json = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
-        fs::write(Session::path(state_dir), json)
+        fs::write(path, json)
     }
 
     fn cursor(&self, chan: &str) -> u64 {
@@ -453,6 +678,11 @@ fn parse_opts(args: &[String]) -> Opts {
             "--since" => {
                 i += 1;
                 o.since = args.get(i).cloned().unwrap_or_default();
+            }
+            "--session" => {
+                // Consumed by session_key() straight from argv; taken here too
+                // so its value is not mistaken for another option.
+                i += 1;
             }
             "--insecure" => o.insecure = true,
             "--no-session" => o.no_session = true,
@@ -1326,7 +1556,166 @@ mod tests {
             std::env::temp_dir().join(format!("chat-session-test-{}-{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
+        // Session files live under sessions/<key>.json; a test that writes one
+        // by hand needs the directory to exist, as `save` would have made it.
+        fs::create_dir_all(d.join("sessions")).unwrap();
         d
+    }
+
+    /// An env lookup over a fixed table, so a rung can be tested without an
+    /// actual harness and without touching the process environment (which
+    /// would race the other tests in this binary).
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn explicit_session_flag_wins_over_everything() {
+        let env = env_of(&[
+            ("CHAT_SESSION_ID", "from-env"),
+            ("CLAUDE_CODE_SESSION_ID", "claude-1"),
+        ]);
+        let (key, src) = resolve_session_key(Some("agent-b"), &env, Some("/repo"));
+        assert_eq!(key, "agent-b");
+        assert_eq!(src, KeySource::Explicit);
+    }
+
+    #[test]
+    fn chat_session_id_env_wins_over_inference() {
+        let env = env_of(&[
+            ("CHAT_SESSION_ID", "from-env"),
+            ("CLAUDE_CODE_SESSION_ID", "claude-1"),
+        ]);
+        let (key, src) = resolve_session_key(None, &env, Some("/repo"));
+        assert_eq!(key, "from-env");
+        assert_eq!(src, KeySource::Explicit);
+    }
+
+    #[test]
+    fn explicit_id_is_reduced_to_a_safe_filename() {
+        let env = env_of(&[]);
+        let (key, src) = resolve_session_key(Some("../../etc/passwd"), &env, None);
+        assert_eq!(src, KeySource::Explicit);
+        assert!(!key.contains('/'), "key must not contain a path separator");
+        // What matters is where the key resolves: one file directly inside
+        // sessions/, never a path that climbs out of it.
+        let d = tmp_state("explicit_id_is_reduced_to_a_safe_filename");
+        let path = Session::path_for(&d, &key);
+        assert_eq!(
+            path.parent().unwrap(),
+            d.join("sessions"),
+            "resolved to {}",
+            path.display()
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_all_dots_explicit_id_falls_through_rather_than_naming_a_directory() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "claude-1")]);
+        let (key, src) = resolve_session_key(Some(".."), &env, Some("/repo"));
+        assert_eq!(src, KeySource::Harness, "got key {}", key);
+    }
+
+    #[test]
+    fn each_harness_session_id_gives_a_distinct_key() {
+        let a = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
+        let b = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]), None);
+        assert_eq!(a.1, KeySource::Harness);
+        assert_ne!(a.0, b.0, "two Claude Code sessions must not share a key");
+
+        let c = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "c")]), None);
+        let d = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "d")]), None);
+        assert_eq!(c.1, KeySource::Harness);
+        assert_ne!(c.0, d.0, "two codex sessions must not share a key");
+
+        let e = resolve_session_key(None, &env_of(&[("OPENCODE_PID", "111")]), None);
+        assert_eq!(e.1, KeySource::Harness);
+        assert_ne!(
+            e.0,
+            resolve_session_key(None, &env_of(&[("OPENCODE_PID", "222")]), None).0
+        );
+    }
+
+    #[test]
+    fn a_harness_key_is_stable_for_the_same_ids() {
+        let pairs = [("CODEX_SESSION_ID", "same"), ("OPENCODE_PID", "9")];
+        let first = resolve_session_key(None, &env_of(&pairs), Some("/a"));
+        let again = resolve_session_key(None, &env_of(&pairs), Some("/b"));
+        assert_eq!(
+            first.0, again.0,
+            "the harness rung must not depend on the worktree"
+        );
+    }
+
+    #[test]
+    fn a_nested_harness_does_not_inherit_the_outer_agents_session() {
+        // Measured: a codex launched from a Claude Code agent keeps that
+        // agent's CLAUDE_CODE_SESSION_ID and adds its own CODEX_SESSION_ID.
+        let outer = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
+        let inner = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a"), ("CODEX_SESSION_ID", "z")]),
+            None,
+        );
+        assert_ne!(
+            outer.0, inner.0,
+            "the inner codex must get its own session, not the outer agent's"
+        );
+    }
+
+    #[test]
+    fn the_worktree_rung_separates_worktrees_and_only_applies_without_a_harness() {
+        let env = env_of(&[]);
+        let a = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"));
+        let b = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/two"));
+        assert_eq!(a.1, KeySource::Worktree);
+        assert_ne!(a.0, b.0, "sibling worktrees must not share a session");
+        // Same root, twice: the same key.
+        assert_eq!(
+            a.0,
+            resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one")).0
+        );
+    }
+
+    #[test]
+    fn outside_a_repository_with_no_harness_one_shared_session_is_named_as_such() {
+        let (key, src) = resolve_session_key(None, &env_of(&[]), None);
+        assert_eq!(key, "shared");
+        assert_eq!(src, KeySource::Shared);
+    }
+
+    #[test]
+    fn distinct_session_keys_get_distinct_files() {
+        let d = tmp_state("distinct_session_keys_get_distinct_files");
+        assert_ne!(
+            Session::path_for(&d, "h-1111111111111111"),
+            Session::path_for(&d, "h-2222222222222222")
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_agent_with_no_file_yet_inherits_the_old_shared_session_without_moving_it() {
+        let d = tmp_state("legacy_session_is_inherited_not_moved");
+        fs::write(
+            Session::legacy_path(&d),
+            "{\"server\":\"h:1\",\"nick\":\"old\",\"cursors\":{\"#a\":4}}",
+        )
+        .unwrap();
+        let s = Session::load(&d);
+        assert_eq!(s.nick, "old");
+        assert_eq!(s.cursor("#a"), 4);
+        assert!(
+            Session::legacy_path(&d).exists(),
+            "the shared file other agents still read must stay put"
+        );
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
