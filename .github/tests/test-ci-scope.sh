@@ -51,6 +51,31 @@ check "the selector itself"    full .github/ci-scope.sh
 check "the subject mapper"     full .github/ci-subjects.sh
 check "its own tests"          full .github/tests/test-ci-scope.sh
 
+echo "ci-scope: a push to an integration branch is exhaustive"
+# REGRESSION. On a push to master, HEAD is origin/master, so the merge base is
+# HEAD and the diff is empty: the selector answered `scope=none`, every native
+# leg was skipped, and master went green having compiled nothing. Run
+# 33781612589 is that run -- 9 jobs, no native legs. Selection is a pull
+# request feature; an integration branch does not get to narrow.
+for branch in master nextupdate; do
+    got="$("$scope_sh" --push-to "$branch" | awk -F= '/^scope=/{print $2}')"
+    if [ "$got" = "full" ]; then
+        printf '  ok    a push to %s is full\n' "$branch"
+    else
+        printf '  FAIL  a push to %s must be full, got %s\n' "$branch" "$got"
+        failures=$((failures + 1))
+    fi
+done
+# And it must win over an empty change set, which is the exact shape that bit:
+# --files-from /dev/null is "nothing changed", and none would be the answer.
+got="$("$scope_sh" --push-to master --files-from /dev/null | awk -F= '/^scope=/{print $2}')"
+if [ "$got" = "full" ]; then
+    printf '  ok    a push beats an empty change set\n'
+else
+    printf '  FAIL  a push must beat an empty change set, got %s\n' "$got"
+    failures=$((failures + 1))
+fi
+
 echo "ci-scope: nothing to do"
 check "no files at all"        none ""
 check "a doc-only change"      none README.md

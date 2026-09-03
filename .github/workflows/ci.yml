@@ -271,14 +271,25 @@ jobs:
         id: decide
         shell: bash
         run: |
-          # On a pull request the target branch is the base; on a push to a
-          # long-lived branch there is nothing to compare against but master.
-          if [ -n "${{ github.base_ref }}" ]; then
-            base="origin/${{ github.base_ref }}"
+          # A PUSH TO A LONG-LIVED BRANCH IS ALWAYS FULL, and not by preference:
+          # on a push to master, HEAD *is* origin/master, so the merge base is
+          # HEAD, the diff is empty, and the selector correctly reported
+          # `scope=none` -- skipping every native leg and turning master green
+          # having compiled nothing. A tick that means "we did not look" is the
+          # one outcome this whole mechanism exists to prevent, so the branch
+          # that cannot compute a meaningful base does not get to narrow.
+          #
+          # It is also what this workflow's own `on:` comment already promised:
+          # "Pushes to either run the full matrix."
+          #
+          # Selection is therefore a PULL REQUEST feature. That is where it
+          # pays anyway -- pull requests are the frequent, incremental runs --
+          # and it keeps the integration branches exhaustively covered.
+          if [ -z "${{ github.base_ref }}" ]; then
+            .github/ci-scope.sh --push-to "${{ github.ref_name }}"
           else
-            base="origin/master"
+            .github/ci-scope.sh --base "origin/${{ github.base_ref }}"
           fi
-          .github/ci-scope.sh --base "$base"
 
       - name: Map the crates onto build subjects
         id: subjects
