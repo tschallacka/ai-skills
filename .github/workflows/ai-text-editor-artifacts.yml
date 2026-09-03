@@ -31,7 +31,7 @@ jobs:
             Cargo.lock
             rust-toolchain.toml
             src
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
       - name: Build editor binaries
