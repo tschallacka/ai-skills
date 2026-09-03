@@ -560,6 +560,62 @@ jobs:
             target/${{ matrix.target }}/release/chat-client-rs.exe
           if-no-files-found: error
 
+      # ---- interactive-shell -----------------------------------------------
+      # interactive-shell/binaries.tsv declares eight shipped rows -- the PTY
+      # wrapper and the socket input client, for the two Linux and the two macOS
+      # targets -- and until this step nothing built them. The registry is
+      # allowed to name a binary that does not exist yet (tests/test-shipped-
+      # binaries.sh says so), but a release assembles bin/<triple>/ from CI
+      # artifacts, so eight declared rows with no producing job is a promise
+      # that cannot be kept on any platform.
+      #
+      # No scope flag of its own: ci-subjects.sh maps crates onto subjects and
+      # adding a fifteenth would be plumbing for a build that costs less than
+      # the workspace-wide clippy already running above. The job-level
+      # `scope != 'none'` condition is the gate.
+      #
+      # The fixture binary is deliberately not built: it is maintainer-only and
+      # has no binaries.tsv row. Windows is excluded for the same reason the
+      # workspace gate excludes the crate there.
+      - name: Build the interactive-shell binaries and prove they launch
+        if: "!contains(matrix.target, 'windows')"
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p interactive-shell --release --target "${{ matrix.target }}" \
+            --bin interactive-shell --bin interactive-shell-input
+          release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          for binary in interactive-shell interactive-shell-input; do
+            # Executed, not just built: these are shipped as prebuilt artifacts,
+            # so "it linked" is not the claim being made about them.
+            "$release/$binary" --help >/dev/null
+            printf '%s launches on %s\n' "$binary" '${{ matrix.target }}'
+          done
+
+      - name: The musl interactive-shell build must actually be static
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          # Same claim as plan-crypt's: the target machine needs nothing.
+          for binary in interactive-shell interactive-shell-input; do
+            out="$(ldd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$binary" 2>&1 || true)"
+            printf '%s: %s\n' "$binary" "$out"
+            case "$out" in
+              *"not a dynamic executable"*|*"statically linked"*) ;;
+              *) echo "::error::$binary links against a shared library"; exit 1 ;;
+            esac
+          done
+
+      - name: Upload the interactive-shell artifacts
+        if: "!contains(matrix.target, 'windows')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: interactive-shell-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/interactive-shell
+            target/${{ matrix.target }}/release/interactive-shell-input
+          if-no-files-found: error
+
       # ---- plan-crypt ------------------------------------------------------
       - name: Build plan-crypt
         if: needs.scope.outputs.plan_crypt == 'true'
