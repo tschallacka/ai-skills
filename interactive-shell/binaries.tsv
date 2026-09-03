@@ -3,10 +3,13 @@
 # + socket input client).
 # Built by the release/CI (cargo build --release --workspace); never committed.
 #
-# Two of the crate's three binaries ship. interactive-shell-fixture is marked
-# MODE: DEV / PACKAGE: DEV: it emits deliberately fragmented CSI and OSC
-# sequences as an input to tests/protocol.rs and has no use on a target
-# machine, so it stays out of this registry.
+# Two of the crate's three binaries ship. interactive-shell-fixture is a
+# maintainer-only build (its markers say so) because it emits deliberately
+# fragmented CSI and OSC sequences as an input to tests/protocol.rs and has no
+# use on a target machine, so it stays out of this registry. Its marker words
+# are described rather than quoted here: a release gate greps the first 25
+# lines of every shipped file for a maintainer marker, and a comment shaped
+# like one reads as one.
 #
 # No Windows row, unlike chat: the wrapper is POSIX-only by construction. It
 # allocates the PTY through libc (TIOCSCTTY, TIOCSWINSZ), terminates a child
