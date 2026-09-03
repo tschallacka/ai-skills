@@ -310,28 +310,44 @@ behaviour will be reported again.
 
 ## Validating the file
 
+Membership is tested with `index(...)`, not jq's `IN/1`. `rjq` — the runtime
+this register mandates, since every writer refuses with 69 without it — does
+not implement `IN/1`: it exits 5 having printed nothing, and an empty findings
+string is the sound case, so the whole check reported any register sound. The
+exit status is therefore tested before the output is trusted; empty output only
+means sound when the command actually ran.
+
+Note the `as $e` binding on each clause. `A | index(B)` evaluates `B` with `A`
+as its input, so a bare `index(.status)` looks `.status` up on the *array* and
+dies with "cannot index". Binding the entry first is what makes the field
+reference resolve against the entry — the same shape `reg_findings` uses.
+
 ```sh
 findings="$(rjq -r '
   (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
   (if (.skill // "") == "" then "the file does not name its schema" else empty end),
   ([.bugs[].id]) as $ids
   | if ([.bugs[].id] | length) != ([.bugs[].id] | unique | length) then "duplicate ids" else empty end,
-    (.bugs[] | select(.parent != null and (.parent | IN($ids[]) | not))
-             | "\(.id) names a parent that does not exist: \(.parent)"),
-    (.bugs[] | select(.status | IN("reported","confirmed","fixed","not-a-defect","wont-fix","obsolete") | not)
-             | "\(.id) has an unknown status: \(.status)"),
-    (.bugs[] | select(.severity | IN("blocking","major","minor","cosmetic") | not)
-             | "\(.id) has an unknown severity: \(.severity)"),
-    (.bugs[] | select(.priority | IN("urgent","high","normal","low","someday") | not)
-             | "\(.id) has an unknown priority: \(.priority)"),
+    (.bugs[] as $e | select($e.parent != null and (($ids | index($e.parent)) == null))
+                   | "\($e.id) names a parent that does not exist: \($e.parent)"),
+    (.bugs[] as $e | select((["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"] | index($e.status)) == null)
+                   | "\($e.id) has an unknown status: \($e.status // "missing")"),
+    (.bugs[] as $e | select((["blocking","major","minor","cosmetic"] | index($e.severity)) == null)
+                   | "\($e.id) has an unknown severity: \($e.severity // "missing")"),
+    (.bugs[] as $e | select((["urgent","high","normal","low","someday"] | index($e.priority)) == null)
+                   | "\($e.id) has an unknown priority: \($e.priority // "missing")"),
     (.bugs[] | select(.created_at == null or .updated_at == null)
              | "\(.id) is missing a timestamp"),
     (.bugs[] | select(.reproduce == null or .reproduce == "") | "\(.id) has no reproduction"),
     (.bugs[] | select(.status == "fixed" and (.verification == null or .verification == ""))
              | "\(.id) is fixed with no verification")
-' BUGS.json)"
+' BUGS.json)" || { printf 'the soundness check could not run\n' >&2; exit 70; }
 [ -z "$findings" ] && echo 'BUGS.json is sound' || printf '%s\n' "$findings"
 ```
+
+The shipped `planning/scripts/register-lib.sh` expresses the same rules as
+`reg_findings`; prefer it where it is available, and keep this snippet in step
+with it.
 
 `rjq -e` is wrong here: it exits 4 on empty output, which is the sound case.
 

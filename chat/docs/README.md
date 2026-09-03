@@ -23,10 +23,10 @@ and a rust client to send, read deltas, or tail.
 
 > `chat-client-rs tail --chan '#deploys' --nick me` — with `--server` left off,
 > the client finds an announcing server by itself.
-> Nothing announcing? `chat/bin/chat-server-rs &` — no environment variables;
-> it binds loopback, announces itself there, and prints the address. Hand that
-> `127.0.0.1:<port>` to whoever wants to watch from an IRC client on this
-> machine.
+> Nothing announcing? `bin/<target-triple>/chat-server-rs &` — no environment
+> variables; it binds loopback, announces itself there, and prints the address.
+> Hand that `127.0.0.1:<port>` to whoever wants to watch from an IRC client on
+> this machine.
 > `chat-client-rs send --chan '#deploys' --nick me --text "smoke tests green, promoting"`.
 > Running more than one agent here? Give each its own `AI_CHAT_HOME`, or they
 > share a nick and a cursor.
