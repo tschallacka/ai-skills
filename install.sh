@@ -452,8 +452,6 @@ runtime_requirements() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
-        bug-report)
-            ;;
         git-merge-resolving)
             case "$platform" in *:*) printf '%s\n' git ;; esac
             ;;
@@ -466,8 +464,6 @@ runtime_requirements() {
         resource-limited-testing)
             case "$platform" in *:*) printf '%s\n' bash ;; esac
             case "$platform" in Darwin:arm64) printf '%s\n' memlimit ;; esac
-            ;;
-        todo)
             ;;
     esac
 }
