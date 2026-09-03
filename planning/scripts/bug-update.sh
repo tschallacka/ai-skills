@@ -76,6 +76,17 @@ case "$status_val" in
         ;;
 esac
 
+# Damage that was already on disk is not this update's doing, and a stamp
+# cannot repair it: refuse before building anything and name the rebuild, the
+# way reg_write does for every other writer.
+findings="$(reg_findings bug "$file")"
+if [ -n "$findings" ]; then
+    printf '%s\n' "$findings" >&2
+    printf '%s: %s is not sound; run register-rebuild.sh %s "%s" first\n' \
+        "${0##*/}" "$file" bug "$file" >&2
+    exit 65
+fi
+
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp="$(mktemp "${TMPDIR:-/tmp}/bug-update.XXXXXX")"
 rjq --arg id "$id" --arg now "$now" \
@@ -93,6 +104,17 @@ rjq --arg id "$id" --arg now "$now" \
          | (if $note != "" then .notes = ((.notes // "") + (if (.notes // "") != "" then " " else "" end) + $note) else . end)
        else . end)
 ' "$file" > "$tmp"
+
+# Validate the candidate, not the register. mv is irreversible, so it must not
+# run ahead of the check that can refuse (CODE-CONTRACTS.md contract 2): a
+# refusal leaves $file byte-for-byte what it was, as todo-update.sh does.
+findings="$(reg_findings bug "$tmp")"
+if [ -n "$findings" ]; then
+    printf '%s\n' "$findings" >&2
+    rm -f "$tmp"
+    printf '%s: update refused; nothing was written\n' "${0##*/}" >&2
+    exit 65
+fi
 mv "$tmp" "$file"
 
 reg_write bug "$file"

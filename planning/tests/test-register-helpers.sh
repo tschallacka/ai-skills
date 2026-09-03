@@ -24,6 +24,10 @@ run_todo() { TODO_JSON="$todo" "$BASH" "$scripts/todo-add.sh" "$@" 2>&1 || echo 
 run_todoup() { TODO_JSON="$todo" "$BASH" "$scripts/todo-update.sh" "$@" 2>&1 || echo "rc=$?"; }
 run_bugadd() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-add.sh" "$@" 2>&1 || echo "rc=$?"; }
 run_bugup() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-update.sh" "$@" 2>&1 || echo "rc=$?"; }
+# The soundness check the writers share, asked of a file from outside them.
+reg_findings_out() {
+    "$BASH" -c 'source "$1"; reg_findings "$2" "$3"' _ "$scripts/register-lib.sh" "$1" "$2"
+}
 
 # ---- add a task: it lands with stamps and sorts into place ------------------
 out="$(run_todo_add() { :; }; run_todo --id T9999 --title 'Helper probe' --priority high)"
@@ -47,6 +51,19 @@ rjq -e --arg id T9999 '.tasks[] | select(.id == $id) | .status == "done"' "$todo
 # ---- unknown statuses are refused by the shared checks ----------------------
 out="$(run_todoup T9999 --status finished)"
 case "$out" in *'unknown status'*|*rc=65*) : ;; *) fail "an invented status was accepted: $out" ;; esac
+
+# ---- a refused bug-update leaves the register byte-identical (B109) ---------
+# The refusal must be atomic: the value that fails the shared checks must not
+# already be in the file. cmp is the whole point of the case — a message alone
+# proves nothing, since the pre-fix script printed one and wrote anyway.
+probe_id="$(rjq -r '.bugs[0].id' "$bugs")"
+cp "$bugs" "$work/bugs-before-refusal.json"
+out="$(run_bugup "$probe_id" --priority bogus)"
+case "$out" in *'unknown priority bogus'*|*rc=65*) : ;; *) fail "an invented priority was accepted: $out" ;; esac
+cmp -s "$work/bugs-before-refusal.json" "$bugs" \
+    || fail "a refused bug-update wrote to the register anyway (B109)"
+[ -z "$(reg_findings_out bug "$bugs")" ] \
+    || fail "a refused bug-update left the register unsound (B109)"
 
 # ---- bug-add requires the four truth fields ---------------------------------
 out="$(run_bugadd --title 'No reproduction attached')"

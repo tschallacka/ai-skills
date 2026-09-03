@@ -64,7 +64,7 @@ package/planning/scripts/add-ui-story-links.sh	2887
 package/planning/scripts/add-ui-story.sh	4795
 package/planning/scripts/add-work-unit.sh	10706
 package/planning/scripts/bug-add.sh	4249
-package/planning/scripts/bug-update.sh	4515
+package/planning/scripts/bug-update.sh	5379
 package/planning/scripts/cleanup-plans.sh	4540
 package/planning/scripts/configure-ui-story-cache.sh	4792
 package/planning/scripts/create-adversarial-review.sh	2598
