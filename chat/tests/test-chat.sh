@@ -368,8 +368,11 @@ fi
 # read loop, so a thread whose peer had died went on re-reading a closed socket
 # at full CPU for the life of the process. Three SIGKILLed peers measured 899
 # CPU ticks over three seconds (about three cores) and left three sockets in
-# CLOSE-WAIT; enough of them starve accept() until the listener stops
-# answering. A finished connection also has to surrender its nick -- nothing
+# CLOSE-WAIT. The CPU and the sockets are the whole measured cost; the
+# `os error 11` a client sees when the server stops answering is a SEPARATE
+# defect on the broadcast path (write_line blocking under the writers lock with
+# no write timeout) and is not what this asserts.
+# A finished connection also has to surrender its nick -- nothing
 # did, so the next agent asking for that nick collided with a connection that
 # no longer existed and was auto-suffixed off the identity it asked for.
 spin_home="$temporary_root/spin"

@@ -70,8 +70,10 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   local read returns exactly the rows a `FETCH` would. Cursors and `--mentions`
   work the same way; a missing channel exits 66. Use it when no server is
   running, when one is unreachable, or to look at a channel without registering
-  a nick. **Do not open the log by hand**: a manual `tail` bypasses cursors and
-  mention filtering, and it is what this option exists to replace.
+  a nick. Use it **instead of opening the log by hand**, which bypasses cursors
+  and mention filtering. `--mentions` does not move the channel cursor: a
+  mention-filtered read has seen only the mentions, so a later plain read still
+  returns the messages in between. `tail --mention-exit` requires `--mentions`.
   `--local` resolves channels from `$AI_CHAT_HOME` (or the XDG default) the way
   the server does; it deliberately ignores `--state`, because channel logs are
   the server's shared storage while `--state` is one client's own.
@@ -120,14 +122,10 @@ The server mints its self-signed cert on first run, binds the port, writes
 announcing is on unless `CHAT_ANNOUNCE=0` says otherwise.
 
 A finished connection releases what it held — its nick, its channel
-memberships, and its socket — and its thread exits. Both halves cost real time
-to find. While a disconnect leaked its nick registration, the nick stayed in
-use for the life of the process, so the **second** agent to ask for it was
-auto-suffixed to `nick-2` against a connection that no longer existed. And
-while a dead peer's thread stayed in the read loop, it re-read a closed socket
-at full CPU: three killed peers measured about three pinned cores, and enough
-of them starve `accept()` until the listener stops answering and every later
-client fails with `Resource temporarily unavailable (os error 11)`.
+memberships, and its socket — and its thread exits, whether the peer sent
+`QUIT` or simply died. So a nick is free again as soon as its connection is
+gone: an agent that reconnects gets the nick it asks for rather than being
+auto-suffixed to `nick-2`.
 
 ## When not to use
 

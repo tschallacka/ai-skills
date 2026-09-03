@@ -1332,7 +1332,10 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(64);
         }
         if !valid_chan(&o.chan) {
-            eprintln!("chat-client-rs: read --local: not a channel name: {}", o.chan);
+            eprintln!(
+                "chat-client-rs: read --local: not a channel name: {}",
+                o.chan
+            );
             std::process::exit(64);
         }
         // --since wins; otherwise the session cursor; otherwise everything.
@@ -1479,7 +1482,10 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(64);
         }
         if !valid_chan(&o.chan) {
-            eprintln!("chat-client-rs: tail --local: not a channel name: {}", o.chan);
+            eprintln!(
+                "chat-client-rs: tail --local: not a channel name: {}",
+                o.chan
+            );
             std::process::exit(64);
         }
         let nick = if o.nick.is_empty() {
