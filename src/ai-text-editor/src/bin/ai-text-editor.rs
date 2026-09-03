@@ -380,6 +380,7 @@ fn die(message: &str) -> ! {
 }
 fn help() {
     println!("Usage: ai-text-editor COMMAND --endpoint ENDPOINT [OPTIONS]");
+    println!("Open another isolated tab with: ai-text-editor open --endpoint ENDPOINT --file PATH");
     println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"

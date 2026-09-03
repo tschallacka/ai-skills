@@ -78,7 +78,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
-        println!("The server owns the tab and accepts one newline-delimited JSON request per connection. Files above 256 MiB use bounded access; override with --large-threshold-bytes.");
+        println!("The server owns the initial tab and accepts one newline-delimited JSON request per connection. Use client open --endpoint ENDPOINT --file PATH to add isolated tabs; each tab has its own session token and metadata. Files above 256 MiB use bounded access; override with --large-threshold-bytes.");
         return;
     }
     if args.get(1).map(String::as_str) != Some("start") {
