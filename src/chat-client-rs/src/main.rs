@@ -35,8 +35,9 @@ fn usage() {
          \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
-         options:\n\
-         \x20 --state DIR     client state dir (default $AI_CHAT_HOME or the tsch-ai-skills XDG chat dir)\n\
+         options (after the subcommand, like every other flag):\n\
+         \x20 --state DIR     client state dir, beats $AI_CHAT_HOME (default: $AI_CHAT_HOME\n\
+         \x20                 or the tsch-ai-skills XDG chat dir)\n\
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
@@ -54,7 +55,7 @@ fn main() {
     if args.len() < 2 {
         usage();
     }
-    let state_dir = client_state_dir();
+    let state_dir = client_state_dir(&args[2..]);
     match args[1].as_str() {
         "discover" => discover(&args[2..]),
         "send" => send(&args[2..], &state_dir),
@@ -143,7 +144,22 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
     }
 }
 
-fn client_state_dir() -> PathBuf {
+// The client's state directory: --state wins, then $AI_CHAT_HOME, then the
+// central XDG home. Resolved once in main() from the raw arguments rather than
+// per subcommand, so it applies to `session` and `discover` too — every
+// subcommand that has a state directory gets the same one.
+//
+// --state was advertised in usage() and parsed nowhere, which is worse than
+// not offering it: `read --state /tmp/x` silently read the default directory
+// while its caller believed it was isolated. Given that a shared state
+// directory is what makes two agents share a nick and a cursor (B116), a flag
+// that pretends to separate them and does not is the wrong failure.
+fn client_state_dir(args: &[String]) -> PathBuf {
+    if let Some(dir) = parse_flag(args, "--state") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
     std::env::var("AI_CHAT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| chat_default_home())
@@ -1389,6 +1405,40 @@ mod tests {
         save_cursor(&d, "#ops", 9, true);
         assert_eq!(Session::load(&d).cursor("#ops"), 0);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    // --state was documented and never parsed. These assert the flag path
+    // only, which returns before any environment is read, so the test does
+    // not race other tests over AI_CHAT_HOME.
+    #[test]
+    fn state_flag_selects_the_client_state_dir() {
+        let dir = client_state_dir(&["--state".into(), "/tmp/chat-state-probe".into()]);
+        assert_eq!(dir, PathBuf::from("/tmp/chat-state-probe"));
+
+        // It is found wherever it sits in the argument list, since it is
+        // resolved from the raw arguments rather than by a subcommand parser.
+        let dir = client_state_dir(&[
+            "--chan".into(),
+            "#c".into(),
+            "--state".into(),
+            "/tmp/elsewhere".into(),
+            "--nick".into(),
+            "me".into(),
+        ]);
+        assert_eq!(dir, PathBuf::from("/tmp/elsewhere"));
+    }
+
+    #[test]
+    fn a_blank_or_absent_state_flag_does_not_win() {
+        // A blank value must not resolve the state dir to "": it falls through
+        // to $AI_CHAT_HOME / the XDG default, whatever those are here.
+        let dir = client_state_dir(&["--state".into(), "   ".into()]);
+        assert_ne!(dir, PathBuf::from(""));
+        assert_ne!(dir, PathBuf::from("   "));
+
+        // A trailing --state with no value must not panic.
+        let dir = client_state_dir(&["--state".into()]);
+        assert_ne!(dir, PathBuf::from(""));
     }
 
     #[test]
