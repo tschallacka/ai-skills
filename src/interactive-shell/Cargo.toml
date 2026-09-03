@@ -22,10 +22,10 @@ name = "interactive-shell-fixture"
 path = "src/bin/interactive-shell-fixture.rs"
 
 [dependencies]
-libc = "=0.2.159"
-serde = { version = "=1.0.210", features = ["derive"] }
-serde_json = "=1.0.128"
-
-[profile.release]
-lto = "thin"
-strip = true
+# Caret ranges, not "=" pins: this crate is a member of the root workspace, so
+# the single root Cargo.lock picks the version. An exact pin would either force
+# a second copy of serde/libc into that lock or drag all 79 members back to
+# this crate's older choice. Profiles are the root's for the same reason.
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

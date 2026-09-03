@@ -2256,7 +2256,13 @@ mod tests {
         assert_eq!(key_sequence("META-LEFT"), Some(b"\x1b[1;3D".to_vec()));
         assert_eq!(key_sequence("F10"), Some(b"\x1b[21~".to_vec()));
         assert_eq!(key_sequence("CTRL-DELETE"), Some(b"\x1b[3;5~".to_vec()));
+        // "éé" does NOT discriminate: it is 4 bytes, both two-byte slices land
+        // on char boundaries, and from_str_radix rejects them anyway, so the
+        // assertion held with or without the is_ascii guard it was meant to
+        // pin. A 3-byte char followed by an ASCII byte is the case that panics
+        // ("end byte index 2 is not a char boundary") once the guard is gone.
         assert!(decode_hex("éé").is_err());
+        assert!(decode_hex("€x").is_err());
     }
 
     #[test]
