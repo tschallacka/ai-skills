@@ -25,6 +25,13 @@ pub struct Session {
     pub session_token: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct EndpointMetadata {
+    pub endpoint: Endpoint,
+    pub pid: Option<u32>,
+    pub generation: Option<String>,
+}
+
 impl Endpoint {
     pub fn parse(value: &str) -> Self {
         #[cfg(unix)]
@@ -80,11 +87,77 @@ pub fn write_endpoint(path: &Path, endpoint: &Endpoint) -> io::Result<()> {
             fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         }
     }
-    fs::write(path, endpoint.display())
+    atomic_write(path, endpoint.display().as_bytes())
 }
 
 pub fn read_endpoint(path: &Path) -> io::Result<Endpoint> {
-    Ok(Endpoint::parse(fs::read_to_string(path)?.trim()))
+    Ok(read_endpoint_metadata(path)?.endpoint)
+}
+
+pub fn write_endpoint_metadata(
+    path: &Path,
+    endpoint: &Endpoint,
+    pid: u32,
+    generation: &str,
+) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    let content = serde_json::to_vec(&json!({
+        "endpoint": endpoint.display(),
+        "pid": pid,
+        "generation": generation,
+        "status": "active"
+    }))
+    .map_err(io::Error::other)?;
+    atomic_write(path, &content)
+}
+
+pub fn read_endpoint_metadata(path: &Path) -> io::Result<EndpointMetadata> {
+    let content = fs::read_to_string(path)?;
+    if let Ok(value) = serde_json::from_str::<Value>(&content) {
+        if let Some(endpoint) = value.get("endpoint").and_then(Value::as_str) {
+            return Ok(EndpointMetadata {
+                endpoint: Endpoint::parse(endpoint),
+                pid: value
+                    .get("pid")
+                    .and_then(Value::as_u64)
+                    .map(|pid| pid as u32),
+                generation: value
+                    .get("generation")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            });
+        }
+    }
+    Ok(EndpointMetadata {
+        endpoint: Endpoint::parse(content.trim()),
+        pid: None,
+        generation: None,
+    })
+}
+
+fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
+    let temporary = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::write(&temporary, content)?;
+    restrict_private(&temporary)?;
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn write_session_token(path: &Path, endpoint: &Endpoint) -> io::Result<()> {
@@ -310,4 +383,37 @@ pub fn validate_request(value: Value) -> Result<Envelope, ProtocolError> {
         serde_json::from_value(value).map_err(|error| ProtocolError::Json(error.to_string()))?;
     envelope.validate()?;
     Ok(envelope)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_metadata_round_trips_and_is_private() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file.endpoint");
+        let endpoint = Endpoint::Tcp("127.0.0.1:43210".into());
+        write_endpoint_metadata(&path, &endpoint, 1234, "generation-1").unwrap();
+
+        let metadata = read_endpoint_metadata(&path).unwrap();
+        assert_eq!(metadata.endpoint.display(), endpoint.display());
+        assert_eq!(metadata.pid, Some(1234));
+        assert_eq!(metadata.generation.as_deref(), Some("generation-1"));
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"status\":\"active\""));
+    }
+
+    #[test]
+    fn legacy_plain_endpoint_remains_readable() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file.endpoint");
+        fs::write(&path, "tcp:127.0.0.1:43210\n").unwrap();
+
+        let metadata = read_endpoint_metadata(&path).unwrap();
+        assert_eq!(metadata.endpoint.display(), "tcp:127.0.0.1:43210");
+        assert_eq!(metadata.pid, None);
+        assert_eq!(metadata.generation, None);
+    }
 }

@@ -61,6 +61,13 @@ must match, and failed proofs are rejected before the editor handler runs.
 An owner-only auth-token-file is reread per TCP connection to permit rotation.
 Never expose the endpoint publicly.
 .PP
+Unix endpoint discovery records are atomic and include the owning PID and
+server generation. Graceful shutdown removes the active record. After a crash,
+an unreachable socket is retained as stale evidence and startup refuses to
+replace it unless \fB--takeover-stale-endpoint\fR is explicitly supplied. The
+agent must verify that the recorded owner is no longer running; the old record
+is preserved with a \fBstale-\fR suffix during takeover.
+.PP
 \fBsave-as\fR atomically creates a new target with the current working view and
 never overwrites an existing target or changes the active tab path.
 .PP

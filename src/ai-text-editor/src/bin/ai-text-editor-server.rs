@@ -14,8 +14,8 @@ use ai_text_editor::resources;
 use ai_text_editor::search::{find_bytes, matches_with_gradient, parse_mode, SearchMode};
 use ai_text_editor::session;
 use ai_text_editor::transport::{
-    complete, endpoint_for_file, error, error_details, response, socket_for_file, validate_request,
-    write_endpoint, Endpoint,
+    complete, endpoint_for_file, error, error_details, read_endpoint_metadata, response,
+    socket_for_file, validate_request, write_endpoint_metadata, Endpoint,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -77,12 +77,12 @@ struct LargeHistory {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
-        println!("The server owns the initial tab and accepts one newline-delimited JSON request per connection. Use client open --endpoint ENDPOINT --file PATH to add isolated tabs; each tab has its own session token and metadata. Files above 256 MiB use bounded access; override with --large-threshold-bytes.");
+        println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--takeover-stale-endpoint] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
+        println!("The server owns the initial tab and accepts one newline-delimited JSON request per connection. Use client open --endpoint ENDPOINT --file PATH to add isolated tabs; each tab has its own session token and metadata. Files above 256 MiB use bounded access; override with --large-threshold-bytes. A stale Unix endpoint is retained and requires --takeover-stale-endpoint for explicit replacement.");
         return;
     }
     if args.get(1).map(String::as_str) != Some("start") {
-        eprintln!("usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
+        eprintln!("usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--takeover-stale-endpoint] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
         std::process::exit(64);
     }
     let path = match option(&args, "--file") {
@@ -303,7 +303,7 @@ fn main() {
             state_guard.endpoint = Some(endpoint.clone());
             state_guard.auth_token = Some(auth_token.clone());
         }
-        announce(&path, &endpoint);
+        announce(&path, &endpoint, &server_generation);
         register_session(
             &endpoint,
             &server_generation,
@@ -356,6 +356,35 @@ fn main() {
                     socket.display()
                 ));
             }
+            let discovery = endpoint_for_file(&path);
+            if !args.iter().any(|arg| arg == "--takeover-stale-endpoint") {
+                let details = read_endpoint_metadata(&discovery)
+                    .ok()
+                    .map(|metadata| {
+                        format!(
+                            " (pid {}, generation {})",
+                            metadata
+                                .pid
+                                .map(|pid| pid.to_string())
+                                .unwrap_or_else(|| "unknown".into()),
+                            metadata.generation.as_deref().unwrap_or("unknown")
+                        )
+                    })
+                    .unwrap_or_default();
+                die(&format!(
+                    "stale editor endpoint detected at {}{}; refusing to impersonate it; retry with --takeover-stale-endpoint after verifying ownership",
+                    discovery.display(), details
+                ));
+            }
+            if discovery.exists() {
+                let stale = discovery.with_extension(format!("stale-{}", server_generation));
+                fs::rename(&discovery, &stale).unwrap_or_else(|error| {
+                    die(&format!(
+                        "cannot preserve stale endpoint {}: {error}",
+                        discovery.display()
+                    ))
+                });
+            }
             fs::remove_file(&socket)
                 .unwrap_or_else(|error| die(&format!("cannot remove stale socket: {error}")));
         }
@@ -365,7 +394,7 @@ fn main() {
         if let Ok(mut state_guard) = state.lock() {
             state_guard.endpoint = Some(endpoint.clone());
         }
-        announce(&path, &endpoint);
+        announce(&path, &endpoint, &server_generation);
         register_session(
             &endpoint,
             &server_generation,
@@ -606,9 +635,9 @@ fn read_auth_token_file(path: &std::path::Path) -> io::Result<String> {
     Ok(token)
 }
 
-fn announce(path: &PathBuf, endpoint: &Endpoint) {
+fn announce(path: &PathBuf, endpoint: &Endpoint, generation: &str) {
     let discovery = endpoint_for_file(path);
-    let _ = write_endpoint(&discovery, endpoint);
+    let _ = write_endpoint_metadata(&discovery, endpoint, std::process::id(), generation);
     println!(
         "{}",
         json!({"file": path, "endpoint": endpoint.display(), "discovery": discovery})

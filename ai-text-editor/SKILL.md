@@ -63,6 +63,10 @@ server-written coordination metadata, not a client-accessible SQLite store.
     transparent restart for non-streaming output.
 12. Recover journaled edits, inspect runtime state, and use Unix sockets or
     loopback TCP on Windows. TCP endpoints must remain private to the host.
+    Active endpoint discovery records include the owning PID and server
+    generation. A dead or unreachable Unix socket is retained as a stale
+    record; start a replacement only with `--takeover-stale-endpoint`, after
+    verifying that the recorded owner is no longer running.
 13. Query `open` or the read-only `resources` command for available memory,
    estimated server overhead, recommended working set, and the active
    large-file threshold before accepting a costly rewrite.

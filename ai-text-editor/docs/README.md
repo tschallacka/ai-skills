@@ -15,3 +15,7 @@ credentials and rotation. The endpoint must remain private to the host.
 An `open` response returns a tab-scoped `session_token`; persist it with
 `--save-session-token` and reuse it for all later requests. Session tokens are
 distinct from TCP credentials and expire when the owning server instance ends.
+Unix endpoint discovery records are atomic and include the active server PID
+and generation. Graceful shutdown removes the active record. If a process
+crashes, the socket and record remain as stale diagnostics; a new server
+refuses to remove them unless `--takeover-stale-endpoint` is explicitly given.

@@ -17,6 +17,15 @@ The client sends the secret only to its local process: the TCP request after
 authentication does not contain `auth_token`. The fallback must never be bound
 publicly.
 
+Endpoint discovery records are atomically replaced JSON containing `endpoint`,
+the owning `pid`, the server `generation`, and `status: active`; clients may
+still read legacy plain endpoint files. Graceful shutdown removes the active
+record. A crashed Unix server leaves its socket and record in place so that
+the next server cannot silently impersonate it. Startup refuses an unreachable
+socket until the operator explicitly supplies `--takeover-stale-endpoint`; the
+old record is renamed with a `stale-` suffix before replacement. The agent is
+responsible for verifying the recorded owner is gone before taking over.
+
 For TCP, the server first sends a `challenge` frame containing a fresh 32-byte
 URL-safe `nonce` and process `generation`. The client replies with an
 `authenticate` envelope whose `payload.proof` is HMAC-SHA256 over the versioned,
