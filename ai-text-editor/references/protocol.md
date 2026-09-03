@@ -97,6 +97,10 @@ silently scanning an unbounded file. Large `exact_bytes` searches instead
 require an explicit half-open `range_start_byte`/`range_end_byte` range no
 larger than the bounded read limit and return absolute `byte_start`/
 `byte_end` coordinates with base64 contents.
+Small-tab `exact_bytes` results likewise include absolute `byte_start` and
+`byte_end` fields. Their line/column fields describe the start and end
+coordinates separately, so a match crossing a newline is not represented by
+an invalid same-line column range.
 
 `page` rejects an unavailable or post-edit result by default with
 `stale_result`. An agent may explicitly send `historical: true` (the CLI flag

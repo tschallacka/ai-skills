@@ -2208,10 +2208,22 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                     return;
                 }
             };
-        let found_matches: Vec<Value> = find_bytes(&bytes, tab.document.bytes()).into_iter().map(|(start, end)| {
-            let coordinate = tab.document.coordinate(start).unwrap();
-            json!({"line": coordinate.line, "column_start": coordinate.column, "column_end": coordinate.column + end - start, "contents_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &tab.document.bytes()[start..end])})
-        }).collect();
+        let found_matches: Vec<Value> = find_bytes(&bytes, tab.document.bytes())
+            .into_iter()
+            .map(|(start, end)| {
+                let coordinate = tab.document.coordinate(start).unwrap();
+                let end_coordinate = tab.document.coordinate(end).unwrap();
+                json!({
+                    "line": coordinate.line,
+                    "column_start": coordinate.column,
+                    "column_end": end_coordinate.column,
+                    "end_line": end_coordinate.line,
+                    "byte_start": start,
+                    "byte_end": end,
+                    "contents_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &tab.document.bytes()[start..end])
+                })
+            })
+            .collect();
         let generation = tab.revision.to_string();
         let result_id = format!(
             "{}:exact_bytes:{}",
