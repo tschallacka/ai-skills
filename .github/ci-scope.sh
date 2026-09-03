@@ -149,12 +149,20 @@ file_count="$(printf '%s\n' "$changed" | awk 'NF' | wc -l | tr -d ' ')"
 # and the flake fix the compiler; the workflows are the thing being trusted, so
 # a change to them must be exercised in full; the installer and package.json
 # decide what ships, which the packaging gates read.
+#
+# `.github/*` covers the whole CI surface, not just the workflows, BECAUSE THE
+# SELECTOR MUST NOT EXEMPT ITSELF. This script and ci-subjects.sh decide how
+# much gets built, so a change to either has to be exercised by a full run —
+# otherwise the commit that narrows the scope is itself validated by the
+# narrowed scope, and a mistake in it is invisible exactly once, on the run
+# that introduces it. Caught the honest way: this very change came back
+# `scope=none`, because a selector edit is not a crate edit.
 global_hit=""
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     case "$path" in
         Cargo.toml|Cargo.lock|rust-toolchain.toml|flake.nix|flake.lock) global_hit="$path"; break ;;
-        .github/workflows/*) global_hit="$path"; break ;;
+        .github/*) global_hit="$path"; break ;;
         install.sh|package.json) global_hit="$path"; break ;;
         installer/*) global_hit="$path"; break ;;
     esac
