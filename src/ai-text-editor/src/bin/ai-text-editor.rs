@@ -20,6 +20,7 @@ fn main() {
     }
     let method = match args[1].as_str() {
         "open" => "open",
+        "capabilities" => "capabilities",
         "history" => "history",
         "resources" => "resources",
         "read" => "read",
@@ -373,7 +374,7 @@ fn die(message: &str) -> ! {
 }
 fn help() {
     println!("Usage: ai-text-editor COMMAND --endpoint ENDPOINT [OPTIONS]");
-    println!("Commands: open history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
+    println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );

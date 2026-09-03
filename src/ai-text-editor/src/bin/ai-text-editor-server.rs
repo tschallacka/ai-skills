@@ -639,6 +639,17 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     }
     match envelope.method.as_str() {
         "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "cursors": tab.cursors, "session_token": tab.session_token, "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
+        "capabilities" => frames.push(response(&envelope.request_id, json!({
+            "protocol_version": ai_text_editor::PROTOCOL_VERSION,
+            "document_modes": ["text_utf8", "raw_bytes", "hex_view"],
+            "search_modes": ["exact_text", "exact_bytes", "wildcard", "shell_wildcard", "path_wildcard", "regex_rust", "regex_pcre2", "fuzzy_edit", "fuzzy_subsequence", "fuzzy_token", "fuzzy_ngram", "fuzzy_phonetic", "fuzzy_soundex"],
+            "presentations": ["structured", "text", "paging", "stream"],
+            "defaults": {"presentation": "structured", "search_preview_matches": 4, "index_granularity": DEFAULT_GRANULARITY, "large_file_threshold_bytes": tab.large_threshold_bytes},
+            "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
+            "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
+            "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
+            "transports": ["unix_socket", "loopback_tcp"]
+        }))),
         "resources" => frames.push(response(&envelope.request_id, json!(resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)))),
         "history" => {
             let (undo_depth, redo_depth) = tab.history.depths();

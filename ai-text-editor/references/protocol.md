@@ -43,6 +43,11 @@ agent identity. `--session ID` and `--agent ID` resolve those candidates in
 newest-first order, reject ambiguity, and refuse unreachable stale records;
 they never silently start or impersonate a server.
 
+`capabilities` is read-only and returns the complete protocol mode list,
+coordinate bases/units, presentation modes, fuzzy-gradient meanings,
+large-file restrictions, transport choices, and server defaults. Agents should
+query it when they need machine-readable behavior instead of parsing help text.
+
 ## Coordinates and modes
 
 1. `text_utf8`: one-based lines, zero-based Unicode scalar columns.

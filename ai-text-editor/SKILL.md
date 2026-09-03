@@ -60,10 +60,12 @@ server-written coordination metadata, not a client-accessible SQLite store.
 12. Recover journaled edits, inspect runtime state, and use Unix sockets or
     loopback TCP on Windows. TCP endpoints must remain private to the host.
 13. Query `open` or the read-only `resources` command for available memory,
-    estimated server overhead, recommended working set, and the active
-    large-file threshold before accepting a costly rewrite.
-14. Start and manage explicit server jobs with `job-start`, `job-poll`,
-    `job-progress`, `job-complete`, `job-cancel`, `job-transfer`, and
+   estimated server overhead, recommended working set, and the active
+   large-file threshold before accepting a costly rewrite.
+14. Query the read-only `capabilities` command for the protocol's complete
+    mode, coordinate, presentation, transport, and default-value contract.
+15. Start and manage explicit server jobs with `job-start`, `job-poll`,
+   `job-progress`, `job-complete`, `job-cancel`, `job-transfer`, and
     `job-release`; detached jobs can outlive a client connection. Use the
     acknowledged `large-edit` operation for streaming large-file rewrites.
 
