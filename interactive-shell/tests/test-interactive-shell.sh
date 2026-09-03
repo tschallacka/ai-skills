@@ -16,7 +16,19 @@ LOG=$TMP/events.jsonl
 ERR=$TMP/wrapper.err
 CLIENT_LOG=$TMP/client.jsonl
 TARGET=$TMP/test.txt
-trap 'status=$?; if [ -n "${WRAPPER_PID:-}" ]; then kill "$WRAPPER_PID" 2>/dev/null || true; wait "$WRAPPER_PID" 2>/dev/null || true; fi; rm -rf "$TMP"; exit "$status"' EXIT HUP INT TERM
+# A function rather than a one-line trap string: shellcheck reads the string
+# as prose and reported `status` as referenced-but-unassigned (SC2154), which
+# the warning-severity gate treats as a failure.
+cleanup() {
+    local status=$?
+    if [ -n "${WRAPPER_PID:-}" ]; then
+        kill "$WRAPPER_PID" 2>/dev/null || true
+        wait "$WRAPPER_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TMP"
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
 
 if ! command -v nano >/dev/null 2>&1; then echo "SKIP: nano is unavailable"; exit 0; fi
 if ! command -v rjq >/dev/null 2>&1; then echo "SKIP: rjq is unavailable"; exit 0; fi

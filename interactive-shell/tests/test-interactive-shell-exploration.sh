@@ -6,7 +6,7 @@ set -eu
 # is its grandparent. The crate is a member of the root cargo workspace, so its
 # binaries land in the ROOT target directory, never src/interactive-shell/target
 # -- and CI sets CARGO_TARGET_DIR, which wins over both.
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 BIN="${CARGO_TARGET_DIR:-$ROOT/target}/debug"
 RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/interactive-shell-exploration.XXXXXX")
 MC_DIR="$RUN_DIR/files"
