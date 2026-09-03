@@ -363,7 +363,63 @@ if command -v git >/dev/null 2>&1; then
     esac
 fi
 
+# ---- B1xx: a dead peer must not pin a core, and must give its nick back ----
+# serve()'s outer loop had no exit: every `break` inside it left only the inner
+# read loop, so a thread whose peer had died went on re-reading a closed socket
+# at full CPU for the life of the process. Three SIGKILLed peers measured 899
+# CPU ticks over three seconds (about three cores) and left three sockets in
+# CLOSE-WAIT; enough of them starve accept() until the listener stops
+# answering. A finished connection also has to surrender its nick -- nothing
+# did, so the next agent asking for that nick collided with a connection that
+# no longer existed and was auto-suffixed off the identity it asked for.
+spin_home="$temporary_root/spin"
+mkdir -p "$spin_home"
+spin_pids=""
+for i in 1 2 3; do
+    AI_CHAT_HOME="$spin_home" "$CLIENT" tail --server 127.0.0.1:"$port" --nick "zombie$i" \
+        --chan '#spin' --insecure --no-session </dev/null >>"$temporary_root/spin.log" 2>&1 &
+    spin_pids="$spin_pids $!"
+done
+sleep 4
+
+# Whole seconds of CPU the server has consumed. `ps -o time=` is the one form
+# both GNU and BSD ps agree on; it prints [[DD-]HH:]MM:SS, so fold the
+# colon-separated fields base 60.
+server_cpu() {
+    ps -o time= -p "$server_pid" 2>/dev/null | tr -d ' ' | tr '-' ':' | awk -F: '
+        { s = 0; for (i = 1; i <= NF; i++) s = s * 60 + $i; printf "%d", s }'
+}
+cpu_before="$(server_cpu)"
+# SIGKILL, so no peer ever sends QUIT: the server learns of the close only from
+# the socket, which is exactly the path that used to spin.
+for p in $spin_pids; do kill -9 "$p" 2>/dev/null || true; done
+# shellcheck disable=SC2086  # deliberate word splitting: one wait per pid
+wait $spin_pids 2>/dev/null || true
+sleep 5
+cpu_after="$(server_cpu)"
+case "$cpu_before-$cpu_after" in
+    *[!0-9-]*|-*|*-)
+        printf 'SKIP chat: ps reported no cpu time for the server; the spin check did not run\n' >&2
+        ;;
+    *)
+        burned=$(( cpu_after - cpu_before ))
+        # Three spinning threads burn ~3 CPU seconds per wall second, so this
+        # window costs ~15s unfixed and 0s fixed. 2s is far above ps rounding
+        # and the server's own idle work, and far below the defect.
+        [ "$burned" -lt 2 ] || t_fail \
+            "the server burned ${burned}s of CPU in a 5s window after 3 peers were SIGKILLed (dead-peer spin)"
+        ;;
+esac
+
+# The killed peer's nick is free again: a reconnect gets the nick it asked for
+# instead of being auto-suffixed away from it by a connection that is gone.
+z_sent="$(cli zrec send --server 127.0.0.1:"$port" --nick zombie1 --chan '#spin' --text 'nick reclaimed' 2>/dev/null || true)"
+case "$z_sent" in
+    *':zombie1!zombie1@localhost PRIVMSG #spin :nick reclaimed'*) : ;;
+    *) t_fail "a dead peer never gave its nick back: [$z_sent]" ;;
+esac
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home)\n' >&2
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown)\n' >&2
 t_end

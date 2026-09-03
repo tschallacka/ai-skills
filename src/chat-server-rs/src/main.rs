@@ -69,6 +69,41 @@ impl Hub {
         self.chan_dir.join(format!("{}.log", chan))
     }
 
+    /// Release everything one connection held: its nick, its channel
+    /// memberships, and its writer slot.
+    ///
+    /// Without this a disconnect left the nick registered for the life of the
+    /// server, so the SECOND agent on a machine could never register that nick
+    /// again. The nick is only surrendered when the registry still points at
+    /// THIS connection index; a later connection that took it over keeps it.
+    fn deregister(&self, nick: &str, idx: usize, chans: &[String]) {
+        if !nick.is_empty() {
+            if let Ok(mut nicks) = self.nicks.lock() {
+                if nicks.get(nick).copied() == Some(idx as u64) {
+                    nicks.remove(nick);
+                }
+            }
+        }
+        if let Ok(mut channels) = self.channels.lock() {
+            for chan in chans {
+                if let Some(members) = channels.get_mut(chan) {
+                    members.retain(|m| m != nick);
+                }
+            }
+        }
+        // The slot itself stays in `writers` so live connections keep their
+        // index (broadcast addresses members by index). It now holds None, so
+        // it is a few bytes rather than a socket, and the broadcast path
+        // already skips an empty slot.
+        if let Ok(writers) = self.writers.lock() {
+            if let Some(slot) = writers.get(idx) {
+                if let Ok(mut g) = slot.lock() {
+                    *g = None;
+                }
+            }
+        }
+    }
+
     fn scan_highest(&self, chan: &str) -> u64 {
         let path = self.chan_path(chan);
         let mut top = 0u64;
@@ -281,6 +316,12 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
         }
     }
 
+    // Set the moment this connection is finished -- a dead peer, a failed
+    // handshake, or QUIT. The outer loop used to have no exit at all: every
+    // `break` inside it left only the inner read loop, so a thread went on
+    // re-reading a closed socket at full CPU for the life of the process.
+    let mut done = false;
+
     loop {
         let mut guard = match slot.lock() {
             Ok(g) => g,
@@ -341,18 +382,27 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                                 e
                             );
                         }
+                        // A handshake that cannot complete never will on this
+                        // socket; retrying it is the spin this flag ends.
+                        done = true;
                         break;
                     }
                 }
             }
         }
         // After the handshake, catch any further buffered raw bytes and
-        // decrypt them before draining plaintext.
-        let _ = st.conn.read_tls(&mut st.tcp);
+        // decrypt them before draining plaintext. read_tls returning Ok(0) is
+        // the peer's TCP close: the authoritative "this connection is over"
+        // signal, and discarding it was how dead sockets stayed in CLOSE-WAIT.
+        if let Ok(0) = st.conn.read_tls(&mut st.tcp) {
+            done = true;
+        }
         let _ = st.conn.process_new_packets();
         while st.conn.write_tls(&mut st.tcp).unwrap_or(0) > 0 {}
         while let Ok(n) = st.conn.reader().read(&mut raw) {
             if n == 0 {
+                // Clean TLS EOF.
+                done = true;
                 break;
             }
             for chunk in raw[..n].split_inclusive(|&b| b == b'\n') {
@@ -921,10 +971,29 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                 }
             }
             if st.closed {
+                done = true;
                 break;
             }
         }
+
+        // Tear down exactly once, and gather what deregistration needs while
+        // the borrow of `st` is still alive.
+        if !done {
+            drop(guard);
+            continue;
+        }
+        st.closed = true;
+        let _ = st.tcp.shutdown(std::net::Shutdown::Both);
+        let leaving_nick = st.nick.clone();
+        let leaving_chans = st.joined.clone();
+        // Drop the ConnState so the socket closes rather than lingering in
+        // CLOSE-WAIT, then release the slot guard BEFORE taking any hub lock:
+        // holding a slot while acquiring `writers` is the ABBA deadlock the
+        // Hub comments warn about.
+        *guard = None;
         drop(guard);
+        hub.deregister(&leaving_nick, idx, &leaving_chans);
+        break;
     }
 }
 fn announce_loop(
