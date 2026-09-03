@@ -1051,7 +1051,27 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             }
             tab.index_complete = true;
             persist_index(&mut tab);
-            frames.push(response(&envelope.request_id, json!({"granularity": tab.index.granularity, "bytes": tab.index.bytes, "lines": tab.index.lines, "blocks": tab.index.blocks, "complete": tab.index_complete, "coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}})));
+            let block_offset = envelope
+                .payload
+                .get("offset")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let block_limit = envelope
+                .payload
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(4) as usize;
+            let blocks = tab
+                .index
+                .blocks
+                .get(block_offset..)
+                .unwrap_or(&[])
+                .iter()
+                .take(block_limit)
+                .cloned()
+                .collect::<Vec<_>>();
+            let returned_blocks = blocks.len();
+            frames.push(response(&envelope.request_id, json!({"granularity": tab.index.granularity, "bytes": tab.index.bytes, "lines": tab.index.lines, "blocks": blocks, "block_offset": block_offset, "block_count": tab.index.blocks.len(), "returned_blocks": returned_blocks, "complete": tab.index_complete, "coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}})));
         }
         "cursor" => cursor(&envelope, &mut tab, &mut frames),
         "page" => page(&envelope, &mut tab, &mut frames),

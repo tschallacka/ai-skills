@@ -58,6 +58,8 @@ server-written coordination metadata, not a client-accessible SQLite store.
    ranges, full-index requests, granularity, cancellation, and resource limits.
    Large-tab startup records bounded prefix coverage; use `index` for an
    explicit full scan and inspect `index_complete` before relying on coverage.
+   Index block output is paged by default; use `--offset` and `--limit` to
+   inspect further persisted blocks without requesting an unbounded response.
 10. Resolve external changes with backup, reload, merge, keep, or acknowledged
     force-save; `backup` preserves external bytes and leaves resolution
     pending, while other choices resolve the alert. External bytes can also be

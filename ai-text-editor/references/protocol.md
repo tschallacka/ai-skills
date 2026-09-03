@@ -67,7 +67,10 @@ Large-tab startup builds only a bounded prefix of the default 10,000-line index
 and persists it as incomplete coverage. `open` reports `index_complete` and
 `index_coverage`. The explicit `index` operation performs a complete scan for
 the requested `granularity`, persists it, and returns `complete: true`; index
-data is an optimization and never changes search correctness.
+data is an optimization and never changes search correctness. Index inspection
+returns four blocks by default; use `offset` and `limit` to page the persisted
+block list. The response reports `block_count`, `block_offset`, and
+`returned_blocks`, so an agent never has to request an unbounded index frame.
 
 ## Coordinates and modes
 
