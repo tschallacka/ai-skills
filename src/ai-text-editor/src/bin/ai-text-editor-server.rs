@@ -9,7 +9,7 @@ use ai_text_editor::journal::{Journal, JournalRecord};
 use ai_text_editor::large_file::LargeFile;
 use ai_text_editor::metadata::Metadata;
 use ai_text_editor::navigation::{self, Position};
-use ai_text_editor::protocol::validate_ndjson;
+use ai_text_editor::protocol::{validate_ndjson, MAX_SERIALIZED_FRAME_BYTES};
 use ai_text_editor::resources;
 use ai_text_editor::search::{find_bytes, matches_with_gradient, parse_mode, SearchMode};
 use ai_text_editor::session;
@@ -814,6 +814,22 @@ fn write_frames<S: std::io::Write>(
             }
         }
         let mut bytes = serde_json::to_vec(&frame).unwrap();
+        if bytes.len() > MAX_SERIALIZED_FRAME_BYTES {
+            let request_id = frame
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_owned();
+            frame = error(
+                &request_id,
+                "response_too_large",
+                "response exceeds the 8 MiB protocol frame limit; reduce the range, limit, or page size",
+            );
+            if let Some(object) = frame.as_object_mut() {
+                object.insert("sequence".into(), json!(sequence as u64));
+            }
+            bytes = serde_json::to_vec(&frame).unwrap();
+        }
         bytes.push(b'\n');
         if writer.write_all(&bytes).is_err() {
             return;

@@ -8,7 +8,8 @@ use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const DEFAULT_READ_BYTES: usize = 8 * 1024 * 1024;
+// Leave room for base64 and JSON framing below the protocol's 8 MiB limit.
+pub const DEFAULT_READ_BYTES: usize = 4 * 1024 * 1024;
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
