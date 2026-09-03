@@ -214,7 +214,7 @@
     {
       "id": "B117",
       "title": "The bug-report skill's documented validation snippet uses IN/1, which rjq cannot parse, so it prints \"BUGS.json is sound\" for any file",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "high",
       "parent": null,
@@ -227,12 +227,12 @@
         "bug-report/SKILL.md",
         "todo/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "pre-push-check.sh section 5 deletes its own copy and delegates to reg_findings, and a check that cannot run is now a failure rather than silence. bug-report/SKILL.md and todo/SKILL.md express the same rules with index(...) instead of IN/1, bind each entry with `as $e` first, and test the command status before trusting empty output.",
+      "verification": "Both snippets extracted verbatim from their SKILL.md and run under rjq against copies: the real BUGS.json and TODO.json report sound (exit 0), and a register carrying a duplicate id, a dangling parent and invalid status/severity/priority yields all five findings. Before the fix the same expressions exited 5 with empty stdout, which every caller read as sound. The pre-push half was mutation-tested separately: a duplicate id in BUGS.json now yields \"BUGS.json: duplicate ids\" where the old check printed \"ok ... ids unique, statuses known\". The mutation that fails without the fix is restoring IN/1: rjq exits 5, and the added status guard turns that into an explicit failure instead of a false pass -- which is how the first attempt at this fix was caught, since `A | index(B)` evaluates B against A and a bare index(.status) dies with \"cannot index\".",
       "found_by": "running the skill's own validation after adding B115 and B116; it reported sound while rjq was erroring",
-      "notes": "Found in bug-report/SKILL.md while validating B115 and B116, then found live in pre-push-check.sh section 5, which carried its own jq-flavoured copy of the same checks behind 2>/dev/null and || true. That gate had therefore never fired on any machine using rjq -- which is every machine following the register contract, since reg_require_jq refuses with 69 when rjq is absent. Raised to blocking for that reason: a gate that always passes is worse than no gate, and this one is run before every push. The pre-push-check half is FIXED in this change: section 5 now delegates to reg_findings, the single correct implementation, and a check that cannot run is reported as a failure rather than as silence. The SKILL.md snippets in bug-report and todo are still wrong and are what this entry stays open for. Fix them the same way -- express the checks with index(...) as reg_findings does, or test the exit status instead of the emptiness of the output. Confirm todo/SKILL.md carries the pattern before changing it.",
+      "notes": "Found in bug-report/SKILL.md while validating B115 and B116, then found live in pre-push-check.sh, which carried its own jq-flavoured copy behind 2>/dev/null and || true. That gate had never fired on any machine using rjq -- which is every machine following the register contract, since reg_require_jq refuses with 69 without it. Held at blocking for that reason: a gate that always passes is worse than no gate, and this one runs before every push. All three surfaces are now fixed. The durable lesson is the shape rather than the builtin: empty output means sound ONLY if the command ran, so any check of this form has to test the status too. Went unnoticed because a passing gate looks identical either way.",
       "created_at": "2026-09-03T08:54:56Z",
-      "updated_at": "2026-09-03T09:39:05Z"
+      "updated_at": "2026-09-03T10:32:05Z"
     },
     {
       "id": "B3",
@@ -2529,6 +2529,27 @@
       "notes": "Filed first as B81, renumbered to B85: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
       "created_at": "2026-08-28T10:58:33Z",
       "updated_at": "2026-08-28T10:58:33Z"
+    },
+    {
+      "id": "B118",
+      "title": "chat-client-rs cannot dial a bare IPv6 server address, so an IPv6 bus is unreachable even when discovered",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "AI_CHAT_HOME=$(mktemp -d) AI_CHAT_BIND=::1 CHAT_ANNOUNCE_HOST=::1 chat-server-rs &\nchat-client-rs discover --wait 3 --json      # carries {\"host\":\"::1\",...}\nchat-client-rs join --chan \"#x\" --nick a --server \"[::1]:<port>\"",
+      "observed": "With the beacon carrying host ::1 the ladder returns ::1:<port> -- tcp_alive accepts it, because Rust's to_socket_addrs splits on the last colon -- and the connect then fails with \"chat-client-rs: server name: invalid dns name\", exit 70. A bracketed --server [::1]:<port> fails the same way.",
+      "expected": "Either an IPv6 address is dialable end to end, or the client refuses it with a message naming IPv6 as the reason rather than reporting an invalid DNS name.",
+      "mechanism": "server_host() (src/chat-client-rs/src/main.rs:584-586) takes the host by `server.split(:).next()`, which on an IPv6 literal yields the empty string (or \"[\" when bracketed). That is handed to ServerName::try_from for TLS SNI, which rejects it. The address never reaches a socket. Splitting on the LAST colon and stripping brackets, or parsing with SocketAddr, is what a v6-aware host extraction needs -- and an IP literal should use ServerName::IpAddress rather than a DNS name at all.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "an adversarial review of the chat-server-rs announce change (PR #20)",
+      "notes": "Not a regression: before the announce change an IPv6 bind advertised an IPv4 address it was not listening on, so an IPv6 bus was unreachable then too. The failure merely moved from \"never found\" to \"found, then rejected at TLS\". The server side now refuses to announce a bare IPv6 host and says why, naming this entry, so nothing advertises an address that cannot be used -- that is containment, not a fix. Filed against the client because that is where the extraction lives; src/chat-client-rs/ is being worked on separately for B116, so this is recorded rather than fixed here to avoid two workers in one file. Low priority: no known caller binds IPv6, and the workaround is to bind IPv4 or set CHAT_ANNOUNCE_HOST.",
+      "created_at": "2026-09-03T10:32:05Z",
+      "updated_at": "2026-09-03T10:32:05Z"
     },
     {
       "id": "B59",

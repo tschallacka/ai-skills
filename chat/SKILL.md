@@ -81,11 +81,18 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
 
 ## The rust server
 
-Start it with the prebuilt `chat/bin/chat-server-rs` (or build it with
-`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`). The
-server mints its self-signed cert on first run, binds the port, writes
-`server.port`, and (with `CHAT_ANNOUNCE=1`) broadcasts a UDP beacon so clients
-can discover it.
+Start it with the prebuilt binary, which lives under a **per-triple**
+directory — `bin/<target-triple>/chat-server-rs`, at the skill root when
+installed and at the repository root in a development tree, e.g.
+`bin/x86_64-unknown-linux-musl/chat-server-rs`. There is no unsuffixed
+`bin/chat-server-rs`, and nothing puts it on `PATH` for you;
+`./setup-dev-env.sh` prints the `export PATH=` line for this host. Failing
+that, build it with
+`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
+
+The server mints its self-signed cert on first run, binds the port, writes
+`server.port`, and broadcasts a UDP beacon so clients can discover it —
+announcing is on unless `CHAT_ANNOUNCE=0` says otherwise.
 
 ## When not to use
 
@@ -118,8 +125,20 @@ and dials the first address that answers a 400 ms TCP probe:
 So a server that is broadcasting is found with no flag at all. Reach for
 `chat-client-rs discover --wait 3 [--json]` only to *look* at what is
 announcing — it is not a required first step and nothing has to be picked by
-hand. When the ladder ends with nothing, the client exits 64 naming all four
-rungs it tried.
+hand.
+
+What happens when nothing answers depends on whether a session was ever saved,
+and the difference matters because the second case is the one you will meet:
+
+- **No saved session.** The client exits **64** naming all four rungs it tried
+  ("no --server, no saved session, no known server, no beacon"). Self-
+  explaining.
+- **A saved session that has since died.** The ladder falls back to dialling
+  the saved address anyway, so you get a bare connect error against an address
+  you did not choose — `connect 127.0.0.1:1: Connection refused` and exit
+  **70**. That is not your `--server` being wrong; it is the bus being down
+  with a stale session pointing at it. `chat-client-rs session show` tells you
+  what it is holding, and `session clear` drops it.
 
 Mind rung 4's ordering on a machine-local bus: it sorts LAN addresses **ahead**
 of loopback ones, on the reasoning that a routable server is the interesting one.
@@ -127,8 +146,14 @@ For a bus meant for the agents on this machine that is backwards — a server
 announcing from elsewhere on the network would be preferred over the local one.
 It only arises where something on the network is announcing too, since a
 local server's beacon does not leave the host. If you are somewhere that
-happens and you meant the local bus, pass
-`--server 127.0.0.1:$(cat "$AI_CHAT_HOME/server.port")` and stop at rung 1.
+happens and you meant the local bus, pass `--server 127.0.0.1:<port>` and stop
+at rung 1.
+
+The port is in the `server.port` file of **the server's** `$AI_CHAT_HOME` —
+which is not your own once you have given yourself a per-agent state directory
+(see below), so `cat "$AI_CHAT_HOME/server.port"` from a client reads nothing.
+The announce line the server logs on startup carries the same address, and
+`chat-client-rs discover --json` reports it without needing the file at all.
 
 `tail` deliberately does not replay history: with no cursor recorded it asks
 the server for `LASTID` and starts at the channel's current end, so tailing a
@@ -188,10 +213,18 @@ actually bound on stdout and rewrites `server.port`.
 
 Read the address off the beacon rather than assembling it — the beacon carries
 the host a peer should dial, which is what the server worked out for itself:
-`CHAT_ANNOUNCE_HOST` if set, else the primary interface's address, else the
-hostname, else the bare string `localhost` — which is not connectable and is
-the server's way of saying "use the packet's source address instead", exactly
-what the client then does:
+`CHAT_ANNOUNCE_HOST` if set, else **the address the bind resolves to** when it
+names one interface, else the primary interface's address found by looking
+outward, else the hostname, else the bare string `localhost` — which is not
+connectable and is the server's way of saying "use the packet's source address
+instead", exactly what the client then does.
+
+A bind given as a *name* is resolved before it is announced, never published
+verbatim: a hostname commonly maps to `127.0.1.1`, and announcing the name
+would have advertised a loopback-only listener to the whole network. A bind
+that resolves to an IPv6 address announces nothing at all and says so on
+stderr, because the client cannot dial a bare IPv6 host (B118) — pass
+`--server [::1]:<port>` explicitly, or set `CHAT_ANNOUNCE_HOST`.
 
 ```bash
 chat-client-rs discover --wait 3 --json

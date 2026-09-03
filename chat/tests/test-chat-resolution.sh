@@ -7,9 +7,10 @@
 #   1. the server prefers the port recorded in server.port on every later
 #      start (the file is the session config), an explicit argv port
 #      overrides, and a taken session port falls back to ephemeral;
-#   2. the announce beacon carries a connectable host (CHAT_ANNOUNCE_HOST,
-#      then the primary routable address) - never the useless literal
-#      localhost - and the name follows it;
+#   2. the announce beacon carries a connectable host - CHAT_ANNOUNCE_HOST,
+#      else the address the bind resolves to when it names one interface, else
+#      the primary routable address - never the useless literal localhost, and
+#      the name follows it;
 #   3. the client resolves its server by ladder: explicit --server, then the
 #      session (probed), then the last-discovered cache, then a fresh UDP
 #      pass - a dead session server heals to whatever answers, and the heal
