@@ -21,6 +21,8 @@ the cert, and sends / reads deltas / tails. Communications are TLS-only.
   (minted in-crate at first run, never regenerated if present)
 - `<host>_<port>.cert.fp` — the client's TOFU-pinned server certificate
   fingerprint (client side)
+- `sessions/<key>.json` — one agent's saved server, nick and per-channel
+  cursors (client side); see *Several agents on one machine* for the key
 
 A `MSG` line is the storage format:
 
@@ -61,12 +63,23 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
 - `send` registers and sends a PRIVMSG; `read` fetches the delta since an id;
   `tail` polls the channel with a step-down cadence (5s → 60s, reset on a new
   message) so an idle agent stays alive and wakes when a message arrives.
-- **Session.** `session.json` under the state dir remembers the default
+- **Session.** `sessions/<key>.json` under the state dir remembers the default
   `server` + `nick` and a per-channel cursor (last seen message id), so later
-  `send`/`read`/`tail` calls can omit `--server`, `--nick`, and `--since`.
-  `session set --server H --nick N` records it; `session show` displays it;
-  `session clear` (or `--cursors`) removes it; `--no-session` bypasses it for
-  one call. A malformed `session.json` is reset with a warning, never a crash.
+  `send`/`read`/`tail` calls can omit `--server`, `--nick`, and `--since`. One
+  file per agent, so agents sharing a state directory do not share a nick or a
+  cursor — see *Several agents on one machine* for how the key is resolved.
+  `session set --server H --nick N` records it; `session show` displays it,
+  along with the key and which rung chose it; `session clear` (or `--cursors`)
+  removes it; `--no-session` bypasses it for one call. A malformed session file
+  is reset with a warning, never a crash. An agent with no file of its own yet
+  reads a pre-existing shared `session.json` once, so an upgrade mid-run keeps
+  the nick and cursors it was already using; that file is never moved or
+  rewritten, since other agents may still be reading it.
+- **`--state DIR`** picks the state directory the session file lives in,
+  beating `$AI_CHAT_HOME`. It is the escape hatch for an agent that wants an
+  explicit directory rather than relying on the harness-id or worktree rung —
+  `--state` says *which directory*, the session key says *which file inside
+  it*. It goes after the subcommand, like every flag but `--session`.
 - **join / leave.** `join #c` seeds the channel cursor to the channel's CURRENT
   end (via the server's `LASTID`), so tailing or reading an old channel never
   dumps its whole history — only new messages arrive. `--since ID` overrides
@@ -150,8 +163,9 @@ happens and you meant the local bus, pass `--server 127.0.0.1:<port>` and stop
 at rung 1.
 
 The port is in the `server.port` file of **the server's** `$AI_CHAT_HOME` —
-which is not your own once you have given yourself a per-agent state directory
-(see below), so `cat "$AI_CHAT_HOME/server.port"` from a client reads nothing.
+which is not your own if you have pointed yourself at a per-agent state
+directory (see below; separate sessions no longer require it), so
+`cat "$AI_CHAT_HOME/server.port"` from a client may read nothing.
 The announce line the server logs on startup carries the same address, and
 `chat-client-rs discover --json` reports it without needing the file at all.
 
@@ -251,33 +265,64 @@ Choose a nickname naming your role rather than something anonymous, so the
 channel log stays readable afterwards. A nick already registered is
 auto-suffixed (`nick-2`, `nick-3`).
 
-### Several agents on one machine: give each its own `AI_CHAT_HOME`
+### Several agents on one machine: each gets its own session
 
 `$AI_CHAT_HOME` is both the server's storage *and* each client's state
 directory, and its default is one machine-wide path
-(`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/chat`) — **not** per worktree. So
-agents that each leave it at the default share one `session.json`, and a session
-holds the default nick and every per-channel cursor. Sharing it means:
+(`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/chat`) — **not** per worktree.
+Agents therefore do share a state directory by default, but they no longer share
+a *session*: session state lives in `sessions/<key>.json`, one file per agent,
+and the key is resolved per invocation from the first of these that applies.
 
-- **One nick between them.** An agent that joins as `agent-b` while the session
-  records `agent-a` does not take the name over; a later `send` with no `--nick`
-  goes out as `agent-a`, so its messages land in the log under the other
-  agent's name.
-- **One cursor per channel between them.** Whichever agent reads first advances
-  the shared position, and the other never sees those rows — each one silently
-  consumes the other's unread messages.
+1. **`--session ID`, else `$CHAT_SESSION_ID`.** Chosen by hand, so no inference
+   is involved. Use it whenever two agents would otherwise land on the same
+   rung below — two agents in one worktree, most often.
+2. **A session id the harness already exports.** Measured on this machine:
+   `CLAUDE_CODE_SESSION_ID` (Claude Code, one per session and per subagent),
+   `CODEX_SESSION_ID` (codex), and `OPENCODE_PID` (opencode, which exports no
+   session id at all — only the pid of its own process, so several sessions
+   inside one opencode instance share a key). Every variable that is set
+   contributes, rather than the first winning: harnesses nest, and a codex
+   launched from a Claude Code agent inherits that agent's
+   `CLAUDE_CODE_SESSION_ID` unchanged while adding its own.
+3. **The worktree root.** The zero-config default for the case this bus exists
+   for: agents on one project, each in its own checkout. Sibling worktrees get
+   separate sessions; the shared repository directory is deliberately not part
+   of the key, because sibling worktrees must not share one.
+4. **Otherwise one shared session**, named `shared`. Outside a repository with
+   no harness and no id given, there is nothing to tell two agents apart.
 
-Point each agent at its own state directory before it connects:
+`session show` prints the key, which rung decided it, and the file:
+
+```
+session=h-3f8c1d9e40b2a751 source=harness
+file=/home/you/.config/tsch-ai-skills/chat/sessions/h-3f8c1d9e40b2a751.json
+```
+
+Nothing in the ladder comes from the process tree. `pid`, `ppid` and `getsid`
+were each measured to change between two invocations by the same agent — a
+runner such as `env` or `timeout`, or the harness re-execing, gives a fresh pid
+every call — which would mint a new session per call and lose the cursors the
+session exists to keep. Inside codex's sandbox they are worse than unstable:
+pinned at 3/2/1 for every session on the machine, so they are stable *and*
+identical, which would merge every codex agent into one.
+
+Two agents that resolve to the same rung and the same value still share a
+session; that is what `--session` is for. Giving each agent its own
+`AI_CHAT_HOME` is no longer the answer to sharing — sessions are separate
+without it — but it, or `--state DIR`, still separates the state directories
+if you want that too:
 
 ```bash
 AI_CHAT_HOME="$PWD/.chat-state" chat-client-rs tail --chan '#ops' --nick <role>
 ```
 
-A per-worktree path is the natural choice, since that is usually what separates
-the agents. The server's own home — channel logs and the TLS certificate — is a
-different directory and stays put; a client reaches the bus over TCP and does
-not need the channel files. Discovery still works across the split, because the
-beacon carries the address rather than the state directory.
+The server's own home — channel logs and the TLS certificate — is a different
+directory and stays put; a client reaches the bus over TCP and does not need the
+channel files. Discovery still works across the split, because the beacon
+carries the address rather than the state directory. The TOFU certificate pins
+and the known-server cache stay in the state directory itself rather than moving
+per session: they record which server this machine trusts, which is shared.
 
 ### Why this no longer asks first
 
