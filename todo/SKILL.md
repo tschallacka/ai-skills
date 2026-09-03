@@ -19,6 +19,31 @@ and no other tool — not `rjq`, not `date` — so it behaves the same under bas
 zsh or anything else, and the queue can be written on a machine that has none of
 them.
 
+### Where `todo` is
+
+Under a **per-triple** directory — `bin/<target-triple>/todo`, at the skill root
+when installed and at the repository root in a development tree, e.g.
+`bin/x86_64-unknown-linux-musl/todo`. There is no unsuffixed `bin/todo`, and
+nothing puts it on `PATH` for you, so every `todo …` line below is written for a
+shell that can already find it. Resolve it once and use that:
+
+```sh
+triple="$(uname -s):$(uname -m)"
+case "$triple" in
+    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
+    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
+    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
+    Darwin:arm64)               triple=aarch64-apple-darwin ;;
+    MINGW*|MSYS*|CYGWIN*)       triple=x86_64-pc-windows-msvc ;;
+esac
+todo="$PWD/bin/$triple/todo"          # a development tree
+[ -x "$todo" ] || todo="<skill root>/bin/$triple/todo"
+```
+
+`./setup-dev-env.sh` prints the `export PATH=` line for this host, which is the
+one thing that makes a bare `todo` work. Failing that, build it with
+`cargo build --release --manifest-path src/todo/Cargo.toml`.
+
 ## The file
 
 `TODO.json` at the root of whatever the work belongs to. One file per queue.

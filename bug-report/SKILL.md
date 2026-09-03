@@ -1,14 +1,15 @@
 ---
 name: bug-report
-description: Use when a defect is found that will not be fixed in the same breath, so it is recorded with its reproduction, the measurement that proves it real, its mechanism, and later its fix and verification, in one JSON file read with rjq. Do not use for work that is merely queued (use the todo skill), for a design preference, or for a defect being fixed immediately in the current change.
+description: Use when a defect is found that will not be fixed in the same breath, so it is recorded with its reproduction, the measurement that proves it real, its mechanism, and later its fix and verification, in one JSON file managed with the `bugs` command. Do not use for work that is merely queued (use the todo skill), for a design preference, or for a defect being fixed immediately in the current change.
 ---
 <!-- MODE: PROD -->
 
 # Bug report
 
-A register of defects, held in `BUGS.json` and read with `rjq`. One entry per
-defect, carrying the four things that decide whether it can be acted on: how to
-reproduce it, the measurement proving it real, the mechanism, and what closed it.
+A register of defects, held in `BUGS.json` and managed with the `bugs` command.
+One entry per defect, carrying the four things that decide whether it can be
+acted on: how to reproduce it, the measurement proving it real, the mechanism,
+and what closed it.
 
 **A report without a reproduction is a rumour.** The most expensive thing in a
 defect register is an entry nobody can confirm: the next reader either re-derives
@@ -76,55 +77,17 @@ than any row:
 | `skill` | which skill's schema this file follows |
 | `skill_version` | the `package.json` version of the skill that last wrote it |
 
-`skill_version` is how an upgrade becomes visible. An installed skill carries its
-version in `.version` beside `SKILL.md`, so the two can be compared, and a file
-written by an older skill can be recognised before its schema is assumed:
-
-```sh
-skill_dir="$(dirname "$(command -v true)")"   # replace with the installed skill's directory
-installed="$(sed -n 's/^package_version=//p' "$skill_dir/.version" 2>/dev/null)"
-recorded="$(rjq -r '.skill_version // "unrecorded"' BUGS.json)"
-if [ -z "$installed" ]; then
-    printf 'cannot read the installed version; leaving %s alone\n' BUGS.json
-elif [ "$installed" = "$recorded" ]; then
-    printf '%s was written by the installed skill (%s)\n' BUGS.json "$installed"
-else
-    printf '%s was written by %s, the installed skill is %s: re-read the schema before writing\n' \
-        BUGS.json "$recorded" "$installed"
-fi
-```
-
-Stamp it on every write, next to `updated_at`:
-
-```sh
-rjq --arg v "$installed" '.skill_version = $v' BUGS.json > BUGS.json.tmp && mv BUGS.json.tmp BUGS.json
-```
+`skill_version` is how an upgrade becomes visible, and it is not yours to
+compare: `bugs` stamps its own on every write and refuses to read a register some
+other version wrote, naming the version it found. So a mismatch surfaces the
+moment a command runs, rather than needing a check the caller could skip.
 
 ### Upgrading a file an older skill wrote
 
-**There is no backwards compatibility.** A reader does not accept an older shape;
-the agent holding the file brings it up to the installed version, or rewrites it.
-
-Every version ships its own `schema.<version>.json` beside `SKILL.md`. It states
-the required and optional fields, the enums, the invariants, and — under
-`upgrade_from` — the recipe that turns each named predecessor into it. So when the
-recorded version differs from the installed one:
-
-```sh
-rjq -r '"required: \(.item.required | join(", "))",
-       "enums:    \(.item.fields.status.enum | join("/"))",
-       "upgrades from: \(.upgrade_from | keys | join(", ") | if . == "" then "nothing" else . end)"' \
-   "$skill_dir/schema.$installed.json"
-rjq -r --arg from "$recorded" '.upgrade_from[$from].steps[]? // empty' \
-   "$skill_dir/schema.$installed.json"
-```
-
-If `upgrade_from` names the recorded version, run its steps: they are written to be
-run, not read. If it does not — or no `schema.<recorded>.json` exists to diff
-against — rewrite the file from the current schema rather than guessing at the
-difference. A register is cheap to rebuild from its own contents and expensive to
-half-migrate. Either way the last step is the same: stamp the installed version, so
-the next reader sees a current file rather than repeating this.
+**There is no backwards compatibility**, and `bugs migrate` is the whole
+procedure — see "A register written by an older version" below. Every version
+still ships its own `schema.<version>.json` beside `SKILL.md`, which is what to
+read when an entry comes back unconverted and has to be re-filed by hand.
 
 `reproduce`, `observed`, `expected`, `severity` and `priority` are required from
 the moment an entry exists. `mechanism`, `fix` and `verification` fill in as it progresses.
@@ -150,6 +113,31 @@ can reproduce is a rumour, and one with no stated expectation is an opinion.
 and no other tool — not `rjq`, not `date` — so it behaves the same under bash,
 zsh or anything else, and the register can be written on a machine that has
 none of them.
+
+### Where `bugs` is
+
+Under a **per-triple** directory — `bin/<target-triple>/bugs`, at the skill root
+when installed and at the repository root in a development tree, e.g.
+`bin/x86_64-unknown-linux-musl/bugs`. There is no unsuffixed `bin/bugs`, and
+nothing puts it on `PATH` for you, so every `bugs …` line below is written for a
+shell that can already find it. Resolve it once and use that:
+
+```sh
+triple="$(uname -s):$(uname -m)"
+case "$triple" in
+    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
+    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
+    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
+    Darwin:arm64)               triple=aarch64-apple-darwin ;;
+    MINGW*|MSYS*|CYGWIN*)       triple=x86_64-pc-windows-msvc ;;
+esac
+bugs="$PWD/bin/$triple/bugs"          # a development tree
+[ -x "$bugs" ] || bugs="<skill root>/bin/$triple/bugs"
+```
+
+`./setup-dev-env.sh` prints the `export PATH=` line for this host, which is the
+one thing that makes a bare `bugs` work. Failing that, build it with
+`cargo build --release --manifest-path src/bug-report/Cargo.toml`.
 
 The vocabulary is fixed and the binary will not accept anything outside it:
 

@@ -15,9 +15,11 @@
 # allowed -- delete the pin and say why in the same commit -- but diverging them
 # by forgetting is not.
 #
-# Not a workspace with a shared library crate, because each crate builds and
-# ships on its own: `cargo build` in src/todo must produce the todo binary with
-# no sibling checked out, which is what the CI legs' sparse checkouts rely on.
+# Two copies rather than a third crate they both depend on: a shared crate is
+# the right shape once the shared surface is worth versioning, and this is 250
+# lines of argument parsing and a clock. The pin below is what makes the copy
+# safe in the meantime, and it is what has to be deleted -- deliberately, in the
+# same commit -- if the two are ever meant to differ.
 
 set -euo pipefail
 export LC_ALL=C
