@@ -421,5 +421,35 @@ esac
 
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown)\n' >&2
+
+# --- with the server STOPPED ------------------------------------------------
+# read --local must still work: the channel log IS the storage format, so a
+# local read returns the rows a FETCH would. Without it there is no supported
+# way to see a channel when no server is running, and the only recourse is
+# opening the log by hand -- which is what agents actually did.
+local_out="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 0 --no-session 2>/dev/null || true)"
+case "$local_out" in
+    *'MSG #sess'*'session message'*) : ;;
+    *) t_fail "read --local returned nothing with the server stopped: [$local_out]" ;;
+esac
+# --since must bound a local read the same way it bounds a FETCH.
+bounded="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 1 --no-session 2>/dev/null | grep -c '^MSG ' || true)"
+unbounded="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 0 --no-session 2>/dev/null | grep -c '^MSG ' || true)"
+[ "$bounded" -lt "$unbounded" ] \
+    || t_fail "read --local ignored --since (bounded=$bounded unbounded=$unbounded)"
+# The channel logs are the server's shared storage, so a private --state dir
+# must not become the place a local read looks.
+state_out="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --state "$temporary_root/elsewhere" \
+    --chan '#sess' --since 0 --no-session 2>/dev/null || true)"
+case "$state_out" in
+    *'MSG #sess'*) : ;;
+    *) t_fail "read --local let --state redirect the channel home: [$state_out]" ;;
+esac
+# An unknown channel is an actionable error, not a crash or silence.
+rc=0
+AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#nosuchchannel' --no-session \
+    >/dev/null 2>"$temporary_root/nochan.err" || rc=$?
+[ "$rc" -eq 66 ] || t_fail "read --local on a missing channel exited $rc (want 66)"
+
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown, serverless local reads)\n' >&2
 t_end

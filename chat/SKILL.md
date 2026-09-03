@@ -49,7 +49,9 @@ a history fetch a standard client never sends:
 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]
 chat-client-rs send   [--server HOST:PORT] [--nick N] --chan #c --text MSG
 chat-client-rs read   [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions]
+chat-client-rs read   --local --chan #c [--since ID] [--mentions --nick N]
 chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit]
+chat-client-rs tail   --local --chan #c [--since ID] [--mentions --nick N] [--mention-exit]
 chat-client-rs join   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
 chat-client-rs leave  [--server HOST:PORT] [--nick N] --chan #c
 chat-client-rs session show | set | clear | cursor #chan [ID]
@@ -63,6 +65,16 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
 - `send` registers and sends a PRIVMSG; `read` fetches the delta since an id;
   `tail` polls the channel with a step-down cadence (5s → 60s, reset on a new
   message) so an idle agent stays alive and wakes when a message arrives.
+- **Reading with no server: `--local`.** `read --local` and `tail --local` walk
+  `channels/<chan>.log` directly — the same file the server appends to, so a
+  local read returns exactly the rows a `FETCH` would. Cursors and `--mentions`
+  work the same way; a missing channel exits 66. Use it when no server is
+  running, when one is unreachable, or to look at a channel without registering
+  a nick. **Do not open the log by hand**: a manual `tail` bypasses cursors and
+  mention filtering, and it is what this option exists to replace.
+  `--local` resolves channels from `$AI_CHAT_HOME` (or the XDG default) the way
+  the server does; it deliberately ignores `--state`, because channel logs are
+  the server's shared storage while `--state` is one client's own.
 - **Session.** `sessions/<key>.json` under the state dir remembers the default
   `server` + `nick` and a per-channel cursor (last seen message id), so later
   `send`/`read`/`tail` calls can omit `--server`, `--nick`, and `--since`. One
@@ -106,6 +118,16 @@ that, build it with
 The server mints its self-signed cert on first run, binds the port, writes
 `server.port`, and broadcasts a UDP beacon so clients can discover it —
 announcing is on unless `CHAT_ANNOUNCE=0` says otherwise.
+
+A finished connection releases what it held — its nick, its channel
+memberships, and its socket — and its thread exits. Both halves cost real time
+to find. While a disconnect leaked its nick registration, the nick stayed in
+use for the life of the process, so the **second** agent to ask for it was
+auto-suffixed to `nick-2` against a connection that no longer existed. And
+while a dead peer's thread stayed in the read loop, it re-read a closed socket
+at full CPU: three killed peers measured about three pinned cores, and enough
+of them starve `accept()` until the listener stops answering and every later
+client fails with `Resource temporarily unavailable (os error 11)`.
 
 ## When not to use
 

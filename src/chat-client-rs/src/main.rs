@@ -14,7 +14,7 @@
 //! for testing.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,7 +31,9 @@ fn usage() {
          \x20 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]\n\
          \x20 chat-client-rs send [--server HOST:PORT] [--nick N] --chan #c --text MSG [--insecure]\n\
          \x20 chat-client-rs read  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions] [--insecure]\n\
+         \x20 chat-client-rs read  --local --chan #c [--since ID] [--mentions] [--nick N]\n\
          \x20 chat-client-rs tail  [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit] [--insecure]\n\
+         \x20 chat-client-rs tail  --local --chan #c [--mentions] [--mention-exit] [--nick N]\n\
          \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
@@ -43,7 +45,10 @@ fn usage() {
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
-         \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\n\
+         \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\
+         \x20 --local         read/tail: walk $AI_CHAT_HOME/channels/<chan>.log directly,\n\
+         \x20                 with no server. Ignores --state: the channel logs are the\n\
+         \x20                 server's shared storage, --state is one client's own\n\n\
          The session remembers the default server+nick and per-channel cursors\n\
          (last seen message id). join seeds the cursor to the channel's current\n\
          end (so read/tail never dump old history); leave PARTs and drops the\n\
@@ -642,6 +647,7 @@ struct Opts {
     no_session: bool,
     mentions: bool,
     mention_exit: bool,
+    local: bool,
 }
 
 fn parse_opts(args: &[String]) -> Opts {
@@ -655,6 +661,7 @@ fn parse_opts(args: &[String]) -> Opts {
         no_session: false,
         mentions: false,
         mention_exit: false,
+        local: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -688,6 +695,7 @@ fn parse_opts(args: &[String]) -> Opts {
             "--no-session" => o.no_session = true,
             "--mentions" => o.mentions = true,
             "--mention-exit" => o.mention_exit = true,
+            "--local" => o.local = true,
             _ => {}
         }
         i += 1;
@@ -1200,8 +1208,135 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
     let _ = write_line(&mut tls, "QUIT");
 }
 
+/// The channel log a local read walks: the same file the server appends to.
+fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
+    home.join("channels").join(format!("{}.log", chan))
+}
+
+/// Where the CHANNEL LOGS live, which is not the same place as `--state`.
+///
+/// Channel logs are the server's shared storage; `--state` is one client's own
+/// certificate pins and sessions. An agent given its own `--state` directory
+/// must still read the channels everyone shares, so a local read resolves the
+/// home from `$AI_CHAT_HOME` (or the XDG default) exactly as the server does,
+/// and ignores `--state`.
+fn channels_home() -> PathBuf {
+    std::env::var("AI_CHAT_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| chat_default_home())
+}
+
+/// One stored `MSG #chan <id> ...` line's id, or None for anything else.
+fn msg_line_id(line: &str) -> Option<u64> {
+    if !line.starts_with("MSG ") {
+        return None;
+    }
+    line.split_whitespace().nth(2)?.parse::<u64>().ok()
+}
+
+/// The highest stored id in a channel log, or 0 when there is none.
+///
+/// Taken from the maximum over all rows rather than the last line: a truncated
+/// or interleaved final write must not make the cursor go backwards.
+fn local_last_id(home: &std::path::Path, chan: &str) -> u64 {
+    let path = local_chan_log(home, chan);
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut top = 0u64;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        if let Some(id) = msg_line_id(&line) {
+            if id > top {
+                top = id;
+            }
+        }
+    }
+    top
+}
+
+/// Print stored messages with id > `since`, straight from the channel log.
+/// Returns the highest id printed.
+///
+/// This is the reader the skill was missing. Every read path required a live
+/// server, so when none was reachable the only way to see a channel was to
+/// open its log by hand -- which is what agents actually did, and it bypasses
+/// mention filtering and cursors entirely. Reading the log is lossless: the
+/// log IS the storage format, so a local read returns the same lines a FETCH
+/// would.
+fn local_read(home: &std::path::Path, chan: &str, since: u64, mentions_for: Option<&str>) -> u64 {
+    let path = local_chan_log(home, chan);
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "chat-client-rs: cannot read {}: {} (no such channel locally; a channel exists once its first message is stored)",
+                path.display(),
+                e
+            );
+            std::process::exit(66);
+        }
+    };
+    let mut max_id = 0u64;
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let id = match msg_line_id(&line) {
+            Some(id) => id,
+            None => continue, // a malformed line is skipped, never fatal
+        };
+        if id <= since {
+            continue;
+        }
+        if let Some(nick) = mentions_for {
+            if !line.contains(&format!("@{}", nick)) {
+                continue;
+            }
+        }
+        println!("{}", line);
+        if id > max_id {
+            max_id = id;
+        }
+    }
+    max_id
+}
+
 fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    if o.local {
+        if o.chan.is_empty() {
+            eprintln!("chat-client-rs: read --local needs --chan #c");
+            std::process::exit(64);
+        }
+        // --since wins; otherwise the session cursor; otherwise everything.
+        // A local read defaults to the whole log rather than the current end:
+        // without a server there is no LASTID to ask, and silently printing
+        // nothing is the worst of the available answers.
+        let since = if !o.since.is_empty() {
+            o.since.parse::<u64>().unwrap_or(0)
+        } else if o.no_session {
+            0
+        } else {
+            Session::load(state_dir).cursor(&o.chan)
+        };
+        let mentions_for = if o.mentions {
+            let nick = if o.nick.is_empty() {
+                Session::load(state_dir).nick
+            } else {
+                o.nick.clone()
+            };
+            if nick.is_empty() {
+                eprintln!("chat-client-rs: --mentions needs --nick (or a saved session nick)");
+                std::process::exit(64);
+            }
+            Some(nick)
+        } else {
+            None
+        };
+        let max_id = local_read(&channels_home(), &o.chan, since, mentions_for.as_deref());
+        if max_id > 0 {
+            save_cursor(state_dir, &o.chan, max_id, o.no_session);
+        }
+        return;
+    }
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1287,6 +1422,50 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
 
 fn tail(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    if o.local {
+        if o.chan.is_empty() {
+            eprintln!("chat-client-rs: tail --local needs --chan #c");
+            std::process::exit(64);
+        }
+        let nick = if o.nick.is_empty() {
+            Session::load(state_dir).nick
+        } else {
+            o.nick.clone()
+        };
+        if o.mentions && nick.is_empty() {
+            eprintln!("chat-client-rs: --mentions needs --nick (or a saved session nick)");
+            std::process::exit(64);
+        }
+        let mentions_for = if o.mentions {
+            Some(nick.as_str())
+        } else {
+            None
+        };
+        // A local tail starts at the log's current end unless told otherwise:
+        // a watcher wants what arrives next, not the backlog.
+        let mut since = if !o.since.is_empty() {
+            o.since.parse::<u64>().unwrap_or(0)
+        } else {
+            local_last_id(&channels_home(), &o.chan)
+        };
+        // Same step-down cadence as the socket tail: responsive while a
+        // conversation is live, near-silent when nothing is happening.
+        let mut wait = 1u64;
+        loop {
+            let max_id = local_read(&channels_home(), &o.chan, since, mentions_for);
+            if max_id > since {
+                since = max_id;
+                save_cursor(state_dir, &o.chan, max_id, o.no_session);
+                wait = 1;
+                if o.mention_exit {
+                    return;
+                }
+            } else if wait < 60 {
+                wait = (wait * 2).min(60);
+            }
+            std::thread::sleep(Duration::from_secs(wait));
+        }
+    }
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1984,6 +2163,109 @@ mod tests {
                 ServerName::DnsName(_)
             ),
             "a hostname must keep the DNS-name path"
+        );
+    }
+
+    // ---- the local channel reader (no server) -----------------------------
+
+    fn write_log(home: &std::path::Path, chan: &str, lines: &[&str]) {
+        let dir = home.join("channels");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{}.log", chan)), lines.join("\n") + "\n").unwrap();
+    }
+
+    #[test]
+    fn msg_line_id_reads_only_stored_message_rows() {
+        assert_eq!(msg_line_id("MSG #ops 7 1700000000 alice :hi"), Some(7));
+        // Anything that is not a stored MSG row carries no id, and a
+        // malformed row must be skipped rather than aborting a read.
+        assert_eq!(msg_line_id(""), None);
+        assert_eq!(msg_line_id("JOIN #ops"), None);
+        assert_eq!(msg_line_id("MSG #ops notanid 0 a :x"), None);
+        assert_eq!(msg_line_id("MSG #ops"), None);
+        assert_eq!(msg_line_id(" MSG #ops 7 0 a :x"), None);
+    }
+
+    #[test]
+    fn local_last_id_takes_the_maximum_not_the_final_line() {
+        let home = tmp_state("local_last_id_takes_the_maximum");
+        // A missing channel has no messages, and must not be an error here:
+        // a tail seeding its cursor on an empty channel starts at 0.
+        assert_eq!(local_last_id(&home, "#nope"), 0);
+        // The last line is deliberately NOT the highest: an interleaved or
+        // truncated final write must not walk the cursor backwards.
+        write_log(
+            &home,
+            "#ops",
+            &[
+                "MSG #ops 1 0 alice :one",
+                "MSG #ops 9 0 alice :nine",
+                "garbage",
+                "MSG #ops 4 0 alice :four",
+            ],
+        );
+        assert_eq!(local_last_id(&home, "#ops"), 9);
+    }
+
+    #[test]
+    fn local_read_returns_only_rows_after_the_cursor() {
+        let home = tmp_state("local_read_after_the_cursor");
+        write_log(
+            &home,
+            "#ops",
+            &[
+                "MSG #ops 1 0 alice :one",
+                "MSG #ops 2 0 alice :two",
+                "MSG #ops 3 0 alice :three",
+            ],
+        );
+        // The return value is the highest id printed, which is what the
+        // caller saves as the new cursor.
+        assert_eq!(local_read(&home, "#ops", 0, None), 3);
+        assert_eq!(local_read(&home, "#ops", 2, None), 3);
+        // Caught up: nothing to print, so no cursor movement.
+        assert_eq!(local_read(&home, "#ops", 3, None), 0);
+        assert_eq!(local_read(&home, "#ops", 99, None), 0);
+    }
+
+    #[test]
+    fn local_read_mention_filter_matches_only_the_named_nick() {
+        let home = tmp_state("local_read_mention_filter");
+        write_log(
+            &home,
+            "#ops",
+            &[
+                "MSG #ops 1 0 alice :nothing for anyone",
+                "MSG #ops 2 0 alice :ping @bob please",
+                "MSG #ops 3 0 alice :ping @carol please",
+            ],
+        );
+        assert_eq!(local_read(&home, "#ops", 0, Some("bob")), 2);
+        assert_eq!(local_read(&home, "#ops", 0, Some("carol")), 3);
+        assert_eq!(local_read(&home, "#ops", 0, Some("dave")), 0);
+        // The filter must not leak past the cursor either.
+        assert_eq!(local_read(&home, "#ops", 2, Some("bob")), 0);
+    }
+
+    #[test]
+    fn local_reads_use_the_shared_channel_home_not_a_private_state_dir() {
+        // --state is one client's own pins and sessions; the channel logs are
+        // the server's shared storage. An agent handed its own --state must
+        // still read the channels everyone shares, so channels_home() resolves
+        // AI_CHAT_HOME (or the XDG default) and never looks at --state.
+        let private = tmp_state("local_reads_ignore_state").join("private");
+        let opts = parse_opts(&[
+            "--local".to_string(),
+            "--state".to_string(),
+            private.display().to_string(),
+            "--chan".to_string(),
+            "#ops".to_string(),
+        ]);
+        assert!(opts.local, "--local must be parsed, not swallowed");
+        assert_ne!(
+            channels_home(),
+            private,
+            "a private --state dir must not become the channel home"
         );
     }
 }
