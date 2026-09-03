@@ -221,9 +221,12 @@ impl Drop for RegistryLock {
 }
 
 fn endpoint_is_reachable(endpoint: &str) -> bool {
-    if let Some(path) = endpoint.strip_prefix("unix:") {
+    if endpoint.starts_with("unix:") {
         #[cfg(unix)]
-        return std::os::unix::net::UnixStream::connect(path).is_ok();
+        {
+            let path = endpoint.strip_prefix("unix:").unwrap_or_default();
+            return std::os::unix::net::UnixStream::connect(path).is_ok();
+        }
         #[cfg(not(unix))]
         return false;
     }

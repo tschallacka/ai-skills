@@ -193,6 +193,8 @@ fn restrict_private(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -327,6 +329,7 @@ fn exchange_tcp(
     Ok(())
 }
 
+#[cfg(unix)]
 fn exchange<S: io::Read + Write>(
     mut stream: S,
     request: &[u8],
