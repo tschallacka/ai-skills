@@ -79,7 +79,11 @@ pub fn register(record: &SessionRecord) -> io::Result<()> {
     let path = registry_path();
     let _lock = RegistryLock::acquire(&path)?;
     let mut records = read_records(&path)?;
-    records.retain(|candidate| candidate.token_id != record.token_id);
+    records.retain(|candidate| {
+        candidate.token_id != record.token_id
+            && (candidate.endpoint != record.endpoint
+                || candidate.server_generation == record.server_generation)
+    });
     records.push(record.clone());
     write_records(&path, &records)
 }
