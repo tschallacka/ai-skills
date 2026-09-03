@@ -1883,19 +1883,6 @@ fn position_offset(document: &Document, position: Position) -> usize {
 }
 
 fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &mut Vec<Value>) {
-    if let Some(expected) = envelope.revision {
-        if expected != tab.revision {
-            frames.push(error(
-                &envelope.request_id,
-                "stale_revision",
-                format!(
-                    "expected revision {expected}, current revision {}",
-                    tab.revision
-                ),
-            ));
-            return;
-        }
-    }
     match fs::read(&tab.path) {
         Ok(bytes) if disk_state(&tab.path, None, &bytes) == tab.disk_digest => {}
         Ok(bytes) => {
