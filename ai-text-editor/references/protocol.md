@@ -45,6 +45,10 @@ Every response frame carries a zero-based `sequence`. Data frames also carry
 consumer can therefore detect skipped frames and account for output without
 parsing presentation text.
 
+The protocol frame ceiling is 8 MiB. Large raw reads default to and are capped
+at 4 MiB before base64/JSON framing; oversized result or index windows return
+`response_too_large` and must be requested as smaller pages.
+
 `open` returns a server-issued `session_token` and `server_generation`. The
 client may persist them with `--save-session-token PATH`; subsequent requests
 must send that session token, either by using `--session-token PATH` or by

@@ -79,6 +79,8 @@ The installed package may keep the binaries outside PATH. Discover this manual
 beside the skill and use \fBman -l /path/to/ai-text-editor.1\fR.
 .SH LARGE FILES
 Files above 256 MiB use bounded file-backed reads and sparse index scans.
+The protocol caps frames at 8 MiB; large raw reads are capped at 4 MiB before
+base64 framing, and oversized result windows must be paged.
 Startup records only a bounded prefix index for a large tab. Use the
 index operation for an explicit full scan and inspect the reported coverage.
 Index output returns four blocks by default; use B--offsetR and

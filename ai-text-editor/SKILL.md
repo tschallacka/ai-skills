@@ -106,6 +106,9 @@ rewrite one, start a job, then call `large-edit` with its `--job-id`,
 `--acknowledge-large-edit`, byte range, and replacement; the server streams the
 rewrite, atomically replaces the file, and completes the job. The agent accepts
 the I/O duration and must keep the job result or release its token.
+Large raw reads are capped at 4 MiB so base64/JSON stays below the 8 MiB frame
+ceiling; oversized result windows return `response_too_large` and should be
+paged with `--offset` and `--limit`.
 
 Large edits retain file-backed before/after snapshots in the tab journal
 directory, so `undo` and `redo` restore them without loading the full file into
