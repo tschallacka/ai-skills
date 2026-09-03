@@ -101,6 +101,10 @@ contains "$wrapped_cursor" '"line": 2'
 visual_cursor="$(editor cursor --file "$file" --line 2 --column 1 --wrap-width 3 --visual)"
 contains "$visual_cursor" '"line": 1'
 contains "$visual_cursor" '"column": 4'
+editor cursor --id 7 --line 2 --column 0 --file "$file" >/dev/null
+cursor_context="$(editor read --cursor-id 7 --before 1 --after 0 --file "$file")"
+contains "$cursor_context" '"start_line": 1'
+contains "$cursor_context" 'beta'
 
 search_output="$(editor search --file "$file" --mode exact_text --query beta)"
 contains "$search_output" '"count": 1'

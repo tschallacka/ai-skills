@@ -699,7 +699,16 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                         let before = envelope.payload.get("before").and_then(Value::as_u64);
                         let after = envelope.payload.get("after").and_then(Value::as_u64);
                         if before.is_some() || after.is_some() {
-                            let cursor = tab.cursors.get(&0).copied().unwrap_or(Position { line: 1, column: 0 });
+                            let cursor_id = envelope
+                                .payload
+                                .get("cursor_id")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+                            let cursor = tab
+                                .cursors
+                                .get(&cursor_id)
+                                .copied()
+                                .unwrap_or(Position { line: 1, column: 0 });
                             let lines: Vec<&str> = text.split_inclusive('\n').collect();
                             let start = cursor.line.saturating_sub(before.unwrap_or(0) as usize + 1);
                             let end = (cursor.line.saturating_add(after.unwrap_or(0) as usize)).min(lines.len());
