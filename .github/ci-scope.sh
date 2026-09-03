@@ -26,6 +26,7 @@
 #
 # Usage:
 #   ci-scope.sh [--base REF] [--files-from FILE] [--threshold N]
+#   ci-scope.sh --push-to BRANCH
 #   ci-scope.sh --help
 #
 #   --base REF        what to diff against (default: origin/master, then master)
@@ -33,6 +34,12 @@
 #                      per line. For tests, so every branch is reachable
 #                      without inventing commits.
 #   --threshold N     override the derived threshold (see below)
+#   --push-to BRANCH  this run is a push to BRANCH, not a pull request: decide
+#                     full and stop. On a push to master, HEAD *is*
+#                     origin/master, so the merge base is HEAD and the diff is
+#                     empty -- the selector reported `scope=none` and master
+#                     went green having compiled nothing. Selection is a pull
+#                     request feature; an integration branch stays exhaustive.
 #
 # THE THRESHOLD IS DERIVED, NOT A CONSTANT. A closure bigger than a quarter of
 # the workspace goes full: ceil(members / 4), with a floor of 5 so a small
@@ -66,6 +73,7 @@ export LC_ALL=C
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_ref=""
 files_from=""
+push_to=""
 # Empty means derive it from the workspace size once cargo metadata is read.
 threshold="${CI_SCOPE_THRESHOLD:-}"
 threshold_source="derived"
@@ -82,6 +90,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --base) [ "$#" -ge 2 ] || usage; base_ref="$2"; shift 2 ;;
         --files-from) [ "$#" -ge 2 ] || usage; files_from="$2"; shift 2 ;;
+        --push-to) [ "$#" -ge 2 ] || usage; push_to="$2"; shift 2 ;;
         --threshold) [ "$#" -ge 2 ] || usage; threshold="$2"; threshold_source="given"; shift 2 ;;
         -h|--help) usage 0 ;;
         *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; usage ;;
@@ -113,6 +122,15 @@ decide() { # <scope> <reason> [crates...]
     fi
     exit 0
 }
+
+# A push to a long-lived branch is exhaustive, decided before any git work.
+# This is not a preference. On a push to master, HEAD *is* origin/master, so
+# the merge base is HEAD, the diff is empty, and the honest answer to "what
+# changed" is "nothing" -- which is how master went green having compiled
+# nothing. The branch that cannot compute a meaningful base does not get to
+# narrow, so selection stays a pull request feature.
+[ -z "$push_to" ] \
+    || decide full "push to $push_to: an integration branch is always built in full"
 
 cd "$repo_root" 2>/dev/null || decide full "cannot enter the repository root; refusing to narrow"
 
