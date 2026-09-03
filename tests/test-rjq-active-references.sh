@@ -10,8 +10,13 @@ set -euo pipefail
 export LC_ALL=C
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# The registers are prose about past work, and so is anything the register
+# tools move that prose INTO: *.archive.json is what `todo prune` writes, and
+# *.back.json what `migrate` writes before converting. Excluding them by shape
+# rather than by name means the next dated archive does not turn this gate red.
 offenders="$(git -C "$repo_root" grep -n -w jq -- \
-    ':!BUGS.json' ':!TODO.json' ':!benchmark/results/**' \
+    ':!BUGS.json' ':!TODO.json' ':!*.archive.json' ':!*.back.json' \
+    ':!benchmark/results/**' \
     ':!tests/test-rjq-active-references.sh' ':!src/rjq/tests/differential.rs' \
     ':!planning/bin/**' ':!ai-text-editor/bin/**' ':!planning/tests/fixtures/**' ':!.npmignore' || true)"
 offenders="$(printf '%s\n' "$offenders" | awk -F: '

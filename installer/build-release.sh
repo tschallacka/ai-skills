@@ -237,6 +237,42 @@ case "$mode" in
                 exit 66
             }
         fi
+        # The two register binaries are release-built and never committed, the
+        # same as the chat pair above, and skill_files() lists the host's row
+        # for each -- so the copy loop below requires them for THIS host. Build
+        # them when cargo is here and otherwise require the CI step's output,
+        # rather than letting the loop fail with a bare "does not exist" on a
+        # path nothing in this script ever writes.
+        register_dir=''
+        case "$(uname -s):$(uname -m)" in
+            Linux:x86_64|Linux:amd64) register_dir=x86_64-unknown-linux-musl ;;
+            Linux:aarch64|Linux:arm64) register_dir=aarch64-unknown-linux-musl ;;
+            Darwin:x86_64) register_dir=x86_64-apple-darwin ;;
+            Darwin:arm64) register_dir=aarch64-apple-darwin ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64) register_dir=x86_64-pc-windows-msvc ;;
+            *) printf '%s: unsupported host for the register binaries\n' "${0##*/}" >&2; exit 66 ;;
+        esac
+        register_exe=''
+        case "$register_dir" in *windows*) register_exe='.exe' ;; esac
+        for register_pair in 'bug-report:bugs' 'todo:todo'; do
+            register_skill="${register_pair%%:*}"
+            register_bin="${register_pair#*:}$register_exe"
+            if [ -x "$repo_root/$register_skill/bin/$register_dir/$register_bin" ]; then
+                continue
+            elif command -v cargo >/dev/null 2>&1; then
+                ( cd "$repo_root" && cargo build --release \
+                    --manifest-path "src/$register_skill/Cargo.toml" ) \
+                    || { printf '%s: cargo build %s failed\n' "${0##*/}" "$register_skill" >&2; exit 66; }
+                mkdir -p "$repo_root/$register_skill/bin/$register_dir"
+                cp "$repo_root/target/release/$register_bin" \
+                    "$repo_root/$register_skill/bin/$register_dir/$register_bin"
+                chmod +x "$repo_root/$register_skill/bin/$register_dir/$register_bin"
+            else
+                printf '%s: no %s at %s/bin/%s/, and no cargo to build one\n' \
+                    "${0##*/}" "$register_bin" "$register_skill" "$register_dir" >&2
+                exit 66
+            fi
+        done
         # The compiled plan libraries are generated and never tracked
         # (MAINTAINER.md section 2.15), so a clean tree has none. Build-if-missing
         # here; staleness stays the tests' job. A listed file still missing after
