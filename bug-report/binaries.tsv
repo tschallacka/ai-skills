@@ -1,0 +1,14 @@
+# MODE: PROD
+# The prebuilt bugs binary shipped with the bug-report skill.
+# Built per target by CI and by ../setup-dev-env.sh; never committed.
+#
+# Rust rather than shell so the register's tools need no shell at all: they
+# behave the same under bash, zsh or anything else, and survive macOS retiring
+# the bash it ships. A static binary also asks the target machine for nothing,
+# which is why this skill's requires.tsv declares no tools.
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	bugs	Static 64-bit x86 Linux defect-register tools
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	bugs	Static 64-bit ARM Linux defect-register tools
+x86_64-apple-darwin	Darwin:x86_64	bugs	Intel macOS defect-register tools
+aarch64-apple-darwin	Darwin:arm64	bugs	Apple Silicon macOS defect-register tools
+x86_64-pc-windows-msvc	MINGW*|MSYS*|CYGWIN*|Windows*:x86_64|amd64	bugs.exe	64-bit Windows and POSIX-layer defect-register tools

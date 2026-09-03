@@ -18,5 +18,11 @@
 # Line-oriented TSV rather than JSON on purpose: rjq is itself declared here, so a
 # format that needed rjq to read it could not be read on the machine that is
 # missing it. awk and sed parse this.
+#
+# NO TOOL ROWS, and that is the point. The register's tools ship as a prebuilt
+# static binary (binaries.tsv), so reading or writing BUGS.json asks the target
+# machine for nothing — not even a shell. rjq was a HARD requirement here while
+# every command was an rjq call; shipping the binary removed the dependency
+# rather than relocating it, which is what CODE-STYLE.md section 1 means by a
+# shipped binary lowering the runtime budget instead of widening it.
 tool	condition	strength	why
-rjq	*:*	hard	reads and writes BUGS.json; every command in this skill is a rjq call, and a register that cannot be read is worse than none

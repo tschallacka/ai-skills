@@ -119,6 +119,27 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/release/chat-server-rs" "chat/bin/$dir/chat-server-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
 
+      - name: Place the compiled register rungs
+        run: |
+          # The two register skills ship a prebuilt binary each, and
+          # skill_files() lists the host's row, so the manifest, the release
+          # package and the installer tests all look for <skill>/bin/<triple>/.
+          # Built natively here; the native job builds and exercises the
+          # cross/static artifacts for release.
+          cargo build --release --manifest-path src/bug-report/Cargo.toml
+          cargo build --release --manifest-path src/todo/Cargo.toml
+          case "$(uname -s):$(uname -m)" in
+            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
+            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
+            Darwin:x86_64) dir=x86_64-apple-darwin ;;
+            Darwin:arm64) dir=aarch64-apple-darwin ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc ;;
+            *) echo "::error::unsupported host for the register binaries: $(uname -s):$(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "bug-report/bin/$dir" "todo/bin/$dir"
+          cp "$GITHUB_WORKSPACE/target/release/bugs" "bug-report/bin/$dir/bugs"
+          cp "$GITHUB_WORKSPACE/target/release/todo" "todo/bin/$dir/todo"
+
       - name: Place the compiled plan-crypt rung so its assertions run
         # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
         # compiled branch loudly and check only the shell rungs, which is the
@@ -208,6 +229,23 @@ jobs:
           fi
           command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
+      - name: Place the compiled register rungs
+        # Same reason as the default-bash leg: skill_files() lists the host's
+        # <skill>/bin/<triple>/ row, so without these six tests go red on a tree
+        # that is green everywhere else. This leg has its own steps, which is why
+        # adding the step to the other job did not cover it.
+        run: |
+          cargo build --release --manifest-path src/bug-report/Cargo.toml
+          cargo build --release --manifest-path src/todo/Cargo.toml
+          case "$(uname -s):$(uname -m)" in
+            Darwin:x86_64) dir=x86_64-apple-darwin ;;
+            Darwin:arm64) dir=aarch64-apple-darwin ;;
+            *) echo "::error::unexpected host for the bash 3.2 leg: $(uname -s):$(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "bug-report/bin/$dir" "todo/bin/$dir"
+          cp "$GITHUB_WORKSPACE/target/release/bugs" "bug-report/bin/$dir/bugs"
+          cp "$GITHUB_WORKSPACE/target/release/todo" "todo/bin/$dir/todo"
+
       - name: Run the full deterministic test suite under /bin/bash
         run: /bin/bash ./run-tests.sh
 
@@ -271,14 +309,25 @@ jobs:
         id: decide
         shell: bash
         run: |
-          # On a pull request the target branch is the base; on a push to a
-          # long-lived branch there is nothing to compare against but master.
-          if [ -n "${{ github.base_ref }}" ]; then
-            base="origin/${{ github.base_ref }}"
+          # A PUSH TO A LONG-LIVED BRANCH IS ALWAYS FULL, and not by preference:
+          # on a push to master, HEAD *is* origin/master, so the merge base is
+          # HEAD, the diff is empty, and the selector correctly reported
+          # `scope=none` -- skipping every native leg and turning master green
+          # having compiled nothing. A tick that means "we did not look" is the
+          # one outcome this whole mechanism exists to prevent, so the branch
+          # that cannot compute a meaningful base does not get to narrow.
+          #
+          # It is also what this workflow's own `on:` comment already promised:
+          # "Pushes to either run the full matrix."
+          #
+          # Selection is therefore a PULL REQUEST feature. That is where it
+          # pays anyway -- pull requests are the frequent, incremental runs --
+          # and it keeps the integration branches exhaustively covered.
+          if [ -z "${{ github.base_ref }}" ]; then
+            .github/ci-scope.sh --push-to "${{ github.ref_name }}"
           else
-            base="origin/master"
+            .github/ci-scope.sh --base "origin/${{ github.base_ref }}"
           fi
-          .github/ci-scope.sh --base "$base"
 
       - name: Map the crates onto build subjects
         id: subjects
@@ -601,6 +650,132 @@ jobs:
         with:
           name: planning-commands-${{ matrix.target }}
           path: planning-rust-artifacts
+          if-no-files-found: error
+
+      # The two register skills each ship one prebuilt binary, and both are
+      # verified by being RUN against a real register on this platform rather
+      # than by `--help`: the register is the repository's own memory, so a
+      # writer that is subtly wrong on one platform corrupts the record instead
+      # of failing loudly. That is why they are their own steps and not rows in
+      # planning/rust-migration.tsv, whose loop derives the binary name from the
+      # crate name and proves only that the command launches.
+      #
+      # Gated on planning_commands, the catch-all subject: ci-subjects.sh routes
+      # every crate no named subject claims into it, and these two are among
+      # them, so a change to either turns this on with no whitelist to keep.
+      #
+      # fmt, clippy and test are NOT repeated here. The workspace-wide gate
+      # above covers both crates, which are members of the root workspace.
+      - name: Build and exercise the bug-report register tools
+        if: needs.scope.outputs.planning_commands == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path src/bug-report/Cargo.toml \
+              --target "${{ matrix.target }}"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/bugs"
+          [ -f "$bin" ] || bin="$bin.exe"
+          [ -f "$bin" ] || { echo "::error::no bugs artifact at $bin"; exit 1; }
+
+          work="$(mktemp -d)"
+          # printf rather than a heredoc: a heredoc terminator cannot be
+          # indented, and YAML block scalars indent every line.
+          printf '%s\n' '{ "skill": "bug-report", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "bugs": [] }' > "$work/reg.json"
+          export BUGS_JSON="$work/reg.json"
+          "$bin" check
+          "$bin" add --title "a CI defect" --reproduce "run the leg" \
+                     --observed "it was observed" --expected "it was expected" \
+                     --severity major --priority high
+          [ "$("$bin" count)" = 1 ] || { echo "::error::count was not 1"; exit 1; }
+          [ "$("$bin" next-id)" = B2 ] || { echo "::error::next-id was not B2"; exit 1; }
+
+          # A round trip has to be byte-identical: the register is a tracked
+          # file, so a writer that reformats it produces a diff on every entry.
+          # This is the assertion that lets the tool replace the shell writers.
+          cp "$work/reg.json" "$work/reg.copy.json"
+          "$bin" fmt >/dev/null
+          cmp "$work/reg.json" "$work/reg.copy.json"
+
+          # Closing without evidence must be refused: the register's whole value
+          # is that a closure carries proof.
+          if "$bin" update B1 --status fixed --fix "some commit"; then
+            echo "::error::a closure with no verification was accepted"
+            exit 1
+          fi
+          "$bin" update B1 --status fixed --fix "abc123 - the change" \
+                          --verification "mutation-tested: reverted, saw it fail"
+          "$bin" report | grep -q "0 open of 1 total"
+
+          # An out-of-vocabulary severity must fail at parse, which is the point
+          # of the types replacing a validation pass.
+          sed 's/"major"/"critical"/' "$work/reg.json" > "$work/bad.json"
+          if BUGS_JSON="$work/bad.json" "$bin" check; then
+            echo "::error::an out-of-enum severity was accepted"
+            exit 1
+          fi
+
+      - name: Build and exercise the todo queue tools
+        if: needs.scope.outputs.planning_commands == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path src/todo/Cargo.toml \
+              --target "${{ matrix.target }}"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/todo"
+          [ -f "$bin" ] || bin="$bin.exe"
+          [ -f "$bin" ] || { echo "::error::no todo artifact at $bin"; exit 1; }
+
+          work="$(mktemp -d)"
+          printf '%s\n' '{ "skill": "todo", "skill_version": "2.0.0-alpha.1", "comment": "CI fixture.", "tasks": [] }' > "$work/queue.json"
+          export TODO_JSON="$work/queue.json"
+          "$bin" check
+          "$bin" add --title "a CI task" --detail "run the leg" --priority high
+          [ "$("$bin" count)" = 1 ] || { echo "::error::count was not 1"; exit 1; }
+          [ "$("$bin" next-id)" = T2 ] || { echo "::error::next-id was not T2"; exit 1; }
+
+          cp "$work/queue.json" "$work/queue.copy.json"
+          "$bin" fmt >/dev/null
+          cmp "$work/queue.json" "$work/queue.copy.json"
+
+          # Closing without evidence must be refused: the queue's whole value is
+          # that a closure says what happened.
+          if "$bin" update T1 --status done; then
+            echo "::error::a closure with no note was accepted"
+            exit 1
+          fi
+          "$bin" update T1 --status done --note "abc123 - did the thing, suite green"
+          "$bin" report | grep -q "0 open of 1 total"
+
+          # Pruning writes nothing without the token it printed, and keeps what
+          # it removes.
+          "$bin" prune >/dev/null
+          [ "$("$bin" count)" = 1 ] || { echo "::error::prune wrote without a token"; exit 1; }
+          token="$("$bin" prune 2>&1 >/dev/null | sed -n 's/^  CONFIRM=//p')"
+          [ -n "$token" ] || { echo "::error::prune printed no confirmation token"; exit 1; }
+          CONFIRM="$token" "$bin" prune >/dev/null
+          [ "$("$bin" count)" = 0 ] || { echo "::error::prune left the task in place"; exit 1; }
+          archive="$work/queue.$(date -u +%Y-%m-%d).archive.json"
+          [ -f "$archive" ] || { echo "::error::prune deleted the task instead of archiving it"; exit 1; }
+          [ "$(TODO_JSON="$archive" "$bin" count)" = 1 ] || { echo "::error::the archive does not hold the task"; exit 1; }
+
+          # An out-of-vocabulary priority must fail at parse, which is the point
+          # of the types replacing a validation pass.
+          sed 's/"high"/"critical"/' "$archive" > "$work/bad.json"
+          if TODO_JSON="$work/bad.json" "$bin" check; then
+            echo "::error::an out-of-enum priority was accepted"
+            exit 1
+          fi
+
+      - name: Upload the register artifacts
+        if: needs.scope.outputs.planning_commands == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: registers-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bugs
+            target/${{ matrix.target }}/release/bugs.exe
+            target/${{ matrix.target }}/release/todo
+            target/${{ matrix.target }}/release/todo.exe
           if-no-files-found: error
 
   rust-artifact-manifest:

@@ -43,7 +43,8 @@
     "!planning/MAINTAINER.md",
     "!planning/PACKAGE-MAP.tsv",
     "!planning/rust-migration.tsv",
-    "!**/.ci-bin"
+    "!**/.ci-bin",
+    "!project-specificies/*-deviations.md"
   ],
   "engines": {
     "node": ">=14"

@@ -119,10 +119,12 @@ host_triple() {
 # What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
 # repository root, not in a bin/ inside each skill. Planning commands also get
 # a second, untracked copy beside their shell oracle as scripts/<binary>; that
-# is the extensionless command layout users invoke after the migration. rjq alone is a hard
-# requirement of planning, todo and bug-report, so a per-skill layout means the
-# same binary copied three times -- or, as it was, shipped by one skill and
-# missing from the other two, which the installer then refuses to install.
+# is the extensionless command layout users invoke after the migration. rjq alone
+# was a hard requirement of planning, todo and bug-report, so a per-skill layout
+# means the same binary copied three times -- or, as it was, shipped by one skill
+# and missing from the other two, which the installer then refuses to install.
+# todo and bug-report no longer declare rjq at all: their own binaries replaced
+# every rjq call, so only planning still needs it.
 #
 # chat-proto is a library the two chat crates depend on and produces no binary,
 # so it is absent here and built as a dependency of theirs.
@@ -202,6 +204,8 @@ update-adversarial-review	update-adversarial-review
 update-progress	update-progress
 update-ui-story	update-ui-story
 rjq	rjq
+bug-report	bugs
+todo	todo
 PLAN
 }
 
