@@ -51,7 +51,7 @@
     {
       "id": "B88",
       "title": "The chat tests wait for a 'chat serving:' banner the detached server never prints, so every detached instance times out as not-ready",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -64,12 +64,12 @@
         "chat/tests/test-chat-config.sh",
         "src/chat/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not fixed — every surface was deleted. chat/tests/test-chat-binary.sh, chat/tests/test-chat-config.sh and src/chat/src/main.rs went with 6bba241, \"chat: ship two binaries per skill; drop src/chat; rewire CI for the rust workspace\". The detached-server readiness handshake the bug is about no longer exists: chat/tests/ holds only test-chat.sh and test-chat-resolution.sh, and neither waits for a banner — readiness is the server writing server.port, which the tests poll for.",
+      "verification": "The string \"chat serving\" now occurs exactly once in the whole of master, inside this BUGS.json entry describing the bug. No live file names it. All three recorded surfaces are absent from master's tree.",
       "found_by": "main session, diagnosing the two red tests that block Phase 1 of the 2.0.0-alpha release",
-      "notes": null,
+      "notes": "Filed as urgent/blocking, which distorted the register's priority ordering for as long as it sat open against deleted code. Closing it is the point of the sweep that found it: a stale entry at the top of the queue is worse than no entry, because everything below it is judged relative to it. Found by checking every open entry's surfaces against master rather than by anyone reading the entry.",
       "created_at": "2026-08-28T16:58:45Z",
-      "updated_at": "2026-08-28T16:58:45Z"
+      "updated_at": "2026-09-03T12:18:24Z"
     },
     {
       "id": "B89",
@@ -1718,7 +1718,7 @@
     {
       "id": "B80",
       "title": "render-plan-overview.sh dies with jq: Argument list too long on a large plan and writes a zero-byte page",
-      "status": "reported",
+      "status": "obsolete",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -1730,12 +1730,12 @@
         "planning/scripts/render-plan-overview.sh",
         "planning/scripts/runtime/overview-server.py"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not fixed — the renderer was replaced, not repaired. planning/scripts/render-plan-overview.sh and planning/scripts/runtime/overview-server.py went with 32dbb1b, \"planning: compiled plan-overview renderer, portability and installer overhaul\". The overview page is now produced by the Rust crate at src/plan-overview, so the jq invocation whose argv exceeded the platform limit has no counterpart to recur in.",
+      "verification": "Both surfaces are absent from master. The 35 remaining occurrences of \"render-plan-overview\" are all registers (BUGS.json, TODO.json), planning/MAINTAINER.md, test fixtures under planning/tests/fixtures/overview/ (plan documents whose subject is retiring the jq renderer), and two exemption lists in tests/test-mode-markers.sh and tests/test-skill-files-manifest.sh. No .sh or .yml on master invokes render-plan-overview.sh.",
       "found_by": "webview, reading the overview surface before proposing work on it",
-      "notes": "Recorded as paragraph 2.1 of the .plans/plan-overview-rebuild plan, whose Rust renderer removes the limit by reading from files and stdin (its paragraphs 3.6 and 4.1). Filed here anyway because the register records what is broken in the tree today while the plan records the intent: if the rebuild slips, this entry is the only thing that remembers. Not fixed in place, on instruction, because render-plan-overview.sh is that plan W15 change target and W15 deletes the file. B51, already fixed, is the adjacent defect where the server sent HTTP 200 with an empty body on this failure; it now returns HTTP 500 with a fourteen-byte body, so an operator must still read the server log to learn the cause.",
+      "notes": "The zero-byte page this produced is gone with the mechanism: a compiled renderer does not assemble an argument vector per step. If a large plan ever renders empty again it is a new defect in src/plan-overview, not this one.",
       "created_at": "2026-08-28T10:45:00Z",
-      "updated_at": "2026-08-28T10:45:00Z"
+      "updated_at": "2026-09-03T12:18:24Z"
     },
     {
       "id": "B94",
@@ -2220,7 +2220,7 @@
     {
       "id": "B84",
       "title": "chat-tail.sh interpolates CHAT_NICK into the protocol without the validation chat-send.sh applies",
-      "status": "reported",
+      "status": "obsolete",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -2232,12 +2232,12 @@
         "chat/scripts/chat-tail.sh",
         "chat/scripts/chat-send.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not fixed — the bash chat tier was removed. chat/scripts/chat-tail.sh and chat/scripts/chat-send.sh went with 09ed19a, \"chat: rust IRC-over-TLS server and client; remove bash/interpreter tiers\". Nick handling moved into the Rust server, which validates with valid_nick() before registering one and answers an invalid nick with an error rather than interpolating it into the protocol.",
+      "verification": "The string \"CHAT_NICK\" now occurs exactly once in the whole of master, inside this BUGS.json entry. Neither surface exists, and chat/scripts/ is absent entirely.",
       "found_by": "the chatfix subagent, reported rather than filed because BUGS.json is outside its scope",
-      "notes": "Filed first as B80, renumbered to B84: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "notes": "The asymmetry the entry describes — one helper validating where its sibling did not — cannot recur in the same shape, because there is now one implementation of nick validation instead of two helpers that had to agree. B75 recorded the injection risk this fed; that entry is already closed.",
       "created_at": "2026-08-28T10:58:33Z",
-      "updated_at": "2026-08-28T10:58:33Z"
+      "updated_at": "2026-09-03T12:18:24Z"
     },
     {
       "id": "B86",
@@ -2264,7 +2264,7 @@
     {
       "id": "B90",
       "title": "test-chat-binary and test-chat-config write presence files into the developer's real XDG_RUNTIME_DIR",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -2277,12 +2277,12 @@
         "chat/tests/test-chat-config.sh",
         "chat/tests/test-chat-registry.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not fixed as filed — the three surfaces were deleted by the rust IRC migration (PR #5, landed as 397947a / ab0857f / 4cfab47, \"chat: rust IRC-over-TLS server and client; remove bash/interpreter tiers\"). The $XDG_RUNTIME_DIR/chat/*.server presence registry those tests wrote into is gone with them: discovery is now $AI_CHAT_HOME/server.port plus a UDP announce beacon. The surviving chat/tests/test-chat.sh scopes that home into mktemp -d \"${TMPDIR:-/tmp}/chat-test.XXXXXX\" under an EXIT trap — the isolation this bug asked for, arrived at from the other direction.",
+      "verification": "ls /run/user/$(id -u)/chat/*.server reports the directory does not exist. A full ls -a snapshot of /run/user/1000 (33 entries) taken before running chat/tests/test-chat.sh and test-chat-resolution.sh (both PASS) diffs clean against the snapshot after, and ~/.config/tsch-ai-skills/chat keeps its pre-run mtimes. The string XDG_RUNTIME_DIR now occurs exactly once in the whole of master, inside this entry. No mutation is available: the leak was removed by deleting the leaking code, so the closing diff is empty by construction.",
       "found_by": "main session, answering which port the chat server runs on and finding 41 stale registry entries while looking",
-      "notes": null,
+      "notes": "Of the three surfaces, test-chat-registry.sh was the one that already isolated correctly (export XDG_RUNTIME_DIR=\"$root/run\"); test-chat-config.sh and test-chat-binary.sh were the two that leaked, neither naming the variable at all. Separately confirmed: CI's \"Verify no temp files leaked outside the runner's scope\" step scans only ${TMPDIR:-/tmp} at depth 1 for three name patterns and never $XDG_RUNTIME_DIR, so it would have passed this bug indefinitely. That gap outlives this entry and is worth its own if anyone wants it tracked.",
       "created_at": "2026-08-29T11:21:21Z",
-      "updated_at": "2026-08-29T11:21:21Z"
+      "updated_at": "2026-09-03T12:18:24Z"
     },
     {
       "id": "B91",
@@ -2509,7 +2509,7 @@
     {
       "id": "B85",
       "title": "the perl chat rung collapses all whitespace where the other three map newline to one space",
-      "status": "reported",
+      "status": "obsolete",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -2523,12 +2523,12 @@
         "chat/runtime/server.js",
         "chat/runtime/bash-handler.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not fixed — all four rungs were removed. chat/runtime/server.pl, server.py, server.js and bash-handler.sh went with 09ed19a, \"chat: rust IRC-over-TLS server and client; remove bash/interpreter tiers\". There is one implementation now, so there is nothing left to disagree about whitespace handling with.",
+      "verification": "chat/runtime/ does not exist on master at any path. All four recorded surfaces are absent.",
       "found_by": "the chatfix subagent",
-      "notes": "Filed first as B81, renumbered to B85: I had instructed the webview subagent to take B80 and B81 for its own two findings and then consumed those ids myself an hour later, which is B78 reproduced by the person who filed B78. Its entries keep the numbers it was told to use.",
+      "notes": "This was the clearest case of the class: a bug whose entire content is a discrepancy between two implementations stops being a defect the moment one of them is the only one. The four-rung design is what made it possible, and dropping it is what closed it.",
       "created_at": "2026-08-28T10:58:33Z",
-      "updated_at": "2026-08-28T10:58:33Z"
+      "updated_at": "2026-09-03T12:18:24Z"
     },
     {
       "id": "B118",
