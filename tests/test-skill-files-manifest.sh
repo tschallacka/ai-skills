@@ -181,4 +181,57 @@ t_assert_eq 'a new file in a register skill is not exempt' \
 t_assert_contains 'a compiler input is exempt, and says why' 'compiled library' \
     "$(unshipped_reason planning scripts/lib/core/plan_die.sh)"
 
+# ── every known platform gets an answer, never an abort ─────────────────────
+# Each artifact case in skill_files() ends in `*) return 69`, for a platform we
+# have no build for. install.sh runs under `set -euo pipefail` and assigns the
+# result as `files="$(skill_files "$skill" "$PACKAGE_SELECTION")"`, so reaching
+# that arm does not skip one skill -- it kills the installer mid-loop, after
+# some skills have already been written and before the rest are reached.
+#
+# skill_unsupported_here() is what keeps a KNOWN platform away from that arm.
+# The two must therefore agree: for every skill on every platform identity the
+# release targets, either the skill is declared unavailable here, or skill_files
+# answers. uname is shadowed by a function, which bash resolves ahead of PATH,
+# so this asks the real code the question rather than a copy of its case list.
+platform_uname_s='' platform_uname_m=''
+uname() {
+    case "${1:-}" in
+        -m) printf '%s\n' "$platform_uname_m" ;;
+        *)  printf '%s\n' "$platform_uname_s" ;;
+    esac
+}
+
+aborting=''
+for identity in Linux:x86_64 Linux:aarch64 Darwin:x86_64 Darwin:arm64 \
+    MINGW64_NT-10.0:x86_64 MSYS_NT-10.0:x86_64 CYGWIN_NT-10.0:x86_64; do
+    platform_uname_s="${identity%:*}"
+    platform_uname_m="${identity##*:}"
+    for skill in "${SKILL_NAMES[@]}"; do
+        skill_unsupported_here "$skill" >/dev/null && continue
+        for arm in prod dev; do
+            skill_files "$skill" "$arm" >/dev/null 2>&1 \
+                || aborting="$aborting $identity/$skill/$arm"
+        done
+    done
+done
+t_assert_eq 'every skill this platform supports answers, on every release identity' \
+    "${aborting# }" ''
+
+# Controls, because the assertion above is satisfied just as well by a gate that
+# declares everything unavailable everywhere, and by a `*)` arm nothing reaches.
+platform_uname_s='MINGW64_NT-10.0' platform_uname_m='x86_64'
+t_assert_contains 'interactive-shell is declared unavailable on Windows' 'POSIX-only' \
+    "$(skill_unsupported_here interactive-shell || true)"
+# Its own subshell with the harness's ERR trap and set -e both off: the point
+# of this control is a non-zero exit, and the trap would report it as a failure.
+probe_rc() ( trap - ERR; set +e; "$@" >/dev/null 2>&1; printf '%s' "$?" )
+t_assert_eq 'and that is the arm the gate prevents skill_files from reaching' \
+    "$(probe_rc skill_files interactive-shell prod)" '69'
+platform_uname_s='Linux' platform_uname_m='x86_64'
+t_assert_eq 'interactive-shell is available on Linux' \
+    "$(skill_unsupported_here interactive-shell || true)" ''
+t_assert_eq 'and no skill is gated off a platform it has a build for' \
+    "$(for skill in "${SKILL_NAMES[@]}"; do skill_unsupported_here "$skill" >/dev/null && printf '%s ' "$skill"; done)" ''
+unset -f uname
+
 t_end

@@ -198,6 +198,7 @@ runtime_report_missing() {
 runtime_report_way_forward() {
     local skill ready=""
     for skill in "$@"; do
+        skill_unsupported_here "$skill" >/dev/null && continue
         skill_runtime_tools_present "$skill" && ready="$ready $skill"
     done
     [ -n "$ready" ] || return 0
@@ -213,10 +214,20 @@ runtime_report_way_forward() {
 # reports every gap on stderr. Callers install the ready list and exit non-zero
 # when the blocked list is not empty.
 verify_runtime_tools() {
-    local skill tool
+    local skill tool reason
     RUNTIME_READY_SKILLS=()
     RUNTIME_BLOCKED_SKILLS=""
     for skill in "$@"; do
+        # A skill this platform cannot run is blocked before its requirements
+        # are read: there is no tool to install that would change the answer, so
+        # the missing-requirement report would name nothing and the way-forward
+        # line would offer a command that cannot work.
+        if reason="$(skill_unsupported_here "$skill")"; then
+            RUNTIME_BLOCKED_SKILLS="$RUNTIME_BLOCKED_SKILLS $skill"
+            echo >&2
+            printf 'Not installing %s: %s\n' "$skill" "$reason" >&2
+            continue
+        fi
         while IFS= read -r tool; do
             [ -n "$tool" ] || continue
             echo >&2

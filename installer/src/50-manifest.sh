@@ -45,6 +45,36 @@ skill_artifact_files() {
     return 0
 }
 
+# skill_unsupported_here <skill>
+#
+# Prints why this machine cannot run the skill and returns 0 when that is the
+# case; returns 1 for a skill this platform supports.
+#
+# Every other skill is text plus, at most, a binary that exists for all five
+# release targets, so "can I install this here" never had to be asked before.
+# interactive-shell is the first that cannot exist on a platform we otherwise
+# support: its wrapper allocates the PTY through libc (openpty, TIOCSCTTY,
+# TIOCSWINSZ), sets up a session and a process group, and kills that group by
+# negative pid. binaries.tsv therefore declares no Windows row.
+#
+# Without this gate skill_files() falls through to its `*)` arm on Git Bash,
+# MSYS2 or Cygwin and returns 69. install.sh runs under `set -euo pipefail` and
+# assigns that in `files="$(skill_files ...)"`, so the whole installer dies
+# mid-loop -- taking every skill that had not been reached yet with it. The
+# `*)` arm stays as the backstop for a genuinely unknown platform, which is a
+# different answer from "this platform is known and this skill is not for it".
+#
+# Windows support is wanted, through Cygwin, MSYS2 and native ConPTY; it is
+# queued as T84a/T84b/T84c, and when it lands the row here goes away with it.
+skill_unsupported_here() {
+    case "$1:$(uname -s)" in
+        interactive-shell:MINGW*|interactive-shell:MSYS*|interactive-shell:CYGWIN*|interactive-shell:Windows*)
+            printf 'no Windows build exists; the PTY wrapper is POSIX-only (see interactive-shell/binaries.tsv)\n'
+            return 0 ;;
+    esac
+    return 1
+}
+
 # skill_files <skill> [package]
 #
 # prod (the default) is what an end user receives: the files whose header marks
