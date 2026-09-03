@@ -71,6 +71,12 @@ Mutation responses include every numeric cursor position. Text coordinates use
 one-based lines and zero-based Unicode scalar columns; raw and hex modes use
 byte offsets.
 .PP
+Pass \fB--wrap-width N\fR to receive the corresponding one-based visual row and
+zero-based wrapped-row column. Pass \fB--visual\fR with \fB--line\fR and
+\fB--column\fR to interpret the input as wrapped coordinates; \fBN\fR must be
+positive. Stored cursors and mutation coordinates remain logical, and the
+response includes both logical and visual positions.
+.PP
 Large-file exact text searches require an explicit inclusive line range with
 \fB--range-start-line\fR and \fB--range-end-line\fR. Exact byte searches use
 the half-open \fB--range-start-byte\fR/\fB--range-end-byte\fR range. Unbounded

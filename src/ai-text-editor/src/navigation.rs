@@ -85,9 +85,47 @@ pub fn visual_position(
         return Err("wrap_width_required");
     }
     let position = clamp(text, position);
+    let lines: Vec<Vec<char>> = text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line).chars().collect())
+        .collect();
+    let preceding_rows: usize = lines[..position.line - 1]
+        .iter()
+        .map(|line| line.len().max(1).div_ceil(width))
+        .sum();
     Ok(Position {
-        line: position.line - 1 + position.column / width + 1,
+        line: preceding_rows + position.column / width + 1,
         column: position.column % width,
+    })
+}
+
+pub fn logical_position(
+    text: &str,
+    visual: Position,
+    wrap_width: Option<usize>,
+) -> Result<Position, &'static str> {
+    let width = wrap_width.ok_or("wrap_width_required")?;
+    if width == 0 || visual.line == 0 {
+        return Err("wrap_width_required");
+    }
+    let lines: Vec<Vec<char>> = text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line).chars().collect())
+        .collect();
+    let mut row = 1usize;
+    for (line_index, chars) in lines.iter().enumerate() {
+        let rows = chars.len().max(1).div_ceil(width);
+        if visual.line < row + rows {
+            return Ok(Position {
+                line: line_index + 1,
+                column: ((visual.line - row) * width + visual.column).min(chars.len()),
+            });
+        }
+        row += rows;
+    }
+    Ok(Position {
+        line: lines.len().max(1),
+        column: lines.last().map_or(0, Vec::len),
     })
 }
 
@@ -174,6 +212,15 @@ mod tests {
         assert_eq!(
             visual_position(text, Position { line: 1, column: 4 }, Some(3)).unwrap(),
             Position { line: 2, column: 1 }
+        );
+        let text = "abcde\nf";
+        assert_eq!(
+            visual_position(text, Position { line: 2, column: 0 }, Some(3)).unwrap(),
+            Position { line: 3, column: 0 }
+        );
+        assert_eq!(
+            logical_position(text, Position { line: 2, column: 1 }, Some(3)).unwrap(),
+            Position { line: 1, column: 4 }
         );
     }
 }

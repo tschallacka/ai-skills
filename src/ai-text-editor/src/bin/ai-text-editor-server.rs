@@ -945,7 +945,48 @@ fn cursor(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         .get(&id)
         .copied()
         .unwrap_or(Position { line: 1, column: 0 });
-    let next = if let (Some(line), Some(column)) = (
+    let wrap_width = envelope
+        .payload
+        .get("wrap_width")
+        .and_then(Value::as_u64)
+        .map(|width| width as usize);
+    let next = if envelope.payload.get("visual").and_then(Value::as_bool) == Some(true) {
+        let Some((line, column)) = envelope
+            .payload
+            .get("line")
+            .and_then(Value::as_u64)
+            .zip(envelope.payload.get("column").and_then(Value::as_u64))
+        else {
+            frames.push(error(
+                &envelope.request_id,
+                "visual_cursor_required",
+                "--visual requires line and column",
+            ));
+            return;
+        };
+        let Some(text) = tab.document.text().ok() else {
+            frames.push(error(
+                &envelope.request_id,
+                "visual_cursor_unsupported",
+                "visual coordinates require a UTF-8 text document",
+            ));
+            return;
+        };
+        match navigation::logical_position(
+            &text,
+            Position {
+                line: line as usize,
+                column: column as usize,
+            },
+            wrap_width,
+        ) {
+            Ok(position) => clamp_cursor(tab, position),
+            Err(message) => {
+                frames.push(error(&envelope.request_id, "wrap_width_required", message));
+                return;
+            }
+        }
+    } else if let (Some(line), Some(column)) = (
         envelope.payload.get("line").and_then(Value::as_u64),
         envelope.payload.get("column").and_then(Value::as_u64),
     ) {
@@ -960,9 +1001,15 @@ fn cursor(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         cursor_action(tab, current, envelope, frames)
     };
     tab.cursors.insert(id, next);
+    let visual = wrap_width.and_then(|width| {
+        tab.document
+            .text()
+            .ok()
+            .and_then(|text| navigation::visual_position(&text, next, Some(width)).ok())
+    });
     frames.push(response(
         &envelope.request_id,
-        json!({"id": id, "line": next.line, "column": next.column, "cursors": tab.cursors}),
+        json!({"id": id, "line": next.line, "column": next.column, "visual": visual, "wrap_width": wrap_width, "cursors": tab.cursors}),
     ));
 }
 

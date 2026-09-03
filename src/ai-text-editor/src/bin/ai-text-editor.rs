@@ -124,6 +124,12 @@ fn main() {
     if let Some(value) = option(&args, "--page-lines") {
         payload.insert("page_lines".into(), json!(parse_number(&value)));
     }
+    if let Some(value) = option(&args, "--wrap-width") {
+        payload.insert("wrap_width".into(), json!(parse_number(&value)));
+    }
+    if args.iter().any(|arg| arg == "--visual") {
+        payload.insert("visual".into(), Value::Bool(true));
+    }
     for name in ["--before", "--after"] {
         if let Some(value) = option(&args, name) {
             payload.insert(
@@ -367,6 +373,7 @@ fn help() {
     );
     println!("Search requires --mode and --query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept --gradient 0.0..1.0 with strategy-specific defaults.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
+    println!("Wrapped navigation: --wrap-width N adds visual coordinates; --visual interprets --line/--column as wrapped coordinates. Stored cursors remain logical.");
     println!("Edits: --offset N or --cursor-id N --delete-len N --text TEXT or --bytes-base64 B64; omitting --offset inserts/replaces at that cursor. --expected-revision N is required for safe concurrent edits. Use begin-transaction/end-transaction to group edits into one undo step.");
     println!("Reading: --before N --after N, --offset N --length N, --limit N, --pager-key KEY, --historical, --range-start-line N --range-end-line N, --range-start-byte N --range-end-byte N, --order forward|reverse.");
     println!("Presentation: --presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");

@@ -52,6 +52,13 @@ the TCP authentication secret. A request without a valid token fails with
    The `restore` operation explicitly disables normalized presentation when the
    mapping is still lossless; it returns `restoration_conflict` after a lossy
    normalized edit.
+6. `wrap_width` is optional and reports visual coordinates in addition to the
+   stored logical cursor. Visual rows are one-based and columns are zero-based
+   within the wrapped row; newline boundaries always start a new visual row.
+   Send `visual: true` with `line` and `column` to interpret the input as a
+   visual position. A visual request must include a positive `wrap_width`.
+   Responses always retain logical `line` and `column`, and include `visual`
+   and `wrap_width` when requested.
 
 ## Search
 

@@ -91,6 +91,13 @@ contains "$insert_output" '"revision": 1'
 read_output="$(editor read --file "$file")"
 contains "$read_output" 'alpha!'
 
+wrapped_cursor="$(editor cursor --file "$file" --line 1 --column 4 --wrap-width 3)"
+contains "$wrapped_cursor" '"visual": {'
+contains "$wrapped_cursor" '"line": 2'
+visual_cursor="$(editor cursor --file "$file" --line 2 --column 1 --wrap-width 3 --visual)"
+contains "$visual_cursor" '"line": 1'
+contains "$visual_cursor" '"column": 4'
+
 search_output="$(editor search --file "$file" --mode exact_text --query beta)"
 contains "$search_output" '"count": 1'
 contains "$search_output" '"pager_key"'
