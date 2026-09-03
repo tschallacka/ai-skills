@@ -117,6 +117,12 @@ fn main() {
         }
     };
     let mut payload = serde_json::Map::new();
+    if let Some(file) = &file {
+        payload.insert(
+            "file".into(),
+            Value::String(file.to_string_lossy().into_owned()),
+        );
+    }
     if let Some(value) = option(&args, "--bytes-base64") {
         payload.insert("bytes_base64".into(), Value::String(value));
     }

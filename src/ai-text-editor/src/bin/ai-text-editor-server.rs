@@ -56,6 +56,16 @@ struct Tab {
     large_redo: Vec<LargeHistory>,
 }
 
+struct ServerState {
+    tabs: HashMap<String, Arc<Mutex<Tab>>>,
+    default_key: String,
+    mode: DocumentMode,
+    normalize_nfc: bool,
+    auth_token: Option<String>,
+    server_generation: String,
+    large_threshold_bytes: u64,
+}
+
 #[derive(Debug, Clone)]
 struct LargeHistory {
     before: PathBuf,
@@ -266,6 +276,16 @@ fn main() {
         persist_index(&mut tab);
     }
     let tab = Arc::new(Mutex::new(tab));
+    let default_key = tab_key(&path);
+    let state = Arc::new(Mutex::new(ServerState {
+        tabs: HashMap::from([(default_key.clone(), Arc::clone(&tab))]),
+        default_key,
+        mode,
+        normalize_nfc: args.iter().any(|arg| arg == "--normalize-nfc"),
+        auth_token: configured_auth_token.clone(),
+        server_generation: server_generation.clone(),
+        large_threshold_bytes: large_threshold,
+    }));
     let requested_tcp = option(&args, "--tcp");
     if let Some(address) = requested_tcp {
         let auth_token = configured_auth_token.unwrap_or_default();
@@ -303,10 +323,14 @@ fn main() {
                 );
                 continue;
             }
-            if let Ok(mut tab) = tab.lock() {
-                tab.auth_token = Some(secret.clone());
+            if let Ok(state_guard) = state.lock() {
+                for tab in state_guard.tabs.values() {
+                    if let Ok(mut tab) = tab.lock() {
+                        tab.auth_token = Some(secret.clone());
+                    }
+                }
             }
-            serve_tcp(stream, Arc::clone(&tab), secret.as_bytes(), &generation);
+            serve_tcp(stream, Arc::clone(&state), secret.as_bytes(), &generation);
         }
         return;
     }
@@ -338,7 +362,7 @@ fn main() {
             configured_auth_token.as_deref(),
         );
         for stream in listener.incoming().flatten() {
-            serve(stream, Arc::clone(&tab));
+            serve(stream, Arc::clone(&state));
         }
     }
     #[cfg(not(unix))]
@@ -422,7 +446,7 @@ fn announce(path: &PathBuf, endpoint: &Endpoint) {
     let _ = std::io::stdout().flush();
 }
 
-fn serve<S: std::io::Read + std::io::Write>(stream: S, tab: Arc<Mutex<Tab>>) {
+fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerState>>) {
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
     if reader.read_until(b'\n', &mut line).unwrap_or(0) == 0 {
@@ -430,20 +454,27 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, tab: Arc<Mutex<Tab>>) {
     }
     let request_id = "unknown";
     let writer = reader.get_mut();
-    let value = match validate_ndjson(&line).and_then(validate_request) {
-        Ok(envelope) => handle(envelope, &tab),
-        Err(error_value) => vec![error(
-            request_id,
-            "invalid_request",
-            error_value.to_string(),
-        )],
+    let default_tab = default_tab(&state);
+    let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
+        Ok(envelope) => {
+            let selected = select_tab(&envelope, &state);
+            (handle(envelope, &selected), selected)
+        }
+        Err(error_value) => (
+            vec![error(
+                request_id,
+                "invalid_request",
+                error_value.to_string(),
+            )],
+            default_tab,
+        ),
     };
-    write_frames(writer, value, &tab);
+    write_frames(writer, value, &selected_tab);
 }
 
 fn serve_tcp(
     mut stream: std::net::TcpStream,
-    tab: Arc<Mutex<Tab>>,
+    state: Arc<Mutex<ServerState>>,
     secret: &[u8],
     generation: &str,
 ) {
@@ -503,6 +534,7 @@ fn serve_tcp(
         });
     let Some(request_id) = authenticated else {
         let writer = reader.get_mut();
+        let tab = default_tab(&state);
         write_frames(
             writer,
             vec![error(
@@ -518,21 +550,29 @@ fn serve_tcp(
     if reader.read_until(b'\n', &mut line).unwrap_or(0) == 0 {
         return;
     }
-    let value = match validate_ndjson(&line).and_then(validate_request) {
+    let default_tab = default_tab(&state);
+    let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
         Ok(mut envelope) if envelope.request_id == request_id => {
             // Authentication is bound to this connection and request id. Do
             // not require the secret to cross the TCP wire in the request.
             envelope.auth_token = Some(String::from_utf8_lossy(secret).into_owned());
-            handle(envelope, &tab)
+            let selected = select_tab(&envelope, &state);
+            (handle(envelope, &selected), selected)
         }
-        Ok(_) => vec![error(
-            &request_id,
-            "authentication_failed",
-            "request id does not match the authenticated challenge",
-        )],
-        Err(error_value) => vec![error("unknown", "invalid_request", error_value.to_string())],
+        Ok(_) => (
+            vec![error(
+                &request_id,
+                "authentication_failed",
+                "request id does not match the authenticated challenge",
+            )],
+            default_tab,
+        ),
+        Err(error_value) => (
+            vec![error("unknown", "invalid_request", error_value.to_string())],
+            default_tab,
+        ),
     };
-    write_frames(reader.get_mut(), value, &tab);
+    write_frames(reader.get_mut(), value, &selected_tab);
 }
 
 fn write_frames<S: std::io::Write>(writer: &mut S, frames: Vec<Value>, tab: &Arc<Mutex<Tab>>) {
@@ -581,6 +621,52 @@ fn server_generation() -> String {
     )
     .to_hex()
     .to_string()
+}
+
+fn tab_key(path: &std::path::Path) -> String {
+    let identity = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    blake3::hash(identity.to_string_lossy().as_bytes())
+        .to_hex()
+        .to_string()
+}
+
+fn default_tab(state: &Arc<Mutex<ServerState>>) -> Arc<Mutex<Tab>> {
+    let state = state.lock().unwrap();
+    state.tabs[&state.default_key].clone()
+}
+
+fn select_tab(
+    envelope: &ai_text_editor::protocol::Envelope,
+    state: &Arc<Mutex<ServerState>>,
+) -> Arc<Mutex<Tab>> {
+    let state_guard = state.lock().unwrap();
+    let _server_configuration = (
+        state_guard.mode,
+        state_guard.normalize_nfc,
+        state_guard.auth_token.as_deref(),
+        state_guard.server_generation.as_str(),
+        state_guard.large_threshold_bytes,
+    );
+    if let Some(token) = envelope.session_token.as_deref() {
+        for tab in state_guard.tabs.values() {
+            if tab
+                .lock()
+                .ok()
+                .is_some_and(|tab| tab.session_token == token)
+            {
+                return tab.clone();
+            }
+        }
+    }
+    if envelope.method == "open" {
+        if let Some(path) = envelope.payload.get("file").and_then(Value::as_str) {
+            let key = tab_key(std::path::Path::new(path));
+            if let Some(tab) = state_guard.tabs.get(&key) {
+                return tab.clone();
+            }
+        }
+    }
+    state_guard.tabs[&state_guard.default_key].clone()
 }
 
 fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -> Vec<Value> {
