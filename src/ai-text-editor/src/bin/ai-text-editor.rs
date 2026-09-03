@@ -316,6 +316,14 @@ fn main() {
         }
         "paging" | "stream" => {
             for frame in frames {
+                if frame.get("type").and_then(Value::as_str) == Some("data")
+                    && frame.pointer("/payload/restart").and_then(Value::as_bool) == Some(true)
+                {
+                    if let Some(text) = frame.pointer("/payload/text").and_then(Value::as_str) {
+                        print!("{text}");
+                    }
+                    continue;
+                }
                 if frame.get("type").and_then(Value::as_str) == Some("error")
                     && matches!(
                         frame.get("code").and_then(Value::as_str),

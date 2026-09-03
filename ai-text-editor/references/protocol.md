@@ -183,6 +183,12 @@ Non-streaming readers restart transparently. Jobs are queued, running,
 completed, cancelled, failed, released, or evicted. Detached retention is ten
 minutes by default, configurable up to one hour with dangerous acknowledgement;
 release/eviction permanently invalidates resume tokens.
+Each request still uses one short-lived connection, but the server may process
+connections concurrently. A streamed text read is a revision snapshot: if a
+write is committed before all its frames are sent, the server emits the
+delimiter as a data frame and then sends a fresh stream plus a new `complete`
+frame. Agents consuming raw protocol frames should treat the pre-delimiter
+stream as superseded.
 
 Job requests use `job_id` and, where stated, `resume_token`. `job-start`
 creates a queued record and returns its opaque resume token. `job-progress`

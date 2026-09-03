@@ -97,6 +97,11 @@ the tab journal when those snapshots are no longer needed.
 Large-tab external backup streams the current file to an atomic B.backR
 copy, and reload refreshes metadata and lazy index coverage. Merge and
 force-save require an acknowledged bounded rewrite job.
+.PP
+Short-lived requests may run concurrently. A streamed text read is a revision
+snapshot; when a write lands during delivery, the server emits the restart
+delimiter and a fresh stream. Consumers must discard frames before that
+delimiter.
 .SH HISTORY AND CURSORS
 \fBhistory\fR reports undo and redo depths without exposing another tab.
 \fBresources\fR reports available memory, estimated server overhead, the

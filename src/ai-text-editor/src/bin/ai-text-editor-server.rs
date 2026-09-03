@@ -341,7 +341,11 @@ fn main() {
                     }
                 }
             }
-            serve_tcp(stream, Arc::clone(&state), secret.as_bytes(), &generation);
+            let state = Arc::clone(&state);
+            let generation = generation.clone();
+            std::thread::spawn(move || {
+                serve_tcp(stream, state, secret.as_bytes(), &generation);
+            });
         }
         return;
     }
@@ -405,7 +409,8 @@ fn main() {
             configured_auth_token.as_deref(),
         );
         for stream in listener.incoming().flatten() {
-            serve(stream, Arc::clone(&state));
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || serve(stream, state));
         }
     }
     #[cfg(not(unix))]
@@ -811,13 +816,96 @@ fn serve_tcp(
     write_frames(reader.get_mut(), value, &selected_tab, &state);
 }
 
+fn stream_read_frames(request_id: &str, tab: &Tab) -> Vec<Value> {
+    let Ok(text) = tab.document.text() else {
+        return vec![error(
+            request_id,
+            "invalid_utf8",
+            "streaming text reads require a UTF-8 document",
+        )];
+    };
+    let mut frames = Vec::new();
+    let mut start = 0;
+    for (offset, _) in text.char_indices().skip(1) {
+        if offset - start >= 64 * 1024 {
+            frames.push(response(
+                request_id,
+                json!({"text": &text[start..offset], "revision": tab.revision, "stream": true, "complete": false}),
+            ));
+            start = offset;
+        }
+    }
+    frames.push(response(
+        request_id,
+        json!({"text": &text[start..], "revision": tab.revision, "stream": true, "complete": true}),
+    ));
+    frames
+}
+
 fn write_frames<S: std::io::Write>(
     writer: &mut S,
     frames: Vec<Value>,
     tab: &Arc<Mutex<Tab>>,
     state: &Arc<Mutex<ServerState>>,
 ) {
+    let stream_revision = frames.iter().find_map(|frame| {
+        (frame.get("type").and_then(Value::as_str) == Some("data")
+            && frame.pointer("/payload/stream").and_then(Value::as_bool) == Some(true))
+        .then(|| frame.pointer("/payload/revision").and_then(Value::as_u64))
+        .flatten()
+    });
     for (sequence, mut frame) in frames.into_iter().enumerate() {
+        if let Some(expected_revision) = stream_revision {
+            let current_revision = tab.lock().ok().map(|tab| tab.revision);
+            if current_revision.is_some_and(|revision| revision != expected_revision) {
+                let revision = current_revision.unwrap_or(expected_revision);
+                let delimiter = response(
+                    frame
+                        .get("request_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
+                    json!({"text": "===== FILE EDITED: RESTARTING =====\n", "revision": revision, "stream": true, "restart": true, "complete": false}),
+                );
+                let mut replacement = tab
+                    .lock()
+                    .ok()
+                    .map(|tab| {
+                        stream_read_frames(
+                            frame
+                                .get("request_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown"),
+                            &tab,
+                        )
+                    })
+                    .unwrap_or_default();
+                replacement.push(complete(
+                    frame
+                        .get("request_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown"),
+                    &revision.to_string(),
+                ));
+                let mut restart_frames = Vec::with_capacity(replacement.len() + 1);
+                restart_frames.push(delimiter);
+                restart_frames.extend(replacement);
+                for (restart_sequence, mut restart_frame) in restart_frames.into_iter().enumerate()
+                {
+                    if let Some(object) = restart_frame.as_object_mut() {
+                        object.insert(
+                            "sequence".into(),
+                            json!((sequence + restart_sequence) as u64),
+                        );
+                    }
+                    let mut restart_bytes = serde_json::to_vec(&restart_frame).unwrap();
+                    restart_bytes.push(b'\n');
+                    if writer.write_all(&restart_bytes).is_err() {
+                        return;
+                    }
+                }
+                break;
+            }
+        }
         if let Some(object) = frame.as_object_mut() {
             object.insert("sequence".into(), json!(sequence as u64));
             if object.get("type").and_then(Value::as_str) == Some("data") {
@@ -1144,14 +1232,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start + 1, "end_line": end, "cursor": cursor, "complete": end == lines.len() && start == 0})))
                         } else {
                             if envelope.payload.get("presentation").and_then(Value::as_str) == Some("stream") {
-                                let mut start = 0;
-                                for (offset, _) in text.char_indices().skip(1) {
-                                    if offset - start >= 64 * 1024 {
-                                        frames.push(response(&envelope.request_id, json!({"text": &text[start..offset], "revision": tab.revision, "stream": true, "complete": false})));
-                                        start = offset;
-                                    }
-                                }
-                                frames.push(response(&envelope.request_id, json!({"text": &text[start..], "revision": tab.revision, "stream": true, "complete": true})))
+                                frames.extend(stream_read_frames(&envelope.request_id, &tab));
                             } else {
                                 frames.push(response(&envelope.request_id, json!({"text": text, "revision": tab.revision, "complete": true})))
                             }

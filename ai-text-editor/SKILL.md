@@ -71,6 +71,9 @@ server-written coordination metadata, not a client-accessible SQLite store.
     require an acknowledged bounded rewrite job.
 11. Stream or page large results with restart delimiters after writes, or use
     transparent restart for non-streaming output.
+    Streamed text reads are revision snapshots; if another request writes
+    during delivery, discard frames before the delimiter and consume the fresh
+    stream that follows it.
 12. Recover journaled edits, inspect runtime state, and use Unix sockets or
     loopback TCP on Windows. TCP endpoints must remain private to the host.
     Active endpoint discovery records include the owning PID and server
