@@ -274,6 +274,17 @@ contains "$large_index" '"complete": true'
 large_index_page="$(editor index --file "$large_file" --granularity 2 --offset 1 --limit 1)"
 contains "$large_index_page" '"block_offset": 1'
 contains "$large_index_page" '"returned_blocks": 1'
+printf 'externally-reloaded\n' > "$large_file"
+if editor open --file "$large_file" >"$scratch/large-external-output" 2>&1; then
+    exit 1
+fi
+grep -Fq 'external_change' "$scratch/large-external-output"
+large_backup="$(editor resolve --file "$large_file" --action backup)"
+contains "$large_backup" '"large_file": true'
+[ -f "$large_file.back" ]
+large_reload="$(editor resolve --file "$large_file" --action reload)"
+contains "$large_reload" '"history_event": "external_reload"'
+contains "$large_reload" '"index_complete": false'
 editor close --file "$large_file" --journal-action clean >/dev/null
 wait "$large_pid" 2>/dev/null || true
 large_pid=""

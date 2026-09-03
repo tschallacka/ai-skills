@@ -2126,8 +2126,16 @@ fn resolve_external(
     };
     if action == "backup" {
         if tab.large_file.is_some() {
-            tab.pending_external = Some(external);
-            frames.push(error(&envelope.request_id, "large_file_resolution_requires_range", "a full external backup is unavailable for a large tab; provide an explicit bounded backup job"));
+            match write_large_external_backup(tab, envelope) {
+                Ok(path) => {
+                    tab.pending_external = Some(external);
+                    frames.push(response(&envelope.request_id, json!({"resolved": "backup", "backup_path": path, "resolution_pending": true, "large_file": true, "revision": tab.revision})));
+                }
+                Err(error_value) => {
+                    tab.pending_external = Some(external);
+                    frames.push(error(&envelope.request_id, "backup_failed", error_value));
+                }
+            }
             return;
         }
         match write_external_backup(tab, envelope, &external) {
@@ -2146,9 +2154,61 @@ fn resolve_external(
         if action == "keep" {
             tab.disk_digest = disk_state(&tab.path, Some(&file), &[]);
             frames.push(response(&envelope.request_id, json!({"resolved": "keep", "large_file": true, "save_required": false, "revision": tab.revision})));
+        } else if action == "reload" {
+            let updated = match LargeFile::open(&tab.path) {
+                Ok(updated) => updated,
+                Err(error_value) => {
+                    tab.pending_external = Some(external);
+                    frames.push(error(
+                        &envelope.request_id,
+                        "reload_failed",
+                        error_value.to_string(),
+                    ));
+                    return;
+                }
+            };
+            let revision = tab.revision.saturating_add(1);
+            if let Err(error_value) = journal_append_result(
+                tab,
+                "external_reload",
+                json!({"revision": revision, "large_file": true, "before": file.bytes, "after": updated.bytes}),
+            ) {
+                tab.pending_external = Some(external);
+                frames.push(error(
+                    &envelope.request_id,
+                    "journal_write_failed",
+                    error_value.to_string(),
+                ));
+                return;
+            }
+            tab.large_file = Some(updated.clone());
+            tab.revision = revision;
+            tab.disk_digest = disk_state(&tab.path, Some(&updated), &[]);
+            tab.index = match updated.index_prefix(tab.index.granularity, DEFAULT_GRANULARITY) {
+                Ok(index) => index,
+                Err(error_value) => {
+                    tab.pending_external = Some(external);
+                    frames.push(error(
+                        &envelope.request_id,
+                        "index_failed",
+                        error_value.to_string(),
+                    ));
+                    return;
+                }
+            };
+            tab.index_complete = false;
+            tab.index_loaded = false;
+            persist_index(tab);
+            let _ = tab.metadata.record(
+                &tab.path,
+                tab.document.mode,
+                tab.revision,
+                updated.bytes as usize,
+            );
+            frames.push(response(&envelope.request_id, json!({"resolved": "reload", "large_file": true, "revision": tab.revision, "history_event": "external_reload", "index_complete": false})));
         } else {
             tab.pending_external = Some(external);
-            frames.push(error(&envelope.request_id, "large_file_resolution_requires_range", "reload, merge, and force_save require a bounded external range or an explicit large-file job"));
+            frames.push(error(&envelope.request_id, "large_file_resolution_requires_range", "merge and force_save require a bounded external range or an explicit large-file rewrite job; choose backup, reload, or keep for this alert"));
         }
         return;
     }
@@ -2397,6 +2457,47 @@ fn write_external_backup(
     if backup.exists() {
         let _ = fs::remove_file(&temp);
         return Err("backup_exists".to_owned());
+    }
+    fs::rename(&temp, &backup).map_err(|error| error.to_string())?;
+    Ok(backup)
+}
+
+fn write_large_external_backup(
+    tab: &Tab,
+    envelope: &ai_text_editor::protocol::Envelope,
+) -> Result<PathBuf, String> {
+    let requested = envelope
+        .payload
+        .get("backup_path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let backup = requested.unwrap_or_else(|| PathBuf::from(format!("{}.back", tab.path.display())));
+    let parent = backup.parent().unwrap_or_else(|| std::path::Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let before = file_metadata_state(&tab.path);
+    let temp = unique_temp_path(parent, "large-backup");
+    let mut input = fs::File::open(&tab.path).map_err(|error| error.to_string())?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|error| error.to_string())?;
+    if let Err(error_value) = io::copy(&mut input, &mut output) {
+        let _ = fs::remove_file(&temp);
+        return Err(error_value.to_string());
+    }
+    output.sync_all().map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        error.to_string()
+    })?;
+    drop(output);
+    if before != file_metadata_state(&tab.path) {
+        let _ = fs::remove_file(&temp);
+        return Err("backup_race_detected".into());
+    }
+    if backup.exists() {
+        let _ = fs::remove_file(&temp);
+        return Err("backup_exists".into());
     }
     fs::rename(&temp, &backup).map_err(|error| error.to_string())?;
     Ok(backup)
