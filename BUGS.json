@@ -343,6 +343,27 @@
       "updated_at": "2026-09-03T10:32:05Z"
     },
     {
+      "id": "B150",
+      "title": "register-resolve.sh reads index stage 1 as the merge base, so during a rebase it reports no collisions and advises taking one side whole",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On a branch whose BUGS.json commits precede a commit that renumbers them, run: git rebase origin/master; resolve each earlier BUGS.json conflict with 'git checkout --ours -- BUGS.json && git add BUGS.json && git rebase --continue'; then at the renumbering commit run ./planning/scripts/register-resolve.sh BUGS.json",
+      "observed": "'register-resolve: no id collisions between the two sides; the conflict is textual only.' followed by 'take either side and re-run: git checkout --theirs -- BUGS.json', while B119 and B120 existed on BOTH sides as different entries (master: rjq-less PATH refill / pre-push per-file test runs; branch: META-LEFT omission / raw hex panic). Taking theirs as advised would have dropped master's two entries entirely.",
+      "expected": "Either both collisions are reported so each gets a decision, or the tool refuses to advise because index stage 1 is not the merge base of the two sides it is comparing.",
+      "mechanism": "The merge base is taken from index stage 1. That is the merge base only for 'git merge'. During a rebase, stage 1 is the parent of the commit being replayed -- a commit on the branch's own history -- so an entry the OTHER side added independently appears in the base already and reads as a modification rather than an addition. The both-sides-added test therefore never fires, and the two-sided-addition case it exists to catch is reported as textual.",
+      "surfaces": [
+        "planning/scripts/register-resolve.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "pr13-rescue, rebasing PR #31 onto master 16c8c06",
+      "notes": "Peer of B151: both are register-resolve.sh assuming a merge where a rebase is the other half of the same workflow. B151 is the refusal's guidance naming no available action; this one is the silent wrong answer, and it is the dangerous half -- the tool exists to stop a register merge losing bug states, and here it advises exactly that. Workaround used on pr13-rescue: install the real merge base as stage 1 before running it, with 'git show $(git merge-base origin/master <branch-tip>):BUGS.json | git hash-object -w --stdin' and 'git update-index --index-info'. With that stage 1 in place it found both collisions immediately. Went unnoticed because every test and every use so far has been a merge, where stage 1 is the merge base by definition.",
+      "created_at": "2026-09-03T22:06:04Z",
+      "updated_at": "2026-09-03T22:06:23Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -3110,6 +3131,27 @@
       "notes": null,
       "created_at": "2026-09-01T20:00:00Z",
       "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B151",
+      "title": "register-resolve.sh tells a rebase to fix an unsound side on its own branch, which names no action a rebase can take",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On a branch that adds register entries in several commits and renumbers them in a later one, run 'git rebase origin/master' and, at the first BUGS.json conflict, run ./planning/scripts/register-resolve.sh BUGS.json",
+      "observed": "Exit 65 with \"the 'theirs (MERGE_HEAD)' side of BUGS.json is not a sound bug register on its own: duplicate ids\" and \"fix that side on its own branch first\". The side named is a historical commit mid-replay; there is no branch to fix it on, and the duplicate ids are a transient state the branch's own later commit already resolves.",
+      "expected": "The refusal is right, but the guidance should name an action available during a rebase -- defer this file to the commit whose register is sound, or resolve the ids here -- rather than an action that only exists for a merge.",
+      "mechanism": "The soundness gate and its message were written for 'git merge', where each side is a branch tip and 'fix that side on its own branch' is a real instruction. Under 'git rebase' each side is an intermediate commit being replayed, so the instruction has no referent.",
+      "surfaces": [
+        "planning/scripts/register-resolve.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "pr13-rescue, rebasing PR #31 onto master 16c8c06",
+      "notes": "Peer of B150: same assumption, other symptom. This half fails safe -- it refuses rather than answering wrongly -- which is why it is minor where B150 is blocking. Workaround used on pr13-rescue: resolve every BUGS.json conflict before the renumbering commit with 'git checkout --ours', then run the tool once at that commit, where the replayed side's register is sound.",
+      "created_at": "2026-09-03T22:06:04Z",
+      "updated_at": "2026-09-03T22:06:23Z"
     },
     {
       "id": "B25",
