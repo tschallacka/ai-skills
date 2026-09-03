@@ -60,6 +60,7 @@ fn read_resource(id: Value, params: Value) -> Value {
 fn tool_definitions() -> Vec<Value> {
     [
         ("open", "Inspect the tab path, document mode, revision, size, and cursors."),
+        ("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports."),
         ("history", "Inspect undo/redo depths and journal sequence without changing the tab."),
         ("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold."),
         ("read", "Read the current document or a bounded byte/line range."),
