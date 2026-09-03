@@ -117,14 +117,20 @@ host_triple() {
 }
 
 # What to build: <crate> <binary>. Everything lands in ONE bin/<triple> at the
-# repository root, not in a bin/ inside each skill. Planning commands also get
-# a second, untracked copy beside their shell oracle as scripts/<binary>; that
-# is the extensionless command layout users invoke after the migration. rjq alone
-# was a hard requirement of planning, todo and bug-report, so a per-skill layout
-# means the same binary copied three times -- or, as it was, shipped by one skill
-# and missing from the other two, which the installer then refuses to install.
-# todo and bug-report no longer declare rjq at all: their own binaries replaced
-# every rjq call, so only planning still needs it.
+# repository root. Planning commands also get a second, untracked copy beside
+# their shell oracle as scripts/<binary>; that is the extensionless command
+# layout users invoke after the migration. rjq alone was a hard requirement of
+# planning, todo and bug-report, so a per-skill layout means the same binary
+# copied three times -- or, as it was, shipped by one skill and missing from the
+# other two, which the installer then refuses to install. todo and bug-report no
+# longer declare rjq at all: their own binaries replaced every rjq call, so only
+# planning still needs it.
+#
+# The register skills are the exception, and not by preference: skill_files()
+# promises bin/<triple>/<binary> RELATIVE TO THE SKILL, so the installer looks
+# in bug-report/bin/<triple>/ and todo/bin/<triple>/. Those get a per-skill copy
+# as well, matching CI's "Place the compiled register rungs" step. T72 replaces
+# both paths with one shared bin and this exception goes with it.
 #
 # chat-proto is a library the two chat crates depend on and produces no binary,
 # so it is absent here and built as a dependency of theirs.
@@ -282,6 +288,20 @@ while IFS="$(printf '\t')" read -r crate binary; do
             chmod +x "$repo_root/planning/scripts/$binary$exe"
             printf '   -> planning/scripts/%s%s\n' "$binary" "$exe"
         fi
+        # The register skills resolve their tool at <skill>/bin/<triple>/, which
+        # is what skill_files() promises and what CI's "Place the compiled
+        # register rungs" step does. Without this copy the shared bin/ above is
+        # the only one, and test-register-schemas fails four assertions on a
+        # tree built the documented way. T72 folds both into one shared bin.
+        case "$crate" in
+            bug-report|todo)
+                skill_dir="$repo_root/$crate/bin/$triple"
+                mkdir -p "$skill_dir"
+                cp "$repo_root/target/$triple/release/$binary$exe" "$skill_dir/$binary$exe"
+                chmod +x "$skill_dir/$binary$exe"
+                printf '   -> %s/bin/%s/%s%s\n' "$crate" "$triple" "$binary" "$exe"
+                ;;
+        esac
         built=$((built + 1))
     else
         printf 'FAILED\n'
