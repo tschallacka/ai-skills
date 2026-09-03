@@ -1,3 +1,4 @@
+<!-- MODE: DEV -->
 # Interactive-shell testing protocol
 
 This protocol verifies that an AI agent can start a fresh subworker and have

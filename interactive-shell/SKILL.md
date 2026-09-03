@@ -3,6 +3,8 @@ name: interactive-shell
 description: Operate unknown full-screen and interactive terminal programs through a PTY-backed wrapper, compact screen observations, and a local Unix-socket input client.
 ---
 
+<!-- MODE: PROD -->
+
 # Interactive shell
 
 Use this skill when an agent must discover and operate a full-screen or
@@ -11,7 +13,7 @@ or a terminal menu. This is an agent-driven interface: never replace the
 interaction with a replayed shell script or assume that a program has the
 shortcuts used in an example.
 
-Read [README.md](README.md) for the command reference and an end-to-end
+Read [docs/README.md](docs/README.md) for the command reference and an end-to-end
 workflow. Start
 `interactive-shell --session <ID> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`
 or `interactive-shell --socket <SOCKET> --cols 80 --rows 24 --idle-timeout 300 -- <COMMAND>`

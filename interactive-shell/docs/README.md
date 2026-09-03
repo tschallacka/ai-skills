@@ -1,3 +1,4 @@
+<!-- MODE: PROD -->
 # Interactive shell skill and tools
 
 This directory contains the agent instructions for operating interactive

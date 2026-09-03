@@ -1,4 +1,4 @@
-display_name: Interactive shell
-short_description: Drive PTY-backed interactive programs through a local socket.
-default_prompt: Build the isolated interactive-shell crate, observe JSONL screen events, and send validated socket requests.
-automatic_invocation: true
+# MODE: PROD
+interface:
+  display_name: "Interactive Shell"
+  short_description: "Drive PTY-backed interactive terminal programs through a local socket"

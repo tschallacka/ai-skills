@@ -1,0 +1,24 @@
+# MODE: PROD
+# Prebuilt interactive-shell rust binaries shipped with the skill (PTY wrapper
+# + socket input client).
+# Built by the release/CI (cargo build --release --workspace); never committed.
+#
+# Two of the crate's three binaries ship. interactive-shell-fixture is marked
+# MODE: DEV / PACKAGE: DEV: it emits deliberately fragmented CSI and OSC
+# sequences as an input to tests/protocol.rs and has no use on a target
+# machine, so it stays out of this registry.
+#
+# No Windows row, unlike chat: the wrapper is POSIX-only by construction. It
+# allocates the PTY through libc (TIOCSCTTY, TIOCSWINSZ), terminates a child
+# process group with SIGTERM/SIGKILL, and the input client speaks
+# std::os::unix::net::UnixStream. x86_64-pc-windows-msvc does not compile, so
+# declaring a row would promise an artifact the release can never produce.
+target	condition	binary	why
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell	Static 64-bit x86 Linux PTY wrapper emitting JSONL screen events
+x86_64-unknown-linux-musl	Linux:x86_64|amd64	interactive-shell-input	Static 64-bit x86 Linux unix-socket input client
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	interactive-shell	Static 64-bit ARM Linux PTY wrapper emitting JSONL screen events
+aarch64-unknown-linux-musl	Linux:aarch64|arm64	interactive-shell-input	Static 64-bit ARM Linux unix-socket input client
+x86_64-apple-darwin	Darwin:x86_64	interactive-shell	Intel macOS PTY wrapper emitting JSONL screen events
+x86_64-apple-darwin	Darwin:x86_64	interactive-shell-input	Intel macOS unix-socket input client
+aarch64-apple-darwin	Darwin:arm64	interactive-shell	Apple Silicon macOS PTY wrapper emitting JSONL screen events
+aarch64-apple-darwin	Darwin:arm64	interactive-shell-input	Apple Silicon macOS unix-socket input client
