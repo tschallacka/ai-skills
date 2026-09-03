@@ -83,6 +83,14 @@ pub fn register(record: &SessionRecord) -> io::Result<()> {
     write_records(&path, &records)
 }
 
+pub fn unregister(session_token: &str) -> io::Result<()> {
+    let path = registry_path();
+    let token_id = blake3::hash(session_token.as_bytes()).to_hex().to_string();
+    let mut records = read_records(&path)?;
+    records.retain(|record| record.token_id != token_id);
+    write_records(&path, &records)
+}
+
 pub fn resolve(identity: &str) -> Result<SessionRecord, String> {
     let path = registry_path();
     let records =

@@ -1638,6 +1638,14 @@ fn close_tab(
             return;
         }
     }
+    if let Err(error_value) = session::unregister(&tab.session_token) {
+        frames.push(error(
+            &envelope.request_id,
+            "session_cleanup_failed",
+            error_value.to_string(),
+        ));
+        return;
+    }
     tab.close_after_response = true;
     frames.push(response(
         &envelope.request_id,
