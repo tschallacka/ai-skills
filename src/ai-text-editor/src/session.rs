@@ -186,9 +186,7 @@ pub fn new_record(
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let tab_uuid = blake3::hash(format!("{}:{}", std::process::id(), now.as_nanos()).as_bytes())
-        .to_hex()
-        .to_string();
+    let tab_uuid = tab_uuid_for(session_token, server_generation);
     let token_id = blake3::hash(session_token.as_bytes()).to_hex().to_string();
     SessionRecord {
         token_id,
@@ -201,6 +199,12 @@ pub fn new_record(
         auth_token: auth_token.map(str::to_owned),
         session_token: session_token.to_owned(),
     }
+}
+
+pub fn tab_uuid_for(session_token: &str, server_generation: &str) -> String {
+    blake3::hash(format!("{session_token}:{server_generation}").as_bytes())
+        .to_hex()
+        .to_string()
 }
 
 #[cfg(test)]

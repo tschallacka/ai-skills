@@ -70,6 +70,7 @@ done
 
 contains "$open_output" '"revision": 0'
 contains "$open_output" '"mode": "TextUtf8"'
+contains "$open_output" '"tab_uuid": "'
 capabilities_output="$($client capabilities --session-token "$session")"
 contains "$capabilities_output" '"protocol_version": 1'
 contains "$capabilities_output" '"search_preview_matches": 4'
