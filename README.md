@@ -4,6 +4,14 @@ A small collection of reusable `SKILL.md` instructions for coding agents.
 The skills are plain Markdown, version-controlled, and portable across
 compatible agent tools.
 
+This README is the reference: what the skills are, which platforms they support,
+and how to install them. **The [wiki][wiki] answers the other question — why the
+project is built this way**: why a Markdown repository contains Rust crates, why
+the dev shell compiles bash 3.2 from source, which design choices were made and
+what they cost, how to verify any of it yourself, and what does not work yet.
+
+[wiki]: https://github.com/tschallacka/ai-skills/wiki
+
 ## Skills
 
 | Skill | Purpose | Documentation |
