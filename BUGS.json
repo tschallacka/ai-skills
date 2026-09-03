@@ -212,6 +212,29 @@
       "updated_at": "2026-09-02T21:51:15Z"
     },
     {
+      "id": "B117",
+      "title": "The bug-report skill's documented validation snippet uses IN/1, which rjq cannot parse, so it prints \"BUGS.json is sound\" for any file",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "echo '{}' | rjq 'if (\"a\" | IN(\"a\",\"b\")) then \"yes\" else \"no\" end'\n# then run the Validating the file snippet from bug-report/SKILL.md with rjq in place of jq, against any BUGS.json",
+      "observed": "rjq exits 5 with [(File { code: ... }, [(\"IN\", Filter(1))])] and writes nothing to stdout. Every caller treats that empty stdout as the sound case. Measured against a register carrying a duplicate id and two invalid statuses: pre-push-check.sh printed \"ok BUGS.json parses, ids unique, statuses known\" and found nothing. jq on the same expression returns the three findings. The shipped reg_findings helper, on the same file, reports all of them.",
+      "expected": "Either the snippet runs under rjq, or a runtime that cannot evaluate it fails loudly instead of reporting the register sound.",
+      "mechanism": "rjq is jaq-based and jaq does not define jq's IN/1 builtin. The snippet uses it four times (parent existence, status, severity, priority). Command substitution discards the parse error to stderr and yields an empty string, and the snippet's success test is emptiness of that string -- so a runtime failure and a clean register are indistinguishable. The skill's own note that `jq -e` is wrong here because it exits 4 on empty output shows the empty-means-sound convention was deliberate; it just has no guard for the command not having run.",
+      "surfaces": [
+        "pre-push-check.sh",
+        "bug-report/SKILL.md",
+        "todo/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "running the skill's own validation after adding B115 and B116; it reported sound while rjq was erroring",
+      "notes": "Found in bug-report/SKILL.md while validating B115 and B116, then found live in pre-push-check.sh section 5, which carried its own jq-flavoured copy of the same checks behind 2>/dev/null and || true. That gate had therefore never fired on any machine using rjq -- which is every machine following the register contract, since reg_require_jq refuses with 69 when rjq is absent. Raised to blocking for that reason: a gate that always passes is worse than no gate, and this one is run before every push. The pre-push-check half is FIXED in this change: section 5 now delegates to reg_findings, the single correct implementation, and a check that cannot run is reported as a failure rather than as silence. The SKILL.md snippets in bug-report and todo are still wrong and are what this entry stays open for. Fix them the same way -- express the checks with index(...) as reg_findings does, or test the exit status instead of the emptiness of the output. Confirm todo/SKILL.md carries the pattern before changing it.",
+      "created_at": "2026-09-03T08:54:56Z",
+      "updated_at": "2026-09-03T09:39:05Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -1783,28 +1806,6 @@
       "notes": "B108 is the live instance and the fastest way to test any fix: whatever check gets added must fail while B108 is unfixed and pass once it is. Do not close this by fixing B108 - the point of the entry is that the packaging defect was invisible to the suite, so fixing the instance would hide the gap again. Related: B108 also revealed that PACKAGE-MANIFEST.tsv omits register-rebuild.sh, so any new check should cover scripts that are in neither package manifest as well as scripts whose dependencies land in a different arm.",
       "created_at": "2026-09-02T12:59:13Z",
       "updated_at": "2026-09-02T12:59:13Z"
-    },
-    {
-      "id": "B117",
-      "title": "The bug-report skill's documented validation snippet uses IN/1, which rjq cannot parse, so it prints \"BUGS.json is sound\" for any file",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "echo '{}' | rjq 'if (\"a\" | IN(\"a\",\"b\")) then \"yes\" else \"no\" end'\n# then run the Validating the file snippet from bug-report/SKILL.md with rjq in place of jq, against any BUGS.json",
-      "observed": "rjq exits non-zero with [(File { code: ... }, [(\"IN\", Filter(1))])] and writes nothing to stdout. The snippet assigns that empty stdout to $findings and its `[ -z \"$findings\" ] && echo 'BUGS.json is sound'` branch reports the file sound. jq on the same expression returns \"yes\" and the same snippet validates correctly.",
-      "expected": "Either the snippet runs under rjq, or a runtime that cannot evaluate it fails loudly instead of reporting the register sound.",
-      "mechanism": "rjq is jaq-based and jaq does not define jq's IN/1 builtin. The snippet uses it four times (parent existence, status, severity, priority). Command substitution discards the parse error to stderr and yields an empty string, and the snippet's success test is emptiness of that string -- so a runtime failure and a clean register are indistinguishable. The skill's own note that `jq -e` is wrong here because it exits 4 on empty output shows the empty-means-sound convention was deliberate; it just has no guard for the command not having run.",
-      "surfaces": [
-        "bug-report/SKILL.md",
-        "todo/SKILL.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "running the skill's own validation after adding B115 and B116; it reported sound while rjq was erroring",
-      "notes": "Narrow but the failure mode is the worst kind: a gate that always passes. It matters because rjq is the declared ceiling of the required runtime for the registers -- reg_require_jq refuses with exit 69 when rjq is absent -- so an agent following the skill on a machine provisioned to that contract gets a false pass. The shipped helper is NOT affected: register-lib.sh reg_findings expresses the same checks with `index($e.status) == null`, which rjq evaluates fine, so the register's real gate works. Only the copy-paste snippet in SKILL.md is broken. Fix either way round: rewrite the snippet with `index(...)` like the shipped helper, or check the exit status rather than the emptiness of the output. todo/SKILL.md is listed because it carries the same validation pattern for TODO.json and needs the same treatment -- confirm before fixing.",
-      "created_at": "2026-09-03T08:54:56Z",
-      "updated_at": "2026-09-03T08:54:56Z"
     },
     {
       "id": "B6",

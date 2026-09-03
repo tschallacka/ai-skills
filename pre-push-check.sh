@@ -171,22 +171,64 @@ else
 fi
 
 # ---- 5. register soundness (needs rjq; skip quietly without it) ------------
+# This delegates to reg_findings rather than carrying its own expression. The
+# copy it used to carry was written in jq and used IN/1, which rjq -- the
+# runtime the registers actually mandate -- cannot parse. It exited 5, the
+# 2>/dev/null discarded the reason, the `|| true` discarded the status, and an
+# empty findings string is the sound case: so the gate printed "ids unique,
+# statuses known" for every register, always. Measured against a register with
+# a duplicate id and two invalid statuses: no finding. Errors are now fatal to
+# the check rather than silent, so a runtime that cannot run it says so.
 if command -v rjq >/dev/null 2>&1; then
+    # shellcheck source=planning/scripts/register-lib.sh
+    source "$(cd "$(dirname "$0")/planning/scripts" && pwd)/register-lib.sh"
     for reg in TODO.json BUGS.json; do
         [ -f "$reg" ] || continue
-        findings="$(rjq -r '
-          ([.tasks[]? .id] + [.bugs[]? .id]) as $ids
-          | if ($ids | length) != ($ids | unique | length) then "duplicate ids" else empty end,
-            (.tasks[]? | select(.status | IN("open","partly","blocked","decided","done","dropped","obsolete") | not)
-                      | "\(.id) has an unknown status: \(.status)")' "$reg" 2>/dev/null || true)"
-        if [ -n "$findings" ]; then
+        kind=bug
+        [ "$reg" = TODO.json ] && kind=todo
+        findings=''
+        if ! findings="$(reg_findings "$kind" "$reg" 2>&1)"; then
+            bad "$reg: the soundness check could not run: $findings"
+        elif [ -n "$findings" ]; then
             bad "$reg: $findings"
         else
-            ok "$reg parses, ids unique, statuses known"
+            ok "$reg is sound (reg_findings)"
         fi
     done
 else
     note "rjq not on PATH; register soundness skipped (CI runs test-register-schemas)"
+fi
+
+# ---- 5b. the npm package baseline ------------------------------------------
+# npm-package-baseline.tsv pins the byte size of every packaged file, so any
+# edit to a shipped file fails planning/tests/test-npm-package.sh. That test
+# runs `npm pack`, whose prepack builds the release tree and runs two suites --
+# minutes, too slow for a pre-push gate. It does not need to be run: a packaged
+# text file's bytes are the working tree's bytes, verified across all 153 rows.
+# So the pinned sizes are checked directly here, in milliseconds.
+#
+# What this does NOT cover is npm's file *selection*: a newly shipped file has
+# no row to disagree with. A row whose file has vanished is caught. The full
+# test remains authoritative for the file set.
+baseline=planning/tests/fixtures/overview/npm-package-baseline.tsv
+if [ -f "$baseline" ]; then
+    drift="$(awk -F'\t' 'NR > 1 { print $1 "\t" $2 }' "$baseline" | while IFS="$(printf '\t')" read -r pkgpath size; do
+        repopath="${pkgpath#package/}"
+        if [ ! -f "$repopath" ]; then
+            printf '%s is in the baseline but not in the tree; ' "$repopath"
+            continue
+        fi
+        actual="$(wc -c < "$repopath" | tr -d ' ')"
+        [ "$actual" = "$size" ] || printf '%s is %s bytes, baseline says %s; ' "$repopath" "$actual" "$size"
+    done)"
+    if [ -n "$drift" ]; then
+        bad "npm package baseline drift: ${drift%; }"
+        note "refresh the rows, then confirm with planning/tests/test-npm-package.sh"
+    else
+        ok "npm package baseline matches the tree ($(( $(wc -l < "$baseline") - 1 )) files)"
+    fi
+else
+    note "no npm package baseline at $baseline"
 fi
 
 # ---- 6. the whole suite, when asked for ------------------------------------
