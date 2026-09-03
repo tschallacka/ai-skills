@@ -2462,6 +2462,16 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         }
         return;
     }
+    if mode != SearchMode::ExactBytes {
+        if let Err(error_value) = matches_with_gradient(mode, query, "", gradient) {
+            frames.push(error(
+                &envelope.request_id,
+                "search_invalid",
+                error_value.to_string(),
+            ));
+            return;
+        }
+    }
     if let Some(file) = &tab.large_file {
         if mode == SearchMode::ExactBytes {
             let encoded = envelope

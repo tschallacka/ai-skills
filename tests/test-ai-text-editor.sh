@@ -130,6 +130,10 @@ contains "$cursor_context" 'beta'
 search_output="$(editor search --file "$file" --mode exact_text --query beta)"
 contains "$search_output" '"count": 1'
 contains "$search_output" '"pager_key"'
+if editor search --file "$file" --mode regex_rust --query '[' >"$scratch/invalid-search" 2>&1; then
+    exit 1
+fi
+grep -Fq 'search_invalid' "$scratch/invalid-search"
 pager_key="$(printf '%s\n' "$search_output" | sed -n 's/.*"pager_key": "\([^"]*\)",/\1/p')"
 [ -n "$pager_key" ]
 
