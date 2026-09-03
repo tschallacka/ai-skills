@@ -103,6 +103,28 @@ fn start_fixture(dir: &Path, idle: &str) -> Child {
     )
 }
 
+/// Block until the wrapper's socket exists, or the budget runs out.
+///
+/// The CLI paths need this and `request()` does not: request() polls connect in
+/// its own loop, so it waits by construction, while a `Command` invocation gets
+/// exactly one attempt. `cli_text_preserves_spaces_and_input_help_is_available`
+/// sent text with no wait at all and passed on Linux for as long as the wrapper
+/// won that race; on the macOS runner it lost it and failed with ENOENT.
+fn wait_for_socket(dir: &Path) {
+    for _ in 0..READY_POLLS {
+        if dir.join("socket").exists() {
+            return;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!(
+        "socket did not appear at {} within {:?}\n{}",
+        dir.join("socket").display(),
+        POLL_INTERVAL * READY_POLLS as u32,
+        wrapper_stderr(dir)
+    )
+}
+
 fn request(dir: &Path, body: &str) -> Value {
     for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
@@ -814,6 +836,8 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
     assert!(help_text.contains("rgbview"));
     assert!(help_text.contains("elements [ROWS...]"));
     assert!(help_text.contains("Application keybindings are unknown"));
+    // A one-shot Command gets no retry, unlike request()'s connect loop.
+    wait_for_socket(&dir);
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args([
             "--socket",
