@@ -20,12 +20,19 @@ t_assert_eq 'workspace crates do not carry stale nested Cargo.lock files' \
 
 t_assert_eq '.gitignore has exactly one root workspace target rule' \
     "$(grep -Fxc '/target/' "$root/.gitignore" || true)" 1
-t_assert_eq '.gitignore has no obsolete per-crate target rule' \
-    "$(grep -Fxc 'src/*/target/' "$root/.gitignore" || true)" 0
+t_assert_eq '.gitignore has the defensive per-crate target rule' \
+    "$(grep -Fxc 'src/*/target/' "$root/.gitignore" || true)" 1
 
 t_assert_eq 'guidelines document the root workspace target rule' \
     "$(grep -Fxc '/target/' "$root/rust-development-guidelines.md" || true)" 1
-t_assert_eq 'guidelines have no obsolete per-crate target rule' \
-    "$(grep -Fxc 'src/*/target/' "$root/rust-development-guidelines.md" || true)" 0
+t_assert_eq 'guidelines document the defensive per-crate target rule' \
+    "$(grep -Fxc 'src/*/target/' "$root/rust-development-guidelines.md" || true)" 1
+
+nested_target="src/rjq/target/x86_64-unknown-linux-musl/release/rjq"
+nested_ignored=''
+if git -C "$root" check-ignore -q --no-index "$nested_target"; then
+    nested_ignored=ignored
+fi
+t_assert_eq 'a crate-shaped target path is actually ignored' "$nested_ignored" ignored
 
 t_end

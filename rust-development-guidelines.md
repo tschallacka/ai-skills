@@ -57,19 +57,23 @@ cannot drift onto two versions of the same library.
 
 ## 2b. Ignore the build artifacts before the first `git add`
 
-One pattern, in the **repository-root** `.gitignore`, keyed on the layout rather
-than on the crate:
+Two patterns, in the **repository-root** `.gitignore`, cover Cargo's workspace
+layout and the directory-add safety net:
 
 ```gitignore
 # Rust build artifacts for the workspace (CODE-STYLE 1b).
 # Never tracked: they are per-platform, large, and rebuilt by CI.
 /target/
+# Defensive coverage for a standalone crate or a directory add.
+src/*/target/
 ```
 
-Root, not per-crate, and that choice has a reason: one pattern covers every
-crate that exists and every crate added later, because the workspace writes one
-shared target directory. A per-crate `.gitignore` would describe a layout Cargo
-does not use and could leave the shared output exposed.
+Both patterns live at the repository root, not in per-crate `.gitignore` files.
+The first covers every crate because the workspace writes one shared target
+directory. The second is belt-and-braces coverage for a standalone crate or a
+directory add before it has joined the workspace; it prevents the `tony-the-pony`
+incident below from staging build output. A per-crate `.gitignore` would
+describe a layout Cargo does not use and could leave the shared output exposed.
 
 This is recorded because it was walked into, not predicted. `src/tony-the-pony`
 was copied in from a standalone repository whose ignore rule (`/target`) was not
@@ -78,9 +82,10 @@ sources plus 13 build artifacts**, including the compiled binary and the cargo
 lock files under `target/release`. Nothing warned; `git add` of a directory is
 silent about what it sweeps in.
 
-Mind the exact pattern. `/target/` matches only the workspace output directory
-at the repository root. A bare `target` would also match an unrelated file or
-directory of that name anywhere in the tree.
+Mind the exact patterns. `/target/` matches only the workspace output directory
+at the repository root, while `src/*/target/` protects crate-shaped directories
+under `src/`. A bare `target` would also match an unrelated file or directory
+of that name anywhere in the tree.
 
 Check it landed rather than assuming, since the failure is silent:
 
