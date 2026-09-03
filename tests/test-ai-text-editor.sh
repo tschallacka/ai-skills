@@ -70,6 +70,9 @@ done
 
 contains "$open_output" '"revision": 0'
 contains "$open_output" '"mode": "TextUtf8"'
+capabilities_output="$($client capabilities --session-token "$session")"
+contains "$capabilities_output" '"protocol_version": 1'
+contains "$capabilities_output" '"search_preview_matches": 4'
 agent_open="$($client open --agent "$TSCH_AI_EDITOR_AGENT")"
 contains "$agent_open" '"session_token"'
 unset TSCH_AI_EDITOR_AGENT
