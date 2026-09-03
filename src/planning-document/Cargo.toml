@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-document"
+version = "0.1.0"
+edition = "2021"
+description = "Document identity and mutable-section logic for planning helpers"
+license = "MIT"
+
+[lib]
+name = "planning_document"

@@ -313,6 +313,13 @@ the repository root — the directory `plan_bin_dir` walks up to find — rather
 than a bin/ inside each skill. Only the host triple is built; cross-building
 the other four is what a release (`installer/build-release.sh`) and CI do.
 
+For every planning command that has a `.sh` oracle, the same build also copies
+the extensionless Rust executable to `scripts/<command>` beside
+`scripts/<command>.sh`. Those sibling files are generated, executable, and
+ignored; they are the developer-facing command layout for the Rust migration.
+The shared root copy remains because existing shell helpers use it for runtime
+discovery, and because the target artifact pipeline still consumes that layout.
+
 Why this needs saying: exactly one artifact is committed, and every helper that
 wants a compiled one degrades honestly when it is absent. `plan_crypt_resolve`
 falls through to the shell rungs, the chat server drops to an interpreter tier.

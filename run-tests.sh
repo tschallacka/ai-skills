@@ -117,9 +117,13 @@ discover() {
 
 # Rust crates are separate gate cases so a broken crate cannot hide behind the
 # shell-suite result. A contributor without cargo gets an explicit, non-failing
-# unconfigured result unless the CI refusal switch is set.
+# unconfigured result unless the CI refusal switch is set. Discover every
+# workspace member rather than naming one crate: each planning command and
+# reusable library is independently testable and must be covered by the gate.
 discover_crates() {
-    [ -f "$repo_root/src/plan-overview/Cargo.toml" ] && printf '%s\n' src/plan-overview
+    find "$repo_root/src" -mindepth 2 -maxdepth 2 -type f -name Cargo.toml -print \
+        | sort \
+        | sed "s#^$repo_root/##; s#/Cargo.toml\$##"
 }
 
 suites=(

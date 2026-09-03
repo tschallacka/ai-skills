@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-adversarial-review"
+version = "0.1.0"
+edition = "2021"
+description = "Update an adversarial review findings table"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-table = { path = "../planning-table" }

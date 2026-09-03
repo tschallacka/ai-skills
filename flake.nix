@@ -120,12 +120,8 @@
           # One toolchain: the NEWEST stable rust the pinned nixpkgs offers.
           #
           # A version literal here rots silently until something refuses to
-          # build, which is exactly what happened -- the shell pinned 1.86.0
-          # while six of the seven rust-toolchain.toml files under src/ asked
-          # for 1.97, so it could not build chat-server-rs at all (its `time`
-          # dependency requires 1.88) while CI, which installs a toolchain per
-          # job, built it fine. Nothing tested the shell against the crates, so
-          # the gap stayed invisible.
+          # build. The workspace now has one root rust-toolchain.toml, so this
+          # shell and every crate use the same pinned compiler and components.
           #
           # There is deliberately no older floor toolchain. Every crate here is
           # pure Rust with no system library dependency a newer compiler cannot

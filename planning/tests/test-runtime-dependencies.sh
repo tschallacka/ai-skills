@@ -43,8 +43,13 @@ if [ -e "$jqless_bin/rjq" ]; then
     note_fail 'the rjq-less PATH unexpectedly contains rjq'
 fi
 
+# Exercise a copied skill tree so the checkout's locally built fallback binary
+# cannot satisfy the dependency probe.
+runtime_scripts="$temporary_root/scripts"
+t_copy_tree "$scripts" "$runtime_scripts"
+
 run_without_jq() {
-    env -i PATH="$jqless_bin" HOME="${HOME:-/tmp}" TMPDIR="$temporary_root" \
+    env -i PATH="$jqless_bin" HOME=/tmp TMPDIR="$temporary_root" \
         "$jqless_bin/bash" "$@" 2>&1
 }
 
@@ -54,7 +59,7 @@ PLANS_ROOT="$temporary_root" "$scripts/create-plan.sh" "$plan_dir" 'Dependency g
 
 # validate-plan.sh: refuses with 69 and names rjq.
 set +e
-output="$(run_without_jq "$scripts/validate-plan.sh" "$plan_dir")"
+output="$(run_without_jq "$runtime_scripts/validate-plan.sh" "$plan_dir")"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "validate-plan.sh without rjq exited $rc, expected 69"
@@ -70,7 +75,7 @@ esac
 
 # register-command.sh: same contract.
 set +e
-output="$(run_without_jq "$scripts/register-command.sh" "$plan_dir" build 'make all' 'when building')"
+output="$(run_without_jq "$runtime_scripts/register-command.sh" "$plan_dir" build 'make all' 'when building')"
 rc=$?
 set -e
 [ "$rc" -eq 69 ] || note_fail "register-command.sh without rjq exited $rc, expected 69"

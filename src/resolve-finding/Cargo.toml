@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "resolve-finding"
+version = "0.1.0"
+edition = "2021"
+description = "Resolve an adversarial planning finding"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+serde_json = { version = "1", features = ["preserve_order"] }

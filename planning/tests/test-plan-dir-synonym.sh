@@ -97,7 +97,7 @@ b="$(bash "$scripts/overview-state.sh" --plan-dir "$work/b/plan")"
 [ -n "$a" ] || t_fail 'overview-state produced no output'
 # The binary is exercised directly so --plan-dir coverage does not depend on a
 # retired shell wrapper.
-binary="$repo_root/src/plan-overview/target/debug/plan-overview"
+binary="$repo_root/target/debug/plan-overview"
 cargo build --manifest-path "$repo_root/src/plan-overview/Cargo.toml" --offline >/dev/null
 OVERVIEW_NOW=fixed "$binary" --plan-dir "$work/a/plan" --out "$work/a.html"
 OVERVIEW_NOW=fixed "$binary" --plan-dir "$work/b/plan" --out "$work/b.html"

@@ -41,11 +41,7 @@ usage() {
     exit "$rc"
 }
 
-frame_write() {
-    # NB: `shift 2>/dev/null` — the `2>` is an fd-2 redirect, NOT a count, so
-    # this intentionally shifts by 1 (drops the captured leading frame-file).
-    local frame_file="${1:-}"; shift 2>/dev/null || true
-    local subagent="" persona="" status="" read_discipline=ok wholesale_reads=0 skill_loaded=none needs_escalation=none grant_requested=none verdict=""
+frame_write_parse() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --subagent) [ "$#" -ge 2 ] || usage; subagent="$2"; shift 2 ;;
@@ -60,6 +56,14 @@ frame_write() {
             *) usage ;;
         esac
     done
+}
+
+frame_write() {
+    # NB: `shift 2>/dev/null` — the `2>` is an fd-2 redirect, NOT a count, so
+    # this intentionally shifts by 1 (drops the captured leading frame-file).
+    local frame_file="${1:-}"; shift 2>/dev/null || true
+    local subagent="" persona="" status="" read_discipline=ok wholesale_reads=0 skill_loaded=none needs_escalation=none grant_requested=none verdict=""
+    frame_write_parse "$@"
     if [ -z "$frame_file" ] || [ -z "$subagent" ] || [ -z "$persona" ] || [ -z "$status" ]; then
         usage
     fi

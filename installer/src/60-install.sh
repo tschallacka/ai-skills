@@ -25,14 +25,15 @@ content_digest() {
 # manifest and the next run treats the untouched files as ours (correct) and the
 # half-written ones as modified (a needless backup, never a lost edit).
 record_digests() {
-    local destination="$1" files="$2" relative manifest temporary
+    local destination="$1" skill="$2" files="$3" relative physical manifest temporary
     manifest="$(digest_manifest "$destination")"
     temporary="$manifest.tmp.$$"
     : > "$temporary"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
-        [ -f "$destination/$relative" ] || continue
-        printf '%s %s\n' "$(content_digest "$destination/$relative")" "$relative" >> "$temporary"
+        physical="$(platform_relative_path "$skill" "$relative")"
+        [ -f "$destination/$physical" ] || continue
+        printf '%s %s\n' "$(content_digest "$destination/$physical")" "$relative" >> "$temporary"
     done <<RECORD
 $files
 RECORD
@@ -96,7 +97,7 @@ install_skill() {
     local skill="$1"
     local root="$2"
     local destination="$root/$skill"
-    local relative source destination_file
+    local relative physical source destination_file
     local changed=0
     local missing=0
     local managed_version_transition=0
@@ -128,6 +129,7 @@ install_skill() {
     files="$(skill_files "$skill" "$PACKAGE_SELECTION")"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -135,7 +137,7 @@ install_skill() {
             continue
         fi
         source="$(source_file "$skill" "$relative")"
-        destination_file="$destination/$relative"
+        destination_file="$destination/$physical"
         if [ -L "$destination" ] || [ -L "$destination_file" ]; then
             echo "Skipping $root/$skill: existing symlink requires manual review." >&2
             summary_add "Skipped:   $destination — existing symlink requires manual review"
@@ -188,6 +190,7 @@ EOF
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -195,7 +198,7 @@ EOF
             continue
         fi
         source="$(source_file "$skill" "$relative")"
-        destination_file="$destination/$relative"
+        destination_file="$destination/$physical"
         # Back up unless we can prove the file is ours and untouched. A version
         # transition no longer suppresses this: the marker says the version
         # changed, not that the user's edits are expendable.
@@ -215,7 +218,7 @@ EOF
         backup_file "$destination/.version"
     fi
     version_marker_content > "$destination/.version"
-    record_digests "$destination" "$files"
+    record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
     summary_add "Installed: $destination$(summary_soft_note "$skill")"
 }

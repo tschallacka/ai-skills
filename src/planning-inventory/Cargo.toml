@@ -1,0 +1,10 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-inventory"
+version = "0.1.0"
+edition = "2021"
+description = "Planning work-unit inventory parsing and table updates"
+license = "MIT"
+
+[dependencies]

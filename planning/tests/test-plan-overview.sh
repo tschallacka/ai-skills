@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
 t_begin
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-binary="$repo/src/plan-overview/target/debug/plan-overview"
+binary="$repo/target/debug/plan-overview"
 fixture="$repo/planning/tests/fixtures/overview/navigation"
 cargo build --manifest-path "$repo/src/plan-overview/Cargo.toml" --offline >/dev/null
 out="$(mktemp)"

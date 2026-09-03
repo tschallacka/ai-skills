@@ -34,6 +34,18 @@ export LC_ALL=C
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 full=false
 
+# Git runs hooks with the caller's environment, which may provide a different
+# Cargo than the repository's pinned toolchain. Re-enter the flake once; the
+# marker prevents recursion inside the development shell.
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
+    command -v nix >/dev/null 2>&1 || {
+        printf '%s: nix develop .#default is required for Rust pre-push checks\n' "${0##*/}" >&2
+        exit 69
+    }
+    exec nix develop "$repo_root" --command env \
+        AI_SKILLS_PREPUSH_IN_NIX=1 "$repo_root/pre-push-check.sh" "$@"
+fi
+
 usage() {
     awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -u/{ exit }' "$0"
     exit "${1:-64}"
@@ -129,24 +141,15 @@ else
 fi
 
 # ---- 4. rust crates under src/ touched by the change -----------------------
-crates=""
-# -E: `+` is a literal in a BRE, so the pattern matched nothing and the rust
-# gates below reported "skipped" however many crates the change touched.
-for f in $(changed -E '^src/[^/]+/'); do
+crates="$(for f in $(changed -E '^src/[^/]+/'); do
     crate="${f#src/}"; crate="${crate%%/*}"
-    case "$crate" in
-        '') ;;
-        *) case "
-$crates" in *"|$crate
-"*) ;; *) crates="$crates|$crate" ;; esac ;;
-    esac
-done
-crates="${crates#|}"
+    [ -n "$crate" ] && printf '%s\n' "$crate"
+done | LC_ALL=C sort -u)"
 if [ -n "$crates" ]; then
     if ! command -v cargo >/dev/null 2>&1; then
         note "src/ changed but cargo is not on PATH (nix develop); CI still runs fmt and test"
     else
-        for crate in $(printf '%s' "$crates" | tr '|' ' '); do
+        while IFS= read -r crate; do
             m="src/$crate/Cargo.toml"
             [ -f "$m" ] || continue
             if cargo fmt --check --manifest-path "$m" >/dev/null 2>&1; then
@@ -159,7 +162,9 @@ if [ -n "$crates" ]; then
             else
                 bad "cargo test: $crate"
             fi
-        done
+        done <<EOF
+$crates
+EOF
     fi
 else
     note "no crates under src/ changed; rust gates skipped"

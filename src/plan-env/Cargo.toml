@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-env"
+version = "0.1.0"
+edition = "2021"
+description = "Write and verify planning environment manifests"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }

@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "mint-fix-keys"
+version = "0.1.0"
+edition = "2021"
+description = "Mint planning adversarial-review fix keys"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+plan-crypt = { path = "../plan-crypt" }

@@ -1,0 +1,16 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-propagation"
+version = "0.1.0"
+edition = "2021"
+description = "Propagation and completion validation for planning documents"
+license = "MIT"
+
+[lib]
+name = "planning_validator_propagation"
+path = "src/lib.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }
+planning-validator-inventory = { path = "../planning-validator-inventory" }

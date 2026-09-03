@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "create-plan"
+version = "0.1.0"
+edition = "2021"
+description = "Create a planning plan"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }

@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "verify-fix-keys"
+version = "0.1.0"
+edition = "2021"
+description = "Verify planning adversarial-review fix keys"
+license = "MIT"
+
+[dependencies]
+plan-crypt = { path = "../plan-crypt" }

@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "plan-context"
+version = "0.1.0"
+edition = "2021"
+description = "Bounded reader and freshness cache for planning documents"
+license = "MIT"
+
+[[bin]]
+name = "plan-context"
+path = "src/main.rs"
+
+[dependencies]
+plan-context-core = { path = "../plan-context-core" }

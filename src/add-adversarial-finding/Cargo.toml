@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-adversarial-finding"
+version = "0.1.0"
+edition = "2021"
+description = "Add an adversarial planning finding"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }

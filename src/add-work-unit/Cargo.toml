@@ -1,0 +1,12 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-work-unit"
+version = "0.1.0"
+edition = "2021"
+description = "Add a planning work unit and its step"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }

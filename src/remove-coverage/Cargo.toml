@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "remove-coverage"
+version = "0.1.0"
+edition = "2021"
+description = "Remove a planning definition-of-done coverage row"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }

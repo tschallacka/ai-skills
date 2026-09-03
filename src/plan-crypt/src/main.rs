@@ -15,8 +15,7 @@
 //! The message is read from stdin, never from argv: a secret in a command line
 //! is visible to every process on the machine.
 
-mod random;
-mod sha256;
+use plan_crypt::{random, sha256};
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;

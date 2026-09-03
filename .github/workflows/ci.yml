@@ -7,6 +7,11 @@ on:
     branches: [master, nextupdate]
   pull_request:
 
+env:
+  # All crates are members of the root workspace, so Cargo writes artifacts to
+  # this one directory even when a command is launched from a crate directory.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
 # A CI result is only meaningful for the newest commit ON ITS OWN REF, so the
 # group is keyed by ref rather than being one global lane. A literal shared
 # group means any push cancels every other pull request's in-flight run: the
@@ -75,7 +80,7 @@ jobs:
           rustup target add "$target"
           cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$dir"
-          cp "src/rjq/target/$target/release/rjq" "planning/bin/$dir/rjq"
+          cp "$GITHUB_WORKSPACE/target/$target/release/rjq" "planning/bin/$dir/rjq"
           echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
 
       - name: Install socat so the served-overview rung is exercised (B48)
@@ -103,16 +108,16 @@ jobs:
           cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
           case "$(uname -s):$(uname -m)" in
-            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
-            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl; src=src/chat-server-rs/target/release ;;
-            Darwin:x86_64) dir=x86_64-apple-darwin; src=src/chat-server-rs/target/release ;;
-            Darwin:arm64) dir=aarch64-apple-darwin; src=src/chat-server-rs/target/release ;;
-            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc; src=src/chat-server-rs/target/release ;;
+            Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
+            Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
+            Darwin:x86_64) dir=x86_64-apple-darwin ;;
+            Darwin:arm64) dir=aarch64-apple-darwin ;;
+            MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64) dir=x86_64-pc-windows-msvc ;;
             *) echo "::error::unsupported host for chat binaries: $(uname -s):$(uname -m)"; exit 1 ;;
           esac
           mkdir -p "chat/bin/$dir"
-          cp "$src/chat-server-rs" "chat/bin/$dir/chat-server-rs"
-          cp "src/chat-client-rs/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
+          cp "$GITHUB_WORKSPACE/target/release/chat-server-rs" "chat/bin/$dir/chat-server-rs"
+          cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
 
       - name: Place the compiled plan-crypt rung so its assertions run
         # Without it test-plan-crypt.sh and test-sha256-fallbacks.sh SKIP their
@@ -122,7 +127,7 @@ jobs:
         run: |
           cargo build --release --manifest-path src/plan-crypt/Cargo.toml
           mkdir -p planning/.ci-bin
-          cp src/plan-crypt/target/release/plan-crypt planning/.ci-bin/plan-crypt
+          cp "$GITHUB_WORKSPACE/target/release/plan-crypt" planning/.ci-bin/plan-crypt
           echo "PLAN_CRYPT_BIN=$PWD/planning/.ci-bin/plan-crypt" >> "$GITHUB_ENV"
 
       - name: Run the full deterministic test suite
@@ -183,7 +188,7 @@ jobs:
           rustup target add "$target"
           cargo build --release --manifest-path src/rjq/Cargo.toml --target "$target"
           mkdir -p "planning/bin/$target"
-          cp "src/rjq/target/$target/release/rjq" "planning/bin/$target/rjq"
+          cp "${{ github.workspace }}/target/$target/release/rjq" "planning/bin/$target/rjq"
           echo "$PWD/planning/bin/$target" >> "$GITHUB_PATH"
 
       - name: Record the bash under test (must be 3.2.x)
@@ -289,8 +294,8 @@ jobs:
         with:
           name: plan-crypt-${{ matrix.target }}
           path: |
-            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt
-            src/plan-crypt/target/${{ matrix.target }}/release/plan-crypt.exe
+            target/${{ matrix.target }}/release/plan-crypt
+            target/${{ matrix.target }}/release/plan-crypt.exe
           if-no-files-found: error
 
       - name: The musl build must actually be static
@@ -300,7 +305,7 @@ jobs:
           # The whole distribution claim is that the target machine needs
           # nothing, so assert it rather than assume it. ldd prints either
           # "not a dynamic executable" or "statically linked" for a static-pie.
-          out="$(ldd target/${{ matrix.target }}/release/plan-crypt 2>&1 || true)"
+          out="$(ldd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/plan-crypt" 2>&1 || true)"
           printf '%s\n' "$out"
           case "$out" in
             *"not a dynamic executable"*|*"statically linked"*) ;;
@@ -313,7 +318,7 @@ jobs:
         run: |
           # Run the artifact directly, never through `cargo run`: the claim is
           # about the binary, not about a toolchain being present.
-          bin="target/${{ matrix.target }}/release/plan-crypt"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/plan-crypt"
           [ -x "$bin" ] || bin="$bin.exe"
 
           # The canonical NIST vector first, so a platform that disagrees is
@@ -422,10 +427,10 @@ jobs:
         with:
           name: chat-${{ matrix.target }}
           path: |
-            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs
-            src/chat-server-rs/target/${{ matrix.target }}/release/chat-server-rs.exe
-            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs
-            src/chat-client-rs/target/${{ matrix.target }}/release/chat-client-rs.exe
+            target/${{ matrix.target }}/release/chat-server-rs
+            target/${{ matrix.target }}/release/chat-server-rs.exe
+            target/${{ matrix.target }}/release/chat-client-rs
+            target/${{ matrix.target }}/release/chat-client-rs.exe
           if-no-files-found: error
 
   rjq-binary:
@@ -481,7 +486,7 @@ jobs:
         shell: bash
         working-directory: src/rjq
         run: |
-          bin="target/${{ matrix.target }}/release/rjq"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq"
           [ -x "$bin" ] || bin="$bin.exe"
           output="$(printf '{"a":1}' | "$bin" '.a')"
           [ "$output" = "1" ] || { echo "::error::rjq output was $output"; exit 1; }
@@ -490,11 +495,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p "rjq-artifacts/${{ matrix.target }}"
-          if [ -f "src/rjq/target/${{ matrix.target }}/release/rjq" ]; then
-            cp "src/rjq/target/${{ matrix.target }}/release/rjq" \
+          if [ -f "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq" ]; then
+            cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq" \
               "rjq-artifacts/${{ matrix.target }}/rjq"
           else
-            cp "src/rjq/target/${{ matrix.target }}/release/rjq.exe" \
+            cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq.exe" \
               "rjq-artifacts/${{ matrix.target }}/rjq.exe"
           fi
 
@@ -503,6 +508,152 @@ jobs:
         with:
           name: rjq-${{ matrix.target }}
           path: rjq-artifacts
+          if-no-files-found: error
+
+  planning-command-binary:
+    # The planning command registry is the source of truth for the migrated
+    # runtime and build-generator surface. Each leg builds and executes the
+    # actual target binaries on its native house runner, so a cross-build that
+    # cannot launch is not mistaken for platform coverage.
+    name: planning commands build and run on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout the planning command sources
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            planning/rust-migration.tsv
+            src
+            Cargo.toml
+            Cargo.lock
+
+      - name: Pin the toolchain and target
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Install the target standard library
+        shell: bash
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Install the musl C toolchain
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
+      - name: Format, lint, test, build and execute every registered command
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "planning-rust-artifacts/${{ matrix.target }}"
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
+          cargo test --workspace --all-targets --target "${{ matrix.target }}"
+          while IFS=$'\t' read -r path kind candidate note; do
+            [ -n "$candidate" ] || continue
+            case "$candidate" in
+              render-plans-board)
+                # The renderer is explicitly owned by another Rust migration.
+                continue
+                ;;
+              overview-state)
+                crate=plan-overview
+                ;;
+              *)
+                crate="$candidate"
+                ;;
+            esac
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
+            echo "==> $candidate ($crate)"
+            cargo fmt --manifest-path "$manifest" --check
+            cargo clippy --manifest-path "$manifest" --target "${{ matrix.target }}" --all-targets -- -D warnings
+            cargo test --manifest-path "$manifest" --target "${{ matrix.target }}"
+            cargo build --manifest-path "$manifest" --release --target "${{ matrix.target }}"
+            suffix=''
+            case "${{ matrix.target }}" in *windows-msvc) suffix=.exe ;; esac
+            binary="target/${{ matrix.target }}/release/$crate$suffix"
+            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
+            output="planning-rust-artifacts/${{ matrix.target }}/$candidate$suffix"
+            cp "$binary" "$output"
+            chmod +x "$output"
+            "$output" --help >/dev/null
+          done < <({
+            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
+          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
+
+      - name: Upload the target command artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-commands-${{ matrix.target }}
+          path: planning-rust-artifacts
+          if-no-files-found: error
+
+      - name: Verify the Linux command artifacts are static
+        if: contains(matrix.target, 'linux-musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(ldd "planning-rust-artifacts/${{ matrix.target }}/plan-content" 2>&1 || true)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *"not a dynamic executable"*|*"statically linked"*) ;;
+            *) echo "::error::planning command artifact is dynamically linked"; exit 1 ;;
+          esac
+
+  rust-artifact-manifest:
+    name: publish Rust artifact hashes
+    runs-on: ubuntu-latest
+    needs: planning-command-binary
+    steps:
+      - name: Download every native target bundle
+        uses: actions/download-artifact@v4
+        with:
+          pattern: planning-commands-*
+          path: planning-rust-artifacts
+          merge-multiple: true
+
+      - name: Generate the per-target hash manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > RUST-ARTIFACTS.tsv
+          printf 'target\tfile\tsha256\n' >> RUST-ARTIFACTS.tsv
+          : > SHA256SUMS
+          while IFS= read -r file; do
+            relative="${file#planning-rust-artifacts/}"
+            target="${relative%%/*}"
+            target_file="${relative#*/}"
+            digest="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s\t%s\t%s\n' "$target" "$target_file" "$digest" >> RUST-ARTIFACTS.tsv
+            printf '%s  %s\n' "$digest" "$file" >> SHA256SUMS
+          done < <(find planning-rust-artifacts -type f | LC_ALL=C sort)
+          [ "$(wc -l < RUST-ARTIFACTS.tsv)" -gt 1 ]
+          sha256sum -c SHA256SUMS
+
+      - name: Upload the verified artifact bundle and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-rust-artifacts-manifest
+          path: |
+            planning-rust-artifacts
+            RUST-ARTIFACTS.tsv
+            SHA256SUMS
           if-no-files-found: error
 
   shellcheck:

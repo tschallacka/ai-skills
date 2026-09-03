@@ -1,0 +1,13 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "remove-work-unit"
+version = "0.1.0"
+edition = "2021"
+description = "Remove and reconcile a planning work unit"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-progress = { path = "../planning-progress" }
+planning-table = { path = "../planning-table" }

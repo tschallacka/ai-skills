@@ -1,0 +1,14 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "update-plan-content"
+version = "0.1.0"
+edition = "2021"
+description = "Edit numbered planning documents"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }
+planning-document = { path = "../planning-document" }
+planning-inventory = { path = "../planning-inventory" }
+planning-table = { path = "../planning-table" }

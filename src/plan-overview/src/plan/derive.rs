@@ -11,11 +11,10 @@ pub struct Count {
 
 impl Count {
     pub fn percentage(self) -> u32 {
-        if self.total == 0 {
-            0
-        } else {
-            self.completed.saturating_mul(100) / self.total
-        }
+        self.completed
+            .saturating_mul(100)
+            .checked_div(self.total)
+            .unwrap_or(0)
     }
 }
 

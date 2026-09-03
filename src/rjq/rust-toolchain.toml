@@ -1,6 +1,0 @@
-# MODE: DEV
-
-[toolchain]
-channel = "1.98"
-components = ["rustfmt", "clippy"]
-profile = "minimal"

@@ -1,0 +1,11 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "add-fix-claim"
+version = "0.1.0"
+edition = "2021"
+description = "Record a planning fix claim"
+license = "MIT"
+
+[dependencies]
+planning-core = { path = "../planning-core" }

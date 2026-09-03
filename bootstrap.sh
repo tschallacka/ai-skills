@@ -68,7 +68,7 @@ arm_rjq() {
         fi
         mkdir -p "$(dirname "$out")"
         cargo build --release --manifest-path "$repo_root/src/rjq/Cargo.toml" --target "$t" >&2
-        cp "$repo_root/src/rjq/target/$t/release/$b" "$out"
+        cp "$repo_root/target/$t/release/$b" "$out"
         printf 'rjq: built %s\n' "$out" >&2
     else
         printf 'rjq: already built at %s\n' "$out" >&2

@@ -61,15 +61,15 @@ One pattern, in the **repository-root** `.gitignore`, keyed on the layout rather
 than on the crate:
 
 ```gitignore
-# Rust build artifacts for the crates under src/ (CODE-STYLE 1b).
+# Rust build artifacts for the workspace (CODE-STYLE 1b).
 # Never tracked: they are per-platform, large, and rebuilt by CI.
-src/*/target/
+/target/
 ```
 
 Root, not per-crate, and that choice has a reason: one pattern covers every
-crate that exists and every crate added later, so a new binary directory cannot
-arrive with its artifacts unignored. A per-crate `.gitignore` protects the crate
-that has one and leaves the next crate exposed.
+crate that exists and every crate added later, because the workspace writes one
+shared target directory. A per-crate `.gitignore` would describe a layout Cargo
+does not use and could leave the shared output exposed.
 
 This is recorded because it was walked into, not predicted. `src/tony-the-pony`
 was copied in from a standalone repository whose ignore rule (`/target`) was not
@@ -78,10 +78,9 @@ sources plus 13 build artifacts**, including the compiled binary and the cargo
 lock files under `target/release`. Nothing warned; `git add` of a directory is
 silent about what it sweeps in.
 
-Mind the exact pattern. `src/*/target/` matches a `target` **directory** one
-level below any crate directory. A bare `target` would also match an unrelated
-file or directory of that name anywhere in the tree; `/target` matches only at
-the repository root, where no crate lives, so it protects nothing here.
+Mind the exact pattern. `/target/` matches only the workspace output directory
+at the repository root. A bare `target` would also match an unrelated file or
+directory of that name anywhere in the tree.
 
 Check it landed rather than assuming, since the failure is silent:
 
@@ -216,6 +215,15 @@ greps `ldd` output to prove the musl build is actually static.
    or they accumulate until nobody reads the output.
 3. `cargo test --workspace`.
 4. Per-target build matrix.
+
+The planning-command CI matrix also publishes `RUST-ARTIFACTS.tsv` and
+`SHA256SUMS` with the target bundles. Run the Rust checks and release tooling
+inside `nix develop .#default`; that shell supplies the pinned Cargo toolchain
+used by CI. From a downloaded bundle, verify the recorded bytes with:
+
+```bash
+sha256sum -c SHA256SUMS
+```
 
 ## 8. Verification standard
 

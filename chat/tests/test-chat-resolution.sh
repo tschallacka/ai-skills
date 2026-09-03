@@ -24,8 +24,8 @@ source "$(cd "$repo/planning/tests" && pwd)/lib-test.sh"
 t_begin
 
 export LC_ALL=C
-SERVER="$repo/src/chat-server-rs/target/release/chat-server-rs"
-CLIENT="$repo/src/chat-client-rs/target/release/chat-client-rs"
+SERVER="$repo/target/release/chat-server-rs"
+CLIENT="$repo/target/release/chat-client-rs"
 
 if ! command -v cargo >/dev/null 2>&1; then
     prebuilt_server="$(ls "$root"/bin/*/chat-server-rs 2>/dev/null | head -1 || true)"

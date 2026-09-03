@@ -1,0 +1,8 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "create-work-unit-inventory"
+version = "0.1.0"
+edition = "2021"
+description = "Create a planning work-unit inventory"
+license = "MIT"

@@ -1,0 +1,15 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "planning-validator-inventory"
+version = "0.1.0"
+edition = "2021"
+description = "Work-unit inventory validation for planning documents"
+license = "MIT"
+
+[lib]
+name = "planning_validator_inventory"
+path = "src/lib.rs"
+
+[dependencies]
+planning-validator-common = { path = "../planning-validator-common" }
