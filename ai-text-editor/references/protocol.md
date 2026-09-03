@@ -158,6 +158,11 @@ agent can decide the subsequent resolution. `preserve_external` captures exact e
 using an exclusive atomic same-directory write to `<file>.back` by default or
 an explicitly selected versioned path. Collision is `backup_exists`; write or
 sync failure is `backup_failed`; neither commits the resolution.
+For large tabs, `backup` performs the same capture by streaming the current
+file to an atomic backup without materialising it in memory, and `reload`
+reopens the file, records `external_reload`, and resets the lazy index. Large
+`merge` and `force_save` still require an explicit bounded rewrite job because
+the server does not hold the whole large document in memory.
 
 `save_as` creates a new, non-existing target atomically and leaves the active
 tab path unchanged; it refuses to overwrite an existing target. `close` is

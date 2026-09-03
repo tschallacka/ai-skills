@@ -67,6 +67,8 @@ server-written coordination metadata, not a client-accessible SQLite store.
     force-save; `backup` preserves external bytes and leaves resolution
     pending, while other choices resolve the alert. External bytes can also be
     preserved atomically as `.back` during a discard or overwrite.
+    Large-tab backup and reload are file-backed; large merge and force-save
+    require an acknowledged bounded rewrite job.
 11. Stream or page large results with restart delimiters after writes, or use
     transparent restart for non-streaming output.
 12. Recover journaled edits, inspect runtime state, and use Unix sockets or

@@ -94,6 +94,9 @@ refused; start a job and use \fBlarge-edit\fR with
 \fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.
 Large edits retain file-backed before/after snapshots for undo and redo; clean
 the tab journal when those snapshots are no longer needed.
+Large-tab external backup streams the current file to an atomic B.backR
+copy, and reload refreshes metadata and lazy index coverage. Merge and
+force-save require an acknowledged bounded rewrite job.
 .SH HISTORY AND CURSORS
 \fBhistory\fR reports undo and redo depths without exposing another tab.
 \fBresources\fR reports available memory, estimated server overhead, the
