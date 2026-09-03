@@ -2582,11 +2582,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         match matches_with_gradient(mode, query, &path_text, gradient) {
             Ok(found) => {
                 let results = found.into_iter().map(|(start, end)| json!({"path": path_text, "line": null, "column_start": null, "column_end": null, "matched": &path_text[start..end]})).collect();
-                let result_id = format!(
-                    "{}:path_wildcard:{}",
-                    tab.revision,
-                    blake3::hash(query.as_bytes()).to_hex()
-                );
+                let result_id = search_result_id(envelope, tab.revision, mode_name, query);
                 emit_results(envelope, tab, frames, result_id, results);
             }
             Err(error_value) => frames.push(error(
@@ -2669,13 +2665,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 ));
                 return;
             }
-            let result_id = format!(
-                "{}:exact_bytes:{}:{}-{}",
-                tab.revision,
-                blake3::hash(encoded.as_bytes()).to_hex(),
-                start,
-                end
-            );
+            let result_id = search_result_id(envelope, tab.revision, Some("exact_bytes"), encoded);
             let query_digest = blake3::hash(encoded.as_bytes()).to_hex().to_string();
             emit_large_results(
                 envelope,
@@ -2725,11 +2715,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             ));
             return;
         }
-        let result_id = format!(
-            "{}:exact_text:{}",
-            tab.revision,
-            blake3::hash(query.as_bytes()).to_hex()
-        );
+        let result_id = search_result_id(envelope, tab.revision, mode_name, query);
         let query_digest = blake3::hash(query.as_bytes()).to_hex().to_string();
         emit_large_results(
             envelope,
@@ -2783,12 +2769,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 })
             })
             .collect();
-        let generation = tab.revision.to_string();
-        let result_id = format!(
-            "{}:exact_bytes:{}",
-            generation,
-            blake3::hash(encoded.as_bytes()).to_hex()
-        );
+        let result_id = search_result_id(envelope, tab.revision, Some("exact_bytes"), encoded);
         emit_results(envelope, tab, frames, result_id, found_matches);
         return;
     }
@@ -2821,13 +2802,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 }
                 line_start += line.len();
             }
-            let generation = tab.revision.to_string();
-            let result_id = format!(
-                "{}:{}:{}",
-                generation,
-                mode_name.unwrap_or("unknown"),
-                blake3::hash(query.as_bytes()).to_hex()
-            );
+            let result_id = search_result_id(envelope, tab.revision, mode_name, query);
             emit_results(envelope, tab, frames, result_id, found_matches);
         }
         Err(error_value) => frames.push(error(
@@ -2856,6 +2831,25 @@ fn text_coordinate(
             .chars()
             .count(),
     })
+}
+
+fn search_result_id(
+    envelope: &ai_text_editor::protocol::Envelope,
+    revision: u64,
+    mode: Option<&str>,
+    query: &str,
+) -> String {
+    let identity = json!({
+        "mode": mode,
+        "query": query,
+        "parameters": envelope.payload,
+    });
+    format!(
+        "{}:{}:{}",
+        revision,
+        mode.unwrap_or("unknown"),
+        blake3::hash(&ai_text_editor::protocol::canonical_json(&identity)).to_hex()
+    )
 }
 
 fn emit_results(

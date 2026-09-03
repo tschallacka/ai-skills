@@ -264,6 +264,10 @@ large_fuzzy="$(editor search --file "$large_file" --mode fuzzy_subsequence --que
 contains "$large_fuzzy" '"count": 1'
 large_pager_key="$(printf '%s\n' "$large_search" | sed -n 's/.*"pager_key": "\([^"]*\)",/\1/p')"
 [ -n "$large_pager_key" ]
+large_wildcard="$(editor search --file "$large_file" --mode wildcard --query needle --range-start-line 1 --range-end-line 3)"
+large_wildcard_key="$(printf '%s\n' "$large_wildcard" | sed -n 's/.*"pager_key": "\([^"]*\)",/\1/p')"
+[ -n "$large_wildcard_key" ]
+[ "$large_pager_key" != "$large_wildcard_key" ]
 large_page="$(editor page --file "$large_file" --pager-key "$large_pager_key" --limit 1)"
 contains "$large_page" '"contents": "needle"'
 large_bytes="$(editor search --file "$large_file" --mode exact_bytes --query-base64 bmVlZGxl --range-start-byte 0 --range-end-byte 18)"
