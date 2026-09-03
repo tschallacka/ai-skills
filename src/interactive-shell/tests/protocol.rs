@@ -125,6 +125,41 @@ fn wait_for_socket(dir: &Path) {
     )
 }
 
+/// Poll `observe` until the screen carries `needle`, and return that snapshot.
+///
+/// SKILL.md states the contract this exists to honour: an ack means the WRAPPER
+/// accepted the input, never that the program acted on it, so a state change is
+/// confirmed against the next screen. Text typed at a `sleep` appears only
+/// because the tty line discipline echoes it, which means it has to travel
+/// input -> pty master -> echo -> the wrapper's read loop -> the screen model
+/// before any observe can see it. A single observe straight after the ack is
+/// sampling that journey once and hoping.
+///
+/// On Linux the echo lands within microseconds and the one-shot assertion
+/// passed for as long as the test existed. On the macOS runner it did not.
+fn wait_for_rows(dir: &Path, needle: &str) -> Value {
+    let mut last = Value::Null;
+    for _ in 0..READY_POLLS {
+        if let Some(snapshot) = request_all(dir, "{\"v\":1,\"op\":\"observe\"}\n")
+            .into_iter()
+            .find(|event| event["event"] == "snapshot")
+        {
+            if snapshot["rows"].to_string().contains(needle) {
+                return snapshot;
+            }
+            last = snapshot;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!(
+        "{:?} never reached the screen within {:?}\nlast snapshot rows: {}\n{}",
+        needle,
+        POLL_INTERVAL * READY_POLLS as u32,
+        last["rows"],
+        wrapper_stderr(dir)
+    )
+}
+
 fn request(dir: &Path, body: &str) -> Value {
     for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
@@ -854,15 +889,9 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
         String::from_utf8_lossy(&input.stderr).trim_end(),
         wrapper_stderr(&dir)
     );
-    let snapshot = request_all(
-        &dir,
-        r#"{"v":1,"op":"observe"}
-"#,
-    )
-    .into_iter()
-    .find(|event| event["event"] == "snapshot")
-    .unwrap();
-    assert!(snapshot["rows"].to_string().contains("Hello World"));
+    // Confirmed against the screen, not against the ack: the ack said the
+    // wrapper took the input, which is a different claim.
+    wait_for_rows(&dir, "Hello World");
     let _ = request(
         &dir,
         r#"{"v":1,"op":"shutdown"}
