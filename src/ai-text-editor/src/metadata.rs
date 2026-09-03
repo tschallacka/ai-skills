@@ -275,6 +275,164 @@ impl Metadata {
         transaction.commit().map_err(sqlite_error)
     }
 
+    pub fn begin_result(
+        &self,
+        result_id: &str,
+        mode: &str,
+        query_digest: &str,
+        revision: u64,
+    ) -> io::Result<()> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "DELETE FROM result_match WHERE result_id=?1",
+                params![result_id],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "INSERT INTO result_set(result_id,mode,query_digest,revision,match_count,complete,updated_at) VALUES(?1,?2,?3,?4,0,0,datetime('now')) ON CONFLICT(result_id) DO UPDATE SET mode=excluded.mode,query_digest=excluded.query_digest,revision=excluded.revision,match_count=0,complete=0,updated_at=excluded.updated_at",
+                params![result_id, mode, query_digest, revision],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)
+    }
+
+    pub fn append_result_matches(
+        &self,
+        result_id: &str,
+        matches: &[serde_json::Value],
+    ) -> io::Result<()> {
+        if matches.is_empty() {
+            return Ok(());
+        }
+        let current = self
+            .connection
+            .query_row(
+                "SELECT match_count FROM result_set WHERE result_id=?1 AND complete=0",
+                params![result_id],
+                |row| row.get::<_, usize>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "result is not open"))?;
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(sqlite_error)?;
+        for (index, value) in matches.iter().enumerate() {
+            let encoded = serde_json::to_string(value)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            transaction
+                .execute(
+                    "INSERT INTO result_match(result_id,ordinal,match_json) VALUES(?1,?2,?3)",
+                    params![result_id, current + index, encoded],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction
+            .execute(
+                "UPDATE result_set SET match_count=?2,updated_at=datetime('now') WHERE result_id=?1 AND complete=0",
+                params![result_id, current + matches.len()],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)
+    }
+
+    pub fn finish_result(&self, result_id: &str) -> io::Result<usize> {
+        self.connection
+            .execute(
+                "UPDATE result_set SET complete=1,updated_at=datetime('now') WHERE result_id=?1 AND complete=0",
+                params![result_id],
+            )
+            .map_err(sqlite_error)?;
+        self.connection
+            .query_row(
+                "SELECT match_count FROM result_set WHERE result_id=?1 AND complete=1",
+                params![result_id],
+                |row| row.get::<_, usize>(0),
+            )
+            .map_err(sqlite_error)
+    }
+
+    pub fn load_result_page(
+        &self,
+        result_id: &str,
+        revision: u64,
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<Option<(usize, Vec<serde_json::Value>)>> {
+        let Some(count) = self
+            .connection
+            .query_row(
+                "SELECT match_count FROM result_set WHERE result_id=?1 AND revision=?2 AND complete=1",
+                params![result_id, revision],
+                |row| row.get::<_, usize>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        else {
+            return Ok(None);
+        };
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT match_json FROM result_match WHERE result_id=?1 ORDER BY ordinal LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(sqlite_error)?;
+        let mut rows = statement
+            .query(params![result_id, limit, offset])
+            .map_err(sqlite_error)?;
+        let mut matches = Vec::new();
+        while let Some(row) = rows.next().map_err(sqlite_error)? {
+            let encoded: String = row.get(0).map_err(sqlite_error)?;
+            matches.push(serde_json::from_str(&encoded).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid persisted result")
+            })?);
+        }
+        Ok(Some((count, matches)))
+    }
+
+    pub fn load_historical_result_page(
+        &self,
+        result_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<Option<(u64, usize, Vec<serde_json::Value>)>> {
+        let Some((revision, count)) = self
+            .connection
+            .query_row(
+                "SELECT revision, match_count FROM result_set WHERE result_id=?1 AND complete=1",
+                params![result_id],
+                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, usize>(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        else {
+            return Ok(None);
+        };
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT match_json FROM result_match WHERE result_id=?1 ORDER BY ordinal LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(sqlite_error)?;
+        let mut rows = statement
+            .query(params![result_id, limit, offset])
+            .map_err(sqlite_error)?;
+        let mut matches = Vec::new();
+        while let Some(row) = rows.next().map_err(sqlite_error)? {
+            let encoded: String = row.get(0).map_err(sqlite_error)?;
+            matches.push(serde_json::from_str(&encoded).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid persisted result")
+            })?);
+        }
+        Ok(Some((revision, count, matches)))
+    }
+
     /// Restore a complete result set for the current revision. Invalid or
     /// partial rows are treated as a cache miss so paging can safely request a
     /// fresh search instead of presenting untrusted metadata.

@@ -1381,21 +1381,36 @@ fn page(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
         .get("limit")
         .and_then(Value::as_u64)
         .unwrap_or(4) as usize;
+    let historical_requested =
+        envelope.payload.get("historical").and_then(Value::as_bool) == Some(true);
     let mut source_revision = tab.revision;
     let mut historical = false;
-    if !tab.results.contains_key(key) {
-        if let Ok(Some(results)) = tab.metadata.load_result_matches(key, tab.revision) {
-            tab.results.insert(key.to_owned(), results);
-        } else if envelope.payload.get("historical").and_then(Value::as_bool) == Some(true) {
-            if let Ok(Some((revision, results))) = tab.metadata.load_historical_result_matches(key)
-            {
+    let page = if let Some(results) = tab.results.get(key) {
+        Some((
+            results.len(),
+            results
+                .get(offset..offset.saturating_add(limit).min(results.len()))
+                .unwrap_or(&[])
+                .to_vec(),
+        ))
+    } else if let Ok(Some(page)) = tab
+        .metadata
+        .load_result_page(key, tab.revision, offset, limit)
+    {
+        Some(page)
+    } else if historical_requested {
+        match tab.metadata.load_historical_result_page(key, offset, limit) {
+            Ok(Some((revision, count, matches))) => {
                 source_revision = revision;
                 historical = revision != tab.revision;
-                tab.results.insert(key.to_owned(), results);
+                Some((count, matches))
             }
+            _ => None,
         }
-    }
-    let Some(results) = tab.results.get(key) else {
+    } else {
+        None
+    };
+    let Some((count, matches)) = page else {
         frames.push(error(
             &envelope.request_id,
             "stale_result",
@@ -1403,8 +1418,7 @@ fn page(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
         ));
         return;
     };
-    let end = offset.saturating_add(limit).min(results.len());
-    frames.push(response(&envelope.request_id, json!({"pager_key": key, "offset": offset, "limit": limit, "count": results.len(), "matches": results.get(offset..end).unwrap_or(&[]), "complete": true, "generation": key.split(':').next().unwrap_or(""), "source_revision": source_revision, "stale": historical})));
+    frames.push(response(&envelope.request_id, json!({"pager_key": key, "offset": offset, "limit": limit, "count": count, "matches": matches, "complete": true, "generation": key.split(':').next().unwrap_or(""), "source_revision": source_revision, "stale": historical})));
 }
 
 fn cursor(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &mut Vec<Value>) {
@@ -2128,9 +2142,9 @@ fn resolve_external(
         }
         return;
     }
-    if let Some(file) = &tab.large_file {
+    if let Some(file) = tab.large_file.clone() {
         if action == "keep" {
-            tab.disk_digest = disk_state(&tab.path, Some(file), &[]);
+            tab.disk_digest = disk_state(&tab.path, Some(&file), &[]);
             frames.push(response(&envelope.request_id, json!({"resolved": "keep", "large_file": true, "save_required": false, "revision": tab.revision})));
         } else {
             tab.pending_external = Some(external);
@@ -2492,7 +2506,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             return;
         }
     }
-    if let Some(file) = &tab.large_file {
+    if let Some(file) = tab.large_file.clone() {
         if mode == SearchMode::ExactBytes {
             let encoded = envelope
                 .payload
@@ -2554,33 +2568,34 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 ));
                 return;
             }
-            match file.search_bytes(&bytes, start, length) {
-                Ok(found) => {
-                    let results = found
-                        .into_iter()
-                        .map(|(found_start, found_end, contents)| {
-                            json!({
-                                "byte_start": found_start,
-                                "byte_end": found_end,
-                                "contents_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, contents)
-                            })
-                        })
-                        .collect();
-                    let result_id = format!(
-                        "{}:exact_bytes:{}:{}-{}",
-                        tab.revision,
-                        blake3::hash(encoded.as_bytes()).to_hex(),
-                        start,
-                        end
-                    );
-                    emit_results(envelope, tab, frames, result_id, results);
-                }
-                Err(error_value) => frames.push(error(
-                    &envelope.request_id,
-                    "large_search_failed",
-                    error_value.to_string(),
-                )),
-            }
+            let result_id = format!(
+                "{}:exact_bytes:{}:{}-{}",
+                tab.revision,
+                blake3::hash(encoded.as_bytes()).to_hex(),
+                start,
+                end
+            );
+            let query_digest = blake3::hash(encoded.as_bytes()).to_hex().to_string();
+            emit_large_results(
+                envelope,
+                tab,
+                frames,
+                LargeResultSpec {
+                    result_id,
+                    mode: "exact_bytes".into(),
+                    query_digest,
+                    search_range: json!({"start_byte": start, "end_byte": end}),
+                },
+                |emit| {
+                    file.search_bytes_each(&bytes, start, length, |(found_start, found_end, contents)| {
+                        emit(json!({
+                            "byte_start": found_start,
+                            "byte_end": found_end,
+                            "contents_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, contents)
+                        }))
+                    })
+                },
+            );
             return;
         }
         let start_line = envelope
@@ -2609,26 +2624,28 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             ));
             return;
         }
-        match file.search_text_mode(mode, query, start_line, end_line, gradient) {
-            Ok(found) => {
-                let results = found.into_iter().map(|(line, start, end, contents)| json!({"line": line, "column_start": start, "column_end": end, "contents": contents})).collect();
-                let result_id = format!(
-                    "{}:exact_text:{}",
-                    tab.revision,
-                    blake3::hash(query.as_bytes()).to_hex()
-                );
-                emit_results(envelope, tab, frames, result_id, results);
-            }
-            Err(error_value) => frames.push(error(
-                &envelope.request_id,
-                if error_value.kind() == std::io::ErrorKind::InvalidInput {
-                    "search_invalid"
-                } else {
-                    "large_search_failed"
-                },
-                error_value.to_string(),
-            )),
-        }
+        let result_id = format!(
+            "{}:exact_text:{}",
+            tab.revision,
+            blake3::hash(query.as_bytes()).to_hex()
+        );
+        let query_digest = blake3::hash(query.as_bytes()).to_hex().to_string();
+        emit_large_results(
+            envelope,
+            tab,
+            frames,
+            LargeResultSpec {
+                result_id,
+                mode: mode_name.unwrap_or("unknown").into(),
+                query_digest,
+                search_range: json!({"start_line": start_line, "end_line": end_line}),
+            },
+            |emit| {
+                file.search_text_mode_each(mode, query, start_line, end_line, gradient, |(line, start, end, contents)| {
+                    emit(json!({"line": line, "column_start": start, "column_end": end, "contents": contents}))
+                })
+            },
+        );
         return;
     }
     if mode == SearchMode::ExactBytes {
@@ -2816,6 +2833,101 @@ fn emit_results(
                 "start_byte": envelope.payload.get("range_start_byte").and_then(Value::as_u64),
                 "end_byte": envelope.payload.get("range_end_byte").and_then(Value::as_u64)
             }
+        }),
+    ));
+}
+
+struct LargeResultSpec {
+    result_id: String,
+    mode: String,
+    query_digest: String,
+    search_range: Value,
+}
+
+fn emit_large_results<F>(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+    spec: LargeResultSpec,
+    scan: F,
+) where
+    F: FnOnce(&mut dyn FnMut(Value) -> io::Result<()>) -> io::Result<usize>,
+{
+    if let Err(error_value) = tab.metadata.begin_result(
+        &spec.result_id,
+        &spec.mode,
+        &spec.query_digest,
+        tab.revision,
+    ) {
+        frames.push(error(
+            &envelope.request_id,
+            "result_persist_failed",
+            error_value.to_string(),
+        ));
+        return;
+    }
+    let preview_limit = envelope
+        .payload
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(4) as usize;
+    let mut preview = Vec::new();
+    let mut chunk = Vec::new();
+    let mut append = |value: Value| -> io::Result<()> {
+        if preview.len() < preview_limit {
+            preview.push(value.clone());
+        }
+        chunk.push(value);
+        if chunk.len() >= 256 {
+            tab.metadata
+                .append_result_matches(&spec.result_id, &chunk)?;
+            chunk.clear();
+        }
+        Ok(())
+    };
+    if let Err(error_value) = scan(&mut append) {
+        frames.push(error(
+            &envelope.request_id,
+            if error_value.kind() == io::ErrorKind::InvalidInput {
+                "search_invalid"
+            } else {
+                "large_search_failed"
+            },
+            error_value.to_string(),
+        ));
+        return;
+    }
+    if let Err(error_value) = tab.metadata.append_result_matches(&spec.result_id, &chunk) {
+        frames.push(error(
+            &envelope.request_id,
+            "result_persist_failed",
+            error_value.to_string(),
+        ));
+        return;
+    }
+    let count = match tab.metadata.finish_result(&spec.result_id) {
+        Ok(count) => count,
+        Err(error_value) => {
+            frames.push(error(
+                &envelope.request_id,
+                "result_persist_failed",
+                error_value.to_string(),
+            ));
+            return;
+        }
+    };
+    tab.results.remove(&spec.result_id);
+    let result_id = spec.result_id;
+    frames.push(response(
+        &envelope.request_id,
+        json!({
+            "result_id": result_id.clone(),
+            "count": count,
+            "pager_key": result_id,
+            "matches": preview,
+            "returned": preview.len(),
+            "complete": true,
+            "search_range": spec.search_range
         }),
     ));
 }

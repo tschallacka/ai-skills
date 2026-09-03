@@ -262,6 +262,10 @@ large_regex="$(editor search --file "$large_file" --mode regex_rust --query 'n.*
 contains "$large_regex" '"count": 1'
 large_fuzzy="$(editor search --file "$large_file" --mode fuzzy_subsequence --query nedle --range-start-line 1 --range-end-line 3)"
 contains "$large_fuzzy" '"count": 1'
+large_pager_key="$(printf '%s\n' "$large_search" | sed -n 's/.*"pager_key": "\([^"]*\)",/\1/p')"
+[ -n "$large_pager_key" ]
+large_page="$(editor page --file "$large_file" --pager-key "$large_pager_key" --limit 1)"
+contains "$large_page" '"contents": "needle"'
 large_bytes="$(editor search --file "$large_file" --mode exact_bytes --query-base64 bmVlZGxl --range-start-byte 0 --range-end-byte 18)"
 contains "$large_bytes" '"byte_start": 6'
 contains "$large_bytes" '"contents_base64": "bmVlZGxl"'

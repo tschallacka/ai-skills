@@ -216,13 +216,33 @@ impl LargeFile {
         end_line: u64,
         gradient: Option<f64>,
     ) -> io::Result<Vec<(usize, usize, usize, String)>> {
+        let mut results = Vec::new();
+        self.search_text_mode_each(mode, query, start_line, end_line, gradient, |found| {
+            results.push(found);
+            Ok(())
+        })?;
+        Ok(results)
+    }
+
+    pub fn search_text_mode_each<F>(
+        &self,
+        mode: SearchMode,
+        query: &str,
+        start_line: u64,
+        end_line: u64,
+        gradient: Option<f64>,
+        mut on_match: F,
+    ) -> io::Result<usize>
+    where
+        F: FnMut((usize, usize, usize, String)) -> io::Result<()>,
+    {
         if query.is_empty() {
-            return Ok(Vec::new());
+            return Ok(0);
         }
         let mut reader = BufReader::new(File::open(&self.path)?);
         let mut line = Vec::new();
         let mut line_number = 1usize;
-        let mut results = Vec::new();
+        let mut count = 0;
         loop {
             line.clear();
             if reader.read_until(b'\n', &mut line)? == 0 {
@@ -241,21 +261,22 @@ impl LargeFile {
                     matches_with_gradient(mode, query, text, gradient).map_err(|error| {
                         io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
                     })?;
-                results.extend(matches.into_iter().map(|(start, end)| {
-                    (
+                for (start, end) in matches {
+                    on_match((
                         line_number,
                         text[..start].chars().count(),
                         text[..end].chars().count(),
                         text[start..end].to_owned(),
-                    )
-                }));
+                    ))?;
+                    count += 1;
+                }
             }
             if line_number as u64 >= end_line {
                 break;
             }
             line_number += 1;
         }
-        Ok(results)
+        Ok(count)
     }
 
     pub fn search_bytes(
@@ -264,8 +285,26 @@ impl LargeFile {
         offset: u64,
         length: usize,
     ) -> io::Result<Vec<(u64, u64, Vec<u8>)>> {
+        let mut results = Vec::new();
+        self.search_bytes_each(query, offset, length, |found| {
+            results.push(found);
+            Ok(())
+        })?;
+        Ok(results)
+    }
+
+    pub fn search_bytes_each<F>(
+        &self,
+        query: &[u8],
+        offset: u64,
+        length: usize,
+        mut on_match: F,
+    ) -> io::Result<usize>
+    where
+        F: FnMut((u64, u64, Vec<u8>)) -> io::Result<()>,
+    {
         if query.is_empty() {
-            return Ok(Vec::new());
+            return Ok(0);
         }
         if length > DEFAULT_READ_BYTES {
             return Err(io::Error::new(
@@ -274,19 +313,21 @@ impl LargeFile {
             ));
         }
         let range = self.read_range(offset, length)?;
-        Ok(range
+        let mut count = 0;
+        for (start, bytes) in range
             .bytes
             .windows(query.len())
             .enumerate()
             .filter(|(_, bytes)| *bytes == query)
-            .map(|(start, bytes)| {
-                (
-                    offset + start as u64,
-                    offset + start as u64 + query.len() as u64,
-                    bytes.to_vec(),
-                )
-            })
-            .collect())
+        {
+            on_match((
+                offset + start as u64,
+                offset + start as u64 + query.len() as u64,
+                bytes.to_vec(),
+            ))?;
+            count += 1;
+        }
+        Ok(count)
     }
 
     /// Rewrite one byte range without materialising the source file in memory.
