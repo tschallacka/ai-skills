@@ -433,13 +433,49 @@ jobs:
       # considered and rejected: clippy and test are cheap next to the release
       # builds, and a workspace-wide pass is what catches a library change
       # breaking a consumer that selection failed to name.
+      # interactive-shell is the workspace's first POSIX-only member, so
+      # --workspace cannot mean "every member" on the Windows leg any more.
+      #
+      # THE UNIX SOCKET IS NOT THE REASON. A loopback port would replace it
+      # without difficulty -- the chat skill already offers exactly that choice
+      # -- so naming the transport here would be naming the one part that does
+      # port cleanly. What does not port is the terminal core:
+      #
+      #   lib.rs:1415  libc::openpty                 no Windows equivalent;
+      #                                              ConPTY (CreatePseudoConsole)
+      #                                              is a different API, not a flag
+      #   lib.rs:1437  ioctl(slave, TIOCSCTTY, 0)    Windows has no controlling
+      #                                              terminal to assign
+      #   lib.rs:1897  ioctl(fd, TIOCSWINSZ)         resize is a ConPTY call
+      #   lib.rs:1436  setsid()                      no sessions
+      #   lib.rs:1443  setpgid(0, 0)                 no process groups, so
+      #   lib.rs:1463  kill(-pid, SIGKILL)           signalling a whole group by
+      #   lib.rs:1473  kill(-pid, SIGTERM)           negative pid has no analogue
+      #                                              (Job Objects are the nearest)
+      #
+      # plus twelve raw-fd sites (AsRawFd/FromRawFd/dup2/fcntl) against a
+      # platform whose equivalent is a HANDLE. Porting means rewriting the PTY
+      # and process-lifecycle layer, not swapping a transport.
+      # interactive-shell/binaries.tsv declares no Windows row for the same
+      # reason, so the exclusion and the shipped set agree.
+      #
+      # An --exclude rather than cfg-gating the crate into an inert Windows
+      # stub: a binary that builds on Windows and refuses to run is a worse
+      # answer than one that is honestly absent, and it would put a
+      # do-nothing artifact next to the four real ones.
       - name: Format, lint and test the whole workspace
         shell: bash
         run: |
           set -euo pipefail
+          exclude=''
+          case "${{ matrix.target }}" in
+            *windows*) exclude='--exclude interactive-shell' ;;
+          esac
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
-          cargo test --workspace --all-targets --target "${{ matrix.target }}"
+          # shellcheck disable=SC2086
+          cargo clippy --workspace $exclude --all-targets --target "${{ matrix.target }}" -- -D warnings
+          # shellcheck disable=SC2086
+          cargo test --workspace $exclude --all-targets --target "${{ matrix.target }}"
 
       # ---- rjq -------------------------------------------------------------
       - name: Build rjq and prove it answers a query
