@@ -1358,39 +1358,88 @@ fn remove_socket(identity: &SocketIdentity) {
 /// concurrent observer inside this process, and the restore is CHECKED rather
 /// than assumed: run() execs the child immediately after this, and the child's
 /// arguments are relative to the caller's directory, not to the socket's.
-fn bind_in_directory(parent_fd: &File, dir: &Path, name: &OsStr) -> Result<UnixListener, String> {
+/// Run `action` with the process cwd inside the directory `dir_fd` holds.
+///
+/// The outer Result is the cwd machinery; the inner one is the action's own, so
+/// each caller words its own failure. The cwd is restored on every path before
+/// either outcome is reported, so no failure leaves the process sitting in the
+/// socket's directory.
+fn in_held_directory<T>(
+    dir_fd: &File,
+    dir: &Path,
+    what: &str,
+    action: impl FnOnce() -> io::Result<T>,
+) -> Result<io::Result<T>, String> {
     let previous =
         File::open(".").map_err(|e| format!("cannot hold the current directory: {e}"))?;
-    if unsafe { libc::fchdir(parent_fd.as_raw_fd()) } < 0 {
+    if unsafe { libc::fchdir(dir_fd.as_raw_fd()) } < 0 {
         return Err(format!(
-            "cannot enter {} to bind {}: {}",
+            "cannot enter {} to {what}: {}",
             dir.display(),
-            Path::new(name).display(),
             io::Error::last_os_error()
         ));
     }
-    let old_umask = unsafe { libc::umask(0o177) };
-    let bound = UnixListener::bind(Path::new(name));
-    unsafe { libc::umask(old_umask) };
-    // Restored on every path, before either outcome is reported, so no failure
-    // leaves the process sitting in the socket's directory.
+    let outcome = action();
     let restored = unsafe { libc::fchdir(previous.as_raw_fd()) };
     let restore_error = io::Error::last_os_error();
     if restored < 0 {
         return Err(format!(
-            "bind of {} in {} {}, but the previous directory could not be restored: {}",
-            Path::new(name).display(),
+            "{what} in {} {}, but the previous directory could not be restored: {}",
             dir.display(),
-            if bound.is_ok() { "succeeded" } else { "failed" },
+            if outcome.is_ok() {
+                "succeeded"
+            } else {
+                "failed"
+            },
             restore_error
         ));
     }
+    Ok(outcome)
+}
+
+fn bind_in_directory(parent_fd: &File, dir: &Path, name: &OsStr) -> Result<UnixListener, String> {
+    let bound = in_held_directory(parent_fd, dir, "bind the socket", || {
+        let old_umask = unsafe { libc::umask(0o177) };
+        let bound = UnixListener::bind(Path::new(name));
+        unsafe { libc::umask(old_umask) };
+        bound
+    })?;
     // The directory is named even though the bind was relative: without it the
     // message says which name failed and not where, which is the gap that made
     // this defect take three rounds to identify.
     bound.map_err(|e| {
         format!(
             "bind {} relative to {} failed: {e}",
+            Path::new(name).display(),
+            dir.display()
+        )
+    })
+}
+
+/// Connect to `socket` by name from inside its own directory.
+///
+/// The mirror of bind_in_directory, and needed for the same two reasons. The
+/// security one: connecting by absolute path re-walks every component, so a
+/// swapped parent could hand the client a different socket than the one whose
+/// directory was checked; an open fd on the directory cannot be substituted.
+///
+/// The portability one is what CI caught. macOS caps sun_path at 104 bytes and
+/// $TMPDIR there is `/var/folders/<12>/<28>/T/`, so a session socket under it
+/// overran the cap and the client failed with "path must be shorter than
+/// SUN_LEN" -- on CONNECT, after the bind side had already been moved off
+/// absolute paths. Both ends have to be relative or the shorter one just moves
+/// the failure. A bare name is six bytes and the cap stops being a
+/// consideration.
+pub fn connect_in_directory(socket: &Path) -> Result<UnixStream, String> {
+    let dir = socket.parent().ok_or("socket needs parent")?;
+    let name = socket.file_name().ok_or("socket needs a filename")?;
+    let dir_fd = File::open(dir).map_err(|e| format!("cannot open {}: {e}", dir.display()))?;
+    let connected = in_held_directory(&dir_fd, dir, "connect to the socket", || {
+        UnixStream::connect(Path::new(name))
+    })?;
+    connected.map_err(|e| {
+        format!(
+            "connect to {} relative to {} failed: {e}",
             Path::new(name).display(),
             dir.display()
         )
@@ -2166,15 +2215,21 @@ mod tests {
         let _ = fs::remove_dir(&dir);
     }
 
-    /// A directory whose absolute path cannot fit in sun_path still binds.
+    /// A directory whose absolute path cannot fit in sun_path still binds AND
+    /// connects.
     ///
-    /// sun_path is 108 bytes on Linux and 104 on macOS. Binding the socket's
-    /// absolute path -- the obvious "fix" for the /dev/fd problem -- would fail
-    /// here with ENAMETOOLONG while the relative bind does not care, so this
-    /// pins the property that made fchdir the choice rather than a shorter
-    /// prefix, and it fails if anyone reverts to an absolute bind.
+    /// sun_path is 108 bytes on Linux and 104 on macOS. Binding or connecting
+    /// the socket's absolute path -- the obvious "fix" for the /dev/fd problem
+    /// -- fails here while the relative form does not care, so this pins the
+    /// property that made fchdir the choice rather than a shorter prefix.
+    ///
+    /// The CONNECT leg is here because its absence let a real defect through:
+    /// the bind side was moved off absolute paths and the client was not, so
+    /// macOS still failed with "path must be shorter than SUN_LEN" -- on
+    /// connect, one CI round later. Half a fix moves the failure rather than
+    /// removing it, and a test that only covered bind could not see that.
     #[test]
-    fn a_directory_too_long_for_sun_path_still_binds() {
+    fn a_directory_too_long_for_sun_path_still_binds_and_connects() {
         let mut dir = std::env::temp_dir().join(format!("is-long-{}", std::process::id()));
         while dir.as_os_str().len() <= 120 {
             dir = dir.join("nested-directory-component");
@@ -2187,16 +2242,23 @@ mod tests {
             socket.as_os_str().len() > 108,
             "the fixture is not long enough to exercise the cap"
         );
-        // The control: the absolute bind this replaced cannot do it.
+        // The control: the absolute forms this replaced cannot do it.
         assert!(
             UnixListener::bind(&socket).is_err(),
-            "sun_path accepted a {}-byte path, so this test proves nothing",
+            "sun_path accepted a {}-byte bind path, so this test proves nothing",
             socket.as_os_str().len()
         );
 
         let parent_fd = File::open(&dir).unwrap();
         let listener = bind_in_directory(&parent_fd, &dir, socket.file_name().unwrap()).unwrap();
         assert!(socket.exists(), "the socket is not where it was asked for");
+
+        assert!(
+            UnixStream::connect(&socket).is_err(),
+            "sun_path accepted a {}-byte connect path, so the connect leg proves nothing",
+            socket.as_os_str().len()
+        );
+        connect_in_directory(&socket).expect("a relative connect must not care about the length");
 
         drop(listener);
         let _ = fs::remove_file(&socket);

@@ -4,7 +4,6 @@ use serde_json::json;
 use std::env;
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
@@ -174,7 +173,9 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let mut s = UnixStream::connect(socket).unwrap_or_else(|error| {
+    // Relative to the socket's own directory, not by absolute path: macOS caps
+    // sun_path at 104 bytes and a session socket under its $TMPDIR overruns it.
+    let mut s = interactive_shell_core::connect_in_directory(&socket).unwrap_or_else(|error| {
         eprintln!("connect: {error}");
         std::process::exit(1);
     });
