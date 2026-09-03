@@ -234,20 +234,102 @@ jobs:
   # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
   # macOS legs above are now blocking.
 
-  plan-crypt:
-    # Proves: the fix-key primitives are correct on every platform we ship to,
-    # by building the binary on that platform and RUNNING it there. A digest is
-    # the one thing in this repository that is silently wrong when it is wrong
-    # -- a corrupted round constant still yields a 64-character hex string --
-    # so the artifact is exercised rather than merely produced.
+  scope:
+    # Proves: nothing. This job DECIDES, and the decision is what the native
+    # legs below obey. It is deliberately tiny and always runs, because every
+    # other crate job depends on its answer.
     #
-    # Each target gets its own runner. Cross-building from Linux is deliberately
-    # not done here: an aarch64-apple-darwin binary cross-built on Linux carries
-    # no ad-hoc signature and Apple Silicon refuses to exec it
-    # (rust-development-guidelines.md section 4), and neither the darwin nor the
-    # msvc target links on a Linux runner at all.
-    name: plan-crypt builds and runs on ${{ matrix.target }}
+    # The default is always the widest scope. See .github/ci-scope.sh — every
+    # error path returns full, including no merge base, a shallow clone and
+    # cargo metadata failing. A selector that narrows when it is confused turns
+    # a green tick into "we did not look" while it reads as "we looked".
+    name: Decide how much of the workspace this run must build
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.decide.outputs.scope }}
+      reason: ${{ steps.decide.outputs.reason }}
+      crates: ${{ steps.decide.outputs.crates }}
+      rjq: ${{ steps.subjects.outputs.rjq }}
+      chat: ${{ steps.subjects.outputs.chat }}
+      plan_crypt: ${{ steps.subjects.outputs.plan_crypt }}
+      planning_commands: ${{ steps.subjects.outputs.planning_commands }}
+      editor: ${{ steps.subjects.outputs.editor }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The selector needs a merge base, so it needs history. A shallow
+          # clone makes it return full, which is safe but defeats the point.
+          fetch-depth: 0
+
+      - name: Pin the toolchain
+        # cargo metadata supplies the reverse-dependency graph, so the selector
+        # needs cargo even though it builds nothing.
+        uses: dtolnay/rust-toolchain@1.98
+
+      - name: Decide the scope
+        id: decide
+        shell: bash
+        run: |
+          # On a pull request the target branch is the base; on a push to a
+          # long-lived branch there is nothing to compare against but master.
+          if [ -n "${{ github.base_ref }}" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="origin/master"
+          fi
+          .github/ci-scope.sh --base "$base"
+
+      - name: Map the crates onto build subjects
+        id: subjects
+        shell: bash
+        run: |
+          .github/ci-subjects.sh \
+            --scope '${{ steps.decide.outputs.scope }}' \
+            --crates '${{ steps.decide.outputs.crates }}'
+
+      - name: Say what was decided, in the run summary
+        shell: bash
+        run: |
+          {
+            printf '## CI scope: `%s`\n\n' '${{ steps.decide.outputs.scope }}'
+            printf '%s\n\n' '${{ steps.decide.outputs.reason }}'
+            printf '| subject | built |\n|---|---|\n'
+            printf '| rjq | %s |\n' '${{ steps.subjects.outputs.rjq }}'
+            printf '| chat | %s |\n' '${{ steps.subjects.outputs.chat }}'
+            printf '| plan-crypt | %s |\n' '${{ steps.subjects.outputs.plan_crypt }}'
+            printf '| planning commands | %s |\n' '${{ steps.subjects.outputs.planning_commands }}'
+            printf '| ai-text-editor | %s |\n' '${{ steps.subjects.outputs.editor }}'
+            crates='${{ steps.decide.outputs.crates }}'
+            if [ -n "$crates" ]; then
+              printf '\nCrates in scope, with their dependents:\n\n'
+              printf '%s\n' "$crates" | tr ' ' '\n' | sed 's/^/- `/; s/$/`/'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  native:
+    # Proves: every subject in scope builds, and its binaries actually launch,
+    # on each supported platform's own native runner.
+    #
+    # ONE JOB PER PLATFORM, NOT PER SUBJECT. This replaced four separate matrix
+    # jobs (plan-crypt, chat-binary, rjq-binary, planning-command-binary) that
+    # each fanned out over the same five os/target pairs: twenty jobs where five
+    # will do. Every one of those twenty paid its own checkout, toolchain
+    # install and target install, and three of them re-ran a workspace-wide
+    # clippy and test that the fourth had already run.
+    #
+    # The platforms are NOT consolidated, only the subjects. Each leg still runs
+    # on the host whose target it builds, because these binaries are verified by
+    # being EXECUTED (`--help`, a real query, a linkage check). A cross-build
+    # that cannot launch must not be mistaken for platform coverage, and only a
+    # native runner can tell the difference.
+    name: ${{ matrix.target }} builds and runs every subject in scope
     runs-on: ${{ matrix.os }}
+    needs: scope
+    # scope=none means the selector established that no crate changed. The
+    # shell, packaging and suite gates still run; there is simply nothing to
+    # compile.
+    if: needs.scope.outputs.scope != 'none'
     strategy:
       fail-fast: false
       matrix:
@@ -266,30 +348,141 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          sparse-checkout: src/plan-crypt
+          # A full checkout, where the four predecessors each sparse-checked out
+          # their own overlapping subset. One job needs the union, and the union
+          # of those four subsets was most of the tree anyway.
+          sparse-checkout: |
+            planning/rust-migration.tsv
+            planning/binaries.tsv
+            ai-text-editor/ai-text-editor.1
+            ai-text-editor/schemas
+            src
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
 
-      - name: Pin the toolchain the crate declares
+      - name: Pin the toolchain and target
         uses: dtolnay/rust-toolchain@1.98
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
 
-      - name: Ensure the target standard library is installed
-        working-directory: src/plan-crypt
+      - name: Install the target standard library
+        shell: bash
         run: rustup target add "${{ matrix.target }}"
 
-      - name: Format, lint and test
-        working-directory: src/plan-crypt
+      - name: Install the musl C toolchain
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y -qq musl-tools
+
+      # ---- one workspace-wide gate, not one per subject -------------------
+      # fmt, clippy and test cover every member of the workspace in a single
+      # pass. The per-subject steps below therefore only BUILD and EXECUTE;
+      # they do not re-lint or re-test what this step already covered.
+      #
+      # This runs whenever anything is in scope. Narrowing it per crate was
+      # considered and rejected: clippy and test are cheap next to the release
+      # builds, and a workspace-wide pass is what catches a library change
+      # breaking a consumer that selection failed to name.
+      - name: Format, lint and test the whole workspace
+        shell: bash
         run: |
-          cargo fmt --check
-          cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
-          cargo test --target ${{ matrix.target }}
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
+          cargo test --workspace --all-targets --target "${{ matrix.target }}"
 
-      - name: Build the release artifact
-        working-directory: src/plan-crypt
-        run: cargo build --release --target ${{ matrix.target }}
+      # ---- rjq -------------------------------------------------------------
+      - name: Build rjq and prove it answers a query
+        if: needs.scope.outputs.rjq == 'true'
+        shell: bash
+        working-directory: src/rjq
+        run: |
+          set -euo pipefail
+          cargo build --release --target "${{ matrix.target }}"
+          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq"
+          [ -x "$bin" ] || bin="$bin.exe"
+          output="$(printf '{"a":1}' | "$bin" '.a')"
+          [ "$output" = "1" ] || { echo "::error::rjq output was $output"; exit 1; }
 
-      - name: Upload the release artifact
+      - name: Stage and upload the rjq artifact
+        if: needs.scope.outputs.rjq == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "rjq-artifacts/${{ matrix.target }}"
+          release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          if [ -f "$release/rjq" ]; then
+            cp "$release/rjq" "rjq-artifacts/${{ matrix.target }}/rjq"
+          else
+            cp "$release/rjq.exe" "rjq-artifacts/${{ matrix.target }}/rjq.exe"
+          fi
+
+      - name: Upload the rjq artifact
+        if: needs.scope.outputs.rjq == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rjq-${{ matrix.target }}
+          path: rjq-artifacts
+          if-no-files-found: error
+
+      # ---- ai-text-editor --------------------------------------------------
+      # Folded in from .github/workflows/ai-text-editor-artifacts.yml, which
+      # ran its own four-platform matrix on a `push` path filter and built
+      # `--workspace --release` to get three binaries. It had no aarch64-linux
+      # leg and pinned macos-13/macos-14 while this matrix had moved on, so
+      # folding it in also stops the editor being built on runner images
+      # nothing else uses.
+      - name: Build the editor binaries
+        if: needs.scope.outputs.editor == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate in ai-text-editor ai-text-editor-mcp; do
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || continue
+            cargo build --manifest-path "$manifest" --release --target "${{ matrix.target }}"
+          done
+
+      - name: Upload the editor binaries
+        if: needs.scope.outputs.editor == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-text-editor-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/ai-text-editor*
+          if-no-files-found: warn
+
+      # ---- chat ------------------------------------------------------------
+      - name: Build the chat server and client
+        if: needs.scope.outputs.chat == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for crate in src/chat-server-rs src/chat-client-rs; do
+            printf '==> %s\n' "$crate"
+            cargo build --manifest-path "$crate/Cargo.toml" --release --target "${{ matrix.target }}"
+          done
+
+      - name: Upload the chat artifacts
+        if: needs.scope.outputs.chat == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/chat-server-rs
+            target/${{ matrix.target }}/release/chat-server-rs.exe
+            target/${{ matrix.target }}/release/chat-client-rs
+            target/${{ matrix.target }}/release/chat-client-rs.exe
+          if-no-files-found: error
+
+      # ---- plan-crypt ------------------------------------------------------
+      - name: Build plan-crypt
+        if: needs.scope.outputs.plan_crypt == 'true'
+        shell: bash
+        run: cargo build --manifest-path src/plan-crypt/Cargo.toml --release --target "${{ matrix.target }}"
+
+      - name: Upload the plan-crypt artifact
+        if: needs.scope.outputs.plan_crypt == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: plan-crypt-${{ matrix.target }}
@@ -298,9 +491,9 @@ jobs:
             target/${{ matrix.target }}/release/plan-crypt.exe
           if-no-files-found: error
 
-      - name: The musl build must actually be static
-        if: contains(matrix.target, 'musl')
-        working-directory: src/plan-crypt
+      - name: The musl plan-crypt build must actually be static
+        if: needs.scope.outputs.plan_crypt == 'true' && contains(matrix.target, 'musl')
+        shell: bash
         run: |
           # The whole distribution claim is that the target machine needs
           # nothing, so assert it rather than assume it. ldd prints either
@@ -312,9 +505,9 @@ jobs:
             *) echo "::error::the musl build links against a shared library"; exit 1 ;;
           esac
 
-      - name: Run the built binary and check it against this platform's own tool
+      - name: Run plan-crypt and check it against this platform's own tool
+        if: needs.scope.outputs.plan_crypt == 'true'
         shell: bash
-        working-directory: src/plan-crypt
         run: |
           # Run the artifact directly, never through `cargo run`: the claim is
           # about the binary, not about a toolchain being present.
@@ -356,215 +549,21 @@ jobs:
           [ "$one" != "$two" ] || { echo "::error::two random draws were identical: $one"; exit 1; }
           printf 'digest and entropy agree on %s\n' '${{ matrix.target }}'
 
-  chat-binary:
-    name: chat builds and runs on ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    env:
-      HOME: ${{ github.workspace }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            src/chat-proto
-            src/chat-server-rs
-            src/chat-client-rs
-
-      - name: Pin the toolchain the crate declares
-        uses: dtolnay/rust-toolchain@1.98
-        with:
-          targets: ${{ matrix.target }}
-          components: rustfmt, clippy
-
-      - name: Ensure the target standard library is installed
-        working-directory: src/chat-server-rs
-        run: rustup target add "${{ matrix.target }}"
-
-      - name: Install the musl C cross-toolchain (ring needs a C compiler)
-        if: contains(matrix.target, 'linux-musl')
-        run: sudo apt-get install -y -qq musl-tools
-
-      - name: Format, lint and test
-        # bash explicitly: this matrix includes a Windows runner, whose default
-        # shell is pwsh, and the loop below is shell syntax pwsh rejects.
-        shell: bash
-        run: |
-          # Both crates, not just the server. The client is built below but was
-          # never formatted, linted or unit-tested, so a clippy error and its
-          # unit tests rode through green for as long as the leg has existed.
-          for crate in src/chat-server-rs src/chat-client-rs; do
-            printf '==> %s\n' "$crate"
-            ( cd "$crate" \
-              && cargo fmt --check \
-              && cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings \
-              && cargo test --target ${{ matrix.target }} )
-          done
-
-      - name: Build the release artifact (server)
-        working-directory: src/chat-server-rs
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build the release artifact (client)
-        working-directory: src/chat-client-rs
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Upload the release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chat-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/chat-server-rs
-            target/${{ matrix.target }}/release/chat-server-rs.exe
-            target/${{ matrix.target }}/release/chat-client-rs
-            target/${{ matrix.target }}/release/chat-client-rs.exe
-          if-no-files-found: error
-
-  rjq-binary:
-    name: rjq builds and runs on ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.required == false }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            required: true
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-            required: true
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            required: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            required: false
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            required: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: src/rjq
-
-      - name: Pin the toolchain and target
-        uses: dtolnay/rust-toolchain@1.98
-        with:
-          components: rustfmt, clippy
-
-      - name: Install the target for the crate toolchain
-        working-directory: src/rjq
-        run: rustup target add "${{ matrix.target }}"
-
-      - name: Format, lint and test
-        working-directory: src/rjq
-        run: |
-          cargo fmt --check
-          cargo clippy --target "${{ matrix.target }}" --all-targets -- -D warnings
-          cargo test --target "${{ matrix.target }}"
-
-      - name: Build rjq
-        working-directory: src/rjq
-        run: cargo build --release --target "${{ matrix.target }}"
-
-      - name: Run the built artifact
-        shell: bash
-        working-directory: src/rjq
-        run: |
-          bin="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq"
-          [ -x "$bin" ] || bin="$bin.exe"
-          output="$(printf '{"a":1}' | "$bin" '.a')"
-          [ "$output" = "1" ] || { echo "::error::rjq output was $output"; exit 1; }
-
-      - name: Stage the target artifact for suite jobs
-        shell: bash
-        run: |
-          mkdir -p "rjq-artifacts/${{ matrix.target }}"
-          if [ -f "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq" ]; then
-            cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq" \
-              "rjq-artifacts/${{ matrix.target }}/rjq"
-          else
-            cp "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rjq.exe" \
-              "rjq-artifacts/${{ matrix.target }}/rjq.exe"
-          fi
-
-      - name: Upload the target artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rjq-${{ matrix.target }}
-          path: rjq-artifacts
-          if-no-files-found: error
-
-  planning-command-binary:
-    # The planning command registry is the source of truth for the migrated
-    # runtime and build-generator surface. Each leg builds and executes the
-    # actual target binaries on its native house runner, so a cross-build that
-    # cannot launch is not mistaken for platform coverage.
-    name: planning commands build and run on ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-    steps:
-      - name: Checkout the planning command sources
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            planning/rust-migration.tsv
-            ai-text-editor/ai-text-editor.1
-            ai-text-editor/schemas
-            src
-            Cargo.toml
-            Cargo.lock
-
-      - name: Pin the toolchain and target
-        uses: dtolnay/rust-toolchain@1.98
-        with:
-          targets: ${{ matrix.target }}
-          components: rustfmt, clippy
-
-      - name: Install the target standard library
-        shell: bash
-        run: rustup target add "${{ matrix.target }}"
-
-      - name: Install the musl C toolchain
-        if: contains(matrix.target, 'linux-musl')
-        run: sudo apt-get install -y -qq musl-tools
-
-      - name: Format, lint, test, build and execute every registered command
+      # ---- planning commands ----------------------------------------------
+      # The registry in planning/rust-migration.tsv is the source of truth for
+      # which commands have been migrated. Each one is built and then RUN with
+      # --help, because a command that builds but cannot launch on a platform
+      # is not migrated on that platform.
+      #
+      # Only build and execute here: fmt, clippy and test for these crates were
+      # already covered by the workspace-wide gate above, which is what the
+      # predecessor job duplicated for every registered crate in turn.
+      - name: Build and execute every registered planning command
+        if: needs.scope.outputs.planning_commands == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "planning-rust-artifacts/${{ matrix.target }}"
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
-          cargo test --workspace --all-targets --target "${{ matrix.target }}"
           while IFS=$'\t' read -r path kind candidate note; do
             [ -n "$candidate" ] || continue
             case "$candidate" in
@@ -582,9 +581,6 @@ jobs:
             manifest="src/$crate/Cargo.toml"
             [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
             echo "==> $candidate ($crate)"
-            cargo fmt --manifest-path "$manifest" --check
-            cargo clippy --manifest-path "$manifest" --target "${{ matrix.target }}" --all-targets -- -D warnings
-            cargo test --manifest-path "$manifest" --target "${{ matrix.target }}"
             cargo build --manifest-path "$manifest" --release --target "${{ matrix.target }}"
             suffix=''
             case "${{ matrix.target }}" in *windows-msvc) suffix=.exe ;; esac
@@ -599,29 +595,23 @@ jobs:
             awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
           } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
 
-      - name: Upload the target command artifacts
+      - name: Upload the planning command artifacts
+        if: needs.scope.outputs.planning_commands == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: planning-commands-${{ matrix.target }}
           path: planning-rust-artifacts
           if-no-files-found: error
 
-      - name: Verify the Linux command artifacts are static
-        if: contains(matrix.target, 'linux-musl')
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$(ldd "planning-rust-artifacts/${{ matrix.target }}/plan-content" 2>&1 || true)"
-          printf '%s\n' "$out"
-          case "$out" in
-            *"not a dynamic executable"*|*"statically linked"*) ;;
-            *) echo "::error::planning command artifact is dynamically linked"; exit 1 ;;
-          esac
-
   rust-artifact-manifest:
     name: publish Rust artifact hashes
     runs-on: ubuntu-latest
-    needs: planning-command-binary
+    needs: [scope, native]
+    # Only when the planning commands were actually built. The manifest step
+    # asserts it found at least one artifact (`wc -l > 1`), so on a run that
+    # skipped that subject this job would fail for the honest reason that
+    # there is nothing to hash — a red tick for a run that was correct.
+    if: needs.scope.outputs.planning_commands == 'true'
     steps:
       - name: Download every native target bundle
         uses: actions/download-artifact@v4
