@@ -670,7 +670,15 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
         Ok(envelope) => match select_tab(&envelope, &state) {
             Ok(selected) => (handle(envelope, &selected), selected),
             Err(message) => (
-                vec![error(&envelope.request_id, "tab_open_failed", message)],
+                vec![error(
+                    &envelope.request_id,
+                    if message.starts_with("session_unauthorized:") {
+                        "session_unauthorized"
+                    } else {
+                        "tab_open_failed"
+                    },
+                    message,
+                )],
                 default_tab.clone(),
             ),
         },
@@ -774,7 +782,15 @@ fn serve_tcp(
             match select_tab(&envelope, &state) {
                 Ok(selected) => (handle(envelope, &selected), selected),
                 Err(message) => (
-                    vec![error(&envelope.request_id, "tab_open_failed", message)],
+                    vec![error(
+                        &envelope.request_id,
+                        if message.starts_with("session_unauthorized:") {
+                            "session_unauthorized"
+                        } else {
+                            "tab_open_failed"
+                        },
+                        message,
+                    )],
                     default_tab.clone(),
                 ),
             }
@@ -902,6 +918,10 @@ fn select_tab(
                 return Ok(tab.clone());
             }
         }
+        return Err(
+            "session_unauthorized: the supplied session_token does not belong to a tab on this server"
+                .into(),
+        );
     }
     if envelope.method == "open" {
         if let Some(path) = envelope.payload.get("file").and_then(Value::as_str) {

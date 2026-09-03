@@ -87,6 +87,14 @@ discovery="$(sed -n 's/.*"discovery":"\([^"]*\)".*/\1/p' "$server_output")"
 grep -Fq '"status":"active"' "$discovery"
 grep -Fq '"pid":' "$discovery"
 grep -Fq '"generation":' "$discovery"
+
+invalid_session="$scratch/invalid-session.json"
+printf '{"endpoint":"%s","session_token":"invalid-token"}\n' "$endpoint" > "$invalid_session"
+if "$client" open --session-token "$invalid_session" >"$scratch/invalid-session-output" 2>&1; then
+    exit 1
+fi
+grep -Fq 'session_unauthorized' "$scratch/invalid-session-output"
+
 second_open="$($client open --endpoint "$endpoint" --file "$second_file" --save-session-token "$second_session")"
 contains "$second_open" 'second-document.txt'
 second_read="$($client read --endpoint "$endpoint" --session-token "$second_session")"
