@@ -15,7 +15,7 @@ pub struct SessionRecord {
     pub server_generation: String,
     pub endpoint: String,
     pub pid: u32,
-    pub start_time_ns: u128,
+    pub start_time_ns: u64,
     pub agent_id: Option<String>,
     pub auth_token: Option<String>,
     pub session_token: String,
@@ -29,7 +29,7 @@ impl SessionRecord {
             server_generation: value.get("server_generation")?.as_str()?.to_owned(),
             endpoint: value.get("endpoint")?.as_str()?.to_owned(),
             pid: value.get("pid")?.as_u64()?.try_into().ok()?,
-            start_time_ns: value.get("start_time_ns")?.as_u64()? as u128,
+            start_time_ns: value.get("start_time_ns")?.as_u64()?,
             agent_id: value
                 .get("agent_id")
                 .and_then(Value::as_str)
@@ -87,19 +87,26 @@ pub fn resolve(identity: &str) -> Result<SessionRecord, String> {
     let path = registry_path();
     let records =
         read_records(&path).map_err(|error| format!("cannot read session registry: {error}"))?;
-    let mut candidates: Vec<_> = records
-        .into_iter()
-        .filter(|record| {
-            record.agent_id.as_deref() == Some(identity) || record.token_id == identity
-        })
+    let exact: Vec<_> = records
+        .iter()
+        .filter(|record| record.token_id == identity)
+        .cloned()
         .collect();
+    let mut candidates: Vec<_> = if exact.len() == 1 {
+        exact.clone()
+    } else {
+        records
+            .into_iter()
+            .filter(|record| record.agent_id.as_deref() == Some(identity))
+            .collect()
+    };
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.start_time_ns));
     if candidates.is_empty() {
         return Err(format!(
             "session_stale: no live session record matches {identity}"
         ));
     }
-    if candidates.len() > 1 && candidates[0].start_time_ns == candidates[1].start_time_ns {
+    if exact.is_empty() && candidates.len() > 1 {
         return Err(format!(
             "session_ambiguous: multiple sessions match {identity}; choose an explicit token_id"
         ));
@@ -181,7 +188,7 @@ pub fn new_record(
         server_generation: server_generation.to_owned(),
         endpoint: endpoint.to_owned(),
         pid: std::process::id(),
-        start_time_ns: now.as_nanos(),
+        start_time_ns: now.as_nanos() as u64,
         agent_id,
         auth_token: auth_token.map(str::to_owned),
         session_token: session_token.to_owned(),
