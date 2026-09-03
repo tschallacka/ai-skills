@@ -76,8 +76,20 @@ contains "$capabilities_output" '"search_preview_matches": 4'
 agent_open="$($client open --agent "$TSCH_AI_EDITOR_AGENT")"
 contains "$agent_open" '"session_token"'
 unset TSCH_AI_EDITOR_AGENT
+second_file="$scratch/second-document.txt"
+second_session="$scratch/second-session.json"
+printf 'second-tab\n' > "$second_file"
+endpoint="$(sed -n 's/.*"endpoint":"\([^"]*\)".*/\1/p' "$server_output")"
+[ -n "$endpoint" ]
+second_open="$($client open --endpoint "$endpoint" --file "$second_file" --save-session-token "$second_session")"
+contains "$second_open" 'second-document.txt'
+second_read="$($client read --endpoint "$endpoint" --session-token "$second_session")"
+contains "$second_read" 'second-tab'
+original_read="$($client read --file "$file" --session-token "$session")"
+contains "$original_read" 'alpha'
 
 # A second startup must reuse the validated per-tab SQLite index.
+"$client" close --endpoint "$endpoint" --session-token "$second_session" --journal-action clean >/dev/null
 editor close --file "$file" --journal-action preserve >/dev/null
 wait "$server_pid" 2>/dev/null || true
 server_pid=""

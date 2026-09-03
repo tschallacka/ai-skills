@@ -5,6 +5,12 @@ connection and zero or more ordered response frames ending in `complete`.
 Structured output is the default; text, paging, and streaming are explicit
 client presentation choices.
 
+`server start --file PATH` creates the initial tab and shared endpoint.
+`open --endpoint ENDPOINT --file PATH` selects an existing tab by canonical
+path or creates a new isolated tab in that server. Each tab receives a distinct
+session token and metadata database; a token for one tab cannot authorize
+another. Closing one tab leaves the endpoint alive while other tabs remain.
+
 Unix sockets are preferred. Loopback TCP is the Windows fallback; the server
 requires `--auth-token` and performs a per-connection challenge/proof exchange.
 The client sends the secret only to its local process: the TCP request after

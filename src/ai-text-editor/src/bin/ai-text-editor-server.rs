@@ -64,6 +64,8 @@ struct ServerState {
     auth_token: Option<String>,
     server_generation: String,
     large_threshold_bytes: u64,
+    endpoint: Option<Endpoint>,
+    discovery_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -285,6 +287,8 @@ fn main() {
         auth_token: configured_auth_token.clone(),
         server_generation: server_generation.clone(),
         large_threshold_bytes: large_threshold,
+        endpoint: None,
+        discovery_path: path.clone(),
     }));
     let requested_tcp = option(&args, "--tcp");
     if let Some(address) = requested_tcp {
@@ -295,6 +299,10 @@ fn main() {
         let listener = TcpListener::bind(&address)
             .unwrap_or_else(|error| die(&format!("cannot bind {address}: {error}")));
         let endpoint = Endpoint::Tcp(listener.local_addr().unwrap().to_string());
+        if let Ok(mut state_guard) = state.lock() {
+            state_guard.endpoint = Some(endpoint.clone());
+            state_guard.auth_token = Some(auth_token.clone());
+        }
         announce(&path, &endpoint);
         register_session(
             &endpoint,
@@ -354,6 +362,9 @@ fn main() {
         let listener = UnixListener::bind(&socket)
             .unwrap_or_else(|error| die(&format!("cannot bind {}: {error}", socket.display())));
         let endpoint = Endpoint::Unix(socket.clone());
+        if let Ok(mut state_guard) = state.lock() {
+            state_guard.endpoint = Some(endpoint.clone());
+        }
         announce(&path, &endpoint);
         register_session(
             &endpoint,
@@ -408,6 +419,165 @@ fn persist_index(tab: &mut Tab) {
     );
 }
 
+fn open_additional_tab(
+    path: PathBuf,
+    mode: DocumentMode,
+    normalize_nfc: bool,
+    auth_token: Option<String>,
+    server_generation: String,
+    large_threshold_bytes: u64,
+) -> Result<Tab, String> {
+    let file_size = fs::metadata(&path)
+        .map_err(|error| format!("cannot stat {}: {error}", path.display()))?
+        .len();
+    let large_file = if file_size > large_threshold_bytes {
+        Some(LargeFile::open(&path).map_err(|error| format!("cannot open large file: {error}"))?)
+    } else {
+        None
+    };
+    let bytes = if large_file.is_some() {
+        Vec::new()
+    } else {
+        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?
+    };
+    let mut document = Document::new(bytes, mode)
+        .map_err(|_| "file is not UTF-8; open it with raw_bytes or hex_view mode".to_owned())?;
+    if normalize_nfc {
+        document
+            .enable_nfc()
+            .map_err(|error| format!("cannot enable NFC normalization: {error}"))?;
+    }
+    let metadata =
+        Metadata::open(&path).map_err(|error| format!("cannot open tab metadata: {error}"))?;
+    let disk_digest = disk_state(&path, large_file.as_ref(), document.bytes());
+    let journal_root = session::metadata_root();
+    fs::create_dir_all(&journal_root)
+        .map_err(|error| format!("cannot create journal directory: {error}"))?;
+    let journal_path = journal_root.join(format!(
+        "journal-{}.ndjson",
+        blake3::hash(path.to_string_lossy().as_bytes()).to_hex()
+    ));
+    let mut journal =
+        Journal::open(journal_path).map_err(|error| format!("cannot open journal: {error}"))?;
+    let records = journal
+        .replay()
+        .map_err(|error| format!("cannot recover journal: {error}"))?;
+    let mut history = History::default();
+    let mut recovered_revision = 0;
+    let mut journal_seq = 0;
+    let mut large_undo = Vec::new();
+    let mut large_redo = Vec::new();
+    for record in records {
+        journal_seq = journal_seq.max(record.seq);
+        recovered_revision = recovered_revision.max(
+            record
+                .payload
+                .get("revision")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        );
+        let (Some(before), Some(after)) = (
+            record.payload.get("before").and_then(Value::as_str),
+            record.payload.get("after").and_then(Value::as_str),
+        ) else {
+            if matches!(
+                record.kind.as_str(),
+                "large_edit" | "large_undo" | "large_redo"
+            ) {
+                if let (Some(before), Some(after)) = (
+                    record.payload.get("before_path").and_then(Value::as_str),
+                    record.payload.get("after_path").and_then(Value::as_str),
+                ) {
+                    let snapshot = LargeHistory {
+                        before: PathBuf::from(before),
+                        after: PathBuf::from(after),
+                    };
+                    if snapshot.before.is_file() && snapshot.after.is_file() {
+                        if record.kind == "large_edit" {
+                            large_undo.push(snapshot);
+                        } else if record.kind == "large_undo" {
+                            if let Some(previous) = large_undo.pop() {
+                                large_redo.push(previous);
+                            }
+                        } else if record.kind == "large_redo" {
+                            if let Some(previous) = large_redo.pop() {
+                                large_undo.push(previous);
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        };
+        let decode = |value: &str| {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
+                .map_err(|error| error.to_string())
+        };
+        let before =
+            decode(before).map_err(|error| format!("cannot recover journal snapshot: {error}"))?;
+        let after =
+            decode(after).map_err(|error| format!("cannot recover journal snapshot: {error}"))?;
+        let before_document = Document::new(before, mode)
+            .map_err(|error| format!("journal snapshot is invalid: {error}"))?;
+        let after_document = Document::new(after, mode)
+            .map_err(|error| format!("journal snapshot is invalid: {error}"))?;
+        document = after_document.clone();
+        history.record(&before_document, &after_document);
+    }
+    let rebuilt_index = if let Some(file) = &large_file {
+        file.index(DEFAULT_GRANULARITY)
+            .unwrap_or_else(|_| LineIndex::build(document.bytes(), DEFAULT_GRANULARITY))
+    } else {
+        LineIndex::build(document.bytes(), DEFAULT_GRANULARITY)
+    };
+    let (index, index_loaded) = match metadata.load_index(
+        DEFAULT_GRANULARITY,
+        rebuilt_index.bytes,
+        &disk_digest,
+        recovered_revision,
+    ) {
+        Ok(Some(index)) => (index, true),
+        _ => (rebuilt_index, false),
+    };
+    let _ = metadata.record(&path, mode, recovered_revision, index.bytes);
+    let session_token =
+        auth::nonce().map_err(|error| format!("cannot create session token: {error}"))?;
+    let mut tab = Tab {
+        path: path.clone(),
+        document,
+        history,
+        revision: recovered_revision,
+        metadata,
+        disk_digest,
+        base_bytes: if large_file.is_some() {
+            Vec::new()
+        } else {
+            tab_base_bytes(&path)
+        },
+        pending_external: None,
+        index,
+        index_loaded,
+        cursors: BTreeMap::from([(0, Position { line: 1, column: 0 })]),
+        results: HashMap::new(),
+        journal,
+        journal_seq,
+        auth_token,
+        session_token,
+        server_generation,
+        large_file,
+        large_threshold_bytes,
+        jobs: JobRegistry::default(),
+        close_after_response: false,
+        transaction_before: None,
+        large_undo,
+        large_redo,
+    };
+    if !index_loaded {
+        persist_index(&mut tab);
+    }
+    Ok(tab)
+}
+
 fn option(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .find(|pair| pair[0] == name)
@@ -456,10 +626,13 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
     let writer = reader.get_mut();
     let default_tab = default_tab(&state);
     let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
-        Ok(envelope) => {
-            let selected = select_tab(&envelope, &state);
-            (handle(envelope, &selected), selected)
-        }
+        Ok(envelope) => match select_tab(&envelope, &state) {
+            Ok(selected) => (handle(envelope, &selected), selected),
+            Err(message) => (
+                vec![error(&envelope.request_id, "tab_open_failed", message)],
+                default_tab.clone(),
+            ),
+        },
         Err(error_value) => (
             vec![error(
                 request_id,
@@ -469,7 +642,7 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
             default_tab,
         ),
     };
-    write_frames(writer, value, &selected_tab);
+    write_frames(writer, value, &selected_tab, &state);
 }
 
 fn serve_tcp(
@@ -543,6 +716,7 @@ fn serve_tcp(
                 "invalid TCP challenge proof",
             )],
             &tab,
+            &state,
         );
         return;
     };
@@ -556,8 +730,13 @@ fn serve_tcp(
             // Authentication is bound to this connection and request id. Do
             // not require the secret to cross the TCP wire in the request.
             envelope.auth_token = Some(String::from_utf8_lossy(secret).into_owned());
-            let selected = select_tab(&envelope, &state);
-            (handle(envelope, &selected), selected)
+            match select_tab(&envelope, &state) {
+                Ok(selected) => (handle(envelope, &selected), selected),
+                Err(message) => (
+                    vec![error(&envelope.request_id, "tab_open_failed", message)],
+                    default_tab.clone(),
+                ),
+            }
         }
         Ok(_) => (
             vec![error(
@@ -572,10 +751,15 @@ fn serve_tcp(
             default_tab,
         ),
     };
-    write_frames(reader.get_mut(), value, &selected_tab);
+    write_frames(reader.get_mut(), value, &selected_tab, &state);
 }
 
-fn write_frames<S: std::io::Write>(writer: &mut S, frames: Vec<Value>, tab: &Arc<Mutex<Tab>>) {
+fn write_frames<S: std::io::Write>(
+    writer: &mut S,
+    frames: Vec<Value>,
+    tab: &Arc<Mutex<Tab>>,
+    state: &Arc<Mutex<ServerState>>,
+) {
     for (sequence, mut frame) in frames.into_iter().enumerate() {
         if let Some(object) = frame.as_object_mut() {
             object.insert("sequence".into(), json!(sequence as u64));
@@ -600,9 +784,20 @@ fn write_frames<S: std::io::Write>(writer: &mut S, frames: Vec<Value>, tab: &Arc
         .ok()
         .and_then(|tab| tab.close_after_response.then(|| tab.path.clone()));
     if let Some(path) = closed_path {
-        let _ = fs::remove_file(endpoint_for_file(&path));
-        let _ = fs::remove_file(socket_for_file(&path));
-        std::process::exit(0);
+        let key = tab_key(&path);
+        let mut state_guard = state.lock().unwrap();
+        state_guard.tabs.remove(&key);
+        if state_guard.tabs.is_empty() {
+            let discovery_path = state_guard.discovery_path.clone();
+            let _ = fs::remove_file(endpoint_for_file(&discovery_path));
+            let _ = fs::remove_file(socket_for_file(&discovery_path));
+            std::process::exit(0);
+        }
+        if state_guard.default_key == key {
+            if let Some(next) = state_guard.tabs.keys().next().cloned() {
+                state_guard.default_key = next;
+            }
+        }
     }
 }
 
@@ -638,15 +833,8 @@ fn default_tab(state: &Arc<Mutex<ServerState>>) -> Arc<Mutex<Tab>> {
 fn select_tab(
     envelope: &ai_text_editor::protocol::Envelope,
     state: &Arc<Mutex<ServerState>>,
-) -> Arc<Mutex<Tab>> {
+) -> Result<Arc<Mutex<Tab>>, String> {
     let state_guard = state.lock().unwrap();
-    let _server_configuration = (
-        state_guard.mode,
-        state_guard.normalize_nfc,
-        state_guard.auth_token.as_deref(),
-        state_guard.server_generation.as_str(),
-        state_guard.large_threshold_bytes,
-    );
     if let Some(token) = envelope.session_token.as_deref() {
         for tab in state_guard.tabs.values() {
             if tab
@@ -654,7 +842,7 @@ fn select_tab(
                 .ok()
                 .is_some_and(|tab| tab.session_token == token)
             {
-                return tab.clone();
+                return Ok(tab.clone());
             }
         }
     }
@@ -662,11 +850,56 @@ fn select_tab(
         if let Some(path) = envelope.payload.get("file").and_then(Value::as_str) {
             let key = tab_key(std::path::Path::new(path));
             if let Some(tab) = state_guard.tabs.get(&key) {
-                return tab.clone();
+                return Ok(tab.clone());
             }
+            let path = fs::canonicalize(path)
+                .map_err(|error| format!("cannot open tab {path}: {error}"))?;
+            let mode = state_guard.mode;
+            let normalize_nfc = state_guard.normalize_nfc;
+            let auth_token = state_guard.auth_token.clone();
+            let generation = state_guard.server_generation.clone();
+            let threshold = state_guard.large_threshold_bytes;
+            let endpoint = state_guard.endpoint.clone();
+            drop(state_guard);
+            let tab = open_additional_tab(
+                path.clone(),
+                mode,
+                normalize_nfc,
+                auth_token.clone(),
+                generation.clone(),
+                threshold,
+            )?;
+            if let Some(endpoint) = endpoint {
+                let tab_guard = tab;
+                let session_token = tab_guard.session_token.clone();
+                register_session(
+                    &endpoint,
+                    &generation,
+                    &session_token,
+                    auth_token.as_deref(),
+                );
+                let tab = Arc::new(Mutex::new(tab_guard));
+                let key = tab_key(&path);
+                let mut state_guard = state.lock().unwrap();
+                if let Some(existing) = state_guard.tabs.get(&key) {
+                    return Ok(existing.clone());
+                }
+                let result = tab.clone();
+                state_guard.tabs.insert(key, tab);
+                return Ok(result);
+            }
+            let key = tab_key(&path);
+            let tab = Arc::new(Mutex::new(tab));
+            let mut state_guard = state.lock().unwrap();
+            if let Some(existing) = state_guard.tabs.get(&key) {
+                return Ok(existing.clone());
+            }
+            let result = tab.clone();
+            state_guard.tabs.insert(key, tab);
+            return Ok(result);
         }
     }
-    state_guard.tabs[&state_guard.default_key].clone()
+    Ok(state_guard.tabs[&state_guard.default_key].clone())
 }
 
 fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -> Vec<Value> {

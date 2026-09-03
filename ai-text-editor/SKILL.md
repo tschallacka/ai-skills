@@ -5,10 +5,12 @@ description: Use the local ai-text-editor server and short-lived client to inspe
 
 # ai-text-editor
 
-Use this skill when an agent needs a durable editor tab, server-owned file
+Use this skill when an agent needs durable editor tabs, server-owned file
 state, revision-aware searches, cursor navigation, undo/redo, raw-byte or hex
-editing, large-file inspection, or external-change resolution. The server is
-the only owner of document state, journals, indexes, and per-tab SQLite data.
+editing, large-file inspection, or external-change resolution. One server can
+own multiple tabs; each tab has its own writer authorization and SQLite data.
+The server is the only owner of document state, journals, indexes, and tab
+metadata.
 
 ## Start
 
@@ -18,6 +20,8 @@ paths described by the man page when necessary:
 ```text
 ai-text-editor-server start --file /path/to/file
 ai-text-editor open --file /path/to/file
+# With an existing endpoint, open another isolated tab:
+ai-text-editor open --endpoint ENDPOINT --file /path/to/other-file
 ai-text-editor help
 man -l ai-text-editor.1
 ```
