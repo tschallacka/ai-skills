@@ -42,11 +42,10 @@ dist/
 bug-report.md
 bugs-found-by-ox-alpha.md
 
-# Rust build artifacts for the crates under src/ (CODE-STYLE 1b).
+# Rust build artifacts for the workspace (CODE-STYLE 1b).
 # Never tracked: they are per-platform, large, and rebuilt by CI.
 /target/
-# Cargo's workspace output is rooted above, but keep a defensive rule for a
-# standalone crate or a directory add before it has joined the workspace.
+# Defensive coverage for a standalone crate or a directory add.
 src/*/target/
 chat/runtime/chat-server-rs
 
