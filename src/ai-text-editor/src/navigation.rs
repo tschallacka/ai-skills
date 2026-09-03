@@ -134,31 +134,50 @@ fn move_word(text: &str, position: Position, forward: bool) -> Position {
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line).chars().collect())
         .collect();
-    let mut index = position.column;
-    let line = position.line - 1;
-    let chars = &lines[line];
+    let mut line = position.line - 1;
+    let mut index = position.column.min(lines[line].len());
     if forward {
-        while index < chars.len() && is_word(chars[index]) {
-            index += 1;
-        }
-        while index < chars.len() && !is_word(chars[index]) {
-            index += 1;
+        loop {
+            while index < lines[line].len() && is_word(lines[line][index]) {
+                index += 1;
+            }
+            while index < lines[line].len() && !is_word(lines[line][index]) {
+                index += 1;
+            }
+            if index < lines[line].len() || line + 1 == lines.len() {
+                break;
+            }
+            line += 1;
+            index = 0;
         }
         Position {
-            line: position.line,
+            line: line + 1,
             column: index,
         }
     } else {
-        index = index.min(chars.len());
-        index = index.saturating_sub(1);
-        while index > 0 && !is_word(chars[index]) {
-            index -= 1;
+        if index == 0 {
+            if line == 0 {
+                return Position { line: 1, column: 0 };
+            }
+            line -= 1;
+            index = lines[line].len();
         }
-        while index > 0 && is_word(chars[index - 1]) {
-            index -= 1;
+        loop {
+            index = index.saturating_sub(1);
+            while index > 0 && !is_word(lines[line][index]) {
+                index -= 1;
+            }
+            while index > 0 && is_word(lines[line][index - 1]) {
+                index -= 1;
+            }
+            if is_word(lines[line].get(index).copied().unwrap_or(' ')) || index > 0 || line == 0 {
+                break;
+            }
+            line -= 1;
+            index = lines[line].len();
         }
         Position {
-            line: position.line,
+            line: line + 1,
             column: index,
         }
     }
@@ -199,6 +218,14 @@ mod tests {
         assert_eq!(
             previous_word(text, Position { line: 1, column: 7 }),
             Position { line: 1, column: 5 }
+        );
+        assert_eq!(
+            next_word("one\ntwo", Position { line: 1, column: 3 }),
+            Position { line: 2, column: 3 }
+        );
+        assert_eq!(
+            previous_word("one\ntwo", Position { line: 2, column: 0 }),
+            Position { line: 1, column: 0 }
         );
         assert_eq!(page(text, Position { line: 1, column: 0 }, 40, -1).line, 1);
     }
