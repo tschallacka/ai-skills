@@ -3,12 +3,12 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	7619
 package/LICENSE	1068
 package/README.md	14835
-package/ai-text-editor/SKILL.md	6971
+package/ai-text-editor/SKILL.md	7124
 package/ai-text-editor/agents/openai.yaml	111
-package/ai-text-editor/ai-text-editor.1	6638
+package/ai-text-editor/ai-text-editor.1	6814
 package/ai-text-editor/binaries.tsv	497
 package/ai-text-editor/docs/README.md	1307
-package/ai-text-editor/references/protocol.md	11431
+package/ai-text-editor/references/protocol.md	11673
 package/ai-text-editor/requires.tsv	190
 package/ai-text-editor/schemas/capabilities.v1.json	1829
 package/ai-text-editor/schemas/protocol.v1.json	764

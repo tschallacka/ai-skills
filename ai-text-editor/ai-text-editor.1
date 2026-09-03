@@ -81,6 +81,9 @@ beside the skill and use \fBman -l /path/to/ai-text-editor.1\fR.
 Files above 256 MiB use bounded file-backed reads and sparse index scans.
 Startup records only a bounded prefix index for a large tab. Use the
 index operation for an explicit full scan and inspect the reported coverage.
+Index output returns four blocks by default; use B--offsetR and
+B--limitR to page the persisted block list. The response reports its total
+block count and returned window.
 Use \fB--offset\fR and \fB--length\fR for reads. Ordinary mutations are
 refused; start a job and use \fBlarge-edit\fR with
 \fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.
