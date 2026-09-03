@@ -42,6 +42,7 @@ editor_artifact_files() {
     for relative in "$@"; do
         [ -f "$SOURCE_ROOT/ai-text-editor/$relative" ] && printf '%s\n' "$relative"
     done
+    return 0
 }
 
 skill_files() {
