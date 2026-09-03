@@ -48,6 +48,12 @@ mkdir -p "$home"
 AI_CHAT_HOME="$home" CHAT_ANNOUNCE=1 CHAT_BCAST=127.0.0.1 CHAT_BEACON_PORT=47991 CHAT_NAME=test-beacon \
     "$SERVER" 0 >"$temporary_root/server.out" 2>"$temporary_root/server.err" &
 server_pid=$!
+# Take the server down however this test ends. A failure that left it running
+# kept announcing on the beacon port, so the NEXT run saw two servers and failed
+# on discovery -- a leak that looks like a regression in the code under test.
+# `|| true`: by the normal path the server is already down, and a failing kill
+# inside an EXIT trap under set -e would turn a passing run into exit 1.
+trap 'kill "$server_pid" 2>/dev/null || true; rm -rf "$temporary_root"' EXIT
 port=""
 for _ in $(seq 1 40); do
     [ -s "$home/server.port" ] && { port="$(cat "$home/server.port")"; break; }
@@ -155,8 +161,12 @@ esac
 cli sess send --chan '#sess' --text 'second session' --insecure >/dev/null 2>&1 || true
 cursor="$(cli sess session show 2>/dev/null | grep 'cursor #sess' | awk '{print $NF}' || true)"
 [ "$cursor" = "2" ] || t_fail "session cursor did not advance to 2: [$cursor]"
-# A malformed session.json must recover (warning + empty session), not crash.
-printf '{ broken json !!!' > "$temporary_root/c_sess/session.json"
+# A malformed session file must recover (warning + empty session), not crash.
+# Ask the client which file it owns rather than assuming: session files are per
+# agent now, so the path carries the session key.
+sess_file="$(cli sess session show 2>/dev/null | sed -n 's/^file=//p')"
+[ -n "$sess_file" ] || t_fail "session show did not report its file"
+printf '{ broken json !!!' > "$sess_file"
 recovered="$(cli sess session show 2>/dev/null || true)"
 case "$recovered" in
     *'server='*) : ;;
@@ -215,7 +225,145 @@ grep -q '!! MENTION !!' "$temporary_root/ment.log" \
     || t_fail "mention was not surfaced: [$(cat "$temporary_root/ment.log")]"
 wait "$ment_pid" 2>/dev/null || true
 
+# ---- B116: two agents, ONE AI_CHAT_HOME, separate sessions ----------------
+# This is the shape the defect was measured in: both agents leave AI_CHAT_HOME
+# at one shared path. Each must keep its own nick and its own per-channel
+# cursor. Before the per-agent session key, one session.json held both, so
+# agent-b's join overwrote agent-a's nick and either agent's read silently
+# advanced the other's cursor.
+shared="$temporary_root/shared"
+mkdir -p "$shared"
+
+# One shared state dir; the two agents differ only by their session identity.
+# --session is the explicit rung of the ladder.
+agent() { # <session-id> <args...>
+    local sid="$1"
+    shift
+    AI_CHAT_HOME="$shared" timeout 8 "$CLIENT" --session "$sid" "$@"
+}
+
+agent agent-a session set --server 127.0.0.1:"$port" --nick agent-a >/dev/null 2>&1 \
+    || t_fail "agent-a session set failed"
+agent agent-b session set --server 127.0.0.1:"$port" --nick agent-b >/dev/null 2>&1 \
+    || t_fail "agent-b session set failed"
+
+# The nick each agent reports is its own, not whichever wrote last.
+a_show="$(agent agent-a session show 2>/dev/null || true)"
+b_show="$(agent agent-b session show 2>/dev/null || true)"
+case "$a_show" in
+    *'nick=agent-a'*) : ;;
+    *) t_fail "agent-a's session reports the wrong nick: [$a_show]" ;;
+esac
+case "$b_show" in
+    *'nick=agent-b'*) : ;;
+    *) t_fail "agent-b's session reports the wrong nick: [$b_show]" ;;
+esac
+case "$a_show" in
+    *'source=explicit'*) : ;;
+    *) t_fail "--session did not take the explicit rung: [$a_show]" ;;
+esac
+
+# A bare send (no --nick) goes out under the sending agent's own identity.
+a_sent="$(agent agent-a send --chan '#iso' --text 'from a' --insecure 2>/dev/null || true)"
+b_sent="$(agent agent-b send --chan '#iso' --text 'from b' --insecure 2>/dev/null || true)"
+case "$a_sent" in
+    *':agent-a!agent-a@localhost PRIVMSG #iso :from a'*) : ;;
+    *) t_fail "agent-a's bare send used the wrong nick: [$a_sent]" ;;
+esac
+case "$b_sent" in
+    *':agent-b!agent-b@localhost PRIVMSG #iso :from b'*) : ;;
+    *) t_fail "agent-b's bare send used the wrong nick: [$b_sent]" ;;
+esac
+
+# Cursors are separate: agent-a sends twice on a fresh channel, which advances
+# only agent-a's cursor. agent-b must still have no read position there, so
+# agent-b's unread messages were not consumed on its behalf.
+agent agent-a send --chan '#isoc' --text 'one' --insecure >/dev/null 2>&1 || true
+agent agent-a send --chan '#isoc' --text 'two' --insecure >/dev/null 2>&1 || true
+a_cursor="$(agent agent-a session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
+b_cursor="$(agent agent-b session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
+[ "$a_cursor" = "2" ] || t_fail "agent-a's #isoc cursor is [$a_cursor], want 2"
+[ -z "$b_cursor" ] || t_fail "agent-b inherited agent-a's #isoc cursor: [$b_cursor]"
+
+# The damaging half of the defect: one agent reading must not consume the
+# other's unread messages. Both agents join a fresh channel, so both sit at its
+# end; a third party then posts two messages that BOTH are owed.
+# One message first, so the channel has an end to join at: a join to an EMPTY
+# channel seeds the cursor to 0, which read cannot tell apart from having no
+# cursor at all.
+cli out send --server 127.0.0.1:"$port" --nick outsider --chan '#isod' --text 'channel seed' \
+    >/dev/null 2>&1 || t_fail "outsider seed send failed"
+agent agent-a join --chan '#isod' --insecure >/dev/null 2>&1 || t_fail "agent-a join failed"
+agent agent-b join --chan '#isod' --insecure >/dev/null 2>&1 || t_fail "agent-b join failed"
+cli out send --server 127.0.0.1:"$port" --nick outsider --chan '#isod' --text 'owed one' \
+    >/dev/null 2>&1 || t_fail "outsider send 1 failed"
+cli out send --server 127.0.0.1:"$port" --nick outsider --chan '#isod' --text 'owed two' \
+    >/dev/null 2>&1 || t_fail "outsider send 2 failed"
+
+# agent-a reads first, which advances agent-a's cursor past both.
+a_read="$(agent agent-a read --chan '#isod' --insecure 2>/dev/null || true)"
+case "$a_read" in
+    *'owed one'*'owed two'*) : ;;
+    *) t_fail "agent-a did not receive the messages it was owed: [$a_read]" ;;
+esac
+# agent-b must still receive them. On one shared session, agent-a's read had
+# already moved the single cursor past both and agent-b saw nothing -- messages
+# that look to agent-b as though they never arrived.
+b_read="$(agent agent-b read --chan '#isod' --insecure 2>/dev/null || true)"
+case "$b_read" in
+    *'owed one'*'owed two'*) : ;;
+    *) t_fail "agent-a's read consumed agent-b's unread messages: [$b_read]" ;;
+esac
+
+# Two agents, two session files in the one shared state dir.
+# `|| true` inside: with no sessions/ directory at all this must report a
+# finding, not abort the run under pipefail before the later assertions.
+session_files="$({ ls "$shared/sessions" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+[ "$session_files" = "2" ] || t_fail "want 2 session files in the shared home, got $session_files"
+
+# The zero-config rungs, with nothing chosen by hand. A harness session id the
+# environment already carries separates two agents with no --session at all.
+noenv() { env -u CHAT_SESSION_ID -u CODEX_SESSION_ID -u OPENCODE_PID "$@"; }
+AI_CHAT_HOME="$shared" noenv CLAUDE_CODE_SESSION_ID=harness-a \
+    timeout 8 "$CLIENT" session set --nick harness-a >/dev/null 2>&1 || true
+AI_CHAT_HOME="$shared" noenv CLAUDE_CODE_SESSION_ID=harness-b \
+    timeout 8 "$CLIENT" session set --nick harness-b >/dev/null 2>&1 || true
+h_show_a="$(AI_CHAT_HOME="$shared" noenv CLAUDE_CODE_SESSION_ID=harness-a \
+    timeout 8 "$CLIENT" session show 2>/dev/null || true)"
+case "$h_show_a" in
+    *'source=harness'*'nick=harness-a'*) : ;;
+    *) t_fail "a harness session id did not isolate the session: [$h_show_a]" ;;
+esac
+
+# With no harness id either, the git worktree root decides, so two checkouts of
+# one project keep separate sessions without any configuration.
+if command -v git >/dev/null 2>&1; then
+    for wt in wt1 wt2; do
+        mkdir -p "$temporary_root/$wt"
+        ( cd "$temporary_root/$wt" && git init -q . 2>/dev/null ) || true
+    done
+    wt_show() { # <dir> <args...>
+        local d="$temporary_root/$1"
+        shift
+        ( cd "$d" && AI_CHAT_HOME="$shared" \
+            env -u CHAT_SESSION_ID -u CODEX_SESSION_ID -u OPENCODE_PID -u CLAUDE_CODE_SESSION_ID \
+            timeout 8 "$CLIENT" "$@" )
+    }
+    wt_show wt1 session set --nick in-wt1 >/dev/null 2>&1 || true
+    wt_show wt2 session set --nick in-wt2 >/dev/null 2>&1 || true
+    w1="$(wt_show wt1 session show 2>/dev/null || true)"
+    w2="$(wt_show wt2 session show 2>/dev/null || true)"
+    case "$w1" in
+        *'source=worktree'*'nick=in-wt1'*) : ;;
+        *) t_fail "the worktree rung did not isolate wt1: [$w1]" ;;
+    esac
+    case "$w2" in
+        *'source=worktree'*'nick=in-wt2'*) : ;;
+        *) t_fail "the worktree rung did not isolate wt2: [$w2]" ;;
+    esac
+fi
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions)\n' >&2
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home)\n' >&2
 t_end
