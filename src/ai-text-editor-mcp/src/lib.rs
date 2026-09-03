@@ -112,12 +112,16 @@ fn call_tool(id: Value, params: Value) -> Value {
     let auth_token = payload
         .remove("auth_token")
         .and_then(|value| value.as_str().map(str::to_owned));
+    let session_token = payload
+        .remove("session_token")
+        .and_then(|value| value.as_str().map(str::to_owned));
     let envelope = Envelope {
         version: ai_text_editor::PROTOCOL_VERSION,
         request_id: "mcp-1".into(),
         method: method.into(),
         revision,
         auth_token,
+        session_token,
         payload: Value::Object(payload),
     };
     match request(&endpoint, &envelope) {

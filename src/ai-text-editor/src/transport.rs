@@ -22,6 +22,7 @@ pub enum Endpoint {
 pub struct Session {
     pub endpoint: Endpoint,
     pub auth_token: Option<String>,
+    pub session_token: Option<String>,
 }
 
 impl Endpoint {
@@ -87,10 +88,15 @@ pub fn read_endpoint(path: &Path) -> io::Result<Endpoint> {
 }
 
 pub fn write_session_token(path: &Path, endpoint: &Endpoint) -> io::Result<()> {
-    write_session(path, endpoint, None)
+    write_session(path, endpoint, None, None)
 }
 
-pub fn write_session(path: &Path, endpoint: &Endpoint, auth_token: Option<&str>) -> io::Result<()> {
+pub fn write_session(
+    path: &Path,
+    endpoint: &Endpoint,
+    auth_token: Option<&str>,
+    session_token: Option<&str>,
+) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
         #[cfg(unix)]
@@ -101,7 +107,7 @@ pub fn write_session(path: &Path, endpoint: &Endpoint, auth_token: Option<&str>)
     }
     fs::write(
         path,
-        serde_json::to_vec(&json!({"endpoint": endpoint.display(), "auth_token": auth_token}))
+        serde_json::to_vec(&json!({"endpoint": endpoint.display(), "auth_token": auth_token, "session_token": session_token}))
             .map_err(io::Error::other)?,
     )?;
     restrict_private(path)?;
@@ -131,12 +137,17 @@ pub fn read_session(path: &Path) -> io::Result<Session> {
                     .get("auth_token")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                session_token: value
+                    .get("session_token")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             });
         }
     }
     Ok(Session {
         endpoint: Endpoint::parse(content.trim()),
         auth_token: None,
+        session_token: None,
     })
 }
 
@@ -209,6 +220,7 @@ fn exchange_tcp(
         method: "authenticate".into(),
         revision: None,
         auth_token: None,
+        session_token: None,
         payload: json!({
             "nonce": payload.get("nonce").cloned().unwrap_or(Value::Null),
             "proof": auth::proof(secret.as_bytes(), &nonce, &envelope.request_id, generation)

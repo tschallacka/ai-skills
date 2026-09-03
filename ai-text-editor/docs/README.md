@@ -12,3 +12,6 @@ explicit transport selection. TCP startup requires `--auth-token`; each
 connection uses a fresh HMAC challenge/proof and does not place the secret in
 the editor request. `--auth-token-file` is also supported for owner-only
 credentials and rotation. The endpoint must remain private to the host.
+An `open` response returns a tab-scoped `session_token`; persist it with
+`--save-session-token` and reuse it for all later requests. Session tokens are
+distinct from TCP credentials and expire when the owning server instance ends.

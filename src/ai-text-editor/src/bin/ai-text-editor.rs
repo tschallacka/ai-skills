@@ -55,8 +55,24 @@ fn main() {
     let session_path = option(&args, "--session-token")
         .map(PathBuf::from)
         .or_else(|| session_identity(&args).map(|id| session_path(&id)));
-    let (endpoint, saved_auth_token) = match option(&args, "--endpoint") {
-        Some(value) => (Endpoint::parse(&value), None),
+    let (endpoint, saved_auth_token, saved_session_token) = match option(&args, "--endpoint") {
+        Some(value) => {
+            let session = session_path.as_ref().map(|path| {
+                read_session(path).unwrap_or_else(|error| {
+                    die(&format!(
+                        "cannot read session token {}: {error}",
+                        path.display()
+                    ))
+                })
+            });
+            (
+                Endpoint::parse(&value),
+                session
+                    .as_ref()
+                    .and_then(|session| session.auth_token.clone()),
+                session.and_then(|session| session.session_token),
+            )
+        }
         None if session_path.is_some()
             && session_path.as_ref().is_some_and(|path| path.exists()) =>
         {
@@ -67,7 +83,7 @@ fn main() {
                     token.display()
                 ))
             });
-            (session.endpoint, session.auth_token)
+            (session.endpoint, session.auth_token, session.session_token)
         }
         None if option(&args, "--session-token").is_some() => die(&format!(
             "explicit session token {} does not exist; provide a valid token or --endpoint",
@@ -84,6 +100,7 @@ fn main() {
                         file.display()
                     ))
                 }),
+                None,
                 None,
             )
         }
@@ -232,6 +249,7 @@ fn main() {
         method: method.into(),
         revision: expected_revision,
         auth_token: auth_token.clone(),
+        session_token: saved_session_token.clone(),
         payload: Value::Object(payload),
     };
     let frames = request(&endpoint, &envelope).unwrap_or_else(|error| die(&error));
@@ -241,9 +259,20 @@ fn main() {
     let save_path = option(&args, "--save-session-token")
         .map(PathBuf::from)
         .or(session_path);
+    let returned_session_token = frames
+        .iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+        .and_then(|frame| frame.pointer("/payload/session_token"))
+        .and_then(Value::as_str);
+    let persisted_session_token = returned_session_token.or(saved_session_token.as_deref());
     if let Some(token) = save_path {
-        write_session(&token, &endpoint, auth_token.as_deref())
-            .unwrap_or_else(|error| die(&format!("cannot save session token: {error}")));
+        write_session(
+            &token,
+            &endpoint,
+            auth_token.as_deref(),
+            persisted_session_token,
+        )
+        .unwrap_or_else(|error| die(&format!("cannot save session token: {error}")));
     }
     match presentation.as_str() {
         "structured" => {

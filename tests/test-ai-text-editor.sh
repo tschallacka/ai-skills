@@ -19,6 +19,7 @@ runtime="$scratch/runtime"
 metadata="$scratch/metadata"
 mkdir -p "$runtime" "$metadata"
 file="$scratch/document.txt"
+session="$scratch/session.json"
 printf 'alpha\nbeta\n' > "$file"
 server_output="$scratch/server-output"
 server_pid=""
@@ -46,6 +47,9 @@ contains() {
         *) return 1 ;;
     esac
 }
+editor() {
+    "$client" "$@" --session-token "$session"
+}
 
 export XDG_RUNTIME_DIR="$runtime"
 export TSCH_AI_EDITOR_METADATA_DIR="$metadata"
@@ -55,7 +59,7 @@ server_pid="$!"
 ready=0
 open_output=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if open_output="$($client open --file "$file" 2>/dev/null)"; then
+    if open_output="$($client open --file "$file" --save-session-token "$session" 2>/dev/null)"; then
         ready=1
         break
     fi
@@ -67,27 +71,27 @@ contains "$open_output" '"revision": 0'
 contains "$open_output" '"mode": "TextUtf8"'
 
 # A second startup must reuse the validated per-tab SQLite index.
-"$client" close --file "$file" --journal-action preserve >/dev/null
+editor close --file "$file" --journal-action preserve >/dev/null
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
 "$server" start --file "$file" >"$server_output" 2>&1 &
 server_pid="$!"
 reopened=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if reopened="$($client open --file "$file" 2>/dev/null)"; then
+    if reopened="$($client open --file "$file" --save-session-token "$session" 2>/dev/null)"; then
         break
     fi
     sleep 0.1
 done
 contains "$reopened" '"index_loaded": true'
 
-insert_output="$($client insert --file "$file" --offset 5 --text '!' --expected-revision 0)"
+insert_output="$(editor insert --file "$file" --offset 5 --text '!' --expected-revision 0)"
 contains "$insert_output" '"revision": 1'
 
-read_output="$($client read --file "$file")"
+read_output="$(editor read --file "$file")"
 contains "$read_output" 'alpha!'
 
-search_output="$($client search --file "$file" --mode exact_text --query beta)"
+search_output="$(editor search --file "$file" --mode exact_text --query beta)"
 contains "$search_output" '"count": 1'
 contains "$search_output" '"pager_key"'
 pager_key="$(printf '%s\n' "$search_output" | sed -n 's/.*"pager_key": "\([^"]*\)",/\1/p')"
@@ -95,47 +99,47 @@ pager_key="$(printf '%s\n' "$search_output" | sed -n 's/.*"pager_key": "\([^"]*\
 
 # Preserve the journal across a server restart so the recovered revision still
 # matches the persisted result set. Paging must reload the result from SQLite.
-"$client" save --file "$file" --expected-revision 1 >/dev/null
-"$client" close --file "$file" --journal-action preserve >/dev/null
+editor save --file "$file" --expected-revision 1 >/dev/null
+editor close --file "$file" --journal-action preserve >/dev/null
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
 "$server" start --file "$file" >"$server_output" 2>&1 &
 server_pid="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if "$client" open --file "$file" >/dev/null 2>&1; then
+    if "$client" open --file "$file" --save-session-token "$session" >/dev/null 2>&1; then
         break
     fi
     sleep 0.1
 done
-page_output="$($client page --file "$file" --pager-key "$pager_key" --limit 1)"
+page_output="$(editor page --file "$file" --pager-key "$pager_key" --limit 1)"
 contains "$page_output" '"count": 1'
 contains "$page_output" '"contents": "beta"'
-"$client" insert --file "$file" --offset 0 --text 'X' --expected-revision 1 >/dev/null
-if "$client" page --file "$file" --pager-key "$pager_key" --limit 1 >"$scratch/stale-page" 2>&1; then
+editor insert --file "$file" --offset 0 --text 'X' --expected-revision 1 >/dev/null
+if editor page --file "$file" --pager-key "$pager_key" --limit 1 >"$scratch/stale-page" 2>&1; then
     exit 1
 fi
 grep -Fq 'stale_result' "$scratch/stale-page"
-historical_page="$($client page --file "$file" --pager-key "$pager_key" --limit 1 --historical)"
+historical_page="$(editor page --file "$file" --pager-key "$pager_key" --limit 1 --historical)"
 contains "$historical_page" '"source_revision": 1'
 contains "$historical_page" '"stale": true'
 
 printf 'outside\n' > "$file"
-if "$client" open --file "$file" >"$scratch/external-output" 2>&1; then
+if editor open --file "$file" >"$scratch/external-output" 2>&1; then
     exit 1
 fi
 grep -Fq 'external_change' "$scratch/external-output"
 
-backup_output="$($client resolve --file "$file" --action backup)"
+backup_output="$(editor resolve --file "$file" --action backup)"
 contains "$backup_output" '"resolved": "backup"'
 [ -f "$file.back" ]
-reload_output="$($client resolve --file "$file" --action reload)"
+reload_output="$(editor resolve --file "$file" --action reload)"
 contains "$reload_output" '"history_event": "external_reload"'
 
-if "$client" close --file "$file" >"$scratch/close-prompt" 2>&1; then
+if editor close --file "$file" >"$scratch/close-prompt" 2>&1; then
     exit 1
 fi
 grep -Fq 'journal_close_decision_required' "$scratch/close-prompt"
-"$client" close --file "$file" --journal-action clean >/dev/null
+editor close --file "$file" --journal-action clean >/dev/null
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
 remaining_metadata="$(find "$metadata" -name 'tab-*.sqlite' -type f -print)"
@@ -153,6 +157,7 @@ auth_file="$scratch/tcp-auth-token"
 printf 'secret\n' > "$auth_file"
 chmod 600 "$auth_file"
 tcp_output="$scratch/tcp-server-output"
+tcp_session="$scratch/tcp-session.json"
 "$server" start --file "$tcp_file" --tcp 127.0.0.1:0 --auth-token-file "$auth_file" >"$tcp_output" 2>&1 &
 tcp_pid="$!"
 tcp_endpoint=""
@@ -164,48 +169,49 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 0.1
 done
 [ -n "$tcp_endpoint" ] || { sed -n '1,120p' "$tcp_output" >&2; exit 1; }
-tcp_open="$($client open --endpoint "$tcp_endpoint" --auth-token secret)"
+tcp_open="$($client open --endpoint "$tcp_endpoint" --auth-token secret --save-session-token "$tcp_session")"
 contains "$tcp_open" '"mode": "TextUtf8"'
 if "$client" open --endpoint "$tcp_endpoint" --auth-token wrong >"$scratch/tcp-auth-failure" 2>&1; then
     exit 1
 fi
 grep -Fq 'authentication_failed' "$scratch/tcp-auth-failure"
-tcp_read="$($client read --endpoint "$tcp_endpoint" --auth-token secret)"
+tcp_read="$($client read --endpoint "$tcp_endpoint" --auth-token secret --session-token "$tcp_session")"
 contains "$tcp_read" 'tcp-content'
 printf 'rotated\n' > "$auth_file"
-if "$client" read --endpoint "$tcp_endpoint" --auth-token secret >"$scratch/rotated-auth-failure" 2>&1; then
+if "$client" read --endpoint "$tcp_endpoint" --auth-token secret --session-token "$tcp_session" >"$scratch/rotated-auth-failure" 2>&1; then
     exit 1
 fi
 grep -Fq 'authentication_failed' "$scratch/rotated-auth-failure"
-tcp_rotated="$($client read --endpoint "$tcp_endpoint" --auth-token rotated)"
+tcp_rotated="$($client read --endpoint "$tcp_endpoint" --auth-token rotated --session-token "$tcp_session")"
 contains "$tcp_rotated" 'tcp-content'
-"$client" close --endpoint "$tcp_endpoint" --auth-token rotated --journal-action clean >/dev/null
+"$client" close --endpoint "$tcp_endpoint" --auth-token rotated --session-token "$tcp_session" --journal-action clean >/dev/null
 wait "$tcp_pid" 2>/dev/null || true
 tcp_pid=""
 
 large_file="$scratch/large-document.txt"
+session="$scratch/large-session.json"
 printf 'first\nneedle\nlast\n' > "$large_file"
 large_output="$scratch/large-server-output"
 "$server" start --file "$large_file" --large-threshold-bytes 1 >"$large_output" 2>&1 &
 large_pid="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if "$client" open --file "$large_file" >/dev/null 2>&1; then
+    if "$client" open --file "$large_file" --save-session-token "$session" >/dev/null 2>&1; then
         break
     fi
     sleep 0.1
 done
-if "$client" search --file "$large_file" --mode exact_text --query needle >"$scratch/unbounded-large-search" 2>&1; then
+if editor search --file "$large_file" --mode exact_text --query needle >"$scratch/unbounded-large-search" 2>&1; then
     exit 1
 fi
 grep -Fq 'large_search_range_required' "$scratch/unbounded-large-search"
-large_search="$($client search --file "$large_file" --mode exact_text --query needle --range-start-line 1 --range-end-line 3)"
+large_search="$(editor search --file "$large_file" --mode exact_text --query needle --range-start-line 1 --range-end-line 3)"
 contains "$large_search" '"count": 1'
 contains "$large_search" '"start_line": 1'
 contains "$large_search" '"end_line": 3'
-large_bytes="$($client search --file "$large_file" --mode exact_bytes --query-base64 bmVlZGxl --range-start-byte 0 --range-end-byte 18)"
+large_bytes="$(editor search --file "$large_file" --mode exact_bytes --query-base64 bmVlZGxl --range-start-byte 0 --range-end-byte 18)"
 contains "$large_bytes" '"byte_start": 6'
 contains "$large_bytes" '"contents_base64": "bmVlZGxl"'
-"$client" close --file "$large_file" --journal-action clean >/dev/null
+editor close --file "$large_file" --journal-action clean >/dev/null
 wait "$large_pid" 2>/dev/null || true
 large_pid=""
 remaining_metadata="$(find "$metadata" -name 'tab-*.sqlite' -type f -print)"

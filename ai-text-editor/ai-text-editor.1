@@ -9,6 +9,9 @@ ai-text-editor \- agent-oriented local text and byte editor
 The editor is a server-owned, revision-aware editor for agents. The server
 owns document state, journals, indexes, SQLite metadata, sessions, and jobs.
 The client opens a short-lived request connection and exits after completion.
+After BopenR, the server returns a tab-scoped Bsession_tokenR. Save it
+with B--save-session-token PATHR and reuse it with B--session-token PATHR;
+requests without the current token are rejected before mutation.
 .SH STARTING
 .IP "server start --file PATH"
 Start an editor server and print endpoint/session discovery information.

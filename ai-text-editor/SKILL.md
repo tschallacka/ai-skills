@@ -27,6 +27,8 @@ The client uses a short-lived request connection. Save a session with
 `--session ID`/`--agent ID` so the client stores and resolves the token under
 the private editor metadata directory. Without those flags it checks
 `TSCH_AI_EDITOR_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID`, in that order.
+The server-issued token is tab-scoped, distinct from the TCP authentication
+secret, and invalid after that server instance closes.
 
 ## Capabilities
 

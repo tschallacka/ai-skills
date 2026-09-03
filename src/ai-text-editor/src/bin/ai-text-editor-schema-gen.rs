@@ -24,7 +24,7 @@ fn write(path: &std::path::Path, value: serde_json::Value) {
 }
 
 fn protocol_schema() -> serde_json::Value {
-    json!({"$schema":"https://json-schema.org/draft/2020-12/schema","title":"ai-text-editor v1 envelope","type":"object","required":["version","request_id","method","payload"],"properties":{"version":{"const":1},"request_id":{"type":"string","minLength":1},"method":{"type":"string","minLength":1},"revision":{"type":["integer","null"],"minimum":0},"auth_token":{"type":["string","null"]},"payload":{"type":"object"}},"additionalProperties":false})
+    json!({"$schema":"https://json-schema.org/draft/2020-12/schema","title":"ai-text-editor v1 envelope","type":"object","required":["version","request_id","method","payload"],"properties":{"version":{"const":1},"request_id":{"type":"string","minLength":1},"method":{"type":"string","minLength":1},"revision":{"type":["integer","null"],"minimum":0},"auth_token":{"type":["string","null"]},"session_token":{"type":["string","null"]},"payload":{"type":"object"}},"additionalProperties":false})
 }
 
 fn capability_schema() -> serde_json::Value {

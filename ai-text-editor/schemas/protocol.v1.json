@@ -26,6 +26,12 @@
         "null"
       ]
     },
+    "session_token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "version": {
       "const": 1
     }

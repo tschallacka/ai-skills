@@ -17,6 +17,8 @@ pub struct Envelope {
     pub revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
     pub payload: Value,
 }
 

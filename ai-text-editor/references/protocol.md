@@ -30,6 +30,14 @@ Every response frame carries a zero-based `sequence`. Data frames also carry
 consumer can therefore detect skipped frames and account for output without
 parsing presentation text.
 
+`open` returns a server-issued `session_token` and `server_generation`. The
+client may persist them with `--save-session-token PATH`; subsequent requests
+must send that session token, either by using `--session-token PATH` or by
+providing it to an equivalent protocol client. The token authorizes one tab,
+is invalidated when that server instance closes, and is never a substitute for
+the TCP authentication secret. A request without a valid token fails with
+`session_unauthorized` before it can mutate, journal, or create a result.
+
 ## Coordinates and modes
 
 1. `text_utf8`: one-based lines, zero-based Unicode scalar columns.
