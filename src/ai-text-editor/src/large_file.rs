@@ -18,6 +18,14 @@ pub struct LargeFile {
     pub bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LineSearchWindow {
+    pub start_line: u64,
+    pub end_line: u64,
+    pub start_offset: u64,
+    pub indexed_line: usize,
+}
+
 impl LargeFile {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -48,10 +56,21 @@ impl LargeFile {
     }
 
     pub fn read_lines(&self, start_line: u64, line_count: usize) -> io::Result<Lines> {
+        self.read_lines_from(start_line, line_count, 0, 1)
+    }
+
+    pub fn read_lines_from(
+        &self,
+        start_line: u64,
+        line_count: usize,
+        start_offset: u64,
+        indexed_line: usize,
+    ) -> io::Result<Lines> {
         let start_line = start_line.max(1);
         let mut reader = BufReader::new(File::open(&self.path)?);
+        reader.seek(SeekFrom::Start(start_offset))?;
         let mut line = Vec::new();
-        let mut current = 1;
+        let mut current = indexed_line.max(1) as u64;
         while current < start_line {
             line.clear();
             if reader.read_until(b'\n', &mut line)? == 0 {
@@ -231,6 +250,31 @@ impl LargeFile {
         start_line: u64,
         end_line: u64,
         gradient: Option<f64>,
+        on_match: F,
+    ) -> io::Result<usize>
+    where
+        F: FnMut((usize, usize, usize, String)) -> io::Result<()>,
+    {
+        self.search_text_mode_each_from(
+            mode,
+            query,
+            LineSearchWindow {
+                start_line,
+                end_line,
+                start_offset: 0,
+                indexed_line: 1,
+            },
+            gradient,
+            on_match,
+        )
+    }
+
+    pub fn search_text_mode_each_from<F>(
+        &self,
+        mode: SearchMode,
+        query: &str,
+        window: LineSearchWindow,
+        gradient: Option<f64>,
         mut on_match: F,
     ) -> io::Result<usize>
     where
@@ -240,15 +284,17 @@ impl LargeFile {
             return Ok(0);
         }
         let mut reader = BufReader::new(File::open(&self.path)?);
+        reader.seek(SeekFrom::Start(window.start_offset))?;
         let mut line = Vec::new();
-        let mut line_number = 1usize;
+        let mut line_number = window.indexed_line;
         let mut count = 0;
         loop {
             line.clear();
             if reader.read_until(b'\n', &mut line)? == 0 {
                 break;
             }
-            if (line_number as u64) >= start_line && (line_number as u64) <= end_line {
+            if (line_number as u64) >= window.start_line && (line_number as u64) <= window.end_line
+            {
                 let content = line.strip_suffix(b"\n").unwrap_or(&line);
                 let content = content.strip_suffix(b"\r").unwrap_or(content);
                 let text = std::str::from_utf8(content).map_err(|_| {
@@ -271,7 +317,7 @@ impl LargeFile {
                     count += 1;
                 }
             }
-            if line_number as u64 >= end_line {
+            if line_number as u64 >= window.end_line {
                 break;
             }
             line_number += 1;
@@ -449,8 +495,28 @@ mod tests {
         let range = large.read_range(2, 2).unwrap();
         assert_eq!(range.bytes, b"b\n");
         assert_eq!(large.read_lines(2, 1).unwrap().text, "b\n");
+        assert_eq!(large.read_lines_from(2, 1, 2, 2).unwrap().text, "b\n");
         assert_eq!(large.index(2).unwrap().blocks[1].line, 3);
         assert_eq!(large.search_text("b", 1, None).unwrap()[0].0, 2);
+        let mut indexed_matches = Vec::new();
+        large
+            .search_text_mode_each_from(
+                SearchMode::ExactText,
+                "b",
+                LineSearchWindow {
+                    start_line: 2,
+                    end_line: 2,
+                    start_offset: 2,
+                    indexed_line: 2,
+                },
+                None,
+                |found| {
+                    indexed_matches.push(found);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(indexed_matches[0].0, 2);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use ai_text_editor::history::History;
 use ai_text_editor::index::{LineIndex, DEFAULT_GRANULARITY};
 use ai_text_editor::jobs::JobRegistry;
 use ai_text_editor::journal::{Journal, JournalRecord};
-use ai_text_editor::large_file::LargeFile;
+use ai_text_editor::large_file::{LargeFile, LineSearchWindow};
 use ai_text_editor::metadata::Metadata;
 use ai_text_editor::navigation::{self, Position};
 use ai_text_editor::protocol::{validate_ndjson, MAX_SERIALIZED_FRAME_BYTES};
@@ -1201,6 +1201,40 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "page" => page(&envelope, &mut tab, &mut frames),
         "read" => {
             if let Some(file) = &tab.large_file {
+                if envelope.payload.get("line").is_some()
+                    || envelope.payload.get("before").is_some()
+                    || envelope.payload.get("after").is_some()
+                {
+                    let line = envelope
+                        .payload
+                        .get("line")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        .max(1);
+                    let before = envelope
+                        .payload
+                        .get("before")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let after = envelope
+                        .payload
+                        .get("after")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let start_line = line.saturating_sub(before).max(1);
+                    let line_count = before.saturating_add(after).saturating_add(1) as usize;
+                    let block = tab.index.block_for_line(start_line as usize).clone();
+                    match file.read_lines_from(
+                        start_line,
+                        line_count,
+                        block.byte_offset as u64,
+                        block.line,
+                    ) {
+                        Ok(lines) => frames.push(response(&envelope.request_id, json!({"text": lines.text, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true}))),
+                        Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
+                    }
+                    return frames;
+                }
                 let offset = envelope.payload.get("offset").and_then(Value::as_u64).unwrap_or(0);
                 let requested = envelope.payload.get("length").and_then(Value::as_u64).unwrap_or(ai_text_editor::large_file::DEFAULT_READ_BYTES as u64) as usize;
                 match file.read_range(offset, requested) {
@@ -2798,6 +2832,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         }
         let result_id = search_result_id(envelope, tab.revision, mode_name, query);
         let query_digest = blake3::hash(query.as_bytes()).to_hex().to_string();
+        let block = tab.index.block_for_line(start_line as usize).clone();
         emit_large_results(
             envelope,
             tab,
@@ -2809,9 +2844,20 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 search_range: json!({"start_line": start_line, "end_line": end_line}),
             },
             |emit| {
-                file.search_text_mode_each(mode, query, start_line, end_line, gradient, |(line, start, end, contents)| {
-                    emit(json!({"line": line, "column_start": start, "column_end": end, "contents": contents}))
-                })
+                file.search_text_mode_each_from(
+                    mode,
+                    query,
+                    LineSearchWindow {
+                        start_line,
+                        end_line,
+                        start_offset: block.byte_offset as u64,
+                        indexed_line: block.line,
+                    },
+                    gradient,
+                    |(line, start, end, contents)| {
+                        emit(json!({"line": line, "column_start": start, "column_end": end, "contents": contents}))
+                    },
+                )
             },
         );
         return;

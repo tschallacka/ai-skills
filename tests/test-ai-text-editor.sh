@@ -250,6 +250,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 contains "$large_open" '"index_complete": false'
 contains "$large_open" '"through_line": 1'
+large_context="$(editor read --line 2 --before 1 --after 1 --file "$large_file")"
+contains "$large_context" '"start_line": 1'
+contains "$large_context" '"end_line": 3'
+contains "$large_context" 'needle'
 if editor search --file "$large_file" --mode exact_text --query needle >"$scratch/unbounded-large-search" 2>&1; then
     exit 1
 fi
