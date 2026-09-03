@@ -24,6 +24,11 @@ with the skill and is available with \fBman -l\fR when binaries are not on PATH.
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
 saved session token.
+.PP
+\fB--session ID\fR and \fB--agent ID\fR resolve server-registered candidates
+from the private \fBsessions.json\fR registry. Resolution is newest-first but
+refuses ambiguity and unreachable stale records; it never starts or
+impersonates a server.
 .SH MODES
 Text, raw bytes, and hex view are explicit document modes. Search modes are
 explicit: exact text/bytes, wildcard, shell wildcard, path wildcard, Rust or

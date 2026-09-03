@@ -37,6 +37,11 @@ providing it to an equivalent protocol client. The token authorizes one tab,
 is invalidated when that server instance closes, and is never a substitute for
 the TCP authentication secret. A request without a valid token fails with
 `session_unauthorized` before it can mutate, journal, or create a result.
+Servers record session candidates in the private editor `sessions.json` with a
+token ID, tab UUID, server generation, endpoint, PID, start time, and optional
+agent identity. `--session ID` and `--agent ID` resolve those candidates in
+newest-first order, reject ambiguity, and refuse unreachable stale records;
+they never silently start or impersonate a server.
 
 ## Coordinates and modes
 

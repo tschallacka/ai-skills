@@ -28,7 +28,10 @@ The client uses a short-lived request connection. Save a session with
 the private editor metadata directory. Without those flags it checks
 `TSCH_AI_EDITOR_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID`, in that order.
 The server-issued token is tab-scoped, distinct from the TCP authentication
-secret, and invalid after that server instance closes.
+secret, and invalid after that server instance closes. Servers also register
+their endpoint and token identity in `sessions.json`; identity lookup refuses
+stale or ambiguous candidates rather than guessing. The registry is
+server-written coordination metadata, not a client-accessible SQLite store.
 
 ## Capabilities
 

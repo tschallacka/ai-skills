@@ -12,6 +12,7 @@ use ai_text_editor::navigation::{self, Position};
 use ai_text_editor::protocol::validate_ndjson;
 use ai_text_editor::resources;
 use ai_text_editor::search::{find_bytes, matches_with_gradient, parse_mode, SearchMode};
+use ai_text_editor::session;
 use ai_text_editor::transport::{
     complete, endpoint_for_file, error, error_details, response, socket_for_file, validate_request,
     write_endpoint, Endpoint,
@@ -251,7 +252,7 @@ fn main() {
         journal,
         journal_seq,
         auth_token: configured_auth_token.clone(),
-        session_token,
+        session_token: session_token.clone(),
         server_generation: server_generation.clone(),
         large_file,
         large_threshold_bytes: large_threshold,
@@ -275,6 +276,12 @@ fn main() {
             .unwrap_or_else(|error| die(&format!("cannot bind {address}: {error}")));
         let endpoint = Endpoint::Tcp(listener.local_addr().unwrap().to_string());
         announce(&path, &endpoint);
+        register_session(
+            &endpoint,
+            &server_generation,
+            &session_token,
+            Some(&auth_token),
+        );
         let generation = server_generation;
         for stream in listener.incoming().flatten() {
             let secret = if let Some(path) = auth_token_file.as_deref() {
@@ -324,12 +331,40 @@ fn main() {
             .unwrap_or_else(|error| die(&format!("cannot bind {}: {error}", socket.display())));
         let endpoint = Endpoint::Unix(socket.clone());
         announce(&path, &endpoint);
+        register_session(
+            &endpoint,
+            &server_generation,
+            &session_token,
+            configured_auth_token.as_deref(),
+        );
         for stream in listener.incoming().flatten() {
             serve(stream, Arc::clone(&tab));
         }
     }
     #[cfg(not(unix))]
     die("Unix sockets are unavailable; provide --tcp HOST:PORT");
+}
+
+fn register_session(
+    endpoint: &Endpoint,
+    server_generation: &str,
+    session_token: &str,
+    auth_token: Option<&str>,
+) {
+    let agent_id = std::env::var("TSCH_AI_EDITOR_AGENT")
+        .ok()
+        .or_else(|| std::env::var("CODEX_AGENT_ID").ok())
+        .or_else(|| std::env::var("AGENT_ID").ok());
+    let record = session::new_record(
+        &endpoint.display(),
+        server_generation,
+        session_token,
+        auth_token,
+        agent_id,
+    );
+    if let Err(error) = session::register(&record) {
+        eprintln!("ai-text-editor-server: cannot register session: {error}");
+    }
 }
 
 fn persist_index(tab: &mut Tab) {

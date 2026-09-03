@@ -1,6 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 use ai_text_editor::protocol::Envelope;
+use ai_text_editor::session;
 use ai_text_editor::transport::{
     endpoint_for_file, read_endpoint, read_session, request, write_session, Endpoint,
 };
@@ -89,6 +90,15 @@ fn main() {
             "explicit session token {} does not exist; provide a valid token or --endpoint",
             session_path.as_ref().unwrap().display()
         )),
+        None if session_identity(&args).is_some() => {
+            let identity = session_identity(&args).unwrap();
+            let record = session::resolve(&identity).unwrap_or_else(|error| die(&error));
+            (
+                Endpoint::parse(&record.endpoint),
+                record.auth_token,
+                Some(record.session_token),
+            )
+        }
         None => {
             let file = file
                 .as_ref()

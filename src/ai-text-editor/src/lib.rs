@@ -17,4 +17,5 @@ pub mod protocol;
 pub mod resources;
 pub mod revision;
 pub mod search;
+pub mod session;
 pub mod transport;
