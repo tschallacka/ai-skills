@@ -103,35 +103,11 @@ pub fn matches_with_gradient(
             })
             .map_err(|error| SearchError::InvalidExpression(error.to_string())),
         SearchMode::FuzzyEdit => fuzzy_edit(query, haystack, gradient),
-        SearchMode::FuzzySubsequence => Ok(if subsequence_score(query, haystack) >= gradient {
-            vec![(0, haystack.len())]
-        } else {
-            Vec::new()
-        }),
-        SearchMode::FuzzyToken => Ok(if token_score(query, haystack) >= gradient {
-            vec![(0, haystack.len())]
-        } else {
-            Vec::new()
-        }),
-        SearchMode::FuzzyNgram => Ok(if ngram_score(query, haystack) >= gradient as f32 {
-            vec![(0, haystack.len())]
-        } else {
-            Vec::new()
-        }),
-        SearchMode::FuzzyPhonetic => Ok(
-            if (phonetic(query) == phonetic(haystack)) as u8 as f64 >= gradient {
-                vec![(0, haystack.len())]
-            } else {
-                Vec::new()
-            },
-        ),
-        SearchMode::FuzzySoundex => Ok(
-            if (soundex(query) == soundex(haystack)) as u8 as f64 >= gradient {
-                vec![(0, haystack.len())]
-            } else {
-                Vec::new()
-            },
-        ),
+        SearchMode::FuzzySubsequence => Ok(subsequence_ranges(query, haystack, gradient)),
+        SearchMode::FuzzyToken => Ok(token_ranges(query, haystack, gradient)),
+        SearchMode::FuzzyNgram => Ok(ngram_ranges(query, haystack, gradient as f32)),
+        SearchMode::FuzzyPhonetic => Ok(phonetic_ranges(query, haystack, gradient, false)),
+        SearchMode::FuzzySoundex => Ok(phonetic_ranges(query, haystack, gradient, true)),
     }
 }
 
@@ -186,17 +162,31 @@ fn fuzzy_edit(
         return Ok(Vec::new());
     }
     let threshold = (query.chars().count() as f64 * gradient).ceil() as usize;
+    let haystack_indices: Vec<usize> = haystack
+        .char_indices()
+        .map(|(index, _)| index)
+        .chain(std::iter::once(haystack.len()))
+        .collect();
+    let query_len = query.chars().count();
     let mut matches = Vec::new();
-    for (start, _) in haystack.char_indices() {
-        let target = (start + query.len() + threshold).min(haystack.len());
-        let end = haystack
-            .char_indices()
-            .map(|(index, _)| index)
-            .find(|index| *index >= target)
-            .unwrap_or(haystack.len());
-        let candidate = &haystack[start..end];
-        if levenshtein(query, candidate) <= threshold {
-            matches.push((start, end));
+    for (start_char, &start) in haystack_indices
+        .iter()
+        .enumerate()
+        .take(haystack_indices.len() - 1)
+    {
+        let minimum_len = query_len.saturating_sub(threshold);
+        let maximum_len = query_len.saturating_add(threshold);
+        for candidate_len in minimum_len..=maximum_len {
+            let end_char = start_char.saturating_add(candidate_len);
+            if end_char >= haystack_indices.len() {
+                continue;
+            }
+            let end = haystack_indices[end_char];
+            let candidate = &haystack[start..end];
+            if levenshtein(query, candidate) <= threshold {
+                matches.push((start, end));
+                break;
+            }
         }
     }
     Ok(matches)
@@ -220,50 +210,112 @@ fn levenshtein(left: &str, right: &str) -> usize {
     row[right.chars().count()]
 }
 
-fn subsequence_score(query: &str, haystack: &str) -> f64 {
-    let mut haystack = haystack.chars();
-    let matched = query
-        .chars()
-        .filter(|query_char| haystack.any(|candidate| candidate.eq_ignore_ascii_case(query_char)))
-        .count();
-    let total = query.chars().count();
-    if total == 0 {
-        0.0
-    } else {
-        matched as f64 / total as f64
+fn subsequence_ranges(query: &str, haystack: &str, gradient: f64) -> Vec<(usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
     }
+    let query: Vec<char> = query.chars().collect();
+    let chars: Vec<(usize, char)> = haystack.char_indices().collect();
+    let mut ranges = Vec::new();
+    for start in 0..chars.len() {
+        let mut query_index = 0;
+        let mut end = start;
+        while end < chars.len() && query_index < query.len() {
+            if chars[end].1.eq_ignore_ascii_case(&query[query_index]) {
+                query_index += 1;
+            }
+            end += 1;
+        }
+        if query_index as f64 / query.len() as f64 >= gradient {
+            let end_byte = chars
+                .get(end.saturating_sub(1))
+                .map_or(haystack.len(), |(_, ch)| {
+                    chars[end.saturating_sub(1)].0 + ch.len_utf8()
+                });
+            ranges.push((chars[start].0, end_byte));
+        }
+    }
+    ranges
 }
 
-fn token_score(query: &str, haystack: &str) -> f64 {
-    let tokens: Vec<&str> = query.split_whitespace().collect();
-    if tokens.is_empty() {
-        return 0.0;
+fn token_ranges(query: &str, haystack: &str, gradient: f64) -> Vec<(usize, usize)> {
+    let wanted: Vec<&str> = query.split_whitespace().collect();
+    if wanted.is_empty() {
+        return Vec::new();
     }
-    let matched = tokens
-        .iter()
-        .filter(|token| {
-            haystack
-                .split_whitespace()
-                .any(|candidate| candidate.eq_ignore_ascii_case(token))
+    let tokens: Vec<(usize, usize, &str)> = haystack
+        .split_whitespace()
+        .filter_map(|token| {
+            let start = haystack.find(token)?;
+            Some((start, start + token.len(), token))
         })
-        .count();
-    matched as f64 / tokens.len() as f64
+        .collect();
+    let mut ranges = Vec::new();
+    for start in 0..tokens.len() {
+        let end = (start + wanted.len()).min(tokens.len());
+        let matched = wanted[..end - start]
+            .iter()
+            .zip(tokens[start..end].iter())
+            .filter(|(wanted, (_, _, candidate))| wanted.eq_ignore_ascii_case(candidate))
+            .count();
+        if matched as f64 / wanted.len() as f64 >= gradient {
+            ranges.push((tokens[start].0, tokens[end - 1].1));
+        }
+    }
+    ranges
 }
 
-fn ngram_score(query: &str, haystack: &str) -> f32 {
+fn ngram_ranges(query: &str, haystack: &str, gradient: f32) -> Vec<(usize, usize)> {
     let grams: Vec<&str> = query
         .as_bytes()
         .windows(3)
         .map(|bytes| std::str::from_utf8(bytes).unwrap_or(""))
         .collect();
     if grams.is_empty() {
-        return 0.0;
+        return Vec::new();
     }
-    grams
+    let score = grams
         .iter()
         .filter(|gram| haystack.contains(**gram))
         .count() as f32
-        / grams.len() as f32
+        / grams.len() as f32;
+    if score >= gradient {
+        vec![(0, haystack.len())]
+    } else {
+        Vec::new()
+    }
+}
+
+fn phonetic_ranges(
+    query: &str,
+    haystack: &str,
+    gradient: f64,
+    use_soundex: bool,
+) -> Vec<(usize, usize)> {
+    let wanted = if use_soundex {
+        soundex(query)
+    } else {
+        phonetic(query)
+    };
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    haystack
+        .split_whitespace()
+        .filter_map(|word| {
+            let candidate = if use_soundex {
+                soundex(word)
+            } else {
+                phonetic(word)
+            };
+            if (candidate == wanted) as u8 as f64 >= gradient {
+                let start = haystack.find(word)?;
+                Some((start, start + word.len()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn phonetic(value: &str) -> String {
@@ -341,12 +393,22 @@ mod tests {
     }
     #[test]
     fn fuzzy_strategies_are_distinct_options() {
-        assert!(!matches(SearchMode::FuzzySubsequence, "ct", "cat")
-            .unwrap()
-            .is_empty());
-        assert!(!matches(SearchMode::FuzzySoundex, "Robert", "Rupert")
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            matches(SearchMode::FuzzySubsequence, "ct", "cat").unwrap(),
+            vec![(0, 3)]
+        );
+        assert_eq!(
+            matches(SearchMode::FuzzyToken, "cat dog", "cat dog here").unwrap(),
+            vec![(0, 7)]
+        );
+        assert_eq!(
+            matches(SearchMode::FuzzyPhonetic, "Robert", "Alice Robert").unwrap(),
+            vec![(6, 12)]
+        );
+        assert_eq!(
+            matches(SearchMode::FuzzySoundex, "Robert", "Alice Rupert").unwrap(),
+            vec![(6, 12)]
+        );
     }
 
     #[test]
@@ -367,5 +429,15 @@ mod tests {
                 .is_empty()
         );
         assert!(matches_with_gradient(SearchMode::FuzzyNgram, "cat", "cat", Some(1.1)).is_err());
+    }
+
+    #[test]
+    fn edit_distance_handles_unicode_boundaries() {
+        let found =
+            matches_with_gradient(SearchMode::FuzzyEdit, "café", "xx café yy", Some(0.5)).unwrap();
+        assert!(!found.is_empty());
+        assert!(found
+            .iter()
+            .all(|(start, end)| "xx café yy".get(*start..*end).is_some()));
     }
 }
