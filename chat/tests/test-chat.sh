@@ -530,10 +530,19 @@ after_mentions="$(AI_CHAT_HOME="$cur_home" "$CLIENT" read --local --state "$st8"
 # outside the `if o.mentions` check the socket tail has, so it returned on the
 # FIRST message from anyone -- the opposite of what the flag names. On the
 # socket path the flag was instead inert. Both now refuse the combination.
-for where in "--local" "--server 127.0.0.1:1"; do
+#
+# `--since 0` on the local arm is load-bearing, not decoration. A local tail
+# defaults to the log's current END, so with the refusal removed it would find
+# nothing new and sit in its poll loop forever -- the assertion would hang the
+# suite instead of failing it. From 0 the first pass sees rows immediately, so
+# the unguarded build exits 0 (the defect: it stopped on a message mentioning
+# nobody) and the fixed build exits 64. Both terminate at once. `timeout` then
+# bounds the loop regardless, so any future regression here fails rather than
+# hangs.
+for where in "--local --since 0" "--server 127.0.0.1:1"; do
     rc=0
-    # shellcheck disable=SC2086  # deliberate word splitting: --server takes an argument
-    AI_CHAT_HOME="$cur_home" "$CLIENT" tail $where --chan '#cur' --nick bob \
+    # shellcheck disable=SC2086  # deliberate word splitting: these are flag pairs
+    AI_CHAT_HOME="$cur_home" timeout 10 "$CLIENT" tail $where --chan '#cur' --nick bob \
         --mention-exit --no-session >/dev/null 2>&1 || rc=$?
     [ "$rc" -eq 64 ] || t_fail \
         "tail $where --mention-exit without --mentions exited $rc (want 64, a usage refusal)"
