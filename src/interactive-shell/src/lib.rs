@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::CString;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -1327,14 +1328,73 @@ fn remove_socket(identity: &SocketIdentity) {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn fd_path(fd: RawFd) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{fd}"))
-}
-
-#[cfg(target_os = "macos")]
-fn fd_path(fd: RawFd) -> PathBuf {
-    PathBuf::from(format!("/dev/fd/{fd}"))
+/// Bind `name` inside the directory `parent_fd` holds open, by name alone.
+///
+/// WHY THROUGH THE FD AND NOT THE SOCKET'S OWN PATH. The open fd pins the
+/// directory: once it exists, nothing can substitute another directory for it,
+/// so a socket bound relative to it lands in the directory valid_dir() checked
+/// and nowhere else. Binding the absolute path re-walks every component, and a
+/// parent swapped in between would take the socket. Verifying afterwards --
+/// which capture_socket_identity() does -- only DETECTS that, once the socket
+/// already exists in the attacker's directory, which is a weaker guarantee than
+/// never creating it there.
+///
+/// WHY NOT A PATH THROUGH /proc OR /dev/fd, WHICH IS WHAT THIS REPLACED. That
+/// was `/proc/self/fd/<n>/<name>` on Linux and `/dev/fd/<n>/<name>` on macOS.
+/// The Linux form works because /proc/self/fd/<n> is a magic symlink TO THE
+/// DIRECTORY, so a trailing component traverses into it. macOS's /dev/fd is the
+/// fdesc filesystem, whose entries stand in for the OPEN FILE rather than a
+/// traversable directory entry, so `/dev/fd/<n>/<name>` does not resolve at all.
+/// The prefix was swapped and the traversal assumed to port with it; it does
+/// not, and every socket-dependent test failed on both macOS legs because of it.
+///
+/// fchdir plus a relative bind behaves identically on both, and it reduces
+/// sun_path to the length of the name -- six bytes for "socket" -- which retires
+/// macOS's 104-byte sun_path cap as a consideration permanently, rather than
+/// leaving it as headroom to be re-measured whenever the socket moves.
+///
+/// THE CWD IS PROCESS-GLOBAL, so it is held for the bind alone. The wrapper
+/// spawns no threads (grep the crate: only thread::sleep), so there is no
+/// concurrent observer inside this process, and the restore is CHECKED rather
+/// than assumed: run() execs the child immediately after this, and the child's
+/// arguments are relative to the caller's directory, not to the socket's.
+fn bind_in_directory(parent_fd: &File, dir: &Path, name: &OsStr) -> Result<UnixListener, String> {
+    let previous =
+        File::open(".").map_err(|e| format!("cannot hold the current directory: {e}"))?;
+    if unsafe { libc::fchdir(parent_fd.as_raw_fd()) } < 0 {
+        return Err(format!(
+            "cannot enter {} to bind {}: {}",
+            dir.display(),
+            Path::new(name).display(),
+            io::Error::last_os_error()
+        ));
+    }
+    let old_umask = unsafe { libc::umask(0o177) };
+    let bound = UnixListener::bind(Path::new(name));
+    unsafe { libc::umask(old_umask) };
+    // Restored on every path, before either outcome is reported, so no failure
+    // leaves the process sitting in the socket's directory.
+    let restored = unsafe { libc::fchdir(previous.as_raw_fd()) };
+    let restore_error = io::Error::last_os_error();
+    if restored < 0 {
+        return Err(format!(
+            "bind of {} in {} {}, but the previous directory could not be restored: {}",
+            Path::new(name).display(),
+            dir.display(),
+            if bound.is_ok() { "succeeded" } else { "failed" },
+            restore_error
+        ));
+    }
+    // The directory is named even though the bind was relative: without it the
+    // message says which name failed and not where, which is the gap that made
+    // this defect take three rounds to identify.
+    bound.map_err(|e| {
+        format!(
+            "bind {} relative to {} failed: {e}",
+            Path::new(name).display(),
+            dir.display()
+        )
+    })
 }
 
 fn capture_socket_identity(path: &Path, parent_fd: File) -> Result<SocketIdentity, String> {
@@ -1961,23 +2021,7 @@ pub fn run(
         return Err("refusing existing socket".into());
     };
     let name = socket.file_name().ok_or("socket needs a filename")?;
-    let bind_path = fd_path(parent_fd.as_raw_fd()).join(name);
-    let old_umask = unsafe { libc::umask(0o177) };
-    let listener_result = UnixListener::bind(&bind_path);
-    unsafe {
-        libc::umask(old_umask);
-    }
-    // The path is in the message, not just the errno. A bare "No such file or
-    // directory" from a bind is unactionable: bind_path is derived from a
-    // /proc or /dev/fd entry that the caller never sees, so the error has to
-    // say which path the kernel rejected and which socket it stood for.
-    let listener = listener_result.map_err(|e| {
-        format!(
-            "bind {} (for {}) failed: {e}",
-            bind_path.display(),
-            socket.display()
-        )
-    })?;
+    let listener = bind_in_directory(&parent_fd, socket.parent().unwrap(), name)?;
     let mut socket_guard = SocketGuard::new();
     socket_guard.identity = Some(capture_socket_identity(&socket, parent_fd)?);
     if let Err(error) = listener.set_nonblocking(true) {
@@ -2077,6 +2121,87 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bind is RELATIVE, lands in the held directory, and gives the cwd back.
+    ///
+    /// A functional test cannot tell the two mechanisms apart on Linux, because
+    /// `/proc/self/fd/<n>/socket` works there -- which is exactly how a
+    /// Linux-only construction reached both macOS legs unnoticed. So this
+    /// asserts the mechanism itself, through the address the kernel recorded:
+    /// a relative bind stores the bare name in sun_path, and the path-based
+    /// construction this replaced stores `/proc/self/fd/<n>/socket`. Restoring
+    /// fd_path() makes the first assertion fail on Linux, which is the point.
+    ///
+    /// Everything cwd-sensitive is in ONE test on purpose: cargo runs unit tests
+    /// as threads of one process and the cwd is shared, so two tests moving it
+    /// could interleave. No other test in this module touches the filesystem.
+    #[test]
+    fn the_socket_is_bound_by_name_inside_the_held_directory() {
+        let before = std::env::current_dir().unwrap();
+        let dir = std::env::temp_dir().join(format!("is-bind-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("socket");
+        let _ = fs::remove_file(&socket);
+        let parent_fd = File::open(&dir).unwrap();
+
+        let listener = bind_in_directory(&parent_fd, &dir, socket.file_name().unwrap()).unwrap();
+
+        // The mechanism: sun_path is the name, not a path through /proc or /dev/fd.
+        assert_eq!(
+            listener.local_addr().unwrap().as_pathname(),
+            Some(Path::new("socket")),
+            "the bind was not relative, so sun_path carries a path the caller never chose"
+        );
+        // ...and "relative" was not achieved by binding somewhere else: the
+        // socket exists at the absolute path the caller asked for, and is 0600.
+        let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the socket is not private");
+        // ...and the process is back where it started, or the child run() is
+        // about to exec would resolve its arguments against the wrong directory.
+        assert_eq!(std::env::current_dir().unwrap(), before, "the cwd leaked");
+
+        drop(listener);
+        let _ = fs::remove_file(&socket);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    /// A directory whose absolute path cannot fit in sun_path still binds.
+    ///
+    /// sun_path is 108 bytes on Linux and 104 on macOS. Binding the socket's
+    /// absolute path -- the obvious "fix" for the /dev/fd problem -- would fail
+    /// here with ENAMETOOLONG while the relative bind does not care, so this
+    /// pins the property that made fchdir the choice rather than a shorter
+    /// prefix, and it fails if anyone reverts to an absolute bind.
+    #[test]
+    fn a_directory_too_long_for_sun_path_still_binds() {
+        let mut dir = std::env::temp_dir().join(format!("is-long-{}", std::process::id()));
+        while dir.as_os_str().len() <= 120 {
+            dir = dir.join("nested-directory-component");
+        }
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("socket");
+        let _ = fs::remove_file(&socket);
+        assert!(
+            socket.as_os_str().len() > 108,
+            "the fixture is not long enough to exercise the cap"
+        );
+        // The control: the absolute bind this replaced cannot do it.
+        assert!(
+            UnixListener::bind(&socket).is_err(),
+            "sun_path accepted a {}-byte path, so this test proves nothing",
+            socket.as_os_str().len()
+        );
+
+        let parent_fd = File::open(&dir).unwrap();
+        let listener = bind_in_directory(&parent_fd, &dir, socket.file_name().unwrap()).unwrap();
+        assert!(socket.exists(), "the socket is not where it was asked for");
+
+        drop(listener);
+        let _ = fs::remove_file(&socket);
+    }
+
     #[test]
     fn keys_are_stable() {
         for k in [
