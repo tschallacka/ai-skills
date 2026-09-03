@@ -642,7 +642,14 @@ fn read_auth_token_file(path: &std::path::Path) -> io::Result<String> {
 
 fn announce(path: &PathBuf, endpoint: &Endpoint, generation: &str) {
     let discovery = endpoint_for_file(path);
-    let _ = write_endpoint_metadata(&discovery, endpoint, std::process::id(), generation);
+    write_endpoint_metadata(&discovery, endpoint, std::process::id(), generation).unwrap_or_else(
+        |error| {
+            die(&format!(
+                "cannot publish endpoint {}: {error}",
+                discovery.display()
+            ))
+        },
+    );
     println!(
         "{}",
         json!({"file": path, "endpoint": endpoint.display(), "discovery": discovery})
