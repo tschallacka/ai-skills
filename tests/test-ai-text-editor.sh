@@ -255,6 +255,9 @@ contains "$large_bytes" '"byte_start": 6'
 contains "$large_bytes" '"contents_base64": "bmVlZGxl"'
 large_index="$(editor index --file "$large_file" --granularity 2)"
 contains "$large_index" '"complete": true'
+large_index_page="$(editor index --file "$large_file" --granularity 2 --offset 1 --limit 1)"
+contains "$large_index_page" '"block_offset": 1'
+contains "$large_index_page" '"returned_blocks": 1'
 editor close --file "$large_file" --journal-action clean >/dev/null
 wait "$large_pid" 2>/dev/null || true
 large_pid=""
