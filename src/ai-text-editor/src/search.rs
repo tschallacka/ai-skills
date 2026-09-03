@@ -243,13 +243,16 @@ fn token_ranges(query: &str, haystack: &str, gradient: f64) -> Vec<(usize, usize
     if wanted.is_empty() {
         return Vec::new();
     }
-    let tokens: Vec<(usize, usize, &str)> = haystack
-        .split_whitespace()
-        .filter_map(|token| {
-            let start = haystack.find(token)?;
-            Some((start, start + token.len(), token))
-        })
-        .collect();
+    let mut cursor = 0;
+    let mut tokens = Vec::new();
+    for token in haystack.split_whitespace() {
+        let Some(relative) = haystack[cursor..].find(token) else {
+            continue;
+        };
+        let start = cursor + relative;
+        tokens.push((start, start + token.len(), token));
+        cursor = start + token.len();
+    }
     let mut ranges = Vec::new();
     for start in 0..tokens.len() {
         let end = (start + wanted.len()).min(tokens.len());
@@ -274,13 +277,18 @@ fn ngram_ranges(query: &str, haystack: &str, gradient: f32) -> Vec<(usize, usize
     if grams.is_empty() {
         return Vec::new();
     }
-    let score = grams
+    let found: Vec<(usize, usize)> = grams
         .iter()
-        .filter(|gram| haystack.contains(**gram))
-        .count() as f32
-        / grams.len() as f32;
+        .filter_map(|gram| {
+            let start = haystack.find(gram)?;
+            Some((start, start + gram.len()))
+        })
+        .collect();
+    let score = found.len() as f32 / grams.len() as f32;
     if score >= gradient {
-        vec![(0, haystack.len())]
+        let start = found.iter().map(|(start, _)| *start).min().unwrap();
+        let end = found.iter().map(|(_, end)| *end).max().unwrap();
+        vec![(start, end)]
     } else {
         Vec::new()
     }
@@ -400,6 +408,10 @@ mod tests {
         assert_eq!(
             matches(SearchMode::FuzzyToken, "cat dog", "cat dog here").unwrap(),
             vec![(0, 7)]
+        );
+        assert_eq!(
+            matches(SearchMode::FuzzyNgram, "cat", "before cat after").unwrap(),
+            vec![(7, 10)]
         );
         assert_eq!(
             matches(SearchMode::FuzzyPhonetic, "Robert", "Alice Robert").unwrap(),
