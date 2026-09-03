@@ -9,6 +9,26 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+/// How many 10ms polls a readiness wait is allowed: 3000, so thirty seconds.
+///
+/// These loops were `0..100`, a ONE second budget, which is ample on a Linux
+/// runner and far too tight on the macOS one. In run 33793295763, 17 of 19
+/// tests here failed on it while the binary and its socket were both fine:
+/// `signal_cleanup_removes_socket` created and removed a socket successfully
+/// and `malformed_cli_arguments_do_not_panic` ran the CLI, so neither bind nor
+/// the executable was at fault. The macOS runner is a shared, oversubscribed
+/// VPS that pauses for other tenants, so a readiness budget has to cover the
+/// worst scheduling delay rather than the typical one.
+///
+/// It is a CEILING, not a sleep: every loop returns the moment its condition
+/// holds, so a healthy run is no slower than it was. Only a genuine failure
+/// pays the thirty seconds, and it pays it once.
+const READY_POLLS: usize = 3000;
+
+/// The gap between polls. Kept small so readiness is detected promptly; the
+/// budget above is what bounds the wait.
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 fn temp_dir(label: &str) -> PathBuf {
     let path =
         std::env::temp_dir().join(format!("interactive-shell-{label}-{}", std::process::id()));
@@ -51,7 +71,7 @@ fn start_fixture(dir: &Path, idle: &str) -> Child {
 }
 
 fn request(dir: &Path, body: &str) -> Value {
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
             stream.write_all(body.as_bytes()).unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
@@ -59,13 +79,17 @@ fn request(dir: &Path, body: &str) -> Value {
             stream.read_to_string(&mut out).unwrap();
             return serde_json::from_str(out.trim()).unwrap();
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
-    panic!("socket did not appear")
+    panic!(
+        "socket did not appear at {} within {:?}",
+        dir.join("socket").display(),
+        POLL_INTERVAL * READY_POLLS as u32
+    )
 }
 
 fn request_all(dir: &Path, body: &str) -> Vec<Value> {
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
             stream.write_all(body.as_bytes()).unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
@@ -76,9 +100,13 @@ fn request_all(dir: &Path, body: &str) -> Vec<Value> {
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
-    panic!("socket did not appear")
+    panic!(
+        "socket did not appear at {} within {:?}",
+        dir.join("socket").display(),
+        POLL_INTERVAL * READY_POLLS as u32
+    )
 }
 
 #[test]
@@ -186,11 +214,11 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
 fn socket_is_private_and_invalid_requests_are_rejected() {
     let dir = temp_dir("bounds");
     let mut child = start(&dir, &["sleep", "2"], "5");
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     let mode = fs::metadata(dir.join("socket"))
         .unwrap()
@@ -230,11 +258,11 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
 fn closed_output_removes_socket_before_exit() {
     let dir = temp_dir("closed-output");
     let mut child = start(&dir, &["yes"], "30");
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     assert!(dir.join("socket").exists());
     drop(child.stdout.take());
@@ -512,11 +540,11 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
         .spawn()
         .unwrap();
     let session_file = state.join("sessions/resume-case.json");
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if session_file.exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     assert!(session_file.exists());
     let session: Value = serde_json::from_str(&fs::read_to_string(&session_file).unwrap()).unwrap();
@@ -557,11 +585,11 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if socket.exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     assert!(socket.exists());
     let resumed = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
@@ -762,11 +790,11 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
 fn signal_cleanup_removes_socket() {
     let dir = temp_dir("signal");
     let mut child = start(&dir, &["sleep", "30"], "30");
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     unsafe {
         libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
@@ -802,11 +830,11 @@ fn long_input_and_descendants_are_handled() {
         pid_file.display()
     );
     let mut child = start(&dir, &["sh", "-c", &command], "5");
-    for _ in 0..1000 {
+    for _ in 0..READY_POLLS {
         if pid_file.exists() {
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     let text = "x".repeat(60_000) + "\n";
     let body = serde_json::json!({"v":1,"op":"text","text":text}).to_string() + "\n";
@@ -819,11 +847,11 @@ fn long_input_and_descendants_are_handled() {
         .unwrap();
     let _ = request(&dir, "{\"v\":1,\"op\":\"shutdown\"}\n");
     child.wait().unwrap();
-    for _ in 0..100 {
+    for _ in 0..READY_POLLS {
         if unsafe { libc::kill(descendant, 0) } == -1 {
             return;
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(POLL_INTERVAL);
     }
     panic!("descendant survived wrapper cleanup");
 }
