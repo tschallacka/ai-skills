@@ -37,6 +37,13 @@ version_marker_content() {
 # Still a hand list, deliberately: the planning arms are a second copy of
 # PACKAGE-MANIFEST.tsv and the duplication is the cross-check.
 # tests/test-mode-markers.sh compares both arms against the markers in the files.
+editor_artifact_files() {
+    local relative
+    for relative in "$@"; do
+        [ -f "$SOURCE_ROOT/ai-text-editor/$relative" ] && printf '%s\n' "$relative"
+    done
+}
+
 skill_files() {
     local package="${2:-prod}"
     case "$package" in
@@ -478,7 +485,7 @@ references/protocol.md
 EDITOR_EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' bin/x86_64-unknown-linux-gnu/ai-text-editor-server bin/x86_64-unknown-linux-gnu/ai-text-editor bin/x86_64-unknown-linux-gnu/ai-text-editor-mcp ;;
+                    editor_artifact_files bin/x86_64-unknown-linux-musl/ai-text-editor-server bin/x86_64-unknown-linux-musl/ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-mcp ;;
                 Linux:aarch64|Linux:arm64)
                     printf '%s\n' bin/aarch64-unknown-linux-musl/ai-text-editor-server bin/aarch64-unknown-linux-musl/ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-mcp ;;
                 Darwin:x86_64)

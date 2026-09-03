@@ -59,6 +59,20 @@
     "protocol_version": {
       "const": 1
     },
+    "revision_required_methods": {
+      "items": {
+        "enum": [
+          "insert",
+          "replace",
+          "large_edit",
+          "restore",
+          "undo",
+          "redo",
+          "save"
+        ]
+      },
+      "type": "array"
+    },
     "search_modes": {
       "items": {
         "enum": [

@@ -66,7 +66,7 @@ the start.
 4. Implemented and live-tested: TCP open/edit/undo/read; auth failure and successful auth; session-token save/reuse; journal restart recovery and undo; bounded search and paging identifiers; forced large-file bounded read/index/exact range search; path wildcard; streaming read; job start/complete/poll; installer MCP↔skill switching.
 5. The job registry is in `src/ai-text-editor/src/jobs.rs`. It supports queued/running/completed/cancelled/released/evicted states, retention, cancellation race locking, transfer tokens, disconnect behavior, and progress. The server exposes `job_start`, `job_poll`, `job_progress`, `job_complete`, `job_cancel`, `job_transfer`, and `job_release`; the client exposes corresponding hyphenated commands; MCP advertises the protocol methods.
 6. Installer switching is in `installer/src/05-config.sh`, `10-cli-args.sh`, `50-manifest.sh`, `55-cli-handlers.sh`, and `60-install.sh`, then regenerated into `install.sh` with `./installer/build.sh`. Use `--editor-integration skill|mcp`; default is `skill`. Cleanup is allowlisted to editor binaries and does not stop servers or touch sessions/metadata. A real temporary-root switch test passed.
-7. Generated schemas live in `ai-text-editor/schemas/`; release Linux GNU binaries were rebuilt into `ai-text-editor/bin/x86_64-unknown-linux-gnu/`. A native-runner GitHub workflow was added at `.github/workflows/ai-text-editor-artifacts.yml` for macOS and Windows artifacts. Cross-building those targets from Linux fails because the host lacks the required native C/MSVC toolchains; do not claim those binaries exist locally.
+7. Generated schemas live in `ai-text-editor/schemas/`; platform release binaries are CI artifacts and are not committed. The artifact workflow is declared at `.github/workflows/ai-text-editor-artifacts.yml` for musl Linux, macOS, and Windows targets. Do not claim those binaries exist locally unless a target build has actually produced them.
 8. Current clean checks: `cargo clippy --workspace --all-targets -- -D warnings` passes; `cargo test --workspace` passes with 18 tests; `installer/build.sh --check`, `bash -n`, shellcheck, and `git diff --check` pass. The full `./run-tests.sh` was started under a 2G/300 resource cap but is not green yet.
 9. The latest full-suite failures requiring repair are structural packaging issues: `test-mode-markers` sees the new `src/ai-text-editor*` files without `MODE:` markers; `test-release-package` discovers an unrelated existing `src/chat-server-rs/Cargo.toml` workspace issue; `test-skill-files-manifest` reports missing chat artifacts and does not account for `ai-text-editor/agents/openai.yaml` or the generated schemas. Resolve these directly using repository helpers/conventions before rerunning the full suite.
 10. Do not dispatch new reviewers. User explicitly requested self-audit, then implementation. Continue with the failing suite repairs and remaining plan work; do not mark the goal complete yet. Use `apply_patch` for source edits and never hand-edit generated `install.sh`.
@@ -273,8 +273,8 @@ Unix transport remains unchanged. Auth unit tests cover transcript stability,
 exact proof verification, mismatch refusal, nonce generation, and decoding.
 
 The Nix editor gate passed after this wiring: editor fmt, clippy with denied
-warnings, and 24 Rust tests. Release Linux binaries were rebuilt into
-`ai-text-editor/bin/x86_64-unknown-linux-gnu/`. No TCP runtime integration test
+warnings, and 24 Rust tests. Release binaries are CI artifacts and are not
+committed. No TCP runtime integration test
 has yet been run after the handshake wiring. The next concrete check is to
 start the shipped server on `tcp:127.0.0.1:0`, parse its announced endpoint,
 verify a correct token can open, and verify an incorrect token is refused

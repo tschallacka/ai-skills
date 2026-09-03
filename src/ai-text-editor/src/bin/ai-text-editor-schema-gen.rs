@@ -39,6 +39,7 @@ fn capability_schema() -> serde_json::Value {
             "search_modes": {"type": "array", "items": {"enum": ["exact_text", "exact_bytes", "wildcard", "shell_wildcard", "path_wildcard", "regex_rust", "regex_pcre2", "fuzzy_edit", "fuzzy_subsequence", "fuzzy_token", "fuzzy_ngram", "fuzzy_phonetic", "fuzzy_soundex"]}},
             "presentations": {"type": "array", "items": {"enum": ["structured", "text", "paging", "stream"]}},
             "edit_methods": {"type": "array", "items": {"enum": ["insert", "replace", "large_edit", "begin_transaction", "end_transaction", "restore", "undo", "redo", "save", "save_as", "close", "resolve_external"]}},
+            "revision_required_methods": {"type": "array", "items": {"enum": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"]}},
             "job_methods": {"type": "array", "items": {"enum": ["job_start", "job_poll", "job_progress", "job_complete", "job_cancel", "job_transfer", "job_release"]}}
         },
         "additionalProperties": false

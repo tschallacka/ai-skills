@@ -99,11 +99,21 @@ server-written coordination metadata, not a client-accessible SQLite store.
 3. Acknowledge recovery, large-file work, force-save, and other safety prompts.
 4. Decide whether external bytes need a `.back` copy and whether a closing tab's
    journal is preserved or explicitly cleaned. Backup failure blocks the action.
-5. Keep snapshots/commits in the surrounding workflow when useful; the editor
+5. Every mutating request (`insert`, `replace`, `large_edit`, `restore`, `undo`,
+   `redo`, and `save`) must include the revision most recently returned by
+   `open`, `history`, or a completed mutation. Missing revisions are refused;
+   stale revisions are never merged implicitly.
+6. Keep snapshots/commits in the surrounding workflow when useful; the editor
    journal is recovery history, not a replacement for Git history. TCP can
    require `--auth-token` or an owner-only `--auth-token-file`; the client proves it through a per-connection HMAC
    challenge and does not send the secret in the editor request. Never expose
    an unauthenticated endpoint publicly.
+
+The server does not confine paths to a configured project root: an authenticated
+client may open any path readable or writable by the server's operating-system
+user. Treat the endpoint token as full file-access authority, keep TCP on
+loopback, and use operating-system permissions or a separately isolated user
+when stronger confinement is required.
 
 Large files above the server's 256 MiB threshold use file-backed bounded reads
 (`read --offset N --length N`) and sparse index scans. Ordinary mutations are

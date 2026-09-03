@@ -5,7 +5,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-target="$repo_root/ai-text-editor/bin/x86_64-unknown-linux-gnu"
+target="$repo_root/ai-text-editor/bin/x86_64-unknown-linux-musl"
 server="$target/ai-text-editor-server"
 client="$target/ai-text-editor"
 
@@ -74,6 +74,11 @@ contains "$open_output" '"tab_uuid": "'
 capabilities_output="$($client capabilities --session-token "$session")"
 contains "$capabilities_output" '"protocol_version": 1'
 contains "$capabilities_output" '"search_preview_matches": 4'
+contains "$capabilities_output" '"revision_required_methods"'
+if editor insert --file "$file" --offset 0 --text 'unsafe' >"$scratch/missing-revision" 2>&1; then
+    exit 1
+fi
+grep -Fq 'revision_required' "$scratch/missing-revision"
 agent_open="$($client open --agent "$TSCH_AI_EDITOR_AGENT")"
 contains "$agent_open" '"session_token"'
 unset TSCH_AI_EDITOR_AGENT

@@ -11,6 +11,7 @@ use ai_text_editor::metadata::Metadata;
 use ai_text_editor::navigation::{self, Position};
 use ai_text_editor::protocol::{validate_ndjson, MAX_SERIALIZED_FRAME_BYTES};
 use ai_text_editor::resources;
+use ai_text_editor::revision::RevisionGuard;
 use ai_text_editor::search::{find_bytes, matches_with_gradient, parse_mode, SearchMode};
 use ai_text_editor::session;
 use ai_text_editor::transport::{
@@ -857,8 +858,26 @@ fn write_frames<S: std::io::Write>(
     for (sequence, mut frame) in frames.into_iter().enumerate() {
         if let Some(expected_revision) = stream_revision {
             let current_revision = tab.lock().ok().map(|tab| tab.revision);
-            if current_revision.is_some_and(|revision| revision != expected_revision) {
-                let revision = current_revision.unwrap_or(expected_revision);
+            if current_revision != Some(expected_revision) {
+                let Some(revision) = current_revision else {
+                    let request_id = frame
+                        .get("request_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    let bytes = serde_json::to_vec(&error(
+                        request_id,
+                        "stream_conflict",
+                        "cannot verify the current revision because the tab lock is poisoned",
+                    ))
+                    .unwrap();
+                    if writer
+                        .write_all(&[bytes.as_slice(), b"\n"].concat())
+                        .is_err()
+                    {
+                        return;
+                    }
+                    return;
+                };
                 let delimiter = response(
                     frame
                         .get("request_id")
@@ -1107,18 +1126,21 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             frames.push(error(&envelope.request_id, "large_file_edit_requires_acknowledgement", "large tabs provide bounded access; editing requires an explicit long-operation acknowledgement"));
             return frames;
         }
-        if let Some(expected) = envelope.revision {
-            if expected != tab.revision {
-                frames.push(error(
-                    &envelope.request_id,
-                    "stale_revision",
-                    format!(
-                        "expected revision {expected}, current revision {}",
-                        tab.revision
-                    ),
-                ));
-                return frames;
-            }
+        let Some(expected) = envelope.revision else {
+            frames.push(error(
+                &envelope.request_id,
+                "revision_required",
+                "mutating operations require the current revision; read open or history first",
+            ));
+            return frames;
+        };
+        if let Err(revision_error) = RevisionGuard(expected).check(tab.revision) {
+            frames.push(error(
+                &envelope.request_id,
+                "stale_revision",
+                revision_error.to_string(),
+            ));
+            return frames;
         }
     }
     match envelope.method.as_str() {
@@ -1132,6 +1154,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
             "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
             "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
+            "revision_required_methods": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"],
             "transports": ["unix_socket", "loopback_tcp"]
         }))),
         "resources" => frames.push(response(&envelope.request_id, json!(resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)))),

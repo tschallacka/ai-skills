@@ -17,6 +17,13 @@ The client opens a short-lived request connection and exits after completion.
 After BopenR, the server returns a tab-scoped Bsession_tokenR. Save it
 with B--save-session-token PATHR and reuse it with B--session-token PATHR;
 requests without the current token are rejected before mutation.
+.PP
+Mutating commands BinsertR, BreplaceR, Blarge-editR, BrestoreR,
+BundoR, BredoR, and BsaveR require B--expected-revisionR. A
+missing or stale value is refused; read BopenR or BhistoryR again before
+retrying. The server has no project-root jail: the session token grants the
+server process's normal filesystem permissions, so keep the endpoint private
+and use operating-system isolation when stronger confinement is needed.
 .SH STARTING
 .IP "server start --file PATH"
 Start an editor server and print endpoint/session discovery information.

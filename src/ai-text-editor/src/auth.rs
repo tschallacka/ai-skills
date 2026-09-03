@@ -59,9 +59,6 @@ pub fn verify(
     generation: &str,
     encoded_proof: &str,
 ) -> bool {
-    let Ok(expected) = proof(secret, nonce, request_id, generation) else {
-        return false;
-    };
     let Ok(provided) = base64::engine::general_purpose::STANDARD.decode(encoded_proof) else {
         return false;
     };
@@ -69,10 +66,7 @@ pub fn verify(
         return false;
     };
     mac.update(&transcript(nonce, request_id, generation));
-    let Ok(expected_bytes) = base64::engine::general_purpose::STANDARD.decode(expected) else {
-        return false;
-    };
-    mac.verify_slice(&provided).is_ok() && provided == expected_bytes
+    mac.verify_slice(&provided).is_ok()
 }
 
 pub fn decode_nonce(encoded: &str) -> io::Result<Vec<u8>> {

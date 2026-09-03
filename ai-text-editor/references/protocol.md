@@ -108,6 +108,18 @@ active large-file threshold. `open` includes the same report.
 `begin_transaction` and `end_transaction` explicitly group ordinary edits into
 one undo step; each individual edit is still journaled for crash recovery.
 
+Mutating methods `insert`, `replace`, `large_edit`, `restore`, `undo`, `redo`,
+and `save` require the envelope's `revision` field. The server refuses a
+missing field with `revision_required` and refuses a value other than the
+current revision with `stale_revision`; it never silently treats an omitted
+revision as last-write-wins. Read `open` or `history` again after either error.
+`save_as`, `close`, and `resolve_external` have their own target or recovery
+decisions and are not covered by this list.
+
+The server intentionally has no project-root jail. A valid session token grants
+the server user the same path access as the server process. Keep endpoints
+private and use OS-level isolation when a client must not access other files.
+
 Search mode is required and must be one of `exact_text`, `exact_bytes`,
 `wildcard`, `shell_wildcard`, `path_wildcard`, `regex_rust`, `regex_pcre2`,
 `fuzzy_edit`, `fuzzy_subsequence`, `fuzzy_token`, `fuzzy_ngram`,
