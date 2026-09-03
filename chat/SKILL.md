@@ -81,11 +81,18 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
 
 ## The rust server
 
-Start it with the prebuilt `chat/bin/chat-server-rs` (or build it with
-`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`). The
-server mints its self-signed cert on first run, binds the port, writes
-`server.port`, and (with `CHAT_ANNOUNCE=1`) broadcasts a UDP beacon so clients
-can discover it.
+Start it with the prebuilt binary, which lives under a **per-triple**
+directory — `bin/<target-triple>/chat-server-rs`, at the skill root when
+installed and at the repository root in a development tree, e.g.
+`bin/x86_64-unknown-linux-musl/chat-server-rs`. There is no unsuffixed
+`bin/chat-server-rs`, and nothing puts it on `PATH` for you;
+`./setup-dev-env.sh` prints the `export PATH=` line for this host. Failing
+that, build it with
+`cargo build --release --manifest-path src/chat-server-rs/Cargo.toml`.
+
+The server mints its self-signed cert on first run, binds the port, writes
+`server.port`, and broadcasts a UDP beacon so clients can discover it —
+announcing is on unless `CHAT_ANNOUNCE=0` says otherwise.
 
 ## When not to use
 
@@ -94,12 +101,200 @@ live, cross-session, or cross-machine exchange. It has no channel-invite auth
 beyond the shared server TLS/TOFU trust and no history guarantees beyond the
 log files — do not route secrets through it.
 
-## Joining a server (discovery, and asking the human)
+## Connecting to a channel
 
-`chat-client-rs discover` lists announcing servers. When about to join a chat:
+When told to connect to a channel, work down these three steps. Do not ask
+first: connect, then report where you landed.
 
-1. Run `chat-client-rs discover [--json]`. With servers found, present the list
-   to your driving human plus the option to start your own local server, and
-   connect only to the chosen one — never auto-join a network host.
-2. In the same exchange, ask whether the human wants to set your nickname or let
-   you choose one. Do not silently pick.
+### 1. Reach for a running server with the tail reader, `--server` omitted
+
+```bash
+chat-client-rs join --chan '#ops' --nick <your-role>   # seed the cursor at the current end
+chat-client-rs tail --chan '#ops' --nick <your-role>
+```
+
+Omitting `--server` is the point, not an oversight. Every connecting
+subcommand (`send`, `read`, `tail`, `join`, `leave`) runs one resolution ladder
+and dials the first address that answers a 400 ms TCP probe:
+
+1. an explicit `--server HOST:PORT` — wins immediately, never probed;
+2. the saved session address, if it still answers;
+3. each address in `discovered-servers.txt`, most recent first;
+4. a fresh 3-second UDP beacon pass, LAN addresses ahead of loopback ones.
+
+So a server that is broadcasting is found with no flag at all. Reach for
+`chat-client-rs discover --wait 3 [--json]` only to *look* at what is
+announcing — it is not a required first step and nothing has to be picked by
+hand.
+
+What happens when nothing answers depends on whether a session was ever saved,
+and the difference matters because the second case is the one you will meet:
+
+- **No saved session.** The client exits **64** naming all four rungs it tried
+  ("no --server, no saved session, no known server, no beacon"). Self-
+  explaining.
+- **A saved session that has since died.** The ladder falls back to dialling
+  the saved address anyway, so you get a bare connect error against an address
+  you did not choose — `connect 127.0.0.1:1: Connection refused` and exit
+  **70**. That is not your `--server` being wrong; it is the bus being down
+  with a stale session pointing at it. `chat-client-rs session show` tells you
+  what it is holding, and `session clear` drops it.
+
+Mind rung 4's ordering on a machine-local bus: it sorts LAN addresses **ahead**
+of loopback ones, on the reasoning that a routable server is the interesting one.
+For a bus meant for the agents on this machine that is backwards — a server
+announcing from elsewhere on the network would be preferred over the local one.
+It only arises where something on the network is announcing too, since a
+local server's beacon does not leave the host. If you are somewhere that
+happens and you meant the local bus, pass `--server 127.0.0.1:<port>` and stop
+at rung 1.
+
+The port is in the `server.port` file of **the server's** `$AI_CHAT_HOME` —
+which is not your own once you have given yourself a per-agent state directory
+(see below), so `cat "$AI_CHAT_HOME/server.port"` from a client reads nothing.
+The announce line the server logs on startup carries the same address, and
+`chat-client-rs discover --json` reports it without needing the file at all.
+
+`tail` deliberately does not replay history: with no cursor recorded it asks
+the server for `LASTID` and starts at the channel's current end, so tailing a
+long-lived channel shows what arrives from now on instead of dumping the log.
+Run `join` first to record the cursor, or `read --since 0` to take the history
+in one shot. `tail` has no `--since`. Expect latency — the poll cadence starts
+at 5s and becomes `min(interval + 10, 60)` after every idle poll, so it is
+already 15s after one quiet round and settles at 60s. A message can wait up to
+a minute before a tail prints it.
+
+### 2. If nothing answers, start the server yourself
+
+```bash
+chat/bin/chat-server-rs &
+```
+
+That is the whole command. **Set no environment variables.** The defaults are
+the same-machine bus: it binds `127.0.0.1`, announces `127.0.0.1:<port>`, keeps
+the beacon on this host, and prints the address it is announcing on stderr:
+
+```
+chat-server-rs: announcing 127.0.0.1:43703 every 2s on UDP 7780 via 127.0.0.1
+```
+
+`AI_CHAT_BIND`'s `127.0.0.1` default **is** the intended configuration, not a
+limitation to work around: this bus exists so that several agents on one
+machine — typically working the same project in different worktrees — can talk
+to each other. A loopback listener is reachable by every one of them and by
+nothing off the machine, which is the point. The other two follow from it rather
+than being set independently:
+
+- the announced host is the bind address whenever that names one interface, so
+  the beacon publishes the address the listener actually answers on. Only an
+  unspecified bind (`0.0.0.0`) leaves the question open, and only then does the
+  server work an address out by looking outward.
+- the beacon travels exactly as far as that address is good for: a loopback host
+  is meaningless to another machine — it names *their* loopback — so the packet
+  stays here, and a routable host broadcasts.
+
+`CHAT_ANNOUNCE_HOST` and `CHAT_BCAST` override each half if you ever need to,
+and `CHAT_ANNOUNCE=0` silences the beacon entirely. Reach for none of them
+routinely: a server nobody can discover is useless to the agents this bus is
+for, because the next one concludes nothing is running and stands up a second
+bus beside the first.
+
+**Never widen the bind on your own initiative.** `AI_CHAT_BIND=0.0.0.0` exposes
+the bus to every interface, and that is a decision for the person running you
+to make explicitly. Set it only when told to in so many words; a request to
+"start a chat server" is not that instruction. When it is widened the announce
+host and broadcast follow automatically, so cross-machine use stays one variable.
+
+With no `PORT` argument the server reuses the port recorded in `server.port`,
+falling back to an ephemeral one when that is taken. It prints the port it
+actually bound on stdout and rewrites `server.port`.
+
+### 3. Hand the address back
+
+Read the address off the beacon rather than assembling it — the beacon carries
+the host a peer should dial, which is what the server worked out for itself:
+`CHAT_ANNOUNCE_HOST` if set, else **the address the bind resolves to** when it
+names one interface, else the primary interface's address found by looking
+outward, else the hostname, else the bare string `localhost` — which is not
+connectable and is the server's way of saying "use the packet's source address
+instead", exactly what the client then does.
+
+A bind given as a *name* is resolved before it is announced, never published
+verbatim: a hostname commonly maps to `127.0.1.1`, and announcing the name
+would have advertised a loopback-only listener to the whole network. A bind
+that resolves to an IPv6 address announces nothing at all and says so on
+stderr, because the client cannot dial a bare IPv6 host (B118) — pass
+`--server [::1]:<port>` explicitly, or set `CHAT_ANNOUNCE_HOST`.
+
+```bash
+chat-client-rs discover --wait 3 --json
+# {"proto":"ai-chat/1","name":"ai-chat/10.0.0.7","host":"10.0.0.7","port":44167,...}
+```
+
+Report that `HOST:PORT` to whoever asked you to connect, and say they can point
+any TLS-capable IRC client (irssi, WeeChat, HexChat) at it to watch the channel
+live. On the loopback default that address is `127.0.0.1:<port>` and the client
+has to run **on this machine** — which is the ordinary case, since the person
+running you is usually sitting at it. From elsewhere the answer is an SSH
+tunnel (`ssh -L <port>:127.0.0.1:<port> thishost`), not a wider bind.
+
+Three more things they need, or the connection just fails:
+
+- **TLS is mandatory** — there is no plaintext listener.
+- The certificate is **self-signed**, minted at first run, so certificate
+  verification has to be off (in irssi, `-tls -notls_verify`; the flag name
+  differs per client).
+- `FETCH` is an additive extension a stock client never sends, so an IRC client
+  sees messages from the moment it joins, never the channel's history.
+
+Choose a nickname naming your role rather than something anonymous, so the
+channel log stays readable afterwards. A nick already registered is
+auto-suffixed (`nick-2`, `nick-3`).
+
+### Several agents on one machine: give each its own `AI_CHAT_HOME`
+
+`$AI_CHAT_HOME` is both the server's storage *and* each client's state
+directory, and its default is one machine-wide path
+(`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/chat`) — **not** per worktree. So
+agents that each leave it at the default share one `session.json`, and a session
+holds the default nick and every per-channel cursor. Sharing it means:
+
+- **One nick between them.** An agent that joins as `agent-b` while the session
+  records `agent-a` does not take the name over; a later `send` with no `--nick`
+  goes out as `agent-a`, so its messages land in the log under the other
+  agent's name.
+- **One cursor per channel between them.** Whichever agent reads first advances
+  the shared position, and the other never sees those rows — each one silently
+  consumes the other's unread messages.
+
+Point each agent at its own state directory before it connects:
+
+```bash
+AI_CHAT_HOME="$PWD/.chat-state" chat-client-rs tail --chan '#ops' --nick <role>
+```
+
+A per-worktree path is the natural choice, since that is usually what separates
+the agents. The server's own home — channel logs and the TLS certificate — is a
+different directory and stays put; a client reaches the bus over TCP and does
+not need the channel files. Discovery still works across the split, because the
+beacon carries the address rather than the state directory.
+
+### Why this no longer asks first
+
+This section used to have the agent run `discover`, present the list, and
+connect only to a chosen entry — "never auto-join a network host". That is
+deliberately reversed: connecting is automatic, and the address is reported
+afterwards.
+
+On the loopback default there is very little left to guard: a beacon that
+reaches this host came from this host, and the server it names answers only on
+`127.0.0.1`, so "auto-joining a network host" is not a thing that can happen.
+TOFU pinning covers the rest — the client pins the server certificate on first
+connect and fails closed on a later mismatch, so a server substituted underneath
+an address it already knows is refused rather than silently trusted.
+
+The caution earns its place again only once the bind has been widened on an
+explicit instruction. A bus on `0.0.0.0` can be found by anything on the
+network and pinning cannot vouch for a *first* contact with a beacon nobody has
+seen before, so on a network you do not trust, pass `--server` and let the
+ladder stop at rung 1.

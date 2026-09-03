@@ -355,25 +355,36 @@ reason. A deleted task takes its reasoning with it.
 
 ## Validating the file
 
+Membership is tested with `index(...)`, not jq's `IN/1`. `rjq` — the runtime
+this register mandates, since every writer refuses with 69 without it — does
+not implement `IN/1`: it exits 5 having printed nothing, and an empty findings
+string is the sound case, so the whole check reported any register sound.
+
+Note the `as $e` binding on each clause. `A | index(B)` evaluates `B` with `A`
+as its input, so a bare `index(.status)` looks `.status` up on the *array* and
+dies with "cannot index". Binding the entry first is what makes the field
+reference resolve against the entry — the same shape `reg_findings` uses.
+
 ```sh
 findings="$(rjq -r '
   (if (.skill_version // "") == "" then "the file does not record which skill version wrote it" else empty end),
   (if (.skill // "") == "" then "the file does not name its schema" else empty end),
   ([.tasks[].id]) as $ids
   | if ([.tasks[].id] | length) != ([.tasks[].id] | unique | length) then "duplicate ids" else empty end,
-    (.tasks[] | select(.parent != null and (.parent | IN($ids[]) | not))
-              | "\(.id) names a parent that does not exist: \(.parent)"),
-    (.tasks[] | select(.status | IN("open","partly","blocked","decided","done","dropped","obsolete") | not)
-              | "\(.id) has an unknown status: \(.status)"),
+    (.tasks[] as $e | select($e.parent != null and (($ids | index($e.parent)) == null))
+                    | "\($e.id) names a parent that does not exist: \($e.parent)"),
+    (.tasks[] as $e | select((["open","partly","blocked","decided","done","dropped","obsolete"] | index($e.status)) == null)
+                    | "\($e.id) has an unknown status: \($e.status // "missing")"),
     (.tasks[] | select(.status == "blocked" and (.blocked_on == null or .blocked_on == ""))
               | "\(.id) is blocked with nothing named"),
     (.tasks[] | select(.parent == .id) | "\(.id) is its own parent")
-' TODO.json)"
+' TODO.json)" || { printf 'the soundness check could not run\n' >&2; exit 70; }
 [ -z "$findings" ] && echo 'TODO.json is sound' || printf '%s\n' "$findings"
 ```
 
 `rjq -e` is wrong here: it exits 4 on empty output, which is the sound case, so a
-clean file would look like a failure. Test the output instead.
+clean file would look like a failure. Test the command's own status, as above,
+and then the output — empty output only means sound when the command ran.
 
 ## When not to use this
 

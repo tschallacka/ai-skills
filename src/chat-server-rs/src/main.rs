@@ -957,16 +957,70 @@ fn announce_loop(
     }
 }
 
-// The address a LAN peer should dial. std has no interface enumeration, so
-// this uses the classic route trick: a UDP connect to a routable address
-// sends no packet, but the kernel picks the primary interface's source, and
-// local_addr reports it. Falls back to the hostname, then to localhost - a
-// name that still tells a LAN peer "this is not an address, look elsewhere".
-fn announce_host() -> String {
+// The address a listener on `bind` will actually answer on, or None when the
+// bind names every interface and so answers the question not at all.
+//
+// A hostname is resolved rather than trusted. Taking it at face value was a
+// defect: "specific" is not "routable", and on the stock Debian/Ubuntu hosts
+// shape a hostname maps to 127.0.1.1, so AI_CHAT_BIND=<hostname> announced a
+// loopback-only listener under a name and then broadcast it to the whole
+// network. Resolving first means the loopback classification below sees what
+// the kernel sees.
+fn bind_address(bind: &str) -> Option<std::net::IpAddr> {
+    let bind = bind.trim();
+    if bind.is_empty() {
+        return None;
+    }
+    if let Ok(ip) = bind.parse::<std::net::IpAddr>() {
+        return if ip.is_unspecified() { None } else { Some(ip) };
+    }
+    // A name: ask the resolver what it means on this machine.
+    use std::net::ToSocketAddrs;
+    (bind, 0u16)
+        .to_socket_addrs()
+        .ok()?
+        .next()
+        .map(|sa| sa.ip())
+}
+
+// Whether the client can dial this host at all.
+//
+// chat-client-rs splits a HOST:PORT on a colon and hands the head to TLS SNI
+// (`server_host`, src/chat-client-rs/src/main.rs), so a bare IPv6 literal is
+// rejected as an invalid DNS name before it is ever connected. Announcing one
+// advertises an address nothing can use; announcing an IPv4 address instead
+// would advertise one this listener does not answer on. So an IPv6 bind
+// announces nothing and says why. B118 tracks the client-side support.
+fn host_is_dialable(host: &str) -> bool {
+    !matches!(
+        host.parse::<std::net::IpAddr>(),
+        Ok(std::net::IpAddr::V6(_))
+    )
+}
+
+// The address a peer should dial.
+//
+// The bind address answers this whenever it names one interface, and it is the
+// only answer that cannot lie: announcing anything else risks publishing an
+// address the listener does not answer on. That was the bug -- the route trick
+// below ran unconditionally, so the default loopback bind advertised the LAN
+// address and no peer, local or remote, could reach the bus (B115).
+//
+// Only an unspecified bind (0.0.0.0, ::) leaves the question open, because the
+// listener really is on every interface and one of them has to be named. std
+// has no interface enumeration, so that case uses the classic route trick: a
+// UDP connect to a routable address sends no packet, but the kernel picks the
+// primary interface's source and local_addr reports it. Falls back to the
+// hostname, then to localhost - a name that still tells a peer "this is not an
+// address, look elsewhere".
+fn announce_host(bind: &str) -> String {
     if let Ok(h) = std::env::var("CHAT_ANNOUNCE_HOST") {
         if !h.trim().is_empty() {
             return h;
         }
+    }
+    if let Some(ip) = bind_address(bind) {
+        return ip.to_string();
     }
     if let Ok(s) = std::net::UdpSocket::bind(("0.0.0.0", 0)) {
         if s.connect("8.8.8.8:80").is_ok() {
@@ -986,6 +1040,33 @@ fn announce_host() -> String {
         }
     }
     "localhost".to_string()
+}
+
+// How far the beacon should travel: exactly as far as the announced address is
+// good for. A loopback announce host is meaningless to another machine -- it
+// names that machine's own loopback -- so the packet stays here. Anything else
+// goes to the broadcast address.
+fn announce_bcast(host: &str) -> String {
+    if let Ok(b) = std::env::var("CHAT_BCAST") {
+        if !b.trim().is_empty() {
+            return b;
+        }
+    }
+    bcast_for_host(host)
+}
+
+// The env-free half, so a test can pin the rule without touching the
+// process environment that every other test shares.
+fn bcast_for_host(host: &str) -> String {
+    let loopback = host
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or_else(|_| host == "localhost");
+    if loopback {
+        "127.0.0.1".to_string()
+    } else {
+        "255.255.255.255".to_string()
+    }
 }
 
 // Failed TLS handshakes since start, and the second the last one was logged:
@@ -1106,7 +1187,11 @@ fn main() {
         writers: Mutex::new(Vec::new()),
     });
 
-    if std::env::var("CHAT_ANNOUNCE").unwrap_or_else(|_| "0".into()) == "1" {
+    // Announcing is on unless switched off. A server nobody can discover is
+    // useless to the agents this bus exists for: they find it by beacon, and a
+    // silent one just makes the next agent start a second bus beside it. Only
+    // an explicit CHAT_ANNOUNCE=0 suppresses it.
+    if std::env::var("CHAT_ANNOUNCE").unwrap_or_else(|_| "1".into()) != "0" {
         let interval: u64 = std::env::var("CHAT_ANNOUNCE_INTERVAL")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -1115,10 +1200,23 @@ fn main() {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(7780);
-        let bcast = std::env::var("CHAT_BCAST").unwrap_or_else(|_| "255.255.255.255".into());
-        let host = announce_host();
-        let name = std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", host));
-        std::thread::spawn(move || announce_loop(actual, name, host, interval, beacon_port, bcast));
+        let host = announce_host(&bind);
+        if host_is_dialable(&host) {
+            let bcast = announce_bcast(&host);
+            let name = std::env::var("CHAT_NAME").unwrap_or_else(|_| format!("ai-chat/{}", host));
+            eprintln!(
+                "chat-server-rs: announcing {}:{} every {}s on UDP {} via {}",
+                host, actual, interval, beacon_port, bcast
+            );
+            std::thread::spawn(move || {
+                announce_loop(actual, name, host, interval, beacon_port, bcast)
+            });
+        } else {
+            eprintln!(
+                "chat-server-rs: not announcing {}:{} — the client cannot dial a bare IPv6 host (B118); pass --server [{}]:{} or set CHAT_ANNOUNCE_HOST",
+                host, actual, host, actual
+            );
+        }
     }
 
     for stream in listener.incoming() {
@@ -1165,5 +1263,90 @@ fn main() {
             }
             serve(slot, hub, idx, server_name);
         });
+    }
+}
+
+#[cfg(test)]
+mod announce_tests {
+    use super::{bcast_for_host, bind_address, host_is_dialable};
+
+    // The default bind names one interface, so it is the address to publish.
+    // This is the case that was broken: the route trick ignored the bind and
+    // advertised the LAN address while the listener answered only on
+    // loopback, so no peer could reach the bus (B115).
+    #[test]
+    fn a_literal_bind_is_the_address_to_announce() {
+        assert_eq!(
+            bind_address("127.0.0.1").map(|i| i.to_string()).as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(
+            bind_address("192.168.1.106")
+                .map(|i| i.to_string())
+                .as_deref(),
+            Some("192.168.1.106")
+        );
+        assert_eq!(
+            bind_address(" 127.0.0.1 ")
+                .map(|i| i.to_string())
+                .as_deref(),
+            Some("127.0.0.1")
+        );
+    }
+
+    // An unspecified bind really is every interface, so the bind cannot say
+    // which one a peer should dial and discovery has to work it out.
+    #[test]
+    fn an_unspecified_bind_answers_nothing() {
+        assert_eq!(bind_address("0.0.0.0"), None);
+        assert_eq!(bind_address("::"), None);
+        assert_eq!(bind_address(""), None);
+        assert_eq!(bind_address("   "), None);
+    }
+
+    // A hostname is NOT taken at face value. This asserts the rule, not a
+    // resolver result: whatever the name maps to, the announced host is an
+    // address, never the name. Treating the name as "specific" was the defect
+    // -- on the stock Debian hosts shape it resolves to 127.0.1.1, so a
+    // loopback-only listener was announced by name and broadcast to the LAN.
+    #[test]
+    fn a_hostname_bind_is_resolved_not_trusted() {
+        // localhost is the one name every machine resolves, and it must come
+        // back as a loopback ADDRESS, so bcast_for_host then keeps it local.
+        let resolved = bind_address("localhost").expect("localhost resolves");
+        assert!(resolved.is_loopback(), "localhost resolved to {resolved}");
+        assert_eq!(bcast_for_host(&resolved.to_string()), "127.0.0.1");
+
+        // A name that cannot resolve announces nothing rather than itself.
+        assert_eq!(bind_address("no-such-host.invalid"), None);
+    }
+
+    // A loopback address is only meaningful on this host: broadcasting it
+    // would tell every other machine to dial its own loopback.
+    #[test]
+    fn a_loopback_announce_host_keeps_the_beacon_local() {
+        assert_eq!(bcast_for_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(bcast_for_host("127.0.1.1"), "127.0.0.1");
+        assert_eq!(bcast_for_host("::1"), "127.0.0.1");
+        assert_eq!(bcast_for_host("localhost"), "127.0.0.1");
+    }
+
+    #[test]
+    fn a_routable_announce_host_broadcasts() {
+        assert_eq!(bcast_for_host("192.168.1.106"), "255.255.255.255");
+        assert_eq!(bcast_for_host("10.0.0.7"), "255.255.255.255");
+    }
+
+    // An IPv6 literal is announceable only once the client can dial it. Until
+    // then advertising it would publish an address that fails at TLS SNI, so
+    // the beacon is withheld (B118). Everything else is dialable.
+    #[test]
+    fn a_bare_ipv6_host_is_not_announceable() {
+        assert!(!host_is_dialable("::1"));
+        assert!(!host_is_dialable("fe80::1"));
+        assert!(host_is_dialable("127.0.0.1"));
+        assert!(host_is_dialable("192.168.1.106"));
+        assert!(host_is_dialable("localhost"));
+        assert!(host_is_dialable("some.host.example"));
     }
 }

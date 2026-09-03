@@ -228,7 +228,22 @@ EOF
     exit 0
 fi
 
-require_nix
+# One dev shell for the whole run, entered here, rather than one per crate.
+#
+# Entering it costs about 2.7s and does not vary with what is being built, so
+# at 58 crates the old shape spent roughly 157s starting shells before any
+# compilation happened. The reason recorded for doing it per crate was that a
+# crate which fails to build should report its own name while the rest still
+# build — but that is the loop's `if` below, not the shell boundary, and it is
+# unchanged here. The only thing a per-crate entry isolated was the dev shell
+# itself failing for one crate, which is not a per-crate condition.
+#
+# --list and --check return above this point, so they still cost no nix at all.
+if [ -z "${SETUP_DEV_ENV_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
+    require_nix
+    exec nix develop "$repo_root" --command env \
+        SETUP_DEV_ENV_IN_NIX=1 "$repo_root/${0##*/}" "$@"
+fi
 
 printf 'setup-dev-env: building for %s\n\n' "$triple"
 built=0 failed=''
@@ -237,10 +252,10 @@ while IFS="$(printf '\t')" read -r crate binary; do
     src="$repo_root/src/$crate"
     [ -f "$src/Cargo.toml" ] || { printf '  %-16s no crate at src/%s; skipped\n' "$crate" "$crate"; continue; }
     printf '  %-16s ' "$crate"
-    # One `nix develop` per crate rather than one wrapping the loop: a crate
-    # that fails to build then reports its own name, and the rest still build.
-    if nix develop "$repo_root" --command \
-        cargo build --release --manifest-path "$src/Cargo.toml" --target "$triple" \
+    # A crate that fails to build reports its own name and the loop carries on
+    # to the next one; only the summary at the end is non-zero. The dev shell
+    # was entered once before this loop, so cargo is already on PATH.
+    if cargo build --release --manifest-path "$src/Cargo.toml" --target "$triple" \
         >"$repo_root/.setup-dev-env.log" 2>&1; then
         dest_dir="$repo_root/bin/$triple"
         mkdir -p "$dest_dir"

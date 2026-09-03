@@ -9,6 +9,12 @@
 #
 # Usage: run-tests.sh [--verbose]
 #
+# One run at a time, machine-wide: the runner holds /tmp/ai-skills-run-tests.lock
+# and refuses to start (exit 75) while another run really holds it. A lock whose
+# recorded pid is gone -- or belongs to something that is not a suite run -- is
+# stale and gets reused, so a killed run never wedges the next one.
+# AI_SKILLS_ALLOW_CONCURRENT=1 bypasses it.
+#
 # A failing test's full output is always printed — it is the only diagnostic the
 # runner has, and truncating it to the last 20 lines hid the failing assertion.
 # `--verbose` additionally prints the output of tests that passed.
@@ -25,6 +31,89 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 wrapper="$repo_root/resource-limited-testing/scripts/limited-run.sh"
 verbose=false
 [ "${1:-}" = "--verbose" ] && verbose=true
+
+# ---- one run at a time, machine-wide ---------------------------------------
+# Two suite runs on this machine collide. They share the cargo target
+# directory, the default chat beacon port (7780), and the short /tmp test roots
+# lib-test.sh explains cannot nest under a per-run scratch; a second
+# verify-both-shells.sh deletes the first's linked worktree outright. The
+# symptom is missing-file failures across most of the suite, or a handful of
+# chat failures that vanish on a clean re-run, which reads as a regression and
+# is not one.
+#
+# The path is fixed under /tmp rather than $TMPDIR: a mutex only works if both
+# runs agree on where it lives, TMPDIR varies per user and per session, and
+# this script exports TMPDIR to its own scratch root a few lines below.
+#
+# Created with noclobber, so the create IS the test — two runs starting in the
+# same instant cannot both win it.
+lock_file="/tmp/ai-skills-run-tests.lock"
+lock_held=false
+lock_marker="ai-skills-run-tests"
+
+# The command line of a live pid, or nothing. Identity matters as much as
+# liveness: a pid recorded by a run that was killed can be reassigned to an
+# unrelated process, and checking only that "the pid exists" would then block
+# every future run forever with no way to tell why.
+lock_holder_command() {
+    ps -p "$1" -o args= 2>/dev/null || ps -p "$1" -o command= 2>/dev/null || true
+}
+
+lock_holder_is_live() { # <pid> -> 0 when that pid is really a suite run
+    local pid="$1" command
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    command="$(lock_holder_command "$pid")"
+    [ -n "$command" ] || return 1
+    case "$command" in *run-tests.sh*) return 0 ;; *) return 1 ;; esac
+}
+
+take_lock() { # 0 on success
+    ( set -o noclobber
+      printf '%s\n%s\n%s\n%s\n' \
+          "$$" "$lock_marker" "$repo_root" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          > "$lock_file" ) 2>/dev/null
+}
+
+release_lock() {
+    [ "$lock_held" = true ] || return 0
+    # Only ever remove our own: a run that refused to start must not delete the
+    # lock belonging to the run that is legitimately holding it.
+    if [ "$(sed -n '1p' "$lock_file" 2>/dev/null)" = "$$" ]; then
+        rm -f -- "$lock_file"
+    fi
+}
+
+if [ "${AI_SKILLS_ALLOW_CONCURRENT:-0}" = 1 ]; then
+    printf 'run-tests: AI_SKILLS_ALLOW_CONCURRENT=1; the single-run lock is bypassed\n' >&2
+elif take_lock; then
+    lock_held=true
+else
+    held_pid="$(sed -n '1p' "$lock_file" 2>/dev/null)"
+    if lock_holder_is_live "$held_pid"; then
+        printf 'run-tests: another suite run is already going (pid %s)\n' "$held_pid" >&2
+        printf '  started: %s\n' "$(sed -n '4p' "$lock_file" 2>/dev/null)" >&2
+        printf '  in:      %s\n' "$(sed -n '3p' "$lock_file" 2>/dev/null)" >&2
+        printf '  command: %s\n' "$(lock_holder_command "$held_pid")" >&2
+        printf '  Two runs on one machine collide over the cargo target dir, the\n' >&2
+        printf '  chat beacon port and the /tmp test roots. Wait for it, or set\n' >&2
+        printf '  AI_SKILLS_ALLOW_CONCURRENT=1 to run anyway and accept the noise.\n' >&2
+        exit 75
+    fi
+    # Stale: the recorded pid is gone, or belongs to something that is not a
+    # suite run. Reuse it. The retry is what settles a race between two runs
+    # that both found it stale -- whoever creates it first owns it, and the
+    # other falls through to the refusal above on its next pass.
+    printf 'run-tests: reusing a stale lock left by pid %s\n' "${held_pid:-unknown}" >&2
+    rm -f -- "$lock_file"
+    if take_lock; then
+        lock_held=true
+    else
+        held_pid="$(sed -n '1p' "$lock_file" 2>/dev/null)"
+        printf 'run-tests: another run took the lock first (pid %s); not starting\n' \
+            "${held_pid:-unknown}" >&2
+        exit 75
+    fi
+fi
 
 # Scope everything this run creates under one scratch root and clean it up on
 # exit so no temp files survive a pass, fail, or interrupted run. The planning
@@ -53,6 +142,7 @@ cleanup_marked_test_roots() {
     done
 }
 cleanup() {
+    release_lock
     cleanup_marked_test_roots
     rm -rf -- "$run_scratch"
     # Each test takes a short root directly under /tmp -- lib-test.sh explains

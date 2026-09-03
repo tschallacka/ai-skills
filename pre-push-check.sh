@@ -3,17 +3,27 @@
 # pre-push-check - the per-change gates from MAINTAINER.md section 4 and the
 # PR hygiene rules in AGENTS.md, in one command.
 #
-# Run it before every push. It applies the fast, mechanical gates to the
-# change about to be pushed:
+# Run it before every push. The change set is everything that differs from
+# master - the branch's commits plus the worktree and the index - and the fast,
+# mechanical gates are applied to that:
 #   git diff --check        whitespace, in the worktree, the index and the
 #                           branch's committed diff
 #   bash -n                 every changed shell script
-#   static shell gate       every live script plus the generated libraries, at
-#                           warning severity - the invocation CI gates on
+#   static shell gate       the changed scripts at warning severity, with -x so
+#                           `source=` resolves from disk. CI lints the whole
+#                           live set; see the note at that gate for why the
+#                           two agree and where they cannot
 #   cargo fmt --check +     each crate under src/ touched by the change
 #   cargo test              (skipped with a note when no crate changed)
-#   register soundness      TODO.json and BUGS.json parse, unique ids, known
-#                           statuses (needs rjq on PATH)
+#   register soundness      TODO.json and BUGS.json through reg_findings, the
+#                           shipped implementation: ids, statuses, severities,
+#                           priorities, parents, timestamps, reproductions,
+#                           mechanism-on-confirmed, verification-on-fixed
+#                           (needs rjq on PATH)
+#   npm package baseline    every pinned byte size in
+#                           npm-package-baseline.tsv against the working tree.
+#                           Not npm's file selection - the full
+#                           test-npm-package.sh still owns that
 # The registers update, the plan validator and the role-drift tests stay with
 # MAINTAINER.md section 4: they need judgement about what changed, which a
 # pre-push helper deliberately does not guess at.
@@ -25,8 +35,8 @@
 #   pre-push-check.sh --help
 #
 # Exit codes: 0 = every gate passed; 1 = at least one gate failed; 64 = bad
-# usage; 65 = not a git repository or no upstream resolvable and no branch
-# diff to check.
+# usage; 65 = not a git repository, or neither master nor an upstream resolves
+# and there is no branch diff to check.
 
 set -u
 export LC_ALL=C
@@ -72,13 +82,28 @@ bad() { printf '  FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 note() { printf '  note  %s\n' "$1"; }
 
 # The change set: committed work on this branch plus whatever is still in the
-# worktree or the index. Upstream when set, master as the common fallback.
+# worktree or the index, measured against master.
+#
+# It used to prefer the tracking upstream, which quietly emptied the change set
+# the moment a branch was pushed: `base..HEAD` is nothing when base IS the
+# branch, so every gate driven by changed() skipped. A push would report "no
+# crates under src/ changed; rust gates skipped" on a branch that rewrote a
+# crate — the gates went quiet exactly when the work was finished.
+#
+# The merge base rather than origin/master itself, so a master that has moved
+# ahead does not show its own commits as part of this branch's diff.
 base=""
-upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-if [ -n "$upstream" ]; then
-    base="$upstream"
-elif git rev-parse --verify origin/master >/dev/null 2>&1; then
-    base="origin/master"
+base_label=""
+for ref in origin/master master; do
+    if git rev-parse --verify "$ref" >/dev/null 2>&1; then
+        base="$(git merge-base "$ref" HEAD 2>/dev/null || printf '%s' "$ref")"
+        base_label="$ref"
+        break
+    fi
+done
+if [ -z "$base" ]; then
+    base="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    base_label="$base"
 fi
 
 changed() { # <pathspec-filter...> -> changed files matching the filter
@@ -86,7 +111,7 @@ changed() { # <pathspec-filter...> -> changed files matching the filter
         2>/dev/null | sort -u | grep "$@" || true
 }
 
-printf 'pre-push-check (base: %s)\n' "${base:-no upstream; worktree only}"
+printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; worktree only}"
 
 # ---- 1. whitespace ---------------------------------------------------------
 ws_rc=0
@@ -114,27 +139,41 @@ else
     note "no changed shell scripts; bash -n skipped"
 fi
 
-# ---- 3. shellcheck, the CI invocation --------------------------------------
-# The generated libraries are untracked, so `git ls-files` cannot see them. A
-# `source=` directive resolves only against files on the linter's own command
-# line, so leaving them out reports every variable a sourcing script reads from
-# them as unassigned. Build them, then name them (CONTRIBUTING.md).
+# ---- 3. shellcheck on the scripts that differ from master ------------------
+# CI lints every live script in one invocation, naming the generated libraries
+# alongside them because a `source=` directive resolves only against files on
+# the linter's own command line — omit them and every variable a sourcing
+# script reads from them reports unassigned (SC2154).
+#
+# That invocation costs ~33s of a ~47s run and is paid in full whether the
+# change touches one script or none. Here the change set is what matters, so
+# only the scripts that differ from master are linted, with -x: shellcheck
+# then follows `source=` from disk instead of requiring the target on the
+# command line, which is what makes a per-file lint equivalent to the whole-set
+# one. Measured over all 317 live scripts, linted one at a time: 2 disagree
+# with the whole-set result without -x (plan-context-lib.sh,
+# test-portable-helpers.sh — both unresolved-source false positives), 0 with
+# it, and -x introduces no findings of its own. On this branch the gate drops
+# from 32,676ms to 454ms.
+#
+# The libraries are still built first: -x resolves them from disk, so they have
+# to exist. CI remains the authority on the full set — a change in one script
+# can in principle provoke a finding in an unchanged script that sources it,
+# and only the whole-set lint sees that.
 if [ -x planning/scripts/build-plan-libs.sh ]; then
     planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
 fi
-tracked_sh="$(
-    { git ls-files '*.sh' | grep -v '^benchmark/results/'
-      for lib in core crypt document progress table; do
-          printf 'planning/scripts/plan-%s-lib.sh\n' "$lib"
-      done
-    } 2>/dev/null | LC_ALL=C sort -u || true
-)"
-if command -v shellcheck >/dev/null 2>&1; then
+changed_sh="$(changed -E '\.sh$')"
+if [ -z "$changed_sh" ]; then
+    note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
+elif command -v shellcheck >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    if shellcheck -s bash --severity=warning $tracked_sh >/dev/null 2>&1; then
-        ok "shellcheck -s bash --severity=warning ($(printf '%s\n' "$tracked_sh" | wc -l | tr -d ' ') scripts)"
+    if shellcheck -x -s bash --severity=warning $changed_sh >/dev/null 2>&1; then
+        ok "shellcheck -x --severity=warning ($(printf '%s\n' "$changed_sh" | wc -l | tr -d ' ') changed vs ${base_label:-base})"
     else
         bad "shellcheck findings at warning severity (CI gates on these)"
+        # shellcheck disable=SC2086
+        shellcheck -x -s bash --severity=warning $changed_sh 2>&1 | sed -n '1,40p' >&2
     fi
 else
     note "shellcheck not installed locally; CI still gates on it"
@@ -171,22 +210,64 @@ else
 fi
 
 # ---- 5. register soundness (needs rjq; skip quietly without it) ------------
+# This delegates to reg_findings rather than carrying its own expression. The
+# copy it used to carry was written in jq and used IN/1, which rjq -- the
+# runtime the registers actually mandate -- cannot parse. It exited 5, the
+# 2>/dev/null discarded the reason, the `|| true` discarded the status, and an
+# empty findings string is the sound case: so the gate printed "ids unique,
+# statuses known" for every register, always. Measured against a register with
+# a duplicate id and two invalid statuses: no finding. Errors are now fatal to
+# the check rather than silent, so a runtime that cannot run it says so.
 if command -v rjq >/dev/null 2>&1; then
+    # shellcheck source=planning/scripts/register-lib.sh
+    source "$(cd "$(dirname "$0")/planning/scripts" && pwd)/register-lib.sh"
     for reg in TODO.json BUGS.json; do
         [ -f "$reg" ] || continue
-        findings="$(rjq -r '
-          ([.tasks[]? .id] + [.bugs[]? .id]) as $ids
-          | if ($ids | length) != ($ids | unique | length) then "duplicate ids" else empty end,
-            (.tasks[]? | select(.status | IN("open","partly","blocked","decided","done","dropped","obsolete") | not)
-                      | "\(.id) has an unknown status: \(.status)")' "$reg" 2>/dev/null || true)"
-        if [ -n "$findings" ]; then
+        kind=bug
+        [ "$reg" = TODO.json ] && kind=todo
+        findings=''
+        if ! findings="$(reg_findings "$kind" "$reg" 2>&1)"; then
+            bad "$reg: the soundness check could not run: $findings"
+        elif [ -n "$findings" ]; then
             bad "$reg: $findings"
         else
-            ok "$reg parses, ids unique, statuses known"
+            ok "$reg is sound (reg_findings)"
         fi
     done
 else
     note "rjq not on PATH; register soundness skipped (CI runs test-register-schemas)"
+fi
+
+# ---- 5b. the npm package baseline ------------------------------------------
+# npm-package-baseline.tsv pins the byte size of every packaged file, so any
+# edit to a shipped file fails planning/tests/test-npm-package.sh. That test
+# runs `npm pack`, whose prepack builds the release tree and runs two suites --
+# minutes, too slow for a pre-push gate. It does not need to be run: a packaged
+# text file's bytes are the working tree's bytes, verified across all 153 rows.
+# So the pinned sizes are checked directly here, in milliseconds.
+#
+# What this does NOT cover is npm's file *selection*: a newly shipped file has
+# no row to disagree with. A row whose file has vanished is caught. The full
+# test remains authoritative for the file set.
+baseline=planning/tests/fixtures/overview/npm-package-baseline.tsv
+if [ -f "$baseline" ]; then
+    drift="$(awk -F'\t' 'NR > 1 { print $1 "\t" $2 }' "$baseline" | while IFS="$(printf '\t')" read -r pkgpath size; do
+        repopath="${pkgpath#package/}"
+        if [ ! -f "$repopath" ]; then
+            printf '%s is in the baseline but not in the tree; ' "$repopath"
+            continue
+        fi
+        actual="$(wc -c < "$repopath" | tr -d ' ')"
+        [ "$actual" = "$size" ] || printf '%s is %s bytes, baseline says %s; ' "$repopath" "$actual" "$size"
+    done)"
+    if [ -n "$drift" ]; then
+        bad "npm package baseline drift: ${drift%; }"
+        note "refresh the rows, then confirm with planning/tests/test-npm-package.sh"
+    else
+        ok "npm package baseline matches the tree ($(( $(wc -l < "$baseline") - 1 )) files)"
+    fi
+else
+    note "no npm package baseline at $baseline"
 fi
 
 # ---- 6. the whole suite, when asked for ------------------------------------
