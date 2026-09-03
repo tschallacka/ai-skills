@@ -1301,8 +1301,11 @@ fn valid_dir(path: &Path) -> Result<(), String> {
 struct SocketIdentity {
     parent: File,
     name: CString,
-    device: u64,
-    inode: u64,
+    // libc's own aliases, not u64: dev_t is i32 on macOS and u64 on Linux, so
+    // hardcoding either side makes the comparison in remove_socket() a type
+    // error on the other platform.
+    device: libc::dev_t,
+    inode: libc::ino_t,
 }
 
 fn remove_socket(identity: &SocketIdentity) {
@@ -1405,19 +1408,25 @@ impl Drop for Cleanup {
 fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t), String> {
     let mut master = 0;
     let mut slave = 0;
-    let size = libc::winsize {
+    let mut size = libc::winsize {
         ws_row: rows,
         ws_col: cols,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
+    let winp: *mut libc::winsize = &mut size;
     if unsafe {
+        // Raw *mut pointers, not &mut references: macOS declares termp and
+        // winp as *mut and Linux as *const. *mut coerces to *const, so the
+        // mut form is the one shape both accept -- but passing `&mut size`
+        // directly trips clippy::unnecessary_mut_passed on Linux, where the
+        // parameter is const. Naming the pointer satisfies both.
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            &size,
+            std::ptr::null_mut(),
+            winp,
         )
     } < 0
     {
@@ -1434,7 +1443,7 @@ fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t
     if pid == 0 {
         unsafe {
             libc::setsid();
-            libc::ioctl(slave, libc::TIOCSCTTY, 0);
+            libc::ioctl(slave, libc::TIOCSCTTY as _, 0);
             for fd in [0, 1, 2] {
                 libc::dup2(slave, fd);
             }
@@ -1447,7 +1456,10 @@ fn spawn(command: &[String], cols: u16, rows: u16) -> Result<(RawFd, libc::pid_t
                 .iter()
                 .map(|x| CString::new(x.as_bytes()).unwrap())
                 .collect();
-            let p: Vec<*const i8> = c
+            // c_char, not i8: it is signed on x86_64 and UNSIGNED on both
+            // aarch64 targets, so the hardcoded i8 compiled on Intel and failed
+            // to compile on aarch64-unknown-linux-musl and aarch64-apple-darwin.
+            let p: Vec<*const libc::c_char> = c
                 .iter()
                 .map(|x| x.as_ptr())
                 .chain(std::iter::once(std::ptr::null()))
@@ -1894,7 +1906,7 @@ fn resize_master(fd: RawFd, cols: u16, rows: u16) -> Result<(), String> {
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) } < 0 {
+    if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ as _, &size) } < 0 {
         return Err(io::Error::last_os_error().to_string());
     }
     Ok(())
