@@ -45,9 +45,13 @@ trap 'rm -rf "$temporary_root"' EXIT
 pids=()
 stop_server() { [ -n "${1:-}" ] && kill "$1" 2>/dev/null && wait "$1" 2>/dev/null || true; }
 
+# Announcing is on by default, and these servers exist only to test port
+# selection. Silencing them keeps them out of the discovery ladder that case 5
+# exercises, and off the beacon port a real agent on the developer's machine is
+# listening to while the suite runs.
 start_server() { # <home> [extra env as VAR=val pairs already set by caller]
     local h="$1"
-    AI_CHAT_HOME="$h" "$SERVER" >"$h/server.out" 2>"$h/server.err" &
+    AI_CHAT_HOME="$h" CHAT_ANNOUNCE=0 "$SERVER" >"$h/server.out" 2>"$h/server.err" &
     pids+=($!)
 }
 
@@ -74,7 +78,7 @@ p1b="$(wait_port "$h1")"
 
 # ---- 2. an explicit argv port overrides the session ------------------------
 override=$((p1 + 1))
-AI_CHAT_HOME="$h1" "$SERVER" "$override" >"$h1/s3.out" 2>"$h1/s3.err" &
+AI_CHAT_HOME="$h1" CHAT_ANNOUNCE=0 "$SERVER" "$override" >"$h1/s3.out" 2>"$h1/s3.err" &
 pids+=($!)
 sleep 0.5
 p3="$(wait_port "$h1")"

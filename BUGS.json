@@ -1318,6 +1318,51 @@
       "updated_at": "2026-09-02T20:19:55Z"
     },
     {
+      "id": "B115",
+      "title": "The announce beacon advertises the primary interface address while the server listens only on loopback, so same-machine agents cannot discover it",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "AI_CHAT_HOME=$(mktemp -d) CHAT_ANNOUNCE=1 chat-server-rs &  # AI_CHAT_BIND unset -> 127.0.0.1 default\nss -ltn | grep \"$(cat $AI_CHAT_HOME/server.port)\"\nchat-client-rs discover --wait 3 --json\nAI_CHAT_HOME=$(mktemp -d) chat-client-rs join --chan \"#w\" --nick sib   # --server omitted",
+      "observed": "ss reports LISTEN 127.0.0.1:36819, the beacon reports {\"host\":\"192.168.1.106\",\"port\":36819}, and the sibling exits 64 with \"no chat server found ... no beacon\". A sibling sharing the same AI_CHAT_HOME fails identically.",
+      "expected": "A server on the loopback default announces an address a same-machine peer can reach, so a sibling agent with --server omitted connects.",
+      "mechanism": "announce_host() (src/chat-server-rs/src/main.rs:965) resolves the advertised host by connecting a UDP socket to 8.8.8.8:80 and reading local_addr, explicitly rejecting a loopback result. It never consults AI_CHAT_BIND, so a loopback-bound server publishes the LAN address it is not listening on. The client then probes that address with tcp_alive (400ms), fails, and the ladder ends. server.port -- written by the server and holding the right port -- is not on the resolution ladder in resolve_server (src/chat-client-rs/src/main.rs:313), so the one authoritative local record is never read.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs",
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": "announce_host now takes the bind address and announces it verbatim whenever it names one interface, falling back to the outward route trick only for an unspecified bind; announce_bcast derives the beacon reach from that host (loopback stays on this machine); CHAT_ANNOUNCE defaults to on. A bare chat-server-rs is now the whole command.",
+      "verification": "Before: bound LISTEN 127.0.0.1:36819 while the beacon carried 192.168.1.106:36819, and a fresh sibling with --server omitted exited 64. After, with no environment variables set at all: the server logs \"announcing 127.0.0.1:43703 ... via 127.0.0.1\", the beacon carries {\"host\":\"127.0.0.1\",\"port\":43703}, and a sibling in its own AI_CHAT_HOME joins and sends (exit 0, message in the channel log). Four unit tests pin the two rules -- a specific bind is announced, an unspecified one is not, a loopback host keeps the beacon local, a routable one broadcasts. The mutation is the pre-fix code itself: removing the bind_is_specific branch restores the unconditional route trick and the sibling join returns to exit 64, which is the measured before-state above.",
+      "found_by": "documenting the connect procedure; measured with ss plus a fresh-home sibling client",
+      "notes": "This broke the skill's stated purpose -- several agents on one machine in different worktrees -- on the default configuration. Fixed by deriving the announcement from the bind rather than by documenting environment overrides, so cross-machine use stays a single explicit AI_CHAT_BIND=0.0.0.0 and the announce host and broadcast follow it. B116 is the other half of the same use case being unusable and is still open. Went unnoticed because chat/tests/test-chat.sh passes --insecure and an explicit --server or a pre-seeded session throughout, so no test ever resolved an address from a beacon alone; the four unit tests added here are the first coverage of the announce rules.",
+      "created_at": "2026-09-03T08:53:27Z",
+      "updated_at": "2026-09-03T09:01:50Z"
+    },
+    {
+      "id": "B116",
+      "title": "Agents sharing the default AI_CHAT_HOME share one session, so the second agent sends under the first agent's nick",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "export AI_CHAT_HOME=$(mktemp -d); chat-server-rs & S=127.0.0.1:$(cat $AI_CHAT_HOME/server.port)\nchat-client-rs session set --server $S --nick agent-a\nchat-client-rs join --chan \"#s\" --nick agent-a --server $S\nchat-client-rs join --chan \"#s\" --nick agent-b --server $S   # a second agent, same home\nchat-client-rs session show\nchat-client-rs send --chan \"#s\" --text \"who am I\"            # no --nick",
+      "observed": "session show reports nick=agent-a after agent-b joined, and the bare send goes out as \":agent-a!agent-a@localhost PRIVMSG #s :who am I\". One session.json exists, holding a single nick and a single cursor per channel (cursor #s 1).",
+      "expected": "Each agent keeps its own identity and its own per-channel read position, so neither sends under the other's name nor consumes the other's unread messages.",
+      "mechanism": "Session state is one file per client state directory -- Session::path(state_dir) -> session.json -- and the state directory is $AI_CHAT_HOME, whose default (${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/chat) is a single machine-wide path rather than per worktree or per agent. The session holds both the default nick and the cursors map, so agents that leave AI_CHAT_HOME at its default share both.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "asked directly whether per-agent session isolation works; measured with two clients in one AI_CHAT_HOME",
+      "notes": "Like B115 this defeats the skill's stated purpose of several agents on one machine in different worktrees. B115 is now fixed; this one stands. PR #18 (fix/chat-dead-peer-spin-help-and-sessions) addresses it by moving sessions to sessions/<owner>.json keyed on --session / $CHAT_SESSION_ID / default, but that PR is open and was reviewed as not approvable, so the defect stands on master. Recorded separately from the PR so it is not lost if the PR is reworked or abandoned. The shared cursor is the subtler half: a shared nick is at least visible in the channel log, whereas one agent silently advancing the other's read position looks like messages that never arrived. chat/SKILL.md tells each agent to set its own AI_CHAT_HOME, which is a workaround, not a fix. Went unnoticed because every test drives one client at a time per state directory.",
+      "created_at": "2026-09-03T08:53:27Z",
+      "updated_at": "2026-09-03T09:01:50Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -1738,6 +1783,28 @@
       "notes": "B108 is the live instance and the fastest way to test any fix: whatever check gets added must fail while B108 is unfixed and pass once it is. Do not close this by fixing B108 - the point of the entry is that the packaging defect was invisible to the suite, so fixing the instance would hide the gap again. Related: B108 also revealed that PACKAGE-MANIFEST.tsv omits register-rebuild.sh, so any new check should cover scripts that are in neither package manifest as well as scripts whose dependencies land in a different arm.",
       "created_at": "2026-09-02T12:59:13Z",
       "updated_at": "2026-09-02T12:59:13Z"
+    },
+    {
+      "id": "B117",
+      "title": "The bug-report skill's documented validation snippet uses IN/1, which rjq cannot parse, so it prints \"BUGS.json is sound\" for any file",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "echo '{}' | rjq 'if (\"a\" | IN(\"a\",\"b\")) then \"yes\" else \"no\" end'\n# then run the Validating the file snippet from bug-report/SKILL.md with rjq in place of jq, against any BUGS.json",
+      "observed": "rjq exits non-zero with [(File { code: ... }, [(\"IN\", Filter(1))])] and writes nothing to stdout. The snippet assigns that empty stdout to $findings and its `[ -z \"$findings\" ] && echo 'BUGS.json is sound'` branch reports the file sound. jq on the same expression returns \"yes\" and the same snippet validates correctly.",
+      "expected": "Either the snippet runs under rjq, or a runtime that cannot evaluate it fails loudly instead of reporting the register sound.",
+      "mechanism": "rjq is jaq-based and jaq does not define jq's IN/1 builtin. The snippet uses it four times (parent existence, status, severity, priority). Command substitution discards the parse error to stderr and yields an empty string, and the snippet's success test is emptiness of that string -- so a runtime failure and a clean register are indistinguishable. The skill's own note that `jq -e` is wrong here because it exits 4 on empty output shows the empty-means-sound convention was deliberate; it just has no guard for the command not having run.",
+      "surfaces": [
+        "bug-report/SKILL.md",
+        "todo/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "running the skill's own validation after adding B115 and B116; it reported sound while rjq was erroring",
+      "notes": "Narrow but the failure mode is the worst kind: a gate that always passes. It matters because rjq is the declared ceiling of the required runtime for the registers -- reg_require_jq refuses with exit 69 when rjq is absent -- so an agent following the skill on a machine provisioned to that contract gets a false pass. The shipped helper is NOT affected: register-lib.sh reg_findings expresses the same checks with `index($e.status) == null`, which rjq evaluates fine, so the register's real gate works. Only the copy-paste snippet in SKILL.md is broken. Fix either way round: rewrite the snippet with `index(...)` like the shipped helper, or check the exit status rather than the emptiness of the output. todo/SKILL.md is listed because it carries the same validation pattern for TODO.json and needs the same treatment -- confirm before fixing.",
+      "created_at": "2026-09-03T08:54:56Z",
+      "updated_at": "2026-09-03T08:54:56Z"
     },
     {
       "id": "B6",
