@@ -82,6 +82,24 @@
       "updated_at": "2026-09-01T16:11:53Z"
     },
     {
+      "id": "T85",
+      "title": "Implement IN/1 and IN/2 in rjq",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "rjq is the mandated register runtime and does not implement jqs IN/1, so every membership test in a register snippet has to be written the long way with index and an explicit binding. That keeps biting, and it fails in the worst direction: rjq reports the error on stderr and exits non-zero, so a snippet that captures only stdout into a findings variable leaves it empty and prints sound. A validation that checked nothing, reading as a pass. The SKILL.md snippets in bug-report and todo were both rewritten off IN/1 for exactly this reason, and it caught me again today in an ad-hoc TODO.json check. It is a trap peculiar to this repo, because the idiom is standard jq and every agent reaches for it by default. jq defines both arities in its own stdlib in terms of any, so this is plausibly a prelude definition rather than Rust work - read the IN definitions in jqs builtin.jq and port them rather than trusting a remembered one-liner. Land it with a test that the register snippets in both SKILL.md files run green under rjq, since that is the whole point of having it, and a test that a membership test against a missing key is false rather than an error. Until it lands, reg_findings in planning/scripts/register-lib.sh is the one place that expression should live and callers should use it instead of hand-rolling.",
+      "blocked_on": null,
+      "refs": [
+        "src/rjq",
+        "planning/scripts/register-lib.sh",
+        "bug-report/SKILL.md",
+        "todo/SKILL.md"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:16:44Z",
+      "updated_at": "2026-09-03T18:16:44Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
@@ -162,6 +180,70 @@
       "note": null,
       "created_at": "2026-09-01T16:12:10Z",
       "updated_at": "2026-09-01T16:12:10Z"
+    },
+    {
+      "id": "T84",
+      "title": "Support Windows in interactive-shell",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "interactive-shell is the workspace's first POSIX-only member and is excluded from the x86_64-pc-windows-msvc leg of the native CI job. The exclusion is correct for that target but it is not the end state: Michael wants Windows supported, including driving powershell.exe and cmd.exe. The unix socket is NOT what blocks it -- a loopback port would replace it, as the chat skill already offers. The terminal core is what blocks it: libc::openpty (lib.rs:1415), ioctl TIOCSCTTY (1437) and TIOCSWINSZ (1897), setsid (1436), setpgid (1443), and kill(-pid, SIGKILL/SIGTERM) (1463, 1473, 1482), plus twelve raw-fd sites against a platform whose equivalent is a HANDLE. The libc crate exposes none of openpty/setsid/TIOCSCTTY for windows targets -- twenty hits across its unix modules, zero in its windows module. Two independent routes, filed as sub-tasks: Cygwin's POSIX layer is cheap and yields a Cygwin bash; a native ConPTY backend is the real work and is the only route that drives PowerShell and cmd.",
+      "blocked_on": null,
+      "refs": [
+        "src/interactive-shell/src/lib.rs",
+        ".github/workflows/ci.yml",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-03T18:14:04Z"
+    },
+    {
+      "id": "T84a",
+      "title": "Add an x86_64-pc-cygwin leg so the POSIX code runs unchanged",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T84",
+      "detail": "Cygwin implements ptys, sessions, process groups and signals, so the existing POSIX code needs little or no change - this is a toolchain excursion, not a port. Verified against the pinned toolchain: rustc 1.98 does list x86_64-pc-cygwin in rustc --print target-list, so the compiler knows it, but it is absent from rustup target list, which means tier 3 with no prebuilt std. It therefore needs nightly with -Z build-std or a hand-built std, which is why this is filed rather than done. Deliverables: the target building in CI as its own matrix leg, and a Windows row in interactive-shell/binaries.tsv so the shipped set matches what CI proves. What this does NOT deliver is PowerShell or cmd - a Cygwin build drives a Cygwin bash, and the native shells are T84b. MSYS is tracked separately as T84c because it is a different runtime DLL, not a variant of this one.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-03T18:18:46Z"
+    },
+    {
+      "id": "T84b",
+      "title": "Add a native ConPTY backend so PowerShell and cmd can be driven",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T84",
+      "detail": "What Michael actually asked for: interactive-shell driving powershell.exe and cmd.exe. That means a second terminal backend behind the same protocol, because Windows has no analogue of the calls the current one makes. CreatePseudoConsole/ResizePseudoConsole/ClosePseudoConsole replace openpty and the two ioctls; a Job Object with TerminateJobObject replaces setpgid plus kill(-pid, ...), since Windows has neither process groups nor POSIX signals; HANDLEs replace the raw fds; and the client transport moves to a loopback port, which is the one piece that ports without argument. Keep the wire protocol identical so the agent-facing surface does not fork per platform, and cfg-gate the backends rather than the crate -- an inert Windows stub that builds and refuses to run is worse than an honest absence. ConPTY needs Windows 10 1809 or newer. Michael wants BOTH routes, so this does not retire T84a: they cover different shells on the same platform, and the two backends can share the protocol and the tests.",
+      "blocked_on": null,
+      "refs": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:14:04Z",
+      "updated_at": "2026-09-03T18:14:04Z"
+    },
+    {
+      "id": "T84c",
+      "title": "Target MSYS2 as well, which has no upstream rust target",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T84",
+      "detail": "Michael wants MSYS2 targeted alongside Cygwin, and it is not the same build. msys2-runtime is a fork of the Cygwin runtime with the same POSIX surface, so the interactive-shell code should need no change, but a binary for it links msys-2.0.dll where a Cygwin binary links cygwin1.dll, and the two are not interchangeable at runtime. The obstacle is sharper than T84a: rustc --print target-list on the pinned 1.98 toolchain lists x86_64-pc-cygwin and NO msys target whatsoever, so unlike Cygwin there is not even a tier-3 target to build std for. The likely route is a custom target spec derived from the cygwin one with the runtime library swapped, built under MSYS2 own toolchain - to be established rather than assumed, so treat the first step as research and record what is found here before writing CI. This is also the Git-for-Windows route in practice: Git for Windows ships the MSYS2 runtime, so whatever makes MSYS2 work is what makes a Git-for-Windows bash work. Its source is public at git-for-windows/git and git-for-windows/msys2-runtime; nothing needs vendoring here to settle the approach.",
+      "blocked_on": null,
+      "refs": [
+        ".github/workflows/ci.yml",
+        "interactive-shell/binaries.tsv"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:18:46Z",
+      "updated_at": "2026-09-03T18:18:46Z"
     },
     {
       "id": "T69",
