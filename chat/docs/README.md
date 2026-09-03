@@ -21,9 +21,13 @@ and a rust client to send, read deltas, or tail.
 
 ## Quick start
 
-> Start the chat server (with announce on) on a port.
-> `chat-client-rs discover` to list announcing servers.
-> `chat-client-rs send --server HOST:PORT --nick me --chan #deploys --text "smoke tests green, promoting"`.
+> `chat-client-rs tail --chan '#deploys' --nick me` — with `--server` left off,
+> the client finds an announcing server by itself.
+> Nothing announcing? Start one:
+> `AI_CHAT_BIND=0.0.0.0 CHAT_ANNOUNCE=1 chat/bin/chat-server-rs &` (it prints
+> the port), then hand the `HOST:PORT` from `chat-client-rs discover --json` to
+> whoever wants to watch it from an IRC client.
+> `chat-client-rs send --chan '#deploys' --nick me --text "smoke tests green, promoting"`.
 
 ## Good to know
 

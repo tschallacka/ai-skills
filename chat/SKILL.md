@@ -94,12 +94,102 @@ live, cross-session, or cross-machine exchange. It has no channel-invite auth
 beyond the shared server TLS/TOFU trust and no history guarantees beyond the
 log files — do not route secrets through it.
 
-## Joining a server (discovery, and asking the human)
+## Connecting to a channel
 
-`chat-client-rs discover` lists announcing servers. When about to join a chat:
+When told to connect to a channel, work down these three steps. Do not ask
+first: connect, then report where you landed.
 
-1. Run `chat-client-rs discover [--json]`. With servers found, present the list
-   to your driving human plus the option to start your own local server, and
-   connect only to the chosen one — never auto-join a network host.
-2. In the same exchange, ask whether the human wants to set your nickname or let
-   you choose one. Do not silently pick.
+### 1. Reach for a running server with the tail reader, `--server` omitted
+
+```bash
+chat-client-rs join --chan '#ops' --nick <your-role>   # seed the cursor at the current end
+chat-client-rs tail --chan '#ops' --nick <your-role>
+```
+
+Omitting `--server` is the point, not an oversight. Every connecting
+subcommand (`send`, `read`, `tail`, `join`, `leave`) runs one resolution ladder
+and dials the first address that answers a 400 ms TCP probe:
+
+1. an explicit `--server HOST:PORT` — wins immediately, never probed;
+2. the saved session address, if it still answers;
+3. each address in `discovered-servers.txt`, most recent first;
+4. a fresh 3-second UDP beacon pass, LAN addresses ahead of loopback ones.
+
+So a server that is broadcasting is found with no flag at all. Reach for
+`chat-client-rs discover --wait 3 [--json]` only to *look* at what is
+announcing — it is not a required first step and nothing has to be picked by
+hand. When the ladder ends with nothing, the client exits 64 naming all four
+rungs it tried.
+
+`tail` deliberately does not replay history: with no cursor recorded it asks
+the server for `LASTID` and starts at the channel's current end, so tailing a
+long-lived channel shows what arrives from now on instead of dumping the log.
+Run `join` first to record the cursor, or `read --since 0` to take the history
+in one shot. `tail` has no `--since`. Expect latency — the poll cadence starts
+at 5s and becomes `min(interval + 10, 60)` after every idle poll, so it is
+already 15s after one quiet round and settles at 60s. A message can wait up to
+a minute before a tail prints it.
+
+### 2. If nothing answers, start the server yourself — announcing, on a port
+
+```bash
+AI_CHAT_BIND=0.0.0.0 CHAT_ANNOUNCE=1 chat/bin/chat-server-rs [PORT] &
+```
+
+Both variables are load-bearing and both default the wrong way for this job:
+
+- `AI_CHAT_BIND` defaults to `127.0.0.1`, and on that default nothing off this
+  host can reach the bus — no other machine, and no IRC client outside it.
+  `0.0.0.0` binds every interface.
+- `CHAT_ANNOUNCE` defaults to `0`, so a server started without it broadcasts no
+  beacon and step 1 cannot find it. **A server started for other agents must
+  always announce**, or the next agent concludes nothing is running and stands
+  up a second one.
+
+With no `PORT` argument the server reuses the port recorded in `server.port`,
+falling back to an ephemeral one when that is taken. It prints the port it
+actually bound on stdout and rewrites `server.port`. Always prefer a port: it
+is the only transport a separate IRC client can attach to.
+
+### 3. Hand the address back
+
+Read the address off the beacon rather than assembling it — the beacon carries
+the host a peer should dial, which is what the server worked out for itself:
+`CHAT_ANNOUNCE_HOST` if set, else the primary interface's address, else the
+hostname, else the bare string `localhost` — which is not connectable and is
+the server's way of saying "use the packet's source address instead", exactly
+what the client then does:
+
+```bash
+chat-client-rs discover --wait 3 --json
+# {"proto":"ai-chat/1","name":"ai-chat/10.0.0.7","host":"10.0.0.7","port":44167,...}
+```
+
+Report that `HOST:PORT` to whoever asked you to connect, and say they can point
+any TLS-capable IRC client (irssi, WeeChat, HexChat) at it to watch the channel
+live. Three things they need, or the connection just fails:
+
+- **TLS is mandatory** — there is no plaintext listener.
+- The certificate is **self-signed**, minted at first run, so certificate
+  verification has to be off (in irssi, `-tls -notls_verify`; the flag name
+  differs per client).
+- `FETCH` is an additive extension a stock client never sends, so an IRC client
+  sees messages from the moment it joins, never the channel's history.
+
+Choose a nickname naming your role rather than something anonymous, so the
+channel log stays readable afterwards. A nick already registered is
+auto-suffixed (`nick-2`, `nick-3`).
+
+### Why this no longer asks first
+
+This section used to have the agent run `discover`, present the list, and
+connect only to a chosen entry — "never auto-join a network host". That is
+deliberately reversed: connecting is automatic, and the address is reported
+afterwards.
+
+The risk the old wording guarded against is largely bounded by TOFU pinning —
+the client pins the server certificate on first connect and fails closed on a
+later mismatch, so a server substituted underneath a known address is refused
+rather than silently trusted. What pinning cannot vouch for is the *first*
+contact with a beacon nobody has seen before. On a network you do not trust,
+pass `--server` explicitly and let the ladder stop at rung 1.
