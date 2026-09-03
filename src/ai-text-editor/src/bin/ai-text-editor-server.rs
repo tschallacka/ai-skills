@@ -40,6 +40,7 @@ struct Tab {
     pending_external: Option<Vec<u8>>,
     index: LineIndex,
     index_loaded: bool,
+    index_complete: bool,
     cursors: BTreeMap<u64, Position>,
     results: HashMap<String, Vec<Value>>,
     journal: Journal,
@@ -229,7 +230,7 @@ fn main() {
         history.record(&before_document, &after_document);
     }
     let rebuilt_index = if let Some(file) = &large_file {
-        file.index(DEFAULT_GRANULARITY)
+        file.index_prefix(DEFAULT_GRANULARITY, DEFAULT_GRANULARITY)
             .unwrap_or_else(|_| LineIndex::build(document.bytes(), DEFAULT_GRANULARITY))
     } else {
         LineIndex::build(document.bytes(), DEFAULT_GRANULARITY)
@@ -244,6 +245,7 @@ fn main() {
         _ => (rebuilt_index, false),
     };
     let _ = metadata.record(&path, mode, recovered_revision, index.bytes);
+    let index_complete = loaded_index || large_file.is_none();
     let mut tab = Tab {
         path: path.clone(),
         document,
@@ -259,6 +261,7 @@ fn main() {
         pending_external: None,
         index,
         index_loaded: loaded_index,
+        index_complete,
         cursors: BTreeMap::from([(0, Position { line: 1, column: 0 })]),
         results: HashMap::new(),
         journal,
@@ -437,7 +440,7 @@ fn persist_index(tab: &mut Tab) {
         tab.index.bytes,
         tab.index.lines,
         &tab.disk_digest,
-        true,
+        tab.index_complete,
         tab.revision,
     );
     let _ = tab.metadata.record_index_blocks(
@@ -554,7 +557,7 @@ fn open_additional_tab(
         history.record(&before_document, &after_document);
     }
     let rebuilt_index = if let Some(file) = &large_file {
-        file.index(DEFAULT_GRANULARITY)
+        file.index_prefix(DEFAULT_GRANULARITY, DEFAULT_GRANULARITY)
             .unwrap_or_else(|_| LineIndex::build(document.bytes(), DEFAULT_GRANULARITY))
     } else {
         LineIndex::build(document.bytes(), DEFAULT_GRANULARITY)
@@ -571,6 +574,7 @@ fn open_additional_tab(
     let _ = metadata.record(&path, mode, recovered_revision, index.bytes);
     let session_token =
         auth::nonce().map_err(|error| format!("cannot create session token: {error}"))?;
+    let index_complete = index_loaded || large_file.is_none();
     let mut tab = Tab {
         path: path.clone(),
         document,
@@ -586,6 +590,7 @@ fn open_additional_tab(
         pending_external: None,
         index,
         index_loaded,
+        index_complete,
         cursors: BTreeMap::from([(0, Position { line: 1, column: 0 })]),
         results: HashMap::new(),
         journal,
@@ -986,7 +991,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         }
     }
     match envelope.method.as_str() {
-        "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
+        "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
         "capabilities" => frames.push(response(&envelope.request_id, json!({
             "protocol_version": ai_text_editor::PROTOCOL_VERSION,
             "document_modes": ["text_utf8", "raw_bytes", "hex_view"],
@@ -1037,8 +1042,9 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             } else {
                 tab.index = LineIndex::build(tab.document.bytes(), granularity);
             }
+            tab.index_complete = true;
             persist_index(&mut tab);
-            frames.push(response(&envelope.request_id, json!({"granularity": tab.index.granularity, "bytes": tab.index.bytes, "lines": tab.index.lines, "blocks": tab.index.blocks})));
+            frames.push(response(&envelope.request_id, json!({"granularity": tab.index.granularity, "bytes": tab.index.bytes, "lines": tab.index.lines, "blocks": tab.index.blocks, "complete": tab.index_complete, "coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}})));
         }
         "cursor" => cursor(&envelope, &mut tab, &mut frames),
         "page" => page(&envelope, &mut tab, &mut frames),
@@ -1141,6 +1147,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             tab.revision = revision;
                             tab.results.clear();
                             tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
+                            tab.index_complete = true;
                             persist_index(&mut tab);
                             let _ = tab.metadata.record(&tab.path, tab.document.mode, tab.revision, tab.document.bytes().len());
                             frames.push(response(&envelope.request_id, json!({"revision": tab.revision, "cursors": tab.cursors})));
@@ -1843,6 +1850,7 @@ fn history_step(
     tab.revision = revision;
     tab.results.clear();
     tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
+    tab.index_complete = true;
     persist_index(tab);
     let _ = tab.metadata.record(
         &tab.path,
@@ -2239,6 +2247,7 @@ fn resolve_external(
             tab.base_bytes = external;
             tab.results.clear();
             tab.index = LineIndex::build(tab.document.bytes(), tab.index.granularity);
+            tab.index_complete = true;
             persist_index(tab);
             frames.push(response(&envelope.request_id, json!({"resolved": "merge", "revision": revision, "save_required": true, "history_event": "external_merge"})));
         }
@@ -2871,6 +2880,7 @@ fn large_edit(
             tab.index = updated
                 .index(tab.index.granularity)
                 .unwrap_or_else(|_| LineIndex::build(&[], tab.index.granularity));
+            tab.index_complete = true;
             persist_index(tab);
             let _ = tab.metadata.record(
                 &tab.path,

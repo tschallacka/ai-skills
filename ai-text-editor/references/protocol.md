@@ -63,6 +63,12 @@ coordinate bases/units, presentation modes, fuzzy-gradient meanings,
 large-file restrictions, transport choices, and server defaults. Agents should
 query it when they need machine-readable behavior instead of parsing help text.
 
+Large-tab startup builds only a bounded prefix of the default 10,000-line index
+and persists it as incomplete coverage. `open` reports `index_complete` and
+`index_coverage`. The explicit `index` operation performs a complete scan for
+the requested `granularity`, persists it, and returns `complete: true`; index
+data is an optimization and never changes search correctness.
+
 ## Coordinates and modes
 
 1. `text_utf8`: one-based lines, zero-based Unicode scalar columns.

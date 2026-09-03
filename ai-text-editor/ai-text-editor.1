@@ -79,6 +79,8 @@ The installed package may keep the binaries outside PATH. Discover this manual
 beside the skill and use \fBman -l /path/to/ai-text-editor.1\fR.
 .SH LARGE FILES
 Files above 256 MiB use bounded file-backed reads and sparse index scans.
+Startup records only a bounded prefix index for a large tab. Use the
+index operation for an explicit full scan and inspect the reported coverage.
 Use \fB--offset\fR and \fB--length\fR for reads. Ordinary mutations are
 refused; start a job and use \fBlarge-edit\fR with
 \fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.

@@ -56,6 +56,8 @@ server-written coordination metadata, not a client-accessible SQLite store.
    explicit historical reads.
 9. Build or inspect lazy 10,000-line/byte-offset indexes, including explicit
    ranges, full-index requests, granularity, cancellation, and resource limits.
+   Large-tab startup records bounded prefix coverage; use `index` for an
+   explicit full scan and inspect `index_complete` before relying on coverage.
 10. Resolve external changes with backup, reload, merge, keep, or acknowledged
     force-save; `backup` preserves external bytes and leaves resolution
     pending, while other choices resolve the alert. External bytes can also be

@@ -122,6 +122,40 @@ impl LargeFile {
         })
     }
 
+    pub fn index_prefix(&self, granularity: usize, max_lines: usize) -> io::Result<LineIndex> {
+        let granularity = granularity.max(1);
+        let max_lines = max_lines.max(1);
+        let mut reader = BufReader::new(File::open(&self.path)?);
+        let mut blocks = vec![IndexBlock {
+            line: 1,
+            byte_offset: 0,
+        }];
+        let mut line_number = 1usize;
+        let mut offset = 0usize;
+        let mut line = Vec::new();
+        while line_number <= max_lines {
+            line.clear();
+            let read = reader.read_until(b'\n', &mut line)?;
+            if read == 0 {
+                break;
+            }
+            offset += read;
+            line_number += 1;
+            if (line_number - 1).is_multiple_of(granularity) {
+                blocks.push(IndexBlock {
+                    line: line_number,
+                    byte_offset: offset,
+                });
+            }
+        }
+        Ok(LineIndex {
+            granularity,
+            bytes: self.bytes as usize,
+            lines: line_number,
+            blocks,
+        })
+    }
+
     pub fn search_text(
         &self,
         query: &str,
@@ -393,6 +427,18 @@ mod tests {
             .search_text_mode(SearchMode::FuzzySubsequence, "bt", 1, 3, Some(0.5))
             .unwrap();
         assert_eq!(fuzzy[0].0, 2);
+    }
+
+    #[test]
+    fn prefix_index_stops_without_scanning_the_whole_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.txt");
+        std::fs::write(&path, b"one\ntwo\nthree\nfour\n").unwrap();
+        let file = LargeFile::open(&path).unwrap();
+        let index = file.index_prefix(2, 2).unwrap();
+        assert_eq!(index.bytes, 19);
+        assert_eq!(index.lines, 3);
+        assert_eq!(index.blocks[1].line, 3);
     }
 
     #[test]
