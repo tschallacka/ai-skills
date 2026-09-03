@@ -82,6 +82,11 @@ second_session="$scratch/second-session.json"
 printf 'second-tab\n' > "$second_file"
 endpoint="$(sed -n 's/.*"endpoint":"\([^"]*\)".*/\1/p' "$server_output")"
 [ -n "$endpoint" ]
+discovery="$(sed -n 's/.*"discovery":"\([^"]*\)".*/\1/p' "$server_output")"
+[ -n "$discovery" ]
+grep -Fq '"status":"active"' "$discovery"
+grep -Fq '"pid":' "$discovery"
+grep -Fq '"generation":' "$discovery"
 second_open="$($client open --endpoint "$endpoint" --file "$second_file" --save-session-token "$second_session")"
 contains "$second_open" 'second-document.txt'
 second_read="$($client read --endpoint "$endpoint" --session-token "$second_session")"
@@ -226,11 +231,13 @@ large_output="$scratch/large-server-output"
 "$server" start --file "$large_file" --large-threshold-bytes 1 >"$large_output" 2>&1 &
 large_pid="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if "$client" open --file "$large_file" --save-session-token "$session" >/dev/null 2>&1; then
+    if large_open="$($client open --file "$large_file" --save-session-token "$session" 2>/dev/null)"; then
         break
     fi
     sleep 0.1
 done
+contains "$large_open" '"index_complete": false'
+contains "$large_open" '"through_line": 1'
 if editor search --file "$large_file" --mode exact_text --query needle >"$scratch/unbounded-large-search" 2>&1; then
     exit 1
 fi
@@ -239,9 +246,15 @@ large_search="$(editor search --file "$large_file" --mode exact_text --query nee
 contains "$large_search" '"count": 1'
 contains "$large_search" '"start_line": 1'
 contains "$large_search" '"end_line": 3'
+large_regex="$(editor search --file "$large_file" --mode regex_rust --query 'n.*dle' --range-start-line 1 --range-end-line 3)"
+contains "$large_regex" '"count": 1'
+large_fuzzy="$(editor search --file "$large_file" --mode fuzzy_subsequence --query nedle --range-start-line 1 --range-end-line 3)"
+contains "$large_fuzzy" '"count": 1'
 large_bytes="$(editor search --file "$large_file" --mode exact_bytes --query-base64 bmVlZGxl --range-start-byte 0 --range-end-byte 18)"
 contains "$large_bytes" '"byte_start": 6'
 contains "$large_bytes" '"contents_base64": "bmVlZGxl"'
+large_index="$(editor index --file "$large_file" --granularity 2)"
+contains "$large_index" '"complete": true'
 editor close --file "$large_file" --journal-action clean >/dev/null
 wait "$large_pid" 2>/dev/null || true
 large_pid=""
