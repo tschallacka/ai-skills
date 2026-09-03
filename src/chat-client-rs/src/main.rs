@@ -1209,6 +1209,31 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
 }
 
 /// The channel log a local read walks: the same file the server appends to.
+/// The server's own channel-name rule, restated here because a LOCAL read
+/// never reaches the server to be checked by it.
+///
+/// A remote read is validated server-side (`valid_chan` in chat-server-rs,
+/// called before every JOIN, PRIVMSG and fetch), so `--chan` could be trusted
+/// for as long as every path went through a socket. `--local` walks the log
+/// file directly, which takes the server out of the loop and turns the channel
+/// name into a path segment: `local_chan_log` joins it straight into
+/// `<home>/channels/<chan>.log`, and `Path::join` does not resolve `..`, so
+/// `--chan ../../../../tmp/x` reads `/tmp/x.log`. The exit code then differs by
+/// whether that file exists, which answers "does this path exist" for any path
+/// the caller names.
+///
+/// Kept character-for-character identical to the server's rule rather than
+/// merely "safe": a name the server would refuse must not be readable by going
+/// around it, or the two disagree about what a channel is.
+fn valid_chan(c: &str) -> bool {
+    c.len() > 1
+        && c.len() <= 33
+        && c.starts_with('#')
+        && c[1..]
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
+}
+
 fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
     home.join("channels").join(format!("{}.log", chan))
 }
@@ -1304,6 +1329,10 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     if o.local {
         if o.chan.is_empty() {
             eprintln!("chat-client-rs: read --local needs --chan #c");
+            std::process::exit(64);
+        }
+        if !valid_chan(&o.chan) {
+            eprintln!("chat-client-rs: read --local: not a channel name: {}", o.chan);
             std::process::exit(64);
         }
         // --since wins; otherwise the session cursor; otherwise everything.
@@ -1425,6 +1454,10 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     if o.local {
         if o.chan.is_empty() {
             eprintln!("chat-client-rs: tail --local needs --chan #c");
+            std::process::exit(64);
+        }
+        if !valid_chan(&o.chan) {
+            eprintln!("chat-client-rs: tail --local: not a channel name: {}", o.chan);
             std::process::exit(64);
         }
         let nick = if o.nick.is_empty() {
