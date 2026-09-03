@@ -188,7 +188,12 @@ impl LargeFile {
                     )
                 })?;
                 for (start, found) in text.match_indices(query) {
-                    results.push((line_number, start, start + found.len(), found.to_owned()));
+                    results.push((
+                        line_number,
+                        text[..start].chars().count(),
+                        text[..start + found.len()].chars().count(),
+                        found.to_owned(),
+                    ));
                 }
             }
             if end_line
@@ -235,11 +240,14 @@ impl LargeFile {
                     matches_with_gradient(mode, query, text, gradient).map_err(|error| {
                         io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
                     })?;
-                results.extend(
-                    matches
-                        .into_iter()
-                        .map(|(start, end)| (line_number, start, end, text[start..end].to_owned())),
-                );
+                results.extend(matches.into_iter().map(|(start, end)| {
+                    (
+                        line_number,
+                        text[..start].chars().count(),
+                        text[..end].chars().count(),
+                        text[start..end].to_owned(),
+                    )
+                }));
             }
             if line_number as u64 >= end_line {
                 break;
@@ -427,6 +435,17 @@ mod tests {
             .search_text_mode(SearchMode::FuzzySubsequence, "bt", 1, 3, Some(0.5))
             .unwrap();
         assert_eq!(fuzzy[0].0, 2);
+    }
+
+    #[test]
+    fn large_text_search_reports_scalar_columns() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.txt");
+        std::fs::write(&path, "éneedle\n").unwrap();
+        let file = LargeFile::open(&path).unwrap();
+        let found = file.search_text("needle", 1, None).unwrap();
+        assert_eq!(found[0].1, 1);
+        assert_eq!(found[0].2, 7);
     }
 
     #[test]
