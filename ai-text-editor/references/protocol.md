@@ -111,7 +111,7 @@ token, and n-gram modes it is the minimum score; phonetic modes use a binary
 match score.
 
 Search responses include `search_range` with the requested line and byte
-bounds. For a large tab, `exact_text` currently requires an explicit inclusive
+bounds. For a large tab, every text search mode requires an explicit inclusive
 `range_start_line`/`range_end_line`; an omitted end line is refused rather than
 silently scanning an unbounded file. Large `exact_bytes` searches instead
 require an explicit half-open `range_start_byte`/`range_end_byte` range no

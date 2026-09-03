@@ -49,7 +49,8 @@ server-written coordination metadata, not a client-accessible SQLite store.
 6. Insert, replace, delete, transact, restore normalized text when lossless,
    undo, redo, inspect history, and replay.
 7. Search with explicit exact-text, exact-byte, wildcard, shell-wildcard,
-   path-wildcard, Rust-regex, PCRE2-regex, and six fuzzy modes.
+   path-wildcard, Rust-regex, PCRE2-regex, and six fuzzy modes; all text modes
+   are available on bounded large-file ranges.
 8. Request counts, pager keys, first-four defaults, context lines, line/byte ranges,
    ordering, completeness, result generations, stale-page detection, and
    explicit historical reads.

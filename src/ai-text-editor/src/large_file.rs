@@ -1,6 +1,7 @@
 // MODE: DEV
 // PACKAGE: PROD
 use crate::index::{IndexBlock, LineIndex};
+use crate::search::{matches_with_gradient, SearchMode};
 use std::fs::File;
 use std::io::Write;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
@@ -160,6 +161,53 @@ impl LargeFile {
                 .map(|end| line_number as u64 >= end)
                 .unwrap_or(false)
             {
+                break;
+            }
+            line_number += 1;
+        }
+        Ok(results)
+    }
+
+    pub fn search_text_mode(
+        &self,
+        mode: SearchMode,
+        query: &str,
+        start_line: u64,
+        end_line: u64,
+        gradient: Option<f64>,
+    ) -> io::Result<Vec<(usize, usize, usize, String)>> {
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut reader = BufReader::new(File::open(&self.path)?);
+        let mut line = Vec::new();
+        let mut line_number = 1usize;
+        let mut results = Vec::new();
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line)? == 0 {
+                break;
+            }
+            if (line_number as u64) >= start_line && (line_number as u64) <= end_line {
+                let content = line.strip_suffix(b"\n").unwrap_or(&line);
+                let content = content.strip_suffix(b"\r").unwrap_or(content);
+                let text = std::str::from_utf8(content).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "large text search range is not UTF-8",
+                    )
+                })?;
+                let matches =
+                    matches_with_gradient(mode, query, text, gradient).map_err(|error| {
+                        io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
+                    })?;
+                results.extend(
+                    matches
+                        .into_iter()
+                        .map(|(start, end)| (line_number, start, end, text[start..end].to_owned())),
+                );
+            }
+            if line_number as u64 >= end_line {
                 break;
             }
             line_number += 1;
@@ -329,6 +377,22 @@ mod tests {
         let file = LargeFile::open(&path).unwrap();
         let found = file.search_bytes(b"needle", 4, 8).unwrap();
         assert_eq!(found, vec![(5, 11, b"needle".to_vec())]);
+    }
+
+    #[test]
+    fn bounded_text_search_supports_explicit_non_literal_modes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.txt");
+        std::fs::write(&path, b"alpha\nbeta\nALPACA\n").unwrap();
+        let file = LargeFile::open(&path).unwrap();
+        let found = file
+            .search_text_mode(SearchMode::RegexRust, "a.*a", 1, 3, None)
+            .unwrap();
+        assert_eq!(found[0].0, 1);
+        let fuzzy = file
+            .search_text_mode(SearchMode::FuzzySubsequence, "bt", 1, 3, Some(0.5))
+            .unwrap();
+        assert_eq!(fuzzy[0].0, 2);
     }
 
     #[test]

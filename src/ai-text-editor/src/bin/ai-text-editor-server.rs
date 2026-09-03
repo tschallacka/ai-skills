@@ -2501,10 +2501,6 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             }
             return;
         }
-        if mode != SearchMode::ExactText {
-            frames.push(error(&envelope.request_id, "large_search_mode_requires_job", "large tabs currently support bounded exact_text search; choose a range or an explicit search job for other engines"));
-            return;
-        }
         let start_line = envelope
             .payload
             .get("range_start_line")
@@ -2531,7 +2527,7 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             ));
             return;
         }
-        match file.search_text(query, start_line, Some(end_line)) {
+        match file.search_text_mode(mode, query, start_line, end_line, gradient) {
             Ok(found) => {
                 let results = found.into_iter().map(|(line, start, end, contents)| json!({"line": line, "column_start": start, "column_end": end, "contents": contents})).collect();
                 let result_id = format!(
@@ -2543,7 +2539,11 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             }
             Err(error_value) => frames.push(error(
                 &envelope.request_id,
-                "large_search_failed",
+                if error_value.kind() == std::io::ErrorKind::InvalidInput {
+                    "search_invalid"
+                } else {
+                    "large_search_failed"
+                },
                 error_value.to_string(),
             )),
         }
