@@ -99,7 +99,7 @@ server-written coordination metadata, not a client-accessible SQLite store.
 
 Large files above the server's 256 MiB threshold use file-backed bounded reads
 (`read --offset N --length N`) and sparse index scans. Ordinary mutations are
-refused. Exact text searches require `--range-start-line` and
+refused. All text searches require `--range-start-line` and
 `--range-end-line`; exact byte searches require bounded
 `--range-start-byte`/`--range-end-byte`; unbounded scans are refused. To
 rewrite one, start a job, then call `large-edit` with its `--job-id`,
