@@ -1,0 +1,21 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "ai-text-editor-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optional MCP adapter for ai-text-editor"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ai-text-editor-mcp"
+path = "src/main.rs"
+
+[dependencies]
+ai-text-editor = { path = "../ai-text-editor" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

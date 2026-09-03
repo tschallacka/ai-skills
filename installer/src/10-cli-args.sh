@@ -83,6 +83,21 @@ while [ "$#" -gt 0 ]; do
             esac
             shift
             ;;
+        --editor-integration)
+            [ "$#" -ge 2 ] || die "--editor-integration needs skill or mcp"
+            case "$2" in
+                skill|mcp) EDITOR_INTEGRATION="$2" ;;
+                *) die "--editor-integration must be skill or mcp, not $2" ;;
+            esac
+            shift 2
+            ;;
+        --editor-integration=*)
+            case "${1#--editor-integration=}" in
+                skill|mcp) EDITOR_INTEGRATION="${1#--editor-integration=}" ;;
+                *) die "--editor-integration must be skill or mcp, not ${1#--editor-integration=}" ;;
+            esac
+            shift
+            ;;
         --target)
             [ "$#" -ge 2 ] || die "--target needs a directory"
             TARGET_SELECTION="$2"
@@ -101,4 +116,3 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
-

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "auth_token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "method": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "request_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "version",
+    "request_id",
+    "method",
+    "payload"
+  ],
+  "title": "ai-text-editor v1 envelope",
+  "type": "object"
+}

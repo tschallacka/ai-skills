@@ -1,0 +1,40 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "ai-text-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent-oriented local text and byte editor server and client"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ai-text-editor-server"
+path = "src/bin/ai-text-editor-server.rs"
+
+[[bin]]
+name = "ai-text-editor"
+path = "src/bin/ai-text-editor.rs"
+
+[[bin]]
+name = "ai-text-editor-schema-gen"
+path = "src/bin/ai-text-editor-schema-gen.rs"
+
+[dependencies]
+base64.workspace = true
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+regex.workspace = true
+pcre2.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+hmac.workspace = true
+getrandom.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

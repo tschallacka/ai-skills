@@ -124,6 +124,11 @@ host_triple() {
 plan() {
     plan_primary
     plan_secondary
+    cat <<'PLAN'
+ai-text-editor	ai-text-editor
+ai-text-editor	ai-text-editor-server
+ai-text-editor-mcp	ai-text-editor-mcp
+PLAN
 }
 
 plan_primary() {

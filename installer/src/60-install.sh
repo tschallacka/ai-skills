@@ -130,6 +130,10 @@ install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
+        if ! ai_text_editor_file_allowed "$skill" "$relative"; then
+            [ -e "$destination/$relative" ] && changed=1
+            continue
+        fi
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -151,7 +155,6 @@ install_skill() {
     done <<EOF
 $files
 EOF
-
     if [ -L "$destination/.version" ]; then
         echo "Skipping $root/$skill: existing .version symlink requires manual review." >&2
         summary_add "Skipped:   $destination — existing .version symlink requires manual review"
@@ -187,10 +190,27 @@ EOF
         return
     fi
 
+    if [ "$skill" = ai-text-editor ]; then
+        local stale_relative
+        for stale_relative in \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor-server \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor-mcp \
+            bin/x86_64-pc-windows-msvc/ai-text-editor.exe \
+            bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe \
+            bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe; do
+            ai_text_editor_file_allowed "$skill" "$stale_relative" || {
+                [ -e "$destination/$stale_relative" ] || continue
+                rm -f "$destination/$stale_relative"
+            }
+        done
+    fi
+
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
+        ai_text_editor_file_allowed "$skill" "$relative" || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi

@@ -20,6 +20,7 @@ compatible agent tools.
 | Git merge resolving | Conflicts resolved by what each side changed rather than by ours/theirs: reading intent from history, unions that look like choices, regenerated output, and attributing post-merge failures to the side that caused them. | [docs](git-merge-resolving/docs/README.md) |
 | Merge request etiquette | Descriptions a reviewer can act on, in the author's voice: a one-paragraph TLDR, the defect/cause/change body, derived from the branch's commits, and the one case where a collapsible section earns its place. | [docs](merge-request-etiquette/docs/README.md) |
 | Text etiquette | Shorthand and a clipped register for an agent's prose - chat, dev talk, and its own thinking: facts first, a shared shorthand with an ask-don't-guess rule, praise capped at `gj`, and the people-please prose banned. Plain english on request. | [docs](text-etiquette/docs/README.md) |
+| AI text editor | Server-owned agent editor tabs with explicit search, revision-aware edits, undo/redo, raw-byte and hex modes, SQLite metadata, and Unix/TCP transport. | [docs](ai-text-editor/docs/README.md) |
 
 Use a skill only when its frontmatter trigger matches the task or when the
 user explicitly requests it. Each skill documents when not to activate.
