@@ -451,5 +451,110 @@ AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#nosuchchannel' --no-session
     >/dev/null 2>"$temporary_root/nochan.err" || rc=$?
 [ "$rc" -eq 66 ] || t_fail "read --local on a missing channel exited $rc (want 66)"
 
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown, serverless local reads)\n' >&2
+
+# ---- F6: --local must refuse a channel name the SERVER would refuse --------
+# `local_chan_log` joins --chan straight into <home>/channels/<chan>.log and
+# Path::join does not resolve "..", so `--chan ../oracle` read <home>/oracle.log
+# -- outside the channels dir entirely. Worse than the read: the exit code
+# differed by whether the target existed (66 for missing, 0 for present), so the
+# flag answered "does this path exist" for any path the caller named.
+#
+# A remote read never had this shape; the server checks valid_chan before every
+# JOIN, PRIVMSG and fetch. --local takes the server out of the loop, so the
+# client has to apply the same rule itself.
+printf 'this file is outside the channels directory\n' >"$home/oracle.log"
+# The traversal target EXISTS, and must be refused rather than read.
+trav_out=""; rc=0
+trav_out="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '../oracle' \
+    --since 0 --no-session 2>"$temporary_root/trav.err")" || rc=$?
+[ "$rc" -eq 64 ] || t_fail "read --local followed a .. traversal (exited $rc, want 64)"
+case "$trav_out" in
+    *'outside the channels directory'*)
+        t_fail "read --local printed a file outside channels/: [$trav_out]" ;;
+esac
+# And the existence oracle is closed: a traversal to a path that does NOT exist
+# must be indistinguishable from one that does. While the guard was missing
+# these differed (0 with the content, 66 without), which is what made it an
+# oracle for any path on the machine.
+rc_missing=0
+AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '../nosuchfile' \
+    --since 0 --no-session >/dev/null 2>&1 || rc_missing=$?
+[ "$rc_missing" -eq "$rc" ] || t_fail \
+    "read --local leaks whether a traversal target exists (present=$rc missing=$rc_missing)"
+# tail shares local_chan_log and needs the same guard. Assert it on a MISSING
+# traversal path: unguarded that reaches local_read and exits 66, guarded it is
+# refused with 64 -- both terminate at once, where an unguarded tail on a target
+# that exists would instead sit in its poll loop forever.
+rc=0
+AI_CHAT_HOME="$home" "$CLIENT" tail --local --chan '../nosuchfile' \
+    --no-session >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || t_fail "tail --local accepted a .. traversal as a channel (exited $rc, want 64)"
+# An absolute path is a traversal too, and the same rule covers it.
+rc=0
+AI_CHAT_HOME="$home" "$CLIENT" read --local --chan "$home/oracle" --since 0 --no-session \
+    >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 64 ] || t_fail "read --local accepted an absolute path as a channel (exited $rc, want 64)"
+# The guard must not cost a legitimate read: the control above still works.
+ctl="$(AI_CHAT_HOME="$home" "$CLIENT" read --local --chan '#sess' --since 0 --no-session 2>/dev/null || true)"
+case "$ctl" in
+    *'MSG #sess'*) : ;;
+    *) t_fail "the channel-name guard broke a legitimate read --local: [$ctl]" ;;
+esac
+
+# ---- F8/F9: the local reader's cursor and its mention-exit -----------------
+# One log whose only mention is its LAST row, which is the shape that loses
+# messages: three unread rows below a mention at the end.
+cur_home="$temporary_root/cursors"
+mkdir -p "$cur_home/channels"
+cat >"$cur_home/channels/#cur.log" <<'EOF'
+MSG #cur 1 :alice!alice@localhost PRIVMSG #cur :unread one
+MSG #cur 2 :alice!alice@localhost PRIVMSG #cur :unread two
+MSG #cur 3 :alice!alice@localhost PRIVMSG #cur :unread three
+MSG #cur 4 :alice!alice@localhost PRIVMSG #cur :ping @bob
+EOF
+
+# F8: a --mentions read must NOT move the channel cursor. local_read returns the
+# highest id it PRINTED, so saving that declared every non-mention row below it
+# as seen: the cursor jumped to 4 and the next plain read returned NOTHING, the
+# three rows having been printed by nothing at all.
+st8="$temporary_root/st8"
+mkdir -p "$st8"
+AI_CHAT_HOME="$cur_home" "$CLIENT" read --local --state "$st8" --chan '#cur' \
+    --mentions --nick bob >/dev/null 2>&1 || true
+after_mentions="$(AI_CHAT_HOME="$cur_home" "$CLIENT" read --local --state "$st8" \
+    --chan '#cur' 2>/dev/null | grep -c '^MSG ' || true)"
+[ "$after_mentions" -eq 4 ] || t_fail \
+    "a --mentions read --local advanced the channel cursor past unread messages (a later plain read saw $after_mentions of 4 rows)"
+
+# F9: --mention-exit needs --mentions. Unguarded, the local tail's exit sat
+# outside the `if o.mentions` check the socket tail has, so it returned on the
+# FIRST message from anyone -- the opposite of what the flag names. On the
+# socket path the flag was instead inert. Both now refuse the combination.
+for where in "--local" "--server 127.0.0.1:1"; do
+    rc=0
+    # shellcheck disable=SC2086  # deliberate word splitting: --server takes an argument
+    AI_CHAT_HOME="$cur_home" "$CLIENT" tail $where --chan '#cur' --nick bob \
+        --mention-exit --no-session >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 64 ] || t_fail \
+        "tail $where --mention-exit without --mentions exited $rc (want 64, a usage refusal)"
+done
+
+# F9: a local tail must record WHERE IT STARTED, not only what it later sees.
+# Skipping the backlog is a decision it makes for the whole channel; until it is
+# written down `read --local` still believes nothing has been seen. A tail that
+# started at the log end and then idled left no session file at all, so the next
+# plain read re-printed the whole backlog the tail had just declared old.
+st9="$temporary_root/st9"
+mkdir -p "$st9"
+AI_CHAT_HOME="$cur_home" "$CLIENT" tail --local --state "$st9" --chan '#cur' \
+    >/dev/null 2>&1 &
+tail_pid=$!
+sleep 3
+kill "$tail_pid" 2>/dev/null || true
+wait "$tail_pid" 2>/dev/null || true
+after_tail="$(AI_CHAT_HOME="$cur_home" "$CLIENT" read --local --state "$st9" \
+    --chan '#cur' 2>/dev/null | grep -c '^MSG ' || true)"
+[ "$after_tail" -eq 0 ] || t_fail \
+    "tail --local never persisted the point it started watching: a later read re-printed $after_tail rows of backlog it had skipped"
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown, serverless local reads, local channel-name guard, local cursors)\n' >&2
 t_end

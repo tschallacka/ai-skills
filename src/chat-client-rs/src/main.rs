@@ -1361,7 +1361,17 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
             None
         };
         let max_id = local_read(&channels_home(), &o.chan, since, mentions_for.as_deref());
-        if max_id > 0 {
+        // A mention-filtered read must NOT move the channel cursor. The cursor
+        // means "the last message I have seen in this channel", and a
+        // `--mentions` read has seen only the mentions: `local_read` returns the
+        // highest id it PRINTED, so saving it declares every non-mention message
+        // below that id as seen. With the last mention at the end of the log
+        // (`ping @bob` at id 4 over three unread messages) the cursor jumped
+        // straight to 4 and the next plain read returned nothing at all -- the
+        // three messages were skipped permanently, having been printed by
+        // nothing. Leaving the cursor alone costs a mentions reader nothing: it
+        // passes `--since` or reads the whole log by design.
+        if mentions_for.is_none() && max_id > 0 {
             save_cursor(state_dir, &o.chan, max_id, o.no_session);
         }
         return;
@@ -1451,6 +1461,18 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
 
 fn tail(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    // `--mention-exit` means "stop once a message mentions me", which needs the
+    // mention filter to know what a mention is. Alone it was quietly wrong in
+    // opposite directions on the two paths: the socket tail guards the exit with
+    // `o.mentions`, so the flag did nothing at all, while the local tail's exit
+    // sat outside that guard and returned on the FIRST message from anyone.
+    // Refusing the combination is the only reading that cannot surprise either
+    // way; a caller that meant "wake me on a mention" was always going to pass
+    // both.
+    if o.mention_exit && !o.mentions {
+        eprintln!("chat-client-rs: tail --mention-exit needs --mentions");
+        std::process::exit(64);
+    }
     if o.local {
         if o.chan.is_empty() {
             eprintln!("chat-client-rs: tail --local needs --chan #c");
@@ -1483,14 +1505,30 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
         };
         // Same step-down cadence as the socket tail: responsive while a
         // conversation is live, near-silent when nothing is happening.
+        // Record where the watch begins, not just what it later sees. Skipping
+        // the backlog is a decision this tail makes for the whole channel, so
+        // until it is written down `read --local` still believes nothing has
+        // been seen: a tail that started at the log end and then idled left no
+        // session file at all, and the next plain read re-printed the entire
+        // backlog the tail had just declared old. A mention-filtered tail is the
+        // exception, for the reason `read --local` does not save one either.
+        if mentions_for.is_none() && since > 0 {
+            save_cursor(state_dir, &o.chan, since, o.no_session);
+        }
         let mut wait = 1u64;
         loop {
             let max_id = local_read(&channels_home(), &o.chan, since, mentions_for);
             if max_id > since {
                 since = max_id;
-                save_cursor(state_dir, &o.chan, max_id, o.no_session);
+                if mentions_for.is_none() {
+                    save_cursor(state_dir, &o.chan, max_id, o.no_session);
+                }
                 wait = 1;
-                if o.mention_exit {
+                // Guarded on the filter, matching the socket tail. Unguarded,
+                // this returned on the first message from anyone; `tail()` now
+                // also refuses `--mention-exit` without `--mentions`, so the
+                // two agree and this cannot fire on a non-mention.
+                if o.mention_exit && mentions_for.is_some() {
                     return;
                 }
             } else if wait < 60 {
