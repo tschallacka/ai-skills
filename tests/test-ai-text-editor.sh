@@ -53,6 +53,7 @@ editor() {
 
 export XDG_RUNTIME_DIR="$runtime"
 export TSCH_AI_EDITOR_METADATA_DIR="$metadata"
+export TSCH_AI_EDITOR_AGENT="editor-integration-agent"
 "$server" start --file "$file" >"$server_output" 2>&1 &
 server_pid="$!"
 
@@ -69,6 +70,9 @@ done
 
 contains "$open_output" '"revision": 0'
 contains "$open_output" '"mode": "TextUtf8"'
+agent_open="$($client open --agent "$TSCH_AI_EDITOR_AGENT")"
+contains "$agent_open" '"session_token"'
+unset TSCH_AI_EDITOR_AGENT
 
 # A second startup must reuse the validated per-tab SQLite index.
 editor close --file "$file" --journal-action preserve >/dev/null
