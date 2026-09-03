@@ -10,6 +10,11 @@
 # repository root, which is where the skills look, so a local tree runs the same
 # code a target does.
 #
+# It also builds the generated shell artifacts a clean checkout lacks — the five
+# plan-*-lib.sh that planning/scripts/*.sh source, and planning/REVIEWER.md — on
+# the same build-if-missing terms, so one run leaves a tree that works rather
+# than one whose compiled half works.
+#
 # Usage:
 #   setup-dev-env.sh              # build everything for this host
 #   setup-dev-env.sh --list       # print what would be built, and where
@@ -283,6 +288,40 @@ done <<EOF
 $(plan)
 EOF
 rm -f "$repo_root/.setup-dev-env.log"
+
+# The generated shell artifacts, on the same build-if-missing terms as the
+# crates above. They are never committed (MAINTAINER.md section 2.16), and a
+# fresh clone therefore has none of them — which is the same gap this script
+# exists to close: planning/scripts/*.sh `source` the five plan-*-lib.sh files,
+# so a freshly cloned tree cannot run a planning helper at all until they are
+# built. Doing it here means "I ran setup-dev-env.sh" is enough to have a
+# working tree, rather than being enough only for the compiled half.
+#
+# Staleness is deliberately not detected here, exactly as run-tests.sh's
+# bootstrap_generated has it: regenerating unconditionally would let this script
+# mask drift the tests are there to find. Missing is built, present is left
+# alone.
+generated=0
+for lib in plan-core-lib.sh plan-crypt-lib.sh plan-document-lib.sh plan-progress-lib.sh plan-table-lib.sh; do
+    if [ ! -f "$repo_root/planning/scripts/$lib" ]; then
+        if "$repo_root/planning/scripts/build-plan-libs.sh" >/dev/null 2>&1; then
+            printf 'setup-dev-env: built the generated shell libraries\n'
+            generated=$((generated + 1))
+        else
+            printf 'setup-dev-env: build-plan-libs.sh failed; planning helpers will not load\n' >&2
+        fi
+        break
+    fi
+done
+if [ ! -f "$repo_root/planning/REVIEWER.md" ]; then
+    if "$repo_root/planning/scripts/generate-reviewer.sh" >/dev/null 2>&1; then
+        printf 'setup-dev-env: generated planning/REVIEWER.md\n'
+        generated=$((generated + 1))
+    else
+        printf 'setup-dev-env: generate-reviewer.sh failed; the reviewer contract is missing\n' >&2
+    fi
+fi
+[ "$generated" -eq 0 ] && printf 'setup-dev-env: generated artifacts already present\n'
 
 # Wire the repo's pre-push gate (./pre-push-check.sh) as the pre-push hook.
 # Git does not version .git/hooks, so the shim lives in hooks/ and

@@ -746,7 +746,7 @@ fn connect(
 
     let conn = rustls::ClientConnection::new(
         Arc::new(client_config(insecure)),
-        ServerName::try_from(server_host(server)).map_err(|e| format!("server name: {}", e))?,
+        server_name(server, &addr)?,
     )
     .map_err(|e| format!("tls client: {}", e))?;
     let mut tls = rustls::StreamOwned::new(conn, tcp);
@@ -827,8 +827,45 @@ fn server_safe(server: &str) -> String {
     server.replace([':', '/', '.'], "_")
 }
 
+/// The host part of a `host:port` server address.
+///
+/// IPv6 needs care that splitting on the FIRST colon does not survive: a
+/// bracketed `[::1]:6667` yielded `"["` and a bare `::1:6667` yielded the
+/// empty string, and neither is a name anything can dial (B118). Both forms
+/// are read the way std's `to_socket_addrs` reads them -- brackets stripped,
+/// otherwise a trailing numeric port removed at the LAST colon -- so the host
+/// this returns is the host the connect resolves to. IPv4 and hostnames carry
+/// at most one colon, so they take the same path they always did.
 fn server_host(server: &str) -> String {
-    server.split(':').next().unwrap_or(server).to_string()
+    let s = server.trim();
+    if let Ok(sa) = s.parse::<SocketAddr>() {
+        return sa.ip().to_string();
+    }
+    if let Some(rest) = s.strip_prefix('[') {
+        // Bracketed but not a whole socket address: no port, or an unusable one.
+        return match rest.find(']') {
+            Some(end) => rest[..end].to_string(),
+            None => rest.to_string(),
+        };
+    }
+    match s.rsplit_once(':') {
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host.to_string(),
+        _ => s.to_string(),
+    }
+}
+
+/// The TLS server name to present for a server address, given the socket
+/// address the connect resolved to. An IP literal is not a DNS name, so
+/// `ServerName::try_from` rejects it -- an IPv4 literal only passes by the
+/// luck of looking like a label. An IP goes to `ServerName::IpAddress`
+/// instead, taking the address from the resolved socket so the name always
+/// matches what is dialled. A hostname keeps the DNS-name path it always had.
+fn server_name(server: &str, addr: &SocketAddr) -> Result<ServerName<'static>, String> {
+    let host = server_host(server);
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(ServerName::IpAddress(addr.ip().into()));
+    }
+    ServerName::try_from(host).map_err(|e| format!("server name: {}", e))
 }
 
 fn resolve(server: &str) -> Result<SocketAddr, String> {
@@ -1884,5 +1921,69 @@ mod tests {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
         assert_eq!(id2, 0);
+    }
+
+    // ---- B118: an IPv6 server address must be dialable -------------------
+
+    #[test]
+    fn server_host_reads_ipv4_and_hostnames_exactly_as_before() {
+        assert_eq!(server_host("127.0.0.1:6667"), "127.0.0.1");
+        assert_eq!(server_host("192.168.1.5:1234"), "192.168.1.5");
+        assert_eq!(server_host("localhost:6667"), "localhost");
+        assert_eq!(server_host("chat.example.org:6667"), "chat.example.org");
+        assert_eq!(server_host("localhost"), "localhost");
+        assert_eq!(server_host("localhost:"), "localhost");
+    }
+
+    #[test]
+    fn server_host_extracts_the_host_from_an_ipv6_address() {
+        // Bracketed: the first-colon split used to return "[".
+        assert_eq!(server_host("[::1]:6667"), "::1");
+        assert_eq!(
+            server_host("[fe80::1ff:fe23:4567:890a]:6667"),
+            "fe80::1ff:fe23:4567:890a"
+        );
+        // Bare, the form the announce beacon's host+port concatenation makes:
+        // the first-colon split used to return the empty string. std's
+        // to_socket_addrs splits this on the LAST colon, so this must too.
+        assert_eq!(server_host("::1:6667"), "::1");
+        assert_eq!(
+            server_host("fe80::1ff:fe23:4567:890a:6667"),
+            "fe80::1ff:fe23:4567:890a"
+        );
+    }
+
+    #[test]
+    fn an_ip_literal_becomes_an_ip_server_name_not_a_dns_name() {
+        use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+        // The whole point of B118: ServerName::try_from rejects "::1" as an
+        // invalid DNS name, so an IP must not take the DNS-name path at all.
+        let v6: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 6667);
+        for addr in ["[::1]:6667", "::1:6667"] {
+            let name = server_name(addr, &v6)
+                .unwrap_or_else(|e| panic!("{} must yield a server name, got {}", addr, e));
+            assert!(
+                matches!(name, ServerName::IpAddress(_)),
+                "{} must present an IP server name, got {:?}",
+                addr,
+                name
+            );
+        }
+        let v4: SocketAddr = "127.0.0.1:6667".parse().unwrap();
+        assert!(
+            matches!(
+                server_name("127.0.0.1:6667", &v4).unwrap(),
+                ServerName::IpAddress(_)
+            ),
+            "an IPv4 literal is an IP, not a DNS name"
+        );
+        // A hostname still presents a DNS name.
+        assert!(
+            matches!(
+                server_name("localhost:6667", &v4).unwrap(),
+                ServerName::DnsName(_)
+            ),
+            "a hostname must keep the DNS-name path"
+        );
     }
 }
