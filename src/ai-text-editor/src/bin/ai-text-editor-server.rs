@@ -14,9 +14,11 @@ use ai_text_editor::resources;
 use ai_text_editor::revision::RevisionGuard;
 use ai_text_editor::search::{find_bytes, matches_with_gradient, parse_mode, SearchMode};
 use ai_text_editor::session;
+#[cfg(unix)]
+use ai_text_editor::transport::read_endpoint_metadata;
 use ai_text_editor::transport::{
-    complete, endpoint_for_file, error, error_details, read_endpoint_metadata, response,
-    socket_for_file, validate_request, write_endpoint_metadata, Endpoint,
+    complete, endpoint_for_file, error, error_details, response, socket_for_file, validate_request,
+    write_endpoint_metadata, Endpoint,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -625,9 +627,9 @@ fn option(args: &[String], name: &str) -> Option<String> {
 }
 
 fn read_auth_token_file(path: &std::path::Path) -> io::Result<String> {
-    let metadata = fs::metadata(path)?;
     #[cfg(unix)]
     {
+        let metadata = fs::metadata(path)?;
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
             return Err(io::Error::new(
@@ -663,6 +665,7 @@ fn announce(path: &PathBuf, endpoint: &Endpoint, generation: &str) {
     let _ = std::io::stdout().flush();
 }
 
+#[cfg(unix)]
 fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerState>>) {
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
