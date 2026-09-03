@@ -37,8 +37,9 @@ SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
+EDITOR_INTEGRATION="${EDITOR_INTEGRATION:-skill}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -52,6 +53,7 @@ SKILL_DESCRIPTIONS=(
     'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
+    'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -113,6 +115,9 @@ Chat transcripts never travel, and a collapsible block is allowed only for evide
 The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
 Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
 The reader may always ask for plain english; the register bends only where brevity would cost understanding.'
+    'Keeps file state on a server so clients can request bounded reads and edits without embedding editor state.
+Supports UTF-8, raw-byte and hex startup modes, explicit exact/wildcard/regex/fuzzy search choices, and revision-guarded saves.
+Each tab records identity and revision in its own SQLite database; TCP is available where Unix sockets are unavailable.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -177,6 +182,10 @@ Interactive by default. Options are useful for automation:
                            may be a comma-separated list
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
+  --editor-integration skill|mcp
+                           Install the editor's direct client/server or its
+                           optional MCP bridge; switching is allowlisted and
+                           does not stop live editor servers.
   --target <path>          Install into one skill root without prompting
   --yes                    Answer yes to every prompt, including the planning
                            permission grants; an edited file is still backed up  
@@ -194,4 +203,3 @@ die() {
     echo "Error: $*" >&2
     exit 1
 }
-

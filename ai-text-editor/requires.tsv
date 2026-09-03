@@ -1,0 +1,6 @@
+# MODE: PROD
+# This skill ships self-contained server and client binaries and needs no runtime tools.
+#
+# Columns, tab-separated:
+#   tool condition strength why
+tool	condition	strength	why

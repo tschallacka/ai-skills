@@ -122,7 +122,7 @@ for skill in "${SKILL_NAMES[@]}"; do
         [ -n "$path" ] || continue
         [ -e "$repo_root/$skill/$path" ] || {
             case "$skill/$path" in
-                planning/bin/*|chat/bin/*) continue ;; # cross-target artifacts are CI outputs
+                planning/bin/*|chat/bin/*|ai-text-editor/bin/*) continue ;; # cross-target artifacts are CI outputs
                 *) absent="$absent $path" ;;
             esac
         }

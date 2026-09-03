@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "document_modes": {
+      "items": {
+        "enum": [
+          "text_utf8",
+          "raw_bytes",
+          "hex_view"
+        ]
+      },
+      "type": "array"
+    },
+    "edit_methods": {
+      "items": {
+        "enum": [
+          "insert",
+          "replace",
+          "large_edit",
+          "begin_transaction",
+          "end_transaction",
+          "restore",
+          "undo",
+          "redo",
+          "save",
+          "save_as",
+          "close",
+          "resolve_external"
+        ]
+      },
+      "type": "array"
+    },
+    "job_methods": {
+      "items": {
+        "enum": [
+          "job_start",
+          "job_poll",
+          "job_progress",
+          "job_complete",
+          "job_cancel",
+          "job_transfer",
+          "job_release"
+        ]
+      },
+      "type": "array"
+    },
+    "presentations": {
+      "items": {
+        "enum": [
+          "structured",
+          "text",
+          "paging",
+          "stream"
+        ]
+      },
+      "type": "array"
+    },
+    "protocol_version": {
+      "const": 1
+    },
+    "revision_required_methods": {
+      "items": {
+        "enum": [
+          "insert",
+          "replace",
+          "large_edit",
+          "restore",
+          "undo",
+          "redo",
+          "save"
+        ]
+      },
+      "type": "array"
+    },
+    "search_modes": {
+      "items": {
+        "enum": [
+          "exact_text",
+          "exact_bytes",
+          "wildcard",
+          "shell_wildcard",
+          "path_wildcard",
+          "regex_rust",
+          "regex_pcre2",
+          "fuzzy_edit",
+          "fuzzy_subsequence",
+          "fuzzy_token",
+          "fuzzy_ngram",
+          "fuzzy_phonetic",
+          "fuzzy_soundex"
+        ]
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "search_modes",
+    "document_modes",
+    "presentations",
+    "edit_methods",
+    "job_methods"
+  ],
+  "title": "ai-text-editor capabilities v1",
+  "type": "object"
+}

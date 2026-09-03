@@ -60,6 +60,9 @@ chat/runtime/chat-server-rs
 # with it.
 chat/bin/*/
 
+# The editor's release artifacts are built by CI and are never committed.
+ai-text-editor/bin/*/
+
 # A local `cargo build` drop of the plan-crypt helper, the same developer
 # convenience as chat/runtime/chat-server-rs above. Per-target compiled
 # artifacts are CI-delivered and never tracked (planning/MAINTAINER.md

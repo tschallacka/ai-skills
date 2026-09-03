@@ -49,7 +49,7 @@ runtime_scripts="$temporary_root/scripts"
 t_copy_tree "$scripts" "$runtime_scripts"
 
 run_without_jq() {
-    env -i PATH="$jqless_bin" HOME=/tmp TMPDIR="$temporary_root" \
+    env -i PATH="$jqless_bin" AI_SKILLS_BIN_ROOT="$jqless_bin" HOME="${HOME:-/tmp}" TMPDIR="$temporary_root" \
         "$jqless_bin/bash" "$@" 2>&1
 }
 

@@ -20,6 +20,18 @@ cli_resolve_source() {
     printf '%s\n' "$source"
 }
 
+cli_copy_skill_files() {
+    local relative source destination_file
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
+        source="$(source_file "$CLI_SKILL" "$relative")"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+}
+
 cli_install_skill() {
     contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
     verify_runtime_tools "$CLI_SKILL"
@@ -29,6 +41,7 @@ cli_install_skill() {
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
@@ -50,13 +63,7 @@ cli_install_skill() {
         return 3
     fi
     [ "$CLI_APPROVAL" = "yes" ] || { printf 'Approval declined; no files changed.\n' >&2; return 2; }
-    while IFS= read -r relative; do
-        [ -n "$relative" ] || continue
-        source="$(source_file "$CLI_SKILL" "$relative")"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
-        mkdir -p "$(dirname "$destination_file")"
-        cp -p "$source" "$destination_file"
-    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+    cli_copy_skill_files
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }

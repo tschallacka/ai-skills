@@ -1,0 +1,45 @@
+name: ai-text-editor artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - src/ai-text-editor/**
+      - src/ai-text-editor-mcp/**
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            src
+      - uses: dtolnay/rust-toolchain@1.98
+        with:
+          targets: ${{ matrix.target }}
+      - name: Ensure target is installed
+        run: rustup target add ${{ matrix.target }}
+      - name: Build editor binaries
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: Publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-text-editor-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/ai-text-editor*

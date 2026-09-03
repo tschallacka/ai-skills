@@ -1,0 +1,4 @@
+# MODE: PROD
+interface:
+  display_name: "Ai Text Editor"
+  short_description: "Help with Ai Text Editor tasks"

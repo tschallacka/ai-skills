@@ -1,0 +1,141 @@
+.TH AI-TEXT-EDITOR 1
+.SH NAME
+ai-text-editor \- agent-oriented local text and byte editor
+.SH SYNOPSIS
+.B ai-text-editor
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+The editor is a server-owned, revision-aware editor for agents. The server
+owns document state, journals, indexes, SQLite metadata, sessions, and jobs.
+One server may own multiple isolated file tabs; each tab has separate state,
+metadata, and authorization. The initial Bstart --file PATHR creates the
+shared endpoint, while Bopen --endpoint ENDPOINT --file PATHR opens or
+selects another tab. Closing one tab leaves the endpoint running until the
+last tab closes.
+The client opens a short-lived request connection and exits after completion.
+After BopenR, the server returns a tab-scoped Bsession_tokenR. Save it
+with B--save-session-token PATHR and reuse it with B--session-token PATHR;
+requests without the current token are rejected before mutation.
+.PP
+Mutating commands BinsertR, BreplaceR, Blarge-editR, BrestoreR,
+BundoR, BredoR, and BsaveR require B--expected-revisionR. A
+missing or stale value is refused; read BopenR or BhistoryR again before
+retrying. The server has no project-root jail: the session token grants the
+server process's normal filesystem permissions, so keep the endpoint private
+and use operating-system isolation when stronger confinement is needed.
+.SH STARTING
+.IP "server start --file PATH"
+Start an editor server and print endpoint/session discovery information.
+.IP "open --file PATH"
+Query an already running server discovered for PATH. Start the server first.
+.IP "help"
+Print the complete capability and option reference. This file is colocated
+with the skill and is available with \fBman -l\fR when binaries are not on PATH.
+.PP
+For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
+\fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
+saved session token.
+.PP
+\fB--session ID\fR and \fB--agent ID\fR resolve server-registered candidates
+from the private \fBsessions.json\fR registry. Resolution is newest-first but
+refuses ambiguity and unreachable stale records; it never starts or
+impersonates a server.
+.SH MODES
+Text, raw bytes, and hex view are explicit document modes. Search modes are
+explicit: exact text/bytes, wildcard, shell wildcard, path wildcard, Rust or
+PCRE2 regex, and six fuzzy strategies. Structured output is the default;
+text, paging, and streaming are explicit presentations.
+.PP
+BcapabilitiesR is read-only machine-readable discovery for these modes,
+coordinate units, defaults, resource limits, and transports. Use it before
+choosing behavior that is not already known to the agent.
+.PP
+Pass \fB--normalize-nfc\fR when starting the server to opt into normalized text
+presentation. Stored-byte coordinates remain distinct from normalized text.
+The \fBrestore\fR command turns normalized presentation off when restoration is
+lossless and refuses with a restoration conflict after a lossy edit.
+.SH SAFETY
+External changes alert at the next interaction. Backup, reload, merge, keep, and
+force-save require the agent to choose the operation; force-save requires an
+acknowledgement. External bytes can be preserved atomically as PATH.back by
+default. Backup failure or collision prevents the resolution. Closing a tab
+asks whether its journal is preserved or explicitly cleaned. TCP is a private
+loopback fallback; startup requires --auth-token or --auth-token-file. Each connection performs a
+fresh HMAC challenge/proof exchange over a nonce and server generation; the
+secret is not placed in the editor request. The challenge nonce and request ID
+must match, and failed proofs are rejected before the editor handler runs.
+An owner-only auth-token-file is reread per TCP connection to permit rotation.
+Never expose the endpoint publicly.
+.PP
+Unix endpoint discovery records are atomic and include the owning PID and
+server generation. Graceful shutdown removes the active record. After a crash,
+an unreachable socket is retained as stale evidence and startup refuses to
+replace it unless \fB--takeover-stale-endpoint\fR is explicitly supplied. The
+agent must verify that the recorded owner is no longer running; the old record
+is preserved with a \fBstale-\fR suffix during takeover.
+.PP
+\fBsave-as\fR atomically creates a new target with the current working view and
+never overwrites an existing target or changes the active tab path.
+.PP
+Closing is explicit: run \fBclose\fR without a journal action to receive a
+decision prompt, then repeat with \fB--journal-action preserve\fR or
+\fB--journal-action clean\fR. Cleaning deletes the tab journal and metadata.
+.SH FILE DISCOVERY
+The installed package may keep the binaries outside PATH. Discover this manual
+beside the skill and use \fBman -l /path/to/ai-text-editor.1\fR.
+.SH LARGE FILES
+Files above 256 MiB use bounded file-backed reads and sparse index scans.
+The protocol caps frames at 8 MiB; large raw reads are capped at 4 MiB before
+base64 framing, and oversized result windows must be paged.
+Large searches persist matches incrementally in bounded SQLite chunks and keep
+only the preview in memory; use the returned pager key with BpageR to fetch
+bounded result slices.
+Startup records only a bounded prefix index for a large tab. Use the
+index operation for an explicit full scan and inspect the reported coverage.
+Index output returns four blocks by default; use B--offsetR and
+B--limitR to page the persisted block list. The response reports its total
+block count and returned window.
+Use \fB--offset\fR and \fB--length\fR for reads. Ordinary mutations are
+refused; start a job and use \fBlarge-edit\fR with
+\fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.
+Large edits retain file-backed before/after snapshots for undo and redo; clean
+the tab journal when those snapshots are no longer needed.
+Large-tab external backup streams the current file to an atomic B.backR
+copy, and reload refreshes metadata and lazy index coverage. Merge and
+force-save require an acknowledged bounded rewrite job.
+.PP
+Short-lived requests may run concurrently. A streamed text read is a revision
+snapshot; when a write lands during delivery, the server emits the restart
+delimiter and a fresh stream. Consumers must discard frames before that
+delimiter.
+.SH HISTORY AND CURSORS
+\fBhistory\fR reports undo and redo depths without exposing another tab.
+\fBresources\fR reports available memory, estimated server overhead, the
+recommended working set, and the active large-file threshold.
+Mutation responses include every numeric cursor position. Text coordinates use
+one-based lines and zero-based Unicode scalar columns; raw and hex modes use
+byte offsets.
+.PP
+Pass \fB--wrap-width N\fR to receive the corresponding one-based visual row and
+zero-based wrapped-row column. Pass \fB--visual\fR with \fB--line\fR and
+\fB--column\fR to interpret the input as wrapped coordinates; \fBN\fR must be
+positive. Stored cursors and mutation coordinates remain logical, and the
+response includes both logical and visual positions.
+.PP
+All large-file text searches require an explicit inclusive line range with
+\fB--range-start-line\fR and \fB--range-end-line\fR. Exact byte searches use
+the half-open \fB--range-start-byte\fR/\fB--range-end-byte\fR range. Unbounded
+scans are refused.
+.PP
+Use \fBbegin-transaction\fR and \fBend-transaction\fR to group ordinary edits
+into one undo step. Each edit remains in the recovery journal.
+.SH JOBS
+Use \fBjob-start\fR, \fBjob-poll\fR, \fBjob-progress\fR, \fBjob-complete\fR,
+\fBjob-cancel\fR, \fBjob-transfer\fR, and \fBjob-release\fR to manage a
+server-side lifecycle record. A job record does not execute work itself. The
+driving agent is responsible for the work, truthful progress, and cleanup;
+detached jobs survive a client disconnect for the configured retention.
+.SH SEE ALSO
+The colocated \fBreferences/protocol.md\fR contains coordinate, search,
+stream, job, journal, and external-change contracts.

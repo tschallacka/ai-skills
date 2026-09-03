@@ -537,6 +537,8 @@ jobs:
         with:
           sparse-checkout: |
             planning/rust-migration.tsv
+            ai-text-editor/ai-text-editor.1
+            ai-text-editor/schemas
             src
             Cargo.toml
             Cargo.lock

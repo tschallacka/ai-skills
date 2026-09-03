@@ -75,8 +75,9 @@ SUMMARY_LINES=()
 SUMMARY_PRINTED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
+EDITOR_INTEGRATION="${EDITOR_INTEGRATION:-skill}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -90,6 +91,7 @@ SKILL_DESCRIPTIONS=(
     'Conflicts resolved by what each side changed, and a merged tree you can trust.'
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
+    'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -151,6 +153,9 @@ Chat transcripts never travel, and a collapsible block is allowed only for evide
 The register is caveman-tight: facts first, fragments fine, paths and errors exact while the wrapper around them shrinks.
 Praise stops at gj, corrections are applied without thanks, and unknown shorthand is asked about, never guessed.
 The reader may always ask for plain english; the register bends only where brevity would cost understanding.'
+    'Keeps file state on a server so clients can request bounded reads and edits without embedding editor state.
+Supports UTF-8, raw-byte and hex startup modes, explicit exact/wildcard/regex/fuzzy search choices, and revision-guarded saves.
+Each tab records identity and revision in its own SQLite database; TCP is available where Unix sockets are unavailable.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -215,6 +220,10 @@ Interactive by default. Options are useful for automation:
                            may be a comma-separated list
   --package prod|dev       prod (default) installs what an end user needs;
                            dev adds the files only a maintainer does
+  --editor-integration skill|mcp
+                           Install the editor's direct client/server or its
+                           optional MCP bridge; switching is allowlisted and
+                           does not stop live editor servers.
   --target <path>          Install into one skill root without prompting
   --yes                    Answer yes to every prompt, including the planning
                            permission grants; an edited file is still backed up  
@@ -232,7 +241,6 @@ die() {
     echo "Error: $*" >&2
     exit 1
 }
-
 # ---------------------------------------------------------------
 # 2. CLI-mode argument parsing
 # ---------------------------------------------------------------
@@ -316,6 +324,21 @@ while [ "$#" -gt 0 ]; do
             esac
             shift
             ;;
+        --editor-integration)
+            [ "$#" -ge 2 ] || die "--editor-integration needs skill or mcp"
+            case "$2" in
+                skill|mcp) EDITOR_INTEGRATION="$2" ;;
+                *) die "--editor-integration must be skill or mcp, not $2" ;;
+            esac
+            shift 2
+            ;;
+        --editor-integration=*)
+            case "${1#--editor-integration=}" in
+                skill|mcp) EDITOR_INTEGRATION="${1#--editor-integration=}" ;;
+                *) die "--editor-integration must be skill or mcp, not ${1#--editor-integration=}" ;;
+            esac
+            shift
+            ;;
         --target)
             [ "$#" -ge 2 ] || die "--target needs a directory"
             TARGET_SELECTION="$2"
@@ -334,7 +357,6 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
-
 # ---------------------------------------------------------------
 # 3. Interactive input channel
 # ---------------------------------------------------------------
@@ -424,6 +446,8 @@ runtime_requirements() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
+        ai-text-editor)
+            ;;
         brainstorm)
             ;;
         bug-report)
@@ -3168,6 +3192,14 @@ version_marker_content() {
 # Still a hand list, deliberately: the planning arms are a second copy of
 # PACKAGE-MANIFEST.tsv and the duplication is the cross-check.
 # tests/test-mode-markers.sh compares both arms against the markers in the files.
+editor_artifact_files() {
+    local relative
+    for relative in "$@"; do
+        [ -f "$SOURCE_ROOT/ai-text-editor/$relative" ] && printf '%s\n' "$relative"
+    done
+    return 0
+}
+
 skill_files() {
     local package="${2:-prod}"
     case "$package" in
@@ -3595,6 +3627,34 @@ EOF
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        ai-text-editor)
+            cat <<'EDITOR_EOF'
+SKILL.md
+agents/openai.yaml
+docs/README.md
+ai-text-editor.1
+binaries.tsv
+schemas/protocol.v1.json
+schemas/capabilities.v1.json
+requires.tsv
+references/protocol.md
+EDITOR_EOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    editor_artifact_files bin/x86_64-unknown-linux-musl/ai-text-editor-server bin/x86_64-unknown-linux-musl/ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-mcp ;;
+                Linux:aarch64|Linux:arm64)
+                    editor_artifact_files bin/aarch64-unknown-linux-musl/ai-text-editor-server bin/aarch64-unknown-linux-musl/ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-mcp ;;
+                Darwin:x86_64)
+                    editor_artifact_files bin/x86_64-apple-darwin/ai-text-editor-server bin/x86_64-apple-darwin/ai-text-editor bin/x86_64-apple-darwin/ai-text-editor-mcp ;;
+                Darwin:arm64)
+                    editor_artifact_files bin/aarch64-apple-darwin/ai-text-editor-server bin/aarch64-apple-darwin/ai-text-editor bin/aarch64-apple-darwin/ai-text-editor-mcp ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    editor_artifact_files bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe bin/x86_64-pc-windows-msvc/ai-text-editor.exe bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe ;;
+                *)
+                    printf 'skill_files: no ai-text-editor artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
+            ;;
         chat)
             cat <<'CHATEOF'
 SKILL.md
@@ -3623,6 +3683,15 @@ tests/test-chat.sh
 tests/test-chat-resolution.sh
 CHATEOF
             ;;
+    esac
+}
+
+ai_text_editor_file_allowed() {
+    [ "$1" = ai-text-editor ] || return 0
+    case "$EDITOR_INTEGRATION:$2" in
+        skill:bin/*/ai-text-editor-mcp|mcp:bin/*/ai-text-editor|mcp:bin/*/ai-text-editor-server|mcp:bin/*/ai-text-editor.exe|mcp:bin/*/ai-text-editor-server.exe)
+            return 1 ;;
+        *) return 0 ;;
     esac
 }
 
@@ -3669,6 +3738,18 @@ cli_resolve_source() {
     printf '%s\n' "$source"
 }
 
+cli_copy_skill_files() {
+    local relative source destination_file
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
+        source="$(source_file "$CLI_SKILL" "$relative")"
+        destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+}
+
 cli_install_skill() {
     contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
     verify_runtime_tools "$CLI_SKILL"
@@ -3678,6 +3759,7 @@ cli_install_skill() {
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
+        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
@@ -3699,13 +3781,7 @@ cli_install_skill() {
         return 3
     fi
     [ "$CLI_APPROVAL" = "yes" ] || { printf 'Approval declined; no files changed.\n' >&2; return 2; }
-    while IFS= read -r relative; do
-        [ -n "$relative" ] || continue
-        source="$(source_file "$CLI_SKILL" "$relative")"
-        destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"
-        mkdir -p "$(dirname "$destination_file")"
-        cp -p "$source" "$destination_file"
-    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+    cli_copy_skill_files
     version_marker_content > "$TARGET_SELECTION/$CLI_SKILL/.version"
     printf 'Installed: %s/%s\n' "$TARGET_SELECTION" "$CLI_SKILL"
 }
@@ -3839,6 +3915,10 @@ install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
+        if ! ai_text_editor_file_allowed "$skill" "$relative"; then
+            [ -e "$destination/$relative" ] && changed=1
+            continue
+        fi
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -3860,7 +3940,6 @@ install_skill() {
     done <<EOF
 $files
 EOF
-
     if [ -L "$destination/.version" ]; then
         echo "Skipping $root/$skill: existing .version symlink requires manual review." >&2
         summary_add "Skipped:   $destination — existing .version symlink requires manual review"
@@ -3896,10 +3975,27 @@ EOF
         return
     fi
 
+    if [ "$skill" = ai-text-editor ]; then
+        local stale_relative
+        for stale_relative in \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor-server \
+            bin/x86_64-unknown-linux-gnu/ai-text-editor-mcp \
+            bin/x86_64-pc-windows-msvc/ai-text-editor.exe \
+            bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe \
+            bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe; do
+            ai_text_editor_file_allowed "$skill" "$stale_relative" || {
+                [ -e "$destination/$stale_relative" ] || continue
+                rm -f "$destination/$stale_relative"
+            }
+        done
+    fi
+
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
+        ai_text_editor_file_allowed "$skill" "$relative" || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi

@@ -10,7 +10,104 @@ If a line here contradicts the tree, the tree is right: check before trusting it
 An earlier version of this file had two stale entries and one that was wrong from
 the start.
 
+## Handoff — ai-text-editor brainstorm (2026-09-02)
+
+- Worktree: `/home/mdibbets/.config/tsch-ai-skills/worktrees/ai-text-editor`
+- Branch: `ai-text-editor`
+- Source of truth: `.plans/ai-text-editor/brainstorm.md` (gitignored/transient).
+- The requested deliverable is a runnable Rust editor server/client plus the
+  `ai-text-editor` skill documentation. Do not implement until the remaining
+  protocol/safety contracts are resolved or deliberately recorded as defaults.
+- Agreed architecture: one Rust server may host multiple file sessions (“editor
+  tabs”); one writer per tab; readers may exist and restart after writes. Unix
+  sockets are the default on Unix-like systems; Windows uses loopback TCP with
+  endpoint discovery and authentication.
+- Metadata root: `~/.config/tsch-ai-skills/editor`; use SQLite to map canonical,
+  symlink-resolved file identities to journals, sparse indexes, result sets, and
+  session metadata. Never derive raw metadata filenames directly from paths.
+- Persistence: journal unsaved edits for recovery, explicit save, best-effort
+  durability. External changes trigger an alert before the next interaction;
+  reload preserves history and records an `external-change` event. If declined,
+  offer a `.back` copy; automatic three-way merge is allowed only when
+  unambiguous, otherwise return conflict hunks.
+- Protocol direction: newline-delimited JSON; server-assigned operation IDs;
+  every response includes a document revision; immutable result sets have IDs;
+  paging supports opaque tokens and numeric offsets; long jobs support progress,
+  polling, and cancellation; edits return all cursor positions. Client session
+  lookup follows PTY style: explicit ID, configured agent ID, then environment
+  agent ID; stale sessions are reported, not silently resurrected.
+- Editing/search: default one cursor, arbitrary numeric cursors, explicit undo
+  transactions, Unicode scalar-value coordinates, tabs count as one logical
+  column, and large files use lazy configurable indexes plus piece-table/rope
+  sparse edits. Search modes are explicit and rich: literal/exact, multiple
+  wildcard/glob grammars, multiple regex engines, multiple fuzzy strategies,
+  strategy-specific gradients/orderings, line/byte ranges, first-four preview,
+  counts, pager IDs, and restart events/delimiters.
+- Eve review: the final unrestricted fresh Eve pass read the full brainstorm and
+  found no rejected scope, but marked the design **not implementation-ready**.
+  Resolve reader subscription/revision semantics, operation result retrieval,
+  huge-file completeness/resource limits, binary/encoding rules, journal and
+  atomic-save guarantees, merge/conflict semantics, registry locking/identity,
+  session leases/authentication, NDJSON/event ordering, and exact help/CLI
+  contracts. Full findings are recorded in the brainstorm’s adversarial review.
+- Next action: continue the numbered brainstorm questions, update the source of
+  truth after each answer, then rerun Eve if the design changes materially. At
+  the final gate choose “structured implementation plan” or “implement as is”.
+
 ## Where the authority actually lives
+
+## Handoff — ai-text-editor implementation pause (2026-09-02)
+
+1. Implementation is in progress in `/home/mdibbets/.config/tsch-ai-skills/worktrees/ai-text-editor`, branch `ai-text-editor`. The older brainstorm handoff above is historical; implementation has begun.
+2. Always run builds/tests through the repository flake:
+   `nix develop /home/mdibbets/git/ai-skills --command bash -lc '...'`.
+   Heavy commands use the worktree's `resource-limited-testing/scripts/limited-run.sh`.
+3. Implemented Rust workspace crates are `src/ai-text-editor` and `src/ai-text-editor-mcp`. The server owns tab state, journals, sparse indexes, SQLite metadata, cursors, revisions, result sets, external-change detection, bounded large-file reads, and Unix/TCP transport. The short-lived client supports structured/text/paging/stream output, session files, searches, edits, cursor actions, recovery, and job commands.
+4. Implemented and live-tested: TCP open/edit/undo/read; auth failure and successful auth; session-token save/reuse; journal restart recovery and undo; bounded search and paging identifiers; forced large-file bounded read/index/exact range search; path wildcard; streaming read; job start/complete/poll; installer MCP↔skill switching.
+5. The job registry is in `src/ai-text-editor/src/jobs.rs`. It supports queued/running/completed/cancelled/released/evicted states, retention, cancellation race locking, transfer tokens, disconnect behavior, and progress. The server exposes `job_start`, `job_poll`, `job_progress`, `job_complete`, `job_cancel`, `job_transfer`, and `job_release`; the client exposes corresponding hyphenated commands; MCP advertises the protocol methods.
+6. Installer switching is in `installer/src/05-config.sh`, `10-cli-args.sh`, `50-manifest.sh`, `55-cli-handlers.sh`, and `60-install.sh`, then regenerated into `install.sh` with `./installer/build.sh`. Use `--editor-integration skill|mcp`; default is `skill`. Cleanup is allowlisted to editor binaries and does not stop servers or touch sessions/metadata. A real temporary-root switch test passed.
+7. Generated schemas live in `ai-text-editor/schemas/`; platform release binaries are CI artifacts and are not committed. The artifact workflow is declared at `.github/workflows/ai-text-editor-artifacts.yml` for musl Linux, macOS, and Windows targets. Do not claim those binaries exist locally unless a target build has actually produced them.
+8. Current clean checks: `cargo clippy --workspace --all-targets -- -D warnings` passes; `cargo test --workspace` passes with 18 tests; `installer/build.sh --check`, `bash -n`, shellcheck, and `git diff --check` pass. The full `./run-tests.sh` was started under a 2G/300 resource cap but is not green yet.
+9. The latest full-suite failures requiring repair are structural packaging issues: `test-mode-markers` sees the new `src/ai-text-editor*` files without `MODE:` markers; `test-release-package` discovers an unrelated existing `src/chat-server-rs/Cargo.toml` workspace issue; `test-skill-files-manifest` reports missing chat artifacts and does not account for `ai-text-editor/agents/openai.yaml` or the generated schemas. Resolve these directly using repository helpers/conventions before rerunning the full suite.
+10. Do not dispatch new reviewers. User explicitly requested self-audit, then implementation. Continue with the failing suite repairs and remaining plan work; do not mark the goal complete yet. Use `apply_patch` for source edits and never hand-edit generated `install.sh`.
+11. Since this pause, the structural suite repairs are green: editor source markers, workspace exclusions, installer manifest registration, host chat artifacts, CLI copy-loop extraction, generated npm baseline, and persona/package checks. The full suite reached 117 passed, 5 failed, 2 unconfigured before those repairs; rerun it after the next implementation slice.
+12. Added explicit CLI help for all commands/modes/responsibilities and MCP `resources/list`/`resources/read` for the protocol schema, capabilities schema, and man page. Canonicalized existing file identities for endpoint, SQLite, and journal keys and corrected the fallback root to `~/.config/tsch-ai-skills/editor`. Rust gates pass again; generated Linux binaries and installer are refreshed.
+13. Remaining known issue from the prior full-suite run: `test-runtime-dependencies` still reports the pre-existing `register-command.sh` rjq-less probe mismatch under the full fixture; investigate with an isolated positive/negative reproduction before changing it. Remaining product gaps include true large-file edit jobs, journal append failure atomicity, richer external-change/reader restart semantics, and complete MCP/session lifecycle behavior.
+14. The whole suite subsequently passed 122/122 (2 optional context tests unconfigured). Added real `large_edit`: requires `job_id`, current revision, and `acknowledge_large_edit=true`; streams a bounded replacement through a same-directory temp file, syncs and renames, refreshes the sparse index, updates metadata, and completes/fails the job. Added a live release-binary test proving the rewrite.
+15. MCP now exposes local schema/man-page resources and explicit tool descriptions. Ordinary edits are journal-first; external reload/merge journal records now include before/after snapshots so restart recovery can rebuild undo history. Every Rust gate still passes after these changes; run the whole suite again after the next non-Rust packaging change.
+16. Added `history` read-only dispatch/client/MCP operation returning undo/redo depths and journal sequence. Mutation responses now include the cursor map; text/raw/hex cursor offsets are adjusted across ordinary byte-range edits. Updated the man page and protocol docs for large edits/history. The full suite was green before this latest Rust-only change; current Rust gates remain green.
+17. Latest Rust hardening adds structured external-change error details (byte count, allowed choices, and the force-save acknowledgement requirement), private permissions for the session-token file and editor metadata root, and protocol documentation for those fields. These changes were made with `apply_patch`; do not hand-edit generated installer output.
+18. The latest source changes also add cursor maps to undo/redo and large-edit mutation responses, and add a history-depth operation to the client/server/MCP surfaces. The revision guard still needs inspection to ensure `large_edit` is included; this is a known follow-up before claiming the mutation contract is complete.
+19. A resource-limited Nix verification command was launched after the latest changes (`cargo fmt`, clippy, workspace tests, release build, schema generation, installer regeneration, diff check), but its output was truncated by context compaction. Inspect the process/state before rerunning so duplicate builds are not started. The prior Rust gates passed; the whole repository suite must be rerun after the current slice.
+20. Product gaps still requiring implementation or an explicit documented contract: real reader pause/restart delimiters during writes; close/tab lifecycle with an explicit preserve-or-clean journal decision; session leases and multi-tab isolation; transactional journal handling for every mutation, including large edits; large-edit undo/recovery; richer fuzzy-gradient semantics; normalization/restoration correctness; raw/hex editing completeness; durable SQLite result-set persistence; and complete Windows atomic-replace behavior. No new reviewers are wanted; resolve and self-audit these gaps.
+21. The repository's `planning/tests/lib-test.sh` documents the Unix socket path ceiling and deliberately uses short test roots. During a live editor probe, two separate application bugs were found and fixed: the socket key is now shortened to 32 hex characters, the socket parent is created before bind, and discovery metadata is separated from the bound `.sock` path (`.endpoint` remains the client lookup file). This was verified with a custom long `XDG_RUNTIME_DIR` and the close lifecycle.
+22. Close lifecycle is now implemented: `close` without `journal_action` returns a structured `journal_close_decision_required`; `preserve` journals and terminates; `clean` removes journal/SQLite artifacts and terminates. Client, protocol reference, man page, MCP tool list, and generated capability schema source are updated. Release build and schema generation passed after the change.
+23. The skill-creator `quick_validate.py` was invoked, first directly (permission denied because the helper is not executable) and then through Python; the latter is blocked only because the ambient Python lacks PyYAML. Do not treat that as a skill-content failure; rerun through an environment containing `yaml` when available.
+24. The full suite after the close/socket/session work reached 121/122 passed, with only `test-npm-package` failing from expected size drift. The baseline was regenerated from `npm pack` using the Nix flake (capturing only the final package filename), and the targeted package test now passes. A prior capture attempt was invalid because the flake banner was included; always strip that banner before reading the package path.
+25. The socket discovery probe exposed and fixed the distinction between the bound Unix socket and endpoint metadata. `endpoint_for_file` is the `.endpoint` discovery file; `socket_for_file` is the `.sock` listener path. The server creates the runtime parent before binding. The live test used an intentionally long runtime directory and passed.
+26. Session behavior now follows the inspected interactive-shell contract: explicit endpoint/token, then named session, named agent, and `TSCH_AI_EDITOR_AGENT`, `CODEX_AGENT_ID`, `AGENT_ID`; named sessions can be initialized with `--file` and are automatically persisted under the metadata/session directory. The refreshed release binary was live-tested through open, history, and close.
+27. Fuzzy search now accepts `gradient` in the inclusive range 0.0..1.0, with strategy-specific defaults/meaning, and has a unit test. The 20-test Nix Rust gate passes after this change.
+28. The subsequent full Nix/resource repository suite is green: 122 passed, 0 failed, 2 optional `PLANNING_CONTEXT_CACHE` tests unconfigured. Release artifacts, schemas, installer, and npm baseline were refreshed before that run.
+29. Added explicit `begin_transaction`/`end_transaction` protocol, client, MCP, schema, man, and protocol support. Ordinary edits inside a transaction remain individually journaled but are grouped into one history undo record. The 20-test Nix Rust gate passes, and a refreshed release live probe confirmed two inserts yield one undo step and restore correctly.
+30. `skill-creator` validation passes when Python is given the Nix PyYAML store's `lib/python3.14/site-packages` through `PYTHONPATH`; direct ambient Python and a plain `nix shell` did not expose the module. Use the working store-path method rather than modifying the helper or the skill.
+31. Close shutdown now removes the `.endpoint` discovery record and owned `.sock` path before exiting. The Rust gate passed after this change, and all release artifacts were rebuilt. The skill text was corrected to document the actual session flags/environment order.
+32. The final whole-repository Nix/resource suite for this slice is green: 122 passed, 0 failed, 2 documented optional context tests unconfigured. It includes packaging, installer, mode-marker, shell portability, schema, and cargo-plan checks; it does not prove all editor runtime contracts.
+33. Added explicit `--normalize-nfc` server startup selection and exposed `normalize_nfc` from `open`. `Document::coordinate` addresses stored bytes, while normalized search uses presentation offsets safely. A live decomposed-to-composed exact-search probe passed; protocol and man documentation were updated.
+34. After transaction, normalization, and metadata changes, release artifacts and generated schemas/installer/npm baseline were refreshed. The next required check is the full Nix/resource repository suite; do not claim final completion until remaining product gaps in entries 20 and 32 are audited.
+35. The final suite after this slice completed green again: 122 passed, 0 failed, 2 documented optional `PLANNING_CONTEXT_CACHE` tests unconfigured. The man page was corrected to real roff escapes (no control-byte form feeds), and the package baseline was regenerated from Nix `npm pack` afterward.
+36. The user has now explicitly paused the work and requested this memory handoff. The current implementation slice added `save_as`: it is allowed through a pending external-change alert, requires a new `target_path`, refuses an existing target, atomically writes the current view to the new path, journals the operation, and returns the new active path/revision. Client, MCP, schema source, protocol reference, and man page were updated with `save-as`/`save_as`. This slice still needs Nix Rust verification, release/schema/installer regeneration, package-baseline refresh, and the full repository suite before its status can be trusted.
+37. The last command was a resource-limited Nix run of `cargo fmt --all`, clippy, and workspace tests. Its output was truncated by context compaction, so inspect for an active `cargo`/wrapper process before starting a duplicate. If it is finished, rerun the gates and then the required artifact/package/full-suite checks one at a time through the flake and resource wrapper.
+38. The user’s latest concern is that the repository maintainer/developer documentation records known limitations. Treat those documents as authoritative context: consult the already-ingested `AGENTS.md`, `DEVELOPMENT.md`, `CODE-STYLE.md`, `CODE-CONTRACTS.md`, generated `PORTABILITY.md`, and relevant planning maintainer references before making future structural changes. Do not infer that a green repository suite proves the editor product is complete.
+39. Preserve the explicit unresolved product audit from entries 20 and 34: one process currently owns one file/tab rather than a multi-tab server; SQLite persists summaries but not reusable exact indexes/results; large-edit undo/recovery and fully transactional journal failure handling are incomplete; external reader restart/delimiter behavior is only contract-level; normalization/raw/hex restoration remains partial; authentication leases/revocation and Windows atomic replacement need review; fuzzy gradients are exposed but simplistic. Resolve or document each before claiming completion.
+40. Added exact SQLite persistence for `line_index_block` rows and `result_match` rows, with per-tab metadata still server-only and WAL/NORMAL/temp-file settings intact. Initial and refreshed indexes now persist their blocks; searches persist the full result rows before putting them in the in-memory pager. The Nix Rust gate passes.
+41. Raw-byte/hex cursor actions are now mode-aware, including home/end, byte/page movement, explicit coordinate clamping, and implicit `--cursor-id` offsets for insert/replace when `--offset` is omitted. TCP startup now requires `--auth-token`; session parent directories are private. External disk identity now tracks size, mtime, permissions, and content digest for normal files.
+42. External reload and merge now append their before/after journal snapshots before committing document/history state. Large-file edits now stream file-backed before/after snapshots, journal their sidecar paths before acknowledging the mutation, expose large undo/redo, reconstruct available large history at startup, and remove those snapshots on `close --journal-action clean`. Nix clippy/tests pass and release artifacts were rebuilt.
+43. The full repository suite after the metadata slice had 121 passed, 1 failed (`test-install-ui`, exit 28) and 2 expected unconfigured context tests; the same UI test reproduced directly under the flake passed. Treat the full-run failure as transient until a subsequent one-at-a-time run confirms it. Package test passed before the latest docs/source changes; regenerate the npm baseline and rerun it after this slice.
+44. Added a mode-aware raw/hex cursor implementation and implicit `cursor_id` offsets for insert/replace. Added sequence and canonical-payload byte counts to response frames, a standalone `backup` external-change action that leaves resolution pending, authenticated-TCP startup enforcement, metadata/permission identity tracking, and journal-first reload/merge commits.
+45. Added durable large-file before/after sidecar snapshots, atomic large undo/redo, journal replay reconstruction where sidecars survive, and cleanup on `close --journal-action clean`. Added explicit lossless NFC `restore` operation with conflict refusal, and an end-to-end `tests/test-ai-text-editor.sh` runtime test. The long-path runtime integration test passes.
+46. Fixed Unix socket discovery for long temporary runtime paths by falling back to a short `/tmp/tsch-ai-skills-editor` root when the configured path approaches `SUN_LEN`; the integration test specifically exercises this through the resource wrapper.
+47. The final Nix/resource whole-repository suite after these changes is green: 123 passed, 0 failed, 2 documented optional `PLANNING_CONTEXT_CACHE` tests unconfigured. Rust clippy/tests (21 unit tests), release build, generated schemas, generated installer, npm package baseline/test, skill-creator validator, shellcheck/bash syntax, `git diff --check`, and the runtime integration test all pass.
+48. Final follow-up hardening: the integration test initially exposed the `pipefail-grep-q` portability rule and was corrected to use a `case`-based `contains` helper; the subsequent full suite is green at 123/123. Added a standalone `backup` external resolution action, protocol sequence/byte-count fields, explicit lossless NFC `restore`, mode-aware raw/hex cursors, implicit cursor-based edits, authenticated TCP refusal without a token, and long-runtime socket fallback. Keep generated binaries/schema/installer/package baseline synchronized after any further source change.
 
 | Question | Answer |
 |---|---|
@@ -95,436 +192,186 @@ nothing, BSD `od` padding a trailing space, and an exact path comparison against
 **Run one verification at a time.** A wholesale failure with missing-file errors
 is a second verification having deleted the first's worktree, not a regression.
 
-## Handoff: planning-helper Rustification (2026-09-02)
+## 49. PR 17 compatibility audit (2026-09-03)
 
-The active objective is to finish every item in the separate plan queue
-`.plans/planning-rustification/TODO.md`, on the implementation branch below,
-then run the full gates, open a PR, and keep the developer-facing wiki notes in
-`/home/mdibbets/git/ai-skills-wiki` current.
+PR 17 is open as `planning: rustify helper tooling` (`a53d12d`). It changes the
+repository-wide Rust build shape: the root workspace becomes `members =
+["src/*"]`, build output is centralized under `/target`, and the installer,
+release builder, CI, and package baselines gain Rust-artifact handling. It does
+not contain the editor crates.
 
-### Worktree and history
+The editor branch must therefore remain additive. Its root `Cargo.toml` now
+uses the same `src/*` workspace glob, retains the editor workspace package and
+dependency declarations, and includes the PR's root `profile.dist`; its lockfile
+was regenerated for both the existing planning crates and the editor crates.
+`setup-dev-env.sh` now reads central Cargo output and lists the editor binaries.
 
-1. Parent repository: `/home/mdibbets/git/ai-skills`.
-2. Implementation worktree: `/home/mdibbets/.config/tsch-ai-skills/worktrees/ai-skills-rustify`.
-3. Implementation branch: `rustify-planning-helpers`.
-4. The `.plans` directory is a separate Git repository. Its queue is on branch
-   `master`; update and commit it independently. Do not touch the parent
-   repository's `TODO.json` for this initiative.
-5. The parent checkout had a pre-existing modified `BUGS.json`; do not carry it
-   into the implementation branch or alter it.
-6. The latest committed implementation before the current slice was `81be873`
-   (`update-work-unit`). Later committed slices include `48bc5df`
-   (`update-plan-content`), `0c4e97e`/`27d81fe` (`monitor-read`), and
-   `13bccaa`/`882c1b9` (`verify-fix-keys`). The current `overview-state` and
-   `plan-content` integration slice is committed; the `plan-context-wrapper`
-   slice is now committed separately. The
-   separate queue has its own history and must be updated independently.
+The exact PR ref is available locally as `origin/pr/17`. Shared files that will
+need a careful three-way merge are `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
+`setup-dev-env.sh`, `.gitignore`, `install.sh`, the installer fragments,
+`package.json`, and the package baseline. Do not blindly take either side: retain
+the editor manifest rows, platform artifacts, MCP/skill swap logic, and editor
+runtime dependencies while taking PR 17's central-target and generated-manifest
+rules.
 
-### Decisions already made
+PR-owned prerequisite found during the audit: with the current PR ref and Rust
+1.98, `cargo fmt --all --check` reports formatting differences in
+`src/plan-overview/src/main.rs`. This is not an editor change and was not altered
+on this branch; it must be fixed in PR 17 or resolved when it lands before using
+the full workspace format gate as evidence.
 
-1. Every `planning/scripts/**/*.sh` file is in scope: runtime commands,
-   library files, validators, generators, build helpers, and DEV-only tools.
-2. Runtime commands become separate extensionless Rust executables with the
-   same basename without `.sh`.
-3. Shared shell libraries become reusable Rust crates, preserving state and
-   invalidation ownership in one crate where they belong.
-4. Current shell behavior is the temporary differential oracle. Preserve
-   stdout/stderr, exit status, help/error behavior, filesystem effects,
-   generated bytes, permissions, and Git snapshots. The old 1.4.2 shell source
-   remains recoverable from Git history, not installed permanently.
-5. Current `planning/tests/` scripts remain the primary regression suite.
-6. Rust commands must be built/tested in the Nix flake development shell, under
-   the resource-limited wrapper for substantial commands. The Nix shell emits a
-   harmless `cargo186: command not found` warning while still providing cargo.
+The compatibility changes were validated with the combined workspace lockfile,
+editor-only fmt/clippy/tests (21 Rust tests), the editor integration test, the
+installer manifest test, shell syntax, whitespace, and `./run-tests.sh` under the
+Nix flake. All local checks passed; the full-workspace format check remains
+blocked only by the PR-owned `plan-overview` formatting finding above.
 
-### Work completed
+## 50. Persisted index reuse (2026-09-03)
 
-1. `planning/rust-migration.tsv` inventories all 140 planning shell files and
-   classifies each as runtime binary, library crate, absorbed build,
-   generator, or generated-retire artifact.
-2. Rust crates exist for `planning-core`, `planning-document`,
-   `planning-progress`, and `planning-table`.
-3. `planning-core` includes safe values, atomic writes, path helpers, and the
-   pinned-plan Git snapshot primitive. Snapshot commits use the legacy subject
-   `snapshot before <helper>.sh`.
-4. Rust binaries added and shell-oracle tested:
-   `plan-root`, `update-progress`, `create-progress`, `plan-env`,
-   `create-plan-progress`, `create-step-testing`,
-   `create-ui-story-run-cache`, `configure-ui-story-cache`,
-   `create-ui-validation`, `add-ui-story`, `add-ui-story-links`,
-   `update-ui-story`, `create-work-unit-inventory`,
-   `create-adversarial-review`, `remove-coverage`, `add-coverage`, and
-   `add-work-unit`, `update-plan-progress`, `update-step`, and
-   `verify-fix-keys`.
-5. Each new crate has a pinned `rust-toolchain.toml`; per-crate generated
-   `Cargo.lock` files are intentionally removed before commits.
-6. The queue marks the corresponding completed command entries, but most of the
-   queue is still unchecked.
-7. Wiki pages already added/updated:
-   `Planning-helper-rust-architecture.md`, `Planning-helper-parity.md`, and
-   `_Sidebar.md`. They describe the layered crates, extensionless binaries,
-   parity protocol, and snapshot behavior.
+Closed a real implementation gap in `metadata.rs` and the server: startup now
+loads a persisted line index only when granularity, byte length, disk identity,
+revision, completeness, ordered blocks, and block bounds all validate. Missing
+or stale/corrupt rows trigger a rebuild; large tabs use their bounded file index
+builder. The `open` response exposes `index_loaded` for machine-verifiable
+diagnostics. Closing with `journal_action=clean` now removes the journal and
+large-history sidecars but retains the per-tab SQLite cache, so a later tab
+startup can reuse indexes/results. The integration test proves a restart cache
+hit. Editor clippy/tests and the shipped-binary end-to-end test pass after the
+change.
 
-### Immediate next work
+## 51. Paused after persistent result paging (2026-09-03)
 
-1. Continue porting the remaining commands; `overview-state` is implemented
-   inside `plan-overview`, and `plan-content` is now implemented as a separate
-   read-only binary crate with shell differential probes. `plan-context-wrapper`
-   is also implemented and differential-tested; it sources worker variables,
-   then delegates to the sibling Rust reader when available. The current seam
-   is the cache reader itself.
-2. Keep every binary's CLI spelling compatible, including `--plan-dir PATH`
-   and `--plan-dir=PATH` where the shell hoist helper accepts both.
-3. Add focused Rust tests for non-success paths and shared crate functions;
-   compilation with zero unit tests is not sufficient evidence.
-4. Finish the reusable inventory/reconciliation/document/validator crates
-   before trying to remove shell library files.
-5. The root Cargo workspace is now defined and passes workspace formatting,
-   check, and test gates; the remaining per-package profile warnings are
-   harmless but should be cleaned up when the artifact contract is settled.
-6. Integrate binaries into `setup-dev-env.sh`, installer manifests,
-   `planning/binaries.tsv`, package maps, benchmarks, and tests only after the
-   artifact contract is settled.
-7. Replace `build-plan-libs.sh` semantically with Cargo/build artifact logic;
-   do not recreate it as a runtime command.
-8. Only after all parity and package evidence exists, remove `.sh` oracles,
-   run `./run-tests.sh`, full Rust checks, package/installer checks, and create
-   the PR.
+The user requested a pause immediately after the next persistence improvement.
+`metadata.rs` now also has `load_result_matches(result_id, revision)`: it loads
+only complete result sets for the current revision, validates the persisted row
+count and JSON, and treats missing/partial/corrupt data as a cache miss. Server
+`page` now attempts that reload before returning `stale_result`, and caches the
+validated rows in memory. A metadata unit test covers a successful load and a
+revision mismatch.
 
-9. `update-plan-content` covers all documented mutation modes, including
-   auto-create/append, CSV newline decoding, review status, decomposition
-   review, context invalidation, and step-testing reminders. Direct shell/Rust
-   probes match for help, successful modes, malformed CSV, missing paragraphs,
-   review approval, and unresolved-review refusal. It is not queue-complete
-   until exact error/atomicity probes, focused tests, package integration, and
-   full command replacement are complete.
+The result-paging change was then compiled and passed editor fmt/clippy and all
+21 Rust tests. The shipped Linux binaries were rebuilt, and the end-to-end test
+now proves search → save → preserve journal → restart → page by the old pager
+key; it passes. The sandbox initially refused the temporary Unix socket, so the
+integration run was repeated with the approved socket-capable execution path.
 
-10. `overview-state` is implemented as a second binary in the existing
-    `plan-overview` crate. Its extractor now matches the shell oracle exactly
-    on the navigation and size fixtures with a pinned `OVERVIEW_NOW`: stdout
-    bytes, parsed JSON, stderr, exit status, and help are identical. The parity
-    fixes preserve shell quirks such as filepath ordering, trailing section
-    whitespace, raw testing-requirement table keys, emoji status markers,
-    backtick-only fields, archived finding-cycle detection, malformed
-    inventory-row filtering, and the default `generatedAt=serve-live` value.
-    `planning/tests/test-overview-state.sh` passes, and `setup-dev-env.sh` now
-    builds/copies both `plan-overview` and `overview-state`. The slice is not
-    yet committed or marked complete in the separate queue.
+The broader implementation remains active. PR 17 is still open; the PR-owned
+`src/plan-overview/src/main.rs` formatting finding and the plan's stale 0%
+progress remain documented in entries 49–50. The next major unimplemented
+contract gaps are authenticated HMAC challenge/session lifecycle, fuller large
+file external-resolution jobs, and the plan-owned verification targets.
 
-11. `plan-context` now has a reusable `plan-context-core` crate and an
-    extensionless `plan-context` binary. It implements init/read/check/refresh/
-    checkpoint, paging, views, inventory rows, source entries, role aliases,
-    UTF-8-safe clipping, snapshot-wide `check --all`, and checkpoint arrays.
-    The five available focused shell parity tests pass, as do workspace Rust
-    fmt/clippy/test/release gates. The main integration test cannot run in this
-    checkout because its required materialized `PLANNING_CONTEXT_CACHE` fixture
-    containing W37 is absent; the visible planning-context fixture is only a
-    protocol-input directory. Direct checkpoint JSON and role-alias probes also
-    match the shell helper.
+## 52. Paused after authenticated TCP wiring (2026-09-03)
 
-12. `role-context` now has an extensionless Rust binary with the shell
-    registry, aliases, scoped-document output, reviewer pin warning, identity
-    gates, path mode, and byte pagination. Differential probes pass for list,
-    paths, aliases, access, normal output, small pages, and out-of-range pages;
-    its focused Rust tests and capped Nix clippy/test/build pass. The full
-    repository suite after the preceding context slice is 122 passed, 0
-    failed, 2 expected unconfigured cache-fixture cases.
+The user paused implementation and requested this memory handoff. The editor
+auth module and TCP challenge/proof path are now wired and compile: each TCP
+connection receives a nonce and server generation, the client proves knowledge
+of the configured secret with HMAC-SHA256 over a length-prefixed transcript,
+and the server then processes the original request through the existing
+authenticated request path. Empty TCP auth tokens are refused at startup;
+Unix transport remains unchanged. Auth unit tests cover transcript stability,
+exact proof verification, mismatch refusal, nonce generation, and decoding.
 
-13. `rebuild-plan-progress` now has an extensionless Rust binary using the
-    shared planning-core/progress/table crates. Its progress-derivation and
-    plan-dir synonym tests pass against the copied shell-test tree, as do its
-    focused Rust test and capped Nix clippy/test/release build.
+The Nix editor gate passed after this wiring: editor fmt, clippy with denied
+warnings, and 24 Rust tests. Release binaries are CI artifacts and are not
+committed. No TCP runtime integration test
+has yet been run after the handshake wiring. The next concrete check is to
+start the shipped server on `tcp:127.0.0.1:0`, parse its announced endpoint,
+verify a correct token can open, and verify an incorrect token is refused
+without mutation. Socket-capable execution may require the approved elevated
+path.
 
-14. `register-read` now has an extensionless Rust binary using ordered
-    `serde_json`, with show/count/report/next-id and a focused filter test. Its
-    `list` path delegates the exact current shell filter to the Rust `rjq`
-    binary, including the installed parser's current exit-5 diagnostic, so a
-    direct stdout/stderr/status probe is byte-identical. The repository's
-    `test-register-read.sh` passes.
+Known follow-up remains: the current handshake is not yet the complete planned
+credential/session lifecycle. It still needs review or implementation for
+credential-file ownership, expiry/skew, replay protection, rotation and
+revocation, and generation lifecycle. The protocol schema, skill help, man
+page, and protocol reference should also be audited so they describe the
+challenge/proof exchange rather than implying a plaintext TCP token. Do not
+claim the overall editor objective complete; the implementation plan still
+contains unfinished product contracts and progress metadata must be updated
+through planning helpers only.
 
-15. `register-command` now has an extensionless Rust writer using ordered
-    `serde_json`, preserving add/remove/list JSON ordering and pretty output,
-    validation, and the shell's rjq-unavailable exit-69 contract. Its focused
-    unit test, command-registry regression, plan-dir synonym test, and direct
-    add/list/remove file/output differential all pass under the capped Nix
-    development shell.
+PR 17 remains open and must not be merged blindly. Its central Cargo target,
+workspace/installer/release changes still require a three-way merge that keeps
+the editor dependencies, artifacts, MCP/skill swapping, and auth implementation.
+The PR-owned `src/plan-overview/src/main.rs` format finding remains separate.
 
-16. `register-rebuild` now has an extensionless Rust DEV binary. It stamps
-    missing fields, applies the register sort order, preserves mechanical
-    writes before semantic refusal, and reports unsound entries. Its focused
-    Rust test and capped Nix gates pass; direct shell/Rust fixture comparison
-    matches normalized JSON, success output, and damaged-register findings.
-    The existing full register-helper test invokes this DEV helper through
-    Bash, so it cannot substitute a raw ELF without a test-only shim.
+## 53. Large-range, historical-page, and cleanup hardening (2026-09-03)
 
-17. The shared `planning-register` library now centralizes ordered JSON
-    register I/O, rjq gating, IDs, sorting, timestamps, and soundness findings.
-    `todo-add` and `todo-update` are extensionless Rust binaries wired by
-    `setup-dev-env.sh`. `todo-add` matches the shell writer on a sound fixture;
-    `todo-update` matches status, stdout/stderr bytes, and normalized JSON. The
-    direct probe confirmed the shell's duplicate `Updated <id>` line and its
-    no-sort behavior, so both are intentionally preserved. Release build and
-    focused Nix checks pass. Remaining register work is `bug-add`/`bug-update`
-    and broader finding parity before the shared library is considered final.
+After resuming, the TCP authentication path was hardened against proof replay:
+the server now requires the client-provided nonce to equal the fresh nonce it
+issued, and the TCP client strips `auth_token` from the editor request after
+using it locally for HMAC proof. Protocol reference, skill, docs README, and
+man page now describe the challenge/proof exchange accurately. The shipped
+TCP test proves good-token open/read and bad-token refusal.
 
-18. After the OOM-interrupted full suite, focused repository gates exposed two
-    integration issues rather than Rust parity defects. `tests/test-mode-markers.sh`
-    now classifies Rust `Cargo.toml` files as compiler inputs as documented, and
-    the newest crates have the required markers (`MODE: DEV`, `PACKAGE: PROD`;
-    toolchain files carry `MODE: DEV` only). `supervision-frame.sh`'s argument
-    parser is split into a helper so the existing function-length ratchet stays
-    at 58 without changing the shell oracle. Marker, function-length,
-    supervision-frame, target-reachability, Bash syntax, and shellcheck gates
-    pass; the repair is committed as `d95dd91`.
+Large tabs no longer silently perform unbounded exact-text scans. They require
+an explicit inclusive line range and report `search_range` coverage. Large
+exact-byte searches now accept an explicit bounded half-open byte range up to
+the read ceiling and return absolute byte offsets plus base64 contents. Client,
+protocol, man, and skill help expose those flags; the runtime test covers both
+large search modes.
 
-    The subsequent capped full suite completed in 477 seconds with 121 passes,
-    one package-baseline mismatch, and the same two expected unconfigured
-    context-cache cases. Updating the owned `npm-package-baseline.tsv` size for
-    the helper split made `test-npm-package.sh` pass; no runtime parity test
-    failed.
+Paging now supports an explicit historical read (`--historical`) of a complete
+persisted result from an older revision, returning `source_revision` and
+`stale: true`; default stale paging remains rejected. Metadata has a validated
+historical loader and a unit test.
 
-19. `bug-add` and `bug-update` now use the shared register layer and are wired
-    as extensionless binaries. Direct shell differentials pass for bug creation,
-    note/priority updates, fixed-status evidence, refusal status, output, and
-    normalized JSON. `bug-add` deliberately does not sort: the current shell
-    helper's implementation contradicts its comment and appends without
-    calling `reg_write`; the Rust implementation preserves that behavior.
+Explicit `close --journal-action clean` now closes the file-backed SQLite
+connection before removing the per-tab database/WAL/SHM files. The integration
+test waits for each short-lived server process, closes the TCP tab explicitly,
+and verifies no tab database remains after cleanup. A direct metadata cleanup
+unit test also passes. Release Linux binaries were rebuilt after the changes.
 
-20. `supervision-frame` is now an extensionless Rust PROD binary wired through
-    `setup-dev-env.sh`. It preserves frame field order and byte-budget refusal,
-    grant-log tab records, show/check output, and missing-file/status behavior.
-    Direct shell/Rust probes for write, check, and grant pass byte-for-byte
-    (timestamps normalized only in grant records); capped Nix fmt, clippy,
-    tests, and release build pass.
+The full repository suite was green immediately before this slice (123 passed,
+2 optional context tests unconfigured); after this slice, rerun the full suite
+and refresh the npm baseline after the final documentation edits. Remaining
+major plan gaps still include multi-tab server hosting, full endpoint/session
+lease and credential rotation lifecycle, live reader restart semantics,
+complete index/search engine coverage for huge files, and final packaging/plan
+verification.
 
-21. `generate-reviewer` is now an extensionless Rust PROD binary using the
-    existing `plan-crypt` SHA-256 implementation. It projects the two tagged
-    sections, preserves the generated document and missing/empty-section
-    refusal behavior, and matches the shell generator's stdout/stderr and
-    output bytes in a temporary-skill differential (path names normalized).
+## 54. Credential-file rotation and historical search contract (2026-09-03)
 
-22. `cleanup-plans` is now an extensionless Rust PROD binary. It preserves the
-    shell helper's direct-child plan discovery, completion-row recognition,
-    listing, cancellation, and exit behavior, and delegates confirmed removal
-    to the existing Rust `remove-plan` binary. Capped Nix fmt/clippy/tests/
-    release build pass; list and declined-confirmation differentials pass.
+The server now accepts exactly one of `--auth-token TOKEN` and
+`--auth-token-file PATH`. On Unix, the credential file must not be
+group/world-readable; it is read at startup and reread for each TCP connection,
+so replacing the file rotates the accepted secret without restarting the
+server. The client never serializes its token in the post-handshake editor
+request. The shipped integration test covers private-file startup, old-token
+rejection after rotation, new-token success, and authenticated clean close.
 
-23. `verify-target` is now an extensionless Rust PROD binary. It parses the
-    work-unit inventory, checks target existence/ownership, render-surface
-    reachability, layout removal/re-point evidence, and module theme overrides.
-    A generated plan/repository fixture matches the shell helper byte-for-byte
-    for render and non-render targets; capped Nix fmt/clippy/tests/release build
-    pass. Remove/re-point/override branch probes still need a wider differential.
+Large-file exact text search now refuses an omitted end line; exact-byte search
+accepts a bounded half-open byte range and returns absolute offsets/base64
+contents. Search responses include requested line/byte coverage. The client,
+skill, protocol reference, docs README, man page, and client help were updated.
+Explicit historical paging (`--historical`) loads a validated complete result
+from SQLite after a revision change and reports its source revision/stale state;
+default paging still refuses stale results.
 
-24. `plan-mutate` now has a Rust dispatcher crate and is included in
-    `setup-dev-env.sh`. Its help text and unknown-command behavior match the
-    shell dispatcher byte-for-byte. It routes only the shell dispatcher’s real
-    verbs, maps aliases to the corresponding Rust binaries where available,
-    and explicitly falls back to the shell oracle for the still-unported
-    inline/validation paths. It passes capped Nix fmt/clippy/test plus direct
-    help, unknown-command, Rust-target, and fallback differential probes; this
-    is an integration seam, not final shell retirement.
+The per-tab SQLite cleanup path now closes the file-backed connection via an
+in-memory replacement before removing the database/WAL/SHM files. The runtime
+test waits for each short-lived server process and verifies clean close leaves
+no tab database. Current editor verification is green: 25 Rust tests,
+release binaries, and the editor integration flow. The whole repository suite
+must still be rerun after the latest client-help/docs/test changes; regenerate
+the npm baseline after those edits. Do not claim overall completion: multi-tab
+hosting, separate session authorization/leases/revocation, live reader
+restart semantics, and full plan-owned verification remain open.
 
-25. The validation library migration has started with `planning-validator-common`
-    and `planning-validator-docs`. The common crate centralizes finding output,
-    warning/error accounting, Markdown trim, heading checks, and single-field
-    extraction. The docs crate ports obsolescence, existence, duplicate step,
-    document-heading, review, UI, and decomposition checks. Both pass capped
-    Nix fmt/clippy/tests; they are not yet wired into a Rust `validate-plan`
-    binary, so shell parity and the remaining validation passes are still open.
+## 55. Updated from merged master (2026-09-03)
 
-26. Added `planning-validator-placeholders` and
-    `planning-validator-stale`. The placeholder crate preserves registry-based
-    authored/generated findings, fenced Markdown exclusion, and generated goal
-    and UI-cache scans. The stale crate preserves paragraph-local history-marker
-    exemptions, default/custom phrase selection, companion scanning, and
-    advisory warning wording. Both pass capped Nix fmt/clippy/tests; neither is
-    wired into `validate-plan` yet.
+The branch fast-forwarded to `origin/master` at merge commit `e9025d5`, which
+includes PR #17's Rust workspace migration and centralized root `target/`
+artifacts. The editor workspace dependencies were retained and `setup-dev-env.sh`
+now emits the editor and MCP binaries alongside the planning tools. The installer
+was regenerated with `./installer/build.sh`; generated package metadata was
+refreshed after explicitly indexing the editor files.
 
-27. Added `planning-validator-comparisons`, which reads the artifact-comparison
-    registry, scans only `## Artifact comparisons` tables in testing companions,
-    refuses unknown comparisons and exact comparisons for nondeterministic file
-    extensions, and otherwise remains advisory-compatible with the shell pass.
-    It passes capped Nix fmt/clippy/tests and is not yet wired into
-    `validate-plan`.
-
-28. Added `planning-validator-serve`, which consumes the state-change registry
-    and an inventory goal/unit projection, detects state-changing indicators,
-    and warns when test/verification acceptance lacks a configured live-serve
-    phrase. It passes capped Nix fmt/clippy/tests and is not yet wired into
-    `validate-plan`.
-
-29. Added `planning-validator-inventory`, a canonical Rust inventory model that
-    parses work-unit rows and coverage ids, preserves declaration/goal order,
-    validates row constraints and target paths, checks dependency cycles and
-    unknown edges, and exposes transitive dependency queries for later passes.
-    Its focused parser/graph tests pass under capped Nix checks; it is not yet
-    wired into `validate-plan`.
-
-30. Added `planning-validator-ui`, which parses the nine-column story table,
-    validates direct interactions and prohibited shortcuts, checks browser-run
-    cache shape/status, related verification units, and bug links. Its focused
-    tests pass under capped Nix checks; the renderer is unrelated and remains
-    outside this agent's scope.
-
-31. Added `planning-validator-commands`, a reusable Rust port of the command
-    literal detector. It preserves fenced/inline span discovery, core and
-    registry command candidates, executable/bin path checks, citation/prose/
-    directory disqualification, extension registry handling, and advisory vs
-    complete-mode findings. Its focused tests and capped Nix fmt/clippy/test
-    gates pass. It is consumed by the Rust `validate-plan` orchestrator. The separate
-    `render-plans-board` migration remains intentionally excluded because
-    another agent owns that renderer.
-
-32. Added `planning-validator-goals`, a reusable Rust port of goal and step
-    structure checks: required headings, testing-requirement rows and testing
-    bands, goal-size bounds, registered yes/no sections, inventory field
-    agreement, atomicity completion checks, and numbered step naming. Its
-    focused tests and capped Nix fmt/clippy/test gates pass, and it is consumed
-    by the Rust `validate-plan` orchestrator.
-
-33. Added `planning-validator-propagation`, covering completion state,
-    verification reachability, testing-companion references, graph leaves, and
-    heuristic symbol ownership. It reuses the inventory model and passes
-    capped Nix fmt/clippy/test gates. Git freshness and the detailed §9.x
-    roster and Git-freshness passes remain orchestration work; the other
-    propagation checks are consumed by `validate-plan`.
-
-34. Added the Rust `validate-plan` orchestration binary and wired it into
-    `setup-dev-env.sh`. Its CLI/help output matches the shell helper and it
-    composes the migrated document, placeholder, stale, inventory, goal,
-    UI, serve, command, completion, propagation, and comparison passes. Fresh
-    generated-plan differentials exposed and fixed path-ancestor, one-unit
-    exception, and failure-gate-summary mismatches; broader mutation coverage
-    and final shell retirement remain.
-
-35. Added the Rust `run-adversary-probe` binary and wired it into the dev
-    build. It copies the probe fixture including dotfiles, initializes and
-    queries the sibling Rust gated reader, checks inventory entries, and emits
-    the reviewer prompt. Its focused copy test and capped Nix gates pass; the
-    runtime differential passes with the complete sibling-binary build.
-
-36. Built the full host artifact set with `setup-dev-env.sh`. A copied
-    `planning-rustification` plan from the separate `.plans` repository now
-    validates identically through the shell and Rust `validate-plan` binaries
-    in both normal and `--complete` modes (same status/stdout/stderr). The
-    shell/Rust `run-adversary-probe` differential also matches byte-for-byte
-    after suppressing Rust reader-init output, using absolute script paths,
-    preserving escaped JSON, and avoiding inventory coverage diagnostics that
-    the probe's shell parser does not emit.
-
-37. The resource-capped full repository suite completed after integration:
-    122 passed, 0 failed, with only the same 2 expected
-    `PLANNING_CONTEXT_CACHE` cases unconfigured. Workspace-wide Rust fmt,
-    clippy (`-D warnings`), and tests also pass.
-
-38. The fresh generated-plan differential now matches Rust and shell exit
-    status and stdout; stderr is being rechecked after aligning the exact
-    failure-path `Gates:` wording. The fixture uses existing `Cargo.toml` as
-    its target and remains outside the repository in `/tmp`.
-
-39. Added propagation roster validation and Git-freshness warnings to the Rust
-    crate and wired both into `validate-plan --propagation`. Roster parsing
-    follows the shell's §9.1 leading-run and per-unit-blurb rules; freshness
-    compares `%cI` timestamps only when the plan is inside the supplied Git
-    repository. Focused capped Nix clippy/tests pass. The installed binary
-    still needs a rebuild before runtime differential testing of this slice.
-
-40. Resumed after that handoff, rebuilt the complete host artifact set with
-    `setup-dev-env.sh`, and verified the copied real
-    `/tmp/validate-plan-fixture.sbb1mZ/plan` with `validate-plan --propagation`.
-    Shell and Rust have identical exit status, stdout, and stderr there. The
-    fresh generated-plan failure differential is also exact after matching the
-    shell's missing-review wording and failure-path gate summary.
-
-41. Release/package baseline after the Rust additions is green under the capped
-    Nix development shell: `tests/test-release-package.sh`,
-    `tests/test-shipped-binaries.sh`, and `tests/test-skill-files-manifest.sh`
-    all pass. The release still intentionally packages the shell façade and
-    generated `plan-*-lib.sh` artifacts; do not remove or replace those until
-    the remaining shell consumers are migrated. `build-plan-libs.sh` is still
-    the current shell-oracle build and is the next packaging/retirement seam.
-
-### Pause handoff — resume this evening
-
-1. Worktree: `/home/mdibbets/.config/tsch-ai-skills/worktrees/ai-skills-rustify`.
-2. Branch: `rustify-planning-helpers`; clean at pause.
-3. Latest commits: `9eddc62` (propagation roster/freshness), `37b4bb6`
-   (validator failure parity), `442e3cf` (renderer explicitly excluded).
-4. The separate `.plans` repository has pre-existing modified
-   `plan-overview-rebuild/context/processed.tsv`; preserve it. Do not hand-edit
-   `.plans` plan pages or the parent repository's `TODO.json`.
-5. Renderer work remains excluded: another agent owns the Rust replacement for
-   `render-plans-board`; leave both that shell helper and its Rust work alone.
-6. Wiki files already updated in `/home/mdibbets/git/ai-skills-wiki`:
-   `Planning-helper-rust-architecture.md` and `Planning-helper-parity.md`.
-7. No long-running process is active. Heavy commands must use the direct
-   wrapper `/home/mdibbets/ai/agents/skills/resource-limited-testing/scripts/limited-run.sh`
-   and run inside `nix develop .#default`; poll long jobs for roughly 60
-   seconds via repeated 30-second waits.
-8. Next technical decision: audit and implement the package transition for
-   extensionless Rust binaries while preserving the current shell differential
-   oracle. First inspect installer/generated-manifest mechanics and the exact
-   release tests; do not remove `build-plan-libs.sh` prematurely because shell
-   helpers still source its generated libraries.
-9. Objective remains unfinished: migrate/retire every in-scope shell helper
-   except the externally owned renderer, complete the separate queue's goals,
-   update package/install/test/docs contracts, run all gates, create the PR,
-   and add/maintain developer wiki entries.
-
-### Verification recipe
-
-`monitor-read` is implemented and wired into `setup-dev-env.sh`. Its Rust
-implementation matches the shell for help, show/status/summary/grants/verify,
-maintainer gating, missing-frame and budget errors, normal and negative GNU
-`tail -n` values, and invalid-number errors. The existing supervision-frame
-test passes; packaging and shell-oracle retirement remain global work.
-
-Use commands of this shape from `/tmp/ai-skills-rustify`:
-
-```bash
-/home/mdibbets/ai/agents/skills/resource-limited-testing/scripts/limited-run.sh 4G 400 -- \
-  nix develop .#default --command bash -lc 'cargo fmt --manifest-path src/<crate>/Cargo.toml --check && cargo clippy --manifest-path src/<crate>/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src/<crate>/Cargo.toml'
-```
-
-For each helper, build `--release` in that same shell, create parallel shell
-and Rust fixtures, compare stdout/stderr, exit status, generated files, and
-permissions with `diff`, and compare snapshot commit subjects when the command
-mutates a pinned plan. Remove any newly generated untracked `src/*/Cargo.lock`
-with `apply_patch` before committing.
-
-`update-plan-progress` has now passed a focused differential fixture, including
-both positional and `--plan-dir=` forms. `update-step` has passed the ordinary
-shell differential and the matching-Git-diff atomicity fixture. `verify-fix-keys`
-has passed a gated shell differential and the existing `test-fix-keys.sh` suite.
-`update-work-unit` has passed field, description, and move differentials, plus
-the existing `test-plan-commands.sh` regression suite. Its implementation is
-committed as `81be873`.
-`update-plan-content` has passed direct shell/Rust tree, stdout/stderr, and exit
-status differentials across its mutation matrix. `plan-content` has passed
-get, summary, find, diff, and blast-radius probes against the shell oracle;
-its remaining work is focused edge coverage and final artifact integration.
-The resource-capped Nix-shell repository suite completed with 121 passes, one
-package-baseline mismatch (fixed and rechecked separately), and 2 expected
-unconfigured context tests. Packaging and the remaining helper surface remain
-incomplete.
-
-### Compact handoff — 2026-09-02
-
-1. Package staging is committed in `3604a4b`: release preparation now stages
-   extensionless Rust planning commands beside their `.sh` oracles, and the
-   package/manifest tests cover them.
-2. `run-tests.sh` now discovers every `src/*/Cargo.toml`; `planning-map` also
-   has the required metadata markers. This gate expansion is committed as
-   `ee052ac`.
-3. Full capped Nix verification after fixing discovery: `Total ran: 199,
-   Passed: 199, Failed: 0, Unconfigured: 2`; the two unconfigured cases are
-   the documented `PLANNING_CONTEXT_CACHE` tests. Shellcheck, `bash -n`, and
-   `git diff --check` pass for the changed runner.
-4. A gated worker found the highest-priority remaining packaging gap: Windows
-   planning commands are staged as `.exe` but the generated planning manifest
-   requests extensionless names. It also identified missing cross-target
-   planning-command CI and that `binaries.tsv` only covers plan-overview/rjq.
-5. The `.plans` repository remains separate with unrelated pre-existing
-   modifications. Do not hand-edit its plan pages; use planning workers and
-   sanctioned helpers. The renderer remains externally owned and excluded.
+Post-merge verification: editor format, clippy, and 25 unit tests passed; isolated
+editor integration, package, chat-resolution, and chat tests passed; the complete
+repository run reached 199/202 passed with only the two expected unconfigured
+context tests, while its three chat/package failures were caused by concurrent
+test runners and the pre-indexed package baseline. Those three checks passed when
+rerun alone. The implementation remains intentionally uncommitted and the
+pre-merge stash checkpoint is retained for recovery.

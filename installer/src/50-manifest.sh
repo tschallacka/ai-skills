@@ -37,6 +37,14 @@ version_marker_content() {
 # Still a hand list, deliberately: the planning arms are a second copy of
 # PACKAGE-MANIFEST.tsv and the duplication is the cross-check.
 # tests/test-mode-markers.sh compares both arms against the markers in the files.
+editor_artifact_files() {
+    local relative
+    for relative in "$@"; do
+        [ -f "$SOURCE_ROOT/ai-text-editor/$relative" ] && printf '%s\n' "$relative"
+    done
+    return 0
+}
+
 skill_files() {
     local package="${2:-prod}"
     case "$package" in
@@ -464,6 +472,34 @@ EOF
         post-implementation-review)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
+        ai-text-editor)
+            cat <<'EDITOR_EOF'
+SKILL.md
+agents/openai.yaml
+docs/README.md
+ai-text-editor.1
+binaries.tsv
+schemas/protocol.v1.json
+schemas/capabilities.v1.json
+requires.tsv
+references/protocol.md
+EDITOR_EOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    editor_artifact_files bin/x86_64-unknown-linux-musl/ai-text-editor-server bin/x86_64-unknown-linux-musl/ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-mcp ;;
+                Linux:aarch64|Linux:arm64)
+                    editor_artifact_files bin/aarch64-unknown-linux-musl/ai-text-editor-server bin/aarch64-unknown-linux-musl/ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-mcp ;;
+                Darwin:x86_64)
+                    editor_artifact_files bin/x86_64-apple-darwin/ai-text-editor-server bin/x86_64-apple-darwin/ai-text-editor bin/x86_64-apple-darwin/ai-text-editor-mcp ;;
+                Darwin:arm64)
+                    editor_artifact_files bin/aarch64-apple-darwin/ai-text-editor-server bin/aarch64-apple-darwin/ai-text-editor bin/aarch64-apple-darwin/ai-text-editor-mcp ;;
+                MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
+                    editor_artifact_files bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe bin/x86_64-pc-windows-msvc/ai-text-editor.exe bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe ;;
+                *)
+                    printf 'skill_files: no ai-text-editor artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
+            ;;
         chat)
             cat <<'CHATEOF'
 SKILL.md
@@ -492,6 +528,15 @@ tests/test-chat.sh
 tests/test-chat-resolution.sh
 CHATEOF
             ;;
+    esac
+}
+
+ai_text_editor_file_allowed() {
+    [ "$1" = ai-text-editor ] || return 0
+    case "$EDITOR_INTEGRATION:$2" in
+        skill:bin/*/ai-text-editor-mcp|mcp:bin/*/ai-text-editor|mcp:bin/*/ai-text-editor-server|mcp:bin/*/ai-text-editor.exe|mcp:bin/*/ai-text-editor-server.exe)
+            return 1 ;;
+        *) return 0 ;;
     esac
 }
 
