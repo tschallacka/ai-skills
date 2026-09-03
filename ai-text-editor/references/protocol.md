@@ -130,6 +130,11 @@ silently scanning an unbounded file. Large `exact_bytes` searches instead
 require an explicit half-open `range_start_byte`/`range_end_byte` range no
 larger than the bounded read limit and return absolute `byte_start`/
 `byte_end` coordinates with base64 contents.
+Large searches scan their bounded range incrementally and persist matches in
+SQLite chunks; only the requested preview is retained in server memory. Use
+`page` with the returned `pager_key`, `offset`, and `limit` to retrieve a
+bounded slice without loading the complete result set into memory. A failed
+scan remains incomplete and cannot be paged as a complete result.
 Small-tab `exact_bytes` results likewise include absolute `byte_start` and
 `byte_end` fields. Their line/column fields describe the start and end
 coordinates separately, so a match crossing a newline is not represented by

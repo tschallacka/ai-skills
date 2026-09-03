@@ -54,6 +54,9 @@ server-written coordination metadata, not a client-accessible SQLite store.
 8. Request counts, pager keys, first-four defaults, context lines, line/byte ranges,
    ordering, completeness, result generations, stale-page detection, and
    explicit historical reads.
+   Large searches persist matches incrementally in bounded SQLite chunks and
+   retain only the preview in server memory; page large result sets instead
+   of expecting one unbounded response.
 9. Build or inspect lazy 10,000-line/byte-offset indexes, including explicit
    ranges, full-index requests, granularity, cancellation, and resource limits.
    Large-tab startup records bounded prefix coverage; use `index` for an
