@@ -160,14 +160,72 @@ fn wait_for_rows(dir: &Path, needle: &str) -> Value {
     )
 }
 
+/// Poll `observe` until `needle` is NO LONGER on the screen.
+///
+/// The counterpart of `wait_for_rows`, for a test that asserts something was
+/// removed. Waiting for the condition rather than sleeping a guessed interval
+/// is the same doctrine: a fixed `thread::sleep` is a bet on how fast the
+/// runner is, and the macOS runner loses that bet.
+fn wait_until_gone(dir: &Path, needle: &str) {
+    for _ in 0..READY_POLLS {
+        if let Some(snapshot) = request_all(dir, "{\"v\":1,\"op\":\"observe\"}\n")
+            .into_iter()
+            .find(|event| event["event"] == "snapshot")
+        {
+            if !snapshot["rows"].to_string().contains(needle) {
+                return;
+            }
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!(
+        "{:?} was still on the screen after {:?}\n{}",
+        needle,
+        POLL_INTERVAL * READY_POLLS as u32,
+        wrapper_stderr(dir)
+    )
+}
+
+/// Send `body` and read the whole reply, saying what went wrong if it cannot.
+///
+/// These were four bare `unwrap()`s. A wrapper that exits mid-request -- an
+/// idle timeout, a fixture that ended -- surfaced as
+/// `Os { code: 104, kind: ConnectionReset }` from `read_to_string`, with no
+/// indication of which request, which socket, or what the wrapper had said on
+/// its way out. `code: 104` is also Linux-only; macOS numbers ECONNRESET 54,
+/// so the number in a CI log is not even stable across the legs.
+fn exchange(dir: &Path, stream: &mut UnixStream, body: &str) -> String {
+    stream.write_all(body.as_bytes()).unwrap_or_else(|error| {
+        panic!("sending {body:?} failed: {error}\n{}", wrapper_stderr(dir))
+    });
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .unwrap_or_else(|error| {
+            panic!(
+                "half-closing after {body:?} failed: {error}\n{}",
+                wrapper_stderr(dir)
+            )
+        });
+    let mut out = String::new();
+    stream.read_to_string(&mut out).unwrap_or_else(|error| {
+        panic!(
+            "reading the reply to {body:?} failed: {error}\npartial reply: {out:?}\n{}",
+            wrapper_stderr(dir)
+        )
+    });
+    out
+}
+
 fn request(dir: &Path, body: &str) -> Value {
     for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
-            stream.write_all(body.as_bytes()).unwrap();
-            stream.shutdown(std::net::Shutdown::Write).unwrap();
-            let mut out = String::new();
-            stream.read_to_string(&mut out).unwrap();
-            return serde_json::from_str(out.trim()).unwrap();
+            let out = exchange(dir, &mut stream, body);
+            return serde_json::from_str(out.trim()).unwrap_or_else(|error| {
+                panic!(
+                    "reply to {body:?} is not JSON: {error}\nreply: {out:?}\n{}",
+                    wrapper_stderr(dir)
+                )
+            });
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -182,13 +240,14 @@ fn request(dir: &Path, body: &str) -> Value {
 fn request_all(dir: &Path, body: &str) -> Vec<Value> {
     for _ in 0..READY_POLLS {
         if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
-            stream.write_all(body.as_bytes()).unwrap();
-            stream.shutdown(std::net::Shutdown::Write).unwrap();
-            let mut out = String::new();
-            stream.read_to_string(&mut out).unwrap();
+            let out = exchange(dir, &mut stream, body);
             return out
                 .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
+                .map(|line| {
+                    serde_json::from_str(line).unwrap_or_else(|error| {
+                        panic!("reply line is not JSON: {error}\nline: {line:?}\nreply: {out:?}")
+                    })
+                })
                 .collect();
         }
         thread::sleep(POLL_INTERVAL);
@@ -204,7 +263,11 @@ fn request_all(dir: &Path, body: &str) -> Vec<Value> {
 #[test]
 fn wrapper_reports_screen_ack_and_lifecycle() {
     let dir = temp_dir("events");
-    let mut child = start(&dir, &["sh", "-c", "stty size; printf first; sleep 1"], "5");
+    let mut child = start(
+        &dir,
+        &["sh", "-c", "stty size; printf first; sleep 1"],
+        "30",
+    );
     let ack = request(
         &dir,
         r#"{"v":1,"op":"key","key":"ENTER"}
@@ -239,7 +302,7 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
             "-c",
             "printf primary; sleep .1; printf '\\x1b[?1049hALT\\x1b[?1049l'; sleep .2",
         ],
-        "5",
+        "30",
     );
     let mut output = String::new();
     child
@@ -275,7 +338,7 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
 #[test]
 fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
     let dir = temp_dir("fragmented-osc");
-    let mut child = start_fixture(&dir, "5");
+    let mut child = start_fixture(&dir, "30");
     let mut output = String::new();
     child
         .stdout
@@ -313,7 +376,7 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
 #[test]
 fn socket_is_private_and_invalid_requests_are_rejected() {
     let dir = temp_dir("bounds");
-    let mut child = start(&dir, &["sleep", "2"], "5");
+    let mut child = start(&dir, &["sleep", "30"], "30");
     for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
@@ -432,7 +495,7 @@ fn invalid_dimensions_fail_before_creating_socket() {
 #[test]
 fn structured_observe_paste_mouse_and_resize_requests_work() {
     let dir = temp_dir("structured-actions");
-    let mut child = start(&dir, &["sh", "-c", "sleep 2"], "5");
+    let mut child = start(&dir, &["sh", "-c", "sleep 30"], "30");
     let observed = request_all(
         &dir,
         r#"{"v":1,"op":"observe"}
@@ -477,15 +540,33 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
     let dir = temp_dir("view");
     let mut child = start(
         &dir,
-        &["sh", "-c", "printf ONE; sleep .1; printf '\\rTWO'; sleep 1"],
-        "5",
+        // Driven by input, NOT by a timer. It was
+        // `printf ONE; sleep .1; printf '\\rTWO'; sleep 1`, which rewrites row 1
+        // a tenth of a second after start, whatever the test is doing -- so the
+        // two `view` assertions below only hold while the test outruns that
+        // sleep. On x86_64-apple-darwin it did not: the range assertion saw
+        // `001 [001-003] TWO` (reproduced locally by inserting a 300ms sleep
+        // before the range view), which read as "row 2 is missing" and is
+        // really "row 1 has already moved on". `read` makes the screen change
+        // exactly when this test sends a line and never before; `stty -echo`
+        // keeps that line off the screen, and the trailing `read` parks the
+        // shell until shutdown so no second timer can end it early.
+        &[
+            "sh",
+            "-c",
+            "stty -echo; printf ONE; read _go; printf '\\rTWO'; read _park",
+        ],
+        "30",
     );
     let first_wait = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"ONE"}
 "#,
     );
-    assert!(first_wait.iter().any(|event| event["matched"] == true));
+    assert!(
+        first_wait.iter().any(|event| event["matched"] == true),
+        "no wait event matched ONE: {first_wait:?}"
+    );
     let view = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args([
             "--socket",
@@ -522,12 +603,18 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
         range_want,
         range_out
     );
+    // Release the fixture's first `read`, which is what turns ONE into TWO.
+    let ack = request(&dir, "{\"v\":1,\"op\":\"text\",\"text\":\"\\n\"}\n");
+    assert_eq!(ack["event"], "ack", "text op was not acknowledged: {ack:?}");
     let second_wait = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"TWO"}
 "#,
     );
-    assert!(second_wait.iter().any(|event| event["matched"] == true));
+    assert!(
+        second_wait.iter().any(|event| event["matched"] == true),
+        "no wait event matched TWO: {second_wait:?}"
+    );
     let delta = request_all(
         &dir,
         r#"{"v":1,"op":"view-delta","rows":[1]}
@@ -548,8 +635,8 @@ fn rgbview_preserves_styles_without_json_wrapping() {
     let dir = temp_dir("rgbview");
     let mut child = start(
         &dir,
-        &["sh", "-c", "printf '\\033[31mRED\\033[0m'; sleep 1"],
-        "5",
+        &["sh", "-c", "printf '\\033[31mRED\\033[0m'; sleep 30"],
+        "30",
     );
     let _ = request_all(
         &dir,
@@ -580,7 +667,7 @@ fn rgbview_preserves_styles_without_json_wrapping() {
 #[test]
 fn locate_returns_visible_coordinates_without_sending_input() {
     let dir = temp_dir("locate");
-    let mut child = start(&dir, &["sh", "-c", "printf TARGET; sleep 1"], "5");
+    let mut child = start(&dir, &["sh", "-c", "printf TARGET; sleep 30"], "30");
     let _ = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"TARGET"}
@@ -612,13 +699,13 @@ fn wait_returns_a_snapshot_after_a_screen_predicate() {
         &[
             "sh",
             "-c",
-            "printf before; sleep .1; printf TARGET; sleep .2",
+            "printf before; sleep .1; printf TARGET; read _park",
         ],
-        "5",
+        "30",
     );
     let events = request_all(
         &dir,
-        r#"{"v":1,"op":"wait","contains":"TARGET","timeout_ms":2000}
+        r#"{"v":1,"op":"wait","contains":"TARGET","timeout_ms":30000}
 "#,
     );
     let wait = events
@@ -646,11 +733,11 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
             "--rows",
             "4",
             "--idle-timeout",
-            "5",
+            "30",
             "--",
             "sh",
             "-c",
-            "printf SESSION_READY; sleep 5",
+            "printf SESSION_READY; sleep 30",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -682,7 +769,7 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
     assert_eq!(session["agent"], "session-agent");
     let input = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
-        .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
+        .args(["--session", "resume-case", "wait", "SESSION_READY", "30000"])
         .output()
         .unwrap();
     assert!(
@@ -716,7 +803,7 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
     assert!(socket.exists());
     let resumed = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .env("INTERACTIVE_SHELL_HOME", &state)
-        .args(["--session", "resume-case", "wait", "SESSION_READY", "2000"])
+        .args(["--session", "resume-case", "wait", "SESSION_READY", "30000"])
         .output()
         .unwrap();
     assert!(resumed.status.success());
@@ -736,10 +823,14 @@ fn observe_exposes_osc8_elements_and_click_targets() {
         &[
             "sh",
             "-c",
-            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 2",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 30",
         ],
-        "5",
+        "30",
     );
+    // Wait for the link to reach the screen first. `observe` used to be issued
+    // the instant the wrapper was up, so `elements[0]` was whatever had been
+    // parsed by then -- null on a runner that had not scheduled the fixture yet.
+    wait_for_rows(&dir, "LINK");
     let snapshot = request_all(
         &dir,
         r#"{"v":1,"op":"observe"}
@@ -812,11 +903,19 @@ fn observe_drops_osc8_elements_after_their_cells_are_erased() {
         &[
             "sh",
             "-c",
-            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 0.2; printf '\\033[2J'; sleep 2",
+            // Input-driven, like the view test: the erase happens when this
+            // test asks for it. It was `sleep 0.2; printf '\\033[2J'; sleep 2`
+            // read by a blind `thread::sleep(500ms)`, which is a bet on both
+            // ends -- too early and the erase has not run, too late and the
+            // fixture has exited and taken the socket with it.
+            "stty -echo; printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; read _go; printf '\\033[2J'; read _park",
         ],
-        "5",
+        "30",
     );
-    thread::sleep(Duration::from_millis(500));
+    wait_for_rows(&dir, "LINK");
+    let ack = request(&dir, "{\"v\":1,\"op\":\"text\",\"text\":\"\\n\"}\n");
+    assert_eq!(ack["event"], "ack", "text op was not acknowledged: {ack:?}");
+    wait_until_gone(&dir, "LINK");
     let snapshot = request_all(
         &dir,
         r#"{"v":1,"op":"observe"}
@@ -867,7 +966,7 @@ fn malformed_cli_arguments_do_not_panic() {
 #[test]
 fn cli_text_preserves_spaces_and_input_help_is_available() {
     let dir = temp_dir("cli-text");
-    let mut child = start(&dir, &["sh", "-c", "sleep 3"], "5");
+    let mut child = start(&dir, &["sh", "-c", "sleep 30"], "30");
     let help = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args(["--help"])
         .output()
@@ -929,7 +1028,7 @@ fn signal_cleanup_removes_socket() {
 #[test]
 fn idle_timeout_reports_status_124() {
     let dir = temp_dir("idle");
-    let mut child = start(&dir, &["sleep", "3"], "1");
+    let mut child = start(&dir, &["sleep", "30"], "1");
     let mut output = String::new();
     child
         .stdout
@@ -957,7 +1056,7 @@ fn long_input_and_descendants_are_handled() {
         "sleep 30 & echo $! > {}; wc -c >/dev/null; wait",
         pid_file.display()
     );
-    let mut child = start(&dir, &["sh", "-c", &command], "5");
+    let mut child = start(&dir, &["sh", "-c", &command], "30");
     for _ in 0..READY_POLLS {
         if pid_file.exists() {
             break;
