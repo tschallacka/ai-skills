@@ -43,6 +43,9 @@
     "!planning/MAINTAINER.md",
     "!planning/PACKAGE-MAP.tsv",
     "!planning/rust-migration.tsv",
+    "!.agents/knowledge/**",
+    "!.agents/skill-loading-experiment/**",
+    "!.agents/skill-loading-findings.md",
     "!**/.ci-bin",
     "!project-specificies/*-deviations.md"
   ],

@@ -1,0 +1,10 @@
+# MODE: DEV
+weakA-r1	sonnet	2600	165245	1	1078	72818	none
+weakA-r2	sonnet	2600	165245	1	1078	72818	none
+weakA-r3	sonnet	2600	165245	1	1078	72818	none
+weakB-r1	sonnet	2600	165245	1	1078	72818	none
+weakB-r2	sonnet	2600	165245	1	1078	72818	none
+weakB-r3	sonnet	2600	165245	6	2634	179175	present
+realplan-r1	sonnet	1502	89860	2	1503	96037	present
+realplan-r2	sonnet	1502	89860	1	977	59602	present
+realplan-r3	sonnet	1502	89860	1	977	59602	present

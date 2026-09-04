@@ -2704,6 +2704,27 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B121",
+      "title": "test-rjq-active-references exempts a comment only at column zero",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "add an INDENTED comment containing the bare word to any scanned file, e.g. \"              # ... the older filter tool ...\" inside a nix list, then run tests/test-rjq-active-references.sh",
+      "observed": "the line is reported as an active reference and the gate exits 1, even though a comment cannot be a call site",
+      "expected": "a comment is exempt wherever it sits, as the column-zero case already is",
+      "mechanism": "The filter is awk on grep -n output, whose lines are path:lineno:content. Its exemption pattern is /(^|:)#/, which requires the hash IMMEDIATELY after the line-number colon. An indented comment puts whitespace between them, so the pattern misses and the line survives as an offender. The sibling pattern for slash-slash comments has the same shape and the same gap. Intent is clearly to exclude comment prose -- the header says the fixtures are \"plan prose ... not call sites that execute\" the tool -- so the indentation dependence is an accident of the regex, not a policy. Allowing optional whitespace, /(^|:)[[:space:]]*#/, closes it without weakening the gate: a comment is prose in shell, nix and rust alike, and an active reference cannot hide in one. Worked around for now by rewording the comment to avoid the bare word, which is contorted prose in service of a regex quirk and is the reason this is filed rather than left.",
+      "surfaces": [
+        "tests/test-rjq-active-references.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "flake.nix comment explaining why the older filter tool is excluded",
+      "notes": null,
+      "created_at": "2026-09-03T22:26:48Z",
+      "updated_at": "2026-09-03T22:26:48Z"
     }
   ]
 }
