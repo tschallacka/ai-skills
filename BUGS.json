@@ -3405,6 +3405,25 @@
       "updated_at": "2026-09-04T07:32:39Z"
     },
     {
+      "id": "B165",
+      "title": "installer/build.sh --check compares the committed install.sh against a WORKING TREE build, so an uncommitted source edit passes locally and fails in CI",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "edit a file under installer/src/ and regenerate install.sh; commit ONLY install.sh, leaving the source edit unstaged; run ./installer/build.sh --check, then push and read CI's 'install.sh matches installer/build.sh output' job",
+      "observed": "locally: 'install.sh is up to date'. In CI: the job fails with a diff showing the committed install.sh differs from a fresh build -- for the change on 2026-09-04 the committed file carried the corrected master-branch URL while CI's rebuild produced the old main URL from the unchanged source. The local check agreed with a state that existed only in one worktree.",
+      "expected": "the check answers the question CI answers: does the committed install.sh match a build from the COMMITTED sources",
+      "mechanism": "the check regenerates from installer/src as it is ON DISK and compares that to install.sh on disk, so an uncommitted source edit sits on both sides of the comparison and cancels out. CI clones the commit, where the edit is absent, and gets a different answer. Fix by building from HEAD (git show HEAD:installer/src/...) rather than the worktree, or by refusing when installer/src has unstaged changes and saying why -- a check that can only be trusted on a clean tree should say so rather than pass.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "pr-master, after CI caught a commit carrying the generated install.sh without its source (PR #48)",
+      "notes": null,
+      "created_at": "2026-09-04T12:36:25Z",
+      "updated_at": "2026-09-04T12:36:25Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
