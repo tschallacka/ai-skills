@@ -10,8 +10,6 @@ planning/scripts/add-planning-bug.sh	runtime-binary	add-planning-bug	preserve CL
 planning/scripts/add-ui-story-links.sh	runtime-binary	add-ui-story-links	preserve CLI and observable behavior
 planning/scripts/add-ui-story.sh	runtime-binary	add-ui-story	preserve CLI and observable behavior
 planning/scripts/add-work-unit.sh	runtime-binary	add-work-unit	preserve CLI and observable behavior
-planning/scripts/bug-add.sh	dev-binary	bug-add	in scope; decide install/package status explicitly
-planning/scripts/bug-update.sh	dev-binary	bug-update	in scope; decide install/package status explicitly
 planning/scripts/build-plan-libs.sh	absorbed-build	cargo-workspace	replace with Cargo artifact/build configuration
 planning/scripts/cleanup-plans.sh	runtime-binary	cleanup-plans	preserve CLI and observable behavior
 planning/scripts/configure-ui-story-cache.sh	runtime-binary	configure-ui-story-cache	preserve CLI and observable behavior
@@ -119,8 +117,6 @@ planning/scripts/resolve-finding.sh	runtime-binary	resolve-finding	preserve CLI 
 planning/scripts/role-context.sh	runtime-binary	role-context	preserve CLI and observable behavior
 planning/scripts/run-adversary-probe.sh	runtime-binary	run-adversary-probe	preserve CLI and observable behavior
 planning/scripts/supervision-frame.sh	runtime-binary	supervision-frame	preserve CLI and observable behavior
-planning/scripts/todo-add.sh	dev-binary	todo-add	in scope; decide install/package status explicitly
-planning/scripts/todo-update.sh	dev-binary	todo-update	in scope; decide install/package status explicitly
 planning/scripts/update-adversarial-review.sh	runtime-binary	update-adversarial-review	preserve CLI and observable behavior
 planning/scripts/update-plan-content.sh	runtime-binary	update-plan-content	preserve CLI and observable behavior
 planning/scripts/update-plan-progress.sh	runtime-binary	update-plan-progress	preserve CLI and observable behavior
