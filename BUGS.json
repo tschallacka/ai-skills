@@ -1386,28 +1386,28 @@
       "updated_at": "2026-09-03T10:37:40Z"
     },
     {
-      "id": "B119",
-      "title": "test-runtime-dependencies' rjq-less PATH is refilled from the shared install directory",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "On a machine that has installed the skills (~/.config/tsch-ai-skills/bin/rjq present): bash planning/tests/test-runtime-dependencies.sh",
-      "observed": "runtime-deps: register-command.sh without rjq exited 0, expected 69 — and the output is 'Registered build = make all (when building)', so the command SUCCEEDED with no rjq on the PATH the test built. Reproduced on a clean worktree of HEAD after build-plan-libs.sh, with planning/bin and bin/ moved aside, so no local change is involved.",
-      "expected": "The rjq-less run refuses with 69 and names rjq, the way the validate-plan.sh case in the same test does.",
-      "mechanism": "The test builds a PATH without rjq but passes HOME through: env -i PATH=$jqless_bin HOME=$HOME. plan-document-lib.sh, which every entry point sources, prepends plan_bin_dir when rjq is missing from PATH, and plan_bin_dir's second candidate is ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin — the shared install location. rjq is restored from HOME, so the guard correctly does not fire and the assertion is wrong rather than the code. The gate therefore reports on whether the host has an install, not on the code under test: green on a clean CI runner, red on a maintainer's machine.",
-      "surfaces": [
-        "planning/tests/test-runtime-dependencies.sh",
-        "planning/scripts/lib/crypt/plan_bin_dir.sh",
-        "planning/scripts/plan-document-lib.sh"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "full suite run while shipping the todo binary; isolated with a clean-HEAD worktree control",
-      "notes": "Filed on feature/ship-register-helpers as B108; master had taken B108 and B109 for unrelated defects before this branch rebased, so the entry was renumbered to B119 at the rebase rather than displacing either.",
-      "created_at": "2026-09-01T21:19:58Z",
-      "updated_at": "2026-09-01T21:19:58Z"
-    },
+        "id": "B119",
+        "title": "test-runtime-dependencies' rjq-less PATH is refilled from the shared install directory",
+        "status": "fixed",
+        "severity": "major",
+        "priority": "high",
+        "parent": null,
+        "reproduce": "On a machine that has installed the skills (~/.config/tsch-ai-skills/bin/rjq present): bash planning/tests/test-runtime-dependencies.sh",
+        "observed": "runtime-deps: register-command.sh without rjq exited 0, expected 69 — and the output is 'Registered build = make all (when building)', so the command SUCCEEDED with no rjq on the PATH the test built. Reproduced on a clean worktree of HEAD after build-plan-libs.sh, with planning/bin and bin/ moved aside, so no local change is involved.",
+        "expected": "The rjq-less run refuses with 69 and names rjq, the way the validate-plan.sh case in the same test does.",
+        "mechanism": "The test builds a PATH without rjq but passes HOME through: env -i PATH=$jqless_bin HOME=$HOME. plan-document-lib.sh, which every entry point sources, prepends plan_bin_dir when rjq is missing from PATH, and plan_bin_dir's second candidate is ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin — the shared install location. rjq is restored from HOME, so the guard correctly does not fire and the assertion is wrong rather than the code. The gate therefore reports on whether the host has an install, not on the code under test: green on a clean CI runner, red on a maintainer's machine.",
+        "surfaces": [
+          "planning/tests/test-runtime-dependencies.sh",
+          "planning/scripts/lib/crypt/plan_bin_dir.sh",
+          "planning/scripts/plan-document-lib.sh"
+        ],
+        "fix": "fd9a67b — the rjq-less test now uses an isolated temporary HOME, so the shared install directory cannot refill PATH",
+        "verification": "test-runtime-dependencies.sh passes with the isolated HOME. Mutation of register-command.sh's rjq guard to a no-op makes the test fail with exit 127 instead of the expected 69, proving the refusal assertion bites. pre-push-check.sh passes, including BUGS.json soundness and the package baseline.",
+        "found_by": "full suite run while shipping the todo binary; isolated with a clean-HEAD worktree control",
+        "notes": "Filed on feature/ship-register-helpers as B108; master had taken B108 and B109 for unrelated defects before this branch rebased, so the entry was renumbered to B119 at the rebase rather than displacing either.",
+        "created_at": "2026-09-01T21:19:58Z",
+        "updated_at": "2026-09-04T08:11:03Z"
+      },
     {
       "id": "B122",
       "title": "chat-server-rs stops servicing accepted connections: the broadcast path blocks in write_line while holding hub.writers",
