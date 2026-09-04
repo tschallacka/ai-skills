@@ -569,6 +569,7 @@ CHATEOF
             cat <<'CHATEOF'
 tests/test-chat.sh
 tests/test-chat-resolution.sh
+tests/test-chat-broadcast-stall.sh
 CHATEOF
             ;;
     esac
