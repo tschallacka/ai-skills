@@ -7,6 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -216,48 +217,109 @@ fn exchange(dir: &Path, stream: &mut UnixStream, body: &str) -> String {
     out
 }
 
-fn request(dir: &Path, body: &str) -> Value {
-    for _ in 0..READY_POLLS {
-        if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
-            let out = exchange(dir, &mut stream, body);
-            return serde_json::from_str(out.trim()).unwrap_or_else(|error| {
-                panic!(
-                    "reply to {body:?} is not JSON: {error}\nreply: {out:?}\n{}",
-                    wrapper_stderr(dir)
-                )
-            });
-        }
-        thread::sleep(POLL_INTERVAL);
-    }
-    panic!(
-        "socket did not appear at {} within {:?}\n{}",
+/// Connect to the wrapper's socket the way the library does: by name, from
+/// inside its own directory.
+///
+/// NOT `UnixStream::connect(dir.join("socket"))`. That is an absolute address,
+/// and sun_path caps a Unix socket address at 104 bytes. On macOS $TMPDIR is a
+/// per-user `/var/folders/<2>/<28>/T/` path, run-tests.sh adds its own scratch
+/// directory and each test names its own, so the address arrives at ~110 bytes
+/// and every connect fails with "path must be shorter than SUN_LEN". The
+/// library already answers this with `connect_in_directory`, whose other half
+/// is `bind_in_directory`; its own doc comment says both ends have to be
+/// relative or the shorter one just moves the failure. The tests are the third
+/// end of that rule and were still connecting absolutely.
+///
+/// Reproduced on Linux by lengthening $TMPDIR alone -- 8 passed, 11 failed, the
+/// same eleven as the macOS legs, with `exists=true` printed beside the SUN_LEN
+/// error. The socket was present and connectable by name the whole time.
+/// WHY THE LOCK. `connect_in_directory` gets its relative address by moving the
+/// process into the directory with `fchdir`, and the cwd is per PROCESS, not per
+/// thread. The wrapper is single-threaded so it pays nothing for that; this
+/// binary runs nineteen tests as threads in one process, so an unguarded move
+/// lets one test's connect run while another test's cwd is in force. Measured,
+/// not feared: connecting by name with no lock failed 3 runs out of 3 with
+/// `Connection reset by peer`, and passed with `--test-threads=1`. The same
+/// hazard is why `the_socket_is_bound_by_name_inside_the_held_directory` and its
+/// sibling are serialised in the library's own unit tests.
+///
+/// The lock covers the move and nothing else -- `exchange` reads and writes
+/// after it is released -- so the suite still finishes in about a second.
+/// A poisoned lock is recovered rather than propagated: the poison would come
+/// from some other test's panic, and turning that into eighteen further
+/// failures hides the one that matters.
+static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+fn connect_socket(dir: &Path) -> Result<UnixStream, String> {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    interactive_shell_core::connect_in_directory(&dir.join("socket"))
+}
+
+/// What to say when no connect ever succeeded.
+///
+/// The old message was "socket did not appear", which named the one thing that
+/// was not wrong: the socket was there throughout and `exists()` said so. A
+/// harness that misattributes its own failure sends the next reader after the
+/// wrapper, and this message sent three sessions there. So it prints the last
+/// connect error, which identifies the cause, and whether the socket exists,
+/// which is what separates "never bound" from "bound but unreachable".
+fn unreachable_socket(dir: &Path, last_error: &str) -> String {
+    format!(
+        "could not connect to {} within {:?}\nsocket present: {}\nlast connect error: {}\n{}",
         dir.join("socket").display(),
         POLL_INTERVAL * READY_POLLS as u32,
+        dir.join("socket").exists(),
+        if last_error.is_empty() {
+            "(never attempted)"
+        } else {
+            last_error
+        },
         wrapper_stderr(dir)
     )
 }
 
-fn request_all(dir: &Path, body: &str) -> Vec<Value> {
+fn request(dir: &Path, body: &str) -> Value {
+    let mut last_error = String::new();
     for _ in 0..READY_POLLS {
-        if let Ok(mut stream) = UnixStream::connect(dir.join("socket")) {
-            let out = exchange(dir, &mut stream, body);
-            return out
-                .lines()
-                .map(|line| {
-                    serde_json::from_str(line).unwrap_or_else(|error| {
-                        panic!("reply line is not JSON: {error}\nline: {line:?}\nreply: {out:?}")
-                    })
-                })
-                .collect();
+        match connect_socket(dir) {
+            Ok(mut stream) => {
+                let out = exchange(dir, &mut stream, body);
+                return serde_json::from_str(out.trim()).unwrap_or_else(|error| {
+                    panic!(
+                        "reply to {body:?} is not JSON: {error}\nreply: {out:?}\n{}",
+                        wrapper_stderr(dir)
+                    )
+                });
+            }
+            Err(error) => last_error = error,
         }
         thread::sleep(POLL_INTERVAL);
     }
-    panic!(
-        "socket did not appear at {} within {:?}\n{}",
-        dir.join("socket").display(),
-        POLL_INTERVAL * READY_POLLS as u32,
-        wrapper_stderr(dir)
-    )
+    panic!("{}", unreachable_socket(dir, &last_error))
+}
+
+fn request_all(dir: &Path, body: &str) -> Vec<Value> {
+    let mut last_error = String::new();
+    for _ in 0..READY_POLLS {
+        match connect_socket(dir) {
+            Ok(mut stream) => {
+                let out = exchange(dir, &mut stream, body);
+                return out
+                    .lines()
+                    .map(|line| {
+                        serde_json::from_str(line).unwrap_or_else(|error| {
+                            panic!(
+                                "reply line is not JSON: {error}\nline: {line:?}\nreply: {out:?}"
+                            )
+                        })
+                    })
+                    .collect();
+            }
+            Err(error) => last_error = error,
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("{}", unreachable_socket(dir, &last_error))
 }
 
 #[test]
