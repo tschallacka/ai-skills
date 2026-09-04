@@ -94,6 +94,52 @@ jobs:
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
 
+      - name: Install memlimit so the resource wrapper's RAM cap is real
+        # limited-run.sh caps memory with a transient systemd scope on Linux and
+        # with memlimit on macOS. Without it the suite prints "the requested RAM
+        # limit (2G) is not enforced" and runs UNCAPPED, so a test that eats
+        # memory takes the runner down instead of failing inside its budget --
+        # the cap was advisory on both macOS legs until this step existed.
+        #
+        # memlimit publishes exactly one artifact,
+        # memlimit-aarch64-apple-darwin.tar.gz, so it exists for Apple Silicon
+        # only. That is already the repository's position -- resource-limited-
+        # testing declares it Darwin:arm64 and limited-run.sh tells an Intel Mac
+        # it has no memory-cap mechanism -- and it is why the arm64 guard is not
+        # padding: on any other host the installer errors out.
+        #
+        # MEMLIMIT_UNMANAGED_INSTALL pins the directory and switches off both
+        # the installer's PATH editing and its self-updater, so the directory
+        # added to PATH is provably the one installed into. The layout is read
+        # back rather than assumed, and the binary is then RUN, in the exact
+        # shape limited-run.sh uses it (`memlimit <bytes> -- command`). A step
+        # that installs nothing has to fail here; if it merely warned, the suite
+        # would quietly go back to the unenforced path and look the same.
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" != arm64 ]; then
+            echo "::notice::memlimit is Apple Silicon only; $(uname -m) has no memory-cap mechanism"
+            exit 0
+          fi
+          root="$HOME/.local/memlimit"
+          export MEMLIMIT_UNMANAGED_INSTALL="$root"
+          curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
+          bin=""
+          for candidate in "$root/memlimit" "$root/bin/memlimit"; do
+            if [ -x "$candidate" ]; then bin="$candidate"; break; fi
+          done
+          if [ -z "$bin" ]; then
+            echo "::error::memlimit did not install under $root"
+            ls -lR "$root" || true
+            exit 1
+          fi
+          if ! "$bin" 2147483648 -- /usr/bin/true; then
+            echo "::error::$bin installed but will not run a command under a cap"
+            exit 1
+          fi
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+          echo "memlimit ready at $bin"
+
       - name: Build the compiled chat rung so its assertions run (T62)
         uses: dtolnay/rust-toolchain@1.98
         with:
@@ -228,6 +274,52 @@ jobs:
             brew install coreutils
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
+
+      - name: Install memlimit so the resource wrapper's RAM cap is real
+        # limited-run.sh caps memory with a transient systemd scope on Linux and
+        # with memlimit on macOS. Without it the suite prints "the requested RAM
+        # limit (2G) is not enforced" and runs UNCAPPED, so a test that eats
+        # memory takes the runner down instead of failing inside its budget --
+        # the cap was advisory on both macOS legs until this step existed.
+        #
+        # memlimit publishes exactly one artifact,
+        # memlimit-aarch64-apple-darwin.tar.gz, so it exists for Apple Silicon
+        # only. That is already the repository's position -- resource-limited-
+        # testing declares it Darwin:arm64 and limited-run.sh tells an Intel Mac
+        # it has no memory-cap mechanism -- and it is why the arm64 guard is not
+        # padding: on any other host the installer errors out.
+        #
+        # MEMLIMIT_UNMANAGED_INSTALL pins the directory and switches off both
+        # the installer's PATH editing and its self-updater, so the directory
+        # added to PATH is provably the one installed into. The layout is read
+        # back rather than assumed, and the binary is then RUN, in the exact
+        # shape limited-run.sh uses it (`memlimit <bytes> -- command`). A step
+        # that installs nothing has to fail here; if it merely warned, the suite
+        # would quietly go back to the unenforced path and look the same.
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" != arm64 ]; then
+            echo "::notice::memlimit is Apple Silicon only; $(uname -m) has no memory-cap mechanism"
+            exit 0
+          fi
+          root="$HOME/.local/memlimit"
+          export MEMLIMIT_UNMANAGED_INSTALL="$root"
+          curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
+          bin=""
+          for candidate in "$root/memlimit" "$root/bin/memlimit"; do
+            if [ -x "$candidate" ]; then bin="$candidate"; break; fi
+          done
+          if [ -z "$bin" ]; then
+            echo "::error::memlimit did not install under $root"
+            ls -lR "$root" || true
+            exit 1
+          fi
+          if ! "$bin" 2147483648 -- /usr/bin/true; then
+            echo "::error::$bin installed but will not run a command under a cap"
+            exit 1
+          fi
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+          echo "memlimit ready at $bin"
 
       - name: Place the compiled register rungs
         # Same reason as the default-bash leg: skill_files() lists the host's
