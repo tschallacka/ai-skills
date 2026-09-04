@@ -3933,6 +3933,37 @@ integration_file_allowed() {
     [ "$declared" = "$(integration_mode_for "$skill")" ]
 }
 
+# A skill switching integration mode (mcp -> skill or back) leaves the
+# previous mode's binary on disk unless something removes it: the install
+# loop only ever copies files the CURRENT mode allows, so a binary the
+# PREVIOUS mode wrote and this one does not declare is simply never revisited.
+# `$files` (from skill_files) already lists every bin/ row for every mode this
+# platform offers -- the same list the copy loop filters by
+# integration_file_allowed -- so reusing it here needs no second, hand-kept
+# list of triples or binary names to fall out of date the next platform this
+# grows to support.
+remove_stale_integration_binaries() {
+    local skill="$1" destination="$2" files="$3" relative physical
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        case "$relative" in bin/*) : ;; *) continue ;; esac
+        if integration_file_allowed "$skill" "$relative"; then
+            continue
+        fi
+        physical="$(platform_relative_path "$skill" "$relative")"
+        if [ -e "$destination/$physical" ]; then
+            rm -f "$destination/$physical"
+        fi
+    done <<EOF
+$files
+EOF
+    # The common case is "nothing to remove": the last loop iteration's own
+    # exit status must never become this function's return status, or the
+    # bare `remove_stale_integration_binaries ...` call at each call site trips
+    # `set -e` on exactly the runs that needed no cleanup at all.
+    return 0
+}
+
 source_file() {
     local skill="$1"
     local relative="$2"
@@ -3977,7 +4008,9 @@ cli_resolve_source() {
 }
 
 cli_copy_skill_files() {
-    local relative source destination_file
+    local relative source destination_file files
+    files="$(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")"
+    remove_stale_integration_binaries "$CLI_SKILL" "$TARGET_SELECTION/$CLI_SKILL" "$files"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         integration_file_allowed "$CLI_SKILL" "$relative" || continue
@@ -3985,7 +4018,9 @@ cli_copy_skill_files() {
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
-    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+    done <<EOF
+$files
+EOF
 }
 
 cli_install_skill() {
@@ -4217,21 +4252,7 @@ EOF
         return
     fi
 
-    if [ "$skill" = ai-text-editor ]; then
-        local stale_relative
-        for stale_relative in \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor-server \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor-mcp \
-            bin/x86_64-pc-windows-msvc/ai-text-editor.exe \
-            bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe \
-            bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe; do
-            integration_file_allowed "$skill" "$stale_relative" || {
-                [ -e "$destination/$stale_relative" ] || continue
-                rm -f "$destination/$stale_relative"
-            }
-        done
-    fi
+    remove_stale_integration_binaries "$skill" "$destination" "$files"
 
     mkdir -p "$destination"
     while IFS= read -r relative; do

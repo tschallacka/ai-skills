@@ -190,21 +190,7 @@ EOF
         return
     fi
 
-    if [ "$skill" = ai-text-editor ]; then
-        local stale_relative
-        for stale_relative in \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor-server \
-            bin/x86_64-unknown-linux-gnu/ai-text-editor-mcp \
-            bin/x86_64-pc-windows-msvc/ai-text-editor.exe \
-            bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe \
-            bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe; do
-            integration_file_allowed "$skill" "$stale_relative" || {
-                [ -e "$destination/$stale_relative" ] || continue
-                rm -f "$destination/$stale_relative"
-            }
-        done
-    fi
+    remove_stale_integration_binaries "$skill" "$destination" "$files"
 
     mkdir -p "$destination"
     while IFS= read -r relative; do
