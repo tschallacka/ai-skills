@@ -86,8 +86,8 @@
         "tests/test-release-package.sh",
         "package.json"
       ],
-      "fix": "d51171a — release-package now validates full SemVer core, prerelease and build metadata forms",
-      "verification": "The gate accepts 2.0.0-alpha, 2.0.0-alpha.1 and 2.0.0+build.7, while rejecting 2.0, x.y.z, empty, 02.0.0, 2.0.0- and 2.0.0-alpha..1. The old numeric-only pattern returns 0 for the prerelease cases; the release-package integration test could not complete because rust-lld hit the host's process-resource limit while rebuilding chat artifacts.",
+      "fix": "9e8ddc1 + 9ee5278 — release-package now validates full SemVer core, prerelease and build metadata forms, including numeric prerelease leading-zero rules and combined prerelease/build cases",
+      "verification": "The gate accepts 2.0.0-alpha, 2.0.0-alpha.1, 2.0.0-alpha.1+build.7 and 2.0.0+build.7, while rejecting 2.0, x.y.z, empty, 02.0.0, 2.0.0-, 2.0.0-01 and 2.0.0-alpha..1. The release-package integration test passes from the real-disk worktree; a no-op guard mutation fails its assertions.",
       "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
       "notes": null,
       "created_at": "2026-08-28T17:11:58Z",
