@@ -56,6 +56,19 @@
       "updated_at": "2026-08-31T13:27:55Z"
     },
     {
+      "id": "T81f",
+      "title": "Traps already paid for while building the resolver — read before touching this code",
+      "status": "open",
+      "priority": "high",
+      "parent": "T81",
+      "detail": "1) jq/rjq rebinds '.' inside a pipe. 'select($t | has(.id))' asks whether $t has a key named by $t.id, not by the entry's id, so it silently matches nothing; and 'if ($map | has(.id))' silently renames nothing. Bind first: '(.id) as $i | ... has($i)'. This produced two separate silent no-ops in one afternoon, each of which looked like working code. 2) plan_register_temp_file records a path and PRINTS NOTHING, so 'x=$(plan_register_temp_file $(mktemp))' yields an empty path; assign first, register second. 3) A merge conflict cannot be faked: the tool reads git index stages :1 base, :2 ours, :3 theirs, so a fixture with hand-written conflict markers exercises none of it. Build real conflicts in throwaway repos. 4) An entry changed on ONE side only is not a divergence - the changed side wins, the way git merges a line one branch edited. Taking ours-first for every id silently DROPPED a theirs-only edit; that was a real data-loss bug my own test caught. A divergence is both sides changing a base entry differently. 5) from_entries keeps the LAST of a repeated id, so any id-keyed comparison under-reports a register that carries duplicates - check soundness separately. 6) test-flag-coverage.sh requires every accepted flag to appear in --help, which is why the confirmation is the CONFIRM environment variable and not a flag. Its 'every flag has a test' check uses grep -w, and '-' is a non-word character, so a flag that is a hyphen-prefix of another (--confirm inside --confirm-cascade) passes without a test of its own.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:04:38Z",
+      "updated_at": "2026-09-01T16:04:38Z"
+    },
+    {
       "id": "T82",
       "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
       "status": "open",
@@ -67,6 +80,60 @@
       "note": null,
       "created_at": "2026-09-01T16:11:53Z",
       "updated_at": "2026-09-01T16:11:53Z"
+    },
+    {
+      "id": "T85",
+      "title": "Implement IN/1 and IN/2 in rjq",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "rjq is the mandated register runtime and does not implement jqs IN/1, so every membership test in a register snippet has to be written the long way with index and an explicit binding. That keeps biting, and it fails in the worst direction: rjq reports the error on stderr and exits non-zero, so a snippet that captures only stdout into a findings variable leaves it empty and prints sound. A validation that checked nothing, reading as a pass. The SKILL.md snippets in bug-report and todo were both rewritten off IN/1 for exactly this reason, and it caught me again today in an ad-hoc TODO.json check. It is a trap peculiar to this repo, because the idiom is standard jq and every agent reaches for it by default. jq defines both arities in its own stdlib in terms of any, so this is plausibly a prelude definition rather than Rust work - read the IN definitions in jqs builtin.jq and port them rather than trusting a remembered one-liner. Land it with a test that the register snippets in both SKILL.md files run green under rjq, since that is the whole point of having it, and a test that a membership test against a missing key is false rather than an error. Until it lands, reg_findings in planning/scripts/register-lib.sh is the one place that expression should live and callers should use it instead of hand-rolling.",
+      "blocked_on": null,
+      "refs": [
+        "src/rjq",
+        "planning/scripts/register-lib.sh",
+        "bug-report/SKILL.md",
+        "todo/SKILL.md"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:16:44Z",
+      "updated_at": "2026-09-03T18:16:44Z"
+    },
+    {
+      "id": "T86",
+      "title": "Give every skill a load sanity check the agent must execute",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Every shipped skill gets a check that proves the agent actually read the whole thing, because the measured truncation is SILENT. Claude Code 2.1.259 returns a prefix at roughly 25,000 tokens with no notice anywhere; opencode 1.18.27 caps an -f attachment at 50 KB but does say so in-band; codex 0.153.0 does not truncate. So on the harness we use most, a skill over the cap is read in part and nothing says so - and an agent asked why content was missing rationalised it as having declined to load repetitive filler, when the transcript showed one unbounded Read handing it 1078 lines. planning/SKILL.md is over the cap today at 1502 lines and 87.8 KB, losing about 35 percent in 2 of 3 real runs. Design, per Michael. First, the sanity token does NOT sit at the end of the file. The end is predictable and a reader that stops early can still be told what to say; place it at a RANDOM position past the known boundary, so its presence is evidence of having read past the cap rather than evidence of having reached a fixed landmark. Past the boundary means past the measured caps above, and random means the position is not guessable from the file shape. Second, loading the skill is not finished by echoing anything: the agent must RUN THE COMMAND WITH THE SANITY ARGUMENTS it can only have obtained by reading that far, and the command is what decides. An instruction to report a token is claimable; an invocation carrying an argument the agent could not otherwise know is not. That distinction is the whole point, and it is why this is worth having as an interlock rather than a line of prose. Scope is all skills, not just planning: the same silent cap applies to any of them that grows, and a check only present on the one file we already know about would not catch the next one. Evidence and the eleven reproducible probes are in .agents/skill-loading-findings.md on this branch. Related: the planning split under discussion (Q11) reuses the existing REVIEWER_SECTION marker plus generate-reviewer.sh plus the hash pinned by test-reviewer-projection.sh, which is already a marked-region-and-generator mechanism, so the split and this check should share it rather than inventing a second scheme.",
+      "blocked_on": null,
+      "refs": [
+        ".agents/skill-loading-findings.md",
+        "planning/SKILL.md",
+        "planning/scripts/generate-reviewer.sh"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:31:42Z",
+      "updated_at": "2026-09-03T18:31:42Z"
+    },
+    {
+      "id": "T87",
+      "title": "Split planning/SKILL.md: authored source, generated short SKILL.md",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "DECIDED by Michael, 2026-09-03. planning/SKILL.md is 1502 lines and 87.8 KB, over the roughly 25,000-token cap at which Claude Code silently returns a prefix, and it measurably loses about 35 percent of itself in 2 of 3 real runs. The shape: the full authored content becomes a SOURCE file - source.skill or similar, not a .md - and a SHORT SKILL.md is GENERATED from it, carrying the front matter and pointers to generated part files. The non-.md extension is load bearing, not cosmetic: an agent looking for SKILL.md must not stumble into the 1500-line source, which is exactly the failure being fixed. Section sizes make the split obvious - section 3 mandatory classification and independent review is 509 lines, section 2 create the plan directory is 365, section 4 resume and update is 342, and everything else is 286. Three parts and a thin index, each part well under the cap. This repo already has the machinery and the convention: install.sh is generated from installer/src, installer/build.sh has a --check mode that diffs instead of writing, and planning/tests/test-installer-build.sh fails when the committed artifact is stale. Follow that pattern exactly rather than inventing one - a generator, a --check mode, and a test that the committed output matches its source. Consequences to handle, none optional. The generated SKILL.md and the parts stay COMMITTED and SHIPPED, because a skill is consumed as files and has no build step at the far end. MODE markers flip: the source is MODE DEV, the generated outputs are MODE PROD, per contract 10a. generate-reviewer.sh currently projects two REVIEWER_SECTION blocks out of SKILL.md, at lines 650-947 and 1190-1276, 383 lines or 25 percent of the file, and pins the source SHA-256 that test-reviewer-projection.sh compares - it must read the SOURCE after this change, and its recorded hash necessarily changes. skill_files() in installer/src/50-manifest.sh must list the new part files, and the npm baseline rows follow from that. The five never-committed generated plan-*-lib.sh files and REVIEWER.md are the precedent for what setup-dev-env.sh has to build. Finally this interlocks with T86: the load sanity check needs a token at a random position past the cap in each part, so build the split and the check together rather than retrofitting the check afterwards.",
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/scripts/generate-reviewer.sh",
+        "installer/build.sh",
+        "installer/src/50-manifest.sh",
+        ".agents/skill-loading-findings.md"
+      ],
+      "note": "Multi-target generation confirmed as the shape (Michael, Q18): one authored source emits SEVERAL documents, not just a short SKILL.md. The existing REVIEWER_SECTION marker already names a region - mandatory-review and bounded-context - so the extension is to have a region declare which target or targets it belongs to, and have one generator emit every target from the single source, with one --check mode diffing all of them and one staleness test covering the set. That subsumes generate-reviewer.sh rather than sitting beside it, and it means a section wanted in two documents is authored once and projected twice, which is the actual answer to sections repeating across documents. Two constraints on it: a region has to carry MODE as well as target, because SKILL.md and its parts ship as PROD while MAINTAINER.md is DEV, and a region projected into two targets must be projected verbatim, since the reviewer projection is pinned by SHA-256. On MAINTAINER.md specifically, 449 lines and 38 KB: it is UNDER the roughly 25,000-token cap, so it does not need splitting to be read whole, and measurement says it shares NOTHING with SKILL.md - comparing every heading across SKILL.md, ROLES.md, MAINTAINER.md, ARCHITECTURE.md and docs/README.md found zero overlap. So it can be a target of the same source, and today that would buy structure rather than deduplication. Worth doing only if the convention of one source per skill is wanted for its own sake; not required by the truncation problem.",
+      "created_at": "2026-09-03T18:32:38Z",
+      "updated_at": "2026-09-03T18:33:20Z"
     },
     {
       "id": "T88",
@@ -108,19 +175,6 @@
       "updated_at": "2026-09-04T08:31:12Z"
     },
     {
-      "id": "T81f",
-      "title": "Traps already paid for while building the resolver — read before touching this code",
-      "status": "open",
-      "priority": "high",
-      "parent": "T81",
-      "detail": "1) jq/rjq rebinds '.' inside a pipe. 'select($t | has(.id))' asks whether $t has a key named by $t.id, not by the entry's id, so it silently matches nothing; and 'if ($map | has(.id))' silently renames nothing. Bind first: '(.id) as $i | ... has($i)'. This produced two separate silent no-ops in one afternoon, each of which looked like working code. 2) plan_register_temp_file records a path and PRINTS NOTHING, so 'x=$(plan_register_temp_file $(mktemp))' yields an empty path; assign first, register second. 3) A merge conflict cannot be faked: the tool reads git index stages :1 base, :2 ours, :3 theirs, so a fixture with hand-written conflict markers exercises none of it. Build real conflicts in throwaway repos. 4) An entry changed on ONE side only is not a divergence - the changed side wins, the way git merges a line one branch edited. Taking ours-first for every id silently DROPPED a theirs-only edit; that was a real data-loss bug my own test caught. A divergence is both sides changing a base entry differently. 5) from_entries keeps the LAST of a repeated id, so any id-keyed comparison under-reports a register that carries duplicates - check soundness separately. 6) test-flag-coverage.sh requires every accepted flag to appear in --help, which is why the confirmation is the CONFIRM environment variable and not a flag. Its 'every flag has a test' check uses grep -w, and '-' is a non-word character, so a flag that is a hyphen-prefix of another (--confirm inside --confirm-cascade) passes without a test of its own.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:04:38Z",
-      "updated_at": "2026-09-01T16:04:38Z"
-    },
-    {
       "id": "T91a",
       "title": "chat-client-rs consumes broadcast PRIVMSG as it arrives, instead of looping on FETCH",
       "status": "open",
@@ -132,24 +186,6 @@
       "note": null,
       "created_at": "2026-09-04T08:29:54Z",
       "updated_at": "2026-09-04T08:29:54Z"
-    },
-    {
-      "id": "T85",
-      "title": "Implement IN/1 and IN/2 in rjq",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "rjq is the mandated register runtime and does not implement jqs IN/1, so every membership test in a register snippet has to be written the long way with index and an explicit binding. That keeps biting, and it fails in the worst direction: rjq reports the error on stderr and exits non-zero, so a snippet that captures only stdout into a findings variable leaves it empty and prints sound. A validation that checked nothing, reading as a pass. The SKILL.md snippets in bug-report and todo were both rewritten off IN/1 for exactly this reason, and it caught me again today in an ad-hoc TODO.json check. It is a trap peculiar to this repo, because the idiom is standard jq and every agent reaches for it by default. jq defines both arities in its own stdlib in terms of any, so this is plausibly a prelude definition rather than Rust work - read the IN definitions in jqs builtin.jq and port them rather than trusting a remembered one-liner. Land it with a test that the register snippets in both SKILL.md files run green under rjq, since that is the whole point of having it, and a test that a membership test against a missing key is false rather than an error. Until it lands, reg_findings in planning/scripts/register-lib.sh is the one place that expression should live and callers should use it instead of hand-rolling.",
-      "blocked_on": null,
-      "refs": [
-        "src/rjq",
-        "planning/scripts/register-lib.sh",
-        "bug-report/SKILL.md",
-        "todo/SKILL.md"
-      ],
-      "note": null,
-      "created_at": "2026-09-03T18:16:44Z",
-      "updated_at": "2026-09-03T18:16:44Z"
     },
     {
       "id": "T71",
@@ -167,32 +203,6 @@
       "note": null,
       "created_at": "2026-08-30T21:50:27Z",
       "updated_at": "2026-08-30T21:50:27Z"
-    },
-    {
-      "id": "T83",
-      "title": "Tools available for register work, and where they came from (PR #15)",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:12:10Z",
-      "updated_at": "2026-09-01T16:12:10Z"
-    },
-    {
-      "id": "T89",
-      "title": "a question skill: numbered questions with lettered options, never an unordered list",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:01:38Z",
-      "updated_at": "2026-09-04T08:01:38Z"
     },
     {
       "id": "T81e",
@@ -247,30 +257,17 @@
       "updated_at": "2026-09-01T16:05:03Z"
     },
     {
-      "id": "T91b",
-      "title": "retire read/tail --local, the log-file path that bypasses the server",
+      "id": "T83",
+      "title": "Tools available for register work, and where they came from (PR #15)",
       "status": "open",
       "priority": "normal",
-      "parent": "T91",
-      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
+      "parent": null,
+      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
       "blocked_on": null,
       "refs": [],
       "note": null,
-      "created_at": "2026-09-04T08:29:54Z",
-      "updated_at": "2026-09-04T08:29:54Z"
-    },
-    {
-      "id": "T91c",
-      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T91",
-      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:36:28Z",
-      "updated_at": "2026-09-04T08:36:28Z"
+      "created_at": "2026-09-01T16:12:10Z",
+      "updated_at": "2026-09-01T16:12:10Z"
     },
     {
       "id": "T84",
@@ -335,6 +332,58 @@
       "note": null,
       "created_at": "2026-09-03T18:18:46Z",
       "updated_at": "2026-09-03T18:18:46Z"
+    },
+    {
+      "id": "T89",
+      "title": "a question skill: numbered questions with lettered options, never an unordered list",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-04T08:01:38Z"
+    },
+    {
+      "id": "T91b",
+      "title": "retire read/tail --local, the log-file path that bypasses the server",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-04T08:29:54Z"
+    },
+    {
+      "id": "T91c",
+      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:36:28Z",
+      "updated_at": "2026-09-04T08:36:28Z"
+    },
+    {
+      "id": "T92",
+      "title": "bump the GitHub Actions we pin to their latest majors, which run on node24",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Every CI run prints 'Node 20 is being deprecated. This workflow is running with Node 24 by default.' We do not choose that: a JavaScript action declares its own runtime as runs.using in its action.yml, and the majors we pin declare node20. The punycode and url.parse DeprecationWarnings in the same logs come from inside those actions' bundled code under the newer Node, not from anything in this repo.\n\nWhat we pin, and where it should go -- runs.using verified by reading each new major's action.yml directly, not from release notes:\n\n  actions/checkout           v4 -> v7.0.1   node24\n  actions/upload-artifact    v4 -> v7.0.1   node24\n  actions/download-artifact  v4 -> v8.0.1   node24\n\nCall sites: .github/workflows/ci.yml lines 627, 741, 863, 884, 909, 932, 987 and .github/workflows/render-artifacts.yml lines 30, 63. dtolnay/rust-toolchain@1.98 is a composite action and is not implicated.\n\nThis is NOT a find-and-replace. upload-artifact v4->v7 and download-artifact v4->v8 cross breaking changes in artifact naming and overwrite behaviour, and we depend on that behaviour: the rust-artifact-manifest job downloads the per-target artifacts by name and publishes their hashes. So the bump has to be proven by a CI run that exercises that round trip, and the manifest job is the assertion.\n\nDo not reach for ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. It silences the warning by pinning the runner to the deprecated runtime, which is the opposite of the fix and leaves us to discover the removal as a hard failure instead.\n\nUrgency: the warnings are noise today and become failures when GitHub removes node20 from the runners (announced 2025-09-19). Raised by Tschallacka on 2026-09-04 after reading them in a run's logs.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T12:05:08Z",
+      "updated_at": "2026-09-04T12:05:08Z"
     },
     {
       "id": "T69",
@@ -472,6 +521,19 @@
       "updated_at": "2026-09-01T21:24:21Z"
     },
     {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "decided",
+      "priority": "normal",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T14:53:12Z"
+    },
+    {
       "id": "T38",
       "title": "Review record: what was checked on the -ox merge, and what was not",
       "status": "decided",
@@ -487,19 +549,6 @@
       "updated_at": "2026-08-24T12:17:47Z"
     },
     {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "decided",
-      "priority": "normal",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
-    },
-    {
       "id": "T1",
       "title": "One test reporter, not eighteen",
       "status": "done",
@@ -513,42 +562,6 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
-    },
-    {
-      "id": "T86",
-      "title": "Give every skill a load sanity check the agent must execute",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Every shipped skill gets a check that proves the agent actually read the whole thing, because the measured truncation is SILENT. Claude Code 2.1.259 returns a prefix at roughly 25,000 tokens with no notice anywhere; opencode 1.18.27 caps an -f attachment at 50 KB but does say so in-band; codex 0.153.0 does not truncate. So on the harness we use most, a skill over the cap is read in part and nothing says so - and an agent asked why content was missing rationalised it as having declined to load repetitive filler, when the transcript showed one unbounded Read handing it 1078 lines. planning/SKILL.md is over the cap today at 1502 lines and 87.8 KB, losing about 35 percent in 2 of 3 real runs. Design, per Michael. First, the sanity token does NOT sit at the end of the file. The end is predictable and a reader that stops early can still be told what to say; place it at a RANDOM position past the known boundary, so its presence is evidence of having read past the cap rather than evidence of having reached a fixed landmark. Past the boundary means past the measured caps above, and random means the position is not guessable from the file shape. Second, loading the skill is not finished by echoing anything: the agent must RUN THE COMMAND WITH THE SANITY ARGUMENTS it can only have obtained by reading that far, and the command is what decides. An instruction to report a token is claimable; an invocation carrying an argument the agent could not otherwise know is not. That distinction is the whole point, and it is why this is worth having as an interlock rather than a line of prose. Scope is all skills, not just planning: the same silent cap applies to any of them that grows, and a check only present on the one file we already know about would not catch the next one. Evidence and the eleven reproducible probes are in .agents/skill-loading-findings.md on this branch. Related: the planning split under discussion (Q11) reuses the existing REVIEWER_SECTION marker plus generate-reviewer.sh plus the hash pinned by test-reviewer-projection.sh, which is already a marked-region-and-generator mechanism, so the split and this check should share it rather than inventing a second scheme.",
-      "blocked_on": null,
-      "refs": [
-        ".agents/skill-loading-findings.md",
-        "planning/SKILL.md",
-        "planning/scripts/generate-reviewer.sh"
-      ],
-      "note": null,
-      "created_at": "2026-09-03T18:31:42Z",
-      "updated_at": "2026-09-03T18:31:42Z"
-    },
-    {
-      "id": "T87",
-      "title": "Split planning/SKILL.md: authored source, generated short SKILL.md",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "DECIDED by Michael, 2026-09-03. planning/SKILL.md is 1502 lines and 87.8 KB, over the roughly 25,000-token cap at which Claude Code silently returns a prefix, and it measurably loses about 35 percent of itself in 2 of 3 real runs. The shape: the full authored content becomes a SOURCE file - source.skill or similar, not a .md - and a SHORT SKILL.md is GENERATED from it, carrying the front matter and pointers to generated part files. The non-.md extension is load bearing, not cosmetic: an agent looking for SKILL.md must not stumble into the 1500-line source, which is exactly the failure being fixed. Section sizes make the split obvious - section 3 mandatory classification and independent review is 509 lines, section 2 create the plan directory is 365, section 4 resume and update is 342, and everything else is 286. Three parts and a thin index, each part well under the cap. This repo already has the machinery and the convention: install.sh is generated from installer/src, installer/build.sh has a --check mode that diffs instead of writing, and planning/tests/test-installer-build.sh fails when the committed artifact is stale. Follow that pattern exactly rather than inventing one - a generator, a --check mode, and a test that the committed output matches its source. Consequences to handle, none optional. The generated SKILL.md and the parts stay COMMITTED and SHIPPED, because a skill is consumed as files and has no build step at the far end. MODE markers flip: the source is MODE DEV, the generated outputs are MODE PROD, per contract 10a. generate-reviewer.sh currently projects two REVIEWER_SECTION blocks out of SKILL.md, at lines 650-947 and 1190-1276, 383 lines or 25 percent of the file, and pins the source SHA-256 that test-reviewer-projection.sh compares - it must read the SOURCE after this change, and its recorded hash necessarily changes. skill_files() in installer/src/50-manifest.sh must list the new part files, and the npm baseline rows follow from that. The five never-committed generated plan-*-lib.sh files and REVIEWER.md are the precedent for what setup-dev-env.sh has to build. Finally this interlocks with T86: the load sanity check needs a token at a random position past the cap in each part, so build the split and the check together rather than retrofitting the check afterwards.",
-      "blocked_on": null,
-      "refs": [
-        "planning/SKILL.md",
-        "planning/scripts/generate-reviewer.sh",
-        "installer/build.sh",
-        "installer/src/50-manifest.sh",
-        ".agents/skill-loading-findings.md"
-      ],
-      "note": "Multi-target generation confirmed as the shape (Michael, Q18): one authored source emits SEVERAL documents, not just a short SKILL.md. The existing REVIEWER_SECTION marker already names a region - mandatory-review and bounded-context - so the extension is to have a region declare which target or targets it belongs to, and have one generator emit every target from the single source, with one --check mode diffing all of them and one staleness test covering the set. That subsumes generate-reviewer.sh rather than sitting beside it, and it means a section wanted in two documents is authored once and projected twice, which is the actual answer to sections repeating across documents. Two constraints on it: a region has to carry MODE as well as target, because SKILL.md and its parts ship as PROD while MAINTAINER.md is DEV, and a region projected into two targets must be projected verbatim, since the reviewer projection is pinned by SHA-256. On MAINTAINER.md specifically, 449 lines and 38 KB: it is UNDER the roughly 25,000-token cap, so it does not need splitting to be read whole, and measurement says it shares NOTHING with SKILL.md - comparing every heading across SKILL.md, ROLES.md, MAINTAINER.md, ARCHITECTURE.md and docs/README.md found zero overlap. So it can be a target of the same source, and today that would buy structure rather than deduplication. Worth doing only if the convention of one source per skill is wanted for its own sake; not required by the truncation problem.",
-      "created_at": "2026-09-03T18:32:38Z",
-      "updated_at": "2026-09-03T18:33:20Z"
     }
   ]
 }
