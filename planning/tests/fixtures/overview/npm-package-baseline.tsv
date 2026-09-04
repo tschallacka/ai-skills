@@ -21,13 +21,13 @@ package/bug-report/docs/README.md	1312
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
-package/chat/SKILL.md	20037
+package/chat/SKILL.md	19811
 package/chat/binaries.tsv	1195
 package/chat/docs/README.md	1676
 package/chat/requires.tsv	467
 package/chat/tests/test-chat-broadcast-stall.sh	11347
 package/chat/tests/test-chat-resolution.sh	7891
-package/chat/tests/test-chat.sh	29517
+package/chat/tests/test-chat.sh	29523
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
