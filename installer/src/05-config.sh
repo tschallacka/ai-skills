@@ -73,39 +73,14 @@ fi
 # door, with the modes that do exist, instead of getting a silent default
 # install that looks like success. A skill offering no choice is refused for the
 # same reason -- naming one is a mistake about the tool, not a preference.
-record_integration() {
-    local argument="$1" skill mode offered known mode_name
-    case "$argument" in
-        *=*)
-            skill="${argument%%=*}"
-            mode="${argument#*=}"
-            ;;
-        *)
-            skill=''
-            mode="$argument"
-            ;;
-    esac
-    [ -n "$mode" ] || die_usage "--integration needs a mode, or skill=mode"
-    if [ -n "$skill" ]; then
-        offered="$(integration_modes "$skill" | tr '\n' ' ')"
-        [ -n "$offered" ] \
-            || die_usage "$skill offers no integration modes to choose between"
-        # Both delimiters, or the FIRST mode never matches: the joined list ends
-        # with a space but does not begin with one.
-        case " $offered" in
-            *" $mode "*) : ;;
-            *) die_usage "$skill has no $mode integration; it offers: $offered" ;;
-        esac
-        INTEGRATION_SELECTION="$skill=$mode
-$INTEGRATION_SELECTION"
-        return 0
-    fi
-    # A run-wide mode is checked against the union of what any skill offers.
-    # `skill` is always in that union even when nothing declares it, because it
-    # is the default every undeclared skill is already installed in. Deduped,
-    # because the refusal prints this list and "skill skill mcp" reads like a
-    # bug in the installer rather than an answer to the question asked.
-    offered=' skill '
+# Every mode any skill declares, space-delimited on both sides.
+#
+# `skill` is always in the union even when nothing declares it, because it is
+# the mode every undeclared skill is already installed in. Deduped, because a
+# refusal prints this list and "skill skill mcp" reads like a bug in the
+# installer rather than an answer to the question asked.
+integration_declared_modes() {
+    local known mode_name offered=' skill '
     for known in ${SKILL_NAMES[@]+"${SKILL_NAMES[@]}"}; do
         while IFS= read -r mode_name; do
             [ -n "$mode_name" ] || continue
@@ -117,6 +92,38 @@ $INTEGRATION_SELECTION"
 $(integration_modes "$known")
 INTEGRATION_MODES_EOF
     done
+    printf '%s' "$offered"
+}
+
+# Record `<skill>=<mode>`, refusing a mode that skill does not offer.
+#
+# Both delimiters in the match, or the FIRST mode never matches: the joined list
+# ends with a space but does not begin with one.
+record_skill_integration() {
+    local skill="$1" mode="$2" offered
+    offered="$(integration_modes "$skill" | tr '\n' ' ')"
+    [ -n "$offered" ] \
+        || die_usage "$skill offers no integration modes to choose between"
+    case " $offered" in
+        *" $mode "*) : ;;
+        *) die_usage "$skill has no $mode integration; it offers: $offered" ;;
+    esac
+    INTEGRATION_SELECTION="$skill=$mode
+$INTEGRATION_SELECTION"
+}
+
+record_integration() {
+    local argument="$1" skill mode offered
+    case "$argument" in
+        *=*) skill="${argument%%=*}"; mode="${argument#*=}" ;;
+        *) skill=''; mode="$argument" ;;
+    esac
+    [ -n "$mode" ] || die_usage "--integration needs a mode, or skill=mode"
+    if [ -n "$skill" ]; then
+        record_skill_integration "$skill" "$mode"
+        return 0
+    fi
+    offered="$(integration_declared_modes)"
     case "$offered" in
         *" $mode "*) : ;;
         *) die_usage "no skill offers a $mode integration; declared modes are:$offered" ;;

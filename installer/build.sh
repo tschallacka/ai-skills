@@ -519,44 +519,61 @@ gen_dependency_block() {
     gen_install_hint
 }
 
+# Generate one block into a named file, saying which stage died.
+#
+# A silent generation failure would reach blast-radius as an empty capture and
+# read as "no output", so the stage is named. It writes to a path given by the
+# caller and RETURNS rather than exiting: `path="$(helper)"` would run the
+# helper in a subshell, where an `exit 70` ends only that subshell and the
+# build carries on with an empty block.
+generate_block() {
+    local label="$1" generator="$2" path="$3"
+    "$generator" > "$path" && return 0
+    printf '%s: generating the %s failed\n' "${0##*/}" "$label" >&2
+    return 70
+}
+
+# One part, with its markers stripped and any generated block spliced in.
+#
+# Separated from emit() so the loop stays readable and emit() stays inside
+# CODE-STYLE.md's 40-line cap: adding the second block pushed it to 41, which
+# the function-length ratchet caught.
+emit_part() {
+    local part="$1" blockfile="$2" integrationfile="$3"
+    # The part's own MODE/PACKAGE markers are dropped: they describe the source
+    # file, and emit_banner has already declared what install.sh is.
+    awk -v blockfile="$blockfile" -v integrationfile="$integrationfile" '
+        /^# MODE: (DEV|PROD)$/ { next }
+        /^# PACKAGE: (DEV|PROD)$/ { next }
+        /^# BEGIN GENERATED DEPENDENCY BLOCK$/ {
+            print
+            while ((getline line < blockfile) > 0) print line
+            close(blockfile)
+            next
+        }
+        /^# BEGIN GENERATED INTEGRATION BLOCK$/ {
+            print
+            while ((getline line < integrationfile) > 0) print line
+            close(integrationfile)
+            next
+        }
+        { print }
+    ' "$part"
+}
+
 emit() {
     local part block integration
     block="$(mktemp "${TMPDIR:-/tmp}/dependency-block.XXXXXX")"
     integration="$(mktemp "${TMPDIR:-/tmp}/integration-block.XXXXXX")"
-    # A silent generation failure would reach blast-radius as an empty capture
-    # and read as "no output"; name the stage that died instead.
-    if ! gen_dependency_block > "$block"; then
-        printf '%s: generating the dependency block failed\n' "${0##*/}" >&2
-        rm -f "$block" "$integration"
-        exit 70
-    fi
-    if ! gen_integration_block > "$integration"; then
-        printf '%s: generating the integration block failed\n' "${0##*/}" >&2
+    if ! generate_block 'dependency block' gen_dependency_block "$block" \
+        || ! generate_block 'integration block' gen_integration_block "$integration"; then
         rm -f "$block" "$integration"
         exit 70
     fi
     emit_banner
     for part in "$src_dir"/[0-9][0-9]-*.sh; do
         [ -f "$part" ] || { printf '%s: no parts in %s\n' "${0##*/}" "$src_dir" >&2; exit 66; }
-        # The part's own MODE/PACKAGE markers are dropped: they describe the
-        # source file, and emit_banner has already declared what install.sh is.
-        awk -v blockfile="$block" -v integrationfile="$integration" '
-            /^# MODE: (DEV|PROD)$/ { next }
-            /^# PACKAGE: (DEV|PROD)$/ { next }
-            /^# BEGIN GENERATED DEPENDENCY BLOCK$/ {
-                print
-                while ((getline line < blockfile) > 0) print line
-                close(blockfile)
-                next
-            }
-            /^# BEGIN GENERATED INTEGRATION BLOCK$/ {
-                print
-                while ((getline line < integrationfile) > 0) print line
-                close(integrationfile)
-                next
-            }
-            { print }
-        ' "$part"
+        emit_part "$part" "$block" "$integration"
     done
     rm -f "$block" "$integration"
 }
