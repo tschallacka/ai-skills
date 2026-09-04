@@ -31,6 +31,31 @@ const READY_POLLS: usize = 3000;
 /// budget above is what bounds the wait.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+// WHY EVERY FIXTURE PARKS FOR 600 SECONDS, AND EVERY IDLE TIMEOUT IS 600.
+//
+// The wrapper exits when its child does, and removes the socket on the way
+// out. So a fixture's lifetime is not a detail of the fixture: it is the
+// window in which the whole test must finish, and a fixture that dies first
+// makes the failure read as a missing socket rather than an expired child.
+//
+// These were 30 seconds, which is generous on a workstation and a bet on the
+// macOS runner. Measured 2026-09-04: this suite takes 1.05s here and 151.94s
+// on the aarch64-apple-darwin leg -- about 150x -- and
+// `cli_text_preserves_spaces_and_input_help_is_available` duly lost the bet,
+// reporting `socket present: false` with ENOENT because `sleep 30` had ended
+// and the wrapper had cleaned up behind it. See
+// .agents/knowledge/github-ci-runners.md.
+//
+// 600 costs a healthy run nothing: every test that needs its wrapper gone
+// either kills it or asserts against its exit, so nothing waits out the
+// ceiling. Two deliberate exceptions, neither of which is an oversight:
+//
+//   * `wrapper_reports_screen_ack_and_lifecycle` keeps `sleep 1`, because the
+//     lifecycle event it asserts is produced BY the child exiting.
+//   * `idle_timeout_reports_status_124` keeps an idle timeout of 1, because
+//     that deadline is its subject -- and its child now parks for 600 so a
+//     starved wrapper cannot report the child's exit in place of the timeout.
+
 /// Where a wrapper's stderr is kept, inside the test's own directory.
 ///
 /// It was `Stdio::null()`. That is why a wrapper that failed before it could
@@ -328,7 +353,7 @@ fn wrapper_reports_screen_ack_and_lifecycle() {
     let mut child = start(
         &dir,
         &["sh", "-c", "stty size; printf first; sleep 1"],
-        "30",
+        "600",
     );
     let ack = request(
         &dir,
@@ -364,7 +389,7 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
             "-c",
             "printf primary; sleep .1; printf '\\x1b[?1049hALT\\x1b[?1049l'; sleep .2",
         ],
-        "30",
+        "600",
     );
     let mut output = String::new();
     child
@@ -400,7 +425,7 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
 #[test]
 fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
     let dir = temp_dir("fragmented-osc");
-    let mut child = start_fixture(&dir, "30");
+    let mut child = start_fixture(&dir, "600");
     let mut output = String::new();
     child
         .stdout
@@ -438,7 +463,7 @@ fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
 #[test]
 fn socket_is_private_and_invalid_requests_are_rejected() {
     let dir = temp_dir("bounds");
-    let mut child = start(&dir, &["sleep", "30"], "30");
+    let mut child = start(&dir, &["sleep", "600"], "600");
     for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
@@ -482,7 +507,7 @@ fn socket_is_private_and_invalid_requests_are_rejected() {
 #[test]
 fn closed_output_removes_socket_before_exit() {
     let dir = temp_dir("closed-output");
-    let mut child = start(&dir, &["yes"], "30");
+    let mut child = start(&dir, &["yes"], "600");
     for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
@@ -557,7 +582,7 @@ fn invalid_dimensions_fail_before_creating_socket() {
 #[test]
 fn structured_observe_paste_mouse_and_resize_requests_work() {
     let dir = temp_dir("structured-actions");
-    let mut child = start(&dir, &["sh", "-c", "sleep 30"], "30");
+    let mut child = start(&dir, &["sh", "-c", "sleep 600"], "600");
     let observed = request_all(
         &dir,
         r#"{"v":1,"op":"observe"}
@@ -618,7 +643,7 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
             "-c",
             "stty -echo; printf ONE; read _go; printf '\\rTWO'; read _park",
         ],
-        "30",
+        "600",
     );
     let first_wait = request_all(
         &dir,
@@ -697,8 +722,8 @@ fn rgbview_preserves_styles_without_json_wrapping() {
     let dir = temp_dir("rgbview");
     let mut child = start(
         &dir,
-        &["sh", "-c", "printf '\\033[31mRED\\033[0m'; sleep 30"],
-        "30",
+        &["sh", "-c", "printf '\\033[31mRED\\033[0m'; sleep 600"],
+        "600",
     );
     let _ = request_all(
         &dir,
@@ -729,7 +754,7 @@ fn rgbview_preserves_styles_without_json_wrapping() {
 #[test]
 fn locate_returns_visible_coordinates_without_sending_input() {
     let dir = temp_dir("locate");
-    let mut child = start(&dir, &["sh", "-c", "printf TARGET; sleep 30"], "30");
+    let mut child = start(&dir, &["sh", "-c", "printf TARGET; sleep 600"], "600");
     let _ = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"TARGET"}
@@ -763,7 +788,7 @@ fn wait_returns_a_snapshot_after_a_screen_predicate() {
             "-c",
             "printf before; sleep .1; printf TARGET; read _park",
         ],
-        "30",
+        "600",
     );
     let events = request_all(
         &dir,
@@ -795,11 +820,11 @@ fn session_file_reuses_socket_and_command_without_repeating_arguments() {
             "--rows",
             "4",
             "--idle-timeout",
-            "30",
+            "600",
             "--",
             "sh",
             "-c",
-            "printf SESSION_READY; sleep 30",
+            "printf SESSION_READY; sleep 600",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -885,9 +910,9 @@ fn observe_exposes_osc8_elements_and_click_targets() {
         &[
             "sh",
             "-c",
-            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 30",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 600",
         ],
-        "30",
+        "600",
     );
     // Wait for the link to reach the screen first. `observe` used to be issued
     // the instant the wrapper was up, so `elements[0]` was whatever had been
@@ -972,7 +997,7 @@ fn observe_drops_osc8_elements_after_their_cells_are_erased() {
             // fixture has exited and taken the socket with it.
             "stty -echo; printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; read _go; printf '\\033[2J'; read _park",
         ],
-        "30",
+        "600",
     );
     wait_for_rows(&dir, "LINK");
     let ack = request(&dir, "{\"v\":1,\"op\":\"text\",\"text\":\"\\n\"}\n");
@@ -1028,7 +1053,7 @@ fn malformed_cli_arguments_do_not_panic() {
 #[test]
 fn cli_text_preserves_spaces_and_input_help_is_available() {
     let dir = temp_dir("cli-text");
-    let mut child = start(&dir, &["sh", "-c", "sleep 30"], "30");
+    let mut child = start(&dir, &["sh", "-c", "sleep 600"], "600");
     let help = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
         .args(["--help"])
         .output()
@@ -1073,7 +1098,7 @@ fn cli_text_preserves_spaces_and_input_help_is_available() {
 #[test]
 fn signal_cleanup_removes_socket() {
     let dir = temp_dir("signal");
-    let mut child = start(&dir, &["sleep", "30"], "30");
+    let mut child = start(&dir, &["sleep", "600"], "600");
     for _ in 0..READY_POLLS {
         if dir.join("socket").exists() {
             break;
@@ -1090,7 +1115,7 @@ fn signal_cleanup_removes_socket() {
 #[test]
 fn idle_timeout_reports_status_124() {
     let dir = temp_dir("idle");
-    let mut child = start(&dir, &["sleep", "30"], "1");
+    let mut child = start(&dir, &["sleep", "600"], "1");
     let mut output = String::new();
     child
         .stdout
@@ -1115,10 +1140,10 @@ fn long_input_and_descendants_are_handled() {
     let dir = temp_dir("long-input");
     let pid_file = dir.join("descendant.pid");
     let command = format!(
-        "sleep 30 & echo $! > {}; wc -c >/dev/null; wait",
+        "sleep 600 & echo $! > {}; wc -c >/dev/null; wait",
         pid_file.display()
     );
-    let mut child = start(&dir, &["sh", "-c", &command], "30");
+    let mut child = start(&dir, &["sh", "-c", &command], "600");
     for _ in 0..READY_POLLS {
         if pid_file.exists() {
             break;
