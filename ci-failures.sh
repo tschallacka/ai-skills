@@ -67,6 +67,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 command -v gh >/dev/null 2>&1 || { printf 'ci-failures: gh is required\n' >&2; exit 69; }
+# `gh --jq` runs an EMBEDDED jq interpreter, which is exactly the hidden jq
+# dependency test-rjq-active-references.sh exists to catch -- it flagged this
+# script's first draft. rjq is this repository's own ceiling for a required
+# JSON tool, so every gh call below asks for raw --json and pipes through it
+# instead.
+command -v rjq >/dev/null 2>&1 || {
+    printf 'ci-failures: rjq is required (run ./bootstrap.sh, or see the release page for T70)\n' >&2
+    exit 69
+}
 
 # ESC as a literal byte. `\x1b` is a GNU sed extension and this repository
 # targets a BSD userland too, so the pattern carries the character itself.
@@ -84,7 +93,7 @@ resolve_run() {
     case "$want" in
         pr/*)
             head_branch="$(gh pr view "${want#pr/}" --repo "$repo_slug" \
-                --json headRefName --jq .headRefName)" \
+                --json headRefName | rjq -r .headRefName)" \
                 || { printf 'ci-failures: no PR %s\n' "${want#pr/}" >&2; exit 66; }
             latest_run_for "$head_branch"
             return
@@ -107,7 +116,7 @@ resolve_run() {
         return
     fi
     head_branch="$(gh pr view "$want" --repo "$repo_slug" \
-        --json headRefName --jq .headRefName)" \
+        --json headRefName | rjq -r .headRefName)" \
         || { printf 'ci-failures: %s is neither a run id nor a PR\n' "$want" >&2; exit 66; }
     latest_run_for "$head_branch"
 }
@@ -117,7 +126,8 @@ resolve_run() {
 latest_run_for() {
     local branch="$1" id
     id="$(gh run list --repo "$repo_slug" --branch "$branch" --limit 20 \
-        --json databaseId,name --jq '[.[] | select(.name != "render-artifacts")][0].databaseId')"
+        --json databaseId,name \
+        | rjq -r '[.[] | select(.name != "render-artifacts")][0].databaseId')"
     [ -n "$id" ] && [ "$id" != null ] \
         || { printf 'ci-failures: no runs for branch %s\n' "$branch" >&2; exit 66; }
     printf '%s\n' "$id"
@@ -125,8 +135,9 @@ latest_run_for() {
 
 run_id="$(resolve_run "$target")"
 
-status="$(gh run view "$run_id" --repo "$repo_slug" --json status --jq .status)"
-conclusion="$(gh run view "$run_id" --repo "$repo_slug" --json conclusion --jq '.conclusion // "pending"')"
+status="$(gh run view "$run_id" --repo "$repo_slug" --json status | rjq -r .status)"
+conclusion="$(gh run view "$run_id" --repo "$repo_slug" --json conclusion \
+    | rjq -r '.conclusion // "pending"')"
 printf 'run %s  %s/%s  https://github.com/%s/actions/runs/%s\n' \
     "$run_id" "$status" "$conclusion" "$repo_slug" "$run_id"
 
@@ -135,10 +146,10 @@ printf 'run %s  %s/%s  https://github.com/%s/actions/runs/%s\n' \
 # failed" means. --all keeps every job so a run can be surveyed.
 if [ "$want_all" = true ]; then
     jobs="$(gh run view "$run_id" --repo "$repo_slug" --json jobs \
-        --jq '.jobs[] | (.databaseId|tostring) + "\t" + (.conclusion // "running") + "\t" + .name')"
+        | rjq -r '.jobs[] | (.databaseId|tostring) + "\t" + (.conclusion // "running") + "\t" + .name')"
 else
     jobs="$(gh run view "$run_id" --repo "$repo_slug" --json jobs \
-        --jq '.jobs[] | select(.conclusion == "failure") | (.databaseId|tostring) + "\tfailure\t" + .name')"
+        | rjq -r '.jobs[] | select(.conclusion == "failure") | (.databaseId|tostring) + "\tfailure\t" + .name')"
 fi
 
 if [ -z "$jobs" ]; then
