@@ -2,9 +2,11 @@
 // PACKAGE: PROD
 //! Optional MCP adapter for the editor protocol.
 
+use ai_text_editor::client::{self, ResolveRequest};
 use ai_text_editor::protocol::Envelope;
-use ai_text_editor::transport::{request, Endpoint};
+use ai_text_editor::transport::request;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 pub fn handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -88,7 +90,7 @@ fn tool_definitions() -> Vec<Value> {
         ("job_release", "Permanently release a job and invalidate its resume token."),
     ]
         .into_iter()
-        .map(|(name, description)| json!({"name":name,"description":format!("{description} Requires an endpoint and operation-specific arguments; the server is authoritative and every mutation needs a current revision."),"inputSchema":{"type":"object","required":["endpoint"],"additionalProperties":true}}))
+        .map(|(name, description)| json!({"name":name,"description":format!("{description} Either an endpoint, or a file (for open) plus an optional agent/session id to reconnect to that agent's already-running workspace, resolves the target; a new workspace-server is started automatically if `open` finds none. The server is authoritative and every mutation needs a current revision."),"inputSchema":{"type":"object","additionalProperties":true}}))
         .collect()
 }
 
@@ -98,35 +100,84 @@ fn call_tool(id: Value, params: Value) -> Value {
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let endpoint = match arguments.get("endpoint").and_then(Value::as_str) {
-        Some(endpoint) => Endpoint::parse(endpoint),
-        None => return tool_error(id, "endpoint is required"),
-    };
     let method = if name == "resolve" {
         "resolve_external"
     } else {
         name
     };
     let mut payload = arguments.as_object().cloned().unwrap_or_default();
+    let file = payload
+        .get("file")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let resolve_request = ResolveRequest {
+        file: file.clone(),
+        method: method.to_string(),
+        explicit_endpoint: payload
+            .get("endpoint")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        explicit_identity: payload
+            .get("session")
+            .or_else(|| payload.get("agent"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        session_token_path: None, // no equivalent of the CLI's --session-token file over MCP
+        agent_env_var: "TSCH_AI_EDITOR_AGENT".to_string(),
+        document_mode: payload
+            .get("document_mode")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        normalize_nfc: payload
+            .get("normalize_nfc")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        idle_timeout_seconds: payload
+            .get("idle_timeout_seconds")
+            .and_then(Value::as_u64)
+            .map(|value| value.to_string()),
+    };
+    let resolved = match client::resolve(&resolve_request) {
+        Ok(resolved) => resolved,
+        Err(error) => return tool_error(id, &error),
+    };
     payload.remove("endpoint");
+    payload.remove("session");
+    payload.remove("agent");
+    payload.remove("document_mode");
+    payload.remove("normalize_nfc");
+    payload.remove("idle_timeout_seconds");
     let revision = payload.remove("revision").and_then(|value| value.as_u64());
     let auth_token = payload
         .remove("auth_token")
-        .and_then(|value| value.as_str().map(str::to_owned));
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .or(resolved.auth_token.clone());
     let session_token = payload
         .remove("session_token")
-        .and_then(|value| value.as_str().map(str::to_owned));
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .or(resolved.session_token.clone());
     let envelope = Envelope {
         version: ai_text_editor::PROTOCOL_VERSION,
         request_id: "mcp-1".into(),
         method: method.into(),
         revision,
-        auth_token,
+        auth_token: auth_token.clone(),
         session_token,
         payload: Value::Object(payload),
     };
-    match request(&endpoint, &envelope) {
+    match request(&resolved.endpoint, &envelope) {
         Ok(frames) => {
+            let returned_session_token = frames
+                .iter()
+                .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
+                .and_then(|frame| frame.pointer("/payload/session_token"))
+                .and_then(Value::as_str);
+            let _ = client::persist_cache(
+                resolved.cache_path.as_deref(),
+                &resolved.endpoint,
+                auth_token.as_deref(),
+                returned_session_token.or(resolved.session_token.as_deref()),
+            );
             json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":serde_json::to_string(&frames).unwrap()}]}})
         }
         Err(error) => tool_error(id, &error),

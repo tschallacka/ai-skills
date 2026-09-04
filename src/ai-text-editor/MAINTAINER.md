@@ -71,9 +71,23 @@ interval, so this has not been observed to bite, but it is a real gap: the
 long-term fix is updating that test to rely on autostart instead of a manual
 start, not hardening the race further.
 
-## Identity: the `agent-session-key` ladder, and why one tier is gated
+## client.rs: one resolver shared by the CLI and the MCP adapter
 
-`session_identity()` (client) and `register_session()` (server) both resolve
+`src/ai-text-editor/src/client.rs` (`resolve`, `identity`, `cache_path`,
+`persist_cache`, `autostart_server`) is a library module, not something
+either binary owns. `bin/ai-text-editor.rs`'s `main` and
+`ai-text-editor-mcp`'s `call_tool` both build a `ResolveRequest` from their
+own argument source (CLI flags; MCP `arguments`) and call the same
+`client::resolve`. This was a deliberate extraction, not the original shape:
+the CLI had all of this inline in `main` first, and it moved into the lib
+specifically so the MCP adapter did not grow a second copy that could drift
+from the CLI's — which, before the extraction, is exactly what the MCP
+adapter had (a hand-rolled `endpoint` argument requirement with none of the
+resolution below).
+
+## Identity: the `agent-session-key` ladder
+
+`client::identity()` (client) and `register_session()` (server) both resolve
 "which agent is this" through `agent_session_key::resolve_session_key` — the
 same precedence ladder `chat-client-rs` resolves its own session key with,
 pulled into its own crate (`src/agent-session-key/`) specifically so a second
@@ -106,12 +120,29 @@ not to gate the harness rung off when a file is given** (an earlier draft of
 this fix did that, which quietly also disabled cross-file workspace reuse for
 the common case — see the second lesson below); **it is to make identity
 resolution failure non-fatal whenever a file is available as a fallback.**
-See the `identity_lookup` variable in `ai-text-editor.rs`'s `main`: a miss
-falls through to the ordinary per-file discovery/autostart path, exactly as
-if no identity had resolved at all. Only "an identity was named and there is
-no file to fall back on" (`session_identity` resolved to `Some`, `--file` was
-never given, resolution still failed) stays fatal — there is nothing else to
-try.
+See the `identity_lookup` variable in `client::resolve`: a miss falls through
+to the ordinary per-file discovery/autostart path, exactly as if no identity
+had resolved at all. Only "an identity was named and there is no file to fall
+back on" (identity resolved to `Some`, no file was given, resolution still
+failed) stays fatal — there is nothing else to try.
+
+**A second regression, same family: an explicit identity that autostart
+never told the new server about.** `--agent NAME`/MCP `arguments.agent` is an
+explicit override, out of band from environment — nothing about it is
+naturally visible to a spawned child process the way an ambient harness
+variable already is (`Command` inherits the parent's environment, so
+`CLAUDE_CODE_SESSION_ID` reaches the child for free; a name that arrived as a
+flag or a JSON field does not). `register_session` (server side) only ever
+reads *its own* environment; it has no argv concept of `--agent`. Without
+`autostart_server` explicitly setting `agent_env_var` on the spawned child, a
+client resolving `--agent NAME` and the server it just autostarted register
+two *different* keys — the client's literal `NAME` and the server's own
+harness-derived key — and every subsequent file for that name falls through
+to yet another new server instead of reconnecting, exactly the failure mode
+cross-file reconnection exists to prevent. Caught while testing the MCP
+adapter specifically (its `arguments.agent` has no ambient env fallback the
+CLI's own `TSCH_AI_EDITOR_AGENT` sometimes coincides with), then re-confirmed
+on the CLI's `--agent` flag too, which had the identical latent bug.
 
 **Two different questions need two different registry lookups.** Once an
 agent has two or more tabs open, they all share one `agent_id` in
@@ -126,7 +157,7 @@ reachable copy of the server, since every tab on one server shares its
 endpoint and the file-based routing in `select_tab` (server side) does the
 rest. That second question is `session::resolve_workspace` — tolerant of any
 number of tabs sharing the identity, picking the most recent reachable
-distinct endpoint. `ai-text-editor.rs`'s `identity_lookup` picks between the
+distinct endpoint. `client::resolve`'s `identity_lookup` picks between the
 two based on exactly one condition: `method == "open" && file.is_some()`.
 
 **The server routes by `session_token` before it ever looks at `file`.**
@@ -142,7 +173,7 @@ only then.
 
 ## The client's local session cache is per-`(identity, file)`, not per-identity
 
-`session_path(identity, file)` hashes identity *and* file into the cache key.
+`client::cache_path(identity, file)` hashes identity *and* file into the cache key.
 It used to be identity alone, and that was a real bug, caught by hand while
 testing this session's other changes rather than by any existing test: with
 a single cache slot per identity, opening file B after file A overwrote A's

@@ -52,6 +52,14 @@ their endpoint and token identity in `sessions.json`; identity lookup refuses
 stale or ambiguous candidates rather than guessing. The registry is
 server-written coordination metadata, not a client-accessible SQLite store.
 
+An MCP adapter (`ai-text-editor-mcp`) exposes the same protocol over stdio
+JSON-RPC for a client that speaks MCP instead of shelling out — same tools,
+same resources (the protocol schema, the capability schema, this man page),
+and the same autostart and workspace-reconnection behavior above: pass
+`file` (and, to reconnect across a fresh, otherwise-forgetful context, an
+`agent`/`session` argument) instead of an `endpoint`, and it resolves the
+same way the CLI does.
+
 ## Capabilities
 
 1. Open isolated editor tabs with one server writer per tab.

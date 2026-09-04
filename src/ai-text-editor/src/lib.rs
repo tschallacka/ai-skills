@@ -5,6 +5,7 @@
 pub const PROTOCOL_VERSION: u32 = 1;
 
 pub mod auth;
+pub mod client;
 pub mod document;
 pub mod history;
 pub mod index;

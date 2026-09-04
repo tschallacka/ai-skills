@@ -3,7 +3,7 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	10289
 package/LICENSE	1068
 package/README.md	15683
-package/ai-text-editor/SKILL.md	9571
+package/ai-text-editor/SKILL.md	10043
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	8019
 package/ai-text-editor/binaries.tsv	500
