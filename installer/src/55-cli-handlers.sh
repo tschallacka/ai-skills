@@ -21,7 +21,9 @@ cli_resolve_source() {
 }
 
 cli_copy_skill_files() {
-    local relative source destination_file
+    local relative source destination_file files
+    files="$(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")"
+    remove_stale_integration_binaries "$CLI_SKILL" "$TARGET_SELECTION/$CLI_SKILL" "$files"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         integration_file_allowed "$CLI_SKILL" "$relative" || continue
@@ -29,7 +31,9 @@ cli_copy_skill_files() {
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         mkdir -p "$(dirname "$destination_file")"
         cp -p "$source" "$destination_file"
-    done < <(skill_files "$CLI_SKILL" "$PACKAGE_SELECTION")
+    done <<EOF
+$files
+EOF
 }
 
 cli_install_skill() {
