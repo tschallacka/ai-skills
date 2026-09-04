@@ -16,7 +16,7 @@ verification that fails without the fix.
   side, forever.
 - **Closures with proof.** Marking a bug `fixed` requires the fix and *how it
   was verified* — including the mutation check. No silent healing.
-- **Shell helpers, not hand-editing.** `bug-add.sh` / `bug-update.sh` write
+- **One binary, not hand-editing.** `bugs add` / `bugs update` write
   through shared validation, so a malformed entry cannot land. Refusals name
   their reason; a rejected write leaves the register exactly as it was.
 

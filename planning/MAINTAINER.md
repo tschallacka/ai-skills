@@ -181,7 +181,7 @@ library, and `test-plan-libs-build.sh` runs it.
   69 only when none exists. `openssl` was the last rung and is gone from the
   chain and from `requires.tsv`: a static binary asks the target machine for
   nothing, so shipping one *lowered* the declared requirement. The binary is
-  opportunistic, found the way `chat-server.sh`'s `rust_bin()` finds its own —
+  opportunistic, found the way the chat skill's own binary lookup works —
   `PLAN_CRYPT_BIN`, then `PATH`, then `planning/bin/<target triple>/plan-crypt`
   and `planning/bin/plan-crypt`. Per-target artifacts are CI-delivered and
   untracked (§2.16); a local `planning/bin/<triple>` path exists only after a

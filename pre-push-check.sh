@@ -239,7 +239,16 @@ fi
 if [ -x planning/scripts/build-plan-libs.sh ]; then
     planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
 fi
-changed_sh="$(changed -E '\.sh$')"
+# Only scripts that still EXIST: a deletion is part of the change set, and
+# feeding a deleted path to shellcheck fails with "openBinaryFile: does not
+# exist" -- so removing a superseded script used to fail this gate, which is
+# precisely the shape that teaches people to bypass a gate rather than use it.
+changed_sh=""
+for _sh in $(changed -E '\.sh$'); do
+    [ -f "$_sh" ] && changed_sh="${changed_sh}${changed_sh:+
+}$_sh"
+done
+unset _sh
 if [ -z "$changed_sh" ]; then
     note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
 elif command -v shellcheck >/dev/null 2>&1; then
