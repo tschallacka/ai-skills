@@ -139,7 +139,7 @@
     {
       "id": "B168",
       "title": "The registers guard and its test use the banned python3-shipped construct, so the portability gate fails on master",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -152,12 +152,12 @@
         ".github/tests/test-registers-guard.sh",
         "planning/tests/test-portability-contract.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "e34a7485 on fix/master-red-trio (PR #56) -- ./.github/*:python3-shipped joins the dev-only allowlist group the rule's own replacement text provides for",
+      "verification": "test-portability-contract PASS. Mutation: a python3 line appended to planning/scripts/plan-env.sh, a SHIPPED file, is still reported, so the row exempts one dev-only tree rather than disabling the rule.",
       "found_by": "master CI run 33873690073, ubuntu-latest leg; reproduced locally",
       "notes": null,
       "created_at": "2026-09-04T15:17:44Z",
-      "updated_at": "2026-09-04T15:17:44Z"
+      "updated_at": "2026-09-04T17:23:31Z"
     },
     {
       "id": "B33",
@@ -1933,7 +1933,7 @@
     {
       "id": "B169",
       "title": "test-register-helpers exercises the retired planning/scripts register helpers, so every case fails with rc=127",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1944,17 +1944,17 @@
       "surfaces": [
         "planning/tests/test-register-helpers.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "73941a86 on fix/master-red-trio (PR #56) -- the four wrappers drive the compiled bugs/todo, with every expected message quoted from real output, and resolve <skill>/bin/<triple>/ before the shared root",
+      "verification": "test-register-helpers rc=0 with the binaries present and a clean SKIP naming setup-dev-env.sh without them. The resolution order is the load-bearing part: CI places them per skill, so resolving only the root bin/ would have SKIPPED on every CI leg -- a silent pass in place of a red test.",
       "found_by": "master CI run 33873690073, ubuntu-latest leg; reproduced locally",
-      "notes": null,
+      "notes": "Two further defects found while rewriting and kept: the flag-coverage setup add was silenced and failing (todo add requires --detail), surfacing three cases later as 'parent T9999 does not exist'; and the binary's damaged-register refusal no longer names register-rebuild.sh, so the lost repair hint is recorded in the test rather than dropped.",
       "created_at": "2026-09-04T15:17:55Z",
-      "updated_at": "2026-09-04T15:17:55Z"
+      "updated_at": "2026-09-04T17:23:31Z"
     },
     {
       "id": "B170",
       "title": "test-installer-manifest exits 1 on CI after every sub-test passes, and names no failure",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1965,12 +1965,12 @@
       "surfaces": [
         "planning/tests/test-installer-manifest.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "28a7f9ef on fix/master-red-trio (PR #56) -- every assertion in test_rust_migration_registry reports before exiting, and the four rows naming deleted shell helpers are removed (dev-binary count 5 -> 1)",
+      "verification": "test-installer-manifest rc=0 with all four sub-tests printing PASS. Mutation: re-adding one dead row reports 'rust-migration.tsv has 2 dev-binary rows, expected 1' instead of exiting 1 in silence.",
       "found_by": "master CI run 33873690073, ubuntu-latest leg",
-      "notes": "Confirmed 2026-09-04, upgraded from reported. The fix is for the suite to be self-sufficient -- generate what it asserts against, or skip with a reason -- rather than depending on a build step nothing in the suite performs. Same family as the CI-vs-local-builder lesson, mirrored: here the SUITE needs a step the suite does not run.",
+      "notes": "Confirmed 2026-09-04, upgraded from reported. The fix is for the suite to be self-sufficient -- generate what it asserts against, or skip with a reason -- rather than depending on a build step nothing in the suite performs. Same family as the CI-vs-local-builder lesson, mirrored: here the SUITE needs a step the suite does not run. CORRECTION to this entry's earlier mechanism: the build-plan-libs -> generate-reviewer chain was a DIFFERENT, local-only failure. run-tests.sh's bootstrap_generated does build those and CI's log shows REVIEWER.md generated; the test had been run directly, bypassing the bootstrap, and its exit status read through a pipe. The real cause was the silent fourth sub-test, which shares its root with B169.",
       "created_at": "2026-09-04T15:18:07Z",
-      "updated_at": "2026-09-04T16:49:56Z"
+      "updated_at": "2026-09-04T17:23:31Z"
     },
     {
       "id": "B14",
