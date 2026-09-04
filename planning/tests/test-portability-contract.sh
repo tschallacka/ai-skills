@@ -97,6 +97,12 @@ in_allowlist() {
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
+        # The registers guard and its own test are CI-only: .github/ is not in
+        # package.json's `files`, so no runtime of ours can depend on their
+        # python3. The guard needs it for the duplicate-id check a textual merge
+        # cannot see, and it must be able to refuse on a runner with nothing
+        # built, which rules out the register binaries.
+        ./.github/*:python3-shipped) return 0 ;;
         # The skill-loading probes are maintainer-only measurement tooling, the
         # same category as ./benchmark/* above: MODE: DEV, and excluded from the
         # package by name in package.json's `files`, so no runtime of ours ever
