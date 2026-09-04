@@ -74,6 +74,40 @@ asserting the absolute form fails first, or the untested half ships.
 `verify-both-shells.sh` gives each test `/tmp/t.XXXXX` for this reason;
 chromium's socket path caps near the same figure.
 
+### The third end: the test harness is a caller too (2026-09-04)
+
+The rule above was written after fixing the bind and the client. It was right,
+and it still missed a caller: **the integration tests connected by absolute
+path**, so eleven of nineteen failed on both macOS legs a CI round later with
+`path must be shorter than SUN_LEN` — the same cap, the same cause, a third
+place.
+
+What made it expensive is that the harness reported the wrong thing. Its loop
+tested the connect with `if let Ok(mut stream) = UnixStream::connect(...)`,
+which **discards the error**, and the panic after the loop said `socket did not
+appear`. `ls` of that directory during the poll showed `srw------- socket`
+present the whole time. Three sessions therefore looked at the wrapper, which
+was never at fault.
+
+So the rule generalises: **fix a paired operation everywhere it is called, and
+count the tests as callers.** And a readiness loop must report the error it
+retried on — the wrong cause, stated confidently, costs more than no cause.
+
+Reproduced on Linux by padding `$TMPDIR` to macOS's 72 bytes and changing
+nothing else: 8 passed, 11 failed, 30.26 s, against 19 passed in 1.05 s with a
+short one — the same eleven as CI. The eight survivors are exactly the tests
+that need no successful connect, which is the fingerprint to look for.
+
+### The process-global cwd caution, now paid for
+
+The caution above — "in a threaded program this needs serialising" — is not
+hypothetical. `cargo test` runs an integration binary's tests as **threads in
+one process**, so the moment the harness called the fd-relative connect,
+nineteen tests were moving one shared cwd. Measured: **3 runs out of 3** failed
+with `Connection reset by peer`, and `--test-threads=1` passed. A mutex around
+the move fixes it and costs nothing measurable, because only the move is inside
+it. The wrapper itself remains safe for the original reason — one process each.
+
 ## There is no short blessed socket directory on macOS
 
 Worth knowing before reaching for one:
