@@ -7,6 +7,11 @@
 .agents/*
 !.agents/MAINTAINER.md
 !.agents/MAINTAINER-STYLE-CONTRACT.md
+!.agents/skill-loading-findings.md
+!.agents/skill-loading-experiment/
+!.agents/skill-loading-experiment/**
+!.agents/knowledge/
+!.agents/knowledge/**
 
 # Benchmark runner staging area: setup-benchmark.sh writes each agent's run
 # here under benchmark/results/<agent>/.staging/ and atomically moves it into

@@ -91,6 +91,13 @@ in_allowlist() {
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
+        # The skill-loading probes are maintainer-only measurement tooling, the
+        # same category as ./benchmark/* above: MODE: DEV, and excluded from the
+        # package by name in package.json's `files`, so no runtime of ours ever
+        # depends on their python3. They became visible to this scan only when
+        # the .gitignore negations made them tracked.
+        ./.agents/skill-loading-experiment/*:python3-shipped) return 0 ;;
+        ./.agents/skill-loading-experiment/*:bash-by-path-lookup) return 0 ;;
     esac
     return 1
 }

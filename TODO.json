@@ -431,6 +431,42 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
+    },
+    {
+      "id": "T86",
+      "title": "Give every skill a load sanity check the agent must execute",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Every shipped skill gets a check that proves the agent actually read the whole thing, because the measured truncation is SILENT. Claude Code 2.1.259 returns a prefix at roughly 25,000 tokens with no notice anywhere; opencode 1.18.27 caps an -f attachment at 50 KB but does say so in-band; codex 0.153.0 does not truncate. So on the harness we use most, a skill over the cap is read in part and nothing says so - and an agent asked why content was missing rationalised it as having declined to load repetitive filler, when the transcript showed one unbounded Read handing it 1078 lines. planning/SKILL.md is over the cap today at 1502 lines and 87.8 KB, losing about 35 percent in 2 of 3 real runs. Design, per Michael. First, the sanity token does NOT sit at the end of the file. The end is predictable and a reader that stops early can still be told what to say; place it at a RANDOM position past the known boundary, so its presence is evidence of having read past the cap rather than evidence of having reached a fixed landmark. Past the boundary means past the measured caps above, and random means the position is not guessable from the file shape. Second, loading the skill is not finished by echoing anything: the agent must RUN THE COMMAND WITH THE SANITY ARGUMENTS it can only have obtained by reading that far, and the command is what decides. An instruction to report a token is claimable; an invocation carrying an argument the agent could not otherwise know is not. That distinction is the whole point, and it is why this is worth having as an interlock rather than a line of prose. Scope is all skills, not just planning: the same silent cap applies to any of them that grows, and a check only present on the one file we already know about would not catch the next one. Evidence and the eleven reproducible probes are in .agents/skill-loading-findings.md on this branch. Related: the planning split under discussion (Q11) reuses the existing REVIEWER_SECTION marker plus generate-reviewer.sh plus the hash pinned by test-reviewer-projection.sh, which is already a marked-region-and-generator mechanism, so the split and this check should share it rather than inventing a second scheme.",
+      "blocked_on": null,
+      "refs": [
+        ".agents/skill-loading-findings.md",
+        "planning/SKILL.md",
+        "planning/scripts/generate-reviewer.sh"
+      ],
+      "note": null,
+      "created_at": "2026-09-03T18:31:42Z",
+      "updated_at": "2026-09-03T18:31:42Z"
+    },
+    {
+      "id": "T87",
+      "title": "Split planning/SKILL.md: authored source, generated short SKILL.md",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "DECIDED by Michael, 2026-09-03. planning/SKILL.md is 1502 lines and 87.8 KB, over the roughly 25,000-token cap at which Claude Code silently returns a prefix, and it measurably loses about 35 percent of itself in 2 of 3 real runs. The shape: the full authored content becomes a SOURCE file - source.skill or similar, not a .md - and a SHORT SKILL.md is GENERATED from it, carrying the front matter and pointers to generated part files. The non-.md extension is load bearing, not cosmetic: an agent looking for SKILL.md must not stumble into the 1500-line source, which is exactly the failure being fixed. Section sizes make the split obvious - section 3 mandatory classification and independent review is 509 lines, section 2 create the plan directory is 365, section 4 resume and update is 342, and everything else is 286. Three parts and a thin index, each part well under the cap. This repo already has the machinery and the convention: install.sh is generated from installer/src, installer/build.sh has a --check mode that diffs instead of writing, and planning/tests/test-installer-build.sh fails when the committed artifact is stale. Follow that pattern exactly rather than inventing one - a generator, a --check mode, and a test that the committed output matches its source. Consequences to handle, none optional. The generated SKILL.md and the parts stay COMMITTED and SHIPPED, because a skill is consumed as files and has no build step at the far end. MODE markers flip: the source is MODE DEV, the generated outputs are MODE PROD, per contract 10a. generate-reviewer.sh currently projects two REVIEWER_SECTION blocks out of SKILL.md, at lines 650-947 and 1190-1276, 383 lines or 25 percent of the file, and pins the source SHA-256 that test-reviewer-projection.sh compares - it must read the SOURCE after this change, and its recorded hash necessarily changes. skill_files() in installer/src/50-manifest.sh must list the new part files, and the npm baseline rows follow from that. The five never-committed generated plan-*-lib.sh files and REVIEWER.md are the precedent for what setup-dev-env.sh has to build. Finally this interlocks with T86: the load sanity check needs a token at a random position past the cap in each part, so build the split and the check together rather than retrofitting the check afterwards.",
+      "blocked_on": null,
+      "refs": [
+        "planning/SKILL.md",
+        "planning/scripts/generate-reviewer.sh",
+        "installer/build.sh",
+        "installer/src/50-manifest.sh",
+        ".agents/skill-loading-findings.md"
+      ],
+      "note": "Multi-target generation confirmed as the shape (Michael, Q18): one authored source emits SEVERAL documents, not just a short SKILL.md. The existing REVIEWER_SECTION marker already names a region - mandatory-review and bounded-context - so the extension is to have a region declare which target or targets it belongs to, and have one generator emit every target from the single source, with one --check mode diffing all of them and one staleness test covering the set. That subsumes generate-reviewer.sh rather than sitting beside it, and it means a section wanted in two documents is authored once and projected twice, which is the actual answer to sections repeating across documents. Two constraints on it: a region has to carry MODE as well as target, because SKILL.md and its parts ship as PROD while MAINTAINER.md is DEV, and a region projected into two targets must be projected verbatim, since the reviewer projection is pinned by SHA-256. On MAINTAINER.md specifically, 449 lines and 38 KB: it is UNDER the roughly 25,000-token cap, so it does not need splitting to be read whole, and measurement says it shares NOTHING with SKILL.md - comparing every heading across SKILL.md, ROLES.md, MAINTAINER.md, ARCHITECTURE.md and docs/README.md found zero overlap. So it can be a target of the same source, and today that would buy structure rather than deduplication. Worth doing only if the convention of one source per skill is wanted for its own sake; not required by the truncation problem.",
+      "created_at": "2026-09-03T18:32:38Z",
+      "updated_at": "2026-09-03T18:33:20Z"
     }
   ]
 }

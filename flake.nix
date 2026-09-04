@@ -183,12 +183,34 @@
               # UNCONFIGURED when mmdc is absent rather than failing.
               pkgs.nodejs
               pkgs.mermaid-cli
+              # Dev tooling resolves from the flake; nothing but nix itself is
+              # assumed present. Plain python3, not withPackages: tracked dev
+              # scripts import stdlib only, and benchmark owns the pyyaml shell.
+              pkgs.python3
+              # ai-text-editor's storage CLI; the package is sqlite, the binary
+              # it provides is sqlite3.
+              pkgs.sqlite
+              # The installer's fetch path (curl | bash), declared so the shell
+              # owns it rather than borrowing the machine's.
+              pkgs.curl
+              # jq is deliberately ABSENT. rjq is the mandated register runtime
+              # and jq on PATH can mask a defect in it; T85 tracks rjq's missing
+              # IN/1. openssl likewise: plan-crypt owns digests now.
             ] ++ pkgs.lib.optional (muslCross != null) muslCross;
             shellHook = ''
               ${pkgs.lib.optionalString (muslCross != null) ''
                 export CC_${builtins.replaceStrings ["-"] ["_"] muslTarget}="${muslCross}/bin/${muslTarget}-gcc"
                 export CARGO_TARGET_${pkgs.lib.toUpper (builtins.replaceStrings ["-"] ["_"] muslTarget)}_LINKER="${muslCross}/bin/${muslTarget}-gcc"
               ''}
+              # This tree's own compiled helpers win over any installed copy.
+              # setup-dev-env.sh builds them into bin/<target triple>/; without
+              # this, rjq resolved to ~/.local/bin/rjq -- an installed binary
+              # that need not match the src/rjq this tree builds.
+              for _bin in "$PWD"/bin/*/; do
+                [ -d "$_bin" ] && PATH="$_bin:$PATH"
+              done
+              unset _bin
+              export PATH
               echo "ai-skills dev shell"
               echo "  bash32           $(${bash32}/bin/bash32 --version | head -1 | cut -d' ' -f4)  (CODE-STYLE.md §1 floor)"
               echo "  bash32-run-tests run ./run-tests.sh entirely under bash 3.2"

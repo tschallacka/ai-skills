@@ -19,10 +19,27 @@ this file holds what applies to the repository as a whole.
 ### 1.2 Small, scoped, single-source docs
 - A skill's `SKILL.md` stays a lean index and shared contract. Never let it
   regrow into a monolithic document.
+- **This rule has a measured limit behind it, not just a preference.** Claude
+  Code returns a *prefix* of a file at roughly 25,000 tokens and says nothing:
+  no notice in the tool result, no notice anywhere. A document past that is
+  partly read and reads as fully read. opencode caps an attachment at 50 KB but
+  does say so; codex did not truncate. Measured 2026-09-03 against Claude Code
+  2.1.259, opencode 1.18.27 and codex 0.153.0. The working notes are kept in
+  the repository at `.agents/knowledge/agent-read-limits.md`, which is
+  maintainer-only and not part of a release.
 - Agents read only the doc for the task they are doing. Phase or scope scoping
   prevents "future knowledge" leaking into a wrong context.
 - Shared facts live in exactly one place. Docs **reference, never duplicate** —
   a second copy is a drift hazard, not a convenience.
+
+### 1.2a Measured facts go in `.agents/knowledge/`
+- A limit, a silent behaviour or a refuted belief that cost time to establish
+  belongs in `.agents/knowledge/`, with its numbers and how it was measured.
+  It is not a changelog: entries answer one question each and must be
+  re-checkable from what they contain. That directory is maintainer-only
+  (`MODE: DEV`), so it exists in the repository and not in a release.
+- Queued work is `TODO.json` and defects are `BUGS.json`. Knowledge is neither
+  — it is what the next agent would otherwise rediscover.
 
 ### 1.3 Proactive, reconciling tools
 - When a mutation happens, the tool reconciles every reference it knows about
@@ -98,6 +115,29 @@ this file holds what applies to the repository as a whole.
   artifact *is* the entry point. Read "nothing machine-produced is committed"
   as "except the one artifact whose whole purpose is to be downloaded on its
   own".
+
+### 1.11 CI runs: a push cancels the run it supersedes
+- The workflow's concurrency group is keyed by ref
+  (`ci-${{ github.workflow }}-${{ github.ref }}`) with `cancel-in-progress`, so
+  **one pull request never cancels another's run**. On a `pull_request` event
+  `github.ref` is `refs/pull/<N>/merge`, giving every PR its own lane. That
+  keying is deliberate: a shared group once cancelled three open pull requests'
+  runs through no fault of their own.
+- What it does cancel is **the same branch superseding itself**. Push a second
+  commit and the run for the first is killed. That is intended — finishing a run
+  for a commit nobody will merge wastes a scarce macOS runner — and it is not a
+  fault to fix.
+- **So do not push while a run you need is still queued.** The queue here can
+  take around fifteen minutes merely to *register* a run, and anything pushed
+  inside that window destroys the previous result. This cost two experiments in
+  one day: a diagnostics run that would have printed a macOS bind errno, and a
+  rebase's verification. Batch the pushes, or hold them until the run completes.
+- The distinction that matters: you lose the result **only when the earlier
+  commit was the one being tested**. A superseded run of code you have already
+  replaced is no loss at all.
+- macOS runners are the scarce resource and set the critical path. A readiness
+  or retry budget written for a Linux runner will be too tight there — the host
+  is a shared, oversubscribed VPS that pauses for other tenants.
 
 ## 2. Change checklist (minimum, per change)
 
