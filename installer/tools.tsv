@@ -46,7 +46,6 @@ verify	openssl	*:*	1	-	command -v openssl
 verify	python3	*:*	1	-	command -v python3
 verify	node	*:*	1	-	command -v node
 verify	perl	*:*	1	-	command -v perl
-verify	socat	*:*	1	-	command -v socat
 verify	*	*:*	1	-	command -v "$1"
 hint	python3	Darwin:*	1	brew	  brew install python3
 hint	python3	Darwin:*	1	port	  sudo port install python3
@@ -72,14 +71,6 @@ hint	perl	Linux:*	1	dnf	  sudo dnf install -y perl
 hint	perl	Linux:*	1	pacman	  sudo pacman -S --noconfirm perl
 hint	perl	Linux:*	1	apk	  sudo apk add perl
 hint	perl	Linux:*	1	-	  install the perl package for your distribution
-hint	socat	Darwin:*	1	brew	  brew install socat
-hint	socat	Darwin:*	1	port	  sudo port install socat
-hint	socat	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install socat
-hint	socat	Linux:*	1	apt-get	  sudo apt-get install -y socat
-hint	socat	Linux:*	1	dnf	  sudo dnf install -y socat
-hint	socat	Linux:*	1	pacman	  sudo pacman -S --noconfirm socat
-hint	socat	Linux:*	1	apk	  sudo apk add socat
-hint	socat	Linux:*	1	-	  install the socat package for your distribution
 hint	memlimit	*:*	1	-	  curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
 hint	memlimit	*:*	2	brew	  or: brew tap pingiun/memlimit https://github.com/pingiun/memlimit && brew install --HEAD memlimit
 hint	memlimit	*:*	2	cargo	  or: cargo install --git https://github.com/pingiun/memlimit memlimit
