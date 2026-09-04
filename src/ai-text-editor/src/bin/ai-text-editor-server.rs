@@ -28,6 +28,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -70,6 +71,12 @@ struct ServerState {
     large_threshold_bytes: u64,
     endpoint: Option<Endpoint>,
     discovery_path: PathBuf,
+    last_activity: std::time::Instant,
+    /// Requests currently being handled, across every connection. A long
+    /// synchronous operation — a large-file edit, an unbounded-feeling
+    /// search — holds this above zero for its whole duration, so idle means
+    /// no request in flight, not merely no request having *arrived* lately.
+    in_flight: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -81,8 +88,9 @@ struct LargeHistory {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--takeover-stale-endpoint] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
+        println!("Usage: ai-text-editor-server start --file PATH [--mode text_utf8|raw_bytes|hex_view] [--normalize-nfc] [--idle-timeout-seconds N] [--takeover-stale-endpoint] [--tcp HOST:PORT --auth-token TOKEN|--auth-token-file PATH]");
         println!("The server owns the initial tab and accepts one newline-delimited JSON request per connection. Use client open --endpoint ENDPOINT --file PATH to add isolated tabs; each tab has its own session token and metadata. Files above 256 MiB use bounded access; override with --large-threshold-bytes. A stale Unix endpoint is retained and requires --takeover-stale-endpoint for explicit replacement.");
+        println!("This binary is not meant to be invoked directly by an agent: the ai-text-editor client's `open` command starts one itself when none is running. --idle-timeout-seconds sets how long the server waits with no request before exiting on its own (default 600, 0 disables); the next open replays the journal and picks up where it left off.");
         return;
     }
     if args.get(1).map(String::as_str) != Some("start") {
@@ -295,7 +303,20 @@ fn main() {
         large_threshold_bytes: large_threshold,
         endpoint: None,
         discovery_path: path.clone(),
+        last_activity: std::time::Instant::now(),
+        in_flight: 0,
     }));
+    let idle_timeout = option(&args, "--idle-timeout-seconds")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .unwrap_or_else(|_| die("--idle-timeout-seconds must be a non-negative integer"))
+        })
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(600));
+    if !idle_timeout.is_zero() {
+        spawn_idle_watchdog(Arc::clone(&state), idle_timeout);
+    }
     let requested_tcp = option(&args, "--tcp");
     if let Some(address) = requested_tcp {
         let auth_token = configured_auth_token.unwrap_or_default();
@@ -420,16 +441,64 @@ fn main() {
     die("Unix sockets are unavailable; provide --tcp HOST:PORT");
 }
 
+/// The server is meant to be invisible to the agent driving it: it starts
+/// itself on the first `open` and, symmetrically, stops itself once nobody
+/// has asked it anything for `idle_timeout` — the next `open` for this file
+/// just starts another one, replaying the journal it left behind.
+fn spawn_idle_watchdog(state: Arc<Mutex<ServerState>>, idle_timeout: Duration) {
+    let poll_interval = idle_timeout.min(Duration::from_secs(15));
+    std::thread::spawn(move || loop {
+        std::thread::sleep(poll_interval);
+        let (idle_for, in_flight, discovery_path, tabs) = {
+            let guard = state.lock().unwrap();
+            (
+                guard.last_activity.elapsed(),
+                guard.in_flight,
+                guard.discovery_path.clone(),
+                guard.tabs.values().cloned().collect::<Vec<_>>(),
+            )
+        };
+        // A request still being handled (a large-file edit, a search with
+        // no natural stopping point) keeps in_flight above zero for its
+        // whole duration; a detached job — the same large-edit machinery,
+        // resumed later by job-poll — can be active with no connection open
+        // at all. Either one means the server is working, not idle, no
+        // matter how long since a request last arrived.
+        if idle_for < idle_timeout || in_flight > 0 {
+            continue;
+        }
+        let any_job_active = tabs
+            .iter()
+            .any(|tab| tab.lock().is_ok_and(|tab| tab.jobs.has_active()));
+        if any_job_active {
+            continue;
+        }
+        let _ = fs::remove_file(endpoint_for_file(&discovery_path));
+        let _ = fs::remove_file(socket_for_file(&discovery_path));
+        std::process::exit(0);
+    });
+}
+
 fn register_session(
     endpoint: &Endpoint,
     server_generation: &str,
     session_token: &str,
     auth_token: Option<&str>,
 ) {
-    let agent_id = std::env::var("TSCH_AI_EDITOR_AGENT")
-        .ok()
-        .or_else(|| std::env::var("CODEX_AGENT_ID").ok())
-        .or_else(|| std::env::var("AGENT_ID").ok());
+    // Same ladder the client's `session_identity` resolves with (no
+    // explicit flag on this side — the server has no argv concept of
+    // "--agent", only its own environment), so a client that supplies no
+    // explicit id still finds the tab its own harness registered.
+    let (key, source) = agent_session_key::resolve_session_key(
+        None,
+        "TSCH_AI_EDITOR_AGENT",
+        &|name| std::env::var(name).ok(),
+        None,
+    );
+    let agent_id = match source {
+        agent_session_key::KeySource::Shared => None,
+        _ => Some(key),
+    };
     let record = session::new_record(
         &endpoint.display(),
         server_generation,
@@ -665,8 +734,34 @@ fn announce(path: &PathBuf, endpoint: &Endpoint, generation: &str) {
     let _ = std::io::stdout().flush();
 }
 
+/// Marks the server busy for as long as it lives, and stamps `last_activity`
+/// again on drop — so the idle watchdog measures time with no request
+/// in flight, not merely time since the last one arrived. Held across the
+/// whole connection, not just the JSON dispatch, so a slow read of a large
+/// request body counts as busy too.
+struct BusyGuard<'a> {
+    state: &'a Arc<Mutex<ServerState>>,
+}
+
+fn mark_busy(state: &Arc<Mutex<ServerState>>) -> BusyGuard<'_> {
+    if let Ok(mut guard) = state.lock() {
+        guard.in_flight += 1;
+    }
+    BusyGuard { state }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.state.lock() {
+            guard.in_flight = guard.in_flight.saturating_sub(1);
+            guard.last_activity = std::time::Instant::now();
+        }
+    }
+}
+
 #[cfg(unix)]
 fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerState>>) {
+    let _busy = mark_busy(&state);
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
     if reader.read_until(b'\n', &mut line).unwrap_or(0) == 0 {
@@ -709,6 +804,7 @@ fn serve_tcp(
     secret: &[u8],
     generation: &str,
 ) {
+    let _busy = mark_busy(&state);
     let encoded_nonce = match auth::nonce() {
         Ok(nonce) => nonce,
         Err(error_value) => {

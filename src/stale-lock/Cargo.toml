@@ -1,0 +1,13 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "stale-lock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A create_new advisory file lock that a crashed holder cannot wedge forever: a waiter past the staleness age steals it."
+
+[dependencies]
+
+[dev-dependencies]
+tempfile.workspace = true
