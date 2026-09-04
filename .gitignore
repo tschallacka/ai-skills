@@ -115,3 +115,13 @@ project-specificies/*-deviations.md
 # The bug-report register tools, built per target by CI and setup-dev-env.sh.
 bug-report/bin/*/
 todo/bin/*/
+
+# A local .env is where a credential ends up -- REGISTERS_PUSH_TOKEN was written
+# to one on 2026-09-04. It was NOT ignored, so one `git add -A` in this
+# repository would have committed a personal access token with contents:write.
+# The fixtures under planning/tests/fixtures/**/.env are tracked on purpose and
+# are not credentials; this pattern is anchored to the repository root so it
+# cannot swallow them.
+/.env
+/.env.*
+!/.env.example
