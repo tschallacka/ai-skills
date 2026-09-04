@@ -60,6 +60,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-session-key"
+version = "0.1.0"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -72,6 +76,7 @@ dependencies = [
 name = "ai-text-editor"
 version = "0.1.0"
 dependencies = [
+ "agent-session-key",
  "base64",
  "blake3",
  "getrandom 0.3.4",
@@ -82,6 +87,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "stale-lock",
  "tempfile",
  "thiserror",
  "unicode-normalization",
@@ -1281,6 +1287,13 @@ name = "smallvec"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+
+[[package]]
+name = "stale-lock"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "subtle"

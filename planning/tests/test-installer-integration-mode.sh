@@ -84,9 +84,18 @@ install_with() { # <target-name> <flag...>
     installed_binaries "$target"
 }
 
-# ---- 1. mcp mode ships the bridge and nothing that speaks the direct protocol.
-t_assert_eq 'mcp mode installs only the MCP bridge' \
-    "$(install_with mcp --integration mcp)" "ai-text-editor-mcp$suffix "
+# ---- 1. mcp mode ships the bridge and the server it autostarts against --
+#         not the skill client, which is the one artifact truly mode-exclusive
+#         to `skill`. The server is unlisted in integration.tsv (installs in
+#         every mode) rather than declared `skill`-only: both the client and
+#         the bridge talk to it, and the bridge's own autostart spawns it
+#         directly whenever none is running yet -- exactly the case an
+#         mcp-only install without it could never recover from, confirmed by
+#         hand against a real install (`cannot autostart ai-text-editor-server:
+#         No such file or directory`).
+t_assert_eq 'mcp mode installs the bridge and the server, not the skill client' \
+    "$(install_with mcp --integration mcp)" \
+    "ai-text-editor-mcp$suffix ai-text-editor-server$suffix "
 
 # ---- 2. skill mode is the exact complement. Asserting only one direction is
 #         how the socket work in this repo shipped a half-fix twice: a filter
@@ -105,10 +114,10 @@ t_assert_eq 'no flag installs the direct client and server' \
 #         scripts passing the old flag keep working.
 t_assert_eq 'the per-skill form selects mcp' \
     "$(install_with perskill --integration ai-text-editor=mcp)" \
-    "ai-text-editor-mcp$suffix "
+    "ai-text-editor-mcp$suffix ai-text-editor-server$suffix "
 t_assert_eq '--editor-integration is still honoured' \
     "$(install_with legacy --editor-integration mcp)" \
-    "ai-text-editor-mcp$suffix "
+    "ai-text-editor-mcp$suffix ai-text-editor-server$suffix "
 
 # ---- 5. Everything that is not an artifact is mode-free, so an mcp install is
 #         a whole skill directory and not a lone binary.

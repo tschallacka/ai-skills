@@ -1,10 +1,8 @@
 // MODE: DEV
 // PACKAGE: PROD
+use ai_text_editor::client::{self, ResolveRequest};
 use ai_text_editor::protocol::Envelope;
-use ai_text_editor::session;
-use ai_text_editor::transport::{
-    endpoint_for_file, read_endpoint, read_session, request, write_session, Endpoint,
-};
+use ai_text_editor::transport::request;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -52,70 +50,26 @@ fn main() {
             std::process::exit(64);
         }
     };
-    let file = option(&args, "--file").map(PathBuf::from);
-    let presentation = option(&args, "--presentation").unwrap_or_else(|| "structured".into());
-    let session_path = option(&args, "--session-token")
-        .map(PathBuf::from)
-        .or_else(|| session_identity(&args).map(|id| session_path(&id)));
-    let (endpoint, saved_auth_token, saved_session_token) = match option(&args, "--endpoint") {
-        Some(value) => {
-            let session = session_path.as_ref().map(|path| {
-                read_session(path).unwrap_or_else(|error| {
-                    die(&format!(
-                        "cannot read session token {}: {error}",
-                        path.display()
-                    ))
-                })
-            });
-            (
-                Endpoint::parse(&value),
-                session
-                    .as_ref()
-                    .and_then(|session| session.auth_token.clone()),
-                session.and_then(|session| session.session_token),
-            )
-        }
-        None if session_path.is_some()
-            && session_path.as_ref().is_some_and(|path| path.exists()) =>
-        {
-            let token = session_path.as_ref().unwrap();
-            let session = read_session(token).unwrap_or_else(|error| {
-                die(&format!(
-                    "cannot read session token {}: {error}",
-                    token.display()
-                ))
-            });
-            (session.endpoint, session.auth_token, session.session_token)
-        }
-        None if option(&args, "--session-token").is_some() => die(&format!(
-            "explicit session token {} does not exist; provide a valid token or --endpoint",
-            session_path.as_ref().unwrap().display()
-        )),
-        None if session_identity(&args).is_some() => {
-            let identity = session_identity(&args).unwrap();
-            let record = session::resolve(&identity).unwrap_or_else(|error| die(&error));
-            (
-                Endpoint::parse(&record.endpoint),
-                record.auth_token,
-                Some(record.session_token),
-            )
-        }
-        None => {
-            let file = file
-                .as_ref()
-                .unwrap_or_else(|| die("--file or --endpoint is required"));
-            (
-                read_endpoint(&endpoint_for_file(file)).unwrap_or_else(|error| {
-                    die(&format!(
-                        "no server discovered for {}: {error}",
-                        file.display()
-                    ))
-                }),
-                None,
-                None,
-            )
-        }
+    let file = option(&args, &["--file", "-f"]).map(PathBuf::from);
+    let presentation =
+        option(&args, &["--presentation", "-p"]).unwrap_or_else(|| "structured".into());
+    let explicit_identity =
+        option(&args, &["--session", "-s"]).or_else(|| option(&args, &["--agent", "-A"]));
+    let resolve_request = ResolveRequest {
+        file: file.clone(),
+        method: method.to_string(),
+        explicit_endpoint: option(&args, &["--endpoint", "-e"]),
+        explicit_identity,
+        session_token_path: option(&args, &["--session-token"]).map(PathBuf::from),
+        agent_env_var: "TSCH_AI_EDITOR_AGENT".to_string(),
+        document_mode: option(&args, &["--document-mode", "-M"]),
+        normalize_nfc: flag(&args, &["--normalize-nfc"]),
+        idle_timeout_seconds: option(&args, &["--idle-timeout-seconds"]),
     };
+    let resolved = client::resolve(&resolve_request).unwrap_or_else(|error| die(&error));
+    let endpoint = resolved.endpoint;
+    let saved_auth_token = resolved.auth_token;
+    let saved_session_token = resolved.session_token;
     let mut payload = serde_json::Map::new();
     if let Some(file) = &file {
         payload.insert(
@@ -123,36 +77,33 @@ fn main() {
             Value::String(file.to_string_lossy().into_owned()),
         );
     }
-    if let Some(value) = option(&args, "--bytes-base64") {
+    if let Some(value) = option(&args, &["--bytes-base64"]) {
         payload.insert("bytes_base64".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--id") {
+    if let Some(value) = option(&args, &["--id"]) {
         payload.insert("id".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--line") {
+    if let Some(value) = option(&args, &["--line", "-l"]) {
         payload.insert("line".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--column") {
+    if let Some(value) = option(&args, &["--column", "-c"]) {
         payload.insert("column".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--action") {
+    if let Some(value) = option(&args, &["--action", "-a"]) {
         payload.insert("action".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--page-lines") {
+    if let Some(value) = option(&args, &["--page-lines"]) {
         payload.insert("page_lines".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--wrap-width") {
+    if let Some(value) = option(&args, &["--wrap-width", "-w"]) {
         payload.insert("wrap_width".into(), json!(parse_number(&value)));
     }
-    if args.iter().any(|arg| arg == "--visual") {
+    if flag(&args, &["--visual", "-V"]) {
         payload.insert("visual".into(), Value::Bool(true));
     }
-    for name in ["--before", "--after"] {
-        if let Some(value) = option(&args, name) {
-            payload.insert(
-                name.trim_start_matches("--").into(),
-                json!(parse_number(&value)),
-            );
+    for (names, field) in [(["--before", "-b"], "before"), (["--after", "-B"], "after")] {
+        if let Some(value) = option(&args, &names) {
+            payload.insert(field.into(), json!(parse_number(&value)));
         }
     }
     for (argument, field) in [
@@ -161,14 +112,14 @@ fn main() {
         ("--range-start-byte", "range_start_byte"),
         ("--range-end-byte", "range_end_byte"),
     ] {
-        if let Some(value) = option(&args, argument) {
+        if let Some(value) = option(&args, &[argument]) {
             payload.insert(field.into(), json!(parse_number(&value)));
         }
     }
-    if let Some(value) = option(&args, "--order") {
+    if let Some(value) = option(&args, &["--order"]) {
         payload.insert("order".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--gradient") {
+    if let Some(value) = option(&args, &["--gradient", "-g"]) {
         payload.insert(
             "gradient".into(),
             json!(value
@@ -176,59 +127,62 @@ fn main() {
                 .unwrap_or_else(|_| die("--gradient must be a number"))),
         );
     }
-    let expected_revision = option(&args, "--expected-revision").map(|value| parse_number(&value));
-    if let Some(value) = option(&args, "--offset") {
+    let expected_revision =
+        option(&args, &["--expected-revision", "-r"]).map(|value| parse_number(&value));
+    if let Some(value) = option(&args, &["--offset", "-o"]) {
         payload.insert("offset".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--length") {
+    if let Some(value) = option(&args, &["--length", "-L"]) {
         payload.insert("length".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--granularity") {
+    if let Some(value) = option(&args, &["--granularity"]) {
         payload.insert("granularity".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--pager-key") {
+    if let Some(value) = option(&args, &["--pager-key"]) {
         payload.insert("pager_key".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--limit") {
+    if let Some(value) = option(&args, &["--limit", "-n"]) {
         payload.insert("limit".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--delete-len") {
+    if let Some(value) = option(&args, &["--delete-len", "-d"]) {
         payload.insert("delete_len".into(), json!(parse_number(&value)));
     }
-    if let Some(value) = option(&args, "--text") {
+    if let Some(value) = option(&args, &["--text", "-t"]) {
         payload.insert("text".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--query") {
+    if let Some(value) = option(&args, &["--query", "-q"]) {
         payload.insert("query".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--query-base64") {
+    if let Some(value) = option(&args, &["--query-base64"]) {
         payload.insert("query_base64".into(), Value::String(value));
     }
-    if args.iter().any(|arg| arg == "--acknowledge-force-save") {
+    if flag(&args, &["--acknowledge-force-save"]) {
         payload.insert("acknowledge_force_save".into(), Value::Bool(true));
     }
-    if args.iter().any(|arg| arg == "--acknowledge-large-edit") {
+    if flag(&args, &["--acknowledge-large-edit"]) {
         payload.insert("acknowledge_large_edit".into(), Value::Bool(true));
     }
-    if args.iter().any(|arg| arg == "--preserve-external") {
+    if flag(&args, &["--preserve-external"]) {
         payload.insert("preserve_external".into(), Value::Bool(true));
     }
-    if let Some(value) = option(&args, "--backup-path") {
+    if let Some(value) = option(&args, &["--backup-path"]) {
         payload.insert("backup_path".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--target-path") {
+    if let Some(value) = option(&args, &["--target-path"]) {
         payload.insert("target_path".into(), Value::String(value));
     }
-    if let Some(value) = option(&args, "--journal-action") {
+    if let Some(value) = option(&args, &["--journal-action"]) {
         payload.insert("journal_action".into(), Value::String(value));
     }
     for (argument, field) in [
         ("--job-id", "job_id"),
+        ("-j", "job_id"),
         ("--cursor-id", "cursor_id"),
+        ("-C", "cursor_id"),
         ("--owner", "owner"),
         ("--resume-token", "resume_token"),
     ] {
-        if let Some(value) = option(&args, argument) {
+        if let Some(value) = option(&args, &[argument]) {
             if field == "job_id" || field == "cursor_id" {
                 payload.insert(field.into(), json!(parse_number(&value)));
             } else {
@@ -236,33 +190,34 @@ fn main() {
             }
         }
     }
-    if let Some(value) = option(&args, "--progress-json") {
+    if let Some(value) = option(&args, &["--progress-json"]) {
         payload.insert(
             "progress".into(),
             serde_json::from_str(&value)
                 .unwrap_or_else(|error| die(&format!("invalid --progress-json: {error}"))),
         );
     }
-    if let Some(value) = option(&args, "--result-json") {
+    if let Some(value) = option(&args, &["--result-json"]) {
         payload.insert(
             "result".into(),
             serde_json::from_str(&value)
                 .unwrap_or_else(|error| die(&format!("invalid --result-json: {error}"))),
         );
     }
-    if args.iter().any(|arg| arg == "--detached") {
+    if flag(&args, &["--detached"]) {
         payload.insert("detached".into(), Value::Bool(true));
     }
-    if args.iter().any(|arg| arg == "--historical") {
+    if flag(&args, &["--historical", "-H"]) {
         payload.insert("historical".into(), Value::Bool(true));
     }
     payload.insert("presentation".into(), Value::String(presentation.clone()));
-    let auth_token = option(&args, "--auth-token").or(saved_auth_token);
+    let auth_token = option(&args, &["--auth-token"]).or(saved_auth_token);
     if method == "search" {
         payload.insert(
             "mode".into(),
             Value::String(
-                option(&args, "--mode").unwrap_or_else(|| die("--mode is required for search")),
+                option(&args, &["--mode", "-m"])
+                    .unwrap_or_else(|| die("--mode is required for search")),
             ),
         );
     }
@@ -279,24 +234,22 @@ fn main() {
     let failed = frames
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
-    let save_path = option(&args, "--save-session-token")
+    let save_path = option(&args, &["--save-session-token"])
         .map(PathBuf::from)
-        .or(session_path);
+        .or(resolved.cache_path);
     let returned_session_token = frames
         .iter()
         .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
         .and_then(|frame| frame.pointer("/payload/session_token"))
         .and_then(Value::as_str);
     let persisted_session_token = returned_session_token.or(saved_session_token.as_deref());
-    if let Some(token) = save_path {
-        write_session(
-            &token,
-            &endpoint,
-            auth_token.as_deref(),
-            persisted_session_token,
-        )
-        .unwrap_or_else(|error| die(&format!("cannot save session token: {error}")));
-    }
+    client::persist_cache(
+        save_path.as_deref(),
+        &endpoint,
+        auth_token.as_deref(),
+        persisted_session_token,
+    )
+    .unwrap_or_else(|error| die(&error));
     match presentation.as_str() {
         "structured" => {
             for frame in frames {
@@ -348,35 +301,16 @@ fn main() {
     }
 }
 
-fn option(args: &[String], name: &str) -> Option<String> {
+fn option(args: &[String], names: &[&str]) -> Option<String> {
     args.windows(2)
-        .find(|pair| pair[0] == name)
+        .find(|pair| names.contains(&pair[0].as_str()))
         .map(|pair| pair[1].clone())
 }
 
-fn session_identity(args: &[String]) -> Option<String> {
-    option(args, "--session")
-        .or_else(|| option(args, "--agent"))
-        .or_else(|| std::env::var("TSCH_AI_EDITOR_AGENT").ok())
-        .or_else(|| std::env::var("CODEX_AGENT_ID").ok())
-        .or_else(|| std::env::var("AGENT_ID").ok())
+fn flag(args: &[String], names: &[&str]) -> bool {
+    args.iter().any(|arg| names.contains(&arg.as_str()))
 }
 
-fn session_path(identity: &str) -> PathBuf {
-    let root = std::env::var_os("TSCH_AI_EDITOR_SESSION_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("TSCH_AI_EDITOR_METADATA_DIR")
-                .map(|root| PathBuf::from(root).join("sessions"))
-        })
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(|home| PathBuf::from(home).join(".config/tsch-ai-skills/editor/sessions"))
-        })
-        .unwrap_or_else(|| std::env::temp_dir().join("tsch-ai-skills-editor/sessions"));
-    let key = blake3::hash(identity.as_bytes()).to_hex().to_string();
-    root.join(format!("{key}.json"))
-}
 fn parse_number(value: &str) -> u64 {
     value
         .parse()
@@ -387,26 +321,26 @@ fn die(message: &str) -> ! {
     std::process::exit(64);
 }
 fn help() {
-    println!("Usage: ai-text-editor COMMAND --endpoint ENDPOINT [OPTIONS]");
-    println!("Open another isolated tab with: ai-text-editor open --endpoint ENDPOINT --file PATH");
+    println!("Usage: ai-text-editor COMMAND -f FILE [OPTIONS]  (or --endpoint/-e ENDPOINT for an already-open tab)");
+    println!("open starts its own server when none is running yet: no separate `ai-text-editor-server start` call is needed. Use --document-mode/-M and --normalize-nfc to shape that autostart; open --endpoint ENDPOINT -f PATH adds another isolated tab to a server that is already up.");
+    println!("Opening a second file under the same agent identity (an explicit --session/--agent, or your coding harness's own session env vars) reconnects to that agent's already-running workspace and adds the file there as a new tab, rather than starting an unrelated second server.");
     println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
-    println!("Discovery: use --file PATH instead of --endpoint to read the announced endpoint; use --session-token PATH to reuse a saved endpoint and auth token.");
-    println!(
-        "Document modes: text_utf8, raw_bytes, hex_view (select at server start with --mode)."
-    );
-    println!("Search requires --mode and --query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept --gradient 0.0..1.0 with strategy-specific defaults.");
+    println!("Common flags (long / short): --file -f, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C, --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
+    println!("Boolean flags with a short form: --visual -V, --historical -H. Safety acknowledgements (--acknowledge-force-save, --acknowledge-large-edit) and auth/session flags are deliberately long-form only.");
+    println!("Document modes: text_utf8, raw_bytes, hex_view (select at autostart with --document-mode/-M, or when starting the server yourself with --mode).");
+    println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
-    println!("Wrapped navigation: --wrap-width N adds visual coordinates; --visual interprets --line/--column as wrapped coordinates. Stored cursors remain logical.");
-    println!("Edits: --offset N or --cursor-id N --delete-len N --text TEXT or --bytes-base64 B64; omitting --offset inserts/replaces at that cursor. --expected-revision N is required for safe concurrent edits. Use begin-transaction/end-transaction to group edits into one undo step.");
-    println!("Reading: --before N --after N, --offset N --length N, --limit N, --pager-key KEY, --historical, --range-start-line N --range-end-line N, --range-start-byte N --range-end-byte N, --order forward|reverse.");
-    println!("Presentation: --presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");
-    println!("Recovery: resolve with --action backup|reload|merge|keep|force_save; backup preserves external bytes and leaves resolution pending, force-save requires --acknowledge-force-save. Add --preserve-external and optionally --backup-path PATH before discard/overwrite.");
+    println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
+    println!("Edits: -o/--offset N or -C/--cursor-id N, plus -d/--delete-len N and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Use begin-transaction/end-transaction to group edits into one undo step.");
+    println!("Reading: -b/--before N -B/--after N, -o/--offset N -L/--length N, -n/--limit N, --pager-key KEY, -H/--historical, --range-start-line N --range-end-line N, --range-start-byte N --range-end-byte N, --order forward|reverse.");
+    println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");
+    println!("Recovery: resolve with -a/--action backup|reload|merge|keep|force_save; backup preserves external bytes and leaves resolution pending, force-save requires --acknowledge-force-save. Add --preserve-external and optionally --backup-path PATH before discard/overwrite.");
     println!("Save-as: use save-as --target-path PATH to atomically create a new file without changing the active tab; existing targets are refused.");
-    println!("Large edits: start a job, then use large-edit with --job-id N --acknowledge-large-edit --offset N --delete-len N and replacement data; this streams and atomically replaces the file.");
+    println!("Large edits: start a job, then use large-edit with -j/--job-id N --acknowledge-large-edit -o/--offset N -d/--delete-len N and replacement data; this streams and atomically replaces the file.");
     println!("Close: close first prompts with journal_close_decision_required; repeat with --journal-action preserve|clean. clean deletes the tab journal and metadata database.");
-    println!("Sessions/auth: --endpoint ENDPOINT, --session-token PATH, --session ID, --agent ID, or environment agent identity (TSCH_AI_EDITOR_AGENT, CODEX_AGENT_ID, AGENT_ID); explicit --endpoint wins, stale saved sessions are errors. --save-session-token PATH overrides automatic session storage. TCP clients use --auth-token TOKEN (or a token saved in the session file); servers accept --auth-token TOKEN or owner-only --auth-token-file PATH. Jobs use --job-id N, --owner NAME, --resume-token TOKEN, --detached, --progress-json JSON, --result-json JSON.");
+    println!("Sessions/auth: -e/--endpoint ENDPOINT, --session-token PATH, -s/--session ID, -A/--agent ID, or environment agent identity (TSCH_AI_EDITOR_AGENT, or a coding harness's own CLAUDE_CODE_SESSION_ID/CODEX_SESSION_ID/OPENCODE_PID); explicit --endpoint wins, stale saved sessions are errors. --save-session-token PATH overrides automatic session storage. TCP clients use --auth-token TOKEN (or a token saved in the session file); servers accept --auth-token TOKEN or owner-only --auth-token-file PATH. Jobs use -j/--job-id N, --owner NAME, --resume-token TOKEN, --detached, --progress-json JSON, --result-json JSON.");
     println!("The server alone owns document state, history, indexes, journals, and SQLite metadata. Large files provide bounded read/index views; acknowledged large-edit jobs stream accepted rewrites and retain file-backed undo snapshots.");
 }
