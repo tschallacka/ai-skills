@@ -176,6 +176,28 @@ defaults verbatim.
   installer-manifest test asserts this.
 - Follow DEVELOPMENT.md for release/versioning/publishing. It is a human
   release action; confirm before running `npm publish` or creating tags.
+- **`BUGS.json` and `TODO.json` may only change on the `registers` branch.**
+  `pre-push-check` refuses a register change on any other branch, fails
+  immediately rather than after the rust gates, and names `registers` as the
+  target in its output. File with the shipped tools — `bin/<triple>/bugs add
+  …`, `bin/<triple>/todo add …` — on that branch, and push; the entry reaches
+  master from there. A fix's resolution keys (`fix`, `verification`, `status`)
+  go the same way, after the code lands, so an id is allocated and closed in
+  one place.
+
+  The reason is not tidiness. Both registers are append-mostly arrays, so two
+  branches that each file an entry both take the same next free id — and git
+  cannot see that collision: the additions land at different array positions,
+  so it merges them textually with **no conflict** and the result carries two
+  unrelated entries under one id. One merge on 2026-09-04 produced eight
+  duplicate ids that way, invisible until `reg_findings` ran. Worse,
+  `register-resolve.sh`'s advice for the textual case is to take one side,
+  which silently drops the other's entries. A single writer removes the class.
+
+  The branch is `registers` and not `bugs` because git refuses a branch named
+  `bugs` while any `bugs/*` ref exists, and work branches use the `bug/`
+  prefix. `PRE_PUSH_ALLOW_REGISTERS=1` exists for transport — an integration
+  branch carrying someone else's entries — never for filing one.
 
 ## PR and commit hygiene
 

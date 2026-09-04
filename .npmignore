@@ -1706,8 +1706,6 @@ planning/.gitignore
 planning/ARCHITECTURE.md
 planning/MAINTAINER.md
 planning/PACKAGE-MAP.tsv
-planning/scripts/bug-add.sh
-planning/scripts/bug-update.sh
 planning/scripts/build-plan-libs.sh
 planning/scripts/lib/core/00-state.sh
 planning/scripts/lib/core/plan_atomic_write.sh
@@ -1777,8 +1775,6 @@ planning/scripts/lib/table/plan_testing_requirement_for_goal.sh
 planning/scripts/lib/table/plan_testing_requirement_row.sh
 planning/scripts/register-lib.sh
 planning/scripts/register-rebuild.sh
-planning/scripts/todo-add.sh
-planning/scripts/todo-update.sh
 planning/tests/fixtures/adversary-probe/01-health-endpoint/goal.md
 planning/tests/fixtures/adversary-probe/01-health-endpoint/steps/01-step-add-handler.md
 planning/tests/fixtures/adversary-probe/01-health-endpoint/steps/02-step-add-test.md

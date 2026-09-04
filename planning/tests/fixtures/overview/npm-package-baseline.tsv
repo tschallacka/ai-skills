@@ -2,7 +2,7 @@ package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	10289
 package/LICENSE	1068
-package/README.md	15681
+package/README.md	15683
 package/ai-text-editor/SKILL.md	8446
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	8019
@@ -17,7 +17,7 @@ package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
 package/bug-report/SKILL.md	15588
 package/bug-report/binaries.tsv	945
-package/bug-report/docs/README.md	1312
+package/bug-report/docs/README.md	1305
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
@@ -36,7 +36,7 @@ package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	195451
+package/install.sh	195369
 package/interactive-shell/SKILL.md	8627
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -82,8 +82,6 @@ package/planning/scripts/add-planning-bug.sh	7045
 package/planning/scripts/add-ui-story-links.sh	2887
 package/planning/scripts/add-ui-story.sh	4795
 package/planning/scripts/add-work-unit.sh	10706
-package/planning/scripts/bug-add.sh	4249
-package/planning/scripts/bug-update.sh	5379
 package/planning/scripts/cleanup-plans.sh	4540
 package/planning/scripts/configure-ui-story-cache.sh	4792
 package/planning/scripts/create-adversarial-review.sh	2598
@@ -129,8 +127,6 @@ package/planning/scripts/resolve-finding.sh	6629
 package/planning/scripts/role-context.sh	10743
 package/planning/scripts/run-adversary-probe.sh	5445
 package/planning/scripts/supervision-frame.sh	6256
-package/planning/scripts/todo-add.sh	3481
-package/planning/scripts/todo-update.sh	3335
 package/planning/scripts/update-adversarial-review.sh	12862
 package/planning/scripts/update-plan-content.sh	33900
 package/planning/scripts/update-plan-progress.sh	3360

@@ -157,7 +157,11 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 #
 # This fails immediately rather than at the end: the push is going to be
 # refused, and there is no reason to spend three minutes of cargo tests first.
-register_branch=bugs
+# `registers`, not `bugs`: a branch cannot be named `bugs` while any `bugs/*`
+# branch exists -- git refuses a ref and a ref directory of the same name, and
+# bugs/close-b95 is unmerged and checked out. Work branches use the `bug/`
+# prefix, so `registers` cannot collide with them either.
+register_branch=registers
 register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
 current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 # PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
@@ -174,8 +178,10 @@ if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; th
     bad "a register is modified outside the $register_branch branch"
     printf '%s\n' "$register_changes" | sed 's/^/    /'
     note "branch: $current_branch"
-    note "file entries on the $register_branch branch instead: git switch $register_branch,"
-    note "  then bin/<triple>/bug-add or todo-add, then push -- CI merges it to master"
+    note "THE TARGET BRANCH IS: $register_branch"
+    note "  git switch $register_branch   (git switch -c $register_branch origin/master if it is not local yet)"
+    note "  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or"
+    note "  bin/<triple>/todo add ... -- and push; the entry reaches master from there"
     note "a fix's resolution keys (fix, verification, status) go the same way, after the"
     note "  code lands, so the id is allocated and closed in one place"
     printf 'pre-push-check: 1 failure(s) - registers changed off the %s branch\n' \
@@ -233,7 +239,16 @@ fi
 if [ -x planning/scripts/build-plan-libs.sh ]; then
     planning/scripts/build-plan-libs.sh >/dev/null 2>&1 || true
 fi
-changed_sh="$(changed -E '\.sh$')"
+# Only scripts that still EXIST: a deletion is part of the change set, and
+# feeding a deleted path to shellcheck fails with "openBinaryFile: does not
+# exist" -- so removing a superseded script used to fail this gate, which is
+# precisely the shape that teaches people to bypass a gate rather than use it.
+changed_sh=""
+for _sh in $(changed -E '\.sh$'); do
+    [ -f "$_sh" ] && changed_sh="${changed_sh}${changed_sh:+
+}$_sh"
+done
+unset _sh
 if [ -z "$changed_sh" ]; then
     note "no shell scripts differ from ${base_label:-the base}; shellcheck skipped (CI lints all)"
 elif command -v shellcheck >/dev/null 2>&1; then

@@ -102,15 +102,14 @@ in `planning/PACKAGE-MANIFEST.tsv`, and the other skill directories:
 | `memlimit` | allowed for `resource-limited-testing` on Apple Silicon macOS only — the documented exception to the `rjq` ceiling, because macOS offers no other way to cap memory at all. Declared `soft` in `resource-limited-testing/requires.tsv`, so the skill installs with a warning and degrades to `nice` + `cpulimit`; never vendored |
 | **`python3`** | **not allowed, in any form — not even guarded-optional** |
 
-This table governs what the target machine must already **have**. It does not
-govern what a skill **delivers**. A skill may ship prebuilt, self-contained
-binaries as artifacts, declared row by row in its own `binaries.tsv` and
-validated by `tests/test-shipped-binaries.sh`. That does not widen the budget
-above — it narrows it, because a static binary asks nothing of the box. The
-`chat` skill's `python3 → node → perl → socat` any-of group in
-`chat/requires.tsv` exists only because there is no binary yet; when one ships,
-those rows go away and chat's runtime requirement drops to `bash` for the
-helpers.
+The `chat` skill used to declare a `python3 → node → perl → socat` any-of
+group in `chat/requires.tsv` because it had no binary yet. It ships two now
+-- `chat-server-rs` and `chat-client-rs`, for five targets in
+`chat/binaries.tsv` -- so those rows are gone, the skill has no runtime tool
+dependency at all, and socat was retired from the installer entirely (PR #36).
+The rule the paragraph illustrated still holds: an any-of group is a
+stopgap for a capability with no shipped binary, and it goes away when one
+arrives.
 
 The build toolchain for such a binary (Rust, `cargo`) is a **dev** dependency
 like `shellcheck` or `bash32`: contributors need it, users never do. The crate

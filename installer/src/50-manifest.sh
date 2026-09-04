@@ -460,10 +460,6 @@ tests/test-npm-package.sh
 tests/test-overview-fixtures.sh
 scripts/register-lib.sh
 scripts/register-resolve.sh
-scripts/todo-add.sh
-scripts/todo-update.sh
-scripts/bug-add.sh
-scripts/bug-update.sh
 scripts/register-rebuild.sh
 tests/test-plan-crypt.sh
 tests/test-plan-freshness.sh

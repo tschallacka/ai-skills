@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Interactive installer for the skills in this repository.
 # It is intentionally self-contained so it can be used as:
-#   curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/tschallacka/ai-skills/master/install.sh | bash
 #
 # Staying one file is a hard constraint, not an oversight: the curl|bash form has
 # no siblings to source, and download_source() distinguishes a local checkout

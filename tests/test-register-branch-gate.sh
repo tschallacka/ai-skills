@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MODE: DEV
 # test-register-branch-gate.sh — pre-push-check refuses a register change made
-# off the `bugs` branch, and stays silent about one made on it.
+# off the `registers` branch, and stays silent about one made on it.
 #
 # BUGS.json and TODO.json are append-mostly arrays, so two branches that each
 # file an entry both take the same next free id. Git cannot see that collision:
@@ -59,7 +59,7 @@ cp "$repo_root/pre-push-check.sh" "$clone/pre-push-check.sh"
 # branch changes nothing. Measured the hard way after two wrong guesses.
 ( cd "$clone" && git update-ref refs/remotes/origin/master HEAD && git branch -f master HEAD )
 
-gate_line='a register is modified outside the bugs branch'
+gate_line='a register is modified outside the registers branch'
 
 run_gate() { # <seconds> -> writes $work/out, echoes the exit code
     local rc=0
@@ -77,7 +77,7 @@ run_gate() { # <seconds> -> writes $work/out, echoes the exit code
 ( cd "$clone" && git switch -q -c feature/some-work && printf '\n' >>TODO.json )
 rc="$(run_gate 120)"
 out="$(cat "$work/out")"
-t_assert_eq 'a register change off the bugs branch is refused' \
+t_assert_eq 'a register change off the registers branch is refused' \
     "$( [ "$rc" -ne 0 ] && echo refused || echo allowed )" 'refused'
 t_assert_contains 'the refusal names the rule' "$gate_line" "$out"
 t_assert_contains 'the refusal names the changed register' 'TODO.json' "$out"
@@ -86,14 +86,14 @@ case "$out" in
     *) : ;;
 esac
 
-# 2. The same change on the bugs branch does not trip this gate. Later gates
+# 2. The same change on the registers branch does not trip this gate. Later gates
 #    may still fail in a throwaway clone (an unbuilt tree), so only this gate's
 #    verdict is read, and the run is bounded rather than waited out.
-( cd "$clone" && git switch -q -c bugs )
+( cd "$clone" && git switch -q -c registers )
 run_gate 90 >/dev/null
 out="$(cat "$work/out")"
 case "$out" in
-    *"$gate_line"*) t_fail 'the gate fired on the bugs branch, where register edits belong' ;;
+    *"$gate_line"*) t_fail 'the gate fired on the registers branch, where register edits belong' ;;
     *) : ;;
 esac
 
