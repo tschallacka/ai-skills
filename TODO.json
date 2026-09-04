@@ -414,6 +414,19 @@
       "updated_at": "2026-09-04T12:13:25Z"
     },
     {
+      "id": "T95",
+      "title": "Interactive installer TUI has no way to choose a skill's integration mode (mcp vs skill)",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T20:52:21Z",
+      "updated_at": "2026-09-04T20:52:21Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",

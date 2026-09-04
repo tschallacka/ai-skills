@@ -3597,6 +3597,29 @@
       "updated_at": "2026-09-04T17:21:38Z"
     },
     {
+      "id": "B174",
+      "title": "Switching a skill integration mode leaves the previous mode's binary behind",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Install ai-text-editor in mcp mode to a target directory, then reinstall the same target in skill mode; inspect the bin/ directory afterward.",
+      "observed": "ai-text-editor-mcp remains in bin/ after the switch to skill mode, alongside the newly installed ai-text-editor and ai-text-editor-server.",
+      "expected": "Only the binaries the current integration mode declares remain on disk after a mode switch.",
+      "mechanism": "The installer copies the files the new mode declares but never diffs against what already exists under bin/; a file an earlier mode wrote that the new mode does not declare is left in place.",
+      "surfaces": [
+        "install.sh",
+        "installer/src/50-manifest.sh",
+        "installer/src/60-install.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "manual verification while testing PR 58's mcp integration mode end to end",
+      "notes": null,
+      "created_at": "2026-09-04T20:16:51Z",
+      "updated_at": "2026-09-04T20:16:51Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
