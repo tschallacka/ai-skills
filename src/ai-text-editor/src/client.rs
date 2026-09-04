@@ -153,10 +153,10 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
         });
     }
 
-    if request.session_token_path.is_some() {
+    if let Some(path) = &request.session_token_path {
         return Err(format!(
             "explicit session token {} does not exist; provide a valid token or an endpoint",
-            request.session_token_path.as_ref().unwrap().display()
+            path.display()
         ));
     }
 
