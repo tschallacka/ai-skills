@@ -408,6 +408,28 @@
       "updated_at": "2026-09-04T15:11:48Z"
     },
     {
+      "id": "B171",
+      "title": "ai-text-editor read ignores --range-start-line and --range-end-line, returning the whole file",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bin/<triple>/ai-text-editor-server start --file FILE & then: bin/<triple>/ai-text-editor open --file FILE --save-session-token T; bin/<triple>/ai-text-editor read --session-token T --range-start-line 60 --range-end-line 64",
+      "observed": "The entire file comes back. Measured on a 296-line, 12787-byte file: the reply carried byte_count 13257 and the whole document in one JSON string, with \"complete\": true, no warning and no error. Identical with --presentation text and with the default structured presentation.",
+      "expected": "Only lines 60 to 64, or a refusal naming the unsupported flag. A bounded read that silently returns everything is worse than one that refuses.",
+      "mechanism": "Not established in the server source; established at the boundary. The flags are accepted, documented in the client help ('Reading: ... --range-start-line N --range-end-line N') and in the skill as the mechanism for large-file inspection, and they change nothing about the response.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "using the skill for a real edit on 2026-09-04; the call spent about 7000 tokens of an agent's context returning a file it had asked five lines of",
+      "notes": null,
+      "created_at": "2026-09-04T17:21:20Z",
+      "updated_at": "2026-09-04T17:21:20Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -2470,6 +2492,28 @@
       "updated_at": "2026-09-04T12:05:37Z"
     },
     {
+      "id": "B172",
+      "title": "ai-text-editor-server start prints no endpoint, so a caller waiting for one hangs",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bin/<triple>/ai-text-editor-server start --file FILE  # capture stdout",
+      "observed": "Zero bytes on stdout. The server is running -- ps shows it and 'open --file FILE' then works by discovery -- but nothing announces the endpoint at the moment a caller needs it. An agent that captured stdout and waited for a line sat there until interrupted.",
+      "expected": "One line naming the endpoint, or an explicit statement that discovery is the only route. Either removes the wait.",
+      "mechanism": "The endpoint IS recorded -- in the session file written by --save-session-token, and in the editor sessions.json registry -- so the information exists and is simply never printed. The skill's Start section shows the start command with no note that it is silent.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "using the skill on 2026-09-04; it cost an interrupted turn",
+      "notes": null,
+      "created_at": "2026-09-04T17:21:38Z",
+      "updated_at": "2026-09-04T17:21:38Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -3529,6 +3573,28 @@
       "notes": null,
       "created_at": "2026-09-04T12:36:25Z",
       "updated_at": "2026-09-04T12:36:25Z"
+    },
+    {
+      "id": "B173",
+      "title": "ai-text-editor --session ID cannot create a session, though the skill says the client stores one",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bin/<triple>/ai-text-editor open --file FILE --session trio   # with no prior session record",
+      "observed": "ai-text-editor: session_stale: no live session record matches trio, exit 64. The flag only resolves an existing record; creating one requires --save-session-token PATH first.",
+      "expected": "Either --session ID seeds the record on first use, as the skill describes, or the error says which flag creates one.",
+      "mechanism": "The skill's Start section reads 'use --session ID/--agent ID so the client stores and resolves the token under the private editor metadata directory', which describes storing. In practice storing is --save-session-token's job and --session is resolve-only, so the two flags are ordered and the doc does not say so.",
+      "surfaces": [
+        "ai-text-editor/SKILL.md",
+        "src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "using the skill on 2026-09-04",
+      "notes": null,
+      "created_at": "2026-09-04T17:21:38Z",
+      "updated_at": "2026-09-04T17:21:38Z"
     },
     {
       "id": "B25",
