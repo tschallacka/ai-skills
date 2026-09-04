@@ -227,9 +227,11 @@ suites=(
     # that nothing discovers is the same dead weight chat/tests was.
     interactive-shell/tests
     # .github/tests covers ci-scope.sh and ci-subjects.sh, which decide how much
-    # of the workspace CI compiles. Undiscovered they would be the same dead
-    # weight as chat/tests was: the scripts that can silently narrow every run,
-    # with nothing asserting they only narrow on grounds.
+    # of the workspace CI compiles, and registers-guard.sh, which decides
+    # whether a registers push may reach master WITHOUT review. Undiscovered
+    # they would be the same dead weight as chat/tests was: the scripts that can
+    # silently narrow every run or widen who writes master, with nothing
+    # asserting they only do so on grounds.
     .github/tests
     benchmark/planning/tests
 )

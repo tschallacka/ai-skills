@@ -1,0 +1,95 @@
+# MODE: DEV
+# Fast-forward the `registers` branch onto master once it is safe to do so.
+#
+# BUGS.json and TODO.json are append-mostly arrays, so two branches that each
+# file an entry both take the same next free id -- and git cannot see that: the
+# additions land at different array positions, so it merges them textually with
+# NO conflict and master ends up with two unrelated entries under one id. Eight
+# of those arrived in a single merge on 2026-09-04, invisible until reg_findings
+# ran. The register branch makes one writer, and this workflow is what lets that
+# writer reach master without waiting for a human to press merge.
+#
+# It is deliberately not the general CI: a register change touches no code, so
+# building 83 crates to land a bug entry is waste. What it does run is the check
+# git cannot do -- see .github/registers-guard.sh -- plus the shipped register
+# tools when a built tree happens to be available.
+name: registers
+
+on:
+  push:
+    branches: [registers]
+
+# Only the merge step needs write access, and it is the only place a token can
+# reach master. Read-only for everything else.
+permissions:
+  contents: write
+
+concurrency:
+  # Two pushes to `registers` must not race each other onto master: the second
+  # would fast-forward from a base the first has already moved. Queue them.
+  group: registers-to-master
+  cancel-in-progress: false
+
+jobs:
+  guard-and-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the register branch with master alongside it
+        uses: actions/checkout@v4
+        with:
+          # The guard diffs against master, so a shallow clone is not enough.
+          fetch-depth: 0
+
+      - name: Refuse anything but a register change
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master
+          ./.github/registers-guard.sh --base origin/master
+
+      - name: Validate with the shipped register tools, if a build is present
+        run: |
+          set -uo pipefail
+          triple="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
+          bugs="bin/${triple:-none}/bugs"
+          todo="bin/${triple:-none}/todo"
+          if [ -x "$bugs" ]; then
+            "$bugs" check
+          else
+            printf 'no built %s; the guard already refused a duplicate id or a dangling parent\n' "$bugs"
+          fi
+          if [ -x "$todo" ]; then
+            "$todo" check || true
+          fi
+
+      - name: Fast-forward master
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # A fast-forward only. If master has moved to something this branch
+          # does not contain, the register branch is stale and a human should
+          # rebase it -- silently merging would be the textual merge this whole
+          # arrangement exists to avoid.
+          if ! git merge-base --is-ancestor origin/master HEAD; then
+            printf 'registers is not a fast-forward of master; rebase it onto master and push again\n' >&2
+            printf 'master:    %s\n' "$(git rev-parse --short origin/master)" >&2
+            printf 'registers: %s\n' "$(git rev-parse --short HEAD)" >&2
+            exit 1
+          fi
+          if git rev-parse --verify --quiet origin/master >/dev/null \
+             && [ "$(git rev-parse origin/master)" = "$(git rev-parse HEAD)" ]; then
+            printf 'master already carries this; nothing to do\n'
+            exit 0
+          fi
+          # Branch protection may refuse this push. That is not something to
+          # work around quietly: the run fails, and the entry waits for a human
+          # rather than the register silently diverging from master.
+          if ! git push origin "HEAD:master"; then
+            printf '\n' >&2
+            printf 'the push to master was refused, most likely by branch protection.\n' >&2
+            printf 'Either allow this workflow to push to master, or merge the\n' >&2
+            printf 'registers branch by hand. Do NOT relax the protection for\n' >&2
+            printf 'everything to make this one path work.\n' >&2
+            exit 1
+          fi
+          printf 'master fast-forwarded to %s\n' "$(git rev-parse --short HEAD)"
