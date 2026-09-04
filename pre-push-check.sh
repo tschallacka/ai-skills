@@ -178,8 +178,10 @@ if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; th
     bad "a register is modified outside the $register_branch branch"
     printf '%s\n' "$register_changes" | sed 's/^/    /'
     note "branch: $current_branch"
-    note "file entries on the $register_branch branch instead: git switch $register_branch,"
-    note "  then bin/<triple>/bug-add or todo-add, then push -- CI merges it to master"
+    note "THE TARGET BRANCH IS: $register_branch"
+    note "  git switch $register_branch   (git switch -c $register_branch origin/master if it is not local yet)"
+    note "  then file the entry with the shipped tools -- bin/<triple>/bugs add ... or"
+    note "  bin/<triple>/todo add ... -- and push; the entry reaches master from there"
     note "a fix's resolution keys (fix, verification, status) go the same way, after the"
     note "  code lands, so the id is allocated and closed in one place"
     printf 'pre-push-check: 1 failure(s) - registers changed off the %s branch\n' \
