@@ -228,6 +228,16 @@ impl JobRegistry {
         Ok(job.snapshot.clone())
     }
 
+    /// True while any job on this tab is still queued or running — a
+    /// detached large-edit job in particular can outlive the connection that
+    /// started it, and an idle-timeout watchdog must not shut the server
+    /// down out from under one.
+    pub fn has_active(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|job| matches!(job.snapshot.state, JobState::Queued | JobState::Running))
+    }
+
     fn evict_expired(&mut self) {
         let now = SystemTime::now();
         for job in self.jobs.values_mut() {

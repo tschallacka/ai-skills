@@ -293,6 +293,23 @@ if [ -n "$crates" ]; then
         done <<EOF
 $crates
 EOF
+        # Workspace-wide, not per-crate: CI's own reasoning (native.yml's
+        # comment on the workspace gate) is that a per-crate pass misses a
+        # library change breaking a consumer selection did not name, and that
+        # was proven true here, not hypothetically -- three CI legs failed on
+        # exactly this (client.rs's `session_token_path.is_some()` then
+        # `.unwrap()`, `-D warnings` turning `unnecessary_unwrap` fatal) while
+        # this gate, running fmt and test only, stayed green. `-D warnings`
+        # matches CI's own flags so a local pass means the same thing CI's
+        # does, not a weaker guarantee with the same wording.
+        clippy_log="$(mktemp "${TMPDIR:-/tmp}/pre-push-clippy.XXXXXX")"
+        if cargo clippy --workspace --all-targets -- -D warnings >"$clippy_log" 2>&1; then
+            ok "cargo clippy --workspace -D warnings"
+        else
+            bad "cargo clippy --workspace -D warnings (CI gates on this too)"
+            sed -n '1,40p' "$clippy_log" >&2
+        fi
+        rm -f "$clippy_log"
     fi
 else
     note "no crates under src/ changed; rust gates skipped"

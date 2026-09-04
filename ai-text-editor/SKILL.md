@@ -14,28 +14,51 @@ metadata.
 
 ## Start
 
-The installed binaries may be outside PATH. Use the colocated client/server
-paths described by the man page when necessary:
+Just open the file. The server is not this skill's concern — `open` starts
+one itself when none is running yet, and a server left idle stops itself
+later (its journal replays on the next `open`, so nothing is lost):
 
 ```text
-ai-text-editor-server start --file /path/to/file
-ai-text-editor open --file /path/to/file
-# With an existing endpoint, open another isolated tab:
-ai-text-editor open --endpoint ENDPOINT --file /path/to/other-file
-ai-text-editor help
-man -l ai-text-editor.1
+ai-text-editor open -f /path/to/file
 ```
+
+Opening a second, unrelated file the same way does not start a second,
+unrelated server: this agent's already-running workspace is found again
+automatically, and the file is added to it as a new tab — the way opening a
+file in an already-running IDE reconnects to that window rather than
+launching a second copy. Reopening a file already open there reconnects to
+its existing tab. This works with no flags at all inside a coding harness
+(Claude Code, codex, opencode all export a session id this skill reads to
+tell agents apart); across other kinds of callers, name a shared identity
+explicitly with `--session ID` or `--agent ID` on every call, or pin one
+server directly with `--endpoint ENDPOINT` (`ai-text-editor-server start
+--file PATH` still exists for that, and for advanced options such as `--tcp`
+or `--large-threshold-bytes`, but is not a normal step any more).
+
+Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
+run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,
+current list rather than trusting prose here to have kept up with it.
 
 The client uses a short-lived request connection. Save a session with
 `--save-session-token PATH`, reuse it with `--session-token PATH`, or use
 `--session ID`/`--agent ID` so the client stores and resolves the token under
-the private editor metadata directory. Without those flags it checks
-`TSCH_AI_EDITOR_AGENT`, `CODEX_AGENT_ID`, and `AGENT_ID`, in that order.
+the private editor metadata directory. Without an explicit id it falls back
+to whatever the surrounding coding harness itself exports
+(`CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, `OPENCODE_PID`) — this is also
+what makes the automatic workspace reconnection above possible with no flags.
 The server-issued token is tab-scoped, distinct from the TCP authentication
 secret, and invalid after that server instance closes. Servers also register
 their endpoint and token identity in `sessions.json`; identity lookup refuses
 stale or ambiguous candidates rather than guessing. The registry is
 server-written coordination metadata, not a client-accessible SQLite store.
+
+An MCP adapter (`ai-text-editor-mcp`) exposes the same protocol over stdio
+JSON-RPC for a client that speaks MCP instead of shelling out — same tools,
+same resources (the protocol schema, the capability schema, this man page),
+and the same autostart and workspace-reconnection behavior above: pass
+`file` (and, to reconnect across a fresh, otherwise-forgetful context, an
+`agent`/`session` argument) instead of an `endpoint`, and it resolves the
+same way the CLI does.
 
 ## Capabilities
 

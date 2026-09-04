@@ -3,10 +3,11 @@
 //! Server-owned coordination records for resolving agent editor tabs.
 
 use serde_json::{json, Value};
+use stale_lock::StaleLock;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
@@ -75,9 +76,18 @@ pub fn registry_path() -> PathBuf {
     metadata_root().join("sessions.json")
 }
 
+/// The session registry's own lock file: same 30s staleness window a
+/// crashed writer's lock is reclaimed under everywhere else in this module.
+fn acquire_registry_lock(registry: &Path) -> io::Result<StaleLock> {
+    StaleLock::acquire(
+        &registry.with_extension("json.lock"),
+        Duration::from_secs(30),
+    )
+}
+
 pub fn register(record: &SessionRecord) -> io::Result<()> {
     let path = registry_path();
-    let _lock = RegistryLock::acquire(&path)?;
+    let _lock = acquire_registry_lock(&path)?;
     let mut records = read_records(&path)?;
     records.retain(|candidate| {
         candidate.token_id != record.token_id
@@ -90,7 +100,7 @@ pub fn register(record: &SessionRecord) -> io::Result<()> {
 
 pub fn unregister(session_token: &str) -> io::Result<()> {
     let path = registry_path();
-    let _lock = RegistryLock::acquire(&path)?;
+    let _lock = acquire_registry_lock(&path)?;
     let token_id = blake3::hash(session_token.as_bytes()).to_hex().to_string();
     let mut records = read_records(&path)?;
     records.retain(|record| record.token_id != token_id);
@@ -135,6 +145,41 @@ pub fn resolve(identity: &str) -> Result<SessionRecord, String> {
     Ok(record)
 }
 
+/// Find the workspace-server most recently associated with `identity` —
+/// matched the same way `resolve` matches, but tolerant of more than one tab
+/// sharing that identity. `resolve` exists to resume one specific,
+/// unambiguous tab (`open --agent NAME` with no file to disambiguate with),
+/// and rightly refuses to guess when several tabs qualify. This exists for a
+/// different question: `open --file X` reconnecting to an agent's already-
+/// running server to add or find X as a tab there, where a file-routed
+/// request never depends on which tab this lookup happened to return — every
+/// tab on one server shares its endpoint, so any reachable record under this
+/// identity answers "where is my workspace" correctly, without needing the
+/// tab-level guarantee `resolve` provides.
+pub fn resolve_workspace(identity: &str) -> Result<SessionRecord, String> {
+    let path = registry_path();
+    let mut candidates: Vec<SessionRecord> = read_records(&path)
+        .map_err(|error| format!("cannot read session registry: {error}"))?
+        .into_iter()
+        .filter(|record| {
+            record.token_id == identity || record.agent_id.as_deref() == Some(identity)
+        })
+        .collect();
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.start_time_ns));
+    let mut tried_endpoints = std::collections::HashSet::new();
+    for record in candidates.drain(..) {
+        if !tried_endpoints.insert(record.endpoint.clone()) {
+            continue; // a more recent tab on this same server already ruled it out
+        }
+        if endpoint_is_reachable(&record.endpoint) {
+            return Ok(record);
+        }
+    }
+    Err(format!(
+        "session_stale: no live session record matches {identity}"
+    ))
+}
+
 fn read_records(path: &Path) -> io::Result<Vec<SessionRecord>> {
     let Ok(content) = fs::read_to_string(path) else {
         return Ok(Vec::new());
@@ -169,55 +214,6 @@ fn write_records(path: &Path, records: &[SessionRecord]) -> io::Result<()> {
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
     }
     fs::rename(temporary, path)
-}
-
-struct RegistryLock {
-    path: PathBuf,
-}
-
-impl RegistryLock {
-    fn acquire(registry: &Path) -> io::Result<Self> {
-        let path = registry.with_extension("json.lock");
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        for _ in 0..500 {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(file) => {
-                    let _ = file.set_len(0);
-                    return Ok(Self { path });
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    if let Ok(metadata) = fs::metadata(&path) {
-                        if metadata
-                            .modified()
-                            .ok()
-                            .and_then(|modified| modified.elapsed().ok())
-                            .is_some_and(|age| age > std::time::Duration::from_secs(30))
-                        {
-                            let _ = fs::remove_file(&path);
-                        }
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "session registry is busy",
-        ))
-    }
-}
-
-impl Drop for RegistryLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
 }
 
 fn endpoint_is_reachable(endpoint: &str) -> bool {

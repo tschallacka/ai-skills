@@ -1,0 +1,10 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "agent-session-key"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resolves which agent a process belongs to as a precedence ladder: an explicit id, else the coding harness's own session env vars, else the git worktree root, else one shared default."
+
+[dependencies]

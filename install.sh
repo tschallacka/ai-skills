@@ -105,7 +105,6 @@ fi
 integration_binary_mode() {
     case "$1:$2" in
         ai-text-editor:ai-text-editor|ai-text-editor:ai-text-editor.exe) printf 'skill\n' ;;
-        ai-text-editor:ai-text-editor-server|ai-text-editor:ai-text-editor-server.exe) printf 'skill\n' ;;
         ai-text-editor:ai-text-editor-mcp|ai-text-editor:ai-text-editor-mcp.exe) printf 'mcp\n' ;;
     esac
 }
