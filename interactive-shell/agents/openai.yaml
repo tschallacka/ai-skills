@@ -1,0 +1,4 @@
+# MODE: PROD
+interface:
+  display_name: "Interactive Shell"
+  short_description: "Drive PTY-backed interactive terminal programs through a local socket"

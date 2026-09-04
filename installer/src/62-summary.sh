@@ -42,7 +42,14 @@ replay_commands() {
 }
 
 summary_blocked_block() {
-    local skill="$1" tool step=1
+    local skill="$1" tool step=1 reason
+    # A platform-unsupported skill has no requirements to meet and no run worth
+    # replaying, so it gets the reason and nothing else. Offering the replay
+    # would promise that trying again could work.
+    if reason="$(skill_unsupported_here "$skill")"; then
+        printf 'Skipped:   %s — %s, nothing was written\n' "$skill" "$reason"
+        return 0
+    fi
     printf 'Skipped:   %s — a hard requirement is missing, nothing was written\n' "$skill"
     printf 'To install %s once its requirements are met:\n' "$skill"
     while IFS= read -r tool; do

@@ -34,6 +34,10 @@ cli_copy_skill_files() {
 
 cli_install_skill() {
     contains "$CLI_SKILL" "${SKILL_NAMES[@]}" || die "unsupported CLI skill: $CLI_SKILL"
+    local platform_reason
+    if platform_reason="$(skill_unsupported_here "$CLI_SKILL")"; then
+        die "$CLI_SKILL cannot be installed here: $platform_reason"
+    fi
     verify_runtime_tools "$CLI_SKILL"
     [ -z "$RUNTIME_BLOCKED_SKILLS" ] \
         || die "$CLI_SKILL is missing a hard runtime requirement; nothing was written"

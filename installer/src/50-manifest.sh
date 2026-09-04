@@ -24,6 +24,57 @@ version_marker_content() {
     printf 'source_ref=%s\n' "$REPO_REF"
 }
 
+# skill_artifact_files <skill> <relative>...
+#
+# Prints only the per-target artifacts that actually exist. Cross-target
+# binaries are CI-delivered and never committed, so a clean checkout has none;
+# installer/build-release.sh hard-fails on any listed path it cannot find, and
+# a bare list therefore breaks the release on every platform whose artifacts
+# this machine did not build.
+#
+# Takes the skill as its first argument rather than hardcoding one directory:
+# it arrived for ai-text-editor, and interactive-shell is the second skill to
+# ship CI-built binaries. Copying the function per skill is how the asymmetry
+# this exists to remove gets reintroduced.
+skill_artifact_files() {
+    local skill="$1" relative
+    shift
+    for relative in "$@"; do
+        [ -f "$SOURCE_ROOT/$skill/$relative" ] && printf '%s\n' "$relative"
+    done
+    return 0
+}
+
+# skill_unsupported_here <skill>
+#
+# Prints why this machine cannot run the skill and returns 0 when that is the
+# case; returns 1 for a skill this platform supports.
+#
+# Every other skill is text plus, at most, a binary that exists for all five
+# release targets, so "can I install this here" never had to be asked before.
+# interactive-shell is the first that cannot exist on a platform we otherwise
+# support: its wrapper allocates the PTY through libc (openpty, TIOCSCTTY,
+# TIOCSWINSZ), sets up a session and a process group, and kills that group by
+# negative pid. binaries.tsv therefore declares no Windows row.
+#
+# Without this gate skill_files() falls through to its `*)` arm on Git Bash,
+# MSYS2 or Cygwin and returns 69. install.sh runs under `set -euo pipefail` and
+# assigns that in `files="$(skill_files ...)"`, so the whole installer dies
+# mid-loop -- taking every skill that had not been reached yet with it. The
+# `*)` arm stays as the backstop for a genuinely unknown platform, which is a
+# different answer from "this platform is known and this skill is not for it".
+#
+# Windows support is wanted, through Cygwin, MSYS2 and native ConPTY; it is
+# queued as T84a/T84b/T84c, and when it lands the row here goes away with it.
+skill_unsupported_here() {
+    case "$1:$(uname -s)" in
+        interactive-shell:MINGW*|interactive-shell:MSYS*|interactive-shell:CYGWIN*|interactive-shell:Windows*)
+            printf 'no Windows build exists; the PTY wrapper is POSIX-only (see interactive-shell/binaries.tsv)\n'
+            return 0 ;;
+    esac
+    return 1
+}
+
 # skill_files <skill> [package]
 #
 # prod (the default) is what an end user receives: the files whose header marks
@@ -37,14 +88,6 @@ version_marker_content() {
 # Still a hand list, deliberately: the planning arms are a second copy of
 # PACKAGE-MANIFEST.tsv and the duplication is the cross-check.
 # tests/test-mode-markers.sh compares both arms against the markers in the files.
-editor_artifact_files() {
-    local relative
-    for relative in "$@"; do
-        [ -f "$SOURCE_ROOT/ai-text-editor/$relative" ] && printf '%s\n' "$relative"
-    done
-    return 0
-}
-
 skill_files() {
     local package="${2:-prod}"
     case "$package" in
@@ -529,15 +572,15 @@ references/protocol.md
 EDITOR_EOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    editor_artifact_files bin/x86_64-unknown-linux-musl/ai-text-editor-server bin/x86_64-unknown-linux-musl/ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-mcp ;;
+                    skill_artifact_files ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-server bin/x86_64-unknown-linux-musl/ai-text-editor bin/x86_64-unknown-linux-musl/ai-text-editor-mcp ;;
                 Linux:aarch64|Linux:arm64)
-                    editor_artifact_files bin/aarch64-unknown-linux-musl/ai-text-editor-server bin/aarch64-unknown-linux-musl/ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-mcp ;;
+                    skill_artifact_files ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-server bin/aarch64-unknown-linux-musl/ai-text-editor bin/aarch64-unknown-linux-musl/ai-text-editor-mcp ;;
                 Darwin:x86_64)
-                    editor_artifact_files bin/x86_64-apple-darwin/ai-text-editor-server bin/x86_64-apple-darwin/ai-text-editor bin/x86_64-apple-darwin/ai-text-editor-mcp ;;
+                    skill_artifact_files ai-text-editor bin/x86_64-apple-darwin/ai-text-editor-server bin/x86_64-apple-darwin/ai-text-editor bin/x86_64-apple-darwin/ai-text-editor-mcp ;;
                 Darwin:arm64)
-                    editor_artifact_files bin/aarch64-apple-darwin/ai-text-editor-server bin/aarch64-apple-darwin/ai-text-editor bin/aarch64-apple-darwin/ai-text-editor-mcp ;;
+                    skill_artifact_files ai-text-editor bin/aarch64-apple-darwin/ai-text-editor-server bin/aarch64-apple-darwin/ai-text-editor bin/aarch64-apple-darwin/ai-text-editor-mcp ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    editor_artifact_files bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe bin/x86_64-pc-windows-msvc/ai-text-editor.exe bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe ;;
+                    skill_artifact_files ai-text-editor bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe bin/x86_64-pc-windows-msvc/ai-text-editor.exe bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe ;;
                 *)
                     printf 'skill_files: no ai-text-editor artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -572,6 +615,34 @@ tests/test-chat-resolution.sh
 tests/test-chat-broadcast-stall.sh
 tests/test-chat-descriptor-leak.sh
 CHATEOF
+            ;;
+        interactive-shell)
+            cat <<'ISHEOF'
+SKILL.md
+agents/openai.yaml
+docs/README.md
+requires.tsv
+binaries.tsv
+ISHEOF
+            case "$(uname -s):$(uname -m)" in
+                Linux:x86_64|Linux:amd64)
+                    skill_artifact_files interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell bin/x86_64-unknown-linux-musl/interactive-shell-input ;;
+                Linux:aarch64|Linux:arm64)
+                    skill_artifact_files interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell bin/aarch64-unknown-linux-musl/interactive-shell-input ;;
+                Darwin:x86_64)
+                    skill_artifact_files interactive-shell bin/x86_64-apple-darwin/interactive-shell bin/x86_64-apple-darwin/interactive-shell-input ;;
+                Darwin:arm64)
+                    skill_artifact_files interactive-shell bin/aarch64-apple-darwin/interactive-shell bin/aarch64-apple-darwin/interactive-shell-input ;;
+                *)
+                    printf 'skill_files: no interactive-shell artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
+                    return 69 ;;
+            esac
+            [ "$package" = dev ] || return 0
+            cat <<'ISHEOF'
+tests/test-interactive-shell.sh
+tests/test-interactive-shell-exploration.sh
+TODO.json
+ISHEOF
             ;;
     esac
 }
