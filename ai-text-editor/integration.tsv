@@ -14,7 +14,15 @@
 # configuration and no running server -- which is what a `curl | bash` install
 # has to leave working. `mcp` is opt-in: its tools are listed in every session
 # that configures the server, so it is worth choosing rather than assuming.
+#
+# ai-text-editor-server is deliberately UNLISTED, not `skill`-only: both
+# ai-text-editor (skill mode) and ai-text-editor-mcp (mcp mode) talk to it,
+# and ai-text-editor-mcp's own autostart spawns it directly (looked up as a
+# sibling of its own binary) whenever no server is already running --
+# `open` in mcp mode is exactly the "no running server yet" case autostart
+# exists for. Listing it as `skill`-only shipped an mcp-only install that
+# could never open a fresh file: `cannot autostart ai-text-editor-server: No
+# such file or directory`, confirmed by hand against a real mcp-mode install.
 mode	binary	why
 skill	ai-text-editor	Short-lived client the skill's own instructions drive
-skill	ai-text-editor-server	Editor server that client talks to
 mcp	ai-text-editor-mcp	MCP bridge an agent calls as typed tools instead
