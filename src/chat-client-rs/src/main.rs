@@ -13,13 +13,15 @@
 //! connects require an exact match (fail closed). `--insecure` bypasses this
 //! for testing.
 
+use std::collections::VecDeque;
 use std::fs;
-use std::io::{BufRead, Read, Write};
+use std::io::{self, BufRead, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
+use chat_proto::Message;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 const DEFAULT_BEACON_PORT: u16 = 7780;
@@ -44,9 +46,10 @@ fn usage() {
          \x20                 the one flag also accepted BEFORE the subcommand\n\
          \x20 --insecure      do not pin the server cert (testing)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
-         \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
+         \x20 --mentions      only messages mentioning your nick; tail filters pushed\n\
+         \x20                 messages locally, read backfills server-side\n\
          \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\
-         \x20 --local         read/tail: walk $AI_CHAT_HOME/channels/<chan>.log directly,\n\
+         \x20 --local         maintenance escape hatch: read/tail the shared log,\n\
          \x20                 with no server. Ignores --state: the channel logs are the\n\
          \x20                 server's shared storage, --state is one client's own\n\n\
          The session remembers the default server+nick and per-channel cursors\n\
@@ -772,7 +775,7 @@ fn connect(
             Ok(()) => break,
             Err(e) => {
                 if attempts >= 1 {
-                    return Err(e);
+                    return Err(e.to_string());
                 }
                 attempts += 1;
                 std::thread::sleep(Duration::from_millis(100));
@@ -896,11 +899,11 @@ fn write_line(
 
 fn read_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
-) -> Result<String, String> {
+) -> io::Result<String> {
     let mut buf = Vec::new();
     let mut b = [0u8; 1];
     loop {
-        let n = tls.read(&mut b).map_err(|e| format!("read: {}", e))?;
+        let n = tls.read(&mut b)?;
         if n == 0 {
             break;
         }
@@ -913,7 +916,10 @@ fn read_line(
         }
     }
     if buf.is_empty() {
-        return Err("connection closed by server".into());
+        return Err(io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "connection closed by server",
+        ));
     }
     Ok(String::from_utf8_lossy(&buf)
         .trim_end_matches(['\r', '\n'])
@@ -1044,7 +1050,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if !e.contains("os error 11") {
+                if e.kind() != ErrorKind::WouldBlock {
                     break;
                 }
             }
@@ -1080,7 +1086,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if !e.contains("os error 11") {
+                if e.kind() != ErrorKind::WouldBlock {
                     break;
                 }
             }
@@ -1096,6 +1102,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
 fn read_last_id(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     chan: &str,
+    pending: &mut VecDeque<String>,
 ) -> u64 {
     let deadline = SystemTime::now() + Duration::from_secs(3);
     while SystemTime::now() < deadline {
@@ -1108,9 +1115,10 @@ fn read_last_id(
                         .and_then(|s| s.parse::<u64>().ok())
                         .unwrap_or(0);
                 }
+                pending.push_back(l);
             }
             Err(e) => {
-                if !e.contains("os error 11") {
+                if e.kind() != ErrorKind::WouldBlock {
                     break;
                 }
             }
@@ -1152,7 +1160,8 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
     // Ask for the current max id; we do NOT dump the channel history.
     let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-    let current = read_last_id(&mut tls, &o.chan);
+    let mut pending = VecDeque::new();
+    let current = read_last_id(&mut tls, &o.chan, &mut pending);
     // Seed the cursor: explicit --since overrides; otherwise the current end.
     let seed = if o.since.is_empty() {
         current
@@ -1420,7 +1429,8 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
         // No cursor yet: find the current end, then fetch nothing from before
         // it unless the caller asked for history.
         let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-        let current = read_last_id(&mut tls, &o.chan);
+        let mut pending = VecDeque::new();
+        let current = read_last_id(&mut tls, &o.chan, &mut pending);
         since = current.to_string();
     }
     let mention_suffix = if o.mentions { " mentions" } else { "" };
@@ -1450,7 +1460,7 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
                 }
             }
             Err(e) => {
-                if !e.contains("os error 11") {
+                if e.kind() != ErrorKind::WouldBlock {
                     break;
                 }
             }
@@ -1573,6 +1583,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     // Resume from the session cursor; with no cursor yet, default to the
     // channel's CURRENT end (LASTID) so tailing an old channel does not dump
     // its whole history — only new messages are shown from now on.
+    let mut pending = VecDeque::new();
     let mut last_id: u64 = if o.no_session {
         0
     } else {
@@ -1581,69 +1592,64 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             cur
         } else {
             let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-            read_last_id(&mut tls, &o.chan)
+            read_last_id(&mut tls, &o.chan, &mut pending)
         }
     };
-    let mention_suffix = if o.mentions { " mentions" } else { "" };
-    let mut interval: u64 = 5;
-    let mut last_seen = SystemTime::now();
+    // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
+    // stream.  FETCH is intentionally not used here: it is a backfill
+    // operation for read/reconnect, not a steady-state transport.
+    let mut last_sync = Instant::now();
     loop {
-        // Poll for new history since the last id we saw; print any new rows.
-        let _ = write_line(
-            &mut tls,
-            &format!("FETCH {} {}{}", o.chan, last_id, mention_suffix),
-        );
-        let poll_deadline = SystemTime::now() + Duration::from_secs(2);
-        let mut new_msg = false;
-        while SystemTime::now() < poll_deadline {
-            match read_line(&mut tls) {
-                Ok(l) => {
-                    if l.starts_with(":server 000 end-of-history") {
-                        break;
+        match pending
+            .pop_front()
+            .map(Ok)
+            .unwrap_or_else(|| read_line(&mut tls))
+        {
+            Ok(l) => {
+                let message = match Message::parse(&l) {
+                    Ok(message) => message,
+                    Err(_) => continue,
+                };
+                if message.command != "PRIVMSG"
+                    || message.params.first().map(String::as_str) != Some(o.chan.as_str())
+                {
+                    continue;
+                }
+                let is_mention = message
+                    .trailing
+                    .as_deref()
+                    .map(|text| text.contains(&format!("@{}", nick)))
+                    .unwrap_or(false);
+                if !o.mentions || is_mention {
+                    if o.mentions {
+                        println!("!! MENTION !! {}", l);
+                    } else {
+                        println!("{}", l);
                     }
-                    if l.starts_with("MSG ") {
-                        let id = l
-                            .split_whitespace()
-                            .nth(2)
-                            .and_then(|s| s.parse::<u64>().ok())
-                            .unwrap_or(0);
-                        if id > last_id {
-                            last_id = id;
-                            new_msg = true;
-                            if o.mentions {
-                                // Notification: mark the mention distinctly so
-                                // a watcher can act on it.
-                                println!("!! MENTION !! {}", l);
-                                if o.mention_exit {
-                                    let _ = write_line(&mut tls, "QUIT");
-                                    std::process::exit(0);
-                                }
-                            } else {
-                                println!("{}", l);
-                            }
-                            save_cursor(state_dir, &o.chan, id, o.no_session);
-                        }
+                    if o.mention_exit && is_mention {
+                        let _ = write_line(&mut tls, "QUIT");
+                        std::process::exit(0);
                     }
                 }
-                Err(e) => {
-                    if !e.contains("os error 11") {
-                        break;
+                // A pushed IRC line has no history-row id. Resynchronize at a
+                // bounded cadence from the server's authoritative maximum,
+                // rather than guessing from the number of pushes received.
+                if last_sync.elapsed() >= Duration::from_secs(1) {
+                    let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+                    let authoritative_id = read_last_id(&mut tls, &o.chan, &mut pending);
+                    if authoritative_id > last_id {
+                        last_id = authoritative_id;
                     }
+                    save_cursor(state_dir, &o.chan, last_id, o.no_session);
+                    last_sync = Instant::now();
+                }
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    break;
                 }
             }
         }
-        if new_msg {
-            // A message reset the cadence to fast.
-            interval = 5;
-            last_seen = SystemTime::now();
-        } else {
-            // No new message: step down toward the 60s cap.
-            interval = (interval + 10).min(60);
-        }
-        std::thread::sleep(Duration::from_secs(interval));
-        // Bound an idle stretch to the cadence; if the connection is dead the
-        // next FETCH will error and this loop breaks.
-        let _ = last_seen;
     }
 }
 
@@ -1677,8 +1683,8 @@ fn wait_for_welcome(
                 // EAGAIN/EWOULDBLOCK: the welcome hasn't arrived within this
                 // read's timeout but the connection is alive; keep waiting for
                 // the deadline rather than failing a noisy localhost exchange.
-                if !e.contains("os error 11") {
-                    return Err(e);
+                if e.kind() != ErrorKind::WouldBlock {
+                    return Err(e.to_string());
                 }
             }
         }
