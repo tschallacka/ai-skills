@@ -448,6 +448,7 @@ tests/test-register-read.sh
 tests/test-resolve-finding.sh
 tests/test-validate-gates.sh
 tests/test-skill-provenance.sh
+tests/test-skill-file-length.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
@@ -611,6 +612,7 @@ CHATEOF
             cat <<'CHATEOF'
 tests/test-chat.sh
 tests/test-chat-resolution.sh
+tests/test-chat-broadcast-stall.sh
 CHATEOF
             ;;
         interactive-shell)

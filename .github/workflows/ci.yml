@@ -83,16 +83,16 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/$target/release/rjq" "planning/bin/$dir/rjq"
           echo "$PWD/planning/bin/$dir" >> "$GITHUB_PATH"
 
-      - name: Install socat so the served-overview rung is exercised (B48)
+      - name: Put GNU coreutils first on the macOS runner
+        # The suite's date, stat and readlink expectations are the GNU ones. BSD
+        # userland is a supported target (CODE-STYLE.md section 1) and is covered
+        # by the bash 3.2 floor leg; this leg tests the default shell, not the
+        # default userland.
         run: |
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get install -y -qq socat
-          elif command -v brew >/dev/null 2>&1; then
-            brew install socat
+          if command -v brew >/dev/null 2>&1; then
             brew install coreutils
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
-          command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
       - name: Build the compiled chat rung so its assertions run (T62)
         uses: dtolnay/rust-toolchain@1.98
@@ -218,16 +218,16 @@ jobs:
           bash --version
           /bin/bash --version
 
-      - name: Install socat so the served-overview rung is exercised (B48)
+      - name: Put GNU coreutils first on the macOS runner
+        # The suite's date, stat and readlink expectations are the GNU ones. BSD
+        # userland is a supported target (CODE-STYLE.md section 1) and is covered
+        # by the bash 3.2 floor leg; this leg tests the default shell, not the
+        # default userland.
         run: |
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get install -y -qq socat
-          elif command -v brew >/dev/null 2>&1; then
-            brew install socat
+          if command -v brew >/dev/null 2>&1; then
             brew install coreutils
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
-          command -v socat || echo "socat still absent; its rung will SKIP loudly"
 
       - name: Place the compiled register rungs
         # Same reason as the default-bash leg: skill_files() lists the host's

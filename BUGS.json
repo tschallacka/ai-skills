@@ -1559,6 +1559,25 @@
       "updated_at": "2026-09-01T20:00:00Z"
     },
     {
+      "id": "B122",
+      "title": "chat-server-rs stops servicing accepted connections: the broadcast path blocks in write_line while holding hub.writers",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "start chat-server-rs, attach one live 'chat-client-rs tail --chan #c', then send a dozen messages; watch 'ss -ltn' backlog on the server port",
+      "observed": "clients report 'send: Resource temporarily unavailable (os error 11)', sends stop landing in the channel log, and the listener's accept backlog climbs without bound (observed 5 -> 9 -> 11 pending on 127.0.0.1:37251 on 2026-09-04 with two agents in #ai-skills). A message already in flight can land while every later one is lost.",
+      "expected": "a slow or dead subscriber never blocks the server: broadcast writes have a write timeout, and accepted connections keep being serviced",
+      "mechanism": "Re-measured against a server built from master (06eb743) on 2026-09-04, and the accurate shape is worse than 'the backlog climbs': ONE attached subscriber wedges the server for everyone. src/chat-server-rs/src/main.rs takes hub.writers.lock(), then a second connection's slot, then calls write_line on that connection's socket, and hub.writers is the lock the accept loop needs to register a new connection. But the dominant mechanism is not the blocking write -- it is lock starvation: a subscriber's own thread holds its slot across a 200ms read_tls and re-acquires it immediately, so a broadcaster contending for that slot loses almost every cycle, while holding hub.writers. Measured with one 'chat-client-rs tail' attached: first send 5.7s, next two failed with 'os error 11' after 10.2s each (including a fresh client sending to a DIFFERENT channel), neither appended to any log, main thread in futex_do_wait, server sockets left in CLOSE-WAIT with the unread NICK/USER/PRIVMSG in Recv-Q. A write timeout alone would therefore not have fixed it. The comment claiming 'their slots are different mutexes, so locking them here is safe' is false: safety needs a lock order, not distinct mutexes.",
+      "surfaces": [],
+      "fix": "991c4bf (branch bug/b122-hub-writers-lock) — each connection gets an outbox: a leaf mutex holding pending lines plus the channel membership a broadcaster needs. A broadcaster copies the peer list under hub.writers, releases it, and appends to each outbox; the connection's own thread drains it and does the socket write. No socket I/O under a shared lock, and no two connection slots locked at once. Plus SO_SNDTIMEO on every accepted socket, write_line returning its error instead of swallowing it (a failed write closes the connection so the existing teardown runs), a byte cap on the outbox that marks an unresponsive peer dead, and PART now updating the broadcast membership (it lived on the connection state, which only JOIN maintained).",
+      "verification": "chat/tests/test-chat-broadcast-stall.sh attaches one 'chat-client-rs tail' subscriber and asserts the server keeps serving. All six assertions fail against a server built from master (CHAT_SERVER_BIN points the test at one) with 'os error 11' after ten seconds each, and all six pass with the fix; the run drops from 1m17s of timeouts to 22s. Its precondition -- that the subscriber really is an attached channel member -- is asserted (the subscriber must print a message another client sent) rather than slept for, so it cannot pass vacuously. The outbox policy has four unit tests (membership filter, order and drain-once, the cap marking a peer dead and releasing its backlog, a dead peer never queued for again), each shown to fail under a mutation of the branch it guards. NOT verified end to end: SO_SNDTIMEO actually firing. Forcing a blocked socket write needs more traffic than a test should push -- 3.6MB queued to a SIGSTOP'd peer was absorbed by the kernel with no block, and this host's tcp_rmem max is 32MB -- so the write timeout and the cap are bounds on damage rather than paths the integration test exercises.",
+      "found_by": "pr-master (reproduced live in #ai-skills 2026-09-04; originally finding F1 of the PR #18 adversarial review)",
+      "notes": "On whether killing the subscriber recovers: pr-master measured that it did not, and only a server restart cleared it. In my reproduction (one tail, master's binary) killing the subscriber DID recover immediately -- the peer's close makes read_tls return Ok(0), so its thread tears the slot down and releases the broadcaster. The variant with no self-recovery is a subscriber that stays alive and stops reading (SIGSTOP), because then nothing tells the server anything is wrong. Both variants are asserted in chat/tests/test-chat-broadcast-stall.sh. Correction to the verification above, found by running the mutation rather than assuming it: making the outbox flush a no-op does NOT fail the integration test, so that test does not cover broadcast delivery. chat-client-rs tail reads new messages with FETCH and ignores PRIVMSG lines outright, so the shipped client never consumes a broadcast; nothing it can do asserts that path end to end. The queueing itself is covered by the four outbox unit tests. Worth knowing separately: the broadcast path that wedged the server is used only by stock IRC clients, not by the agents' own client.",
+      "created_at": "2026-09-04T07:17:22Z",
+      "updated_at": "2026-09-04T08:03:29Z"
+    },
+    {
       "id": "B128",
       "title": "less can remain visually empty after a subprocess transition despite the file being present",
       "status": "not-a-defect",
@@ -2150,6 +2169,27 @@
       "notes": "B108 is the live instance and the fastest way to test any fix: whatever check gets added must fail while B108 is unfixed and pass once it is. Do not close this by fixing B108 - the point of the entry is that the packaging defect was invisible to the suite, so fixing the instance would hide the gap again. Related: B108 also revealed that PACKAGE-MANIFEST.tsv omits register-rebuild.sh, so any new check should cover scripts that are in neither package manifest as well as scripts whose dependencies land in a different arm.",
       "created_at": "2026-09-02T12:59:13Z",
       "updated_at": "2026-09-02T12:59:13Z"
+    },
+    {
+      "id": "B123",
+      "title": "chat-server-rs treats any non-numeric argv[1] as 'no port' and starts a server, so --version never returns",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "AI_CHAT_HOME=$(mktemp -d) timeout 4 target/release/chat-server-rs --version; echo rc=$?",
+      "observed": "rc=124: the process prints a port, announces itself on the UDP beacon and runs forever. It binds the session port from server.port when there is one, so a --version probe takes the port the agents' server is meant to own. Observed live: pid 20562 held a LISTEN socket on 127.0.0.1:34169 for hours, from a codex probe running 'chat-server-rs --help; chat-server-rs --version'. A typo'd flag ('--prot 9999') does the same.",
+      "expected": "a conventional --version prints a version and exits 0; an unrecognised argument is refused with a usage message and a non-zero exit, and neither binds a port",
+      "mechanism": "main.rs handles --help and -h only. Every other argv[1] falls through to 'args.get(1).and_then(|p| p.parse().ok())', where a parse failure is indistinguishable from no argument at all, so the port-preference path runs and the server starts. There is no argument validation and no --version.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "chat-b122 (while checking whether the stale --help process of B122's brief was a live master defect)",
+      "notes": null,
+      "created_at": "2026-09-04T08:00:57Z",
+      "updated_at": "2026-09-04T08:00:57Z"
     },
     {
       "id": "B6",
@@ -2808,49 +2848,6 @@
       "updated_at": "2026-09-03T00:00:00Z"
     },
     {
-      "id": "B122",
-      "title": "screen coordinates are approximate for non-ASCII terminal cells",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "Display a multi-byte or wide Unicode glyph and use locate or coordinate hints to target adjacent text.",
-      "observed": "The screen model stores PTY bytes one byte per cell, so glyph width and coordinate metadata may not match the rendered terminal.",
-      "expected": "The agent-facing documentation states this boundary instead of promising full Unicode cell behavior.",
-      "mechanism": "Screen storage and cursor movement are byte-oriented; implementing Unicode width would require a larger cell-model change.",
-      "surfaces": [
-        "src/interactive-shell/src/lib.rs",
-        "interactive-shell/SKILL.md"
-      ],
-      "fix": "Documented limitation — no universal Unicode-cell rewrite in this iteration.",
-      "verification": "The skill explicitly marks non-ASCII glyph widths and coordinates as approximate.",
-      "found_by": "critical post-implementation review, subworker Raman",
-      "notes": "A future Unicode-cell implementation should be separately designed and tested for combining and wide characters.",
-      "created_at": "2026-09-01T20:00:00Z",
-      "updated_at": "2026-09-01T20:00:00Z"
-    },
-    {
-      "id": "B123",
-      "title": "wait output did not refresh the wrapper idle clock",
-      "status": "fixed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "Run a child that emits output while an agent has an active wait request and compare the output-idle timeout with ordinary screen-event handling.",
-      "observed": "The wait path fed output into the screen and published deltas but did not refresh the main loop's last-output timestamp.",
-      "expected": "PTY output received while satisfying wait counts as output activity for idle-timeout purposes.",
-      "mechanism": "The wait reader lived inside client() and had no access to the main loop's output clock.",
-      "surfaces": [
-        "src/interactive-shell/src/lib.rs"
-      ],
-      "fix": "Working tree change — pass the output timestamp into client() and refresh it whenever wait reads PTY bytes.",
-      "verification": "The interactive-shell protocol suite passes with the shared output clock wired through the wait path.",
-      "found_by": "critical post-implementation review, subworker Raman",
-      "notes": "wait remains a synchronous request; the documented timeout and output-idle semantics are intentionally separate.",
-      "created_at": "2026-09-01T20:00:00Z",
-      "updated_at": "2026-09-01T20:00:00Z"
-    },
-    {
       "id": "B124",
       "title": "interactive-shell rejects direct names for modified tilde keys",
       "status": "fixed",
@@ -3152,6 +3149,49 @@
       "notes": "Peer of B150: same assumption, other symptom. This half fails safe -- it refuses rather than answering wrongly -- which is why it is minor where B150 is blocking. Workaround used on pr13-rescue: resolve every BUGS.json conflict before the renumbering commit with 'git checkout --ours', then run the tool once at that commit, where the replayed side's register is sound.",
       "created_at": "2026-09-03T22:06:04Z",
       "updated_at": "2026-09-03T22:06:23Z"
+    },
+    {
+      "id": "B152",
+      "title": "screen coordinates are approximate for non-ASCII terminal cells",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Display a multi-byte or wide Unicode glyph and use locate or coordinate hints to target adjacent text.",
+      "observed": "The screen model stores PTY bytes one byte per cell, so glyph width and coordinate metadata may not match the rendered terminal.",
+      "expected": "The agent-facing documentation states this boundary instead of promising full Unicode cell behavior.",
+      "mechanism": "Screen storage and cursor movement are byte-oriented; implementing Unicode width would require a larger cell-model change.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs",
+        "interactive-shell/SKILL.md"
+      ],
+      "fix": "Documented limitation — no universal Unicode-cell rewrite in this iteration.",
+      "verification": "The skill explicitly marks non-ASCII glyph widths and coordinates as approximate.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": "A future Unicode-cell implementation should be separately designed and tested for combining and wide characters.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
+    },
+    {
+      "id": "B153",
+      "title": "wait output did not refresh the wrapper idle clock",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run a child that emits output while an agent has an active wait request and compare the output-idle timeout with ordinary screen-event handling.",
+      "observed": "The wait path fed output into the screen and published deltas but did not refresh the main loop's last-output timestamp.",
+      "expected": "PTY output received while satisfying wait counts as output activity for idle-timeout purposes.",
+      "mechanism": "The wait reader lived inside client() and had no access to the main loop's output clock.",
+      "surfaces": [
+        "src/interactive-shell/src/lib.rs"
+      ],
+      "fix": "Working tree change — pass the output timestamp into client() and refresh it whenever wait reads PTY bytes.",
+      "verification": "The interactive-shell protocol suite passes with the shared output clock wired through the wait path.",
+      "found_by": "critical post-implementation review, subworker Raman",
+      "notes": "wait remains a synchronous request; the documented timeout and output-idle semantics are intentionally separate.",
+      "created_at": "2026-09-01T20:00:00Z",
+      "updated_at": "2026-09-01T20:00:00Z"
     },
     {
       "id": "B25",

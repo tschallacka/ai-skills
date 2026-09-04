@@ -25,6 +25,7 @@ package/chat/SKILL.md	20037
 package/chat/binaries.tsv	1195
 package/chat/docs/README.md	1676
 package/chat/requires.tsv	467
+package/chat/tests/test-chat-broadcast-stall.sh	11347
 package/chat/tests/test-chat-resolution.sh	7891
 package/chat/tests/test-chat.sh	29517
 package/git-merge-resolving/SKILL.md	9341
@@ -34,7 +35,7 @@ package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	196665
+package/install.sh	195416
 package/interactive-shell/SKILL.md	8627
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996

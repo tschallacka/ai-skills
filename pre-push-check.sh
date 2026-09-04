@@ -282,7 +282,31 @@ else
     note "no npm package baseline at $baseline"
 fi
 
-# ---- 6. the whole suite, when asked for ------------------------------------
+# ---- 6. every tracked skill file is declared --------------------------------
+# The baseline gate above checks SIZES of paths it already knows, deliberately:
+# its header says npm's file SELECTION belongs to test-npm-package.sh. So a file
+# ADDED to a skill directory and never declared in skill_files() passes here and
+# fails in CI -- which is exactly what happened when the skill-length ratchet was
+# added to planning/tests without a manifest row.
+#
+# --declarations-only is the half of that test which needs no built tree: it
+# drops "every promised file exists on disk", which demands the 48 extensionless
+# planning commands setup-dev-env.sh generates, and keeps the arm accounting that
+# catches an undeclared file. The full form stays in the suite.
+manifest_test="$repo_root/tests/test-skill-files-manifest.sh"
+if [ -x "$manifest_test" ]; then
+    if manifest_out="$("$manifest_test" --declarations-only 2>&1)"; then
+        ok "every tracked skill file is declared in skill_files()"
+    else
+        bad "a skill file is tracked but not declared in skill_files()"
+        printf '%s\n' "$manifest_out" | sed -n 's/^ *FAIL: /  /p'
+        note "add it to the right arm in installer/src/50-manifest.sh, then installer/build.sh"
+    fi
+else
+    note "no $manifest_test to check skill declarations with"
+fi
+
+# ---- 7. the whole suite, when asked for ------------------------------------
 if [ "$full" = true ]; then
     if ./run-tests.sh; then
         ok "run-tests.sh: the whole suite"
