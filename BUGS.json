@@ -364,6 +364,27 @@
       "updated_at": "2026-09-03T22:06:23Z"
     },
     {
+      "id": "B166",
+      "title": "The protocol tests connect by absolute path, so a long TMPDIR overruns sun_path and every socket test fails",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "pad=$(mktemp -d); while [ ${#pad} -lt 72 ]; do pad=\"$pad/p\"; mkdir -p \"$pad\"; done; TMPDIR=$pad cargo test -p interactive-shell --test protocol",
+      "observed": "8 passed; 11 failed in 30.26s, where a short TMPDIR gives 19 passed in 1.05s. Every failure reads 'socket did not appear at <110-byte path> within 30s' with 'wrapper stderr: (empty)'. A probe inside the loop printed exists=true beside 'path must be shorter than SUN_LEN', and ls showed 'srw------- socket' in that very directory during the poll.",
+      "expected": "19 passed, as with a short TMPDIR. The socket is present and connectable by name; only the absolute address is too long.",
+      "mechanism": "request() and request_all() polled UnixStream::connect(dir.join(\"socket\")). sun_path caps a Unix socket address at 104 bytes; on macOS TMPDIR is a per-user /var/folders/<2>/<28>/T/ path, run-tests.sh adds a scratch directory and each test names its own, so the address reaches about 110. The library already answers this with connect_in_directory, whose pair is bind_in_directory, and its doc comment states both ends must be relative or the shorter one just moves the failure. The tests were the third end of that rule.",
+      "surfaces": [
+        "src/interactive-shell/tests/protocol.rs"
+      ],
+      "fix": "14e8f5e1 -- both loops connect through interactive_shell_core::connect_in_directory, guarded by a CWD_LOCK because fchdir is process-global while this binary runs 19 tests as threads",
+      "verification": "19/19 protocol plus 19/19 library unit tests under both a short and a 74-byte TMPDIR, three parallel runs each, still 1.05s. Mutation: restoring the absolute connect fails under the long TMPDIR and reports 'last connect error: path must be shorter than SUN_LEN'. Second mutation: dropping CWD_LOCK fails 3 runs of 3 with 'Connection reset by peer' and passes with --test-threads=1.",
+      "found_by": "CI, both macOS legs of run 33871455553; reproduced on Linux by padding TMPDIR alone",
+      "notes": "B167 is the other half: the loop discarded the connect error and the panic blamed a missing socket, which is why the cause was looked for in the wrapper across three sessions. Fixing either leaves the other open.",
+      "created_at": "2026-09-04T15:11:39Z",
+      "updated_at": "2026-09-04T15:11:48Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -1842,6 +1863,27 @@
       "notes": null,
       "created_at": "2026-09-04T12:05:37Z",
       "updated_at": "2026-09-04T12:05:37Z"
+    },
+    {
+      "id": "B167",
+      "title": "A readiness loop blames a missing socket when the connect is what failed",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "restore UnixStream::connect(dir.join(\"socket\")) in request_all, then: pad=$(mktemp -d); while [ ${#pad} -lt 72 ]; do pad=\"$pad/p\"; mkdir -p \"$pad\"; done; TMPDIR=$pad cargo test -p interactive-shell --test protocol view_is_compact",
+      "observed": "panic reads 'socket did not appear at <path> within 30s' and 'wrapper stderr: (empty)', while ls of that same directory during the poll shows 'srw------- socket'. The connect error was never printed.",
+      "expected": "The failure names the connect error and says whether the socket exists, so the reader can tell 'never bound' from 'bound but unreachable'.",
+      "mechanism": "The loops tested the connect with 'if let Ok(mut stream) = ...', which discards the Err, and the panic after the loop was written as though non-appearance were the only way to reach it. So a connect that fails for any reason is reported as a socket that was never created.",
+      "surfaces": [
+        "src/interactive-shell/tests/protocol.rs"
+      ],
+      "fix": "14e8f5e1 -- the loops keep the last connect error and panic through unreachable_socket(), which prints that error and whether the socket exists",
+      "verification": "With the absolute connect restored, the panic now reads 'socket present: false / last connect error: path must be shorter than SUN_LEN' instead of 'socket did not appear'. That is the mutation: the old message cannot be produced by the new code path.",
+      "found_by": "reading the CI panic against a local reproduction that contradicted it",
+      "notes": "Peer of B166, not a facet of it: this message would misreport any connect failure, not only the sun_path one. B166 is the cause, B167 is why it was invisible.",
+      "created_at": "2026-09-04T15:12:01Z",
+      "updated_at": "2026-09-04T15:12:10Z"
     },
     {
       "id": "B14",
