@@ -137,6 +137,29 @@
       "updated_at": "2026-09-01T16:20:00Z"
     },
     {
+      "id": "B168",
+      "title": "The registers guard and its test use the banned python3-shipped construct, so the portability gate fails on master",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "./planning/tests/test-portability-contract.sh",
+      "observed": "portability: ./.github/registers-guard.sh uses banned construct 'python3-shipped' at line 101, and the same for ./.github/tests/test-registers-guard.sh at line 91. test-portability-contract FAILs, and master's ubuntu-latest leg is red with it (run 33873690073).",
+      "expected": "The gate passes. python3 in a CI-only tree is either allowlisted for this rule or replaced, but master is not left red.",
+      "mechanism": "The guard calls python3 for the duplicate-id check that a textual merge cannot detect, and its own comment argues CODE-STYLE.md permits python3 for development tooling. Assertion 4 of test-portability-contract scans every TRACKED script for a detectable banned construct, and .github/ carries no allowlist row, so that justification was never expressed anywhere the gate can read it. The rule's own replacement text anticipates the case: probe sites, the generated installer tables and dev-only trees carry allowlist rows.",
+      "surfaces": [
+        ".github/registers-guard.sh",
+        ".github/tests/test-registers-guard.sh",
+        "planning/tests/test-portability-contract.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "master CI run 33873690073, ubuntu-latest leg; reproduced locally",
+      "notes": null,
+      "created_at": "2026-09-04T15:17:44Z",
+      "updated_at": "2026-09-04T15:17:44Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -1884,6 +1907,48 @@
       "notes": "Peer of B166, not a facet of it: this message would misreport any connect failure, not only the sun_path one. B166 is the cause, B167 is why it was invisible.",
       "created_at": "2026-09-04T15:12:01Z",
       "updated_at": "2026-09-04T15:12:10Z"
+    },
+    {
+      "id": "B169",
+      "title": "test-register-helpers exercises the retired planning/scripts register helpers, so every case fails with rc=127",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "./planning/tests/test-register-helpers.sh",
+      "observed": "Every case reports rc=127: 'planning/scripts/todo-add.sh: No such file or directory', and the same for todo-update.sh, bug-add.sh and bug-update.sh. The test then reports consequential failures such as 'the added task lacks its fields or stamps' and 'bug-add did not append exactly one entry'.",
+      "expected": "The suite exercises whatever now owns those operations -- the shipped register binaries -- or the test is retired with its coverage moved, rather than failing on absent files.",
+      "mechanism": "The four shell helpers it drives were replaced by the compiled register binaries, and the test was left pointing at the old paths. Because each call fails at the door with 127, its later assertions test nothing at all -- they report a missing field where the real cause is a missing file.",
+      "surfaces": [
+        "planning/tests/test-register-helpers.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "master CI run 33873690073, ubuntu-latest leg; reproduced locally",
+      "notes": null,
+      "created_at": "2026-09-04T15:17:55Z",
+      "updated_at": "2026-09-04T15:17:55Z"
+    },
+    {
+      "id": "B170",
+      "title": "test-installer-manifest exits 1 on CI after every sub-test passes, and names no failure",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "./planning/tests/test-installer-manifest.sh   # passes here; fails only on the ubuntu-latest runner",
+      "observed": "On master run 33873690073 the leg prints 'test-installer-manifest FAIL (exit 1)' immediately above 'test_manifest_emission: PASS', 'test_skill_files_matches_manifest: PASS' and 'test_windows_command_paths: PASS', with no failing assertion named. Locally the same script exits 0 with those three passes, so it is not reproducible on this host.",
+      "expected": "Either a named failing assertion, or exit 0. A non-zero exit with every sub-test passing cannot be acted on.",
+      "mechanism": "Not established. The exit follows the last sub-test, so it comes from something after them rather than from an assertion -- a cleanup, or a note escalating to a failure. The leg also prints 'no bundled rjq for this host; the register helpers need rjq' twice, which is the environmental difference from this machine and the first thing to test.",
+      "surfaces": [
+        "planning/tests/test-installer-manifest.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "master CI run 33873690073, ubuntu-latest leg",
+      "notes": null,
+      "created_at": "2026-09-04T15:18:07Z",
+      "updated_at": "2026-09-04T15:18:07Z"
     },
     {
       "id": "B14",
