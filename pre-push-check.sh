@@ -106,12 +106,82 @@ if [ -z "$base" ]; then
     base_label="$base"
 fi
 
+# ---- master is refreshed before anything is measured ------------------------
+# Every gate below measures the change set against master. A master ref that is
+# behind the remote therefore makes already-merged work look like this branch's,
+# and the gates report on a change set that does not exist: a register commit
+# someone else merged an hour ago reads as yours. So master is fetched first,
+# and a failure to fetch is a failure of the check rather than a silent fallback
+# to a stale answer -- an unreliable change set is worse than no answer, because
+# it looks like an answer.
+#
+# PRE_PUSH_SKIP_FETCH=1 exists for two callers only: a test driving this script
+# in a throwaway clone whose origin is a local path, and diagnosis with no
+# network. It is not an escape hatch for a slow link -- retry instead, since a
+# dropped fetch here is usually the wifi (see the retry-first rule).
+if [ "${PRE_PUSH_SKIP_FETCH:-0}" = 1 ]; then
+    note "PRE_PUSH_SKIP_FETCH=1: master not refreshed, the change set may be stale"
+elif git rev-parse --git-dir >/dev/null 2>&1 && git remote get-url origin >/dev/null 2>&1; then
+    if git fetch --quiet origin master 2>/dev/null; then
+        ok "fetched origin master, so the change set is measured against it"
+    else
+        bad "could not fetch origin master; the change set would be measured against a stale ref"
+        note "retry first -- a dropped fetch is usually the network, not the remote"
+        note "to check an unrelated gate meanwhile: PRE_PUSH_SKIP_FETCH=1 ./pre-push-check.sh"
+        printf 'pre-push-check: 1 failure(s) - master could not be refreshed\n'
+        exit 1
+    fi
+else
+    note "no origin remote; master cannot be refreshed and the change set may be stale"
+fi
+
 changed() { # <pathspec-filter...> -> changed files matching the filter
     { [ -n "$base" ] && git diff --name-only "$base..HEAD"; git diff --name-only; git diff --cached --name-only; } \
         2>/dev/null | sort -u | grep "$@" || true
 }
 
 printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; worktree only}"
+
+# ---- 0. the registers live on their own branch ------------------------------
+# BUGS.json and TODO.json are append-mostly arrays, so two branches that both
+# file an entry both take the same next free id. Git does not see that: the
+# additions land at different array positions, it merges them textually with NO
+# conflict, and the result carries two unrelated entries under one id. That
+# happened for real on 2026-09-04 -- eight duplicate ids in one merge, invisible
+# until reg_findings ran -- and register-resolve.sh's advice in the textual case
+# is to take one side, which silently drops the other's entries.
+#
+# The structural answer is a single writer: register entries are filed on the
+# `bugs` branch and nowhere else, so ids are allocated in one place and no merge
+# ever has to reconcile two sets of them.
+#
+# This fails immediately rather than at the end: the push is going to be
+# refused, and there is no reason to spend three minutes of cargo tests first.
+register_branch=bugs
+register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
+current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+# PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
+# transition that introduces this rule while register work is already in
+# flight, and an integration branch that merges someone else's entries rather
+# than filing its own. It must never be used to file an entry -- that is the
+# whole thing being prevented, and the duplicate ids it produces surface as a
+# merge nobody can resolve without reading two histories.
+if [ "${PRE_PUSH_ALLOW_REGISTERS:-0}" = 1 ] && [ -n "$register_changes" ]; then
+    note "PRE_PUSH_ALLOW_REGISTERS=1: register changes accepted off the $register_branch branch"
+    register_changes=''
+fi
+if [ -n "$register_changes" ] && [ "$current_branch" != "$register_branch" ]; then
+    bad "a register is modified outside the $register_branch branch"
+    printf '%s\n' "$register_changes" | sed 's/^/    /'
+    note "branch: $current_branch"
+    note "file entries on the $register_branch branch instead: git switch $register_branch,"
+    note "  then bin/<triple>/bug-add or todo-add, then push -- CI merges it to master"
+    note "a fix's resolution keys (fix, verification, status) go the same way, after the"
+    note "  code lands, so the id is allocated and closed in one place"
+    printf 'pre-push-check: 1 failure(s) - registers changed off the %s branch\n' \
+        "$register_branch"
+    exit 1
+fi
 
 # ---- 1. whitespace ---------------------------------------------------------
 ws_rc=0
