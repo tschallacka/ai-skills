@@ -127,11 +127,11 @@ sleep 6
 if ! kill -0 "$wake_pid" 2>/dev/null; then
     t_fail "idle tail exited during a 6s silence: $(cat "$temporary_root/wake.err")"
 fi
-# Send a wake message; the tail's poll must pick it up and print it.
+# Send a wake message; the server push must deliver it and print it.
 wake_msg="wake wakee now"
 cli wS send --server 127.0.0.1:"$port" --nick waker --chan '#wake' --text "$wake_msg" >/dev/null 2>"$temporary_root/wake-send.err" \
     || t_fail "wake send failed: $(cat "$temporary_root/wake-send.err")"
-sleep 8 # allow the tail's poll (5s interval) to catch it
+sleep 2 # allow the attached tail to receive the pushed message
 grep -q "$wake_msg" "$temporary_root/wake.log" \
     || t_fail "idle tail did not wake on the message: [$(cat "$temporary_root/wake.log")]"
 if ! kill -0 "$wake_pid" 2>/dev/null; then

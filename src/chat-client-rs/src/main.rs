@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use chat_proto::Message;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 const DEFAULT_BEACON_PORT: u16 = 7780;
@@ -46,7 +47,7 @@ fn usage() {
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick (server-side filter)\n\
          \x20 --mention-exit  tail: exit as soon as a message mentions your nick\n\
-         \x20 --local         read/tail: walk $AI_CHAT_HOME/channels/<chan>.log directly,\n\
+         \x20 --local         maintenance escape hatch: read/tail the shared log,\n\
          \x20                 with no server. Ignores --state: the channel logs are the\n\
          \x20                 server's shared storage, --state is one client's own\n\n\
          The session remembers the default server+nick and per-channel cursors\n\
@@ -1584,66 +1585,49 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             read_last_id(&mut tls, &o.chan)
         }
     };
-    let mention_suffix = if o.mentions { " mentions" } else { "" };
-    let mut interval: u64 = 5;
-    let mut last_seen = SystemTime::now();
+    // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
+    // stream.  FETCH is intentionally not used here: it is a backfill
+    // operation for read/reconnect, not a steady-state transport.
     loop {
-        // Poll for new history since the last id we saw; print any new rows.
-        let _ = write_line(
-            &mut tls,
-            &format!("FETCH {} {}{}", o.chan, last_id, mention_suffix),
-        );
-        let poll_deadline = SystemTime::now() + Duration::from_secs(2);
-        let mut new_msg = false;
-        while SystemTime::now() < poll_deadline {
-            match read_line(&mut tls) {
-                Ok(l) => {
-                    if l.starts_with(":server 000 end-of-history") {
-                        break;
+        match read_line(&mut tls) {
+            Ok(l) => {
+                let message = match Message::parse(&l) {
+                    Ok(message) => message,
+                    Err(_) => continue,
+                };
+                if message.command != "PRIVMSG"
+                    || message.params.first().map(String::as_str) != Some(o.chan.as_str())
+                {
+                    continue;
+                }
+                // The IRC push form deliberately has no history-row id.  The
+                // server assigns channel ids consecutively, so every pushed
+                // row advances the cursor by one from the JOIN/backfill point.
+                last_id = last_id.saturating_add(1);
+                let is_mention = message
+                    .trailing
+                    .as_deref()
+                    .map(|text| text.contains(&format!("@{}", nick)))
+                    .unwrap_or(false);
+                if !o.mentions || is_mention {
+                    if o.mentions {
+                        println!("!! MENTION !! {}", l);
+                    } else {
+                        println!("{}", l);
                     }
-                    if l.starts_with("MSG ") {
-                        let id = l
-                            .split_whitespace()
-                            .nth(2)
-                            .and_then(|s| s.parse::<u64>().ok())
-                            .unwrap_or(0);
-                        if id > last_id {
-                            last_id = id;
-                            new_msg = true;
-                            if o.mentions {
-                                // Notification: mark the mention distinctly so
-                                // a watcher can act on it.
-                                println!("!! MENTION !! {}", l);
-                                if o.mention_exit {
-                                    let _ = write_line(&mut tls, "QUIT");
-                                    std::process::exit(0);
-                                }
-                            } else {
-                                println!("{}", l);
-                            }
-                            save_cursor(state_dir, &o.chan, id, o.no_session);
-                        }
+                    if o.mention_exit && is_mention {
+                        let _ = write_line(&mut tls, "QUIT");
+                        std::process::exit(0);
                     }
                 }
-                Err(e) => {
-                    if !e.contains("os error 11") {
-                        break;
-                    }
+                save_cursor(state_dir, &o.chan, last_id, o.no_session);
+            }
+            Err(e) => {
+                if !e.contains("os error 11") {
+                    break;
                 }
             }
         }
-        if new_msg {
-            // A message reset the cadence to fast.
-            interval = 5;
-            last_seen = SystemTime::now();
-        } else {
-            // No new message: step down toward the 60s cap.
-            interval = (interval + 10).min(60);
-        }
-        std::thread::sleep(Duration::from_secs(interval));
-        // Bound an idle stretch to the cadence; if the connection is dead the
-        // next FETCH will error and this loop breaks.
-        let _ = last_seen;
     }
 }
 

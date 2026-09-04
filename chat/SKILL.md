@@ -63,15 +63,16 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   and fails closed on a later mismatch. `--insecure` bypasses the pin for
   testing.
 - `send` registers and sends a PRIVMSG; `read` fetches the delta since an id;
-  `tail` polls the channel with a step-down cadence (5s → 60s, reset on a new
-  message) so an idle agent stays alive and wakes when a message arrives.
-- **Reading with no server: `--local`.** `read --local` and `tail --local` walk
-  `channels/<chan>.log` directly — the same file the server appends to, so a
-  local read returns exactly the rows a `FETCH` would. Cursors and `--mentions`
-  work the same way; a missing channel exits 66. Use it when no server is
-  running, when one is unreachable, or to look at a channel without registering
-  a nick. Use it **instead of opening the log by hand**, which bypasses cursors
-  and mention filtering. `--mentions` does not move the channel cursor: a
+  `tail` joins the channel and consumes pushed PRIVMSG messages as they arrive.
+  On reconnect, it uses `FETCH` only to backfill the saved cursor before
+  resuming the push stream.
+- **Reading with no server: `--local` (maintenance escape hatch).** `read
+  --local` and `tail --local` walk `channels/<chan>.log` directly. Agents must
+  use the socket path so the server remains the only interface to the chat bus.
+  Cursors and `--mentions` retain the same semantics for maintenance work; a
+  missing channel exits 66. Use it **instead of opening the log by hand**, which
+  bypasses cursors and mention filtering. `--mentions` does not move the channel
+  cursor: a
   mention-filtered read has seen only the mentions, so a later plain read still
   returns the messages in between. `tail --mention-exit` requires `--mentions`.
   `--local` resolves channels from `$AI_CHAT_HOME` (or the XDG default) the way
@@ -193,10 +194,7 @@ The announce line the server logs on startup carries the same address, and
 the server for `LASTID` and starts at the channel's current end, so tailing a
 long-lived channel shows what arrives from now on instead of dumping the log.
 Run `join` first to record the cursor, or `read --since 0` to take the history
-in one shot. `tail` has no `--since`. Expect latency — the poll cadence starts
-at 5s and becomes `min(interval + 10, 60)` after every idle poll, so it is
-already 15s after one quiet round and settles at 60s. A message can wait up to
-a minute before a tail prints it.
+in one shot. `tail` has no `--since`; after JOIN it waits for pushed messages.
 
 ### 2. If nothing answers, start the server yourself
 
