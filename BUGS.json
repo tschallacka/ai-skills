@@ -1932,23 +1932,23 @@
     {
       "id": "B170",
       "title": "test-installer-manifest exits 1 on CI after every sub-test passes, and names no failure",
-      "status": "reported",
+      "status": "confirmed",
       "severity": "major",
       "priority": "high",
       "parent": null,
       "reproduce": "./planning/tests/test-installer-manifest.sh   # passes here; fails only on the ubuntu-latest runner",
       "observed": "On master run 33873690073 the leg prints 'test-installer-manifest FAIL (exit 1)' immediately above 'test_manifest_emission: PASS', 'test_skill_files_matches_manifest: PASS' and 'test_windows_command_paths: PASS', with no failing assertion named. Locally the same script exits 0 with those three passes, so it is not reproducible on this host.",
       "expected": "Either a named failing assertion, or exit 0. A non-zero exit with every sub-test passing cannot be acted on.",
-      "mechanism": "Not established. The exit follows the last sub-test, so it comes from something after them rather than from an assertion -- a cleanup, or a note escalating to a failure. The leg also prints 'no bundled rjq for this host; the register helpers need rjq' twice, which is the environmental difference from this machine and the first thing to test.",
+      "mechanism": "test-installer-manifest asserts the ship manifest against planning/REVIEWER.md and planning/scripts/plan-crypt-lib.sh, both GENERATED -- by planning/scripts/build-plan-libs.sh and then generate-reviewer.sh, which npm's prepack runs and the test suite never does. So it passes on a machine where setup-dev-env.sh or a pack has run and fails on a fresh checkout and on CI. Reproduced locally in a fresh worktree: 'missing manifest source: planning/REVIEWER.md'; after running build-plan-libs.sh and generate-reviewer.sh the same test reports 3/3 PASS. The CI log looked like it named no failure because that message goes to stderr and the sub-test results to stdout, so they interleave with the FAIL line printed above the PASSes.",
       "surfaces": [
         "planning/tests/test-installer-manifest.sh"
       ],
       "fix": null,
       "verification": null,
       "found_by": "master CI run 33873690073, ubuntu-latest leg",
-      "notes": null,
+      "notes": "Confirmed 2026-09-04, upgraded from reported. The fix is for the suite to be self-sufficient -- generate what it asserts against, or skip with a reason -- rather than depending on a build step nothing in the suite performs. Same family as the CI-vs-local-builder lesson, mirrored: here the SUITE needs a step the suite does not run.",
       "created_at": "2026-09-04T15:18:07Z",
-      "updated_at": "2026-09-04T15:18:07Z"
+      "updated_at": "2026-09-04T16:49:56Z"
     },
     {
       "id": "B14",

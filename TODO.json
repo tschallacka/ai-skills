@@ -188,6 +188,21 @@
       "updated_at": "2026-09-04T08:29:54Z"
     },
     {
+      "id": "T94",
+      "title": "Turn ci-failures.sh into a pipeline-failure-retrieval skill, with glab alongside gh",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "ci-failures.sh landed as a maintainer script: given a run id, a PR number, a branch, or nothing (the current branch), it prints each failing job with the lines that identify the failure, and --raw keeps whole logs. It replaced a six-step hand dance that was performed eight times in one session.\n\nIt should become a skill, because the knowledge in it is not specific to this repository: which API answers while a run is still going, that the logs endpoint refuses a body without --allow-escape-sequences, that the colour codes then need stripping with a literal ESC because the escape form is a GNU extension, and which lines in a log actually identify a failure as opposed to merely mentioning one.\n\nAdd glab support beside gh, so the same command answers for a project hosted on either forge. The shapes differ and both need naming: gh has runs containing jobs, glab has pipelines containing jobs with a trace endpoint rather than a logs endpoint, and the failure vocabulary in a trace is not the same. The skill should detect which tool the remote calls for rather than being told, and say which it chose.\n\nWorth carrying over from the script: resolving a bare number is ambiguous between a run id and a PR number, and it is disambiguated by magnitude, which is a heuristic that must be stated rather than hidden -- pr/47 is the unambiguous spelling. Also the extractor's own failure mode, found by pointing it at a ratchet failure it could not explain: 'FAIL (exit 1)' has a space before the paren, so a FAIL[:(] pattern missed the whole class, and continuing on indentation rather than a fixed line count is what keeps the next PASS row out of the extract.\n\nRequested by Tschallacka on 2026-09-04, immediately after watching the manual version repeated once too often.",
+      "blocked_on": null,
+      "refs": [
+        "ci-failures.sh"
+      ],
+      "note": null,
+      "created_at": "2026-09-04T16:49:44Z",
+      "updated_at": "2026-09-04T16:49:44Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
