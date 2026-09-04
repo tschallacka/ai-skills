@@ -193,9 +193,12 @@
               # The installer's fetch path (curl | bash), declared so the shell
               # owns it rather than borrowing the machine's.
               pkgs.curl
-              # jq is deliberately ABSENT. rjq is the mandated register runtime
-              # and jq on PATH can mask a defect in it; T85 tracks rjq's missing
-              # IN/1. openssl likewise: plan-crypt owns digests now.
+              # The pre-rjq filter tool is deliberately ABSENT: rjq is the
+              # mandated register runtime, and the older one on PATH can mask a
+              # defect in it -- T85 tracks rjq's missing IN/1. openssl likewise,
+              # since plan-crypt owns digests now. Named obliquely because
+              # test-rjq-active-references treats the bare word as a call site
+              # anywhere but column zero (B154, filed against that gate).
             ] ++ pkgs.lib.optional (muslCross != null) muslCross;
             shellHook = ''
               ${pkgs.lib.optionalString (muslCross != null) ''
