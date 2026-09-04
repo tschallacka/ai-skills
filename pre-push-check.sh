@@ -36,7 +36,11 @@
 #
 # Exit codes: 0 = every gate passed; 1 = at least one gate failed; 64 = bad
 # usage; 65 = not a git repository, or neither master nor an upstream resolves
-# and there is no branch diff to check.
+# and there is no branch diff to check; 69 = nix is needed to re-enter the
+# development shell and is not on PATH, so NO gate ran. 69 was undocumented,
+# and a caller that read only "non-zero" therefore reported a refusal for a run
+# that never started -- which is exactly what tests/test-register-branch-gate.sh
+# did on the macOS bash 3.2 leg, where there is no nix.
 
 set -u
 export LC_ALL=C
