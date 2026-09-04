@@ -8,6 +8,7 @@ package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	8019
 package/ai-text-editor/binaries.tsv	500
 package/ai-text-editor/docs/README.md	1307
+package/ai-text-editor/integration.tsv	1100
 package/ai-text-editor/references/protocol.md	13769
 package/ai-text-editor/requires.tsv	190
 package/ai-text-editor/schemas/capabilities.v1.json	2086
@@ -36,14 +37,14 @@ package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	195369
+package/install.sh	202166
 package/interactive-shell/SKILL.md	8627
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	5713
 package/interactive-shell/requires.tsv	1918
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5751
-package/interactive-shell/tests/test-interactive-shell.sh	4543
+package/interactive-shell/tests/test-interactive-shell.sh	7638
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296

@@ -1,0 +1,83 @@
+# MODE: DEV
+# Keep the `registers` branch level with master.
+#
+# The register branch only ever fast-forwards onto master (see registers.yml:
+# anything else would be the textual merge the whole arrangement exists to
+# avoid). So the moment master moves for any other reason -- an ordinary PR --
+# `registers` is behind, and the next entry filed there cannot land: the merge
+# step refuses it as not a fast-forward and asks for a rebase. This closes that
+# gap so the register branch is always ready to be written to.
+#
+# It will NOT force. If `registers` carries commits master does not have, that
+# is a filed entry waiting to land, and overwriting it would destroy a register
+# entry -- the one outcome this design must never produce. In that case the run
+# says so and stops, leaving the entry intact.
+#
+# The push uses github.token deliberately, NOT the REGISTERS_PUSH_TOKEN PAT:
+# GitHub does not raise workflow events for pushes made with GITHUB_TOKEN, so
+# syncing `registers` cannot trigger registers.yml. With a PAT it would, and
+# that run would find an empty change set and fail. `registers` is not a
+# protected branch, so the default token is sufficient as well as safer.
+name: registers-sync
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Serialised with itself, and deliberately NOT shared with the
+  # registers-to-master group: a sync and a landing touch different branches,
+  # and blocking one on the other would deadlock a busy moment rather than
+  # order it.
+  group: registers-sync
+  cancel-in-progress: false
+
+jobs:
+  fast-forward-registers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out master with the register branch alongside it
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward registers to master, or leave a pending entry alone
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse --verify --quiet origin/registers >/dev/null; then
+            printf 'no registers branch yet; creating it at master\n'
+            git push origin "origin/master:refs/heads/registers"
+            exit 0
+          fi
+
+          master="$(git rev-parse origin/master)"
+          registers="$(git rev-parse origin/registers)"
+
+          if [ "$master" = "$registers" ]; then
+            printf 'registers is already level with master (%s)\n' "${master:0:8}"
+            exit 0
+          fi
+
+          # A commit on registers that master does not carry is a filed entry
+          # waiting for its own run to land it. Syncing would mean force-pushing
+          # over it, which destroys a register entry. Report and stop: the
+          # landing run will move master, and the next master push syncs then.
+          if ! git merge-base --is-ancestor "$registers" "$master"; then
+            printf 'registers carries commits master does not:\n'
+            git --no-pager log --oneline "$master..$registers" | sed 's/^/  /'
+            printf '\n'
+            printf 'leaving it alone -- those are filed entries, and a force push\n'
+            printf 'would destroy them. They land through registers.yml; this branch\n'
+            printf 'syncs on the next master push once they have.\n'
+            exit 0
+          fi
+
+          printf 'fast-forwarding registers %s -> %s\n' "${registers:0:8}" "${master:0:8}"
+          git push origin "$master:refs/heads/registers"
+          printf 'registers is level with master\n'

@@ -400,6 +400,7 @@ tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-integration-mode.sh
 tests/test-installer-manifest.sh
 tests/test-installer-noninteractive.sh
 tests/test-installer-opencode-permissions.sh
@@ -564,6 +565,7 @@ binaries.tsv
 schemas/protocol.v1.json
 schemas/capabilities.v1.json
 requires.tsv
+integration.tsv
 references/protocol.md
 EDITOR_EOF
             case "$(uname -s):$(uname -m)" in
@@ -643,13 +645,43 @@ ISHEOF
     esac
 }
 
-ai_text_editor_file_allowed() {
-    [ "$1" = ai-text-editor ] || return 0
-    case "$EDITOR_INTEGRATION:$2" in
-        skill:bin/*/ai-text-editor-mcp|mcp:bin/*/ai-text-editor|mcp:bin/*/ai-text-editor-server|mcp:bin/*/ai-text-editor.exe|mcp:bin/*/ai-text-editor-server.exe)
-            return 1 ;;
+# Which mode this run installs a skill in: the per-skill choice if one was made,
+# else the run-wide one, else `skill`.
+#
+# `skill` is the default on purpose. It is the interface that needs no client
+# configuration and no running server, which is what a piped-from-curl install
+# has to leave working; an MCP server's tools are listed in every session that
+# configures it, so it is opted into rather than assumed.
+integration_mode_for() {
+    local skill="$1" line
+    # bash 3.2 is the floor and has no associative arrays, so the per-skill
+    # choices are newline-delimited `skill=mode` records.
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
+# Does this file belong in the mode this skill is being installed in?
+#
+# Only artifacts under bin/ carry a mode; everything else -- SKILL.md, the
+# schemas, the manpage -- is mode-free, so an mcp install is still a complete
+# skill directory and not a lone binary. A skill that declares no
+# integration.tsv has no arm in the generated table, its lookup is empty, and
+# every file is allowed: the flag is a no-op for it rather than an error.
+integration_file_allowed() {
+    local skill="$1" relative="$2" declared
+    case "$relative" in
+        bin/*) : ;;
         *) return 0 ;;
     esac
+    declared="$(integration_binary_mode "$skill" "${relative##*/}")"
+    [ -n "$declared" ] || return 0
+    [ "$declared" = "$(integration_mode_for "$skill")" ]
 }
 
 source_file() {

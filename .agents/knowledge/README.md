@@ -35,6 +35,7 @@ contains, it does not belong here.
 |---|---|
 | [agent-read-limits.md](agent-read-limits.md) | How much of a file does each agent actually read, and does it say when it stops? |
 | [unix-sockets-across-platforms.md](unix-sockets-across-platforms.md) | Why does a socket bind that works on Linux fail on macOS, and what actually ports? |
+| [github-ci-runners.md](github-ci-runners.md) | What are GitHub's runners actually like — arch, speed, `$TMPDIR`, what a resource cap can enforce — and which of those breaks tests? |
 
 ## Format
 

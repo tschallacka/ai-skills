@@ -34,6 +34,28 @@ repo_root="$(cd "$tests_dir/.." && pwd)"
 source "$repo_root/planning/tests/lib-test.sh"
 t_begin
 
+# The gate can only be exercised where it can actually run, and it re-enters
+# `nix develop` unless it is already inside the development shell. On the macOS
+# system-bash-3.2 leg there is no nix, so pre-push-check.sh printed
+# "nix develop .#default is required for Rust pre-push checks" and exited 69 --
+# non-zero, which satisfied the old "was it refused?" assertion for entirely
+# the wrong reason, while the two assertions on the refusal TEXT failed. Cases
+# 2 and 3 then passed vacuously, because the gate line is absent from a run
+# that never started. That is a test reporting FAIL where it should report SKIP,
+# and reporting PASS on two checks it did not perform.
+if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ] &&
+    ! command -v nix >/dev/null 2>&1; then
+    printf '%s: SKIP (no nix, and pre-push-check re-enters nix develop)\n' "${0##*/}"
+    exit 0
+fi
+# `timeout` is GNU coreutils, not stock BSD userland. The CI legs install
+# coreutils, so this is for a developer running the suite on a plain Mac; the
+# sibling chat tests skip on the same condition.
+if ! command -v timeout >/dev/null 2>&1; then
+    printf '%s: SKIP (no timeout(1))\n' "${0##*/}"
+    exit 0
+fi
+
 work="$(mktemp -d "${TMPDIR:-/tmp}/register-branch-gate.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
@@ -77,8 +99,12 @@ run_gate() { # <seconds> -> writes $work/out, echoes the exit code
 ( cd "$clone" && git switch -q -c feature/some-work && printf '\n' >>TODO.json )
 rc="$(run_gate 120)"
 out="$(cat "$work/out")"
-t_assert_eq 'a register change off the registers branch is refused' \
-    "$( [ "$rc" -ne 0 ] && echo refused || echo allowed )" 'refused'
+# Exit 1 exactly, not merely non-zero. The gate's own `exit 1` is what is being
+# asserted; any other non-zero code means the script stopped for some unrelated
+# reason and the run proves nothing -- 69 for a missing nix, 127 for a missing
+# `timeout`. "Non-zero" accepted all of those as a refusal.
+t_assert_eq 'a register change off the registers branch is refused (exit 1)' \
+    "$rc" '1'
 t_assert_contains 'the refusal names the rule' "$gate_line" "$out"
 t_assert_contains 'the refusal names the changed register' 'TODO.json' "$out"
 case "$out" in

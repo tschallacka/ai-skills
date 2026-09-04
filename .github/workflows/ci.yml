@@ -94,6 +94,76 @@ jobs:
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
 
+      - name: Install GNU nano, because macOS answers `nano` with Pico
+        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
+        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
+        # program. Stock macOS ships UW Pico under that name (the runner
+        # reported "UW PICO 5.09" in its title bar), which shares neither the
+        # title nor the keys, so the test skips itself there rather than
+        # asserting against a different program.
+        #
+        # Installing it keeps the assertions strict instead of widening them to
+        # cover two editors: the subject is the wrapper, so pinning the program
+        # removes a variable rather than adding a branch. This is the same
+        # reasoning as the GNU coreutils step above.
+        if: runner.os == 'macOS'
+        run: |
+          brew install nano
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Install memlimit, so the resource wrapper's RAM cap is real where it can be
+        # limited-run.sh caps memory with a transient systemd scope on Linux and
+        # with memlimit on macOS. Without it the suite prints "the requested RAM
+        # limit (2G) is not enforced" and runs UNCAPPED, so a test that eats
+        # memory takes the runner down instead of failing inside its budget.
+        #
+        # NEITHER macOS ARCH CAN ENFORCE IT ON THESE RUNNERS, measured
+        # 2026-09-04 and written up in .agents/knowledge/github-ci-runners.md.
+        # Intel: memlimit publishes only memlimit-aarch64-apple-darwin, so there
+        # is nothing to install. arm64: it installs and then cannot run, because
+        # it works through DYLD_INSERT_LIBRARIES, which SIP strips for system
+        # binaries -- its own installer says "no non-SIP shell found" -- and its
+        # hook library is arm64 where the system is arm64e:
+        #
+        #   dyld: terminating because inserted dylib '.../hook-*.dylib' could
+        #   not be loaded: (mach-o file, but is an incompatible architecture
+        #   (have 'arm64', need 'arm64e'))
+        #
+        # So the probe's failure is a PLATFORM RESTRICTION, not a broken step,
+        # and it reports `::notice` rather than failing the leg. A hard failure
+        # here reddens every macOS run for something no change to this
+        # repository can fix. What is still worth doing is installing it and
+        # SAYING which of the two states we are in, so "uncapped" is a recorded
+        # fact rather than a silence.
+        #
+        # MEMLIMIT_UNMANAGED_INSTALL pins the directory and switches off both
+        # the installer's PATH editing and its self-updater, so the directory
+        # added to PATH is provably the one installed into.
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" != arm64 ]; then
+            echo "::notice::memlimit is Apple Silicon only; $(uname -m) has no memory-cap mechanism, so the suite runs uncapped"
+            exit 0
+          fi
+          root="$HOME/.local/memlimit"
+          export MEMLIMIT_UNMANAGED_INSTALL="$root"
+          curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
+          bin=""
+          for candidate in "$root/memlimit" "$root/bin/memlimit"; do
+            if [ -x "$candidate" ]; then bin="$candidate"; break; fi
+          done
+          if [ -z "$bin" ]; then
+            echo "::notice::memlimit did not install under $root; the suite runs uncapped"
+            ls -lR "$root" || true
+            exit 0
+          fi
+          if ! "$bin" 2147483648 -- /usr/bin/true; then
+            echo "::notice::$bin installed but cannot cap a command on this runner (SIP strips DYLD_INSERT_LIBRARIES); the suite runs uncapped"
+            exit 0
+          fi
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+          echo "memlimit ready at $bin"
+
       - name: Build the compiled chat rung so its assertions run (T62)
         uses: dtolnay/rust-toolchain@1.98
         with:
@@ -228,6 +298,76 @@ jobs:
             brew install coreutils
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
+
+      - name: Install GNU nano, because macOS answers `nano` with Pico
+        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
+        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
+        # program. Stock macOS ships UW Pico under that name (the runner
+        # reported "UW PICO 5.09" in its title bar), which shares neither the
+        # title nor the keys, so the test skips itself there rather than
+        # asserting against a different program.
+        #
+        # Installing it keeps the assertions strict instead of widening them to
+        # cover two editors: the subject is the wrapper, so pinning the program
+        # removes a variable rather than adding a branch. This is the same
+        # reasoning as the GNU coreutils step above.
+        if: runner.os == 'macOS'
+        run: |
+          brew install nano
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Install memlimit, so the resource wrapper's RAM cap is real where it can be
+        # limited-run.sh caps memory with a transient systemd scope on Linux and
+        # with memlimit on macOS. Without it the suite prints "the requested RAM
+        # limit (2G) is not enforced" and runs UNCAPPED, so a test that eats
+        # memory takes the runner down instead of failing inside its budget.
+        #
+        # NEITHER macOS ARCH CAN ENFORCE IT ON THESE RUNNERS, measured
+        # 2026-09-04 and written up in .agents/knowledge/github-ci-runners.md.
+        # Intel: memlimit publishes only memlimit-aarch64-apple-darwin, so there
+        # is nothing to install. arm64: it installs and then cannot run, because
+        # it works through DYLD_INSERT_LIBRARIES, which SIP strips for system
+        # binaries -- its own installer says "no non-SIP shell found" -- and its
+        # hook library is arm64 where the system is arm64e:
+        #
+        #   dyld: terminating because inserted dylib '.../hook-*.dylib' could
+        #   not be loaded: (mach-o file, but is an incompatible architecture
+        #   (have 'arm64', need 'arm64e'))
+        #
+        # So the probe's failure is a PLATFORM RESTRICTION, not a broken step,
+        # and it reports `::notice` rather than failing the leg. A hard failure
+        # here reddens every macOS run for something no change to this
+        # repository can fix. What is still worth doing is installing it and
+        # SAYING which of the two states we are in, so "uncapped" is a recorded
+        # fact rather than a silence.
+        #
+        # MEMLIMIT_UNMANAGED_INSTALL pins the directory and switches off both
+        # the installer's PATH editing and its self-updater, so the directory
+        # added to PATH is provably the one installed into.
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" != arm64 ]; then
+            echo "::notice::memlimit is Apple Silicon only; $(uname -m) has no memory-cap mechanism, so the suite runs uncapped"
+            exit 0
+          fi
+          root="$HOME/.local/memlimit"
+          export MEMLIMIT_UNMANAGED_INSTALL="$root"
+          curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
+          bin=""
+          for candidate in "$root/memlimit" "$root/bin/memlimit"; do
+            if [ -x "$candidate" ]; then bin="$candidate"; break; fi
+          done
+          if [ -z "$bin" ]; then
+            echo "::notice::memlimit did not install under $root; the suite runs uncapped"
+            ls -lR "$root" || true
+            exit 0
+          fi
+          if ! "$bin" 2147483648 -- /usr/bin/true; then
+            echo "::notice::$bin installed but cannot cap a command on this runner (SIP strips DYLD_INSERT_LIBRARIES); the suite runs uncapped"
+            exit 0
+          fi
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+          echo "memlimit ready at $bin"
 
       - name: Place the compiled register rungs
         # Same reason as the default-bash leg: skill_files() lists the host's

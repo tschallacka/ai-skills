@@ -24,7 +24,7 @@ cli_copy_skill_files() {
     local relative source destination_file
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
-        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
+        integration_file_allowed "$CLI_SKILL" "$relative" || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$relative"
         mkdir -p "$(dirname "$destination_file")"
@@ -45,7 +45,7 @@ cli_install_skill() {
     local relative source destination_file collision=0 unsafe_collision=0 managed_version_transition=0
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
-        ai_text_editor_file_allowed "$CLI_SKILL" "$relative" || continue
+        integration_file_allowed "$CLI_SKILL" "$relative" || continue
         source="$(source_file "$CLI_SKILL" "$relative")"
         [ -f "$source" ] || die "source does not exist: $relative"
         destination_file="$TARGET_SELECTION/$CLI_SKILL/$(platform_relative_path "$CLI_SKILL" "$relative")"

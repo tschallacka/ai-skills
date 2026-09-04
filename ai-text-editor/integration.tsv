@@ -1,0 +1,20 @@
+# MODE: PROD
+# Which artifacts belong to which integration mode.
+#
+# A skill that offers more than one way to be driven declares it here, and
+# `install.sh --integration <skill>=<mode>` picks one without a prompt, so an
+# agent can choose its own interface headlessly.
+#
+# The rule is deliberately narrow: a binary named below installs ONLY in its
+# mode, and every file not named installs in every mode. So SKILL.md, the
+# schemas and the manpage are never mode-dependent, and a skill with no
+# integration.tsv at all has one mode and is unaffected by the flag.
+#
+# `skill` is the default, because it is the interface that needs no client
+# configuration and no running server -- which is what a `curl | bash` install
+# has to leave working. `mcp` is opt-in: its tools are listed in every session
+# that configures the server, so it is worth choosing rather than assuming.
+mode	binary	why
+skill	ai-text-editor	Short-lived client the skill's own instructions drive
+skill	ai-text-editor-server	Editor server that client talks to
+mcp	ai-text-editor-mcp	MCP bridge an agent calls as typed tools instead

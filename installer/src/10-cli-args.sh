@@ -9,27 +9,27 @@
 # `trap cleanup EXIT` must be installed before the first mktemp -d.
 case "${1:-}" in
     --print-skill-files)
-        [ "$#" -eq 3 ] || die "--print-skill-files needs skill and --format"
+        [ "$#" -eq 3 ] || die_usage "--print-skill-files needs skill and --format"
         CLI_MODE="print"
         CLI_SKILL="$2"
-        [ "$3" = "--format=tsv" ] || die "--print-skill-files requires --format=tsv"
+        [ "$3" = "--format=tsv" ] || die_usage "--print-skill-files requires --format=tsv"
         CLI_FORMAT="tsv"
         set --
         ;;
     --resolve-source)
-        [ "$#" -eq 3 ] || die "--resolve-source needs skill and relative path"
+        [ "$#" -eq 3 ] || die_usage "--resolve-source needs skill and relative path"
         CLI_MODE="resolve"
         CLI_SKILL="$2"
         CLI_RELATIVE="$3"
         set --
         ;;
     --install-skill)
-        [ "$#" -eq 6 ] || die "--install-skill needs skill, --target, and --approval"
+        [ "$#" -eq 6 ] || die_usage "--install-skill needs skill, --target, and --approval"
         CLI_MODE="install"
         CLI_SKILL="$2"
-        [ "$3" = "--target" ] || die "--install-skill requires --target"
+        [ "$3" = "--target" ] || die_usage "--install-skill requires --target"
         TARGET_SELECTION="$4"
-        [ "$5" = "--approval" ] || die "--install-skill requires --approval"
+        [ "$5" = "--approval" ] || die_usage "--install-skill requires --approval"
         CLI_APPROVAL="$6"
         set --
         ;;
@@ -56,7 +56,7 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         --skill)
-            [ "$#" -ge 2 ] || die "--skill needs a skill name"
+            [ "$#" -ge 2 ] || die_usage "--skill needs a skill name"
             # Accumulates. `--skill a --skill b` is the form people reach for
             # first, and it used to keep only the last one, installing something
             # other than what was asked with no warning. A comma-joined value is
@@ -69,37 +69,40 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         --package)
-            [ "$#" -ge 2 ] || die "--package needs prod or dev"
+            [ "$#" -ge 2 ] || die_usage "--package needs prod or dev"
             case "$2" in
                 prod|dev) PACKAGE_SELECTION="$2" ;;
-                *) die "--package must be prod or dev, not $2" ;;
+                *) die_usage "--package must be prod or dev, not $2" ;;
             esac
             shift 2
             ;;
         --package=*)
             case "${1#--package=}" in
                 prod|dev) PACKAGE_SELECTION="${1#--package=}" ;;
-                *) die "--package must be prod or dev, not ${1#--package=}" ;;
+                *) die_usage "--package must be prod or dev, not ${1#--package=}" ;;
             esac
+            shift
+            ;;
+        --integration)
+            [ "$#" -ge 2 ] || die_usage "--integration needs a mode, or skill=mode"
+            record_integration "$2"
+            shift 2
+            ;;
+        --integration=*)
+            record_integration "${1#--integration=}"
             shift
             ;;
         --editor-integration)
-            [ "$#" -ge 2 ] || die "--editor-integration needs skill or mcp"
-            case "$2" in
-                skill|mcp) EDITOR_INTEGRATION="$2" ;;
-                *) die "--editor-integration must be skill or mcp, not $2" ;;
-            esac
+            [ "$#" -ge 2 ] || die_usage "--editor-integration needs skill or mcp"
+            record_integration "ai-text-editor=$2"
             shift 2
             ;;
         --editor-integration=*)
-            case "${1#--editor-integration=}" in
-                skill|mcp) EDITOR_INTEGRATION="${1#--editor-integration=}" ;;
-                *) die "--editor-integration must be skill or mcp, not ${1#--editor-integration=}" ;;
-            esac
+            record_integration "ai-text-editor=${1#--editor-integration=}"
             shift
             ;;
         --target)
-            [ "$#" -ge 2 ] || die "--target needs a directory"
+            [ "$#" -ge 2 ] || die_usage "--target needs a directory"
             TARGET_SELECTION="$2"
             shift 2
             ;;
@@ -112,7 +115,7 @@ while [ "$#" -gt 0 ]; do
             exit 0
             ;;
         *)
-            die "Unknown option: $1 (use --help for usage)"
+            die_usage "Unknown option: $1 (use --help for usage)"
             ;;
     esac
 done

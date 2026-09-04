@@ -130,7 +130,7 @@ install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        if ! ai_text_editor_file_allowed "$skill" "$relative"; then
+        if ! integration_file_allowed "$skill" "$relative"; then
             [ -e "$destination/$relative" ] && changed=1
             continue
         fi
@@ -199,7 +199,7 @@ EOF
             bin/x86_64-pc-windows-msvc/ai-text-editor.exe \
             bin/x86_64-pc-windows-msvc/ai-text-editor-server.exe \
             bin/x86_64-pc-windows-msvc/ai-text-editor-mcp.exe; do
-            ai_text_editor_file_allowed "$skill" "$stale_relative" || {
+            integration_file_allowed "$skill" "$stale_relative" || {
                 [ -e "$destination/$stale_relative" ] || continue
                 rm -f "$destination/$stale_relative"
             }
@@ -210,7 +210,7 @@ EOF
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        ai_text_editor_file_allowed "$skill" "$relative" || continue
+        integration_file_allowed "$skill" "$relative" || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi

@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-register-helpers.sh — the register write helpers (T41): add, update,
+# test-register-helpers.sh — the register writers (T41): add, update,
 # close-with-evidence refusals, and the rebuild that repairs mechanical
-# damage. Every helper runs against a throwaway copy of the real registers.
+# damage. Every writer runs against a throwaway copy of the real registers.
+#
+# It drives the COMPILED `bugs` and `todo` now. The four shell helpers it used
+# to run -- planning/scripts/{bug,todo}-{add,update}.sh -- were deleted when
+# those binaries replaced them, so every case exited 127 and the assertions
+# below reported a missing field where the real cause was a missing file
+# (B169). The wording of each refusal is quoted from the binaries' actual
+# output rather than carried over from the scripts, because it differs: a task
+# is "Queued" where it was "Added", and an out-of-vocabulary value is refused
+# by the type at read time with the vocabulary listed.
+#
+# register-rebuild.sh is still a shell script and is still driven as one.
 set -euo pipefail
 export LC_ALL=C
 
@@ -15,29 +26,64 @@ trap 'rm -rf "$work"' EXIT
 fail() { printf 'register-helpers: %s\n' "$1" >&2; FAILED=1; }
 FAILED=0
 
+# The binaries live under a per-triple directory and nothing puts them on PATH.
+# A checkout that has not built them cannot run this, so it skips with the fix
+# named rather than failing on absence -- the same shape the other tests use.
+case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64)   triple=x86_64-unknown-linux-musl ;;
+    Linux:aarch64|Linux:arm64)  triple=aarch64-unknown-linux-musl ;;
+    Darwin:x86_64)              triple=x86_64-apple-darwin ;;
+    Darwin:arm64)               triple=aarch64-apple-darwin ;;
+    MINGW*|MSYS*|CYGWIN*|Windows*) triple=x86_64-pc-windows-msvc ;;
+    *) triple='' ;;
+esac
+# The SKILL directory first, then the shared root. That order is not cosmetic:
+# CI places them at <skill>/bin/<triple>/ because skill_files() lists that row,
+# and a test that looked only in the root bin/ would SKIP on every CI leg --
+# turning a red test into a silent pass, which is worse than the failure it
+# replaced. setup-dev-env.sh and a plain `cargo build` land in the root, hence
+# the fallback.
+resolve_register_bin() { # <skill> <name>
+    local candidate
+    for candidate in "$repo_root_tests/$1/bin/$triple/$2" "$repo_root_tests/bin/$triple/$2"; do
+        if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+    done
+    return 1
+}
+bugs_bin=''
+todo_bin=''
+if [ -n "$triple" ]; then
+    bugs_bin="$(resolve_register_bin bug-report bugs || true)"
+    todo_bin="$(resolve_register_bin todo todo || true)"
+fi
+if [ -z "$bugs_bin" ] || [ -z "$todo_bin" ]; then
+    echo "SKIP: the register binaries are not built for this host; run ./setup-dev-env.sh"
+    exit 0
+fi
+
 todo="$work/TODO.json"
 bugs="$work/BUGS.json"
 cp "$repo_root_tests/TODO.json" "$todo"
 cp "$repo_root_tests/BUGS.json" "$bugs"
 
-run_todo() { TODO_JSON="$todo" "$BASH" "$scripts/todo-add.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_todoup() { TODO_JSON="$todo" "$BASH" "$scripts/todo-update.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_bugadd() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-add.sh" "$@" 2>&1 || echo "rc=$?"; }
-run_bugup() { BUGS_JSON="$bugs" "$BASH" "$scripts/bug-update.sh" "$@" 2>&1 || echo "rc=$?"; }
+run_todo() { "$todo_bin" --file "$todo" add "$@" 2>&1 || echo "rc=$?"; }
+run_todoup() { "$todo_bin" --file "$todo" update "$@" 2>&1 || echo "rc=$?"; }
+run_bugadd() { "$bugs_bin" --file "$bugs" add "$@" 2>&1 || echo "rc=$?"; }
+run_bugup() { "$bugs_bin" --file "$bugs" update "$@" 2>&1 || echo "rc=$?"; }
 # The soundness check the writers share, asked of a file from outside them.
 reg_findings_out() {
     "$BASH" -c 'source "$1"; reg_findings "$2" "$3"' _ "$scripts/register-lib.sh" "$1" "$2"
 }
 
 # ---- add a task: it lands with stamps and sorts into place ------------------
-out="$(run_todo_add() { :; }; run_todo --id T9999 --title 'Helper probe' --priority high)"
-case "$out" in *'Added T9999'*) : ;; *) fail "todo-add did not report the add: $out" ;; esac
+out="$(run_todo --id T9999 --title 'Helper probe' --detail 'probe detail' --priority high)"
+case "$out" in *'Queued T9999'*) : ;; *) fail "todo add did not report the add: $out" ;; esac
 rjq -e --arg id T9999 '.tasks[] | select(.id == $id and .status == "open"
     and (.created_at | length > 0) and (.updated_at | length > 0))' "$todo" >/dev/null \
     || fail "the added task lacks its fields or stamps"
 
 # ---- duplicate ids are refused ----------------------------------------------
-out="$(run_todo --id T9999 --title 'Second of the same')"
+out="$(run_todo --id T9999 --title 'Second of the same' --detail d)"
 case "$out" in *'duplicate ids'*|*rc=65*) : ;; *) fail "a duplicate task id was accepted: $out" ;; esac
 
 # ---- set-status done without evidence is refused; with note it lands --------
@@ -50,7 +96,7 @@ rjq -e --arg id T9999 '.tasks[] | select(.id == $id) | .status == "done"' "$todo
 
 # ---- unknown statuses are refused by the shared checks ----------------------
 out="$(run_todoup T9999 --status finished)"
-case "$out" in *'unknown status'*|*rc=65*) : ;; *) fail "an invented status was accepted: $out" ;; esac
+case "$out" in *'is not one of'*|*rc=65*) : ;; *) fail "an invented status was accepted: $out" ;; esac
 
 # ---- a refused bug-update leaves the register byte-identical (B109) ---------
 # The refusal must be atomic: the value that fails the shared checks must not
@@ -59,7 +105,7 @@ case "$out" in *'unknown status'*|*rc=65*) : ;; *) fail "an invented status was 
 probe_id="$(rjq -r '.bugs[0].id' "$bugs")"
 cp "$bugs" "$work/bugs-before-refusal.json"
 out="$(run_bugup "$probe_id" --priority bogus)"
-case "$out" in *'unknown priority bogus'*|*rc=65*) : ;; *) fail "an invented priority was accepted: $out" ;; esac
+case "$out" in *'is not one of'*|*rc=65*) : ;; *) fail "an invented priority was accepted: $out" ;; esac
 cmp -s "$work/bugs-before-refusal.json" "$bugs" \
     || fail "a refused bug-update wrote to the register anyway (B109)"
 [ -z "$(reg_findings_out bug "$bugs")" ] \
@@ -77,7 +123,6 @@ out="$(run_bugadd --title 'Helper probe defect' \
     --expected 'probe entries never appear in a real run' \
     --severity minor --surfaces 'planning/scripts/a.sh,planning/scripts/b.sh')"
 case "$out" in *'Filed B'*) : ;; *) fail "bug-add did not report an id: $out" ;; esac
-echo "PRE-COUNT: $(rjq ".bugs|length" "$bugs")" >&2
 after="$(rjq '[.bugs[]] | length' "$bugs")"
 [ "$after" -eq $((before + 1)) ] || fail "bug-add did not append exactly one entry"
 
@@ -95,13 +140,26 @@ rjq -e --arg id "$bid" '.bugs[] | select(.id == $id)
     | .status == "fixed" and (.fix | length > 0) and (.verification | length > 0)' "$bugs" >/dev/null \
     || fail "the closed entry lost its fix or verification text"
 
-# ---- a damaged register is refused, naming the rebuild ----------------------
+# ---- a damaged register is refused, and the damage is named -----------------
+# The shell helper used to name register-rebuild.sh in the refusal; the binary
+# names the DAMAGE instead ("no reproduction — a report without one is a
+# rumour") and states that the file is unchanged. That is the load-bearing
+# half, so it is what is asserted. The lost repair hint is a real if small
+# regression in helpfulness, recorded rather than silently accepted: a reader
+# who has never met register-rebuild.sh is no longer told it exists.
 rjq '.bugs[-1].reproduce = ""' "$bugs" > "$work/dmg.json" && mv "$work/dmg.json" "$bugs"
+cp "$bugs" "$work/bugs-before-damage-refusal.json"
 out="$(run_bugup "$bid" --priority high)"
 case "$out" in
-    *'register-rebuild.sh'*) : ;;
-    *) fail "a damaged register was accepted without naming the rebuild: $out" ;;
+    *'no reproduction'*) : ;;
+    *) fail "a damaged register was accepted without naming the damage: $out" ;;
 esac
+case "$out" in
+    *'is unchanged'*) : ;;
+    *) fail "a refusal on a damaged register did not say the file was left alone: $out" ;;
+esac
+cmp -s "$work/bugs-before-damage-refusal.json" "$bugs" \
+    || fail "a refused update on a damaged register wrote to it anyway"
 
 # ---- the rebuild repairs what stamps can and refuses what it cannot ---------
 out="$("$BASH" "$scripts/register-rebuild.sh" bugs "$bugs" 2>&1 || true)"
@@ -129,14 +187,20 @@ total="$(rjq '.bugs | length' "$work/stamps.json")"
 # the flag probes start from fresh copies of the real registers.
 cp "$repo_root_tests/TODO.json" "$todo"
 cp "$repo_root_tests/BUGS.json" "$bugs"
-run_todo --id T9999 --title 'Flag probe parent' >/dev/null 2>&1
+# Not silenced. This add is only scaffolding for the --parent probe below, but
+# `>/dev/null 2>&1` on it is how a real failure hid: `todo add` requires
+# --detail, this call did not pass one, and the refusal surfaced three cases
+# later as "parent T9999 does not exist" -- a downstream symptom blaming the
+# wrong thing. A setup step that can fail is asserted like any other.
+out="$(run_todo --id T9999 --title 'Flag probe parent' --detail 'parent for the flag probe')"
+case "$out" in *'Queued T9999'*) : ;; *) fail "the flag probe's parent task was refused: $out" ;; esac
 out="$(run_todo --id T8888 --title 'Flag probe' --parent T9999 --priority low \
-    --blocked-on T9999 --detail 'flag detail' --ref planning/scripts/todo-add.sh)"
-case "$out" in *'Added T8888'*) : ;; *) fail "flag-rich todo-add refused: $out" ;; esac
+    --blocked-on T9999 --detail 'flag detail' --refs planning/scripts/register-rebuild.sh)"
+case "$out" in *'Queued T8888'*) : ;; *) fail "flag-rich todo-add refused: $out" ;; esac
 rjq -e --arg id T8888 '.tasks[] | select(.id == $id
     and .parent == "T9999" and .blocked_on == "T9999"
     and .detail == "flag detail"
-    and (.refs | index("planning/scripts/todo-add.sh") != null))' "$todo" >/dev/null \
+    and (.refs | index("planning/scripts/register-rebuild.sh") != null))' "$todo" >/dev/null \
     || fail "todo-add flags (--parent/--blocked-on/--detail/--ref) did not all land"
 out="$(run_todoup T8888 --detail 'detail two' --blocked-on —)"
 case "$out" in *Updated*) : ;; *) fail "todo-update --detail/--blocked-on refused: $out" ;; esac

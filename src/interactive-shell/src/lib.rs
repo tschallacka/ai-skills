@@ -2123,6 +2123,29 @@ pub fn run(
             .map_err(|e| e.to_string())?;
         }
         if let Ok((s, _)) = listener.accept() {
+            // THE ACCEPTED SOCKET INHERITS O_NONBLOCK ON BSD, AND NOT ON LINUX.
+            //
+            // The listener is non-blocking on purpose: this loop polls it
+            // between reads of the pty master. On Linux accept() hands back a
+            // BLOCKING socket regardless, so client() could read a request and
+            // wait for the rest of it. macOS copies the listener's O_NONBLOCK
+            // onto the connection, so every read returned EAGAIN before the
+            // request had arrived, client() failed, and the wrapper logged
+            //
+            //   interactive-shell client: Resource temporarily unavailable
+            //                             (os error 35)
+            //
+            // twice per attempt while the screen stayed empty and the input the
+            // caller sent was never delivered. `os error 35` is EAGAIN on
+            // macOS; Linux numbers it 11, so the errno in a CI log does not
+            // even match across legs.
+            //
+            // Setting it explicitly is the portable form: it is what Linux
+            // already did implicitly, so nothing changes there.
+            if let Err(e) = s.set_nonblocking(false) {
+                eprintln!("interactive-shell client: cannot block the accepted socket: {e}");
+                continue;
+            }
             if let Err(e) = client(
                 s,
                 master,
@@ -2170,6 +2193,41 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serialises every test that moves the process directory.
+    ///
+    /// `in_held_directory` fchdirs the WHOLE PROCESS, and cargo runs unit tests
+    /// as threads of one process, so two such tests interleave. Both halves of
+    /// that were seen on the aarch64-apple-darwin leg, one per run: master's run
+    /// 33868523959 failed `the_socket_is_bound_by_name_inside_the_held_directory`
+    /// on "the cwd leaked", and run 33870346097 failed
+    /// `a_directory_too_long_for_sun_path_still_binds_and_connects` on "the
+    /// socket is not where it was asked for" -- a relative bind that landed in
+    /// the other test's directory. Reproduced locally at roughly three runs in
+    /// four with `interactive_shell_core-<hash> --test-threads 2 held_directory
+    /// sun_path`, which is the pair on its own; the full suite hides it because
+    /// nineteen tests rarely put these two on the two threads at once.
+    ///
+    /// The comment on the first test used to carry the invariant "No other test
+    /// in this module touches the filesystem", which is exactly right and was
+    /// true when it was written. The second cwd-moving test broke it. A lock
+    /// enforces what a comment could only ask for.
+    ///
+    /// Not a product defect: nothing in this crate spawns a thread (there is no
+    /// `thread::spawn` in it), `run()` binds once before it does anything else,
+    /// and the input CLI is a one-shot process. The hazard is real for any
+    /// FUTURE concurrent caller, so it is recorded here rather than only fixed.
+    static CWD: Mutex<()> = Mutex::new(());
+
+    /// Take the cwd lock, treating a poisoned mutex as simply held.
+    ///
+    /// Without this, the first of these tests to fail poisons the mutex and the
+    /// second fails too, on the lock rather than on its own subject -- one
+    /// defect reported as two, with the second one misdescribed.
+    fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+        CWD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     /// The bind is RELATIVE, lands in the held directory, and gives the cwd back.
     ///
@@ -2181,11 +2239,12 @@ mod tests {
     /// construction this replaced stores `/proc/self/fd/<n>/socket`. Restoring
     /// fd_path() makes the first assertion fail on Linux, which is the point.
     ///
-    /// Everything cwd-sensitive is in ONE test on purpose: cargo runs unit tests
-    /// as threads of one process and the cwd is shared, so two tests moving it
-    /// could interleave. No other test in this module touches the filesystem.
+    /// The cwd is process-wide, so this test holds `CWD` for its whole body.
+    /// See that lock's comment: this test and the sun_path one below both move
+    /// the process directory, and without the lock they corrupt each other.
     #[test]
     fn the_socket_is_bound_by_name_inside_the_held_directory() {
+        let _cwd = cwd_lock();
         let before = std::env::current_dir().unwrap();
         let dir = std::env::temp_dir().join(format!("is-bind-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -2230,6 +2289,7 @@ mod tests {
     /// removing it, and a test that only covered bind could not see that.
     #[test]
     fn a_directory_too_long_for_sun_path_still_binds_and_connects() {
+        let _cwd = cwd_lock();
         let mut dir = std::env::temp_dir().join(format!("is-long-{}", std::process::id()));
         while dir.as_os_str().len() <= 120 {
             dir = dir.join("nested-directory-component");

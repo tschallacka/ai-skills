@@ -136,6 +136,25 @@ test_windows_command_paths() {
     printf '%s\n' 'test_windows_command_paths: PASS'
 }
 
+# Every assertion here reports what failed before exiting.
+#
+# It used to assert with bare `[ ... ]` under `set -e`, so a failure exited 1
+# having printed nothing at all -- the run showed three sub-tests passing, then
+# `FAIL (exit 1)` with no reason, on every platform. That is the whole of B170:
+# four rows named shell helpers deleted when the register binaries landed, and
+# the test could not say so. A test that cannot name its own failure costs more
+# than the failure.
+registry_fail() {
+    printf 'installer-manifest: %s\n' "$1" >&2
+    exit 1
+}
+
+registry_count_is() {
+    local label="$1" actual="$2" want="$3"
+    [ "$actual" -eq "$want" ] \
+        || registry_fail "rust-migration.tsv has $actual $label rows, expected $want"
+}
+
 test_rust_migration_registry() {
     local runtime generator dev excluded path kind candidate crate
     runtime="$(awk -F '\t' '$2 == "runtime-binary" { n++ } END { print n + 0 }' \
@@ -146,20 +165,26 @@ test_rust_migration_registry() {
         "$repo_dir/planning/rust-migration.tsv")"
     excluded="$(awk -F '\t' '$2 == "runtime-binary" && $3 == "render-plans-board" { n++ } END { print n + 0 }' \
         "$repo_dir/planning/rust-migration.tsv")"
-    [ "$runtime" -eq 48 ]
-    [ "$generator" -eq 1 ]
-    [ "$dev" -eq 5 ]
-    [ "$excluded" -eq 1 ]
+    registry_count_is runtime-binary "$runtime" 48
+    registry_count_is build-generator "$generator" 1
+    # One: register-rebuild.sh. The four register helpers that were here went
+    # with their shell originals when the compiled `bugs` and `todo` replaced
+    # them -- every other row's path is a live file, which is the invariant the
+    # loop below enforces, and a completed migration cannot satisfy it.
+    registry_count_is dev-binary "$dev" 1
+    registry_count_is 'excluded render-plans-board' "$excluded" 1
 
     while IFS=$'\t' read -r path kind candidate _; do
         [ -n "$candidate" ] || continue
         case "$kind" in
             runtime-binary|build-generator|dev-binary)
                 [ "$candidate" = render-plans-board ] && continue
-                [ -f "$repo_dir/$path" ]
+                [ -f "$repo_dir/$path" ] \
+                    || registry_fail "rust-migration.tsv names $path, which does not exist (candidate $candidate)"
                 crate="$candidate"
                 [ "$candidate" = overview-state ] && crate=plan-overview
-                [ -f "$repo_dir/src/$crate/Cargo.toml" ]
+                [ -f "$repo_dir/src/$crate/Cargo.toml" ] \
+                    || registry_fail "row $path names crate $crate, but src/$crate/Cargo.toml does not exist"
                 ;;
         esac
     done < "$repo_dir/planning/rust-migration.tsv"
