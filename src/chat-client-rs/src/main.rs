@@ -1600,10 +1600,6 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 {
                     continue;
                 }
-                // The IRC push form deliberately has no history-row id.  The
-                // server assigns channel ids consecutively, so every pushed
-                // row advances the cursor by one from the JOIN/backfill point.
-                last_id = last_id.saturating_add(1);
                 let is_mention = message
                     .trailing
                     .as_deref()
@@ -1619,6 +1615,14 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                         let _ = write_line(&mut tls, "QUIT");
                         std::process::exit(0);
                     }
+                }
+                // A pushed IRC line has no history-row id.  Resynchronize
+                // from the server's authoritative channel maximum instead of
+                // guessing from the number of pushes received.
+                let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+                let authoritative_id = read_last_id(&mut tls, &o.chan);
+                if authoritative_id > last_id {
+                    last_id = authoritative_id;
                 }
                 save_cursor(state_dir, &o.chan, last_id, o.no_session);
             }
