@@ -421,6 +421,87 @@ gen_install_hint() {
     printf '    esac\n}\n'
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Integration modes — generated from each skill's integration.tsv into
+# install.sh between the marker comments in 50-manifest.sh.
+#
+# Generated rather than read at runtime for the same reason the dependency
+# tables are: install.sh has no siblings to source, because the README's first
+# command pipes it from curl.
+
+integration_manifests() {
+    local manifest
+    for manifest in "$repo_root"/*/integration.tsv; do
+        [ -f "$manifest" ] || continue
+        printf '%s\n' "$manifest"
+    done
+}
+
+# mode<TAB>binary, header and comments dropped, and a row missing either field
+# refused rather than emitted as a pattern that matches everything.
+integration_rows() {
+    local manifest="$1"
+    awk -F '\t' -v OFS='\t' -v prog="${0##*/}" -v manifest="$manifest" '
+        /^[[:space:]]*#/ { next }
+        NF == 0 { next }
+        $1 == "mode" { next }
+        $1 == "" || $2 == "" {
+            printf "%s: integration row needs a mode and a binary in %s\n", prog, manifest > "/dev/stderr"
+            exit 65
+        }
+        $1 !~ /^[a-z][a-z0-9-]*$/ {
+            printf "%s: bad integration mode %s in %s\n", prog, $1, manifest > "/dev/stderr"
+            exit 65
+        }
+        { print $1, $2 }
+    ' "$manifest"
+}
+
+# Which mode a binary belongs to, by BASENAME, empty when it is mode-free.
+#
+# Both the bare name and the .exe form are emitted from one declaration. The
+# hand-written predicate this replaces listed the Windows suffixes separately,
+# which is a rule stated twice and therefore a rule that can be half-updated:
+# adding a fourth artifact meant remembering to add its .exe arm too.
+gen_integration_binary_mode() {
+    local manifest skill mode binary
+    printf 'integration_binary_mode() {\n    case "$1:$2" in\n'
+    while IFS= read -r manifest; do
+        skill="$(basename "$(dirname "$manifest")")"
+        while IFS="$tab" read -r mode binary; do
+            [ -n "$mode" ] || continue
+            printf "        %s:%s|%s:%s.exe) printf '%s\\\\n' ;;\n" \
+                "$skill" "$binary" "$skill" "$binary" "$mode"
+        done < <(integration_rows "$manifest")
+    done < <(integration_manifests)
+    printf '    esac\n}\n'
+}
+
+# The modes a skill offers, one per line, in declaration order with duplicates
+# collapsed. A skill absent from this table offers exactly one way to be driven,
+# which is what makes --integration a no-op for it rather than an error.
+gen_integration_modes() {
+    local manifest skill mode literal
+    printf 'integration_modes() {\n    case "$1" in\n'
+    while IFS= read -r manifest; do
+        skill="$(basename "$(dirname "$manifest")")"
+        literal=''
+        while IFS= read -r mode; do
+            [ -n "$mode" ] || continue
+            literal="$literal$mode\\n"
+        done < <(integration_rows "$manifest" | cut -f1 | awk '!seen[$0]++')
+        [ -n "$literal" ] || continue
+        printf "        %s) printf '%s' ;;\n" "$skill" "$literal"
+    done < <(integration_manifests)
+    printf '    esac\n}\n'
+}
+
+gen_integration_block() {
+    gen_integration_binary_mode
+    printf '\n'
+    gen_integration_modes
+}
+
 gen_dependency_block() {
     validate_probes_declared || printf "GATE-RC=%s
 " "$?" >&2
@@ -438,34 +519,63 @@ gen_dependency_block() {
     gen_install_hint
 }
 
+# Generate one block into a named file, saying which stage died.
+#
+# A silent generation failure would reach blast-radius as an empty capture and
+# read as "no output", so the stage is named. It writes to a path given by the
+# caller and RETURNS rather than exiting: `path="$(helper)"` would run the
+# helper in a subshell, where an `exit 70` ends only that subshell and the
+# build carries on with an empty block.
+generate_block() {
+    local label="$1" generator="$2" path="$3"
+    "$generator" > "$path" && return 0
+    printf '%s: generating the %s failed\n' "${0##*/}" "$label" >&2
+    return 70
+}
+
+# One part, with its markers stripped and any generated block spliced in.
+#
+# Separated from emit() so the loop stays readable and emit() stays inside
+# CODE-STYLE.md's 40-line cap: adding the second block pushed it to 41, which
+# the function-length ratchet caught.
+emit_part() {
+    local part="$1" blockfile="$2" integrationfile="$3"
+    # The part's own MODE/PACKAGE markers are dropped: they describe the source
+    # file, and emit_banner has already declared what install.sh is.
+    awk -v blockfile="$blockfile" -v integrationfile="$integrationfile" '
+        /^# MODE: (DEV|PROD)$/ { next }
+        /^# PACKAGE: (DEV|PROD)$/ { next }
+        /^# BEGIN GENERATED DEPENDENCY BLOCK$/ {
+            print
+            while ((getline line < blockfile) > 0) print line
+            close(blockfile)
+            next
+        }
+        /^# BEGIN GENERATED INTEGRATION BLOCK$/ {
+            print
+            while ((getline line < integrationfile) > 0) print line
+            close(integrationfile)
+            next
+        }
+        { print }
+    ' "$part"
+}
+
 emit() {
-    local part block
+    local part block integration
     block="$(mktemp "${TMPDIR:-/tmp}/dependency-block.XXXXXX")"
-    # A silent generation failure would reach blast-radius as an empty capture
-    # and read as "no output"; name the stage that died instead.
-    if ! gen_dependency_block > "$block"; then
-        printf '%s: generating the dependency block failed\n' "${0##*/}" >&2
-        rm -f "$block"
+    integration="$(mktemp "${TMPDIR:-/tmp}/integration-block.XXXXXX")"
+    if ! generate_block 'dependency block' gen_dependency_block "$block" \
+        || ! generate_block 'integration block' gen_integration_block "$integration"; then
+        rm -f "$block" "$integration"
         exit 70
     fi
     emit_banner
     for part in "$src_dir"/[0-9][0-9]-*.sh; do
         [ -f "$part" ] || { printf '%s: no parts in %s\n' "${0##*/}" "$src_dir" >&2; exit 66; }
-        # The part's own MODE/PACKAGE markers are dropped: they describe the
-        # source file, and emit_banner has already declared what install.sh is.
-        awk -v blockfile="$block" '
-            /^# MODE: (DEV|PROD)$/ { next }
-            /^# PACKAGE: (DEV|PROD)$/ { next }
-            /^# BEGIN GENERATED DEPENDENCY BLOCK$/ {
-                print
-                while ((getline line < blockfile) > 0) print line
-                close(blockfile)
-                next
-            }
-            { print }
-        ' "$part"
+        emit_part "$part" "$block" "$integration"
     done
-    rm -f "$block"
+    rm -f "$block" "$integration"
 }
 
 if [ "$check_only" = true ]; then
