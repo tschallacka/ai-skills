@@ -157,7 +157,11 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 #
 # This fails immediately rather than at the end: the push is going to be
 # refused, and there is no reason to spend three minutes of cargo tests first.
-register_branch=bugs
+# `registers`, not `bugs`: a branch cannot be named `bugs` while any `bugs/*`
+# branch exists -- git refuses a ref and a ref directory of the same name, and
+# bugs/close-b95 is unmerged and checked out. Work branches use the `bug/`
+# prefix, so `registers` cannot collide with them either.
+register_branch=registers
 register_changes="$(changed -E '^(BUGS|TODO)\.json$' || true)"
 current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 # PRE_PUSH_ALLOW_REGISTERS=1 is for transport, not authoring: the one-off
