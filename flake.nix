@@ -143,6 +143,24 @@
             extensions = [ "rust-src" "rustfmt" "clippy" ];
             targets = rustTargets;
           };
+          # A C compiler that targets musl, for the crates whose dependencies
+          # build C: ai-text-editor pulls pcre2-sys, libsqlite3-sys and blake3.
+          # Without it cc-rs compiles them with the host's glibc cc and the link
+          # against musl fails on __memcpy_chk, __memmove_chk and open64 --
+          # glibc fortify and LFS symbols musl does not carry. CI installs
+          # musl-tools for this reason; the dev shell owes the same.
+          #
+          # Linux only: host_triple() in setup-dev-env.sh resolves a Darwin host
+          # to *-apple-darwin, so no musl target is ever built there.
+          muslTarget =
+            if pkgs.stdenv.hostPlatform.isAarch64
+            then "aarch64-unknown-linux-musl"
+            else "x86_64-unknown-linux-musl";
+          muslCross =
+            if !pkgs.stdenv.hostPlatform.isLinux then null
+            else if pkgs.stdenv.hostPlatform.isAarch64
+            then pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc
+            else pkgs.pkgsCross.musl64.stdenv.cc;
         in {
           default = pkgs.mkShell {
             packages = [
@@ -165,8 +183,12 @@
               # UNCONFIGURED when mmdc is absent rather than failing.
               pkgs.nodejs
               pkgs.mermaid-cli
-            ];
+            ] ++ pkgs.lib.optional (muslCross != null) muslCross;
             shellHook = ''
+              ${pkgs.lib.optionalString (muslCross != null) ''
+                export CC_${builtins.replaceStrings ["-"] ["_"] muslTarget}="${muslCross}/bin/${muslTarget}-gcc"
+                export CARGO_TARGET_${pkgs.lib.toUpper (builtins.replaceStrings ["-"] ["_"] muslTarget)}_LINKER="${muslCross}/bin/${muslTarget}-gcc"
+              ''}
               echo "ai-skills dev shell"
               echo "  bash32           $(${bash32}/bin/bash32 --version | head -1 | cut -d' ' -f4)  (CODE-STYLE.md §1 floor)"
               echo "  bash32-run-tests run ./run-tests.sh entirely under bash 3.2"
