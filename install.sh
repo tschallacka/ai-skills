@@ -3692,6 +3692,7 @@ CHATEOF
 tests/test-chat.sh
 tests/test-chat-resolution.sh
 tests/test-chat-broadcast-stall.sh
+tests/test-chat-descriptor-leak.sh
 CHATEOF
             ;;
     esac
