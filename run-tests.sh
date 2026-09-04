@@ -223,6 +223,9 @@ suites=(
     # the rung CI builds cargo for specifically "so its assertions run" (T62) —
     # was dead weight: a green suite proved nothing about the chat skill.
     chat/tests
+    # Registered with the suite dir, not after it: an interactive-shell/tests
+    # that nothing discovers is the same dead weight chat/tests was.
+    interactive-shell/tests
     # .github/tests covers ci-scope.sh and ci-subjects.sh, which decide how much
     # of the workspace CI compiles. Undiscovered they would be the same dead
     # weight as chat/tests was: the scripts that can silently narrow every run,

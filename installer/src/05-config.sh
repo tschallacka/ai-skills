@@ -39,7 +39,7 @@ SUMMARY_PRINTED=0
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 EDITOR_INTEGRATION="${EDITOR_INTEGRATION:-skill}"
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -54,6 +54,7 @@ SKILL_DESCRIPTIONS=(
     'Merge requests in your voice: own branch, one squashed commit, a TLDR, then the fix.'
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
+    'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -118,6 +119,11 @@ The reader may always ask for plain english; the register bends only where brevi
     'Keeps file state on a server so clients can request bounded reads and edits without embedding editor state.
 Supports UTF-8, raw-byte and hex startup modes, explicit exact/wildcard/regex/fuzzy search choices, and revision-guarded saves.
 Each tab records identity and revision in its own SQLite database; TCP is available where Unix sockets are unavailable.'
+    'Lets an agent operate a full-screen terminal program it has never seen: nano, mc, lynx, a pager, a menu.
+A rust wrapper allocates a real PTY and publishes each screen change as one JSONL event; a socket client sends keys, combos, pastes, mouse events and resizes.
+Observation is the point: compact row views and deltas keep context small, and element discovery reports what is actually on screen rather than assuming a shortcut.
+An acknowledgement means the wrapper accepted the input, never that the program acted on it, so every state change is confirmed against the next screen.
+POSIX only, and the screen model is honest about its limits: byte-oriented cells, so non-ASCII widths are approximate.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

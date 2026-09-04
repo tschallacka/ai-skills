@@ -262,15 +262,26 @@ requires_rows() {
 # runtime_requirements() stays a self-contained case statement: it is extracted
 # from install.sh and sourced on its own by test-limited-run-contract.sh.
 gen_requirements() {
-    local manifest skill tool condition strength why group
+    local manifest skill tool condition strength why group arms
     printf 'runtime_requirements() {\n    local platform\n    platform="$(uname -s):$(uname -m)"\n'
     printf '    case "$1" in\n'
     while IFS= read -r manifest; do
         skill="$(basename "$(dirname "$manifest")")"
-        printf '        %s)\n' "$skill"
+        arms=''
         while IFS="$tab" read -r tool condition strength why group; do
-            printf '%s\n' "            case \"\$platform\" in $condition) printf '%s\\n' $tool ;; esac"
+            arms="$arms            case \"\$platform\" in $condition) printf '%s\\n' $tool ;; esac
+"
         done < <(requires_rows "$manifest")
+        # A skill that requires nothing gets no arm at all. An empty arm and an
+        # unmatched case print exactly the same thing -- nothing -- but the arm
+        # costs two lines per skill, and seven of the fourteen skills declare no
+        # runtime requirement, which pushed this generated function past
+        # CODE-STYLE.md's 40-line cap as soon as the fourteenth was registered.
+        # The cap is ratcheted downward only, so the generator pays it rather
+        # than the ratchet being raised for output nobody wrote by hand.
+        [ -n "$arms" ] || continue
+        printf '        %s)\n' "$skill"
+        printf '%s' "$arms"
         printf '            ;;\n'
     done < <(skill_manifests)
     printf '    esac\n}\n'

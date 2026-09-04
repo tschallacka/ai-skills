@@ -433,13 +433,49 @@ jobs:
       # considered and rejected: clippy and test are cheap next to the release
       # builds, and a workspace-wide pass is what catches a library change
       # breaking a consumer that selection failed to name.
+      # interactive-shell is the workspace's first POSIX-only member, so
+      # --workspace cannot mean "every member" on the Windows leg any more.
+      #
+      # THE UNIX SOCKET IS NOT THE REASON. A loopback port would replace it
+      # without difficulty -- the chat skill already offers exactly that choice
+      # -- so naming the transport here would be naming the one part that does
+      # port cleanly. What does not port is the terminal core:
+      #
+      #   lib.rs:1415  libc::openpty                 no Windows equivalent;
+      #                                              ConPTY (CreatePseudoConsole)
+      #                                              is a different API, not a flag
+      #   lib.rs:1437  ioctl(slave, TIOCSCTTY, 0)    Windows has no controlling
+      #                                              terminal to assign
+      #   lib.rs:1897  ioctl(fd, TIOCSWINSZ)         resize is a ConPTY call
+      #   lib.rs:1436  setsid()                      no sessions
+      #   lib.rs:1443  setpgid(0, 0)                 no process groups, so
+      #   lib.rs:1463  kill(-pid, SIGKILL)           signalling a whole group by
+      #   lib.rs:1473  kill(-pid, SIGTERM)           negative pid has no analogue
+      #                                              (Job Objects are the nearest)
+      #
+      # plus twelve raw-fd sites (AsRawFd/FromRawFd/dup2/fcntl) against a
+      # platform whose equivalent is a HANDLE. Porting means rewriting the PTY
+      # and process-lifecycle layer, not swapping a transport.
+      # interactive-shell/binaries.tsv declares no Windows row for the same
+      # reason, so the exclusion and the shipped set agree.
+      #
+      # An --exclude rather than cfg-gating the crate into an inert Windows
+      # stub: a binary that builds on Windows and refuses to run is a worse
+      # answer than one that is honestly absent, and it would put a
+      # do-nothing artifact next to the four real ones.
       - name: Format, lint and test the whole workspace
         shell: bash
         run: |
           set -euo pipefail
+          exclude=''
+          case "${{ matrix.target }}" in
+            *windows*) exclude='--exclude interactive-shell' ;;
+          esac
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets --target "${{ matrix.target }}" -- -D warnings
-          cargo test --workspace --all-targets --target "${{ matrix.target }}"
+          # shellcheck disable=SC2086
+          cargo clippy --workspace $exclude --all-targets --target "${{ matrix.target }}" -- -D warnings
+          # shellcheck disable=SC2086
+          cargo test --workspace $exclude --all-targets --target "${{ matrix.target }}"
 
       # ---- rjq -------------------------------------------------------------
       - name: Build rjq and prove it answers a query
@@ -522,6 +558,62 @@ jobs:
             target/${{ matrix.target }}/release/chat-server-rs.exe
             target/${{ matrix.target }}/release/chat-client-rs
             target/${{ matrix.target }}/release/chat-client-rs.exe
+          if-no-files-found: error
+
+      # ---- interactive-shell -----------------------------------------------
+      # interactive-shell/binaries.tsv declares eight shipped rows -- the PTY
+      # wrapper and the socket input client, for the two Linux and the two macOS
+      # targets -- and until this step nothing built them. The registry is
+      # allowed to name a binary that does not exist yet (tests/test-shipped-
+      # binaries.sh says so), but a release assembles bin/<triple>/ from CI
+      # artifacts, so eight declared rows with no producing job is a promise
+      # that cannot be kept on any platform.
+      #
+      # No scope flag of its own: ci-subjects.sh maps crates onto subjects and
+      # adding a fifteenth would be plumbing for a build that costs less than
+      # the workspace-wide clippy already running above. The job-level
+      # `scope != 'none'` condition is the gate.
+      #
+      # The fixture binary is deliberately not built: it is maintainer-only and
+      # has no binaries.tsv row. Windows is excluded for the same reason the
+      # workspace gate excludes the crate there.
+      - name: Build the interactive-shell binaries and prove they launch
+        if: "!contains(matrix.target, 'windows')"
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p interactive-shell --release --target "${{ matrix.target }}" \
+            --bin interactive-shell --bin interactive-shell-input
+          release="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          for binary in interactive-shell interactive-shell-input; do
+            # Executed, not just built: these are shipped as prebuilt artifacts,
+            # so "it linked" is not the claim being made about them.
+            "$release/$binary" --help >/dev/null
+            printf '%s launches on %s\n' "$binary" '${{ matrix.target }}'
+          done
+
+      - name: The musl interactive-shell build must actually be static
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          # Same claim as plan-crypt's: the target machine needs nothing.
+          for binary in interactive-shell interactive-shell-input; do
+            out="$(ldd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/$binary" 2>&1 || true)"
+            printf '%s: %s\n' "$binary" "$out"
+            case "$out" in
+              *"not a dynamic executable"*|*"statically linked"*) ;;
+              *) echo "::error::$binary links against a shared library"; exit 1 ;;
+            esac
+          done
+
+      - name: Upload the interactive-shell artifacts
+        if: "!contains(matrix.target, 'windows')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: interactive-shell-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/interactive-shell
+            target/${{ matrix.target }}/release/interactive-shell-input
           if-no-files-found: error
 
       # ---- plan-crypt ------------------------------------------------------

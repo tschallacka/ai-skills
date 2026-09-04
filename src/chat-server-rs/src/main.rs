@@ -689,14 +689,22 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                     continue;
                 }
                 if verb == "QUIT" {
+                    // Fall through to the single teardown path at the bottom of
+                    // the loop. This used to `return` here, which skipped it
+                    // entirely, and three things followed (B127): the socket
+                    // was never closed, so the process leaked one descriptor
+                    // per QUIT until it hit its limit and stopped accepting
+                    // connections -- silently, with every later message lost;
+                    // the nick's channel membership was never dropped, leaving
+                    // ghosts in NAMES; and the peer's outbox went on accepting
+                    // broadcasts for a connection that was gone.
+                    //
+                    // `chat-client-rs send` sends QUIT as its last act, so this
+                    // was one leaked descriptor per message on the bus.
                     w(st, "ERROR :bye");
                     st.closed = true;
                     sess.closed = true;
-                    if let Ok(mut nicks) = hub.nicks.lock() {
-                        nicks.retain(|_, v| *v != idx as u64);
-                    }
-                    drop(guard);
-                    return;
+                    break;
                 }
 
                 if !sess.registered && !sess.nick.is_empty() && !sess.user.is_empty() {
@@ -1324,6 +1332,12 @@ fn bcast_for_host(host: &str) -> String {
 static HANDSHAKE_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LAST_LOG: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
+// The same pair for accept() failures, which have their own gate: a descriptor
+// limit reached mid-run is a different condition from a bad handshake, and one
+// must not silence the other.
+static ACCEPT_ERRORS: AtomicU64 = AtomicU64::new(0);
+static LAST_ACCEPT_LOG: Mutex<u64> = Mutex::new(0);
+
 fn main() {
     // Same central default as the client: the tsch-ai-skills XDG home.
     let home = std::env::var("AI_CHAT_HOME").unwrap_or_else(|_| {
@@ -1472,7 +1486,39 @@ fn main() {
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(e) => {
+                // Discarding this was how descriptor exhaustion presented as
+                // "the bus went quiet": accept() fails, the loop spins on it at
+                // full speed, every connect is dropped without being serviced,
+                // and nothing is written anywhere to say so. Say it, once a
+                // minute, and pause -- an error here is a condition to report,
+                // not a nuisance to skip.
+                let n = ACCEPT_ERRORS.fetch_add(1, Ordering::Relaxed);
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let due = {
+                    let mut last = LAST_ACCEPT_LOG.lock().unwrap_or_else(|p| p.into_inner());
+                    if now.saturating_sub(*last) >= 60 || *last == 0 {
+                        *last = now;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if due {
+                    eprintln!(
+                        "chat-server-rs: cannot accept connections ({} so far, one line per minute): {}",
+                        n + 1,
+                        e
+                    );
+                }
+                // Without this the loop burns a core retrying an error that
+                // will not clear on its own.
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
         };
         // A short read timeout lets each serve thread release its slot guard
         // frequently instead of holding it across an indefinitely-blocking
@@ -1501,12 +1547,18 @@ fn main() {
             };
             let state = ConnState {
                 conn,
-                tcp: stream.try_clone().unwrap_or_else(|_| {
-                    // Unreachable in practice on a live socket; if it fails the
-                    // connection is unusable. Provide the original stream so the
-                    // rest of the setup still compiles; serve will drop it on EOF.
-                    stream.try_clone().unwrap()
-                }),
+                // The accepted stream is MOVED here, not cloned. It was
+                // `stream.try_clone().unwrap_or_else(|_| stream.try_clone().unwrap())`,
+                // which was two defects in one expression: it duplicated the
+                // descriptor for no reason (nothing below needs `stream`), and
+                // its fallback unwrapped a second clone that fails for exactly
+                // the same reason the first one did. Under a descriptor limit
+                // that is `Os { code: 24, TooManyOpenFiles }` in an unwrap --
+                // and this crate is built with `panic = "abort"`, so the whole
+                // server died, dropping every other live connection with it.
+                // Measured: at `ulimit -n 6` the process aborted with that
+                // exact message.
+                tcp: stream,
                 nick: String::new(),
                 user: String::new(),
                 host: "localhost".into(),

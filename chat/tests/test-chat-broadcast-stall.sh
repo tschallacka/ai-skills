@@ -68,11 +68,19 @@ mkdir -p "$home"
 subscriber_pid=""
 server_pid=""
 cleanup() {
+    # Every kill is `|| :` and the function ends in `return 0`, so a teardown
+    # can never decide the verdict: by the time cleanup runs a subscriber may
+    # have exited on its own and `kill` then fails. This is hygiene, not a fix
+    # for anything observed -- the exit status here was already `rm`'s, and a
+    # macOS failure of this test was traced to a client regression on another
+    # branch, not to teardown.
+    #
     # CONT first: a stopped process cannot act on a TERM until it is resumed.
-    [ -n "$subscriber_pid" ] && kill -CONT "$subscriber_pid" 2>/dev/null
-    [ -n "$subscriber_pid" ] && kill "$subscriber_pid" 2>/dev/null
-    [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null
+    [ -n "$subscriber_pid" ] && { kill -CONT "$subscriber_pid" 2>/dev/null || :; }
+    [ -n "$subscriber_pid" ] && { kill "$subscriber_pid" 2>/dev/null || :; }
+    [ -n "$server_pid" ] && { kill "$server_pid" 2>/dev/null || :; }
     rm -rf "$work"
+    return 0
 }
 trap cleanup EXIT
 
@@ -201,8 +209,8 @@ else
     t_fail "the server stopped serving other channels while a subscriber was stopped: $(cat "$work/send-afterstop2.out")"
 fi
 
-kill -CONT "$subscriber_pid" 2>/dev/null
-kill "$subscriber_pid" 2>/dev/null
+kill -CONT "$subscriber_pid" 2>/dev/null || :
+kill "$subscriber_pid" 2>/dev/null || :
 subscriber_pid=""
 
 # 5. Delivery still works. The queue replaced a direct socket write, so this is
@@ -246,14 +254,20 @@ if command -v openssl >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1; then
         [ "$delivered" = true ] \
             || t_fail "a joined watcher never received the broadcast: $(cat "$work/watch.out")"
     fi
-    kill "$watch_pid" "$watch_feeder" 2>/dev/null
+    kill "$watch_pid" "$watch_feeder" 2>/dev/null || :
 else
     printf 'SKIP chat broadcast stall: no openssl or mkfifo - broadcast delivery was not asserted\n' >&2
 fi
 
 # 6. Nothing above may have been bought with a panicked server thread: a
 #    poisoned mutex would show up here, and the process must still be alive.
-kill -0 "$server_pid" 2>/dev/null || t_fail "the server process died during the run"
+# Not `kill -0`: the server is our own child, so an aborted process stays an
+# unreaped zombie and `kill -0` still succeeds. The state is what tells them
+# apart.
+srv_state="$(ps -o state= -p "$server_pid" 2>/dev/null | tr -d ' ')"
+case "$srv_state" in
+    ''|Z*) t_fail "the server process died during the run (state '${srv_state:-gone}')" ;;
+esac
 case "$(cat "$work/server.err" 2>/dev/null)" in
     *panicked*) t_fail "a server thread panicked: $(cat "$work/server.err")" ;;
 esac

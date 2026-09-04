@@ -87,10 +87,23 @@ in_allowlist() {
         ./planning/tests/test-runtime-dependencies.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/lib-portable.sh:sha256-tool) return 0 ;;
         ./benchmark/planning/tests/test-review-lifecycle.sh:sha256-tool) return 0 ;;
+        # The descriptor-leak assertion counts the server's OWN open descriptors,
+        # which is the only way to name the leak rather than infer it from the
+        # symptom, and /proc is the only interface that exposes it. The read is
+        # guarded by `[ -d /proc/<pid>/fd ]` and prints a skip note elsewhere,
+        # so the test stays honest on a platform without it.
+        ./chat/tests/test-chat-descriptor-leak.sh:gnu-only-tools) return 0 ;;
         # Development-only tooling may use python3 (CODE-STYLE.md §1).
         ./benchmark/*:python3-shipped) return 0 ;;
         ./run-tests.sh:python3-shipped) return 0 ;;
         ./planning/tests/*:python3-shipped) return 0 ;;
+        # The skill-loading probes are maintainer-only measurement tooling, the
+        # same category as ./benchmark/* above: MODE: DEV, and excluded from the
+        # package by name in package.json's `files`, so no runtime of ours ever
+        # depends on their python3. They became visible to this scan only when
+        # the .gitignore negations made them tracked.
+        ./.agents/skill-loading-experiment/*:python3-shipped) return 0 ;;
+        ./.agents/skill-loading-experiment/*:bash-by-path-lookup) return 0 ;;
     esac
     return 1
 }
