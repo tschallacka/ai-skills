@@ -57,13 +57,32 @@ jobs:
           # only live in code, and it runs before the push is attempted.
           token: ${{ secrets.REGISTERS_PUSH_TOKEN || github.token }}
 
+      - name: Stop early when there is nothing to land
+        id: pending
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]; then
+            # registers-sync.yml levels this branch with master whenever master
+            # moves, so this is the ordinary state between entries -- not a
+            # mistake. The guard below would refuse it as an empty change set,
+            # which is the right answer to "someone resolved the base wrongly"
+            # and the wrong answer to "there is simply nothing filed yet".
+            printf 'registers is level with master; nothing filed to land\n'
+            printf 'landing=no\n' >>"$GITHUB_OUTPUT"
+          else
+            printf 'landing=yes\n' >>"$GITHUB_OUTPUT"
+          fi
+
       - name: Refuse anything but a register change
+        if: steps.pending.outputs.landing == 'yes'
         run: |
           set -euo pipefail
           git fetch --quiet origin master
           ./.github/registers-guard.sh --base origin/master
 
       - name: Validate with the shipped register tools, if a build is present
+        if: steps.pending.outputs.landing == 'yes'
         run: |
           set -uo pipefail
           triple="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
@@ -79,6 +98,7 @@ jobs:
           fi
 
       - name: Fast-forward master
+        if: steps.pending.outputs.landing == 'yes'
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
