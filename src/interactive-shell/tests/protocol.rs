@@ -1050,6 +1050,46 @@ fn malformed_cli_arguments_do_not_panic() {
     assert!(!String::from_utf8_lossy(&input.stderr).contains("panicked"));
 }
 
+/// A request whose body arrives after the connect is still served.
+///
+/// This is the macOS failure of run 33890018179 turned into a test. The
+/// listener is non-blocking so the run loop can poll it between reads of the
+/// pty master, and BSD copies that O_NONBLOCK onto the socket `accept()`
+/// returns while Linux does not. So on macOS the wrapper's first read of a
+/// request that had not yet arrived returned EAGAIN, client() failed, the
+/// connection was dropped, and the caller's input never reached the program:
+///
+///     interactive-shell client: Resource temporarily unavailable (os error 35)
+///
+/// 35 is EAGAIN on macOS and 11 on Linux, so even the errno differs by leg.
+///
+/// The delay is what makes the mechanism reachable on either platform. Without
+/// it the request is always already buffered by the time the wrapper reads, so
+/// the defect is invisible on a fast machine: injecting `set_nonblocking(true)`
+/// alone left all 19 tests passing here, and only the pause reproduced CI.
+/// Measured all three ways -- bug+delay fails with EAGAIN, fix+delay passes,
+/// bug without the delay passes, which is why Linux never saw it. One test pays
+/// the 150ms rather than every exchange in this file.
+#[test]
+fn a_request_body_that_arrives_late_is_still_served() {
+    let dir = temp_dir("late-body");
+    let mut child = start(&dir, &["sh", "-c", "sleep 600"], "600");
+    wait_for_socket(&dir);
+    let mut stream = connect_socket(&dir).expect("the socket must accept a connection");
+    thread::sleep(Duration::from_millis(150));
+    let reply = exchange(&dir, &mut stream, "{\"v\":1,\"op\":\"observe\"}\n");
+    assert!(
+        reply.contains("\"event\":\"snapshot\""),
+        "a late request body must still be answered, got {reply:?}\n{}",
+        wrapper_stderr(&dir)
+    );
+    // Reaped, not just killed: clippy::zombie_processes is denied here, and a
+    // fixture parked for 600 seconds is exactly the one worth not leaving
+    // behind on a runner that may go on to run another 200 tests.
+    child.kill().ok();
+    child.wait().ok();
+}
+
 #[test]
 fn cli_text_preserves_spaces_and_input_help_is_available() {
     let dir = temp_dir("cli-text");

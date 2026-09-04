@@ -98,6 +98,56 @@ nothing else: 8 passed, 11 failed, 30.26 s, against 19 passed in 1.05 s with a
 short one — the same eleven as CI. The eight survivors are exactly the tests
 that need no successful connect, which is the fingerprint to look for.
 
+## accept() inherits O_NONBLOCK on BSD, and not on Linux (2026-09-04)
+
+The third platform difference in the same crate, and the first that was a
+defect in the wrapper rather than in a test.
+
+A non-blocking LISTENER is the normal way to poll for connections between other
+work. What differs is the socket `accept()` returns:
+
+| platform | accepted socket |
+|---|---|
+| Linux | **blocking**, whatever the listener was — the flag is not inherited |
+| macOS / BSD | **inherits the listener's `O_NONBLOCK`** |
+
+So on macOS the wrapper's first read of a request that had not yet arrived
+returned EAGAIN, the client handler failed, the connection was dropped, and the
+caller's input never reached the program. The screen stayed empty:
+
+    interactive-shell client: Resource temporarily unavailable (os error 35)
+
+**The errno is not even stable across legs**: EAGAIN is 35 on macOS and 11 on
+Linux, so a number copied out of one CI log means nothing in the other.
+
+The fix is one line — `set_nonblocking(false)` on the accepted socket, which is
+what Linux was doing implicitly all along, so nothing changes there.
+
+### Why the obvious control did not reproduce it
+
+Forcing `set_nonblocking(true)` on the accepted socket on Linux left **all 19
+tests passing**. That is not evidence the hypothesis is wrong; it is evidence
+the test never exercised the case. On a fast machine the request is always
+already buffered by the time the wrapper reads, so a non-blocking read succeeds.
+
+It took **two** injected variables to reproduce: the inherited flag *and* a
+150ms pause between the connect and the body. With both, Linux produced the CI
+failure exactly, `os error 11` in place of 35. Measured all three ways —
+
+| flag inherited | body delayed | result |
+|---|---|---|
+| yes | yes | fails, EAGAIN — the CI failure |
+| no | yes | passes |
+| yes | no | **passes** — which is why Linux never saw it |
+
+The general lesson is about controls, not sockets: **an injection that fails to
+reproduce may be missing a second variable rather than refuting the cause.**
+Reproduce one variable at a time, but be willing to add the second before
+concluding the mechanism is innocent.
+
+`a_request_body_that_arrives_late_is_still_served` pins it, and pays the 150ms
+once rather than in every exchange.
+
 ### The process-global cwd caution, now paid for
 
 The caution above — "in a threaded program this needs serialising" — is not

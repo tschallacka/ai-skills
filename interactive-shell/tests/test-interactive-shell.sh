@@ -51,6 +51,23 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 if ! command -v nano >/dev/null 2>&1; then echo "SKIP: nano is unavailable"; exit 0; fi
+# It has to be GNU nano, and on macOS `nano` usually is not.
+#
+# Stock macOS answers `nano` with UW Pico -- the macos-latest runner reported
+# "UW PICO 5.09" in its title bar -- and this test drives nano's own bindings:
+# META-RIGHT for next-word, CTRL-E for end-of-line, CTRL-O for write-out. Pico
+# does not share them, so the sequence below is not a portable "open an editor"
+# script and widening the predicates would only move the failure to the first
+# keystroke that means something else.
+#
+# Said here rather than discovered at a predicate: without this the run spends
+# its whole 60s budget waiting for "GNU nano" while a perfectly healthy Pico
+# sits on screen, which is exactly how run 33890018179 read.
+if ! nano --version 2>/dev/null | head -1 | grep -q 'GNU nano'; then
+    echo "SKIP: nano is not GNU nano ($(nano --version 2>/dev/null | head -1))"
+    echo "  This test drives GNU nano's bindings; install it (brew install nano) to run it."
+    exit 0
+fi
 if ! command -v rjq >/dev/null 2>&1; then echo "SKIP: rjq is unavailable"; exit 0; fi
 if [ ! -x "$BIN/interactive-shell" ] || [ ! -x "$BIN/interactive-shell-input" ]; then
     if ! command -v cargo >/dev/null 2>&1; then echo "SKIP: no cargo and no built interactive-shell binaries"; exit 0; fi

@@ -2123,6 +2123,29 @@ pub fn run(
             .map_err(|e| e.to_string())?;
         }
         if let Ok((s, _)) = listener.accept() {
+            // THE ACCEPTED SOCKET INHERITS O_NONBLOCK ON BSD, AND NOT ON LINUX.
+            //
+            // The listener is non-blocking on purpose: this loop polls it
+            // between reads of the pty master. On Linux accept() hands back a
+            // BLOCKING socket regardless, so client() could read a request and
+            // wait for the rest of it. macOS copies the listener's O_NONBLOCK
+            // onto the connection, so every read returned EAGAIN before the
+            // request had arrived, client() failed, and the wrapper logged
+            //
+            //   interactive-shell client: Resource temporarily unavailable
+            //                             (os error 35)
+            //
+            // twice per attempt while the screen stayed empty and the input the
+            // caller sent was never delivered. `os error 35` is EAGAIN on
+            // macOS; Linux numbers it 11, so the errno in a CI log does not
+            // even match across legs.
+            //
+            // Setting it explicitly is the portable form: it is what Linux
+            // already did implicitly, so nothing changes there.
+            if let Err(e) = s.set_nonblocking(false) {
+                eprintln!("interactive-shell client: cannot block the accepted socket: {e}");
+                continue;
+            }
             if let Err(e) = client(
                 s,
                 master,

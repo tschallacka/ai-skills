@@ -94,6 +94,23 @@ jobs:
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
 
+      - name: Install GNU nano, because macOS answers `nano` with Pico
+        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
+        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
+        # program. Stock macOS ships UW Pico under that name (the runner
+        # reported "UW PICO 5.09" in its title bar), which shares neither the
+        # title nor the keys, so the test skips itself there rather than
+        # asserting against a different program.
+        #
+        # Installing it keeps the assertions strict instead of widening them to
+        # cover two editors: the subject is the wrapper, so pinning the program
+        # removes a variable rather than adding a branch. This is the same
+        # reasoning as the GNU coreutils step above.
+        if: runner.os == 'macOS'
+        run: |
+          brew install nano
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
       - name: Install memlimit, so the resource wrapper's RAM cap is real where it can be
         # limited-run.sh caps memory with a transient systemd scope on Linux and
         # with memlimit on macOS. Without it the suite prints "the requested RAM
@@ -281,6 +298,23 @@ jobs:
             brew install coreutils
             echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           fi
+
+      - name: Install GNU nano, because macOS answers `nano` with Pico
+        # test-interactive-shell drives GNU nano's own bindings -- META-RIGHT,
+        # CTRL-E, CTRL-O -- to prove the PTY wrapper can operate a full-screen
+        # program. Stock macOS ships UW Pico under that name (the runner
+        # reported "UW PICO 5.09" in its title bar), which shares neither the
+        # title nor the keys, so the test skips itself there rather than
+        # asserting against a different program.
+        #
+        # Installing it keeps the assertions strict instead of widening them to
+        # cover two editors: the subject is the wrapper, so pinning the program
+        # removes a variable rather than adding a branch. This is the same
+        # reasoning as the GNU coreutils step above.
+        if: runner.os == 'macOS'
+        run: |
+          brew install nano
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
       - name: Install memlimit, so the resource wrapper's RAM cap is real where it can be
         # limited-run.sh caps memory with a transient systemd scope on Linux and
