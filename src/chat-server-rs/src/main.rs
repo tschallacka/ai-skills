@@ -16,7 +16,7 @@
 //! highest+1. Non-MSG lines are skipped, malformed ones cannot kill the
 //! connection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,25 +27,158 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chat_proto::message::{numeric, numerics, Message, FETCH_END};
 
+// How long a socket write may block before the peer is declared unresponsive,
+// and how much undelivered broadcast one peer may accumulate. Both are bounds
+// on damage a single peer can do, not tuning knobs: without the first, a peer
+// that stops reading blocks its own thread forever; without the second, the
+// queue that keeps that thread from blocking anyone else grows without bound.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+const OUTBOX_MAX_BYTES: usize = 1 << 20;
+
 struct ConnState {
     conn: rustls::ServerConnection,
     tcp: TcpStream,
     nick: String,
     user: String,
     host: String,
-    joined: Vec<String>,
     closed: bool,
 }
 
 impl ConnState {
-    fn write_line(&mut self, s: &str) {
-        let _ = self
-            .conn
+    // Returns the write error rather than swallowing it: a peer that has
+    // stopped reading fails here (SO_SNDTIMEO, set on accept), and the caller
+    // must mark the connection closed so the teardown path runs. Swallowing it
+    // meant a timed-out peer was retried on every later message forever.
+    fn write_line(&mut self, s: &str) -> std::io::Result<()> {
+        self.conn
             .writer()
-            .write_all(format!("{}\r\n", s).as_bytes());
+            .write_all(format!("{}\r\n", s).as_bytes())?;
         // Write-only flush: complete_io would block reading for more input,
         // which deadlocks when the peer is also blocked reading a response.
-        while self.conn.write_tls(&mut self.tcp).unwrap_or(0) > 0 {}
+        loop {
+            match self.conn.write_tls(&mut self.tcp) {
+                Ok(0) => return Ok(()),
+                Ok(_) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+/// One connection's pending outbound lines, plus the channel membership a
+/// broadcaster needs to decide whether to send at all.
+///
+/// This is a leaf lock: it is held only long enough to push or drain a Vec,
+/// never across I/O and never while any other lock is taken. That is the whole
+/// point of it (see `Peer`).
+struct Outbox {
+    queue: VecDeque<String>,
+    bytes: usize,
+    joined: Vec<String>,
+    dead: bool,
+}
+
+/// What happened to a line offered to a peer.
+#[derive(Debug, PartialEq, Eq)]
+enum Offer {
+    Queued,
+    /// The peer is not in the channel, or is already finished.
+    Skipped,
+    /// The peer is not draining its queue; it has been marked dead so its own
+    /// thread tears it down instead of being written to again.
+    Dropped,
+}
+
+/// A live connection: the state its own thread does I/O on, and the outbox
+/// every other thread talks to instead.
+///
+/// The split is the fix for B122. The broadcast path used to hold `hub.writers`
+/// and then lock a second connection's state and write to its socket from the
+/// sender's thread. Two things followed, both measured:
+///
+/// * A socket write blocks for as long as the peer declines to read, and it was
+///   blocking while holding `hub.writers` -- which the accept loop must take to
+///   register a new connection. So connects completed through the kernel
+///   backlog and were then never serviced.
+/// * Even with nothing blocking, the target's own thread holds its state across
+///   a 200ms `read_tls`, so a broadcaster contending for it loses that race
+///   almost every time. One idle subscriber was enough to starve the
+///   broadcaster for tens of seconds while it held `hub.writers`.
+///
+/// Distinct mutexes were never what made that safe -- safety needs a lock
+/// order, which the comment there claimed was unnecessary. Now there is one:
+/// `writers` is taken alone, `slot` is taken only by the connection's own
+/// thread, and `out` is a leaf. No socket I/O happens under a shared lock, so a
+/// peer that refuses to read can no longer stall anything but itself.
+struct Peer {
+    slot: Mutex<Option<ConnState>>,
+    out: Mutex<Outbox>,
+}
+
+impl Peer {
+    fn new() -> Peer {
+        Peer {
+            slot: Mutex::new(None),
+            out: Mutex::new(Outbox {
+                queue: VecDeque::new(),
+                bytes: 0,
+                joined: Vec::new(),
+                dead: false,
+            }),
+        }
+    }
+
+    /// Record which channels this connection is in, so a broadcaster can filter
+    /// without touching the connection state.
+    fn set_joined(&self, joined: &[String]) {
+        if let Ok(mut o) = self.out.lock() {
+            o.joined = joined.to_vec();
+        }
+    }
+
+    /// Mark the connection finished. Idempotent, and safe to call from any
+    /// thread: it only touches the leaf lock.
+    fn mark_dead(&self) {
+        if let Ok(mut o) = self.out.lock() {
+            o.dead = true;
+            o.queue.clear();
+            o.bytes = 0;
+        }
+    }
+
+    /// Offer one line to this peer. Never writes to a socket, so it cannot
+    /// block on the peer's behaviour; the peer's own thread does the writing.
+    fn offer(&self, chan: &str, line: &str) -> Offer {
+        let mut o = match self.out.lock() {
+            Ok(o) => o,
+            // A poisoned outbox means the owning thread panicked; there is
+            // nothing to deliver to.
+            Err(_) => return Offer::Skipped,
+        };
+        if o.dead || !o.joined.iter().any(|j| j == chan) {
+            return Offer::Skipped;
+        }
+        if o.bytes.saturating_add(line.len()) > OUTBOX_MAX_BYTES {
+            o.dead = true;
+            o.queue.clear();
+            o.bytes = 0;
+            return Offer::Dropped;
+        }
+        o.bytes += line.len();
+        o.queue.push_back(line.to_string());
+        Offer::Queued
+    }
+
+    /// Take everything queued for this connection, and whether it has been
+    /// declared dead. Called by the connection's own thread.
+    fn drain(&self) -> (Vec<String>, bool) {
+        match self.out.lock() {
+            Ok(mut o) => {
+                o.bytes = 0;
+                (o.queue.drain(..).collect(), o.dead)
+            }
+            Err(_) => (Vec::new(), true),
+        }
     }
 }
 
@@ -60,8 +193,9 @@ struct Hub {
     // (holding a connection's own slot guard while acquiring writers is an
     // ABBA deadlock with the broadcast path).
     nicks: Mutex<HashMap<String, u64>>, // nick -> conn index
-    // zero-sized connection writers: one per live connection, keyed by index
-    writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>,
+    // One peer per connection, keyed by index. Taken alone and held only long
+    // enough to snapshot the list: nothing that can block is done under it.
+    writers: Mutex<Vec<Arc<Peer>>>,
 }
 
 impl Hub {
@@ -91,16 +225,22 @@ impl Hub {
                 }
             }
         }
-        // The slot itself stays in `writers` so live connections keep their
-        // index (broadcast addresses members by index). It now holds None, so
-        // it is a few bytes rather than a socket, and the broadcast path
-        // already skips an empty slot.
-        if let Ok(writers) = self.writers.lock() {
-            if let Some(slot) = writers.get(idx) {
-                if let Ok(mut g) = slot.lock() {
-                    *g = None;
-                }
-            }
+        // The peer itself stays in `writers` so live connections keep their
+        // index (broadcast addresses members by index). Its connection state is
+        // dropped by the owning thread and its outbox is marked dead, so it is
+        // a few bytes rather than a socket, and the broadcast path skips it.
+        //
+        // The peer is fetched under `writers` and marked afterwards: taking the
+        // outbox lock while holding `writers` would put two locks in one place
+        // for no reason, and the point of this design is that there is only ever
+        // one.
+        let peer = self
+            .writers
+            .lock()
+            .ok()
+            .and_then(|writers| writers.get(idx).map(Arc::clone));
+        if let Some(peer) = peer {
+            peer.mark_dead();
         }
     }
 
@@ -296,7 +436,7 @@ struct Session {
     closed: bool,
 }
 
-fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_name: String) {
+fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
     let mut raw = [0u8; 4096];
     let mut sess = Session {
         server_name,
@@ -309,10 +449,13 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
     };
 
     // Emit to a connection state's TLS writer. Called while holding the
-    // slot guard, so it never re-locks the same slot (no deadlock).
+    // slot guard, so it never re-locks the same slot (no deadlock). A write
+    // that fails -- including a peer that stopped reading long enough to hit
+    // the write timeout -- closes the connection, so the teardown below runs
+    // instead of the peer being written to again on every later message.
     fn w(st: &mut ConnState, s: &str) {
-        if !st.closed {
-            st.write_line(s);
+        if !st.closed && st.write_line(s).is_err() {
+            st.closed = true;
         }
     }
 
@@ -323,7 +466,7 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
     let mut done = false;
 
     loop {
-        let mut guard = match slot.lock() {
+        let mut guard = match peer.slot.lock() {
             Ok(g) => g,
             Err(_) => break,
         };
@@ -389,6 +532,22 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                     }
                 }
             }
+        }
+        // Deliver anything other connections queued for this one. This thread
+        // owns the socket, so this is where a broadcast becomes a write -- a
+        // slow peer blocks only itself here. `read_tls` below bounds the wait
+        // to its 200ms timeout, so this runs at least that often.
+        let (pending, marked_dead) = peer.drain();
+        for line in &pending {
+            w(st, line);
+        }
+        if marked_dead || st.closed {
+            // Either a broadcaster gave up on this peer, or one of those writes
+            // failed. Both mean the connection is finished; the read below is
+            // harmless (it is bounded and `w` is now a no-op) and the teardown
+            // at the bottom of the loop runs on this pass.
+            st.closed = true;
+            done = true;
         }
         // After the handshake, catch any further buffered raw bytes and
         // decrypt them before draining plaintext. read_tls returning Ok(0) is
@@ -599,7 +758,7 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                         if !sess.joined.contains(&chan) {
                             sess.joined.push(chan.clone());
                         }
-                        st.joined = sess.joined.clone();
+                        peer.set_joined(&sess.joined);
                         let members = {
                             if let Ok(ch) = hub.channels.lock() {
                                 ch.get(&chan).cloned().unwrap_or_default()
@@ -628,6 +787,10 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                             }
                         }
                         sess.joined.retain(|j| j != &chan);
+                        // Broadcast membership is read from the outbox, so a
+                        // PART has to update it or a parted connection keeps
+                        // receiving the channel.
+                        peer.set_joined(&sess.joined);
                     }
                     "NAMES" => {
                         let chan = params.first().cloned().unwrap_or_default();
@@ -679,21 +842,39 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
                                 };
                                 let out = m.serialize();
                                 w(st, &out);
-                                // broadcast to OTHER connections (their slots are
-                                // different mutexes, so locking them here is safe).
-                                if let Ok(writers) = hub.writers.lock() {
-                                    for (i, s) in writers.iter().enumerate() {
-                                        if i == idx {
-                                            continue;
-                                        }
-                                        if let Ok(mut g) = s.lock() {
-                                            if let Some(c) = g.as_mut() {
-                                                if !c.closed && c.joined.iter().any(|j| j == &chan)
-                                                {
-                                                    c.write_line(&out);
-                                                }
-                                            }
-                                        }
+                                // Broadcast to OTHER connections by queueing on
+                                // each peer's outbox. Deliberately not by
+                                // writing to their sockets from this thread:
+                                // that write blocks for as long as the peer
+                                // declines to read, and it happened while
+                                // holding `hub.writers` -- the lock the accept
+                                // loop needs -- so one idle subscriber wedged
+                                // the whole server (B122).
+                                //
+                                // `hub.writers` is held only to copy the peer
+                                // list, and the offers happen after it is
+                                // released, so no second lock is ever taken
+                                // under it.
+                                let peers: Vec<Arc<Peer>> = match hub.writers.lock() {
+                                    Ok(writers) => writers
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| *i != idx)
+                                        .map(|(_, p)| Arc::clone(p))
+                                        .collect(),
+                                    Err(_) => Vec::new(),
+                                };
+                                for p in &peers {
+                                    if p.offer(&chan, &out) == Offer::Dropped {
+                                        // The peer is not draining its queue.
+                                        // It is marked dead, so its own thread
+                                        // tears it down; say so, because a
+                                        // silently dropped subscriber looks
+                                        // like message loss.
+                                        eprintln!(
+                                            "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
+                                            chan, OUTBOX_MAX_BYTES
+                                        );
                                     }
                                 }
                             }
@@ -985,7 +1166,7 @@ fn serve(slot: Arc<Mutex<Option<ConnState>>>, hub: Arc<Hub>, idx: usize, server_
         st.closed = true;
         let _ = st.tcp.shutdown(std::net::Shutdown::Both);
         let leaving_nick = st.nick.clone();
-        let leaving_chans = st.joined.clone();
+        let leaving_chans = sess.joined.clone();
         // Drop the ConnState so the socket closes rather than lingering in
         // CLOSE-WAIT, then release the slot guard BEFORE taking any hub lock:
         // holding a slot while acquiring `writers` is the ABBA deadlock the
@@ -1300,12 +1481,17 @@ fn main() {
         stream
             .set_read_timeout(Some(Duration::from_millis(200)))
             .ok();
+        // And a write timeout, so a peer that stops reading cannot block a
+        // write forever. Without one there was no upper bound at all: the
+        // blocked thread never learned the peer was gone, so the connection was
+        // never torn down and every later broadcast queued behind it.
+        stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
         let hub = Arc::clone(&hub);
         let tls_config = Arc::clone(&tls_config);
         let mut writers = hub.writers.lock().unwrap();
         let idx = writers.len();
-        let slot = Arc::new(Mutex::new(None));
-        writers.push(Arc::clone(&slot));
+        let peer = Arc::new(Peer::new());
+        writers.push(Arc::clone(&peer));
         drop(writers);
         let server_name = server_name.clone();
         std::thread::spawn(move || {
@@ -1324,13 +1510,12 @@ fn main() {
                 nick: String::new(),
                 user: String::new(),
                 host: "localhost".into(),
-                joined: Vec::new(),
                 closed: false,
             };
-            if let Ok(mut g) = slot.lock() {
+            if let Ok(mut g) = peer.slot.lock() {
                 *g = Some(state);
             }
-            serve(slot, hub, idx, server_name);
+            serve(peer, hub, idx, server_name);
         });
     }
 }
@@ -1417,5 +1602,87 @@ mod announce_tests {
         assert!(host_is_dialable("192.168.1.106"));
         assert!(host_is_dialable("localhost"));
         assert!(host_is_dialable("some.host.example"));
+    }
+}
+
+#[cfg(test)]
+mod outbox_tests {
+    use super::{Offer, Peer, OUTBOX_MAX_BYTES};
+
+    // A broadcaster only ever queues; it must never queue for a connection that
+    // is not in the channel, or the peer would receive traffic it never joined.
+    #[test]
+    fn offer_skips_a_non_member() {
+        let p = Peer::new();
+        p.set_joined(&["#ops".to_string()]);
+        assert_eq!(p.offer("#other", "hello"), Offer::Skipped);
+        let (lines, dead) = p.drain();
+        assert!(lines.is_empty(), "queued for a channel it never joined");
+        assert!(!dead);
+    }
+
+    // The membership the broadcaster reads has to follow a PART, which is why
+    // it lives in the outbox rather than in the connection state.
+    #[test]
+    fn offer_queues_for_a_member_in_order() {
+        let p = Peer::new();
+        p.set_joined(&["#ops".to_string(), "#dev".to_string()]);
+        assert_eq!(p.offer("#ops", "first"), Offer::Queued);
+        assert_eq!(p.offer("#dev", "second"), Offer::Queued);
+        let (lines, dead) = p.drain();
+        assert_eq!(lines, vec!["first".to_string(), "second".to_string()]);
+        assert!(!dead);
+        // Drained once, delivered once: a second drain must not repeat them.
+        assert_eq!(p.drain().0, Vec::<String>::new());
+    }
+
+    // The queue is what stops a non-reading peer from blocking anyone else, so
+    // it is also what would grow without bound. Past the cap the peer is
+    // declared dead and its backlog released, rather than the server growing a
+    // buffer for a subscriber that is not consuming it (B122).
+    #[test]
+    fn offer_drops_a_peer_that_exceeds_the_backlog_cap() {
+        let p = Peer::new();
+        p.set_joined(&["#ops".to_string()]);
+        let line = "x".repeat(64 * 1024);
+        let mut queued = 0;
+        let mut outcome = Offer::Queued;
+        for _ in 0..64 {
+            outcome = p.offer("#ops", &line);
+            if outcome != Offer::Queued {
+                break;
+            }
+            queued += 1;
+        }
+        assert_eq!(
+            outcome,
+            Offer::Dropped,
+            "the cap never tripped after {} lines of {} bytes",
+            queued,
+            line.len()
+        );
+        assert!(
+            queued * line.len() <= OUTBOX_MAX_BYTES,
+            "queued {} bytes, over the {} byte cap",
+            queued * line.len(),
+            OUTBOX_MAX_BYTES
+        );
+        let (lines, dead) = p.drain();
+        assert!(dead, "the peer was over the cap but not marked dead");
+        assert!(lines.is_empty(), "a dropped peer kept its backlog");
+    }
+
+    // Once dead, a peer must stay skipped: it is being torn down by its own
+    // thread, and re-queueing for it is how a timed-out peer was retried
+    // forever.
+    #[test]
+    fn a_dead_peer_is_never_queued_for_again() {
+        let p = Peer::new();
+        p.set_joined(&["#ops".to_string()]);
+        p.mark_dead();
+        assert_eq!(p.offer("#ops", "hello"), Offer::Skipped);
+        let (lines, dead) = p.drain();
+        assert!(dead);
+        assert!(lines.is_empty());
     }
 }
