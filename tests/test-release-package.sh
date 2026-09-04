@@ -35,11 +35,18 @@ trap 'rm -rf "$work"' EXIT
 
 version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     "$repo_root/package.json" | head -1)"
+numeric='(0|[1-9][0-9]*)'
+prerelease_identifier="(0|[1-9][0-9]*|[A-Za-z-][0-9A-Za-z-]*)"
+build_identifier='([0-9A-Za-z-]+)'
+version_pattern="^${numeric}\.${numeric}\.${numeric}(-${prerelease_identifier}(\.${prerelease_identifier})*)?(\\+${build_identifier}(\.${build_identifier})*)?$"
 t_assert_eq 'package.json states a version' \
-    "$(printf '%s' "$version" | grep -Ec '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$')" '1'
+    "$(printf '%s' "$version" | grep -Ec "$version_pattern")" '1'
 
-version_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(\-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
-for invalid in 2.0 x.y.z ''; do
+for valid in 2.0.0-alpha 2.0.0-alpha.1 2.0.0-alpha.1+build.7 2.0.0+build.7; do
+    t_assert_eq "valid SemVer is accepted: $valid" \
+        "$(printf '%s' "$valid" | grep -Ec "$version_pattern")" '1'
+done
+for invalid in 2.0 x.y.z '' 02.0.0 2.0.0- 2.0.0-01 2.0.0-alpha..1; do
     t_assert_eq "malformed version is rejected: ${invalid:-empty}" \
         "$(printf '%s' "$invalid" | grep -Ec "$version_pattern" || true)" '0'
 done
