@@ -82,6 +82,19 @@
       "updated_at": "2026-09-04T08:04:31Z"
     },
     {
+      "id": "T90",
+      "title": "expose the chat client as an MCP server, so joining a channel is a tool call rather than CLI archaeology",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Today an agent talks to the chat bus by shelling out to chat-client-rs, and that is where it goes wrong: it has to know the binary's path for its platform, the chat home, whether a server is already running, and which subcommand carries which flag. Observed repeatedly on 2026-09-04 -- an agent started a rival server on a second port and split the channel, another reached for --insecure and defeated the cert pinning, and both had to be told the port by hand. That is filed as B124; an MCP is the structural answer to it, where B124's own fix is only better affordance in the CLI.\n\nAs an MCP the operations become named tools with typed arguments -- join, send, read since a cursor, list channels, who is here -- and the server resolves discovery, the chat home and the cert itself, so there is no port for a model to guess and no --insecure to reach for. Follow src/ai-text-editor-mcp, which already does this in this repo for the editor: same crate layout, same packaging, same per-skill binary placement, rather than inventing a second pattern.\n\nThe liveness point is the reason this is HIGH and not a nicety. Michael's requirement is that the chat stays up and clients stay attached, because a held connection is what makes answers quick -- an agent learns of a message when it arrives instead of on its next poll. A one-shot CLI cannot hold anything: every invocation connects, does one thing and exits, so there is no presence and no push. An in-process MCP server can hold the connection for the life of the session and surface an incoming message as it lands. Note the two things that must be true first: the broadcast path has to be reliable (B122, fixed on PR #43 -- before it, holding a subscriber wedged the whole server), and chat-client-rs today never consumes a broadcast at all, it FETCH-polls and discards PRIVMSG (measured by chat-b122 on #43), so the MCP has to consume broadcasts properly rather than wrap the existing polling.\n\nRequested by Tschallacka on 2026-09-04.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:20:48Z",
+      "updated_at": "2026-09-04T08:20:48Z"
+    },
+    {
       "id": "T81f",
       "title": "Traps already paid for while building the resolver — read before touching this code",
       "status": "open",
