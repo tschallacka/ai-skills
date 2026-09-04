@@ -20,6 +20,28 @@
 set -euo pipefail
 export LC_ALL=C
 
+# A pre-push hook runs with GIT_DIR exported and GIT_WORK_TREE unset. In that
+# combination `git ls-files` takes its paths from the work-tree root and ignores
+# the process cwd entirely, so the per-skill `cd` below stops scoping anything
+# and every repo-root file is reported as an undeclared file of the FIRST skill.
+# The gate then refuses every push. Setting both variables scopes correctly
+# again, which is why testing them together hides the bug -- GIT_DIR alone is
+# the breaking case. This check derives its own root from BASH_SOURCE, so an
+# inherited git environment has nothing to contribute: drop it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
+# --declarations-only drops the two assertions that need a BUILT tree -- every
+# promised file existing, and every bundled artifact being executable -- and
+# keeps the two that are pure declaration checks. pre-push-check runs it that
+# way, because it must work on a tree that has never run setup-dev-env.sh; the
+# full suite runs it whole, where a built tree is a fair assumption.
+declarations_only=false
+case "${1:-}" in
+    --declarations-only) declarations_only=true ;;
+    '') ;;
+    *) printf '%s: unknown argument: %s\n' "${0##*/}" "$1" >&2; exit 64 ;;
+esac
+
 tests_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$tests_dir/.." && pwd)"
 # shellcheck source=planning/tests/lib-test.sh
@@ -127,7 +149,9 @@ for skill in "${SKILL_NAMES[@]}"; do
             esac
         }
     done < "$work/listed"
-    t_assert_eq "$skill: every file skill_files() promises exists on disk" "${absent# }" ''
+    if [ "$declarations_only" = false ]; then
+        t_assert_eq "$skill: every file skill_files() promises exists on disk" "${absent# }" ''
+    fi
     # A present cross-target artifact must be a regular executable file: the
     # installer copies and execs it, so a stub or a wrong-arch file here fails
     # at install time in ways the suite would not see. Absent rows are
@@ -143,7 +167,9 @@ for skill in "${SKILL_NAMES[@]}"; do
         [ -e "$p" ] || continue
         { [ -f "$p" ] && [ -x "$p" ]; } || invalid="$invalid $path"
     done < "$work/listed"
-    t_assert_eq "$skill: every present bundled artifact is a regular executable" "${invalid# }" ''
+    if [ "$declarations_only" = false ]; then
+        t_assert_eq "$skill: every present bundled artifact is a regular executable" "${invalid# }" ''
+    fi
     # The dev arm is inclusive, so between them the two arms must account for
     # every tracked file. A file in neither is one no install can deliver.
     unexplained=''

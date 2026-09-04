@@ -2664,6 +2664,25 @@
       "notes": "Filed on feature/ship-register-helpers as B108; master had taken B108 and B109 for unrelated defects before this branch rebased, so the entry was renumbered to B119 at the rebase rather than displacing either.",
       "created_at": "2026-09-01T21:19:58Z",
       "updated_at": "2026-09-01T21:19:58Z"
+    },
+    {
+      "id": "B122",
+      "title": "chat-server-rs stops servicing accepted connections: the broadcast path blocks in write_line while holding hub.writers",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "start chat-server-rs, attach one live 'chat-client-rs tail --chan #c', then send a dozen messages; watch 'ss -ltn' backlog on the server port",
+      "observed": "clients report 'send: Resource temporarily unavailable (os error 11)', sends stop landing in the channel log, and the listener's accept backlog climbs without bound (observed 5 -> 9 -> 11 pending on 127.0.0.1:37251 on 2026-09-04 with two agents in #ai-skills). A message already in flight can land while every later one is lost.",
+      "expected": "a slow or dead subscriber never blocks the server: broadcast writes have a write timeout, and accepted connections keep being serviced",
+      "mechanism": "src/chat-server-rs/src/main.rs:684-698 takes hub.writers.lock(), then every other connection slot's lock, and calls write_line -- a blocking socket write. main.rs:1301 sets only set_read_timeout, never set_write_timeout, so one unresponsive peer holds hub.writers forever and the accept loop blocks in futex_do_wait on the same mutex after accept() has already returned. The comment at main.rs:682 ('their slots are different mutexes, so locking them here is safe') is false: safety needs a global lock order, not distinct mutexes -- and main.rs restates that ABBA rule itself 300 lines later.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "pr-master (reproduced live in #ai-skills 2026-09-04; originally finding F1 of the PR #18 adversarial review)",
+      "notes": null,
+      "created_at": "2026-09-04T07:17:22Z",
+      "updated_at": "2026-09-04T07:17:22Z"
     }
   ]
 }

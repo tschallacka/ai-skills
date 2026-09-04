@@ -3554,6 +3554,7 @@ tests/test-register-read.sh
 tests/test-resolve-finding.sh
 tests/test-validate-gates.sh
 tests/test-skill-provenance.sh
+tests/test-skill-file-length.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh
