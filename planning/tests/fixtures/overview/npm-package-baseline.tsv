@@ -43,7 +43,7 @@ package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	5713
 package/interactive-shell/requires.tsv	1918
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5751
-package/interactive-shell/tests/test-interactive-shell.sh	4543
+package/interactive-shell/tests/test-interactive-shell.sh	6247
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
