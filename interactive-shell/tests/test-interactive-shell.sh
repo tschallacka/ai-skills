@@ -63,11 +63,20 @@ if ! command -v nano >/dev/null 2>&1; then echo "SKIP: nano is unavailable"; exi
 # Said here rather than discovered at a predicate: without this the run spends
 # its whole 60s budget waiting for "GNU nano" while a perfectly healthy Pico
 # sits on screen, which is exactly how run 33890018179 read.
-if ! nano --version 2>/dev/null | head -1 | grep -q 'GNU nano'; then
-    echo "SKIP: nano is not GNU nano ($(nano --version 2>/dev/null | head -1))"
-    echo "  This test drives GNU nano's bindings; install it (brew install nano) to run it."
-    exit 0
-fi
+# Captured and then matched, not piped into `grep -q`: this file runs under
+# `set -o pipefail`, and grep -q closes the pipe on its first match, so the
+# writer dies of SIGPIPE and the pipeline reports 141 even though it matched.
+# PORTABILITY(pipefail-grep-q) has the whole trap; the contract test denies the
+# shape, which is how this line was caught.
+nano_version="$(nano --version 2>/dev/null | head -1 || true)"
+case "$nano_version" in
+    *"GNU nano"*) ;;
+    *)
+        echo "SKIP: nano is not GNU nano (${nano_version:-no version output})"
+        echo "  This test drives GNU nano's bindings; install it (brew install nano) to run it."
+        exit 0
+        ;;
+esac
 if ! command -v rjq >/dev/null 2>&1; then echo "SKIP: rjq is unavailable"; exit 0; fi
 if [ ! -x "$BIN/interactive-shell" ] || [ ! -x "$BIN/interactive-shell-input" ]; then
     if ! command -v cargo >/dev/null 2>&1; then echo "SKIP: no cargo and no built interactive-shell binaries"; exit 0; fi
