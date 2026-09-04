@@ -39,6 +39,23 @@ jobs:
         with:
           # The guard diffs against master, so a shallow clone is not enough.
           fetch-depth: 0
+          # REGISTERS_PUSH_TOKEN, when set, is what makes the final step able to
+          # land. master carries classic branch protection with required status
+          # checks, and those block a DIRECT push as well as a merge -- the
+          # default GITHUB_TOKEN cannot bypass them, so without this secret the
+          # run reaches the push and fails, deliberately and loudly.
+          #
+          # enforce_admins is off on this repository, so an admin's token
+          # pushes directly. A fine-grained PAT with contents:write, or a
+          # GitHub App installation token, is enough; no protection change is
+          # needed, which is the point -- relaxing protection would weaken
+          # every other path to fix this one.
+          #
+          # What keeps that power narrow is registers-guard.sh, not the token:
+          # GitHub can grant a bypass to an ACTOR but cannot make it
+          # conditional on "only these two files changed". That condition can
+          # only live in code, and it runs before the push is attempted.
+          token: ${{ secrets.REGISTERS_PUSH_TOKEN || github.token }}
 
       - name: Refuse anything but a register change
         run: |
@@ -86,10 +103,21 @@ jobs:
           # rather than the register silently diverging from master.
           if ! git push origin "HEAD:master"; then
             printf '\n' >&2
-            printf 'the push to master was refused, most likely by branch protection.\n' >&2
-            printf 'Either allow this workflow to push to master, or merge the\n' >&2
-            printf 'registers branch by hand. Do NOT relax the protection for\n' >&2
-            printf 'everything to make this one path work.\n' >&2
+            printf 'the push to master was refused. master has classic branch protection\n' >&2
+            printf 'with required status checks, and those block a direct push too; the\n' >&2
+            printf 'default GITHUB_TOKEN cannot bypass them.\n' >&2
+            printf '\n' >&2
+            printf 'The fix is a repository secret named REGISTERS_PUSH_TOKEN holding a\n' >&2
+            printf 'fine-grained PAT with contents:write (or a GitHub App installation\n' >&2
+            printf 'token). enforce_admins is off here, so an admin token pushes\n' >&2
+            printf 'directly and no protection change is required.\n' >&2
+            printf '\n' >&2
+            printf 'Do NOT relax the protection itself to make this one path work, and\n' >&2
+            printf 'do NOT remove the guard: the token is what makes the push possible,\n' >&2
+            printf 'the guard is what keeps it to the two registers.\n' >&2
+            printf '\n' >&2
+            printf 'Until then, merge the registers branch by hand -- the entries are\n' >&2
+            printf 'sound, this step is the only thing that did not happen.\n' >&2
             exit 1
           fi
           printf 'master fast-forwarded to %s\n' "$(git rev-parse --short HEAD)"
