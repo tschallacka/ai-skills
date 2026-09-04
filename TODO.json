@@ -242,6 +242,19 @@
       "updated_at": "2026-09-04T08:29:54Z"
     },
     {
+      "id": "T91c",
+      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:36:28Z",
+      "updated_at": "2026-09-04T08:36:28Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
