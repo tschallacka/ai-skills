@@ -3599,7 +3599,7 @@
     {
       "id": "B174",
       "title": "Switching a skill integration mode leaves the previous mode's binary behind",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3612,12 +3612,12 @@
         "installer/src/50-manifest.sh",
         "installer/src/60-install.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "remove_stale_integration_binaries() in installer/src/50-manifest.sh, called from install_skill() and cli_copy_skill_files()",
+      "verification": "Switched ai-text-editor between mcp and skill mode repeatedly on a real target; the previous mode's binary is now removed each time, and test-installer-integration-mode.sh passes.",
       "found_by": "manual verification while testing PR 58's mcp integration mode end to end",
       "notes": null,
       "created_at": "2026-09-04T20:16:51Z",
-      "updated_at": "2026-09-04T20:16:51Z"
+      "updated_at": "2026-09-04T20:53:05Z"
     },
     {
       "id": "B25",
