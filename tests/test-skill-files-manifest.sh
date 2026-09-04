@@ -20,6 +20,16 @@
 set -euo pipefail
 export LC_ALL=C
 
+# A pre-push hook runs with GIT_DIR exported and GIT_WORK_TREE unset. In that
+# combination `git ls-files` takes its paths from the work-tree root and ignores
+# the process cwd entirely, so the per-skill `cd` below stops scoping anything
+# and every repo-root file is reported as an undeclared file of the FIRST skill.
+# The gate then refuses every push. Setting both variables scopes correctly
+# again, which is why testing them together hides the bug -- GIT_DIR alone is
+# the breaking case. This check derives its own root from BASH_SOURCE, so an
+# inherited git environment has nothing to contribute: drop it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
 # --declarations-only drops the two assertions that need a BUILT tree -- every
 # promised file existing, and every bundled artifact being executable -- and
 # keeps the two that are pure declaration checks. pre-push-check runs it that
