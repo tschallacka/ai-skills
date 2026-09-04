@@ -56,6 +56,58 @@
       "updated_at": "2026-08-31T13:27:55Z"
     },
     {
+      "id": "T82",
+      "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Blocking faults are filed as B103 through B107; read those first, they carry the evidence. Order of work: (1) fix the branch's own BUGS.json before touching the merge - dedupe B94, B95 and B96, keeping for B95 the 'fixed' copy because master closed it in PR #8, and remap B103's severity 'critical' to a value in the enum (blocking/major/minor/cosmetic; the author paired it with priority urgent, so blocking is the faithful reading). No renaming tool will touch an unsound register, by design. (2) Register the skill: SKILL_NAMES in installer/src/05-config.sh, both arms of skill_files() in installer/src/50-manifest.sh, then ./installer/build.sh; add requires.tsv, docs/README.md, a README.md table row, a package.json files entry, and binaries.tsv if its three-binary crate ships. (3) Add MODE markers to the six unmarked files. (4) Then merge origin/master into the branch and resolve BUGS.json with planning/scripts/register-resolve.sh (PR #15) - master's ids are the published ones and do not move, so rename the branch's side; expect six collisions, B97 through B102. (5) Regenerate planning/tests/fixtures/overview/npm-package-baseline.tsv and run the full suite plus bash32-run-tests.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:11:53Z",
+      "updated_at": "2026-09-01T16:11:53Z"
+    },
+    {
+      "id": "T88",
+      "title": "a www skill: a brake the human can pull, and one the agent pulls on itself when it is thrashing",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "www is the three W's, and the skill's whole job is to make the agent answer all three, in order, before it does anything else. W1 What do we have? W2 What are the values? W3 What are we trying to achieve? These are Tschallacka's own words and they are the required prompts -- not a paraphrase, not a longer checklist. They earned their place by resolving a thrashing agent immediately, in a short time, where more elaborate prodding had not.\n\nTwo triggers, one behaviour. (1) The human types 'www' -- that alone means stop: no further tool calls, no continuing the current line of attack. (2) The agent notices it is thrashing: retrying variants of a failing command, re-reading the same files, guessing at a cause it has not measured, or otherwise acting without knowing. Same brake, pulled by the agent on itself, without waiting to be told.\n\nAnswering all three W's is the gate, and each has a distinct job. 'What do we have' forces an inventory of what is actually in hand -- the real error text, the measured facts, the files that exist -- separated from what was assumed. 'What are the values' forces the concrete particulars out into the open: the actual paths, ports, ids, exit codes and settings, rather than the shape of the problem in the abstract, which is where a thrashing agent hides. 'What are we trying to achieve' forces the goal back into view, which is the one a thrashing agent has usually lost while chasing a symptom.\n\nOnly after all three are answered may work continue, and then with one reasoned step or a numbered question -- never another speculative attempt. Requested by Tschallacka on 2026-09-04, after a session where a worker guessed three times at a Darwin errno instead of stopping, and where a hypothesis stayed wrongly ruled out for a day because two variables were tested together.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-04T08:04:31Z"
+    },
+    {
+      "id": "T90",
+      "title": "expose the chat client as an MCP server, so joining a channel is a tool call rather than CLI archaeology",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Today an agent talks to the chat bus by shelling out to chat-client-rs, and that is where it goes wrong: it has to know the binary's path for its platform, the chat home, whether a server is already running, and which subcommand carries which flag. Observed repeatedly on 2026-09-04 -- an agent started a rival server on a second port and split the channel, another reached for --insecure and defeated the cert pinning, and both had to be told the port by hand. That is filed as B124; an MCP is the structural answer to it, where B124's own fix is only better affordance in the CLI.\n\nAs an MCP the operations become named tools with typed arguments -- join, send, read since a cursor, list channels, who is here -- and the server resolves discovery, the chat home and the cert itself, so there is no port for a model to guess and no --insecure to reach for. Follow src/ai-text-editor-mcp, which already does this in this repo for the editor: same crate layout, same packaging, same per-skill binary placement, rather than inventing a second pattern.\n\nThe liveness point is the reason this is HIGH and not a nicety. Michael's requirement is that the chat stays up and clients stay attached, because a held connection is what makes answers quick -- an agent learns of a message when it arrives instead of on its next poll. A one-shot CLI cannot hold anything: every invocation connects, does one thing and exits, so there is no presence and no push. An in-process MCP server can hold the connection for the life of the session and surface an incoming message as it lands. Note the two things that must be true first: the broadcast path has to be reliable (B122, fixed on PR #43 -- before it, holding a subscriber wedged the whole server), and chat-client-rs today never consumes a broadcast at all, it FETCH-polls and discards PRIVMSG (measured by chat-b122 on #43), so the MCP has to consume broadcasts properly rather than wrap the existing polling.\n\nRequested by Tschallacka on 2026-09-04.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:20:48Z",
+      "updated_at": "2026-09-04T08:20:48Z"
+    },
+    {
+      "id": "T91",
+      "title": "the socket is the only interface to the chat bus: nothing outside the server may touch the channel log",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Architectural rule set by Tschallacka on 2026-09-04: everything goes over the socket, and nothing interfaces the log. The channel log is the SERVER's private storage format, not an API. Two things follow, and both are violations present today.\n\n(1) No client may read the log file. chat-client-rs has 'read --local' and 'tail --local' which walk $AI_CHAT_HOME/channels/<chan>.log directly with no server, and the docs advertise it. That has to go, or survive only as an explicitly-labelled maintenance escape hatch that no agent instruction ever recommends. pr-master's own coordination poller was reading the log this way as a workaround for B122 -- a live tail wedged the server -- which is exactly the shortcut this rule forbids, and it must move to a socket tail once B122 lands.\n\n(2) Steady-state delivery is a PUSH over the socket, not a poll. Today 'tail' is a loop issuing FETCH <chan> <last_id>, and the client discards broadcast PRIVMSG lines except to confirm its own send echoed -- measured by chat-b122 on PR #43. So the server's whole fan-out path serves stock IRC clients only, while our own client polls. Invert it: the client consumes PRIVMSG as it arrives, so a message reaches an agent when it is sent rather than on the next poll interval. This is the liveness requirement behind wanting the chat up at all -- a held connection is what makes answers quick.\n\nWhere FETCH legitimately stays: backfill. On join or reconnect a client asks for what it missed since its cursor, over the SOCKET, and then follows the push stream. That is not log interfacing and not steady-state polling.\n\nDepends on B122 (PR #43): before it, a held subscriber wedged the server, which is why polling was tolerated. Related: B124 (connect affordance) and T90 (chat client as an MCP) -- an MCP is the natural home for a held socket that consumes pushes.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "2026-09-04: pr-master's coordination poller no longer touches the log. It now uses 'read --chan #ai-skills --since N' over the socket, which is a short-lived connection -- so it holds no subscriber (safe even before B122) and reads no file. Tschallacka pointed out that --since was the right tool all along; it had been ruled out by over-generalising from one wedged-server observation where both send and read failed, and never retested once the server was healthy. This closes the log-interfacing half of the violation for pr-master. What remains is the poll itself, which is T91a's push subscription.",
+      "created_at": "2026-09-04T08:29:41Z",
+      "updated_at": "2026-09-04T08:31:12Z"
+    },
+    {
       "id": "T81f",
       "title": "Traps already paid for while building the resolver — read before touching this code",
       "status": "open",
@@ -69,17 +121,17 @@
       "updated_at": "2026-09-01T16:04:38Z"
     },
     {
-      "id": "T82",
-      "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
+      "id": "T91a",
+      "title": "chat-client-rs consumes broadcast PRIVMSG as it arrives, instead of looping on FETCH",
       "status": "open",
       "priority": "high",
-      "parent": null,
-      "detail": "Blocking faults are filed as B103 through B107; read those first, they carry the evidence. Order of work: (1) fix the branch's own BUGS.json before touching the merge - dedupe B94, B95 and B96, keeping for B95 the 'fixed' copy because master closed it in PR #8, and remap B103's severity 'critical' to a value in the enum (blocking/major/minor/cosmetic; the author paired it with priority urgent, so blocking is the faithful reading). No renaming tool will touch an unsound register, by design. (2) Register the skill: SKILL_NAMES in installer/src/05-config.sh, both arms of skill_files() in installer/src/50-manifest.sh, then ./installer/build.sh; add requires.tsv, docs/README.md, a README.md table row, a package.json files entry, and binaries.tsv if its three-binary crate ships. (3) Add MODE markers to the six unmarked files. (4) Then merge origin/master into the branch and resolve BUGS.json with planning/scripts/register-resolve.sh (PR #15) - master's ids are the published ones and do not move, so rename the branch's side; expect six collisions, B97 through B102. (5) Regenerate planning/tests/fixtures/overview/npm-package-baseline.tsv and run the full suite plus bash32-run-tests.",
+      "parent": "T91",
+      "detail": "tail is currently a FETCH poll loop (src/chat-client-rs/src/main.rs around line 1594) and PRIVMSG is only inspected to confirm a send echoed (line 1041). Make the client a real subscriber: after backfilling from its cursor, follow the pushed stream and surface each message on arrival. Keep the cursor updated from pushed ids so a reconnect backfills correctly. Prove it with a test that a message reaches an attached client without any FETCH being issued after the join.",
       "blocked_on": null,
       "refs": [],
       "note": null,
-      "created_at": "2026-09-01T16:11:53Z",
-      "updated_at": "2026-09-01T16:11:53Z"
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-04T08:29:54Z"
     },
     {
       "id": "T71",
@@ -97,6 +149,32 @@
       "note": null,
       "created_at": "2026-08-30T21:50:27Z",
       "updated_at": "2026-08-30T21:50:27Z"
+    },
+    {
+      "id": "T83",
+      "title": "Tools available for register work, and where they came from (PR #15)",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-01T16:12:10Z",
+      "updated_at": "2026-09-01T16:12:10Z"
+    },
+    {
+      "id": "T89",
+      "title": "a question skill: numbered questions with lettered options, never an unordered list",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Questions put to the human carry an increasing numeric id within the session -- Q1, Q2, Q3 -- and never restart at 1 for a new batch, so an answer of 'Q1' is unambiguous. One question per number. A multipart question is sub-numbered (Q20a, Q20b), never bulleted. When a question offers options or suggested answers they are lettered a, b, c, d, e, so the human can answer 'Q7b' rather than quoting text back. There is ALWAYS a final letter meaning 'none of these, I will say it myself' -- a closed set of options is a leading question. Never an unordered list for either the questions or the options: a bullet cannot be referenced, so an answer covering three of four parts leaves no way to say which one was missed. Repeat the number when following up, say which number an answer resolved, and carry an unanswered number forward unrenumbered rather than dropping it. Requested by Tschallacka on 2026-09-04; the same rules are already in his global CLAUDE.md, and this task is to make them a shipped skill so every agent follows them, not only this one.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-04T08:01:38Z"
     },
     {
       "id": "T81e",
@@ -151,17 +229,30 @@
       "updated_at": "2026-09-01T16:05:03Z"
     },
     {
-      "id": "T83",
-      "title": "Tools available for register work, and where they came from (PR #15)",
+      "id": "T91b",
+      "title": "retire read/tail --local, the log-file path that bypasses the server",
       "status": "open",
       "priority": "normal",
-      "parent": null,
-      "detail": "PR #15 adds two things any agent touching BUGS.json or TODO.json should know about. (1) planning/scripts/register-resolve.sh resolves an id collision in a conflicted register. Usage: '--check <register>' exits 1 when conflicted and 0 when clean, so it fits a hook; '<register>' with no decisions lists every collision with BOTH sides' titles plus a suggested free id and exits 65; '<register> side:old:new side:old:new ...' takes every decision in ONE run, applies them, and prints the resolved register to stdout with a confirmation on stderr; re-running the SAME command prefixed with CONFIRM=<that hash> writes it in place. side is ours|theirs or either branch name. It reads git index stages (:1 base, :2 ours, :3 theirs) so it needs no checkout, refuses a divergence (both sides editing one base entry differently) as something a rename cannot fix, refuses to resolve into a register whose own side is already unsound, follows a rename into parent and into an id-valued blocked_on, and REPORTS prose mentions rather than rewriting them. (2) tests/test-register-soundness.sh runs the rules over the committed registers, which nothing did before: a finding there means the entry did not come from the writers, because bug-add.sh and todo-update.sh refuse exactly those. Run it after any hand edit. Both are MODE: DEV and repository-side only - shipping equivalents to the two skills is T81.",
+      "parent": "T91",
+      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
       "blocked_on": null,
       "refs": [],
       "note": null,
-      "created_at": "2026-09-01T16:12:10Z",
-      "updated_at": "2026-09-01T16:12:10Z"
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-04T08:29:54Z"
+    },
+    {
+      "id": "T91c",
+      "title": "make the server's fan-out structurally lock-safe: a real channel per peer, and a read-write registry",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "PR #43 fixed the acute wedge by giving each connection an outbox that its own thread drains, so a broadcaster never writes another peer's socket. That is the right shape, hand-rolled. Finish it properly:\n\n(1) The outbox is a Mutex<Vec<String>> plus drain. The idiomatic form is one std::sync::mpsc::Sender per connection: the message is MOVED to the owner, the channel's lock is a true leaf that is never held across I/O, and no code can accidentally reach a peer's connection state again. A hand-rolled queue invites someone to add 'just one' extra field guarded by the same mutex.\n\n(2) The registry is 'writers: Mutex<Vec<Arc<Mutex<Option<ConnState>>>>>' -- a mutex holding a vector of mutexes. It is READ on every broadcast and WRITTEN only on connect and disconnect, so it wants an RwLock. This matters beyond speed: the accept loop needs that same lock to register an arrival, which is why a stalled broadcast stopped new clients being served at all.\n\n(3) While in there, the connection state's own mutex is held across a 200ms read and immediately retaken, which is what starved broadcasters (measured by chat-b122). Whatever survives after (1), that pattern should not.\n\nCONSIDERED AND REJECTED, recorded so it is not re-proposed: dropping server-side fan-out entirely and letting our clients read the log, or poll FETCH, because they largely do that already. Tschallacka's rule on 2026-09-04 forecloses it -- nothing outside the server may touch the log, and steady-state delivery is a push over the socket, not a poll. Fan-out is therefore load-bearing and gets fixed, not deleted. See T91a.\n\nNot urgent: the acute bug is fixed. This is the cleanup that stops it recurring by construction rather than by care.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:36:28Z",
+      "updated_at": "2026-09-04T08:36:28Z"
     },
     {
       "id": "T69",
@@ -299,19 +390,6 @@
       "updated_at": "2026-09-01T21:24:21Z"
     },
     {
-      "id": "T1e",
-      "title": "Decide what a converted test prints on success",
-      "status": "decided",
-      "priority": "normal",
-      "parent": "T1",
-      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
-      "created_at": "2026-08-20T00:00:00Z",
-      "updated_at": "2026-08-20T14:53:12Z"
-    },
-    {
       "id": "T38",
       "title": "Review record: what was checked on the -ox merge, and what was not",
       "status": "decided",
@@ -325,6 +403,19 @@
       "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T1e",
+      "title": "Decide what a converted test prints on success",
+      "status": "decided",
+      "priority": "normal",
+      "parent": "T1",
+      "detail": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead. **Common to T1a-T1c.** Not every `exit` is a finding: a missing fixture or an absent `openssl` is a precondition and must keep exiting. Conversion changes *when* a test stops, so later assertions begin running against state a fail-fast run never reached — that can surface real failures or hit setup that assumed the abort. Prove each one the way the earlier batch of 26 was proved: capture stdout, stderr and exit code before and after, diff them, and confirm the test still fails when an assertion is broken. Counts measured by brace-matching each reporter's own body, not by an awk range: `/^(fail|note_fail)\\(\\)/,/^}/` runs past a one-line `fail() { …; }` into the next function and finds *its* `exit`, which is how this file came to claim 18 fail-fast tests when there are 6. 42 tests already accumulate via `t_record`/`t_fail`; 15 define no reporter at all and are out of scope here.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "DECIDED — t_end adopted, matching the 42 tests already using it, so byte-identical stdout is not the acceptance criterion. `t_end` prints `<test>: PASS`, or `<test>: N failure(s).` and exits 1. The three T1a tests print their own success line today, so adopting the library changes their stdout. Two defensible answers: adopt `t_end` and match the 42 tests that already use it, or keep each test's existing success line and call only the finding-recording part of the library. This has to be settled before T1a, because it decides the acceptance criterion: with `t_end`, byte-identical stdout cannot be the test of a correct conversion, and the proof has to compare the *findings* instead.",
+      "created_at": "2026-08-20T00:00:00Z",
+      "updated_at": "2026-08-20T14:53:12Z"
     },
     {
       "id": "T1",
