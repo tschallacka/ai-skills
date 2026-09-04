@@ -209,6 +209,15 @@ defaults verbatim.
 - Before committing: inspect `git status`/`git diff`; run `bash -n`,
   `git diff --check`, and the relevant tests; confirm no generated archives,
   npm cache, or temporary targets are staged.
+- When CI is red, read it with `./ci-failures.sh` rather than by hand. It takes
+  a run id, a PR number (`47` or `pr/47`), a branch, or nothing for the current
+  branch, and prints each failing job with the lines that identify the failure;
+  `--raw DIR` keeps the whole de-escaped log when a screen dump has to be read
+  in full. Three things it knows that cost a session to find out: `gh run view`
+  refuses while a run is in progress but the per-job logs API does not, that
+  API refuses a body without `--allow-escape-sequences`, and stripping the
+  colour codes afterwards needs a literal ESC because `\x1b` is a GNU
+  extension.
 - Every edited shell script must pass `shellcheck -s bash <file>` with no new
   findings (`.shellcheckrc` already silences the three checks that are noise
   here). CI gates on `error` severity across all tracked `*.sh` outside
