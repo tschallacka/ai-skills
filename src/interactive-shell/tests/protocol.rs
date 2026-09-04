@@ -510,9 +510,18 @@ fn view_is_compact_numbered_and_supports_rows_and_deltas() {
         .output()
         .unwrap();
     assert!(range.status.success());
-    assert!(String::from_utf8(range.stdout)
-        .unwrap()
-        .starts_with("terminal=20x4\n001 [001-003] ONE\n002 "));
+    // Carries the actual output: this assertion failed on x86_64-apple-darwin
+    // while the single-row view above passed, and a bare starts_with reports
+    // only that it failed -- nobody can tell whether row 2 was absent,
+    // differently numbered, or merely not written yet.
+    let range_out = String::from_utf8(range.stdout).unwrap();
+    let range_want = "terminal=20x4\n001 [001-003] ONE\n002 ";
+    assert!(
+        range_out.starts_with(range_want),
+        "view 1-2 did not start with the expected two rows\n  want prefix: {:?}\n  got:         {:?}",
+        range_want,
+        range_out
+    );
     let second_wait = request_all(
         &dir,
         r#"{"v":1,"op":"wait","contains":"TWO"}
