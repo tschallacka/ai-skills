@@ -95,6 +95,19 @@
       "updated_at": "2026-09-04T08:20:48Z"
     },
     {
+      "id": "T91",
+      "title": "the socket is the only interface to the chat bus: nothing outside the server may touch the channel log",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Architectural rule set by Tschallacka on 2026-09-04: everything goes over the socket, and nothing interfaces the log. The channel log is the SERVER's private storage format, not an API. Two things follow, and both are violations present today.\n\n(1) No client may read the log file. chat-client-rs has 'read --local' and 'tail --local' which walk $AI_CHAT_HOME/channels/<chan>.log directly with no server, and the docs advertise it. That has to go, or survive only as an explicitly-labelled maintenance escape hatch that no agent instruction ever recommends. pr-master's own coordination poller was reading the log this way as a workaround for B122 -- a live tail wedged the server -- which is exactly the shortcut this rule forbids, and it must move to a socket tail once B122 lands.\n\n(2) Steady-state delivery is a PUSH over the socket, not a poll. Today 'tail' is a loop issuing FETCH <chan> <last_id>, and the client discards broadcast PRIVMSG lines except to confirm its own send echoed -- measured by chat-b122 on PR #43. So the server's whole fan-out path serves stock IRC clients only, while our own client polls. Invert it: the client consumes PRIVMSG as it arrives, so a message reaches an agent when it is sent rather than on the next poll interval. This is the liveness requirement behind wanting the chat up at all -- a held connection is what makes answers quick.\n\nWhere FETCH legitimately stays: backfill. On join or reconnect a client asks for what it missed since its cursor, over the SOCKET, and then follows the push stream. That is not log interfacing and not steady-state polling.\n\nDepends on B122 (PR #43): before it, a held subscriber wedged the server, which is why polling was tolerated. Related: B124 (connect affordance) and T90 (chat client as an MCP) -- an MCP is the natural home for a held socket that consumes pushes.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:29:41Z",
+      "updated_at": "2026-09-04T08:29:41Z"
+    },
+    {
       "id": "T81f",
       "title": "Traps already paid for while building the resolver — read before touching this code",
       "status": "open",
@@ -106,6 +119,19 @@
       "note": null,
       "created_at": "2026-09-01T16:04:38Z",
       "updated_at": "2026-09-01T16:04:38Z"
+    },
+    {
+      "id": "T91a",
+      "title": "chat-client-rs consumes broadcast PRIVMSG as it arrives, instead of looping on FETCH",
+      "status": "open",
+      "priority": "high",
+      "parent": "T91",
+      "detail": "tail is currently a FETCH poll loop (src/chat-client-rs/src/main.rs around line 1594) and PRIVMSG is only inspected to confirm a send echoed (line 1041). Make the client a real subscriber: after backfilling from its cursor, follow the pushed stream and surface each message on arrival. Keep the cursor updated from pushed ids so a reconnect backfills correctly. Prove it with a test that a message reaches an attached client without any FETCH being issued after the join.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-04T08:29:54Z"
     },
     {
       "id": "T71",
@@ -201,6 +227,19 @@
       "note": null,
       "created_at": "2026-09-01T16:05:03Z",
       "updated_at": "2026-09-01T16:05:03Z"
+    },
+    {
+      "id": "T91b",
+      "title": "retire read/tail --local, the log-file path that bypasses the server",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T91",
+      "detail": "read --local and tail --local walk $AI_CHAT_HOME/channels/<chan>.log with no server. Remove them, or keep them only as a maintenance escape hatch that is documented as such and never recommended in an agent instruction or skill doc. Sweep SKILL.md, the client's own usage text and .agents docs for anywhere --local is offered as the way to read a channel, since that is what teaches every future agent to bypass the socket. Depends on T91a: nothing may lose the ability to read a channel before the push path replaces it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-04T08:29:54Z"
     },
     {
       "id": "T69",
