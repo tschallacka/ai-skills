@@ -177,10 +177,20 @@ else
         ''|Z*)
             t_fail "the server died when it ran out of descriptors instead of refusing the connection (state '${srv_state:-gone}'): $(tail -2 "$work/tiny.err" 2>/dev/null)" ;;
     esac
-    case "$(cat "$work/tiny.err" 2>/dev/null)" in
-        *'cannot accept connections'*) : ;;
-        *) t_fail "the server never reported that it could not accept connections; stderr was: $(cat "$work/tiny.err" 2>/dev/null)" ;;
-    esac
+    # Whether the limit actually STARVED the server is only demonstrable where
+    # the descriptor table is readable. macOS started and announced normally at
+    # `ulimit -n 6` -- the limit bit this script's own redirections there
+    # ("cannot duplicate fd") rather than the server's accept loop -- so
+    # requiring the report would fail the test for a condition that never
+    # occurred. The crash assertions stay on every platform: a panic is a panic.
+    if [ -d /proc ]; then
+        case "$(cat "$work/tiny.err" 2>/dev/null)" in
+            *'cannot accept connections'*) : ;;
+            *) t_fail "the server never reported that it could not accept connections; stderr was: $(cat "$work/tiny.err" 2>/dev/null)" ;;
+        esac
+    else
+        printf 'SKIP chat descriptor leak: no /proc, so exhaustion could not be confirmed and the report was not asserted\n' >&2
+    fi
     # Only "panicked": an EMFILE that is merely *reported* is the correct
     # behaviour being asserted two checks above, and matching on the error text
     # itself would call that a panic.
