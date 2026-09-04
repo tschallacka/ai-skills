@@ -386,6 +386,19 @@
       "updated_at": "2026-09-04T12:05:08Z"
     },
     {
+      "id": "T93",
+      "title": "CI merges the registers branch to master on push, and refuses anything but the registers in it",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Half of the register policy is in place: pre-push-check refuses a BUGS.json or TODO.json change on any branch but 'registers', names that branch in the refusal, and AGENTS.md documents why. The other half -- Tschallacka's original design -- is not built: 'bugs branch gets merged automatically by ci on push, only bugs.json and todo.json may be modified in that ci'.\n\nWhat is missing:\n\n1. A workflow on push to 'registers' that validates and fast-forwards master. Validation is cheap and already exists: 'bugs check' and reg_findings decide soundness, and a duplicate-id scan is the one thing git cannot see -- two branches taking the same next free id merge textually with NO conflict, which is how eight duplicate ids landed on 2026-09-04.\n\n2. That workflow must REFUSE a push to 'registers' touching anything except BUGS.json and TODO.json. Without it the branch becomes a protection bypass: register changes skip review by design, so anything else riding along would too.\n\n3. Master is protected and requires a successful CI run, so the workflow needs a way to land the merge -- a token with permission, or the branch protection amended for this one path. That decision is Tschallacka's, not a worker's, because it widens who can write master.\n\nUntil it exists, a registers push is an ordinary PR against master, which is what today's entries did (B162-B164, T92). That works but leaves the register waiting on a human, which is the friction the design was meant to remove.\n\nRaised from the transition itself: the rule shipped naming a branch ('bugs') that git cannot create while any bugs/* ref exists, so it had to be renamed to 'registers' in PR #48 before a single entry could be filed under it.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-04T12:13:25Z",
+      "updated_at": "2026-09-04T12:13:25Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
