@@ -2645,7 +2645,7 @@
     {
       "id": "B119",
       "title": "test-runtime-dependencies' rjq-less PATH is refilled from the shared install directory",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2658,12 +2658,12 @@
         "planning/scripts/lib/crypt/plan_bin_dir.sh",
         "planning/scripts/plan-document-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "pending commit — the rjq-less test now uses an isolated temporary HOME, so the shared install directory cannot refill PATH",
+      "verification": "test-runtime-dependencies.sh passes with the isolated HOME. Mutation of register-command.sh's rjq guard to a no-op makes the test fail with exit 127 instead of the expected 69, proving the refusal assertion bites. Full pre-push checks remain to run.",
       "found_by": "full suite run while shipping the todo binary; isolated with a clean-HEAD worktree control",
       "notes": "Filed on feature/ship-register-helpers as B108; master had taken B108 and B109 for unrelated defects before this branch rebased, so the entry was renumbered to B119 at the rebase rather than displacing either.",
       "created_at": "2026-09-01T21:19:58Z",
-      "updated_at": "2026-09-01T21:19:58Z"
+      "updated_at": "2026-09-04T08:09:31Z"
     },
     {
       "id": "B122",
