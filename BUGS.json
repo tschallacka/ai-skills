@@ -74,7 +74,7 @@
     {
       "id": "B89",
       "title": "The release-package gate rejects any prerelease version, so bumping package.json to 2.0.0-alpha turns the suite red",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -86,12 +86,12 @@
         "tests/test-release-package.sh",
         "package.json"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "1055e4a — release-package now validates full SemVer core, prerelease and build metadata forms",
+      "verification": "The gate accepts 2.0.0-alpha, 2.0.0-alpha.1 and 2.0.0+build.7, while rejecting 2.0, x.y.z, empty, 02.0.0, 2.0.0- and 2.0.0-alpha..1. The old numeric-only pattern returns 0 for the prerelease cases; the release-package integration test could not complete because rust-lld hit the host's process-resource limit while rebuilding chat artifacts.",
       "found_by": "main session, working out the runbook for tagging 2.0.0-alpha; found before the bump rather than after, so it has never actually gone red",
       "notes": null,
       "created_at": "2026-08-28T17:11:58Z",
-      "updated_at": "2026-08-28T17:11:58Z"
+      "updated_at": "2026-09-04T07:14:00Z"
     },
     {
       "id": "B33",
