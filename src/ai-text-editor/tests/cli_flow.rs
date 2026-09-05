@@ -1,5 +1,4 @@
 // MODE: DEV
-// PACKAGE: PROD
 //! End-to-end regressions for the failure modes found in the first real
 //! agent test-drive of the skill: silent refusals, a wedged session after
 //! an external change, edits routed to the wrong tab, stale endpoints that
