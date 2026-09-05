@@ -26,7 +26,7 @@ use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -98,8 +98,8 @@ fn main() {
         std::process::exit(64);
     }
     let path = match option(&args, "--file") {
-        Some(path) => fs::canonicalize(&path)
-            .unwrap_or_else(|error| die(&format!("cannot canonicalize {path}: {error}"))),
+        Some(path) => ai_text_editor::transport::canonical_or_near(Path::new(&path))
+            .unwrap_or_else(|error| die(&format!("cannot resolve {path}: {error}"))),
         None => die("--file is required"),
     };
     let auth_token_file = option(&args, "--auth-token-file").map(PathBuf::from);
@@ -115,9 +115,13 @@ fn main() {
     let session_token =
         auth::nonce().unwrap_or_else(|error| die(&format!("cannot create session token: {error}")));
     let server_generation = server_generation();
-    let file_size = fs::metadata(&path)
-        .unwrap_or_else(|error| die(&format!("cannot stat {}: {error}", path.display())))
-        .len();
+    let file_size = match fs::metadata(&path) {
+        Ok(metadata) => metadata.len(),
+        // A file that does not exist yet opens as an empty document; it is
+        // created at its real path by the first save.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => die(&format!("cannot stat {}: {error}", path.display())),
+    };
     let large_threshold = option(&args, "--large-threshold-bytes")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_else(|| {
@@ -133,8 +137,11 @@ fn main() {
     let bytes = if large_file.is_some() {
         Vec::new()
     } else {
-        fs::read(&path)
-            .unwrap_or_else(|error| die(&format!("cannot read {}: {error}", path.display())))
+        match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => die(&format!("cannot read {}: {error}", path.display())),
+        }
     };
     let mode = match option(&args, "--mode").as_deref() {
         None | Some("text_utf8") => DocumentMode::TextUtf8,
@@ -388,7 +395,9 @@ fn main() {
                 ));
             }
             let discovery = endpoint_for_file(&path);
-            if !args.iter().any(|arg| arg == "--takeover-stale-endpoint") {
+            if !args.iter().any(|arg| arg == "--takeover-stale-endpoint")
+                && !endpoint_owner_is_gone(&discovery)
+            {
                 let details = read_endpoint_metadata(&discovery)
                     .ok()
                     .map(|metadata| {
@@ -536,9 +545,11 @@ fn open_additional_tab(
     server_generation: String,
     large_threshold_bytes: u64,
 ) -> Result<Tab, String> {
-    let file_size = fs::metadata(&path)
-        .map_err(|error| format!("cannot stat {}: {error}", path.display()))?
-        .len();
+    let file_size = match fs::metadata(&path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(format!("cannot stat {}: {error}", path.display())),
+    };
     let large_file = if file_size > large_threshold_bytes {
         Some(LargeFile::open(&path).map_err(|error| format!("cannot open large file: {error}"))?)
     } else {
@@ -547,7 +558,11 @@ fn open_additional_tab(
     let bytes = if large_file.is_some() {
         Vec::new()
     } else {
-        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?
+        match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+        }
     };
     let mut document = Document::new(bytes, mode)
         .map_err(|_| "file is not UTF-8; open it with raw_bytes or hex_view mode".to_owned())?;
@@ -1098,7 +1113,8 @@ fn server_generation() -> String {
 }
 
 fn tab_key(path: &std::path::Path) -> String {
-    let identity = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let identity = ai_text_editor::transport::canonical_or_near(path)
+        .unwrap_or_else(|_| path.to_path_buf());
     blake3::hash(identity.to_string_lossy().as_bytes())
         .to_hex()
         .to_string()
@@ -1109,11 +1125,46 @@ fn default_tab(state: &Arc<Mutex<ServerState>>) -> Arc<Mutex<Tab>> {
     state.tabs[&state.default_key].clone()
 }
 
+/// The file a request explicitly names, in the same canonical form tab
+/// paths are stored in, or `None` when the request names none.
+fn requested_file(envelope: &ai_text_editor::protocol::Envelope) -> Option<PathBuf> {
+    envelope
+        .payload
+        .get("file")
+        .and_then(Value::as_str)
+        .map(|path| {
+            ai_text_editor::transport::canonical_or_near(std::path::Path::new(path))
+                .unwrap_or_else(|_| std::path::PathBuf::from(path))
+        })
+}
+
+/// A tab may only serve a request that names its own file. Routing was
+/// token-first with `file` consulted only for `open`, which let a
+/// `-f OTHERFILE` replace silently mutate the session's *previous* tab:
+/// the edit returned a real new revision, the next read (routed elsewhere)
+/// never showed it, and the named file never changed on disk.
+fn ensure_tab_file(tab: &Arc<Mutex<Tab>>, requested: Option<&PathBuf>) -> Result<(), String> {
+    let Some(requested) = requested else {
+        return Ok(());
+    };
+    let held = tab.lock().ok().map(|tab| tab.path.clone());
+    match held {
+        Some(path) if &path == requested => Ok(()),
+        Some(path) => Err(format!(
+            "file_mismatch: the request names {requested:?} but this tab holds {}; run `ai-text-editor open -f {}` to route to the named file",
+            path.display(),
+            requested.display()
+        )),
+        None => Err("tab_unavailable: the tab lock is poisoned".into()),
+    }
+}
+
 fn select_tab(
     envelope: &ai_text_editor::protocol::Envelope,
     state: &Arc<Mutex<ServerState>>,
 ) -> Result<Arc<Mutex<Tab>>, String> {
     let state_guard = state.lock().unwrap();
+    let requested = requested_file(envelope);
     if let Some(token) = envelope.session_token.as_deref() {
         for tab in state_guard.tabs.values() {
             if tab
@@ -1121,6 +1172,7 @@ fn select_tab(
                 .ok()
                 .is_some_and(|tab| tab.session_token == token)
             {
+                ensure_tab_file(tab, requested.as_ref())?;
                 return Ok(tab.clone());
             }
         }
@@ -1130,13 +1182,11 @@ fn select_tab(
         );
     }
     if envelope.method == "open" {
-        if let Some(path) = envelope.payload.get("file").and_then(Value::as_str) {
-            let key = tab_key(std::path::Path::new(path));
+        if let Some(path) = requested.as_ref() {
+            let key = tab_key(path);
             if let Some(tab) = state_guard.tabs.get(&key) {
                 return Ok(tab.clone());
             }
-            let path = fs::canonicalize(path)
-                .map_err(|error| format!("cannot open tab {path}: {error}"))?;
             let mode = state_guard.mode;
             let normalize_nfc = state_guard.normalize_nfc;
             let auth_token = state_guard.auth_token.clone();
@@ -1182,7 +1232,9 @@ fn select_tab(
             return Ok(result);
         }
     }
-    Ok(state_guard.tabs[&state_guard.default_key].clone())
+    let default = state_guard.tabs[&state_guard.default_key].clone();
+    ensure_tab_file(&default, requested.as_ref())?;
+    Ok(default)
 }
 
 fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -> Vec<Value> {
@@ -1210,8 +1262,30 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     }
     if envelope.method != "resolve_external" && envelope.method != "save_as" {
         observe_external(&mut tab);
-        if let Some(bytes) = &tab.pending_external {
-            frames.push(error_details(&envelope.request_id, "external_change", "the file changed outside this editor tab", json!({"bytes": bytes.len(), "choices": ["backup", "reload", "merge", "keep", "force_save"], "force_save_requires": "acknowledge_force_save=true"})));
+    }
+    // An unresolved external change blocks everything that could lose a
+    // side's bytes — but not the read-only commands. A read that answers
+    // "resolve first" with an error frame is how a wedged session looks
+    // under `-p text`: an empty, silent command the agent cannot diagnose;
+    // the buffer is what the editor holds, and that is exactly what a
+    // confused agent needs to see while deciding.
+    if let Some(bytes) = &tab.pending_external {
+        if matches!(
+            envelope.method.as_str(),
+            "insert"
+                | "replace"
+                | "undo"
+                | "redo"
+                | "save"
+                | "large_edit"
+                | "restore"
+                | "begin_transaction"
+                | "end_transaction"
+                | "job_start"
+                | "job_complete"
+        ) {
+            let byte_count = bytes.len();
+            frames.push(error_details(&envelope.request_id, "external_change", "the file changed outside this editor tab; mutating commands are blocked until you resolve the external change (reads still return the editor's buffer)", json!({"bytes": byte_count, "choices": ["backup", "reload", "merge", "keep", "force_save"], "force_save_requires": "acknowledge_force_save=true"})));
             return frames;
         }
     }
@@ -1243,7 +1317,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         }
     }
     match envelope.method.as_str() {
-        "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
+        "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
         "capabilities" => frames.push(response(&envelope.request_id, json!({
             "protocol_version": ai_text_editor::PROTOCOL_VERSION,
             "document_modes": ["text_utf8", "raw_bytes", "hex_view"],
@@ -1385,19 +1459,37 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             let start = cursor.line.saturating_sub(before.unwrap_or(0) as usize + 1);
                             let end = (cursor.line.saturating_add(after.unwrap_or(0) as usize)).min(lines.len());
                             let selected = lines.get(start..end).unwrap_or(&[]).concat();
-                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start + 1, "end_line": end, "cursor": cursor, "complete": end == lines.len() && start == 0})))
+                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start + 1, "end_line": end, "cursor": cursor, "dirty": tab_dirty(&tab), "complete": end == lines.len() && start == 0})))
+                        } else if let Some(offset) = envelope.payload.get("offset").and_then(Value::as_u64) {
+                            // -o/--offset and -L/--length address a text read
+                            // in BYTES (matching raw/hex coordinates), and
+                            // the window is snapped outward from an offset
+                            // and inward from a length so both ends land on
+                            // UTF-8 char boundaries.
+                            let mut start = (offset as usize).min(text.len());
+                            while start < text.len() && !text.is_char_boundary(start) {
+                                start += 1;
+                            }
+                            let mut end = match envelope.payload.get("length").and_then(Value::as_u64) {
+                                Some(length) => start.saturating_add(length as usize).min(text.len()),
+                                None => text.len(),
+                            };
+                            while end > start && !text.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            frames.push(response(&envelope.request_id, json!({"text": &text[start..end], "revision": tab.revision, "offset": start, "returned_bytes": end - start, "total_bytes": text.len(), "eof": end == text.len(), "dirty": tab_dirty(&tab), "complete": end == text.len()})));
                         } else {
                             if envelope.payload.get("presentation").and_then(Value::as_str) == Some("stream") {
                                 frames.extend(stream_read_frames(&envelope.request_id, &tab));
                             } else {
-                                frames.push(response(&envelope.request_id, json!({"text": text, "revision": tab.revision, "complete": true})))
+                                frames.push(response(&envelope.request_id, json!({"text": text, "revision": tab.revision, "dirty": tab_dirty(&tab), "complete": true})))
                             }
                         }
                     }
                     Err(error_value) => frames.push(error(&envelope.request_id, "invalid_utf8", error_value.to_string())),
                 }
             } else {
-                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "mode": tab.document.mode})))
+                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "mode": tab.document.mode})))
             }
         },
         "replace" | "insert" => {
@@ -1450,7 +1542,16 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             tab.index_complete = true;
                             persist_index(&mut tab);
                             let _ = tab.metadata.record(&tab.path, tab.document.mode, tab.revision, tab.document.bytes().len());
-                            frames.push(response(&envelope.request_id, json!({"revision": tab.revision, "cursors": tab.cursors})));
+                            // A delete spanning a line end joins two lines;
+                            // nothing in the coordinates says so otherwise.
+                            let spans_lines = before.bytes()[offset..offset + delete_len]
+                                .iter()
+                                .any(|byte| *byte == b'\n');
+                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab)});
+                            if spans_lines {
+                                payload["spans_lines"] = json!(true);
+                            }
+                            frames.push(response(&envelope.request_id, payload));
                         }
                         Err(error_value) => frames.push(error(&envelope.request_id, "journal_write_failed", error_value.to_string())),
                     }
@@ -1579,6 +1680,17 @@ fn disk_state(path: &std::path::Path, large: Option<&LargeFile>, bytes: &[u8]) -
     } else {
         format!("{}:{}", file_metadata_state(path), digest(bytes))
     }
+}
+
+/// Whether the tab's buffer differs from the file on disk — an edit landed
+/// in the journal but no `save` has flushed it yet. Every mutating response
+/// carries this so a caller that never saves cannot mistake journal-only
+/// success for work on disk.
+fn tab_dirty(tab: &Tab) -> bool {
+    if tab.large_file.is_some() {
+        return false;
+    }
+    disk_state(&tab.path, None, tab.document.bytes()) != tab.disk_digest
 }
 
 fn file_metadata_state(path: &std::path::Path) -> String {
@@ -1995,6 +2107,10 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
             ));
             return;
         }
+        // A tab opened on a path that did not exist yet has no disk copy to
+        // reconcile against; the save creates the file. Any other read
+        // error is a real failure.
+        Err(error_value) if error_value.kind() == io::ErrorKind::NotFound => {}
         Err(error_value) => {
             frames.push(error(
                 &envelope.request_id,
@@ -2022,7 +2138,7 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
     journal_append(tab, "save", json!({"revision": tab.revision}));
     frames.push(response(
         &envelope.request_id,
-        json!({"saved": true, "revision": tab.revision, "bytes": tab.document.bytes().len()}),
+        json!({"saved": true, "dirty": false, "revision": tab.revision, "bytes": tab.document.bytes().len()}),
     ));
 }
 
@@ -2161,7 +2277,7 @@ fn history_step(
     );
     frames.push(response(
         &envelope.request_id,
-        json!({"revision": revision, "cursors": tab.cursors}),
+        json!({"revision": revision, "cursors": tab.cursors, "dirty": tab_dirty(tab)}),
     ));
 }
 
@@ -2272,7 +2388,7 @@ fn close_tab(
             &envelope.request_id,
             "journal_close_decision_required",
             "choose whether to preserve or clean the tab journal before closing",
-            json!({"choices": ["preserve", "clean"], "journal": tab.journal.path()}),
+            json!({"choices": ["preserve", "clean"], "journal": tab.journal.path(), "unsaved_changes": tab_dirty(tab)}),
         ));
         return;
     };
@@ -3606,4 +3722,26 @@ fn job_release(
 fn die(message: &str) -> ! {
     eprintln!("ai-text-editor-server: {message}");
     std::process::exit(64);
+}
+
+/// Whether the endpoint file at `discovery` names a server process that is
+/// demonstrably gone. A `kill`ed server leaves its endpoint and socket
+/// behind; refusing a takeover then protects nothing and wedges every later
+/// `open` (the refusal message names a flag for a problem the agent was
+/// never supposed to see). Only a *proven* dead pid takes over silently —
+/// an unknown owner keeps the explicit `--takeover-stale-endpoint` gate.
+#[cfg(unix)]
+fn endpoint_owner_is_gone(discovery: &std::path::Path) -> bool {
+    match read_endpoint_metadata(discovery) {
+        Ok(metadata) => metadata.pid.is_some_and(|pid| !pid_is_alive(pid)),
+        Err(_) => false,
+    }
+}
+
+#[cfg(unix)]
+fn pid_is_alive(pid: u32) -> bool {
+    // signal 0 performs the existence and permission checks without
+    // touching the process; EPERM means it exists and is not ours to kill.
+    let result = unsafe { libc::kill(pid as libc::c_int, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
