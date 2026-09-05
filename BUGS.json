@@ -464,12 +464,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": "b49e4cd — reads honour inclusive line windows on text tabs and half-open byte windows on raw, hex, and large tabs; bounds a tab cannot honour are refused with the flag named",
+      "fix": "PR #61 (c1876f1; pre-rebase b49e4cd) - reads honour inclusive line windows on text tabs and half-open byte windows on raw, hex, and large tabs; bounds a tab cannot honour are refused with the flag named",
       "verification": "BUGS.json repro on a 296-line file returns exactly lines 60-64 over CLI, adapter, and large-tab paths; read_range_incomplete, read_range_conflict, read_range_invalid, read_range_unsupported refusals observed; tests/cli_flow.rs adds bounded_text_reads_honour_their_line_range_and_refuse_the_impossible and raw_reads_honour_a_half_open_byte_window_and_refuse_line_ranges — removing the fix fails both",
       "found_by": "using the skill for a real edit on 2026-09-04; the call spent about 7000 tokens of an agent's context returning a file it had asked five lines of",
       "notes": null,
       "created_at": "2026-09-04T17:21:20Z",
-      "updated_at": "2026-09-05T16:14:49Z"
+      "updated_at": "2026-09-05T20:58:09Z"
     },
     {
       "id": "B3",
