@@ -790,3 +790,33 @@ fn capabilities_answers_cold_without_any_server() {
     assert_eq!(payload["source"], json!("client_default"));
     assert!(payload["search_modes"].is_array());
 }
+
+#[test]
+fn a_stopped_server_leaves_no_session_registry_records_behind() {
+    // B189: shutdown (idle or last tab closed) used to tear down the socket
+    // and endpoint but leave every tab's sessions.json record pointing at a
+    // server that no longer exists.
+    let harness = Harness::new("registryretire");
+    let file = harness.write("doc.txt", "a\n");
+    harness.open(&file);
+    let registry = harness.scratch.join("meta").join("sessions.json");
+    let live = std::fs::read_to_string(&registry).unwrap();
+    assert!(
+        live.contains("server_generation"),
+        "the tab should be registered while the server lives: {live}"
+    );
+    let closed = harness.client(&[
+        "close",
+        "-f",
+        file.to_str().unwrap(),
+        "--journal-action",
+        "clean",
+    ]);
+    assert!(closed.status.success(), "{}", refusal_text(&closed));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let after = std::fs::read_to_string(&registry).unwrap_or_else(|_| "[]".into());
+    assert!(
+        !after.contains("server_generation"),
+        "ghost records survive shutdown: {after}"
+    );
+}
