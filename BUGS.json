@@ -3916,23 +3916,23 @@
     {
       "id": "B189",
       "title": "sessions.json keeps records of cleanly closed tabs; the registry never self-cleans",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
       "reproduce": "close every tab with journal_action, then inspect sessions.json: entries for dead servers and closed tabs remain until a resolve refuses them",
       "observed": "Growth is unbounded; identity resolution pays stale probes forever.",
       "expected": "Close removes the record (it already calls unregister); shutdown sweeps the endpoint's remaining records.",
-      "mechanism": "unregister-by-token ran for the closed tabs yet records survived; needs confirmation which close path left them.",
+      "mechanism": "Not the close path: shutdown (idle watchdog and last-tab exit) removed the endpoint/socket but never the tabs' sessions.json records, so generations that died left ghosts",
       "surfaces": [
         "src/ai-text-editor/src/session.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "857d189 - session::retire_generation drops the leaving server's records at both exit paths",
+      "verification": "session.rs unit test retiring one generation keeps the other's records; cli_flow a_stopped_server_leaves_no_session_registry_records_behind asserts the registry clean after close of the last tab",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T21:20:54Z"
     },
     {
       "id": "B192",
