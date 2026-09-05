@@ -167,17 +167,25 @@ fn call_tool(id: Value, params: Value) -> Value {
     };
     match request(&resolved.endpoint, &envelope) {
         Ok(frames) => {
+            let failed = frames
+                .iter()
+                .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
             let returned_session_token = frames
                 .iter()
                 .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
                 .and_then(|frame| frame.pointer("/payload/session_token"))
                 .and_then(Value::as_str);
-            let _ = client::persist_cache(
-                resolved.cache_path.as_deref(),
-                &resolved.endpoint,
-                auth_token.as_deref(),
-                returned_session_token.or(resolved.session_token.as_deref()),
-            );
+            // Same rule as the CLI: a refused request must not rewrite the
+            // per-(identity,file) cache with the endpoint and token of
+            // whichever tab answered the refusal.
+            if !failed {
+                let _ = client::persist_cache(
+                    resolved.cache_path.as_deref(),
+                    &resolved.endpoint,
+                    auth_token.as_deref(),
+                    returned_session_token.or(resolved.session_token.as_deref()),
+                );
+            }
             json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":serde_json::to_string(&frames).unwrap()}]}})
         }
         Err(error) => tool_error(id, &error),

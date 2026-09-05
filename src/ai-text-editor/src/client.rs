@@ -142,15 +142,30 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     if let Some(path) = cache_path.as_ref().filter(|path| path.exists()) {
         // A previous call under this same (identity, file) — reconnects
         // straight to its own tab, skipping both the registry lookup and
-        // any per-file discovery.
+        // any per-file discovery. A cached endpoint whose server has since
+        // died is not a live tab to reconnect to: fall through to the file
+        // path below, which can autostart a replacement that replays the
+        // journal, instead of failing every later request on a socket
+        // nobody is listening on.
         let session = read_session(path)
             .map_err(|error| format!("cannot read session token {}: {error}", path.display()))?;
-        return Ok(Resolved {
-            endpoint: session.endpoint,
-            auth_token: session.auth_token,
-            session_token: session.session_token,
-            cache_path,
-        });
+        if session.endpoint.is_live() {
+            // Same leak the registry branch withholds: the server routes by
+            // session_token before it ever consults `file`, so an `open`
+            // that carries this (possibly other-tab's) token reconnects to
+            // the wrong tab instead of routing to the named file.
+            let session_token = if request.method == "open" && request.file.is_some() {
+                None
+            } else {
+                session.session_token
+            };
+            return Ok(Resolved {
+                endpoint: session.endpoint,
+                auth_token: session.auth_token,
+                session_token,
+                cache_path,
+            });
+        }
     }
 
     if let Some(path) = &request.session_token_path {
@@ -188,14 +203,27 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             _ => Err("a file or an endpoint is required".to_owned()),
         };
     };
-    match read_endpoint(&endpoint_for_file(file)) {
-        Ok(endpoint) => Ok(Resolved {
+    let discovery = endpoint_for_file(file);
+    match read_endpoint(&discovery) {
+        // A discovered endpoint file outlives its server after a kill:
+        // probe it, and treat a dead one as "needs a server" rather than
+        // handing a socket nobody listens on to the request.
+        Ok(endpoint) if endpoint.is_live() => Ok(Resolved {
             endpoint,
             auth_token: None,
             session_token: None,
             cache_path,
         }),
-        Err(_) if request.method == "open" => {
+        Ok(_) if request.method != "open" => Err(format!(
+            "the editor server for {} has stopped; run `ai-text-editor open -f {}` to start a new one (the journal replays, but the tab is new — re-read to get a current revision and session token)",
+            file.display(),
+            file.display()
+        )),
+        Err(error) if request.method != "open" => Err(format!(
+            "no server discovered for {}: {error}",
+            file.display()
+        )),
+        _ => {
             autostart_server(
                 file,
                 request.document_mode.as_deref(),
@@ -204,7 +232,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
                 request.explicit_identity.as_deref(),
                 &request.agent_env_var,
             )?;
-            let endpoint = read_endpoint(&endpoint_for_file(file)).map_err(|error| {
+            let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
                     "server was started but never announced an endpoint for {}: {error}",
                     file.display()
@@ -217,10 +245,6 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
                 cache_path,
             })
         }
-        Err(error) => Err(format!(
-            "no server discovered for {}: {error}",
-            file.display()
-        )),
     }
 }
 
@@ -280,10 +304,24 @@ pub fn autostart_server(
     let lock_path = discovery.with_extension("start.lock");
     let _lock = StaleLock::acquire(&lock_path, Duration::from_secs(20))
         .map_err(|error| format!("cannot coordinate server start: {error}"))?;
-    if read_endpoint(&discovery).is_ok() {
+    if has_live_endpoint(&discovery) {
         return Ok(()); // another `open` invocation already won this race.
     }
     let binary = server_binary_path();
+    // A start that dies before announcing (a refused stale endpoint, a
+    // non-UTF-8 file, a bad mode) used to vanish into Stdio::null and the
+    // caller got a 10s timeout with no cause. Capture the child's stderr
+    // and fold it into the failure message when the wait expires.
+    let log_path = discovery.with_extension(format!("start-{}.log", std::process::id()));
+    let log = std::fs::File::create(&log_path).map_err(|error| {
+        format!(
+            "cannot create server start log {}: {error}",
+            log_path.display()
+        )
+    })?;
+    let log_capture = log
+        .try_clone()
+        .map_err(|error| format!("cannot capture server start log: {error}"))?;
     let mut command = std::process::Command::new(&binary);
     command.arg("start").arg("--file").arg(file);
     if let Some(identity) = explicit_identity {
@@ -301,8 +339,9 @@ pub fn autostart_server(
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command.spawn().map_err(|error| {
+        .stderr(Stdio::from(log_capture));
+    let mut child = command.spawn().map_err(|error| {
+        let _ = std::fs::remove_file(&log_path);
         format!(
             "cannot autostart {}: {error}; start it yourself with `ai-text-editor-server start --file {}`",
             binary.display(),
@@ -311,12 +350,30 @@ pub fn autostart_server(
     })?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if read_endpoint(&discovery).is_ok() {
+        if has_live_endpoint(&discovery) {
+            let _ = std::fs::remove_file(&log_path);
             return Ok(());
+        }
+        if child.try_wait().is_ok_and(|status| status.is_some()) {
+            break; // no point waiting out the deadline on an exited spawn
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    Ok(())
+    let reason = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&log_path);
+    let reason = reason.trim();
+    Err(if reason.is_empty() {
+        format!(
+            "server for {} did not announce an endpoint in time",
+            file.display()
+        )
+    } else {
+        format!("server for {} failed to start: {reason}", file.display())
+    })
+}
+
+fn has_live_endpoint(discovery: &Path) -> bool {
+    read_endpoint(discovery).is_ok_and(|endpoint| endpoint.is_live())
 }
 
 fn server_binary_path() -> PathBuf {
