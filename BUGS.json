@@ -410,24 +410,24 @@
     {
       "id": "B171",
       "title": "ai-text-editor read ignores --range-start-line and --range-end-line, returning the whole file",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "high",
       "parent": null,
       "reproduce": "bin/<triple>/ai-text-editor-server start --file FILE & then: bin/<triple>/ai-text-editor open --file FILE --save-session-token T; bin/<triple>/ai-text-editor read --session-token T --range-start-line 60 --range-end-line 64",
       "observed": "The entire file comes back. Measured on a 296-line, 12787-byte file: the reply carried byte_count 13257 and the whole document in one JSON string, with \"complete\": true, no warning and no error. Identical with --presentation text and with the default structured presentation.",
       "expected": "Only lines 60 to 64, or a refusal naming the unsupported flag. A bounded read that silently returns everything is worse than one that refuses.",
-      "mechanism": "Not established in the server source; established at the boundary. The flags are accepted, documented in the client help ('Reading: ... --range-start-line N --range-end-line N') and in the skill as the mechanism for large-file inspection, and they change nothing about the response.",
+      "mechanism": "Established in source: the CLI and MCP map --range-start-line/--range-end-line into every command's payload (bin/ai-text-editor.rs flag table), but no read path consumed those keys — only search did. read returned the whole document regardless.",
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "b49e4cd — reads honour inclusive line windows on text tabs and half-open byte windows on raw, hex, and large tabs; bounds a tab cannot honour are refused with the flag named",
+      "verification": "BUGS.json repro on a 296-line file returns exactly lines 60-64 over CLI, adapter, and large-tab paths; read_range_incomplete, read_range_conflict, read_range_invalid, read_range_unsupported refusals observed; tests/cli_flow.rs adds bounded_text_reads_honour_their_line_range_and_refuse_the_impossible and raw_reads_honour_a_half_open_byte_window_and_refuse_line_ranges — removing the fix fails both",
       "found_by": "using the skill for a real edit on 2026-09-04; the call spent about 7000 tokens of an agent's context returning a file it had asked five lines of",
       "notes": null,
       "created_at": "2026-09-04T17:21:20Z",
-      "updated_at": "2026-09-04T17:21:20Z"
+      "updated_at": "2026-09-05T16:14:49Z"
     },
     {
       "id": "B3",
