@@ -462,3 +462,118 @@ fn text_reads_honor_a_byte_window_and_deletes_report_line_spans() {
     assert_eq!(payload["spans_lines"], json!(true));
     assert_eq!(payload["dirty"], json!(true));
 }
+
+#[test]
+fn bounded_text_reads_honour_their_line_range_and_refuse_the_impossible() {
+    // B171: --range-start-line/--range-end-line used to change nothing about
+    // a read — the whole document came back marked complete, with no
+    // warning. They now slice the response, and a range that cannot mean one
+    // thing is refused with the flag named instead of being ignored.
+    let harness = Harness::new("linerange");
+    let doc = harness.write("doc.txt", "one\ntwo\nthree\nfour\nfive\n");
+    harness.open(&doc);
+    let path = doc.to_str().unwrap();
+    let read = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "4",
+    ]);
+    assert!(
+        read.status.success(),
+        "bounded read failed: {}",
+        stderr_text(&read)
+    );
+    let payload = first_payload(&read);
+    assert_eq!(payload["text"], json!("two\nthree\nfour\n"));
+    assert_eq!(payload["start_line"], json!(2));
+    assert_eq!(payload["end_line"], json!(4));
+    assert_eq!(payload["complete"], json!(false));
+    // A range without its end is refused, never silently widened to the
+    // whole document.
+    let read = harness.client(&["read", "-f", path, "--range-start-line", "2"]);
+    assert!(!read.status.success());
+    let refusal = format!(
+        "{}{}",
+        String::from_utf8_lossy(&read.stdout),
+        stderr_text(&read)
+    );
+    assert!(refusal.contains("read_range_incomplete"), "{refusal}");
+    // A range and an offset window together cannot mean one thing: refused.
+    let read = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "2",
+        "-o",
+        "0",
+        "-L",
+        "3",
+    ]);
+    assert!(!read.status.success());
+    let refusal = format!(
+        "{}{}",
+        String::from_utf8_lossy(&read.stdout),
+        stderr_text(&read)
+    );
+    assert!(refusal.contains("read_range_conflict"), "{refusal}");
+}
+
+#[test]
+fn raw_reads_honour_a_half_open_byte_window_and_refuse_line_ranges() {
+    let harness = Harness::new("byterange");
+    let doc = harness.write("raw.bin", "one\ntwo\nthree\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        doc.to_str().unwrap(),
+        "--document-mode",
+        "raw_bytes",
+    ]);
+    assert!(
+        opened.status.success(),
+        "open failed: {}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    let path = doc.to_str().unwrap();
+    let read = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--range-start-byte",
+        "4",
+        "--range-end-byte",
+        "7",
+    ]);
+    assert!(
+        read.status.success(),
+        "byte-window read failed: {}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let payload = first_payload(&read);
+    assert_eq!(payload["offset"], json!(4));
+    assert_eq!(payload["returned_bytes"], json!(3));
+    assert_eq!(payload["bytes_base64"], json!("dHdv"));
+    let read = harness.client(&[
+        "read",
+        "-f",
+        path,
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+    ]);
+    assert!(!read.status.success());
+    let refusal = format!(
+        "{}{}",
+        String::from_utf8_lossy(&read.stdout),
+        stderr_text(&read)
+    );
+    assert!(refusal.contains("read_range_unsupported"), "{refusal}");
+}

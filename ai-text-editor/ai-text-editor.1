@@ -145,6 +145,13 @@ All large-file text searches require an explicit inclusive line range with
 the half-open \fB--range-start-byte\fR/\fB--range-end-byte\fR range. Unbounded
 scans are refused.
 .PP
+Bounded reads take the same pair of bounds: a text read honors
+\fB--range-start-line\fR/\fB--range-end-line\fR as an inclusive window, and a
+raw or hex read honors \fB--range-start-byte\fR/\fB--range-end-byte\fR as a
+half-open window. A bound the tab cannot honor \-\- a line range on a raw tab,
+a byte range on a text tab, or a range combined with an offset window \-\- is
+refused with the offending flag named.
+.PP
 Use \fBbegin-transaction\fR and \fBend-transaction\fR to group ordinary edits
 into one undo step. Each edit remains in the recovery journal.
 .SH JOBS

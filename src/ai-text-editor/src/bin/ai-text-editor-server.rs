@@ -1406,7 +1406,92 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "cursor" => cursor(&envelope, &mut tab, &mut frames),
         "page" => page(&envelope, &mut tab, &mut frames),
         "read" => {
+            // The documented read bounds (the client help's "Reading:" line):
+            // range_start_line/range_end_line are one-based and INCLUSIVE on
+            // text tabs; range_start_byte/range_end_byte are zero-based and
+            // HALF-OPEN on raw and hex tabs. A bound the tab cannot honor is
+            // refused with the flag named — silently ignoring one is B171.
+            let line_range = match (
+                envelope.payload.get("range_start_line").and_then(Value::as_u64),
+                envelope.payload.get("range_end_line").and_then(Value::as_u64),
+            ) {
+                (None, None) => None,
+                (Some(start), Some(end)) => {
+                    if start == 0 || end < start {
+                        frames.push(error(&envelope.request_id, "read_range_invalid", "range_start_line must be positive and range_end_line must not precede it"));
+                        return frames;
+                    }
+                    Some((start, end))
+                }
+                (Some(start), None) => {
+                    frames.push(error_details(
+                        &envelope.request_id,
+                        "read_range_incomplete",
+                        "a line-range read requires an explicit inclusive range; range_end_line was omitted",
+                        json!({"range_start_line": start, "choices": ["provide range_end_line", "omit range_start_line to read the whole document"]}),
+                    ));
+                    return frames;
+                }
+                (None, Some(_)) => {
+                    frames.push(error(&envelope.request_id, "read_range_incomplete", "range_end_line was given without range_start_line"));
+                    return frames;
+                }
+            };
+            let byte_range = match (
+                envelope.payload.get("range_start_byte").and_then(Value::as_u64),
+                envelope.payload.get("range_end_byte").and_then(Value::as_u64),
+            ) {
+                (None, None) => None,
+                (Some(start), Some(end)) => {
+                    if end < start {
+                        frames.push(error(&envelope.request_id, "read_range_invalid", "range_end_byte must not precede range_start_byte"));
+                        return frames;
+                    }
+                    Some((start, end))
+                }
+                _ => {
+                    frames.push(error(&envelope.request_id, "read_range_incomplete", "byte-range reads require both range_start_byte and range_end_byte"));
+                    return frames;
+                }
+            };
+            if line_range.is_some() && byte_range.is_some() {
+                frames.push(error(&envelope.request_id, "read_range_conflict", "a read takes either a line range or a byte range, not both"));
+                return frames;
+            }
+            let windowed = envelope.payload.get("offset").is_some()
+                || envelope.payload.get("before").is_some()
+                || envelope.payload.get("after").is_some()
+                || envelope.payload.get("line").is_some();
+            if windowed && (line_range.is_some() || byte_range.is_some()) {
+                frames.push(error(&envelope.request_id, "read_range_conflict", "a bounded read takes either offset/length/before/after/line or a range bound, not both"));
+                return frames;
+            }
+            if (line_range.is_some() || byte_range.is_some())
+                && envelope.payload.get("presentation").and_then(Value::as_str) == Some("stream")
+            {
+                frames.push(error(&envelope.request_id, "read_range_conflict", "streamed reads deliver the whole document; drop the range or the stream presentation"));
+                return frames;
+            }
             if let Some(file) = &tab.large_file {
+                if let Some((start_line, end_line)) = line_range {
+                    if tab.document.mode != DocumentMode::TextUtf8 {
+                        frames.push(error(&envelope.request_id, "read_range_unsupported", "line-range reads apply to text tabs; a large raw or hex tab takes range_start_byte/range_end_byte"));
+                        return frames;
+                    }
+                    let block = tab.index.block_for_line(start_line as usize).clone();
+                    match file.read_lines_from(start_line, (end_line - start_line + 1) as usize, block.byte_offset as u64, block.line) {
+                        Ok(lines) => frames.push(response(&envelope.request_id, json!({"text": lines.text, "start_line": lines.start_line, "end_line": lines.end_line, "eof": lines.eof, "revision": tab.revision, "large_file": true}))),
+                        Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
+                    }
+                    return frames;
+                }
+                if let Some((start_byte, end_byte)) = byte_range {
+                    match file.read_range(start_byte, (end_byte - start_byte) as usize) {
+                        Ok(range) => frames.push(response(&envelope.request_id, json!({"offset": range.offset, "bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, range.bytes), "eof": range.eof, "revision": tab.revision, "large_file": true}))),
+                        Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
+                    }
+                    return frames;
+                }
                 if envelope.payload.get("line").is_some()
                     || envelope.payload.get("before").is_some()
                     || envelope.payload.get("after").is_some()
@@ -1454,7 +1539,15 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                     Ok(text) => {
                         let before = envelope.payload.get("before").and_then(Value::as_u64);
                         let after = envelope.payload.get("after").and_then(Value::as_u64);
-                        if before.is_some() || after.is_some() {
+                        if let Some((start_line, end_line)) = line_range {
+                            let lines: Vec<&str> = text.split_inclusive('\n').collect();
+                            let start = (start_line as usize).min(lines.len() + 1);
+                            let end = (end_line as usize).min(lines.len());
+                            let selected = if start <= end { lines[start - 1..end].concat() } else { String::new() };
+                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start, "end_line": end, "dirty": tab_dirty(&tab), "complete": start == 1 && end == lines.len()})));
+                        } else if byte_range.is_some() {
+                            frames.push(error(&envelope.request_id, "read_range_unsupported", "a text tab reads a byte window with offset/length, snapped to char boundaries; range_start_byte/range_end_byte address raw and hex tabs"));
+                        } else if before.is_some() || after.is_some() {
                             let cursor_id = envelope
                                 .payload
                                 .get("cursor_id")
@@ -1498,6 +1591,13 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                     }
                     Err(error_value) => frames.push(error(&envelope.request_id, "invalid_utf8", error_value.to_string())),
                 }
+            } else if let Some((start_byte, end_byte)) = byte_range {
+                let bytes = tab.document.bytes();
+                let start = (start_byte as usize).min(bytes.len());
+                let end = (end_byte as usize).min(bytes.len()).max(start);
+                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes[start..end]), "offset": start, "returned_bytes": end - start, "total_bytes": bytes.len(), "eof": end == bytes.len(), "revision": tab.revision, "dirty": tab_dirty(&tab), "mode": tab.document.mode})));
+            } else if line_range.is_some() {
+                frames.push(error(&envelope.request_id, "read_range_unsupported", "line-range reads apply to text tabs; raw and hex tabs take range_start_byte/range_end_byte (half-open)"));
             } else {
                 frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "mode": tab.document.mode})))
             }
