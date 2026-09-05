@@ -36,6 +36,22 @@ proceeds — see `autostart_server` in `ai-text-editor.rs`. The binary is found
 as a sibling of the client's own `current_exe()` first (the installed,
 colocated layout), falling back to `PATH`.
 
+**Windows has no usable Unix socket to autostart onto, so `autostart_server`
+falls back to the loopback TCP transport**: `--tcp 127.0.0.1:0` (an
+OS-assigned ephemeral port) plus a per-start nonce in a token file beside the
+discovery record — a file rather than an argv flag so the secret stays out of
+the process list, which the server already re-reads per connection anyway.
+Nothing downstream needs to know: `announce()` publishes whatever endpoint
+the server bound, so discovery, `Endpoint::is_live` probing, the session
+cache, and `file_mismatch` all behave as they do for a socket. The token
+travels back as `autostart_server`'s `Ok(Some(token))`, onto `Resolved`, and
+into the cache like any other session secret. This is also why
+`endpoint_owner_is_gone` is `#[cfg(unix)]`-only: on Windows there is no socket
+file to reclaim, only a dead TCP address that `is_live` already sees.
+`tests/tcp_flow.rs` drives this transport on every platform; the autostart
+half of it can only run where the socket is genuinely absent, so its
+assertions are `#[cfg(windows)]` and live in the Windows CI job.
+
 A server that nobody is using stops itself too (`spawn_idle_watchdog` in
 `ai-text-editor-server.rs`), after `--idle-timeout-seconds` (default 600, `0`
 disables it). Restarting is cheap and lossless: the journal replays on the
@@ -170,6 +186,36 @@ Both places a session_token could leak in from a stale source
 (`identity_lookup`'s registry hit, and the local session-path cache below)
 explicitly withhold it exactly when `method == "open" && file.is_some()`, and
 only then.
+
+**The two invariants above were not both true until the brutal-review
+round.** The prose above claimed the session-path cache withholds the token
+for open-with-file like the registry branch does; the cache branch never
+actually did it, and a first real test-drive proved the consequence: a
+refused request was still persisted into the per-`(identity, file)` cache
+with the *answering* tab's endpoint+token, so every later command for that
+file replayed the misroute — the "large files wedge, small files work"
+finding in `.Ai-EDITOR-BRUTAL-REVIEW` was this, not a size problem. Three
+rules now hold it shut, and tests in `tests/cli_flow.rs` pin each:
+`Endpoint::is_live` (transport) gates every endpoint the client is about to
+trust (cache hit and file discovery alike — a `.endpoint` file outlives a
+`kill -9`), a refused request persists nothing (CLI and MCP adapter both
+check `failed` first), and `select_tab`'s `ensure_tab_file` refuses, server-
+side, a request whose payload names a file the routed tab does not hold
+(`file_mismatch`), so the last line of defense does not depend on the client
+being careful.
+
+Two response-state facts the same review asked for and which later changes
+must keep true: mutating and reading responses carry `dirty` (buffer differs
+from disk — the "edits are journal-only until save" contract made visible),
+and a text-presentation CLI call that was refused says so on stderr with the
+server's code and message (the old silent-discard of error frames is what
+made stale revisions and wedged sessions indistinguishable from success).
+`autostart_server` captures the spawned server's stderr into
+`<discovery>.start-<pid>.log` and folds it into a start failure — "never
+announced an endpoint" with no cause was how F5's missing-file failure
+read; the server side now opens missing paths as empty tabs and reclaims an
+endpoint whose owning pid is demonstrably dead without
+`--takeover-stale-endpoint` (unknown owners still require the flag).
 
 ## The client's local session cache is per-`(identity, file)`, not per-identity
 

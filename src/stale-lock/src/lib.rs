@@ -172,8 +172,14 @@ mod tests {
         let path = dir.path().join("abandoned.lock");
         fs::write(&path, b"").unwrap();
         let old = std::time::SystemTime::now() - Duration::from_secs(120);
-        let file = fs::File::open(&path).unwrap();
-        file.set_modified(old).unwrap();
+        // set_modified needs a write-attributes handle; a read-only open
+        // fails with Access Denied on Windows. write(true) with no
+        // truncate() still leaves the bytes intact, and the handle is
+        // dropped before the acquire so nothing holds the path back.
+        {
+            let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.set_modified(old).unwrap();
+        }
         let lock = StaleLock::acquire(&path, Duration::from_millis(50));
         assert!(
             lock.is_ok(),

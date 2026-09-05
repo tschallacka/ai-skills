@@ -22,7 +22,9 @@ later (its journal replays on the next `open`, so nothing is lost):
 ai-text-editor open -f /path/to/file
 ```
 
-Opening a second, unrelated file the same way does not start a second,
+Opening a path that does not exist yet is how you create a file: the tab
+starts empty and the file appears on disk only when the first `save`
+succeeds. Opening a second, unrelated file the same way does not start a second,
 unrelated server: this agent's already-running workspace is found again
 automatically, and the file is added to it as a new tab — the way opening a
 file in an already-running IDE reconnects to that window rather than
@@ -34,6 +36,20 @@ explicitly with `--session ID` or `--agent ID` on every call, or pin one
 server directly with `--endpoint ENDPOINT` (`ai-text-editor-server start
 --file PATH` still exists for that, and for advanced options such as `--tcp`
 or `--large-threshold-bytes`, but is not a normal step any more).
+On Windows, where no usable Unix socket exists, the same plain `open`
+autostarts a loopback-TCP server on an ephemeral port with a per-start
+private token and discovers it exactly the way the socket is discovered —
+every command in this skill works unchanged there.
+
+Edits are journal-and-buffer operations: a successful `insert`/`replace`
+returns a new revision but changes nothing on disk until a `save` succeeds.
+Every mutating and reading response carries a `dirty` flag saying so; finish
+an editing session with `save` and a fresh `read` (or `open`) showing
+`dirty: false`. A command that did not apply always says why — errors are
+written to stderr in every presentation with a code, a message, and the
+recovery choices where there are any — so exit status plus stderr is the
+complete story of any call; a silent success-shaped output means the work is
+in the journal, not yet that it is on disk.
 
 Every high-frequency flag has a short form (`-f`, `-l`, `-t`, `-o`, `-r`, …) —
 run `ai-text-editor help` or `man -l ai-text-editor.1` for the exact,
@@ -100,9 +116,11 @@ same way the CLI does.
 12. Recover journaled edits, inspect runtime state, and use Unix sockets or
     loopback TCP on Windows. TCP endpoints must remain private to the host.
     Active endpoint discovery records include the owning PID and server
-    generation. A dead or unreachable Unix socket is retained as a stale
-    record; start a replacement only with `--takeover-stale-endpoint`, after
-    verifying that the recorded owner is no longer running.
+    generation. A dead or unreachable Unix socket whose recorded owner is
+    demonstrably gone is reclaimed automatically by the next `open` (which
+    replays the journal); only when the owning process is still alive or
+    unknown does a replacement require the explicit `--takeover-stale-endpoint`
+    flag after verifying ownership.
 13. Query `open` or the read-only `resources` command for available memory,
    estimated server overhead, recommended working set, and the active
    large-file threshold before accepting a costly rewrite.
@@ -126,7 +144,12 @@ same way the CLI does.
    `redo`, and `save`) must include the revision most recently returned by
    `open`, `history`, or a completed mutation. Missing revisions are refused;
    stale revisions are never merged implicitly.
-6. Keep snapshots/commits in the surrounding workflow when useful; the editor
+6. A request that names a file is only served by the tab holding that file;
+   a request routed to a different tab is refused with `file_mismatch` and
+   the fix is to `open` the named file first. Mutating `--offset`/`--delete-len`
+   address bytes, not columns, and a delete that crosses a line end is
+   reported as `spans_lines`.
+7. Keep snapshots/commits in the surrounding workflow when useful; the editor
    journal is recovery history, not a replacement for Git history. TCP can
    require `--auth-token` or an owner-only `--auth-token-file`; the client proves it through a per-connection HMAC
    challenge and does not send the secret in the editor request. Never expose

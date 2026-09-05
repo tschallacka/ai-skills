@@ -48,6 +48,46 @@ impl Endpoint {
             Self::Tcp(address) => format!("tcp:{address}"),
         }
     }
+
+    /// Whether anything can accept a connection on this endpoint *right
+    /// now*. An endpoint file surviving a killed server still parses and
+    /// reads fine while its socket has no listener, so discovery callers
+    /// must probe before handing it to a request — otherwise `open` never
+    /// autostarts a replacement and every later call dies on a connection
+    /// error naming nothing the agent can act on.
+    pub fn is_live(&self) -> bool {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(path) => UnixStream::connect(path).is_ok(),
+            Self::Tcp(address) => address
+                .to_socket_addrs()
+                .ok()
+                .and_then(|mut addresses| addresses.next())
+                .is_some_and(|address| {
+                    TcpStream::connect_timeout(&address, std::time::Duration::from_millis(500))
+                        .is_ok()
+                }),
+        }
+    }
+}
+
+/// The canonical form a path would have if it existed: a missing file
+/// resolves through its existing parent directory. `fs::canonicalize`
+/// refuses nonexistent paths wholesale, which made opening a file before
+/// its first save impossible — the discovery key, the tab key, and the
+/// server all need one stable path for a path that is about to exist.
+pub fn canonical_or_near(path: &Path) -> io::Result<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(canonical) => Ok(canonical),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty());
+            let name = path.file_name().ok_or(error)?;
+            Ok(fs::canonicalize(parent.unwrap_or_else(|| Path::new(".")))?.join(name))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn endpoint_for_file(path: &Path) -> PathBuf {
@@ -55,7 +95,7 @@ pub fn endpoint_for_file(path: &Path) -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join("tsch-ai-skills-editor");
-    let identity = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let identity = canonical_or_near(path).unwrap_or_else(|_| path.to_path_buf());
     let key = blake3::hash(identity.to_string_lossy().as_bytes())
         .to_hex()
         .to_string();
@@ -253,6 +293,13 @@ pub fn request(endpoint: &Endpoint, envelope: &Envelope) -> Result<Vec<Value>, S
             wire_request.push(b'\n');
             exchange_tcp(stream, envelope, &wire_request, &mut responses)?;
         }
+    }
+    // Zero frames is never an answer.
+    if responses.is_empty() {
+        return Err(format!(
+            "the server at {} closed the connection without answering",
+            endpoint.display()
+        ));
     }
     Ok(responses)
 }

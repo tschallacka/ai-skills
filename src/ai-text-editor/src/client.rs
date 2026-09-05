@@ -126,8 +126,12 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     });
 
     if let Some(value) = &request.explicit_endpoint {
+        // The cache is an optimization here, never a prerequisite: a named
+        // endpoint must work as the *first* call under an identity, before
+        // any session file exists to read.
         let session = cache_path
             .as_ref()
+            .filter(|path| path.exists())
             .map(|path| read_session(path))
             .transpose()
             .map_err(|error| format!("cannot read session token: {error}"))?;
@@ -142,15 +146,30 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     if let Some(path) = cache_path.as_ref().filter(|path| path.exists()) {
         // A previous call under this same (identity, file) — reconnects
         // straight to its own tab, skipping both the registry lookup and
-        // any per-file discovery.
+        // any per-file discovery. A cached endpoint whose server has since
+        // died is not a live tab to reconnect to: fall through to the file
+        // path below, which can autostart a replacement that replays the
+        // journal, instead of failing every later request on a socket
+        // nobody is listening on.
         let session = read_session(path)
             .map_err(|error| format!("cannot read session token {}: {error}", path.display()))?;
-        return Ok(Resolved {
-            endpoint: session.endpoint,
-            auth_token: session.auth_token,
-            session_token: session.session_token,
-            cache_path,
-        });
+        if session.endpoint.is_live() {
+            // Same leak the registry branch withholds: the server routes by
+            // session_token before it ever consults `file`, so an `open`
+            // that carries this (possibly other-tab's) token reconnects to
+            // the wrong tab instead of routing to the named file.
+            let session_token = if request.method == "open" && request.file.is_some() {
+                None
+            } else {
+                session.session_token
+            };
+            return Ok(Resolved {
+                endpoint: session.endpoint,
+                auth_token: session.auth_token,
+                session_token,
+                cache_path,
+            });
+        }
     }
 
     if let Some(path) = &request.session_token_path {
@@ -188,15 +207,34 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             _ => Err("a file or an endpoint is required".to_owned()),
         };
     };
-    match read_endpoint(&endpoint_for_file(file)) {
-        Ok(endpoint) => Ok(Resolved {
+    let discovery = endpoint_for_file(file);
+    match read_endpoint(&discovery) {
+        // A discovered endpoint file outlives its server after a kill:
+        // probe it, and treat a dead one as "needs a server" rather than
+        // handing a socket nobody listens on to the request. A loopback TCP
+        // endpoint (the Windows transport) cannot be used without its
+        // secret, so carry the auth token this agent's registry records
+        // know about onto the file-discovered endpoint too.
+        Ok(endpoint) if endpoint.is_live() => Ok(Resolved {
             endpoint,
-            auth_token: None,
+            auth_token: identity_lookup
+                .as_ref()
+                .and_then(|record| record.as_ref().ok())
+                .and_then(|record| record.auth_token.clone()),
             session_token: None,
             cache_path,
         }),
-        Err(_) if request.method == "open" => {
-            autostart_server(
+        Ok(_) if request.method != "open" => Err(format!(
+            "the editor server for {} has stopped; run `ai-text-editor open -f {}` to start a new one (the journal replays, but the tab is new — re-read to get a current revision and session token)",
+            file.display(),
+            file.display()
+        )),
+        Err(error) if request.method != "open" => Err(format!(
+            "no server discovered for {}: {error}",
+            file.display()
+        )),
+        _ => {
+            let autostart_auth = autostart_server(
                 file,
                 request.document_mode.as_deref(),
                 request.normalize_nfc,
@@ -204,7 +242,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
                 request.explicit_identity.as_deref(),
                 &request.agent_env_var,
             )?;
-            let endpoint = read_endpoint(&endpoint_for_file(file)).map_err(|error| {
+            let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
                     "server was started but never announced an endpoint for {}: {error}",
                     file.display()
@@ -212,15 +250,16 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             })?;
             Ok(Resolved {
                 endpoint,
-                auth_token: None,
+                auth_token: autostart_auth.or_else(|| {
+                    identity_lookup
+                        .as_ref()
+                        .and_then(|record| record.as_ref().ok())
+                        .and_then(|record| record.auth_token.clone())
+                }),
                 session_token: None,
                 cache_path,
             })
         }
-        Err(error) => Err(format!(
-            "no server discovered for {}: {error}",
-            file.display()
-        )),
     }
 }
 
@@ -244,6 +283,16 @@ pub fn persist_cache(
 /// server exists as a separate process. Looks for a sibling
 /// `ai-text-editor-server` next to this binary first (the installed,
 /// colocated layout), falling back to `PATH`.
+///
+/// On Unix the replacement speaks a per-file Unix socket. Windows has no
+/// usable socket here, so the autostart falls back to the loopback TCP
+/// transport instead: an ephemeral port the OS assigns (`--tcp 127.0.0.1:0`)
+/// and a per-start nonce the server also requires (an unauthenticated TCP
+/// endpoint is refused by design). The port reaches the caller through the
+/// discovery file like any other start; the secret is the returned token,
+/// which `resolve` carries onto the request and the session cache. `Ok(None)`
+/// means "nothing extra was needed" — the Unix transport, or a server that
+/// was already alive.
 ///
 /// Two `open` calls for the same file racing here both take this path before
 /// either one has announced an endpoint. A per-file start lock (the
@@ -275,17 +324,54 @@ pub fn autostart_server(
     idle_timeout_seconds: Option<&str>,
     explicit_identity: Option<&str>,
     agent_env_var: &str,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let discovery = endpoint_for_file(file);
     let lock_path = discovery.with_extension("start.lock");
     let _lock = StaleLock::acquire(&lock_path, Duration::from_secs(20))
         .map_err(|error| format!("cannot coordinate server start: {error}"))?;
-    if read_endpoint(&discovery).is_ok() {
-        return Ok(()); // another `open` invocation already won this race.
+    if has_live_endpoint(&discovery) {
+        return Ok(None); // another `open` invocation already won this race.
     }
     let binary = server_binary_path();
+    // A start that dies before announcing (a refused stale endpoint, a
+    // non-UTF-8 file, a bad mode) used to vanish into Stdio::null and the
+    // caller got a 10s timeout with no cause. Capture the child's stderr
+    // and fold it into the failure message when the wait expires.
+    let log_path = discovery.with_extension(format!("start-{}.log", std::process::id()));
+    let log = std::fs::File::create(&log_path).map_err(|error| {
+        format!(
+            "cannot create server start log {}: {error}",
+            log_path.display()
+        )
+    })?;
+    let log_capture = log
+        .try_clone()
+        .map_err(|error| format!("cannot capture server start log: {error}"))?;
+    // Windows has no usable Unix socket, so an autostarted server there is
+    // a loopback TCP endpoint on an OS-assigned ephemeral port. It also
+    // refuses an unauthenticated TCP endpoint outright, so the autostart
+    // mints a per-start nonce. A file (not an argv flag) carries it so the
+    // secret never appears in the spawned process's command line.
+    #[cfg(not(unix))]
+    let (auth_file, auth_token) = {
+        let file = discovery.with_extension("autostart-token");
+        let token = crate::auth::nonce()
+            .map_err(|error| format!("cannot create autostart auth token: {error}"))?;
+        std::fs::write(&file, &token).map_err(|error| {
+            format!(
+                "cannot write autostart auth token {}: {error}",
+                file.display()
+            )
+        })?;
+        (file, token)
+    };
     let mut command = std::process::Command::new(&binary);
     command.arg("start").arg("--file").arg(file);
+    #[cfg(not(unix))]
+    {
+        command.arg("--tcp").arg("127.0.0.1:0");
+        command.arg("--auth-token-file").arg(&auth_file);
+    }
     if let Some(identity) = explicit_identity {
         command.env(agent_env_var, identity);
     }
@@ -301,8 +387,11 @@ pub fn autostart_server(
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command.spawn().map_err(|error| {
+        .stderr(Stdio::from(log_capture));
+    let mut child = command.spawn().map_err(|error| {
+        let _ = std::fs::remove_file(&log_path);
+        #[cfg(not(unix))]
+        let _ = std::fs::remove_file(&auth_file);
         format!(
             "cannot autostart {}: {error}; start it yourself with `ai-text-editor-server start --file {}`",
             binary.display(),
@@ -311,12 +400,35 @@ pub fn autostart_server(
     })?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if read_endpoint(&discovery).is_ok() {
-            return Ok(());
+        if has_live_endpoint(&discovery) {
+            let _ = std::fs::remove_file(&log_path);
+            #[cfg(unix)]
+            return Ok(None);
+            #[cfg(not(unix))]
+            return Ok(Some(auth_token));
+        }
+        if child.try_wait().is_ok_and(|status| status.is_some()) {
+            break; // no point waiting out the deadline on an exited spawn
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    Ok(())
+    let reason = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&log_path);
+    #[cfg(not(unix))]
+    let _ = std::fs::remove_file(&auth_file);
+    let reason = reason.trim();
+    Err(if reason.is_empty() {
+        format!(
+            "server for {} did not announce an endpoint in time",
+            file.display()
+        )
+    } else {
+        format!("server for {} failed to start: {reason}", file.display())
+    })
+}
+
+fn has_live_endpoint(discovery: &Path) -> bool {
+    read_endpoint(discovery).is_ok_and(|endpoint| endpoint.is_live())
 }
 
 fn server_binary_path() -> PathBuf {

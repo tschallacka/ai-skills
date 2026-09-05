@@ -243,13 +243,39 @@ fn main() {
         .and_then(|frame| frame.pointer("/payload/session_token"))
         .and_then(Value::as_str);
     let persisted_session_token = returned_session_token.or(saved_session_token.as_deref());
-    client::persist_cache(
-        save_path.as_deref(),
-        &endpoint,
-        auth_token.as_deref(),
-        persisted_session_token,
-    )
-    .unwrap_or_else(|error| die(&error));
+    // A refused request must not rewrite the per-(identity,file) cache:
+    // persisting the endpoint and token that *answered* the refusal bakes a
+    // wrong-file routing in, and every later command for this file replays
+    // the same mismatch — a wedge that outlived the original mistake.
+    if !failed {
+        client::persist_cache(
+            save_path.as_deref(),
+            &endpoint,
+            auth_token.as_deref(),
+            persisted_session_token,
+        )
+        .unwrap_or_else(|error| die(&error));
+    }
+    // A refused operation must look refused in every presentation. Before
+    // this, `text`/`paging`/`stream` dropped error frames silently, so a
+    // stale revision or an unresolved external change exited 1 with empty
+    // stdout and empty stderr — indistinguishable from a wedged server and
+    // the exact failure that made batch edits unverifiable.
+    if presentation != "structured" {
+        for frame in &frames {
+            if frame.get("type").and_then(Value::as_str) == Some("error") {
+                let code = frame.get("code").and_then(Value::as_str).unwrap_or("error");
+                let message = frame.get("message").and_then(Value::as_str).unwrap_or("");
+                let details = frame
+                    .get("details")
+                    .map(|details| {
+                        format!(" {}", serde_json::to_string(details).unwrap_or_default())
+                    })
+                    .unwrap_or_default();
+                eprintln!("ai-text-editor: {code}: {message}{details}");
+            }
+        }
+    }
     match presentation.as_str() {
         "structured" => {
             for frame in frames {
@@ -323,7 +349,10 @@ fn die(message: &str) -> ! {
 fn help() {
     println!("Usage: ai-text-editor COMMAND -f FILE [OPTIONS]  (or --endpoint/-e ENDPOINT for an already-open tab)");
     println!("open starts its own server when none is running yet: no separate `ai-text-editor-server start` call is needed. Use --document-mode/-M and --normalize-nfc to shape that autostart; open --endpoint ENDPOINT -f PATH adds another isolated tab to a server that is already up.");
+    println!("On Windows, where no usable Unix socket exists, the autostarted server falls back to loopback TCP on an ephemeral port with a per-start authentication token kept in a token file; every command works unchanged there.");
     println!("Opening a second file under the same agent identity (an explicit --session/--agent, or your coding harness's own session env vars) reconnects to that agent's already-running workspace and adds the file there as a new tab, rather than starting an unrelated second server.");
+    println!("New files: open on a path that does not exist yet is not an error — the tab starts empty and the file is created on disk by the first successful save.");
+    println!("Recovery: if the server died, open again (a stale endpoint whose owning process is gone is reclaimed automatically); reads report dirty/external_change_pending state, and every server refusal is named on stderr in every presentation.");
     println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
@@ -334,8 +363,8 @@ fn help() {
     println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
-    println!("Edits: -o/--offset N or -C/--cursor-id N, plus -d/--delete-len N and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Use begin-transaction/end-transaction to group edits into one undo step.");
-    println!("Reading: -b/--before N -B/--after N, -o/--offset N -L/--length N, -n/--limit N, --pager-key KEY, -H/--historical, --range-start-line N --range-end-line N, --range-start-byte N --range-end-byte N, --order forward|reverse.");
+    println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");
+    println!("Reading: -b/--before N -B/--after N (line windows around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), -n/--limit N, --pager-key KEY, -H/--historical, --range-start-line N --range-end-line N, --range-start-byte N --range-end-byte N, --order forward|reverse.");
     println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");
     println!("Recovery: resolve with -a/--action backup|reload|merge|keep|force_save; backup preserves external bytes and leaves resolution pending, force-save requires --acknowledge-force-save. Add --preserve-external and optionally --backup-path PATH before discard/overwrite.");
     println!("Save-as: use save-as --target-path PATH to atomically create a new file without changing the active tab; existing targets are refused.");

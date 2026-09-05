@@ -3,9 +3,9 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	10289
 package/LICENSE	1068
 package/README.md	15683
-package/ai-text-editor/SKILL.md	10043
+package/ai-text-editor/SKILL.md	11565
 package/ai-text-editor/agents/openai.yaml	111
-package/ai-text-editor/ai-text-editor.1	8019
+package/ai-text-editor/ai-text-editor.1	9094
 package/ai-text-editor/binaries.tsv	500
 package/ai-text-editor/docs/README.md	1307
 package/ai-text-editor/integration.tsv	1638
@@ -37,7 +37,7 @@ package/git-worktrees/SKILL.md	8808
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	6509
-package/install.sh	202059
+package/install.sh	202999
 package/interactive-shell/SKILL.md	8627
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
