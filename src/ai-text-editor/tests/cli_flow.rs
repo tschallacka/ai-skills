@@ -133,7 +133,12 @@ impl Drop for Harness {
     fn drop(&mut self) {
         // Autostarted servers outlive their short-lived client; stop the
         // ones this test left behind before removing the tree they run in.
-        if let Ok(entries) = std::fs::read_dir(self.scratch.join("runtime")) {
+        // The records live under the endpoint directory nested inside the
+        // runtime root (XDG_RUNTIME_DIR/tsch-ai-skills-editor/), so a sweep
+        // of the runtime root itself finds nothing and leaks every server
+        // an autostarted flow started.
+        let endpoint_root = self.scratch.join("runtime").join("tsch-ai-skills-editor");
+        if let Ok(entries) = std::fs::read_dir(endpoint_root) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !name.ends_with(".endpoint") {
