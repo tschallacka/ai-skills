@@ -56,6 +56,12 @@ impl Harness {
         ));
         std::fs::create_dir_all(scratch.join("runtime")).unwrap();
         std::fs::create_dir_all(scratch.join("sessions")).unwrap();
+        // Canonicalize now (the tcp harness does the same): Windows hands
+        // the temp dir as an 8.3 short path (`RUNNER~1`), the server
+        // announces through the long resolved form, and every cache,
+        // session, and endpoint key the test derives from the raw string
+        // disagrees with the server's from the first call onward.
+        let scratch = std::fs::canonicalize(scratch).unwrap();
         Self {
             scratch,
             // A literal identity keeps each test's workspace isolated from
@@ -76,6 +82,22 @@ impl Harness {
 
     fn client(&self, args: &[&str]) -> Output {
         self.client_env(args, &[])
+    }
+
+    /// Every test's first call. A failed open is never incidental to a
+    /// flow test — every later call is meaningless without the tab — and
+    /// on the Windows runner a swallowed open failure turned into six
+    /// cascading "no server discovered" panics that hid the real cause.
+    fn open(&self, file: &std::path::Path) -> Output {
+        let opened = self.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+        assert!(
+            opened.status.success(),
+            "open of {} failed: {}{}",
+            file.display(),
+            stderr_text(&opened),
+            String::from_utf8_lossy(&opened.stdout)
+        );
+        opened
     }
 
     fn client_env(&self, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
@@ -167,7 +189,7 @@ fn new_file_opens_edits_and_is_created_by_save() {
     let harness = Harness::new("newfile");
     let target = harness.path("created.txt");
     assert!(!target.exists());
-    let opened = harness.client(&["open", "-f", target.to_str().unwrap(), "-p", "structured"]);
+    let opened = harness.open(&target);
     assert!(opened.status.success(), "{}", stderr_text(&opened));
     assert_eq!(first_payload(&opened)["dirty"], json!(false));
     let inserted = harness.client(&[
@@ -201,7 +223,7 @@ fn new_file_opens_edits_and_is_created_by_save() {
         std::fs::read_to_string(&target).unwrap(),
         "hello from a new tab"
     );
-    let reopened = harness.client(&["open", "-f", target.to_str().unwrap(), "-p", "structured"]);
+    let reopened = harness.open(&target);
     assert_eq!(first_payload(&reopened)["dirty"], json!(false));
 }
 
@@ -209,7 +231,7 @@ fn new_file_opens_edits_and_is_created_by_save() {
 fn stale_revision_is_named_on_stderr_under_text_presentation() {
     let harness = Harness::new("stale");
     let file = harness.write("stale.txt", "alpha\nbeta\n");
-    harness.client(&["open", "-f", file.to_str().unwrap()]);
+    harness.open(&file);
     let refused = harness.client(&[
         "replace",
         "-f",
@@ -240,7 +262,7 @@ fn stale_revision_is_named_on_stderr_under_text_presentation() {
 fn external_change_blocks_writes_loudly_without_blinding_reads() {
     let harness = Harness::new("external");
     let file = harness.write("ext.txt", "alpha\nbeta\n");
-    let opened = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    let opened = harness.open(&file);
     let revision = revision_of(&opened).to_string();
     let mut appended = std::fs::OpenOptions::new()
         .append(true)
@@ -284,7 +306,7 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
     let harness = Harness::new("mismatch");
     let first = harness.write("first.txt", "one\n");
     let second = harness.write("second.txt", "two\n");
-    harness.client(&["open", "-f", first.to_str().unwrap()]);
+    harness.open(&first);
     // No tab exists for `second` under this identity; the registry's newest
     // tab belongs to `first` and answered earlier calls, so its token would
     // route here. It must be refused, not applied to the wrong buffer.
@@ -312,7 +334,7 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
     assert_eq!(std::fs::read_to_string(&first).unwrap(), "one\n");
     assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
     // Opening the named file routes correctly and the same edit then lands.
-    let opened = harness.client(&["open", "-f", second.to_str().unwrap(), "-p", "structured"]);
+    let opened = harness.open(&second);
     let revision = revision_of(&opened).to_string();
     let applied = harness.client(&[
         "replace",
@@ -338,7 +360,7 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
 fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     let harness = Harness::new("killed");
     let file = harness.write("journal.txt", "alpha\nbeta\n");
-    let opened = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    let opened = harness.open(&file);
     let pid = server_pid(&opened);
     let revision = revision_of(&opened).to_string();
     let edited = harness.client(&[
@@ -372,7 +394,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     );
     // `open` reclaims the dead endpoint, starts a replacement, and replays
     // the unsaved edit into the buffer.
-    let reopened = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    let reopened = harness.open(&file);
     assert!(reopened.status.success(), "{}", stderr_text(&reopened));
     let payload = first_payload(&reopened);
     assert!(
@@ -392,7 +414,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
 fn text_reads_honor_a_byte_window_and_deletes_report_line_spans() {
     let harness = Harness::new("window");
     let file = harness.write("window.txt", "0123456789\nabcdefgh\n");
-    harness.client(&["open", "-f", file.to_str().unwrap()]);
+    harness.open(&file);
     let window = harness.client(&[
         "read",
         "-f",
