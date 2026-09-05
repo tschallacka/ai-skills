@@ -79,7 +79,10 @@ same way the CLI does.
 ## Capabilities
 
 1. Open isolated editor tabs with one server writer per tab.
-2. Inspect text as UTF-8, exact raw bytes, or 16-byte-row hex pairs.
+2. Inspect text as UTF-8, exact raw bytes, or 16-byte-row hex pairs; a text
+   read honors an inclusive line range
+   (`--range-start-line`/`--range-end-line`) and a raw or hex read a
+   half-open byte range (`--range-start-byte`/`--range-end-byte`).
 3. Use one-based line and zero-based scalar columns for text; raw and hex use
    byte offsets. Invalid UTF-8 is never replaced silently: use raw or hex mode.
 4. Opt into NFC normalization with explicit restoration-conflict reporting.
