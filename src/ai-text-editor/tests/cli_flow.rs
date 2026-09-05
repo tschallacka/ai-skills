@@ -1,11 +1,16 @@
 // MODE: DEV
-//! End-to-end regressions for the failure modes found in the first real
-//! agent test-drive of the skill: silent refusals, a wedged session after
-//! an external change, edits routed to the wrong tab, stale endpoints that
-//! nothing could walk past, and the impossibility of creating a file.
-//! Each test drives the same two binaries an agent drives, in a private
-//! scratch tree, and asserts on what the *agent* would see: exit status,
-//! stdout, and stderr.
+// End-to-end regressions for the failure modes found in the first real
+// agent test-drive of the skill: silent refusals, a wedged session after
+// an external change, edits routed to the wrong tab, stale endpoints that
+// nothing could walk past, and the impossibility of creating a file.
+// Each test drives the same two binaries an agent drives, in a private
+// scratch tree, and asserts on what the *agent* would see: exit status,
+// stdout, and stderr.
+//
+// Unix only, like the shipped shell integration test: these flows drive
+// the Unix-socket transport, and a Windows server refuses to start without
+// an explicit --tcp endpoint.
+#![cfg(unix)]
 
 use serde_json::{json, Value};
 use std::io::Write;
