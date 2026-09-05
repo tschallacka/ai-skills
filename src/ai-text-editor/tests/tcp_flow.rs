@@ -318,28 +318,13 @@ fn open_autostarts_onto_a_loopback_port_when_unix_sockets_are_unavailable() {
         "open must fall back to a port: {}",
         stderr_text(&opened)
     );
-    // The discovery record is hash-named inside the private runtime root
-    // the harness points XDG_RUNTIME_DIR at — the same tree the autostart
-    // writes through — so it is found by walking, not by recomputing the
-    // key from this process's (unconfigured) environment.
-    let discovery_root = harness
-        .scratch
-        .join("runtime")
-        .join("tsch-ai-skills-editor");
-    let announced = std::fs::read_dir(&discovery_root)
-        .expect("autostart announced a discovery record")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "endpoint")
-        })
-        .map(|entry| std::fs::read_to_string(entry.path()).unwrap_or_default())
-        .find(|content| content.contains("\"tcp:127.0.0.1:"))
-        .unwrap_or_else(|| panic!("the fallback must announce a loopback port, not a socket"));
-    let record: Value = serde_json::from_str(&announced).expect("endpoint record is json");
-    let pid = record["pid"].as_u64().unwrap() as u32;
+    // Proved behaviourally, not by reading the discovery file: the record
+    // lives under the private runtime root only while that path stays under
+    // 96 chars, and a Windows runner temp path is past it, so endpoint_for_file
+    // falls back to a shared temp root the test process cannot recompute
+    // (it does not carry the child's XDG_RUNTIME_DIR). A whole edit+save that
+    // reaches disk through this self-started, socket-less server is the
+    // fallback working end to end.
     let payload = first_payload(&opened);
     let revision = payload["revision"].as_u64().unwrap().to_string();
     let edited = harness.client(&[
@@ -370,6 +355,9 @@ fn open_autostarts_onto_a_loopback_port_when_unix_sockets_are_unavailable() {
         std::fs::read_to_string(&file).unwrap(),
         "edited first save\n"
     );
+    // The server outlives its short-lived client, so stop it by the pid the
+    // open response reported or it would linger past this test.
+    let pid = payload["server_pid"].as_u64().unwrap();
     let _ = Command::new("taskkill")
         .args(["/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
