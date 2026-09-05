@@ -7,15 +7,34 @@
 // scratch tree, and asserts on what the *agent* would see: exit status,
 // stdout, and stderr.
 //
-// Unix only, like the shipped shell integration test: these flows drive
-// the Unix-socket transport, and a Windows server refuses to start without
-// an explicit --tcp endpoint.
-#![cfg(unix)]
+// Cross-platform on purpose: on Unix these flows ride the socket
+// transport; on Windows the same `open` autostarts onto the loopback TCP
+// fallback, so every assertion below doubles as the fallback's test.
+// tcp_flow.rs pins the port transport explicitly on top of that.
 
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+
+/// Kill a pid the way this platform hard-stops a process, so the
+/// killed-server tests can assert on the corpse of a real process
+/// everywhere.
+fn terminate(pid: u32) {
+    #[cfg(unix)]
+    let mut kill = {
+        let mut c = Command::new("kill");
+        c.args(["-9", &pid.to_string()]);
+        c
+    };
+    #[cfg(not(unix))]
+    let mut kill = {
+        let mut c = Command::new("taskkill");
+        c.args(["/F", "/PID", &pid.to_string()]);
+        c
+    };
+    let _ = kill.stdout(std::process::Stdio::null()).status();
+}
 
 struct Harness {
     scratch: PathBuf,
@@ -99,10 +118,7 @@ impl Drop for Harness {
                 };
                 if let Ok(value) = serde_json::from_str::<Value>(&content) {
                     if let Some(pid) = value.get("pid").and_then(Value::as_u64) {
-                        let _ = Command::new("kill")
-                            .args(["-9", &pid.to_string()])
-                            .stdout(std::process::Stdio::null())
-                            .status();
+                        terminate(pid as u32);
                     }
                 }
             }
@@ -318,7 +334,6 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
     assert_eq!(std::fs::read_to_string(&second).unwrap(), "X\n");
 }
 
-#[cfg(unix)]
 #[test]
 fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     let harness = Harness::new("killed");
@@ -344,10 +359,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     assert!(edited.status.success(), "{}", stderr_text(&edited));
     assert_eq!(first_payload(&edited)["dirty"], json!(true));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\n");
-    std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .unwrap();
+    terminate(pid);
     std::thread::sleep(std::time::Duration::from_millis(200));
     // A plain command must explain that its server is gone, not die on a
     // bare connection error.

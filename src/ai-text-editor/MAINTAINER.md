@@ -36,6 +36,22 @@ proceeds — see `autostart_server` in `ai-text-editor.rs`. The binary is found
 as a sibling of the client's own `current_exe()` first (the installed,
 colocated layout), falling back to `PATH`.
 
+**Windows has no usable Unix socket to autostart onto, so `autostart_server`
+falls back to the loopback TCP transport**: `--tcp 127.0.0.1:0` (an
+OS-assigned ephemeral port) plus a per-start nonce in a token file beside the
+discovery record — a file rather than an argv flag so the secret stays out of
+the process list, which the server already re-reads per connection anyway.
+Nothing downstream needs to know: `announce()` publishes whatever endpoint
+the server bound, so discovery, `Endpoint::is_live` probing, the session
+cache, and `file_mismatch` all behave as they do for a socket. The token
+travels back as `autostart_server`'s `Ok(Some(token))`, onto `Resolved`, and
+into the cache like any other session secret. This is also why
+`endpoint_owner_is_gone` is `#[cfg(unix)]`-only: on Windows there is no socket
+file to reclaim, only a dead TCP address that `is_live` already sees.
+`tests/tcp_flow.rs` drives this transport on every platform; the autostart
+half of it can only run where the socket is genuinely absent, so its
+assertions are `#[cfg(windows)]` and live in the Windows CI job.
+
 A server that nobody is using stops itself too (`spawn_idle_watchdog` in
 `ai-text-editor-server.rs`), after `--idle-timeout-seconds` (default 600, `0`
 disables it). Restarting is cheap and lossless: the journal replays on the

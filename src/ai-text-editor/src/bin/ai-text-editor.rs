@@ -349,6 +349,7 @@ fn die(message: &str) -> ! {
 fn help() {
     println!("Usage: ai-text-editor COMMAND -f FILE [OPTIONS]  (or --endpoint/-e ENDPOINT for an already-open tab)");
     println!("open starts its own server when none is running yet: no separate `ai-text-editor-server start` call is needed. Use --document-mode/-M and --normalize-nfc to shape that autostart; open --endpoint ENDPOINT -f PATH adds another isolated tab to a server that is already up.");
+    println!("On Windows, where no usable Unix socket exists, the autostarted server falls back to loopback TCP on an ephemeral port with a per-start authentication token kept in a token file; every command works unchanged there.");
     println!("Opening a second file under the same agent identity (an explicit --session/--agent, or your coding harness's own session env vars) reconnects to that agent's already-running workspace and adds the file there as a new tab, rather than starting an unrelated second server.");
     println!("New files: open on a path that does not exist yet is not an error — the tab starts empty and the file is created on disk by the first successful save.");
     println!("Recovery: if the server died, open again (a stale endpoint whose owning process is gone is reclaimed automatically); reads report dirty/external_change_pending state, and every server refusal is named on stderr in every presentation.");

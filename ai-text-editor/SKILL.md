@@ -36,6 +36,10 @@ explicitly with `--session ID` or `--agent ID` on every call, or pin one
 server directly with `--endpoint ENDPOINT` (`ai-text-editor-server start
 --file PATH` still exists for that, and for advanced options such as `--tcp`
 or `--large-threshold-bytes`, but is not a normal step any more).
+On Windows, where no usable Unix socket exists, the same plain `open`
+autostarts a loopback-TCP server on an ephemeral port with a per-start
+private token and discovers it exactly the way the socket is discovered —
+every command in this skill works unchanged there.
 
 Edits are journal-and-buffer operations: a successful `insert`/`replace`
 returns a new revision but changes nothing on disk until a `save` succeeds.

@@ -86,6 +86,12 @@ owner is still alive or cannot be determined, startup refuses to impersonate
 it unless \fB--takeover-stale-endpoint\fR is explicitly supplied. The old
 record is preserved with a \fBstale-\fR suffix during takeover.
 .PP
+On Windows, where no usable Unix socket exists, \fBopen\fR autostarts a
+loopback-TCP server on an OS-assigned ephemeral port with a per-start private
+authentication token, and discovers it through the same per-file endpoint
+record the Unix transport uses. Every command works unchanged over that
+fallback; the secret is kept in a token file, never on the command line.
+.PP
 \fBsave-as\fR atomically creates a new target with the current working view and
 never overwrites an existing target or changes the active tab path.
 .PP
