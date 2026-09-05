@@ -351,13 +351,16 @@ fn main() {
             state_guard.endpoint = Some(endpoint.clone());
             state_guard.auth_token = Some(auth_token.clone());
         }
-        announce(&path, &endpoint, &server_generation);
+        // B189's sibling race: register the session (the record carries the
+        // TCP endpoint's auth token) BEFORE announcing the endpoint file, so
+        // no client can discover a port it has no credentials for.
         register_session(
             &endpoint,
             &server_generation,
             &session_token,
             Some(&auth_token),
         );
+        announce(&path, &endpoint, &server_generation);
         let generation = server_generation;
         for stream in listener.incoming().flatten() {
             let secret = if let Some(path) = auth_token_file.as_deref() {
@@ -448,13 +451,13 @@ fn main() {
         if let Ok(mut state_guard) = state.lock() {
             state_guard.endpoint = Some(endpoint.clone());
         }
-        announce(&path, &endpoint, &server_generation);
         register_session(
             &endpoint,
             &server_generation,
             &session_token,
             configured_auth_token.as_deref(),
         );
+        announce(&path, &endpoint, &server_generation);
         for stream in listener.incoming().flatten() {
             let state = Arc::clone(&state);
             std::thread::spawn(move || serve(stream, state));
@@ -472,12 +475,13 @@ fn spawn_idle_watchdog(state: Arc<Mutex<ServerState>>, idle_timeout: Duration) {
     let poll_interval = idle_timeout.min(Duration::from_secs(15));
     std::thread::spawn(move || loop {
         std::thread::sleep(poll_interval);
-        let (idle_for, in_flight, discovery_path, tabs) = {
+        let (idle_for, in_flight, discovery_path, generation, tabs) = {
             let guard = state.lock().unwrap();
             (
                 guard.last_activity.elapsed(),
                 guard.in_flight,
                 guard.discovery_path.clone(),
+                guard.server_generation.clone(),
                 guard.tabs.values().cloned().collect::<Vec<_>>(),
             )
         };
@@ -498,6 +502,7 @@ fn spawn_idle_watchdog(state: Arc<Mutex<ServerState>>, idle_timeout: Duration) {
         }
         let _ = fs::remove_file(endpoint_for_file(&discovery_path));
         let _ = fs::remove_file(socket_for_file(&discovery_path));
+        let _ = session::retire_generation(&generation);
         std::process::exit(0);
     });
 }
@@ -1104,8 +1109,10 @@ fn write_frames<S: std::io::Write>(
         state_guard.tabs.remove(&key);
         if state_guard.tabs.is_empty() {
             let discovery_path = state_guard.discovery_path.clone();
+            let generation = state_guard.server_generation.clone();
             let _ = fs::remove_file(endpoint_for_file(&discovery_path));
             let _ = fs::remove_file(socket_for_file(&discovery_path));
+            let _ = session::retire_generation(&generation);
             std::process::exit(0);
         }
         if state_guard.default_key == key {

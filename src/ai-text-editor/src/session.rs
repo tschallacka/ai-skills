@@ -107,6 +107,25 @@ pub fn unregister(session_token: &str) -> io::Result<()> {
     write_records(&path, &records)
 }
 
+/// B189: a server leaving (idle shutdown, last tab closed) takes its tabs'
+/// reachability with it, but nothing else ever removed the records they
+/// registered — the registry kept growing ghosts that every later identity
+/// lookup had to probe and reject. Retire the whole generation on the way
+/// out; records of other, still-live servers are untouched.
+pub fn retire_generation(generation: &str) -> io::Result<()> {
+    retire_generation_at(&registry_path(), generation)
+}
+
+fn retire_generation_at(path: &Path, generation: &str) -> io::Result<()> {
+    let _lock = acquire_registry_lock(path)?;
+    let records = read_records(path)?;
+    let kept: Vec<SessionRecord> = records
+        .into_iter()
+        .filter(|record| record.server_generation != generation)
+        .collect();
+    write_records(path, &kept)
+}
+
 pub fn resolve(identity: &str) -> Result<SessionRecord, String> {
     let path = registry_path();
     let records =
@@ -281,5 +300,30 @@ mod tests {
     #[test]
     fn malformed_registry_rows_are_ignored() {
         assert!(SessionRecord::from_value(&json!({"token_id": "incomplete"})).is_none());
+    }
+
+    #[test]
+    fn retiring_a_generation_clears_its_records_and_keeps_other_servers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("sessions.json");
+        let dying = new_record(
+            "unix:/tmp/dying.sock",
+            "generation-a",
+            "token-a",
+            None,
+            None,
+        );
+        let living = new_record(
+            "unix:/tmp/living.sock",
+            "generation-b",
+            "token-b",
+            None,
+            None,
+        );
+        write_records(&path, &[dying, living]).unwrap();
+        retire_generation_at(&path, "generation-a").unwrap();
+        let kept = read_records(&path).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].server_generation, "generation-b");
     }
 }
