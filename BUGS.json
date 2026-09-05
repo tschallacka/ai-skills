@@ -160,6 +160,48 @@
       "updated_at": "2026-09-04T17:23:31Z"
     },
     {
+      "id": "B175",
+      "title": "MCP adapter discards the advertised expected_revision argument; every MCP mutation dies with revision_required",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"insert\",\"arguments\":{\"file\":F,\"text\":\"x\",\"offset\":0,\"expected_revision\":0}}}' | ai-text-editor-mcp -> revision_required; same with key 'revision' passes the guard",
+      "observed": "Server receives no revision: the adapter only lifts 'revision' into the envelope; expected_revision stays in the payload where the server ignores it. Schema-faithful clients are stripped of 'revision' by validation, so no client configured against the advertised surface can mutate.",
+      "expected": "The adapter accepts the key its own tool schemas advertise (or advertises the key it accepts).",
+      "mechanism": "call_tool: payload.remove(\"revision\"); the tool inputSchemas (harness-enriched) name expected_revision - two contracts, no overlap.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B178",
+      "title": "cached endpoint/session reuse has no liveness or generation check: every non-open command wedges after a server restart or idle shutdown",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "open -f F (autostarts server), kill -9 server, then open -f F -> Connection refused (os error 111); rm the socket -> No such file or directory (os error 2); recovery needs deleting the (identity,file) session cache. Variant: restart the server, then read -f F -> session_unauthorized: the supplied session_token does not belong to a tab on this server, no recovery named.",
+      "observed": "Dead-endpoint wedge persists across opens; stale-generation tokens break every non-open verb. The cli_flow killed_server test passes because it never carries a warm cache.",
+      "expected": "A connect failure or token refusal on a cached endpoint re-resolves and autostarts (journal replay is already lossless); session_unauthorized names re-open as the fix.",
+      "mechanism": "client::resolve forwards the cached endpoint+token without probing pid/generation; the withhold-token rule covers only method==open.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -1973,6 +2015,69 @@
       "updated_at": "2026-09-04T17:23:31Z"
     },
     {
+      "id": "B179",
+      "title": "server accepts unknown payload keys on every method; a misspelled argument is a silent no-op",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "insert arguments {offset:0, text_note:'x', revision:N} -> inserted empty text with revision bumped; harness-dropped limit:3 became the default 4 with no signal",
+      "observed": "No handler validates its payload key set; B171 (fixed) was this same class.",
+      "expected": "Per-method known-key whitelist; refuse with the offending name.",
+      "mechanism": "handle() dispatches on payload.get per method and never inspects the remainder.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B180",
+      "title": "job_complete silently empties a non-array result instead of refusing",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "job_start, then job_complete result={\"ok\":true} -> job Completed with result:[] and a success frame",
+      "observed": "The JSON object was discarded; callers cannot know result must be an array - documented nowhere.",
+      "expected": "Refuse non-array results by name, or accept and wrap any JSON value.",
+      "mechanism": "payload.get(\"result\").and_then(Value::as_array).unwrap_or_default().",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B187",
+      "title": "an mcp-mode install ships no CLI client, yet SKILL.md and the man page instruct the CLI for everything",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "install --integration ai-text-editor=mcp; follow SKILL.md Start: ai-text-editor open -f PATH -> 127 No such file",
+      "observed": "Every CLI instruction in the skill is unrunnable in the mode this machine actually installed; no page says which mode installed what.",
+      "expected": "SKILL.md states the mode split and gives the MCP-first path; the installer prints what it did not ship.",
+      "mechanism": "integration.tsv: ai-text-editor is skill-only; SKILL.md prose predates autostart/MCP.",
+      "surfaces": [
+        "ai-text-editor/SKILL.md;ai-text-editor/integration.tsv"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -2512,6 +2617,90 @@
       "notes": null,
       "created_at": "2026-09-04T17:21:38Z",
       "updated_at": "2026-09-04T17:21:38Z"
+    },
+    {
+      "id": "B176",
+      "title": "MCP has no page tool and no historical search read; preview-4 search results are unreachable over MCP",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "tools/list has no page; search accepts neither offset nor historical; server-side page works via raw passthrough.",
+      "observed": "A search hitting the default preview is a dead end for MCP clients.",
+      "expected": "page exposed as a tool and historical as a search argument, or the docs stop promising the same protocol over MCP.",
+      "mechanism": "tool_definitions() omits page; call_tool never sees historical because clients cannot know to send it.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B177",
+      "title": "capabilities and resources are tab-scoped: the first MCP call of a cold session fails session_stale",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "fresh agent identity, no server running: tools/call capabilities -> session_stale: no live session record matches h-<id>; only works after an open has registered a tab",
+      "observed": "Protocol discovery requires a live tab to exist first.",
+      "expected": "Stateless queries answer cold; if they cannot, the response says what to open.",
+      "mechanism": "client::resolve treats identity-without-file as fatal when no registry record exists; server capabilities reads tab.large_threshold_bytes, so it never answers without a tab.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs;src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B181",
+      "title": "job verbs verify no ownership: job_poll returns another agent's resume_token and job_complete needs no proof",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "job_start -> job_poll without resume_token returns the snapshot including resume_token; that token then authorizes job_transfer of the job to anyone",
+      "observed": "Sequential job ids plus token disclosure in poll makes any endpoint client able to seize or complete any job.",
+      "expected": "Polls/updates require the resume_token (or owner); poll never echoes the token to non-holders.",
+      "mechanism": "jobs::get checks the token only when one is supplied; the job_complete handler reads neither owner nor token.",
+      "surfaces": [
+        "src/ai-text-editor/src/jobs.rs;src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B182",
+      "title": "dirty conflates unsaved own edits with an external change under the tab",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "open+save F, then append to F externally, then read -> dirty:true with zero own edits",
+      "observed": "The flag that means do-not-trust-your-journal also fires when the DISK moved, pointing agents to save over the external change.",
+      "expected": "Separate unsaved_edits from disk_diverged (or keep dirty for own edits only).",
+      "mechanism": "tab_dirty = digest(buffer+disk meta) != saved disk_digest baseline; any divergence reads as dirty.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
     },
     {
       "id": "B6",
@@ -3620,6 +3809,132 @@
       "updated_at": "2026-09-04T20:53:05Z"
     },
     {
+      "id": "B183",
+      "title": "an out-of-range edit on a text tab reports the hex-parity error",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "insert -o <len+89> on a TextUtf8 tab -> edit_refused: hex edits must address complete byte pairs",
+      "observed": "A text edit got a hex-flavored message describing parity, not range.",
+      "expected": "out_of_range naming the byte offset and document length.",
+      "mechanism": "document.rs apply_bytes guards every mode's range with DocumentError::InvalidHexCoordinate.",
+      "surfaces": [
+        "src/ai-text-editor/src/document.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B184",
+      "title": "NFC tabs edit in original-byte space without saying so; a valid-looking view offset fails as invalid UTF-8",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "server start --file decomposed.txt --normalize-nfc; read shows cafe composed; insert -o 5 (valid view boundary) -> edit_refused: document contains invalid UTF-8",
+      "observed": "Offsets address the raw bytes (5 lands inside the combining sequence); nothing maps view to original or suggests the snapped offset.",
+      "expected": "The refusal names the original/view mapping and a usable offset; the docs state the address space.",
+      "mechanism": "text() returns the normalized view while apply_bytes and position mapping work on original bytes; the guard only revalidates UTF-8.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs;src/ai-text-editor/src/document.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B185",
+      "title": "large-tab reads answer bytes_base64 even under --presentation text",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "server start --file big.txt --large-threshold-bytes 2000; read -o 0 -L 40 -p text -> the client prints the JSON frame because the payload has no text field",
+      "observed": "The only text-shaped large reads are line/before/after; the default and windowed reads are base64-only in every presentation.",
+      "expected": "A text_utf8 large tab decodes its bounded window under text presentation, or the response says why not.",
+      "mechanism": "the large branch never looks at presentation; it emits bytes_base64 unconditionally.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B186",
+      "title": "search silently ignores -o/--offset; the paging offset lives on page only",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "search -m exact_text -q w --range-start-line 1 --range-end-line 60 -o 2 -n 2 -> returns matches 1,2 of a fresh scan",
+      "observed": "An offset that cannot page a fresh scan is dropped without a word.",
+      "expected": "Refuse offset on the search verb, naming page.",
+      "mechanism": "search() reads limit/pager_key/historical but not offset; the client help lists -o under Reading.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs;src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B189",
+      "title": "sessions.json keeps records of cleanly closed tabs; the registry never self-cleans",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "close every tab with journal_action, then inspect sessions.json: entries for dead servers and closed tabs remain until a resolve refuses them",
+      "observed": "Growth is unbounded; identity resolution pays stale probes forever.",
+      "expected": "Close removes the record (it already calls unregister); shutdown sweeps the endpoint's remaining records.",
+      "mechanism": "unregister-by-token ran for the closed tabs yet records survived; needs confirmation which close path left them.",
+      "surfaces": [
+        "src/ai-text-editor/src/session.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B192",
+      "title": "a large-edit refused by the revision guard leaves its job Queued forever",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "job-start; large-edit -j 1 without -r (or stale) -> refused; job-poll still Queued; nothing cancels or expires it",
+      "observed": "The job record leaks; retention only starts at terminal states.",
+      "expected": "Refusal cancels the job or answers the driver with a cancel instruction.",
+      "mechanism": "the revision guard rejects before the handler touches the registry.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -3729,6 +4044,27 @@
       "updated_at": "2026-09-03T10:32:05Z"
     },
     {
+      "id": "B188",
+      "title": "the MCP adapter never reaps the servers it autostarts; exited servers linger as zombies",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "MCP open (autostart), close all tabs (server exits); ps shows the child <defunct> with the adapter as PPID",
+      "observed": "A long-lived adapter accumulates one zombie per autostarted server.",
+      "expected": "SIGCHLD auto-reap in the adapter (unix), or waitpid on the tracked child.",
+      "mechanism": "autostart_server spawns detached-ish children nobody waits on; the long-lived adapter process inherits the reaping duty.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs;src/ai-text-editor-mcp/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
       "id": "B59",
       "title": "chat server.py answers an invalid channel on PRIVMSG with the empty-text usage message, misreporting which argument was wrong",
       "status": "fixed",
@@ -3773,6 +4109,90 @@
       "notes": "Found while adding bootstrap.sh, whose usage() copies the existing idiom verbatim; the new script inherited the wart rather than introducing it.",
       "created_at": "2026-09-01T00:00:00Z",
       "updated_at": "2026-09-01T00:00:00Z"
+    },
+    {
+      "id": "B190",
+      "title": "restore on a never-normalized tab answers success with restored:false",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "open plain file; restore -r N -> data frame {restored:false}, rc 0",
+      "observed": "A do-nothing call shaped like success; no reason given.",
+      "expected": "Error not_normalized.",
+      "mechanism": "the restore handler reports the attempted outcome without distinguishing nothing-was-on.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B191",
+      "title": "stale_revision reads inverted: expected X, got Y names the SENT value as expected",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "send revision 1 when the tab is on 0 -> stale revision: expected 1, got 0",
+      "observed": "Agents read this as the server wanting 1 and retry with 1 - forever.",
+      "expected": "current=0 supplied=1.",
+      "mechanism": "RevisionGuard formats expected(sent) before current.",
+      "surfaces": [
+        "src/ai-text-editor/src/revision.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:31Z",
+      "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B193",
+      "title": "job_transfer silently flips detached:false to true",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "job-start (no --detached); job-transfer with owner+token -> snapshot now detached:true",
+      "observed": "A semantics change the caller never asked for.",
+      "expected": "Transfer preserves the detached flag, or the response says it changed and why.",
+      "mechanism": "the transfer path re-creates the job record with detached defaulted true.",
+      "surfaces": [
+        "src/ai-text-editor/src/jobs.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:32Z",
+      "updated_at": "2026-09-05T18:43:32Z"
+    },
+    {
+      "id": "B194",
+      "title": "open on a path with a live journal replays it silently: revision 6, dirty true, for a file that was never saved",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "open -f NEWPATH; edit 6 times without saving; let the server die; open NEWPATH again -> tab at revision 6 dirty, file still absent from disk, response says nothing about replay",
+      "observed": "Correct recovery, indistinguishable from corruption at first sight.",
+      "expected": "The open response carries journal_replay:{edits, through_sequence} when it replays.",
+      "mechanism": "replay reconstructs state but the open payload reports no provenance.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:43:32Z",
+      "updated_at": "2026-09-05T18:43:32Z"
     },
     {
       "id": "B93",
