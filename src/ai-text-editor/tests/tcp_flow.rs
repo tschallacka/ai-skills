@@ -33,6 +33,12 @@ impl TcpHarness {
         ));
         std::fs::create_dir_all(scratch.join("runtime")).unwrap();
         std::fs::create_dir_all(scratch.join("sessions")).unwrap();
+        // Canonicalize now so every later path the test compares matches
+        // the server's own canonicalized view — macOS hands back
+        // `/private/var/...` for a temp dir the test built as
+        // `/var/...`, and an un-canonical scratch reads as a phantom
+        // routing mismatch on that platform alone.
+        let scratch = std::fs::canonicalize(scratch).unwrap();
         Self {
             scratch,
             agent: format!("tcp-test-{name}"),
