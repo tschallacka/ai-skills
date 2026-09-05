@@ -303,9 +303,7 @@ fn a_port_endpoint_is_discoverable_with_no_endpoint_flag_at_all() {
 #[cfg(windows)]
 #[test]
 fn open_autostarts_onto_a_loopback_port_when_unix_sockets_are_unavailable() {
-    let mut harness = TcpHarness::new("fallback");
-    // The discovery tree is shared with the other tests' naming; the
-    // fallback test must observe what autostart actually announced.
+    let harness = TcpHarness::new("fallback");
     let file = harness.path("fallback.txt");
     std::fs::write(&file, "first save\n").unwrap();
     let opened = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
@@ -314,14 +312,29 @@ fn open_autostarts_onto_a_loopback_port_when_unix_sockets_are_unavailable() {
         "open must fall back to a port: {}",
         stderr_text(&opened)
     );
-    let discovery = ai_text_editor::transport::endpoint_for_file(&file);
-    let announced = std::fs::read_to_string(&discovery).expect("endpoint was announced");
-    assert!(
-        announced.contains("\"tcp:127.0.0.1:"),
-        "the fallback must announce a loopback port, not a socket: {announced}"
-    );
+    // The discovery record is hash-named inside the private runtime root
+    // the harness points XDG_RUNTIME_DIR at — the same tree the autostart
+    // writes through — so it is found by walking, not by recomputing the
+    // key from this process's (unconfigured) environment.
+    let discovery_root = harness
+        .scratch
+        .join("runtime")
+        .join("tsch-ai-skills-editor");
+    let announced = std::fs::read_dir(&discovery_root)
+        .expect("autostart announced a discovery record")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "endpoint")
+        })
+        .map(|entry| std::fs::read_to_string(entry.path()).unwrap_or_default())
+        .find(|content| content.contains("\"tcp:127.0.0.1:"))
+        .unwrap_or_else(|| panic!("the fallback must announce a loopback port, not a socket"));
+    let record: Value = serde_json::from_str(&announced).expect("endpoint record is json");
+    let pid = record["pid"].as_u64().unwrap() as u32;
     let payload = first_payload(&opened);
-    let pid = payload["server_pid"].as_u64().unwrap();
     let revision = payload["revision"].as_u64().unwrap().to_string();
     let edited = harness.client(&[
         "insert",
