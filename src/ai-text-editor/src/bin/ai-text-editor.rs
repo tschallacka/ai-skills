@@ -268,7 +268,9 @@ fn main() {
                 let message = frame.get("message").and_then(Value::as_str).unwrap_or("");
                 let details = frame
                     .get("details")
-                    .map(|details| format!(" {}", serde_json::to_string(details).unwrap_or_default()))
+                    .map(|details| {
+                        format!(" {}", serde_json::to_string(details).unwrap_or_default())
+                    })
                     .unwrap_or_default();
                 eprintln!("ai-text-editor: {code}: {message}{details}");
             }

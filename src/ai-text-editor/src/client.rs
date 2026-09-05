@@ -313,9 +313,15 @@ pub fn autostart_server(
     // caller got a 10s timeout with no cause. Capture the child's stderr
     // and fold it into the failure message when the wait expires.
     let log_path = discovery.with_extension(format!("start-{}.log", std::process::id()));
-    let log = std::fs::File::create(&log_path)
-        .map_err(|error| format!("cannot create server start log {}: {error}", log_path.display()))?;
-    let log_capture = log.try_clone().map_err(|error| format!("cannot capture server start log: {error}"))?;
+    let log = std::fs::File::create(&log_path).map_err(|error| {
+        format!(
+            "cannot create server start log {}: {error}",
+            log_path.display()
+        )
+    })?;
+    let log_capture = log
+        .try_clone()
+        .map_err(|error| format!("cannot capture server start log: {error}"))?;
     let mut command = std::process::Command::new(&binary);
     command.arg("start").arg("--file").arg(file);
     if let Some(identity) = explicit_identity {
@@ -357,7 +363,10 @@ pub fn autostart_server(
     let _ = std::fs::remove_file(&log_path);
     let reason = reason.trim();
     Err(if reason.is_empty() {
-        format!("server for {} did not announce an endpoint in time", file.display())
+        format!(
+            "server for {} did not announce an endpoint in time",
+            file.display()
+        )
     } else {
         format!("server for {} failed to start: {reason}", file.display())
     })

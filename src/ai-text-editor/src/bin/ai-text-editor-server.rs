@@ -1113,8 +1113,8 @@ fn server_generation() -> String {
 }
 
 fn tab_key(path: &std::path::Path) -> String {
-    let identity = ai_text_editor::transport::canonical_or_near(path)
-        .unwrap_or_else(|_| path.to_path_buf());
+    let identity =
+        ai_text_editor::transport::canonical_or_near(path).unwrap_or_else(|_| path.to_path_buf());
     blake3::hash(identity.to_string_lossy().as_bytes())
         .to_hex()
         .to_string()
@@ -1143,7 +1143,17 @@ fn requested_file(envelope: &ai_text_editor::protocol::Envelope) -> Option<PathB
 /// `-f OTHERFILE` replace silently mutate the session's *previous* tab:
 /// the edit returned a real new revision, the next read (routed elsewhere)
 /// never showed it, and the named file never changed on disk.
-fn ensure_tab_file(tab: &Arc<Mutex<Tab>>, requested: Option<&PathBuf>) -> Result<(), String> {
+fn ensure_tab_file(
+    tab: &Arc<Mutex<Tab>>,
+    requested: Option<&PathBuf>,
+    method: &str,
+) -> Result<(), String> {
+    // `capabilities` and `resources` describe the server, not the tab's
+    // content, so a file named with them is only a discovery hint and must
+    // not be refused for addressing a different tab.
+    if matches!(method, "capabilities" | "resources") {
+        return Ok(());
+    }
     let Some(requested) = requested else {
         return Ok(());
     };
@@ -1172,7 +1182,7 @@ fn select_tab(
                 .ok()
                 .is_some_and(|tab| tab.session_token == token)
             {
-                ensure_tab_file(tab, requested.as_ref())?;
+                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
                 return Ok(tab.clone());
             }
         }
@@ -1212,7 +1222,7 @@ fn select_tab(
                     auth_token.as_deref(),
                 );
                 let tab = Arc::new(Mutex::new(tab_guard));
-                let key = tab_key(&path);
+                let key = tab_key(path);
                 let mut state_guard = state.lock().unwrap();
                 if let Some(existing) = state_guard.tabs.get(&key) {
                     return Ok(existing.clone());
@@ -1221,7 +1231,7 @@ fn select_tab(
                 state_guard.tabs.insert(key, tab);
                 return Ok(result);
             }
-            let key = tab_key(&path);
+            let key = tab_key(path);
             let tab = Arc::new(Mutex::new(tab));
             let mut state_guard = state.lock().unwrap();
             if let Some(existing) = state_guard.tabs.get(&key) {
@@ -1233,7 +1243,7 @@ fn select_tab(
         }
     }
     let default = state_guard.tabs[&state_guard.default_key].clone();
-    ensure_tab_file(&default, requested.as_ref())?;
+    ensure_tab_file(&default, requested.as_ref(), &envelope.method)?;
     Ok(default)
 }
 
@@ -1544,9 +1554,8 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             let _ = tab.metadata.record(&tab.path, tab.document.mode, tab.revision, tab.document.bytes().len());
                             // A delete spanning a line end joins two lines;
                             // nothing in the coordinates says so otherwise.
-                            let spans_lines = before.bytes()[offset..offset + delete_len]
-                                .iter()
-                                .any(|byte| *byte == b'\n');
+                            let spans_lines =
+                                before.bytes()[offset..offset + delete_len].contains(&b'\n');
                             let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab)});
                             if spans_lines {
                                 payload["spans_lines"] = json!(true);

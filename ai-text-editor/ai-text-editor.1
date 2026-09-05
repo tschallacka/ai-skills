@@ -28,10 +28,19 @@ and use operating-system isolation when stronger confinement is needed.
 .IP "server start --file PATH"
 Start an editor server and print endpoint/session discovery information.
 .IP "open --file PATH"
-Query an already running server discovered for PATH. Start the server first.
+Open a tab for PATH, starting the server itself when none is running yet.
+A PATH that does not exist opens an empty new tab; the file is created at
+its path by the first successful \fBsave\fR.
 .IP "help"
 Print the complete capability and option reference. This file is colocated
 with the skill and is available with \fBman -l\fR when binaries are not on PATH.
+.PP
+Edits change the tab's buffer and journal, never the file: mutating and
+reading responses carry a \fBdirty\fR flag, and the bytes reach disk only
+when \fBsave\fR succeeds. Refused operations are named on stderr in every
+presentation with a code, a message, and recovery choices where they exist;
+a \fBfile_mismatch\fR refusal means the request was routed to the tab of a
+different file and \fBopen\fR of the named file is the fix.
 .PP
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
@@ -69,11 +78,13 @@ An owner-only auth-token-file is reread per TCP connection to permit rotation.
 Never expose the endpoint publicly.
 .PP
 Unix endpoint discovery records are atomic and include the owning PID and
-server generation. Graceful shutdown removes the active record. After a crash,
-an unreachable socket is retained as stale evidence and startup refuses to
-replace it unless \fB--takeover-stale-endpoint\fR is explicitly supplied. The
-agent must verify that the recorded owner is no longer running; the old record
-is preserved with a \fBstale-\fR suffix during takeover.
+server generation. Graceful shutdown removes the active record. After a crash
+or a plain kill, an unreachable socket is retained as stale evidence. A
+replacement server reclaims it automatically when the recorded owner PID is
+demonstrably gone (the next \fBopen\fR does this through autostart); when the
+owner is still alive or cannot be determined, startup refuses to impersonate
+it unless \fB--takeover-stale-endpoint\fR is explicitly supplied. The old
+record is preserved with a \fBstale-\fR suffix during takeover.
 .PP
 \fBsave-as\fR atomically creates a new target with the current working view and
 never overwrites an existing target or changes the active tab path.

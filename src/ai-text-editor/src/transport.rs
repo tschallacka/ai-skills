@@ -80,7 +80,9 @@ pub fn canonical_or_near(path: &Path) -> io::Result<PathBuf> {
     match fs::canonicalize(path) {
         Ok(canonical) => Ok(canonical),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty());
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty());
             let name = path.file_name().ok_or(error)?;
             Ok(fs::canonicalize(parent.unwrap_or_else(|| Path::new(".")))?.join(name))
         }
