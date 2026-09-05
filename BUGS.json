@@ -162,7 +162,7 @@
     {
       "id": "B175",
       "title": "MCP adapter discards the advertised expected_revision argument; every MCP mutation dies with revision_required",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -173,17 +173,17 @@
       "surfaces": [
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - the adapter lifts expected_revision into the envelope as well as revision",
+      "verification": "cli_flow cold/recovery tests; raw tools/call insert with expected_revision now passes the guard against the new build",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:41Z"
     },
     {
       "id": "B178",
       "title": "cached endpoint/session reuse has no liveness or generation check: every non-open command wedges after a server restart or idle shutdown",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -194,12 +194,12 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - liveness probes on cached and registered endpoints; execute() refreshes a stale tab token against a live server and retries once; session_unauthorized names the recovery",
+      "verification": "cli_flow a_restarted_server_reports_the_journal_replay... and a_dead_server_without_a_replacement_fails_with_guidance... pass; repro that needed cache deletion now self-heals",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B33",
@@ -2017,7 +2017,7 @@
     {
       "id": "B179",
       "title": "server accepts unknown payload keys on every method; a misspelled argument is a silent no-op",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2028,17 +2028,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - KNOWN_PAYLOAD_KEYS whitelist in handle() refuses unknown args by name",
+      "verification": "cli_flow refuses_misplaced_and_unknown_arguments_by_name",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B180",
       "title": "job_complete silently empties a non-array result instead of refusing",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2049,17 +2049,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - job_complete wraps a non-array result instead of emptying it",
+      "verification": "job auth + wrap verified against new build; raw tools/call with object result returns the wrapped frame",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B187",
       "title": "an mcp-mode install ships no CLI client, yet SKILL.md and the man page instruct the CLI for everything",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2070,17 +2070,17 @@
       "surfaces": [
         "ai-text-editor/SKILL.md;ai-text-editor/integration.tsv"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - SKILL.md Start states which client an mcp-mode install ships and how the same verbs are reached",
+      "verification": "doc review",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B195",
       "title": "MCP tools/list serves empty inputSchemas for all tools; no argument contract is discoverable",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2091,12 +2091,12 @@
       "surfaces": [
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - every tool now publishes per-arg inputSchemas with descriptions and required lists",
+      "verification": "tools/list diff; harness-side mutation now round-trips expected_revision",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:44:08Z",
-      "updated_at": "2026-09-05T18:44:08Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B14",
@@ -2642,7 +2642,7 @@
     {
       "id": "B176",
       "title": "MCP has no page tool and no historical search read; preview-4 search results are unreachable over MCP",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2653,17 +2653,17 @@
       "surfaces": [
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - page exposed as an MCP tool; search documents historical/limit/order/pager args",
+      "verification": "tools/list diff shows the page tool; server refuses no arg that is now documented",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:41Z"
     },
     {
       "id": "B177",
       "title": "capabilities and resources are tab-scoped: the first MCP call of a cold session fails session_stale",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2674,17 +2674,17 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs;src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - capabilities/resources answer client_default frames when no server is reachable",
+      "verification": "cli_flow capabilities_answers_cold_without_any_server passes",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:41Z"
     },
     {
       "id": "B181",
       "title": "job verbs verify no ownership: job_poll returns another agent's resume_token and job_complete needs no proof",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2695,17 +2695,17 @@
       "surfaces": [
         "src/ai-text-editor/src/jobs.rs;src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - authorized_job requires resume_token on poll/progress/complete/cancel and large_edit",
+      "verification": "cli_flow job_verbs_require_the_resume_token",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B182",
       "title": "dirty conflates unsaved own edits with an external change under the tab",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2716,12 +2716,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - dirty compares buffer to a saved_digest baseline; new disk_diverged carries the disk-moved fact",
+      "verification": "cli_flow a_dirty_tab_and_a_diverged_disk_are_two_different_facts",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B6",
@@ -3832,7 +3832,7 @@
     {
       "id": "B183",
       "title": "an out-of-range edit on a text tab reports the hex-parity error",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3843,17 +3843,17 @@
       "surfaces": [
         "src/ai-text-editor/src/document.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - CoordinateOutOfRange names offset/length/doc-size; hex parity check made real",
+      "verification": "cli_flow an_out_of_range_text_edit_names_the_range_not_hex",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B184",
       "title": "NFC tabs edit in original-byte space without saying so; a valid-looking view offset fails as invalid UTF-8",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3864,17 +3864,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs;src/ai-text-editor/src/document.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - NFC edit refusals state the original-byte address space",
+      "verification": "verified live: insert mid-combining-sequence on a --normalize-nfc tab returns the mapping explanation",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B185",
       "title": "large-tab reads answer bytes_base64 even under --presentation text",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3885,17 +3885,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - large UTF-8 reads include a decoded text field beside bytes_base64",
+      "verification": "verified live on a low-threshold tab: windowed read carries text",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B186",
       "title": "search silently ignores -o/--offset; the paging offset lives on page only",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3906,12 +3906,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs;src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - search refuses --offset naming page; read refuses historical",
+      "verification": "same test as B179",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B189",
@@ -3937,7 +3937,7 @@
     {
       "id": "B192",
       "title": "a large-edit refused by the revision guard leaves its job Queued forever",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3948,17 +3948,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - a guard-refused large_edit fails its job with the refusal reason",
+      "verification": "verified live: job-poll after refused large-edit reports Failed, not Queued",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B196",
       "title": "Relative bare filename for --save-session-token kills open; save into a missing parent reports an unnamed ENOENT",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3969,12 +3969,12 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs;src/ai-text-editor/src/transport.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - write_session skips empty parents; save/save_as failures name the path",
+      "verification": "new_file_opens test still green; bare relative token path verified against the build",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:44:08Z",
-      "updated_at": "2026-09-05T18:44:08Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B25",
@@ -4088,7 +4088,7 @@
     {
       "id": "B188",
       "title": "the MCP adapter never reaps the servers it autostarts; exited servers linger as zombies",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -4099,12 +4099,12 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs;src/ai-text-editor-mcp/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - adapter sets SIGCHLD to SIG_IGN so autostarted servers cannot accumulate as zombies",
+      "verification": "ps shows no defunct children of the adapter after open/close cycles",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B59",
@@ -4155,7 +4155,7 @@
     {
       "id": "B190",
       "title": "restore on a never-normalized tab answers success with restored:false",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -4166,17 +4166,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - restore on a never-normalized tab errors not_normalized",
+      "verification": "cli_flow restore_on_a_plain_tab_is_an_error_not_a_quiet_success",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B191",
       "title": "stale_revision reads inverted: expected X, got Y names the SENT value as expected",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -4187,17 +4187,17 @@
       "surfaces": [
         "src/ai-text-editor/src/revision.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - stale_revision reads: the tab is at X; this request supplied Y",
+      "verification": "cli_flow stale_revision_is_named_on_stderr_under_text_presentation updated to the new wording",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
-      "updated_at": "2026-09-05T18:43:31Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B193",
       "title": "job_transfer silently flips detached:false to true",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -4208,17 +4208,17 @@
       "surfaces": [
         "src/ai-text-editor/src/jobs.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - transfer preserves the detached flag",
+      "verification": "jobs.rs unit test asserts preservation",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:32Z",
-      "updated_at": "2026-09-05T18:43:32Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B194",
       "title": "open on a path with a live journal replays it silently: revision 6, dirty true, for a file that was never saved",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -4229,12 +4229,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "5dbc5da - open reports journal_replay {edits, through_sequence} when it recovered",
+      "verification": "cli_flow cache-heal test asserts the field",
       "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
       "notes": null,
       "created_at": "2026-09-05T18:43:32Z",
-      "updated_at": "2026-09-05T18:43:32Z"
+      "updated_at": "2026-09-05T20:51:42Z"
     },
     {
       "id": "B93",
