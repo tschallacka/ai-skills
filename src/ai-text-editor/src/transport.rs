@@ -294,6 +294,13 @@ pub fn request(endpoint: &Endpoint, envelope: &Envelope) -> Result<Vec<Value>, S
             exchange_tcp(stream, envelope, &wire_request, &mut responses)?;
         }
     }
+    // Zero frames is never an answer.
+    if responses.is_empty() {
+        return Err(format!(
+            "the server at {} closed the connection without answering",
+            endpoint.display()
+        ));
+    }
     Ok(responses)
 }
 
