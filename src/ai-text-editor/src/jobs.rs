@@ -199,7 +199,6 @@ impl JobRegistry {
             return Err(JobError::Terminal);
         }
         job.snapshot.owner = new_owner.into();
-        job.snapshot.detached = true;
         Ok(job.snapshot.clone())
     }
 
@@ -269,7 +268,9 @@ mod tests {
         let transferred = jobs
             .transfer(queued.id, queued.resume_token.as_deref().unwrap(), "other")
             .unwrap();
-        assert!(transferred.detached);
+        // B195: transfer moves ownership; it must not change how the job is
+        // lifecycle-managed. A non-detached job stays non-detached.
+        assert!(!transferred.detached);
         let completed = jobs
             .complete(queued.id, vec![serde_json::json!({"ok": true})])
             .unwrap();

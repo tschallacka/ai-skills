@@ -3,6 +3,14 @@
 use std::io::{self, BufRead, Write};
 
 fn main() {
+    #[cfg(unix)]
+    unsafe {
+        // Servers this adapter autostarts are its children, and they exit on
+        // their own (last tab closed, or the idle watchdog). Ignoring SIGCHLD
+        // makes the kernel reap them, so a long-lived adapter never
+        // accumulates zombies of its own workspaces.
+        libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+    }
     let stdin = io::stdin();
     let mut stdout = io::BufWriter::new(io::stdout());
     for line in stdin.lock().lines() {

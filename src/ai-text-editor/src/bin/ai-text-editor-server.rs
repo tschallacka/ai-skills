@@ -59,6 +59,13 @@ struct Tab {
     transaction_before: Option<Document>,
     large_undo: Vec<LargeHistory>,
     large_redo: Vec<LargeHistory>,
+    /// Digest of the buffer as of the last save/load/reload. `dirty` means
+    /// the buffer moved away from this; `disk_diverged` means the file on
+    /// disk moved away from what the tab last synced (B183's split).
+    saved_digest: String,
+    /// Journal edits replayed when this tab opened; reported by `open` so a
+    /// recovered revision is never mistaken for fresh work (B196).
+    replayed_edits: usize,
 }
 
 struct ServerState {
@@ -163,6 +170,7 @@ fn main() {
     let metadata = Metadata::open(&path)
         .unwrap_or_else(|error| die(&format!("cannot open tab metadata: {error}")));
     let disk_digest = disk_state(&path, large_file.as_ref(), document.bytes());
+    let saved_digest = digest(document.bytes());
     let journal_root = std::env::var_os("TSCH_AI_EDITOR_METADATA_DIR")
         .map(PathBuf::from)
         .or_else(|| {
@@ -186,6 +194,10 @@ fn main() {
     let records = journal
         .replay()
         .unwrap_or_else(|error| die(&format!("cannot recover journal: {error}")));
+    let replayed_edits = records
+        .iter()
+        .filter(|record| matches!(record.kind.as_str(), "edit" | "large_edit" | "restore"))
+        .count();
     let mut history = History::default();
     let mut recovered_revision = 0;
     let mut journal_seq = 0;
@@ -294,6 +306,8 @@ fn main() {
         transaction_before: None,
         large_undo,
         large_redo,
+        saved_digest,
+        replayed_edits,
     };
     if !loaded_index {
         persist_index(&mut tab);
@@ -574,6 +588,7 @@ fn open_additional_tab(
     let metadata =
         Metadata::open(&path).map_err(|error| format!("cannot open tab metadata: {error}"))?;
     let disk_digest = disk_state(&path, large_file.as_ref(), document.bytes());
+    let saved_digest = digest(document.bytes());
     let journal_root = session::metadata_root();
     fs::create_dir_all(&journal_root)
         .map_err(|error| format!("cannot create journal directory: {error}"))?;
@@ -586,6 +601,10 @@ fn open_additional_tab(
     let records = journal
         .replay()
         .map_err(|error| format!("cannot recover journal: {error}"))?;
+    let replayed_edits = records
+        .iter()
+        .filter(|record| matches!(record.kind.as_str(), "edit" | "large_edit" | "restore"))
+        .count();
     let mut history = History::default();
     let mut recovered_revision = 0;
     let mut journal_seq = 0;
@@ -697,6 +716,8 @@ fn open_additional_tab(
         transaction_before: None,
         large_undo,
         large_redo,
+        saved_digest,
+        replayed_edits,
     };
     if !index_loaded {
         persist_index(&mut tab);
@@ -1266,7 +1287,45 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         frames.push(error(
             &envelope.request_id,
             "session_unauthorized",
-            "a valid server-issued session_token is required for this tab operation",
+            "a valid server-issued session_token is required for this tab operation; if the server restarted, run `open` again (the journal replays)",
+        ));
+        return frames;
+    }
+    // B180/B187: refuse arguments no handler for this verb reads. A typo'd
+    // or misplaced flag must fail here, not become a silent no-op.
+    if let Some(key) = envelope
+        .payload
+        .as_object()
+        .and_then(|map| {
+            map.keys()
+                .find(|key| !KNOWN_PAYLOAD_KEYS.contains(&key.as_str()))
+        })
+        .cloned()
+    {
+        frames.push(error_details(
+            &envelope.request_id,
+            "unknown_argument",
+            format!(
+                "the request carries {key}, which no handler for {} reads",
+                envelope.method
+            ),
+            json!({"offending_key": key}),
+        ));
+        return frames;
+    }
+    if envelope.method == "search" && envelope.payload.get("offset").is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "search_offset_unsupported",
+            "search always scans the whole (bounded) document; page an existing result set with `page --pager-key <key> --offset N` instead",
+        ));
+        return frames;
+    }
+    if envelope.method == "read" && envelope.payload.get("historical").is_some() {
+        frames.push(error(
+            &envelope.request_id,
+            "read_historical_unsupported",
+            "historical belongs to search and page; a read always returns the live buffer",
         ));
         return frames;
     }
@@ -1310,6 +1369,13 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
         let Some(expected) = envelope.revision else {
+            if envelope.method == "large_edit" {
+                fail_guarded_job(
+                    &mut tab,
+                    &envelope,
+                    "large_edit refused before the rewrite: revision_required",
+                );
+            }
             frames.push(error(
                 &envelope.request_id,
                 "revision_required",
@@ -1318,6 +1384,13 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         };
         if let Err(revision_error) = RevisionGuard(expected).check(tab.revision) {
+            if envelope.method == "large_edit" {
+                fail_guarded_job(
+                    &mut tab,
+                    &envelope,
+                    "large_edit refused before the rewrite: stale revision",
+                );
+            }
             frames.push(error(
                 &envelope.request_id,
                 "stale_revision",
@@ -1327,7 +1400,14 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         }
     }
     match envelope.method.as_str() {
-        "open" => frames.push(response(&envelope.request_id, json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)}))),
+        "open" => {
+            let mut payload = json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)});
+            if tab.replayed_edits > 0 {
+                payload["journal_replay"] =
+                    json!({"edits": tab.replayed_edits, "through_sequence": tab.journal_seq});
+            }
+            frames.push(response(&envelope.request_id, payload));
+        }
         "capabilities" => frames.push(response(&envelope.request_id, json!({
             "protocol_version": ai_text_editor::PROTOCOL_VERSION,
             "document_modes": ["text_utf8", "raw_bytes", "hex_view"],
@@ -1487,7 +1567,18 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 }
                 if let Some((start_byte, end_byte)) = byte_range {
                     match file.read_range(start_byte, (end_byte - start_byte) as usize) {
-                        Ok(range) => frames.push(response(&envelope.request_id, json!({"offset": range.offset, "bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, range.bytes), "eof": range.eof, "revision": tab.revision, "large_file": true}))),
+                        Ok(range) => {
+                            let decoded = if tab.document.mode == DocumentMode::TextUtf8 {
+                                std::str::from_utf8(&range.bytes).ok().map(str::to_owned)
+                            } else {
+                                None
+                            };
+                            let mut payload = json!({"offset": range.offset, "bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, range.bytes), "eof": range.eof, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "large_file": true});
+                            if let Some(text) = decoded {
+                                payload["text"] = json!(text);
+                            }
+                            frames.push(response(&envelope.request_id, payload));
+                        }
                         Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
                     }
                     return frames;
@@ -1529,7 +1620,18 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 let offset = envelope.payload.get("offset").and_then(Value::as_u64).unwrap_or(0);
                 let requested = envelope.payload.get("length").and_then(Value::as_u64).unwrap_or(ai_text_editor::large_file::DEFAULT_READ_BYTES as u64) as usize;
                 match file.read_range(offset, requested) {
-                    Ok(range) => frames.push(response(&envelope.request_id, json!({"offset": range.offset, "bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, range.bytes), "eof": range.eof, "revision": tab.revision, "large_file": true}))),
+                    Ok(range) => {
+                        let decoded = if tab.document.mode == DocumentMode::TextUtf8 {
+                            std::str::from_utf8(&range.bytes).ok().map(str::to_owned)
+                        } else {
+                            None
+                        };
+                        let mut payload = json!({"offset": range.offset, "bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, range.bytes), "eof": range.eof, "revision": tab.revision, "large_file": true});
+                        if let Some(text) = decoded {
+                            payload["text"] = json!(text);
+                        }
+                        frames.push(response(&envelope.request_id, payload));
+                    }
                     Err(error_value) => frames.push(error(&envelope.request_id, "large_read_failed", error_value.to_string())),
                 }
                 return frames;
@@ -1544,7 +1646,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             let start = (start_line as usize).min(lines.len() + 1);
                             let end = (end_line as usize).min(lines.len());
                             let selected = if start <= end { lines[start - 1..end].concat() } else { String::new() };
-                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start, "end_line": end, "dirty": tab_dirty(&tab), "complete": start == 1 && end == lines.len()})));
+                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start, "end_line": end, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": start == 1 && end == lines.len()})));
                         } else if byte_range.is_some() {
                             frames.push(error(&envelope.request_id, "read_range_unsupported", "a text tab reads a byte window with offset/length, snapped to char boundaries; range_start_byte/range_end_byte address raw and hex tabs"));
                         } else if before.is_some() || after.is_some() {
@@ -1562,7 +1664,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             let start = cursor.line.saturating_sub(before.unwrap_or(0) as usize + 1);
                             let end = (cursor.line.saturating_add(after.unwrap_or(0) as usize)).min(lines.len());
                             let selected = lines.get(start..end).unwrap_or(&[]).concat();
-                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start + 1, "end_line": end, "cursor": cursor, "dirty": tab_dirty(&tab), "complete": end == lines.len() && start == 0})))
+                            frames.push(response(&envelope.request_id, json!({"text": selected, "revision": tab.revision, "start_line": start + 1, "end_line": end, "cursor": cursor, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": end == lines.len() && start == 0})))
                         } else if let Some(offset) = envelope.payload.get("offset").and_then(Value::as_u64) {
                             // -o/--offset and -L/--length address a text read
                             // in BYTES (matching raw/hex coordinates), and
@@ -1580,12 +1682,12 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             while end > start && !text.is_char_boundary(end) {
                                 end -= 1;
                             }
-                            frames.push(response(&envelope.request_id, json!({"text": &text[start..end], "revision": tab.revision, "offset": start, "returned_bytes": end - start, "total_bytes": text.len(), "eof": end == text.len(), "dirty": tab_dirty(&tab), "complete": end == text.len()})));
+                            frames.push(response(&envelope.request_id, json!({"text": &text[start..end], "revision": tab.revision, "offset": start, "returned_bytes": end - start, "total_bytes": text.len(), "eof": end == text.len(), "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": end == text.len()})));
                         } else {
                             if envelope.payload.get("presentation").and_then(Value::as_str) == Some("stream") {
                                 frames.extend(stream_read_frames(&envelope.request_id, &tab));
                             } else {
-                                frames.push(response(&envelope.request_id, json!({"text": text, "revision": tab.revision, "dirty": tab_dirty(&tab), "complete": true})))
+                                frames.push(response(&envelope.request_id, json!({"text": text, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "complete": true})))
                             }
                         }
                     }
@@ -1595,11 +1697,11 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                 let bytes = tab.document.bytes();
                 let start = (start_byte as usize).min(bytes.len());
                 let end = (end_byte as usize).min(bytes.len()).max(start);
-                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes[start..end]), "offset": start, "returned_bytes": end - start, "total_bytes": bytes.len(), "eof": end == bytes.len(), "revision": tab.revision, "dirty": tab_dirty(&tab), "mode": tab.document.mode})));
+                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes[start..end]), "offset": start, "returned_bytes": end - start, "total_bytes": bytes.len(), "eof": end == bytes.len(), "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "mode": tab.document.mode})));
             } else if line_range.is_some() {
                 frames.push(error(&envelope.request_id, "read_range_unsupported", "line-range reads apply to text tabs; raw and hex tabs take range_start_byte/range_end_byte (half-open)"));
             } else {
-                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "mode": tab.document.mode})))
+                frames.push(response(&envelope.request_id, json!({"bytes_base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, tab.document.bytes()), "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "mode": tab.document.mode})))
             }
         },
         "replace" | "insert" => {
@@ -1656,7 +1758,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             // nothing in the coordinates says so otherwise.
                             let spans_lines =
                                 before.bytes()[offset..offset + delete_len].contains(&b'\n');
-                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab)});
+                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab)});
                             if spans_lines {
                                 payload["spans_lines"] = json!(true);
                             }
@@ -1665,7 +1767,18 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                         Err(error_value) => frames.push(error(&envelope.request_id, "journal_write_failed", error_value.to_string())),
                     }
                 }
-                Err(error_value) => frames.push(error(&envelope.request_id, "edit_refused", error_value.to_string())),
+                Err(error_value) => {
+                    let message = if tab.document.normalize_nfc
+                        && tab.document.mode == DocumentMode::TextUtf8
+                    {
+                        format!(
+                            "{error_value}; on a normalized tab, byte offsets address the ORIGINAL bytes, not the normalized view a read shows - offset {offset} is inside a multi-byte sequence of the original"
+                        )
+                    } else {
+                        error_value.to_string()
+                    };
+                    frames.push(error(&envelope.request_id, "edit_refused", message));
+                }
             }
         }
         "large_edit" => large_edit(&envelope, &mut tab, &mut frames),
@@ -1710,9 +1823,10 @@ fn restore_document(
         return;
     }
     if !before.normalize_nfc {
-        frames.push(response(
+        frames.push(error(
             &envelope.request_id,
-            json!({"restored": false, "normalize_nfc": false, "revision": tab.revision}),
+            "not_normalized",
+            "this tab was not opened with NFC normalization; there is no normalized presentation to restore away from",
         ));
         return;
     }
@@ -1791,15 +1905,79 @@ fn disk_state(path: &std::path::Path, large: Option<&LargeFile>, bytes: &[u8]) -
     }
 }
 
-/// Whether the tab's buffer differs from the file on disk — an edit landed
-/// in the journal but no `save` has flushed it yet. Every mutating response
-/// carries this so a caller that never saves cannot mistake journal-only
-/// success for work on disk.
+/// Whether the tab's own edits are unsaved: the buffer differs from the
+/// document as of the last save/load. Deliberately NOT a comparison with the
+/// file on disk — that fact has its own field (B183): an external change must
+/// never read as the agent's unsaved work.
 fn tab_dirty(tab: &Tab) -> bool {
     if tab.large_file.is_some() {
         return false;
     }
+    digest(tab.document.bytes()) != tab.saved_digest
+}
+
+/// Whether the file on disk differs from what the tab last synced with.
+fn tab_disk_diverged(tab: &Tab) -> bool {
+    if let Some(large) = &tab.large_file {
+        return disk_state(&tab.path, Some(large), &[]) != tab.disk_digest;
+    }
     disk_state(&tab.path, None, tab.document.bytes()) != tab.disk_digest
+}
+
+/// Every payload key any handler reads. Requests carrying anything outside
+/// this list are refused by name instead of having the extra silently
+/// ignored (B180); keep in step with the client's flag table.
+const KNOWN_PAYLOAD_KEYS: &[&str] = &[
+    "acknowledge_force_save",
+    "acknowledge_large_edit",
+    "action",
+    "after",
+    "before",
+    "bytes_base64",
+    "column",
+    "cursor_id",
+    "delete_len",
+    "detached",
+    "file",
+    "gradient",
+    "granularity",
+    "historical",
+    "id",
+    "job_id",
+    "journal_action",
+    "length",
+    "limit",
+    "line",
+    "mode",
+    "offset",
+    "order",
+    "owner",
+    "page_lines",
+    "pager_key",
+    "presentation",
+    "preserve_external",
+    "progress",
+    "query",
+    "query_base64",
+    "range_end_byte",
+    "range_end_line",
+    "range_start_byte",
+    "range_start_line",
+    "resume_token",
+    "result",
+    "backup_path",
+    "target_path",
+    "text",
+    "visual",
+    "wrap_width",
+];
+
+/// A large-edit refused before it ever touched the file must not leave its
+/// job Queued forever (B194): fail it with the refusal reason.
+fn fail_guarded_job(tab: &mut Tab, envelope: &ai_text_editor::protocol::Envelope, reason: &str) {
+    if let Ok(id) = job_id(envelope) {
+        let _ = tab.jobs.fail(id, reason);
+    }
 }
 
 fn file_metadata_state(path: &std::path::Path) -> String {
@@ -2224,7 +2402,7 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
             frames.push(error(
                 &envelope.request_id,
                 "save_failed",
-                error_value.to_string(),
+                format!("cannot save {}: {error_value}", tab.path.display()),
             ));
             return;
         }
@@ -2243,6 +2421,7 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
         return;
     }
     tab.disk_digest = disk_state(&tab.path, None, tab.document.bytes());
+    tab.saved_digest = digest(tab.document.bytes());
     tab.base_bytes = tab.document.bytes().to_vec();
     journal_append(tab, "save", json!({"revision": tab.revision}));
     frames.push(response(
@@ -2270,7 +2449,7 @@ fn save_as(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames:
         frames.push(error(
             &envelope.request_id,
             "save_as_failed",
-            error_value.to_string(),
+            format!("cannot save as {}: {error_value}", target.display()),
         ));
         return;
     }
@@ -2279,7 +2458,7 @@ fn save_as(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames:
         frames.push(error(
             &envelope.request_id,
             "save_as_failed",
-            error_value.to_string(),
+            format!("cannot save as {}: {error_value}", target.display()),
         ));
         return;
     }
@@ -2386,7 +2565,7 @@ fn history_step(
     );
     frames.push(response(
         &envelope.request_id,
-        json!({"revision": revision, "cursors": tab.cursors, "dirty": tab_dirty(tab)}),
+        json!({"revision": revision, "cursors": tab.cursors, "dirty": tab_dirty(tab), "disk_diverged": tab_disk_diverged(tab)}),
     ));
 }
 
@@ -2703,6 +2882,7 @@ fn resolve_external(
             tab.revision = revision;
             tab.base_bytes = external.clone();
             tab.disk_digest = disk_state(&tab.path, None, &external);
+            tab.saved_digest = digest(tab.document.bytes());
             let _ = tab.metadata.record(
                 &tab.path,
                 tab.document.mode,
@@ -2767,6 +2947,7 @@ fn resolve_external(
                 return;
             }
             tab.disk_digest = disk_state(&tab.path, None, tab.document.bytes());
+            tab.saved_digest = digest(tab.document.bytes());
             tab.base_bytes = tab.document.bytes().to_vec();
             frames.push(response(
                 &envelope.request_id,
@@ -3537,6 +3718,22 @@ fn large_edit(
         Ok(id) => id,
         Err(message) => return job_error(envelope, frames, "invalid_job", message),
     };
+    let Some(token) = job_token(envelope) else {
+        return job_error(
+            envelope,
+            frames,
+            "job_unauthorized",
+            "large_edit requires the job's resume_token",
+        );
+    };
+    if let Err(error_value) = tab.jobs.get(id, Some(token)) {
+        return job_error(
+            envelope,
+            frames,
+            "job_unauthorized",
+            error_value.to_string(),
+        );
+    }
     let offset = envelope
         .payload
         .get("offset")
@@ -3695,10 +3892,47 @@ fn job_error(
     frames.push(error(&envelope.request_id, code, message.into()));
 }
 
-fn job_poll(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &mut Vec<Value>) {
+/// B182: every verb that reads or moves a job requires the owner's
+/// resume_token, and it must match. Polling without it used to disclose the
+/// token to any client on the endpoint — job ids are sequential integers.
+fn authorized_job(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &mut Tab,
+    frames: &mut Vec<Value>,
+) -> Option<u64> {
     let id = match job_id(envelope) {
         Ok(id) => id,
-        Err(message) => return job_error(envelope, frames, "invalid_job", message),
+        Err(message) => {
+            job_error(envelope, frames, "invalid_job", message);
+            return None;
+        }
+    };
+    let Some(token) = job_token(envelope) else {
+        job_error(
+            envelope,
+            frames,
+            "job_unauthorized",
+            "job operations require the owner's resume_token",
+        );
+        return None;
+    };
+    match tab.jobs.get(id, Some(token)) {
+        Ok(_) => Some(id),
+        Err(error_value) => {
+            job_error(
+                envelope,
+                frames,
+                "job_unauthorized",
+                error_value.to_string(),
+            );
+            None
+        }
+    }
+}
+
+fn job_poll(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &mut Vec<Value>) {
+    let Some(id) = authorized_job(envelope, tab, frames) else {
+        return;
     };
     match tab.jobs.get(id, job_token(envelope)) {
         Ok(snapshot) => frames.push(response(&envelope.request_id, json!({"job": snapshot}))),
@@ -3711,9 +3945,8 @@ fn job_progress(
     tab: &mut Tab,
     frames: &mut Vec<Value>,
 ) {
-    let id = match job_id(envelope) {
-        Ok(id) => id,
-        Err(message) => return job_error(envelope, frames, "invalid_job", message),
+    let Some(id) = authorized_job(envelope, tab, frames) else {
+        return;
     };
     let progress = envelope
         .payload
@@ -3736,16 +3969,15 @@ fn job_complete(
     tab: &mut Tab,
     frames: &mut Vec<Value>,
 ) {
-    let id = match job_id(envelope) {
-        Ok(id) => id,
-        Err(message) => return job_error(envelope, frames, "invalid_job", message),
+    let Some(id) = authorized_job(envelope, tab, frames) else {
+        return;
     };
-    let result = envelope
-        .payload
-        .get("result")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    // B181: a result that is not an array is wrapped, never silently emptied.
+    let result = match envelope.payload.get("result") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        Some(value) => vec![value.clone()],
+    };
     match tab.jobs.complete(id, result) {
         Ok(snapshot) => frames.push(response(&envelope.request_id, json!({"job": snapshot}))),
         Err(error_value) => job_error(
@@ -3762,9 +3994,8 @@ fn job_cancel(
     tab: &mut Tab,
     frames: &mut Vec<Value>,
 ) {
-    let id = match job_id(envelope) {
-        Ok(id) => id,
-        Err(message) => return job_error(envelope, frames, "invalid_job", message),
+    let Some(id) = authorized_job(envelope, tab, frames) else {
+        return;
     };
     match tab.jobs.cancel(id) {
         Ok(snapshot) => frames.push(response(&envelope.request_id, json!({"job": snapshot}))),

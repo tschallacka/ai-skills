@@ -23,6 +23,12 @@ pub enum DocumentError {
     InvalidUtf8,
     #[error("hex edits must address complete byte pairs")]
     InvalidHexCoordinate,
+    #[error("byte range {offset} with length {delete_len} is outside the {document_bytes}-byte document")]
+    CoordinateOutOfRange {
+        offset: usize,
+        delete_len: usize,
+        document_bytes: usize,
+    },
     #[error("restoration of original bytes is no longer lossless")]
     RestorationConflict,
 }
@@ -128,10 +134,14 @@ impl Document {
         replacement: &[u8],
     ) -> Result<(), DocumentError> {
         if offset > self.bytes.len() || delete_len > self.bytes.len() - offset {
-            return Err(DocumentError::InvalidHexCoordinate);
+            return Err(DocumentError::CoordinateOutOfRange {
+                offset,
+                delete_len,
+                document_bytes: self.bytes.len(),
+            });
         }
         if self.mode == DocumentMode::HexView
-            && (offset > self.bytes.len() || offset.saturating_add(delete_len) > self.bytes.len())
+            && (!offset.is_multiple_of(2) || !delete_len.is_multiple_of(2))
         {
             return Err(DocumentError::InvalidHexCoordinate);
         }

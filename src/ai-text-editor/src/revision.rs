@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RevisionError {
-    #[error("stale revision: expected {expected}, got {actual}")]
+    #[error("stale revision: the tab is at revision {actual}; this request supplied {expected} - re-read open or history and retry with the current revision")]
     Stale { expected: u64, actual: u64 },
 }
 

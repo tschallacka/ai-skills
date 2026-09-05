@@ -8,8 +8,11 @@
 //! (autostart, idle shutdown, cross-file workspace reconnection, and the two
 //! regressions caught while building it).
 
+use crate::protocol::Envelope;
 use crate::session;
-use crate::transport::{endpoint_for_file, read_endpoint, read_session, write_session, Endpoint};
+use crate::transport::{
+    endpoint_for_file, read_endpoint, read_session, request, write_session, Endpoint,
+};
 use stale_lock::StaleLock;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -18,6 +21,7 @@ use std::time::{Duration, Instant};
 /// What a caller already knows going in, from its own flags or arguments.
 /// `method` and `file` decide, together, which of the paths below apply —
 /// see `resolve`'s own comments for exactly which combination does what.
+#[derive(Clone)]
 pub struct ResolveRequest {
     pub file: Option<PathBuf>,
     pub method: String,
@@ -41,10 +45,15 @@ pub struct ResolveRequest {
     pub document_mode: Option<String>,
     pub normalize_nfc: bool,
     pub idle_timeout_seconds: Option<String>,
+    /// Skip every cached or registered session token (the endpoint may still
+    /// be reused). `execute` sets it on its recovery pass, when the token on
+    /// file belongs to a server generation that is gone (B179).
+    pub force_refresh: bool,
 }
 
 /// What a caller sends the request to, and what to persist for next time via
 /// `persist_cache`.
+#[derive(Clone)]
 pub struct Resolved {
     pub endpoint: Endpoint,
     pub auth_token: Option<String>,
@@ -143,7 +152,10 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
         });
     }
 
-    if let Some(path) = cache_path.as_ref().filter(|path| path.exists()) {
+    if let Some(path) = cache_path
+        .as_ref()
+        .filter(|path| path.exists() && !request.force_refresh)
+    {
         // A previous call under this same (identity, file) — reconnects
         // straight to its own tab, skipping both the registry lookup and
         // any per-file discovery. A cached endpoint whose server has since
@@ -173,10 +185,12 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     }
 
     if let Some(path) = &request.session_token_path {
-        return Err(format!(
-            "explicit session token {} does not exist; provide a valid token or an endpoint",
-            path.display()
-        ));
+        if !request.force_refresh {
+            return Err(format!(
+                "explicit session token {} does not exist; provide a valid token or an endpoint",
+                path.display()
+            ));
+        }
     }
 
     if let Some(Ok(record)) = &identity_lookup {
@@ -188,17 +202,26 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
         // instead of routing to the named file. Only withhold it in that one
         // case; every other call (including `open` with no file, resuming a
         // tab purely by identity) still wants the known tab.
-        let session_token = if request.method == "open" && request.file.is_some() {
-            None
-        } else {
-            Some(record.session_token.clone())
-        };
-        return Ok(Resolved {
-            endpoint: Endpoint::parse(&record.endpoint),
-            auth_token: record.auth_token.clone(),
-            session_token,
-            cache_path,
-        });
+        let endpoint = Endpoint::parse(&record.endpoint);
+        // A registered endpoint whose server has since died is not a live
+        // workspace to reconnect to: skip the record and fall through to the
+        // file path below, which can autostart a replacement that replays the
+        // journal, instead of handing the caller a socket nobody listens on
+        // (B179).
+        if endpoint.is_live() {
+            let session_token =
+                if request.force_refresh || (request.method == "open" && request.file.is_some()) {
+                    None
+                } else {
+                    Some(record.session_token.clone())
+                };
+            return Ok(Resolved {
+                endpoint,
+                auth_token: record.auth_token.clone(),
+                session_token,
+                cache_path,
+            });
+        }
     }
 
     let Some(file) = request.file.as_ref() else {
@@ -230,7 +253,8 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             file.display()
         )),
         Err(error) if request.method != "open" => Err(format!(
-            "no server discovered for {}: {error}",
+            "no editor server is reachable for {}; only `open` creates a tab, and every other verb routes to that file's own tab - run `open -f {}` first (the discovery probe reported: {error})",
+            file.display(),
             file.display()
         )),
         _ => {
@@ -442,4 +466,165 @@ fn server_binary_path() -> PathBuf {
         .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// The request path both short-lived clients share: resolve, send, and
+/// recover ONCE from the two signs that the session on file belongs to a
+/// server that no longer exists — a transport failure against a cached or
+/// registered endpoint, or a `session_unauthorized` refusal from a server
+/// that restarted with a new generation (B179). Recovery deletes the stale
+/// cache entry, re-resolves (falling through to file discovery and
+/// autostart, whose journal replay makes it lossless), re-opens the named
+/// file for a fresh tab-scoped token, and retries the original request.
+///
+/// The `build` closure turns a resolution into the request envelope, so the
+/// retry carries the recovered endpoint and token rather than the stale ones.
+pub fn execute<F>(
+    request: &ResolveRequest,
+    build: F,
+) -> Result<(Vec<serde_json::Value>, Resolved), String>
+where
+    F: Fn(&Resolved) -> Envelope,
+{
+    let resolved = match resolve(request) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            // B178: a capabilities/resources query with no server to ask is
+            // answered from compiled-in defaults rather than the resolve
+            // failure the cold start used to surface.
+            if request.file.is_none()
+                && request.explicit_endpoint.is_none()
+                && matches!(request.method.as_str(), "capabilities" | "resources")
+            {
+                return Ok((
+                    cold_discovery_frames(&request.method),
+                    resolved_default(request),
+                ));
+            }
+            return Err(error);
+        }
+    };
+    // Non-open verbs deliberately do NOT autostart (see resolve's file path
+    // and the cli_flow policy test): when the server is gone, resolve has
+    // already produced a clear "run open" error rather than the raw
+    // "Connection refused" the unprobed cache used to hand back. So here we
+    // only ever talk to a resolution that came back live.
+    let frames = request_send(&resolved, &build(&resolved))?;
+    // B179's stale-token variant: a server RESTARTED on the same socket path
+    // is live (so resolve did not error and the no-autostart policy is
+    // untouched), but the cached tab-scoped token belongs to the dead
+    // generation and the server refused the request. `open` against a live
+    // server only re-routes to the file's tab and returns a fresh token — it
+    // spawns nothing — so refreshing and retrying once here is in-bounds in a
+    // way that autostarting a dead server is not.
+    if request.file.is_some()
+        && frames.iter().any(|frame| {
+            frame.get("type").and_then(serde_json::Value::as_str) == Some("error")
+                && frame.get("code").and_then(serde_json::Value::as_str)
+                    == Some("session_unauthorized")
+        })
+    {
+        if let Some(refreshed) = refresh_token(request, &resolved) {
+            if let Ok(retried) = request_send(&resolved, &build(&refreshed)) {
+                return Ok((retried, refreshed));
+            }
+        }
+    }
+    Ok((frames, resolved))
+}
+
+/// Re-open the file against the already-live endpoint to recover a current
+/// tab-scoped session token after a server restart. Never autostarts; if the
+/// open itself does not answer with a token, there is nothing to refresh.
+fn refresh_token(request: &ResolveRequest, resolved: &Resolved) -> Option<Resolved> {
+    let file = request.file.as_ref()?;
+    if let Some(path) = recovery_cache_path(request) {
+        let _ = std::fs::remove_file(path);
+    }
+    let open_envelope = Envelope {
+        version: crate::PROTOCOL_VERSION,
+        request_id: "recover-open".into(),
+        method: "open".into(),
+        revision: None,
+        auth_token: resolved.auth_token.clone(),
+        session_token: None,
+        payload: serde_json::json!({"file": file.to_string_lossy()}),
+    };
+    let frames = request_send(resolved, &open_envelope).ok()?;
+    let session_token = frames.iter().find_map(|frame| {
+        frame
+            .pointer("/payload/session_token")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    })?;
+    Some(Resolved {
+        endpoint: resolved.endpoint.clone(),
+        auth_token: resolved.auth_token.clone(),
+        session_token: Some(session_token),
+        cache_path: resolved.cache_path.clone(),
+    })
+}
+
+fn request_send(
+    resolved: &Resolved,
+    envelope: &Envelope,
+) -> Result<Vec<serde_json::Value>, String> {
+    request(&resolved.endpoint, envelope)
+        .map_err(|error| format!("{error} (endpoint {})", resolved.endpoint.display()))
+}
+
+fn resolved_default(request: &ResolveRequest) -> Resolved {
+    let _ = request;
+    Resolved {
+        endpoint: Endpoint::parse("client-default"),
+        auth_token: None,
+        session_token: None,
+        // No cache path: a cold answer has nothing real to remember, and
+        // persisting this endpoint would poison the next call.
+        cache_path: None,
+    }
+}
+
+fn recovery_cache_path(request: &ResolveRequest) -> Option<PathBuf> {
+    request.session_token_path.clone().or_else(|| {
+        identity(request.explicit_identity.as_deref(), &request.agent_env_var)
+            .map(|id| cache_path(&id, request.file.as_deref()))
+    })
+}
+
+/// Answers for `capabilities` and `resources` when no server is reachable
+/// and none was asked for: the compiled-in contract, marked as such so a
+/// caller never mistakes it for a live server's configuration (B178).
+pub fn cold_discovery_frames(method: &str) -> Vec<serde_json::Value> {
+    let payload = match method {
+        "resources" => {
+            let mut report = serde_json::to_value(crate::resources::report(
+                0,
+                crate::DEFAULT_LARGE_THRESHOLD_BYTES,
+            ))
+            .unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(object) = report.as_object_mut() {
+                object.insert("source".into(), serde_json::json!("client_default"));
+            }
+            report
+        }
+        _ => serde_json::json!({
+            "protocol_version": crate::PROTOCOL_VERSION,
+            "document_modes": ["text_utf8", "raw_bytes", "hex_view"],
+            "search_modes": ["exact_text", "exact_bytes", "wildcard", "shell_wildcard", "path_wildcard", "regex_rust", "regex_pcre2", "fuzzy_edit", "fuzzy_subsequence", "fuzzy_token", "fuzzy_ngram", "fuzzy_phonetic", "fuzzy_soundex"],
+            "presentations": ["structured", "text", "paging", "stream"],
+            "defaults": {"presentation": "structured", "search_preview_matches": 4, "index_granularity": 10000, "large_file_threshold_bytes": crate::DEFAULT_LARGE_THRESHOLD_BYTES},
+            "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
+            "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
+            "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
+            "revision_required_methods": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"],
+            "transports": ["unix_socket", "loopback_tcp"],
+            "source": "client_default",
+            "note": "no editor server is running; these are compiled-in defaults. open a file to query a live server."
+        }),
+    };
+    vec![
+        serde_json::json!({"type": "data", "version": 1, "request_id": "cold-default", "payload": payload}),
+        serde_json::json!({"type": "complete", "version": 1, "request_id": "cold-default", "sequence": 1, "result_generation": "client_default"}),
+    ]
 }
