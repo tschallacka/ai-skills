@@ -2078,6 +2078,27 @@
       "updated_at": "2026-09-05T18:43:31Z"
     },
     {
+      "id": "B195",
+      "title": "MCP tools/list serves empty inputSchemas for all tools; no argument contract is discoverable",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' | ai-text-editor-mcp | grep -A2 insert",
+      "observed": "inputSchema is {type object, additionalProperties true} with zero properties; only the prose description carries information.",
+      "expected": "Per-tool inputSchemas derived from schemas/protocol.v1.json; related to the expected_revision wedge, since the adapter documents no key at all.",
+      "mechanism": "tool_definitions() never attaches schemas; the generated protocol schema is only served as a resource.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:44:08Z",
+      "updated_at": "2026-09-05T18:44:08Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -3933,6 +3954,27 @@
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
       "updated_at": "2026-09-05T18:43:31Z"
+    },
+    {
+      "id": "B196",
+      "title": "Relative bare filename for --save-session-token kills open; save into a missing parent reports an unnamed ENOENT",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor open -f F --save-session-token t.json -> cannot save session token: No such file or directory (os error 2); and open+save a new file under a nonexistent directory -> save_failed: No such file or directory (os error 2)",
+      "observed": "Neither error names the path; neither says parent-directory-missing; the creation promise in SKILL.md holds only for existing directories.",
+      "expected": "Absolute-or-empty-parent handling for the token path; save errors name the path and the failing component.",
+      "mechanism": "write_session runs create_dir_all(path.parent()); a filename-only path has parent empty string, which ENOENTs. save maps os errors without context.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs;src/ai-text-editor/src/transport.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "second agent test-drive 2026-09-05, review .Ai-EDITOR-BRUTAL-REVIEW.md",
+      "notes": null,
+      "created_at": "2026-09-05T18:44:08Z",
+      "updated_at": "2026-09-05T18:44:08Z"
     },
     {
       "id": "B25",
