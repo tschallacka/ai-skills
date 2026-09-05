@@ -351,13 +351,16 @@ fn main() {
             state_guard.endpoint = Some(endpoint.clone());
             state_guard.auth_token = Some(auth_token.clone());
         }
-        announce(&path, &endpoint, &server_generation);
+        // B189's sibling race: register the session (the record carries the
+        // TCP endpoint's auth token) BEFORE announcing the endpoint file, so
+        // no client can discover a port it has no credentials for.
         register_session(
             &endpoint,
             &server_generation,
             &session_token,
             Some(&auth_token),
         );
+        announce(&path, &endpoint, &server_generation);
         let generation = server_generation;
         for stream in listener.incoming().flatten() {
             let secret = if let Some(path) = auth_token_file.as_deref() {
@@ -448,13 +451,13 @@ fn main() {
         if let Ok(mut state_guard) = state.lock() {
             state_guard.endpoint = Some(endpoint.clone());
         }
-        announce(&path, &endpoint, &server_generation);
         register_session(
             &endpoint,
             &server_generation,
             &session_token,
             configured_auth_token.as_deref(),
         );
+        announce(&path, &endpoint, &server_generation);
         for stream in listener.incoming().flatten() {
             let state = Arc::clone(&state);
             std::thread::spawn(move || serve(stream, state));
