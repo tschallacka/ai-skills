@@ -177,10 +177,16 @@ contains "$historical_page" '"source_revision": 1'
 contains "$historical_page" '"stale": true'
 
 printf 'outside\n' > "$file"
-if editor open --file "$file" >"$scratch/external-output" 2>&1; then
+# An external change stays VISIBLE on open and reads (the buffer answers with
+# the pending flag) while mutating verbs are blocked by name — the policy the
+# editor adopted for wedging; the old expectation that `open` itself died was
+# what made sessions unreadable mid-conflict.
+editor open --file "$file" >"$scratch/external-output" 2>&1
+grep -Fq '"external_change_pending": true' "$scratch/external-output"
+if editor save --file "$file" --expected-revision 2 >"$scratch/external-save" 2>&1; then
     exit 1
 fi
-grep -Fq 'external_change' "$scratch/external-output"
+grep -Fq 'external_change' "$scratch/external-save"
 
 backup_output="$(editor resolve --file "$file" --action backup)"
 contains "$backup_output" '"resolved": "backup"'
@@ -288,10 +294,10 @@ large_index_page="$(editor index --file "$large_file" --granularity 2 --offset 1
 contains "$large_index_page" '"block_offset": 1'
 contains "$large_index_page" '"returned_blocks": 1'
 printf 'externally-reloaded\n' > "$large_file"
-if editor open --file "$large_file" >"$scratch/large-external-output" 2>&1; then
-    exit 1
-fi
-grep -Fq 'external_change' "$scratch/large-external-output"
+# Same policy as the small-file case above: on a large tab the external
+# change is reported by open (a bounded reload), not a hard refusal.
+editor open --file "$large_file" >"$scratch/large-external-output" 2>&1
+grep -Fq '"external_change_pending": true' "$scratch/large-external-output"
 large_backup="$(editor resolve --file "$large_file" --action backup)"
 contains "$large_backup" '"large_file": true'
 [ -f "$large_file.back" ]

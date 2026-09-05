@@ -210,7 +210,13 @@ pub fn write_session(
     auth_token: Option<&str>,
     session_token: Option<&str>,
 ) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
+    // A bare filename has an empty parent; create_dir_all("") is an ENOENT
+    // that used to fail the whole `open` (B196). The current directory is
+    // the parent the caller meant.
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)?;
         #[cfg(unix)]
         {

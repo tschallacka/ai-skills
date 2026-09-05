@@ -2,7 +2,6 @@
 // PACKAGE: PROD
 use ai_text_editor::client::{self, ResolveRequest};
 use ai_text_editor::protocol::Envelope;
-use ai_text_editor::transport::request;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -65,11 +64,8 @@ fn main() {
         document_mode: option(&args, &["--document-mode", "-M"]),
         normalize_nfc: flag(&args, &["--normalize-nfc"]),
         idle_timeout_seconds: option(&args, &["--idle-timeout-seconds"]),
+        force_refresh: false,
     };
-    let resolved = client::resolve(&resolve_request).unwrap_or_else(|error| die(&error));
-    let endpoint = resolved.endpoint;
-    let saved_auth_token = resolved.auth_token;
-    let saved_session_token = resolved.session_token;
     let mut payload = serde_json::Map::new();
     if let Some(file) = &file {
         payload.insert(
@@ -211,7 +207,7 @@ fn main() {
         payload.insert("historical".into(), Value::Bool(true));
     }
     payload.insert("presentation".into(), Value::String(presentation.clone()));
-    let auth_token = option(&args, &["--auth-token"]).or(saved_auth_token);
+    let auth_token = option(&args, &["--auth-token"]);
     if method == "search" {
         payload.insert(
             "mode".into(),
@@ -221,16 +217,18 @@ fn main() {
             ),
         );
     }
-    let envelope = Envelope {
+    let method = method.to_string();
+    let payload = Value::Object(payload);
+    let (frames, resolved) = client::execute(&resolve_request, |resolved| Envelope {
         version: ai_text_editor::PROTOCOL_VERSION,
         request_id: "cli-1".into(),
-        method: method.into(),
+        method: method.clone(),
         revision: expected_revision,
-        auth_token: auth_token.clone(),
-        session_token: saved_session_token.clone(),
-        payload: Value::Object(payload),
-    };
-    let frames = request(&endpoint, &envelope).unwrap_or_else(|error| die(&error));
+        auth_token: auth_token.clone().or_else(|| resolved.auth_token.clone()),
+        session_token: resolved.session_token.clone(),
+        payload: payload.clone(),
+    })
+    .unwrap_or_else(|error| die(&error));
     let failed = frames
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
@@ -242,7 +240,7 @@ fn main() {
         .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
         .and_then(|frame| frame.pointer("/payload/session_token"))
         .and_then(Value::as_str);
-    let persisted_session_token = returned_session_token.or(saved_session_token.as_deref());
+    let persisted_session_token = returned_session_token.or(resolved.session_token.as_deref());
     // A refused request must not rewrite the per-(identity,file) cache:
     // persisting the endpoint and token that *answered* the refusal bakes a
     // wrong-file routing in, and every later command for this file replays
@@ -250,8 +248,8 @@ fn main() {
     if !failed {
         client::persist_cache(
             save_path.as_deref(),
-            &endpoint,
-            auth_token.as_deref(),
+            &resolved.endpoint,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
             persisted_session_token,
         )
         .unwrap_or_else(|error| die(&error));
@@ -364,11 +362,12 @@ fn help() {
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
     println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");
-    println!("Reading: -b/--before N -B/--after N (line windows around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), -n/--limit N, --pager-key KEY, -H/--historical, --range-start-line N --range-end-line N (an inclusive line window on text tabs), --range-start-byte N --range-end-byte N (a half-open byte window on raw and hex tabs), --order forward|reverse.");
+    println!("Reading: -b/--before N -B/--after N (line window around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), --range-start-line N --range-end-line N (an inclusive line window on text tabs), --range-start-byte N --range-end-byte N (a half-open byte window on raw and hex tabs).");
+    println!("Paging search results: -n/--limit N, --pager-key KEY, --historical, and the page command's -o/--offset N; --order forward|reverse applies to search responses. A search command itself refuses -o/--offset: the offset pages an existing result set, it never trims a fresh scan.");
     println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");
     println!("Recovery: resolve with -a/--action backup|reload|merge|keep|force_save; backup preserves external bytes and leaves resolution pending, force-save requires --acknowledge-force-save. Add --preserve-external and optionally --backup-path PATH before discard/overwrite.");
     println!("Save-as: use save-as --target-path PATH to atomically create a new file without changing the active tab; existing targets are refused.");
-    println!("Large edits: start a job, then use large-edit with -j/--job-id N --acknowledge-large-edit -o/--offset N -d/--delete-len N and replacement data; this streams and atomically replaces the file.");
+    println!("Large edits: start a job, then use large-edit with -j/--job-id N --resume-token TOKEN --acknowledge-large-edit -o/--offset N -d/--delete-len N, -r/--expected-revision N and replacement data; this streams and atomically replaces the file. Job verbs (poll/progress/complete/cancel/transfer/release) all require --resume-token; it is issued by job-start and never disclosed to a caller who does not hold it.");
     println!("Close: close first prompts with journal_close_decision_required; repeat with --journal-action preserve|clean. clean deletes the tab journal and metadata database.");
     println!("Sessions/auth: -e/--endpoint ENDPOINT, --session-token PATH, -s/--session ID, -A/--agent ID, or environment agent identity (TSCH_AI_EDITOR_AGENT, or a coding harness's own CLAUDE_CODE_SESSION_ID/CODEX_SESSION_ID/OPENCODE_PID); explicit --endpoint wins, stale saved sessions are errors. --save-session-token PATH overrides automatic session storage. TCP clients use --auth-token TOKEN (or a token saved in the session file); servers accept --auth-token TOKEN or owner-only --auth-token-file PATH. Jobs use -j/--job-id N, --owner NAME, --resume-token TOKEN, --detached, --progress-json JSON, --result-json JSON.");
     println!("The server alone owns document state, history, indexes, journals, and SQLite metadata. Large files provide bounded read/index views; acknowledged large-edit jobs stream accepted rewrites and retain file-backed undo snapshots.");

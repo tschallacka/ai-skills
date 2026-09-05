@@ -41,11 +41,23 @@ autostarts a loopback-TCP server on an ephemeral port with a per-start
 private token and discovers it exactly the way the socket is discovered —
 every command in this skill works unchanged there.
 
+Which client you have depends on the install mode (`integration.tsv`): a
+`skill` install ships the `ai-text-editor` CLI this page drives, and an
+`mcp` install ships only `ai-text-editor-mcp` + the server, where the same
+verbs are the MCP tools (`open`, `read`, `insert`, `page`, …) rather than
+shell commands. If `ai-text-editor` is not on disk you are in an `mcp`
+install: call the tool of the same name instead of the CLI line.
+
 Edits are journal-and-buffer operations: a successful `insert`/`replace`
 returns a new revision but changes nothing on disk until a `save` succeeds.
-Every mutating and reading response carries a `dirty` flag saying so; finish
-an editing session with `save` and a fresh `read` (or `open`) showing
-`dirty: false`. A command that did not apply always says why — errors are
+Every mutating and reading response carries a `dirty` flag (the buffer has
+unsaved edits of its own) and a `disk_diverged` flag (the file on disk moved
+under the tab — an external change, not your unsaved work); finish an editing
+session with `save` and a fresh `read` (or `open`) showing `dirty: false`.
+On a tab opened with NFC normalization, byte offsets address the ORIGINAL
+bytes, not the normalized view a read shows; a refused edit says so. Every
+job verb needs the `resume_token` `job_start` issued, and it is never shown to
+a caller who does not hold it. A command that did not apply always says why — errors are
 written to stderr in every presentation with a code, a message, and the
 recovery choices where there are any — so exit status plus stderr is the
 complete story of any call; a silent success-shaped output means the work is
