@@ -202,6 +202,27 @@
       "updated_at": "2026-09-05T20:51:42Z"
     },
     {
+      "id": "B197",
+      "title": "MCP adapter discards the string expected_revision its own schema advertises; every schema-following mutation dies with revision_required",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "printf two raw tools/call undo lines for a live tab against ai-text-editor-mcp over stdio, one with the revision guard as a string and one as a number; the string form refuses, the number succeeds",
+      "observed": "revision_required for the string form on the shipped Sep-5 build, while the numeric form applied the undo; identical for replace — drive three could not edit through MCP at all",
+      "expected": "a value that follows the published schema satisfies the guard; an unsatisfiable value is refused naming the argument",
+      "mechanism": "call_tool removed expected_revision from the payload and hoisted it with as_u64(), which answers None for a JSON string; the guard is typed as string by revision_guard(). A swallowed value and a missing one are the same request to the server",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": "3ac9b65 (PR #65, merged 4156c76) — parse_revision_argument accepts numbers and digit-strings, refuses anything else naming the value; call_tool answers unsatisfiable guards as a tool_error",
+      "verification": "tests/mcp_flow.rs a_schema_following_string_revision_satisfies_the_guard drives the string form over raw stdio against a live autostarted server; removing the parser reintroduces the refusal. lib.rs unit tests pin the conversion. Runs on every cargo test --workspace leg (both triples).",
+      "found_by": "third test drive, 2026-09-06 — the first MCP mutation the drive attempted",
+      "notes": "B175 was closed by a test that drove the argument name but not its advertised type; that fix and B195 schema publication landed in different PRs and neither followed the other contract. Lesson for fix verification prose: argument-contract closures need a test that follows the published schema.",
+      "created_at": "2026-09-06T09:53:46Z",
+      "updated_at": "2026-09-06T09:54:33Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -2099,6 +2120,27 @@
       "updated_at": "2026-09-05T20:51:42Z"
     },
     {
+      "id": "B204",
+      "title": "After journal replay the external-change guard is inert: disk_diverged true, external_change_pending false, reload refused",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": "B194",
+      "reproduce": "open a small file, insert without saving, kill -9 the server, change the file on disk externally (cargo fmt), open again and inspect the payload; then try resolve -a reload and any mutation whose byte range fits the replayed buffer",
+      "observed": "open replays (journal_replay {edits:5, through_sequence:12}) and reports dirty:true disk_diverged:true but external_change_pending:false; resolve -a reload answers no_external_change; the mutation gate stays open and only a coincidental size mismatch refused the edit (observed byte-exact on PR #65 test file, 8194-byte stale buffer vs 8195-byte disk)",
+      "expected": "a tab whose replayed buffer differs from disk must carry a pending external change; reload must be offered, and save of the stale buffer must be gated",
+      "mechanism": "observe_external (src/ai-text-editor/src/bin/ai-text-editor-server.rs:1867-1880) compares the current disk against tab.disk_digest, and the replay-tab constructor stamps disk_digest from the current disk while the buffer comes from the journal — the comparison is equal by construction; tab_disk_diverged instead compares disk against the buffer, so the two flags measure different things and the gate reads the inert one",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third test drive, 2026-09-06 — recovered with close --journal-action clean before the stale buffer could save",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:33Z",
+      "updated_at": "2026-09-06T09:54:33Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -2620,7 +2662,7 @@
     {
       "id": "B172",
       "title": "ai-text-editor-server start prints no endpoint, so a caller waiting for one hangs",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2632,12 +2674,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "c1ce47d — announce() prints {file,endpoint,discovery} to stdout on start (src/ai-text-editor/src/bin/ai-text-editor-server.rs:761); no commit since has removed it",
+      "verification": "Third test drive, 2026-09-06, installed 3c2b659 build: the register reproduction printed the JSON line within one second (218 bytes, exit on kill, no hang); the original zero-stdout observation cannot be reproduced on any build available here",
       "found_by": "using the skill on 2026-09-04; it cost an interrupted turn",
-      "notes": null,
+      "notes": "",
       "created_at": "2026-09-04T17:21:38Z",
-      "updated_at": "2026-09-04T17:21:38Z"
+      "updated_at": "2026-09-06T09:52:24Z"
     },
     {
       "id": "B176",
@@ -2722,6 +2764,49 @@
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
       "updated_at": "2026-09-05T20:51:42Z"
+    },
+    {
+      "id": "B198",
+      "title": "MCP adapter answers in-band server refusals without isError:true",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "raw tools/call insert with expected_revision one behind the tab revision; inspect the JSON-RPC result",
+      "observed": "the result carries no isError; a harness treating the flag as the verdict sees a refusal as an applied edit",
+      "expected": "isError true whenever the answer carries an error frame, matching the CLI exit status for the same frames",
+      "mechanism": "call_tool computed failed only to skip cache persistence; the result builder never looked at it again, unlike the tool_error path which sets the flag",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": "3ac9b65 (PR #65, merged 4156c76) — answers containing error frames carry isError:true",
+      "verification": "tests/mcp_flow.rs a_refusal_is_marked_refused_on_the_wire asserts isError for a stale-revision refusal and that an unsatisfiable guard names itself; removing the flag fails the test.",
+      "found_by": "third test drive, 2026-09-06",
+      "notes": "same builder as B197 (call_tool result construction); two defects in one function, filed apart.",
+      "created_at": "2026-09-06T09:53:46Z",
+      "updated_at": "2026-09-06T09:54:33Z"
+    },
+    {
+      "id": "B199",
+      "title": "A job its owning client left behind pins the idle watchdog forever; abandoned servers accumulate",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": "B192",
+      "reproduce": "run cargo test -p ai-text-editor --test cli_flow (the job_verbs_require_the_resume_token leg job-starts and never releases); afterwards pgrep -af \"ai-text-editor-server start --file /tmp/nix-shell\" and watch ages climb past an hour with a 600s idle default",
+      "observed": "16 servers alive 5 to 13 hours on this machine, ps state Sl, their /tmp/nix-shell scratch already deleted; the very same drive produced 3 fresh ones in its own test legs within an hour; GitHub runners terminate orphans of every job as routine",
+      "expected": "the idle watchdog reaps a server whose jobs lost their owner; detached:true is the only reason a job keeps a server alive",
+      "mechanism": "spawn_idle_watchdog continues while any tab has an active job (src/ai-text-editor/src/bin/ai-text-editor-server.rs:497-502) without distinguishing detached from ownerless jobs; once the server is undiscoverable (endpoint gone with the scratch dir) nothing else can reach it either",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/src/jobs.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third test drive, 2026-09-06 — pre-existing process census at drive start",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:09Z",
+      "updated_at": "2026-09-06T09:54:09Z"
     },
     {
       "id": "B6",
@@ -3787,7 +3872,7 @@
     {
       "id": "B173",
       "title": "ai-text-editor --session ID cannot create a session, though the skill says the client stores one",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -3799,12 +3884,12 @@
         "ai-text-editor/SKILL.md",
         "src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "862c14a — client::resolve tolerates a failed identity lookup for open and falls through to file discovery/autostart; autostart passes the explicit identity into the spawned server environment so the record seeds under the same key the client resolves",
+      "verification": "Third test drive on origin/master a382655 debug build: ai-text-editor open -f FILE --session trio exits 0 (drive one: exit 64 session_stale), a record persists, and follow-up read --session trio works with and without -f",
       "found_by": "using the skill on 2026-09-04",
       "notes": null,
       "created_at": "2026-09-04T17:21:38Z",
-      "updated_at": "2026-09-04T17:21:38Z"
+      "updated_at": "2026-09-06T09:52:24Z"
     },
     {
       "id": "B174",
@@ -3975,6 +4060,69 @@
       "notes": null,
       "created_at": "2026-09-05T18:44:08Z",
       "updated_at": "2026-09-05T20:51:42Z"
+    },
+    {
+      "id": "B200",
+      "title": "save into a missing parent directory reports an unnamed ENOENT after open promised creation on first save",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor open -f nonexistent-dir/new.txt; insert at 0 with a body; save",
+      "observed": "open succeeds (tab empty, create-on-save promised); save answers save_failed: No such file or directory (os error 2) — no path, no parent, no hint that mkdir is the recovery; the tab keeps the buffer",
+      "expected": "the refusal names the target path and the missing parent, or open refuses a path it cannot possibly save to",
+      "mechanism": "the save io::Error is formatted bare into the refusal; B196 named this exact message shape but the save-into-missing-parent instance still surfaces it unnamed",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third test drive, 2026-09-06",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:09Z",
+      "updated_at": "2026-09-06T09:54:09Z"
+    },
+    {
+      "id": "B201",
+      "title": "Tab identity is the request path string, so one file can hold two mismatched tabs under relative and absolute spellings",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "from a repo dir: ai-text-editor open -f src/some/file.rs (relative), insert something, save; then from anywhere: history -f /abs/path/src/some/file.rs",
+      "observed": "the absolute call refused with file_mismatch: the request names the absolute spelling but this tab holds the relative one — same file, same server, recovery advice invites opening a presumed second tab",
+      "expected": "tab identity canonicalizes at open, as endpoint discovery already does",
+      "mechanism": "Tab.path keeps the request string while endpoint_for_file hashes canonical_or_near (src/ai-text-editor/src/transport.rs:98), so routing agrees while tab matching disagrees",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third test drive, 2026-09-06 — the refusal text is genuinely good; the seam is not",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:09Z",
+      "updated_at": "2026-09-06T09:54:09Z"
+    },
+    {
+      "id": "B203",
+      "title": "run-tests.sh crate discovery sorts with the ambient locale, so per-crate legs run in a machine-dependent order",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "LC_ALL=C find src -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort | head -4 versus the same without LC_ALL=C in a UTF-8 shell",
+      "observed": "under LC_ALL=C src/ai-text-editor-mcp sorts before src/ai-text-editor (dash 0x2D precedes slash 0x2F); under UTF-8 collation the parent crate leg runs first. Any per-crate test that depends on another crate being built already passes on one machine and fails CI on the other — PR #65 head 1 was exactly this: three suite legs red, all four workspace legs green",
+      "expected": "the suite order is a property of the runner, not of the environment",
+      "mechanism": "discover_crates pipes find into a bare sort and inherits LC_COLLATE (run-tests.sh:213-217)",
+      "surfaces": [
+        "run-tests.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "PR #65 CI iteration, 2026-09-06",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:33Z",
+      "updated_at": "2026-09-06T09:54:33Z"
     },
     {
       "id": "B25",
@@ -4235,6 +4383,27 @@
       "notes": null,
       "created_at": "2026-09-05T18:43:32Z",
       "updated_at": "2026-09-05T20:51:42Z"
+    },
+    {
+      "id": "B202",
+      "title": "parse_number errors name the consumed token, not the flag at fault: -r with no value reports the next flag as invalid",
+      "status": "confirmed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "ai-text-editor save -f SOMEFILE -r -p text",
+      "observed": "ai-text-editor: -p is not a non-negative integer",
+      "expected": "a message naming --expected-revision as the argument missing its value",
+      "mechanism": "option() takes the token after a value flag unconditionally; parse_number dies naming the token, not the flag (src/ai-text-editor/src/bin/ai-text-editor.rs)",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third test drive, 2026-09-06 — a chained empty variable in a script surfaced it",
+      "notes": null,
+      "created_at": "2026-09-06T09:54:09Z",
+      "updated_at": "2026-09-06T09:54:09Z"
     },
     {
       "id": "B93",
