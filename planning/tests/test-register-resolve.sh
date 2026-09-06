@@ -82,6 +82,71 @@ conflict() {
     printf '%s\n' "$repo"
 }
 
+# rebase_collision <name> <file> <base> <c1> <c2> <master>
+# Leaves a repository at <work>/<name> mid-rebase, stopped on the replay of
+# the branch's second commit. The branch's first commit added an id that
+# master independently reused for a different entry; the first stop is that
+# collision and is resolved by taking ours, the way B150's reproduction did.
+# At the second stop index stage 1 is the branch's own first commit, so it
+# already holds the branch's version of the id: only a base taken from the
+# real merge base rather than stage 1 reports the collision there.
+rebase_collision() {
+    local name="$1" file="$2" base="$3" c1="$4" c2="$5" master="$6" repo
+    repo="$work/$name"
+    mkdir -p "$repo"
+    (
+        cd "$repo" || exit 70
+        git init -q .
+        git config user.email test@example.invalid
+        git config user.name test
+        git config commit.gpgsign false
+        register bug "$base" > "$file"
+        git add "$file" && git commit -qm base
+        git checkout -qb feature
+        register bug "$base, $c1" > "$file"
+        git commit -qam c1
+        register bug "$base, $c1, $c2" > "$file"
+        git commit -qam c2
+        git checkout -q master 2>/dev/null || git checkout -q main
+        register bug "$base, $master" > "$file"
+        git commit -qam master
+        git checkout -q feature
+        git rebase master >/dev/null 2>&1 || true
+        git checkout --ours -- "$file"
+        git add "$file"
+        GIT_EDITOR=true git rebase --continue >/dev/null 2>&1 || true
+    ) >/dev/null 2>&1
+    printf '%s\n' "$repo"
+}
+
+# merge_same_shape <name> <file> <base> <c1+theirs> <ours>
+# The same two-sided addition as a plain merge, for the control: stage 1 IS
+# the merge base there, so the rebase fix must be inert.
+merge_same_shape() {
+    local name="$1" file="$2" base="$3" theirs="$4" ours="$5" repo
+    repo="$work/$name"
+    mkdir -p "$repo"
+    (
+        cd "$repo" || exit 70
+        git init -q .
+        git config user.email test@example.invalid
+        git config user.name test
+        git config commit.gpgsign false
+        register bug "$base" > "$file"
+        git add "$file" && git commit -qm base
+        git checkout -qb ours
+        register bug "$base, $ours" > "$file"
+        git commit -qam ours
+        git checkout -q master 2>/dev/null || git checkout -q main
+        git checkout -qb theirs
+        register bug "$base, $theirs" > "$file"
+        git commit -qam theirs
+        git checkout -q ours
+        git merge theirs >/dev/null 2>&1 || true
+    ) >/dev/null 2>&1
+    printf '%s\n' "$repo"
+}
+
 # run <repo> <args...> — stdout to $out_file, stderr to $err_file, sets $rc
 out_file="$work/stdout"
 err_file="$work/stderr"
@@ -256,5 +321,52 @@ t_assert_eq "an edit only theirs made survives" \
     "$(rjq -r '.bugs[] | select(.id == "B01") | .severity' "$out_file")" 'blocking'
 t_assert_eq "an edit only ours made survives" \
     "$(rjq -r '.bugs[] | select(.id == "B02") | .severity' "$out_file")" 'blocking'
+
+# ── B150: a rebase collision that index stage 1 cannot see ─────────────────
+# The branch's first commit added B50 as 'theirs: sockets leak'; master
+# reused B50 for 'ours: register drift'; the replay of the second commit
+# stops with stage 1 holding the BRANCH's B50, which makes their side look
+# unchanged and hides the both-sides-added collision. Before the fix this
+# fixture answered 'no id collisions between the two sides' and advised
+# `git checkout --theirs`, which would have dropped master's entry.
+repo="$(rebase_collision rebase-hidden BUGS.json \
+    "$(bug_entry B01 'base one')" \
+    "$(bug_entry B50 'theirs: sockets leak')" \
+    "$(bug_entry B51 'theirs: parser loops')" \
+    "$(bug_entry B50 'ours: register drift')")"
+
+run "$repo" --check BUGS.json
+t_assert_eq 'the second stop is still a conflict' "$rc" '1'
+
+run "$repo" BUGS.json
+t_assert_eq 'a rebase collision is reported as a decision, not as textual-only' "$rc" '65'
+t_assert_contains 'the hidden collision is named' 'exist on both sides as different entries' "$(cat "$err_file")"
+t_assert_contains 'the collision names the id' 'B50' "$(cat "$err_file")"
+t_assert_contains 'ours title is shown' 'ours: register drift' "$(cat "$err_file")"
+t_assert_contains 'theirs title is shown' 'theirs: sockets leak' "$(cat "$err_file")"
+t_assert_eq 'the textual-only advice is gone' \
+    "$(grep -c 'no id collisions' "$err_file" || true)" '0'
+
+run "$repo" BUGS.json theirs:B50:B52
+t_assert_eq 'the rebase collision resolves with a decision' "$rc" '0'
+t_assert_eq 'the resolved register keeps both sides' \
+    "$(rjq -r '.bugs | length' "$out_file")" '4'
+t_assert_eq 'master keeps the contested id' \
+    "$(rjq -r '.bugs[] | select(.id == "B50") | .title' "$out_file")" 'ours: register drift'
+t_assert_eq 'the branch entry is carried under the new id' \
+    "$(rjq -r '.bugs[] | select(.id == "B52") | .title' "$out_file")" 'theirs: sockets leak'
+
+# Control: the same two-sided addition as a merge must behave as before,
+# because there stage 1 genuinely is the merge base.
+repo="$(merge_same_shape merge-visible BUGS.json \
+    "$(bug_entry B01 'base one')" \
+    "$(bug_entry B50 'theirs: sockets leak')" \
+    "$(bug_entry B50 'ours: register drift')")"
+
+run "$repo" BUGS.json
+t_assert_eq 'the merge collision is still a decision, not textual-only' "$rc" '65'
+t_assert_contains 'the merge path names the id' 'exist on both sides as different entries' "$(cat "$err_file")"
+t_assert_eq 'the merge path claims no rebase base' \
+    "$(grep -c 'during a rebase' "$err_file" || true)" '0'
 
 t_end 'test-register-resolve'
