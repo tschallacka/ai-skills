@@ -2811,7 +2811,7 @@
     {
       "id": "B207",
       "title": "ai-text-editor CLI silently drops unknown --flags/-x options: a typo-ed parameter vanishes and the operation succeeds without it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -2822,12 +2822,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68 (155254e): option()/flag() register every name their lookup consulted; reject_unknown_options() runs before any request leaves the client and exits 64 naming the token; value positions after value-taking options are exempt",
+      "verification": "Reproduced on the 02e5e70-era installed build: cursor -i 1 answered id 0, --zzz 5 answered a normal frame, replace --delete-lent 8 inserted without deleting. Test unknown_options_are_refused_before_anything_is_sent (src/ai-text-editor/tests/cli_flow.rs): mutation = delete the reject_unknown_options call and both the long and short rejections return success on cursor 0; the --id control asserts the rejection invents no false unknowns. Green on release x86_64-unknown-linux-musl and all 18 CI legs.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D1)",
       "notes": null,
       "created_at": "2026-09-06T13:52:19Z",
-      "updated_at": "2026-09-06T13:52:19Z"
+      "updated_at": "2026-09-06T15:21:16Z"
     },
     {
       "id": "B6",
@@ -4191,7 +4191,7 @@
     {
       "id": "B208",
       "title": "help() never mentions --id, the only flag that routes the cursor verb to a numbered cursor",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4203,17 +4203,17 @@
         "src/ai-text-editor/src/bin/ai-text-editor.rs",
         "ai-text-editor/ai-text-editor.1"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "help() documents --id on the common-flags line and in a new Navigation line; the man page HISTORY AND CURSORS paragraph says the same",
+      "verification": "Fourth-drive reproduction was `ai-text-editor help | grep -c --id == 0`; post-fix the installed help names the flag twice (help + Navigation line). No test can fail on prose; verification is the quoted help output, checked live after install.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D2, documentation blind)",
       "notes": null,
       "created_at": "2026-09-06T13:52:38Z",
-      "updated_at": "2026-09-06T13:52:38Z"
+      "updated_at": "2026-09-06T15:21:16Z"
     },
     {
       "id": "B209",
       "title": "home and end are line anchors, and no surface says so",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4225,17 +4225,17 @@
         "src/ai-text-editor/src/navigation.rs",
         "src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "help() Navigation line and the man page now state home/end anchor to the first/last column of the CURRENT line, not the document",
+      "verification": "Doc fix; behavior pinned at src/ai-text-editor/src/navigation.rs:38 (clamp keeps the line). Verification is the quoted help/man text, checked live after install.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D3, documentation blind)",
       "notes": null,
       "created_at": "2026-09-06T13:52:38Z",
-      "updated_at": "2026-09-06T13:52:38Z"
+      "updated_at": "2026-09-06T15:21:16Z"
     },
     {
       "id": "B210",
       "title": "the man page still describes the pre-autostart world: says open needs the server started first and that --agent/--session never start one",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4247,17 +4247,17 @@
         "ai-text-editor/ai-text-editor.1",
         "src/ai-text-editor/src/client.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: the man page identity paragraph now says --session/--agent with --file may autostart a fresh registered server and never connects to or impersonates another",
+      "verification": "Register-hygiene note first: the filed repro line \"Query an already running server... Start the server first.\" was already fixed on master by 8499ba7 - the fourth drive quoted its stale working tree, not origin/master, so this entry closes only the surviving half. The surviving half reproduced live in drive four (open -f g.txt --agent docprobe1 autostarted pid 789613 while the man page said identity resolution never starts a server); post-fix the paragraph names the autostart. Doc fix, verified against the installed skill man page after this install.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D4, documentation blind)",
       "notes": null,
       "created_at": "2026-09-06T13:52:38Z",
-      "updated_at": "2026-09-06T13:52:38Z"
+      "updated_at": "2026-09-06T15:21:31Z"
     },
     {
       "id": "B211",
       "title": "the MCP page tool schema omits historical, the documented stale-result escape the transport forwards anyway",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4269,17 +4269,17 @@
         "src/ai-text-editor-mcp/src/lib.rs",
         "ai-text-editor/references/protocol.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: page tool declares the historical boolean in its published schema, matching what the transport already forwards",
+      "verification": "Fourth drive reproduced: page properties [agent,endpoint,file,limit,offset,pager_key,session] while protocol.md documented the escape and the raw call honoured it. Test the_page_tool_advertises_and_honours_the_historical_escape (src/ai-text-editor-mcp/tests/mcp_flow.rs): mutation = drop the schema line and the tools/list assertion fails; drop the forwarding and the stale:true/source_revision round trip fails. Green on release musl and CI.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D6)",
       "notes": null,
       "created_at": "2026-09-06T13:52:38Z",
-      "updated_at": "2026-09-06T13:52:38Z"
+      "updated_at": "2026-09-06T15:21:31Z"
     },
     {
       "id": "B212",
       "title": "empty-text insert advances the revision counter and reports success with no content change",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4290,17 +4290,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: insert/replace refuse empty_edit when the replacement carries no bytes and delete_len is zero; the revision counter is no longer spent on a no-op",
+      "verification": "Fourth drive observed revision 13 to 14 with byte-identical content via an empty-text insert. Test an_empty_edit_is_refused_without_spending_a_revision (cli_flow.rs): mutation = remove the guard and the error-frame assertion plus the history revision-0 assertion fail. A pure delete (empty text, delete_len > 0) stays legal - the test names the flag pair.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D7)",
       "notes": null,
       "created_at": "2026-09-06T13:59:50Z",
-      "updated_at": "2026-09-06T13:59:50Z"
+      "updated_at": "2026-09-06T15:21:31Z"
     },
     {
       "id": "B213",
       "title": "a routed verb against an unreachable workspace exits 64 - the usage-error code - for a perfectly valid command line",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4311,17 +4311,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: client::execute failures die_runtime() with exit 66; help() gained the exit-code contract",
+      "verification": "Fourth drive: close/read on an idle-reaped workspace exited 64 for a valid command line. Test an_unreachable_workspace_exits_66_not_usage (cli_flow.rs): mutation = revert to die() and the code assertion fails; the B207 test covers the complementary rule that 64 still means usage.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D9)",
       "notes": null,
       "created_at": "2026-09-06T14:16:19Z",
-      "updated_at": "2026-09-06T14:16:19Z"
+      "updated_at": "2026-09-06T15:21:31Z"
     },
     {
       "id": "B214",
       "title": "nothing converts a text-search line/column hit into the byte offset insert/replace demand; the exact_bytes locator trick is unadvertised",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4334,34 +4334,34 @@
         "ai-text-editor/references/protocol.md",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: text-mode search results carry absolute byte_start/byte_end (running line byte offset plus in-line byte index); protocol.md and the man page state the convention",
+      "verification": "Fourth drive located report edits by counting bytes through read windows whose character and byte counts disagreed over 3-byte arrows - the filed limitation. Test text_search_hits_carry_the_editable_byte_offsets (cli_flow.rs): multibyte document, asserts byte_start 18/byte_end 23 for the second hit and completes a replace driven purely by the returned offsets; mutation = drop the fields and the match assertions and the edit round trip both fail. exact_bytes already carried them; the large-tab streaming arm deliberately stays line/column, which protocol.md now words accordingly.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D8, the arrow-and-the-56-byte-window limitation)",
       "notes": null,
       "created_at": "2026-09-06T14:16:19Z",
-      "updated_at": "2026-09-06T14:16:19Z"
+      "updated_at": "2026-09-06T15:21:44Z"
     },
     {
       "id": "B215",
       "title": "exact_bytes quietly re-reads query as base64; no surface says so and the refusal names neither field nor mode",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
       "reproduce": "search with mode exact_bytes and a plain-text query answers invalid_base64 - \"Invalid symbol 35, offset 0\" - no mention of which field, which mode flipped the interpretation, or that a query_base64 alternative exists. The convention is invisible: protocol.md 141-153 promises base64 in the results, SKILL.md and help say nothing about the query, and the capability listing gives no hint. The same search with the bytes properly encoded returns byte_start/byte_end - the very locator B214 asks for - so the working path exists purely by reverse-engineering the decoder error.",
       "observed": "A successful tool contract discoverable only by guessing the mechanism; the error quotes a base64 crate Display string with no field name.",
       "expected": "The refusal names the argument and the rule (exact_bytes decodes query as base64; query_base64 is the explicit alternative), and help()/protocol state the convention once.",
-      "mechanism": "src/ai-text-editor/src/bin/ai-text-editor-server.rs:2838 and :2981 push the raw decode error string into invalid_base64; the query-vs-query_base64 convention lives only in the code.",
+      "mechanism": "Arms were src/ai-text-editor/src/bin/ai-text-editor-server.rs:3327 (large tab) and :3470 (small tab) on c13e4ee - the filed 2838/2981 were line numbers from a stale working tree, the same drift as B210; PR #68 rewrote both messages in place",
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "ai-text-editor/references/protocol.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #68: both exact_bytes decode arms refuse with a message naming the mode, the query fields, and query_base64; help() and protocol.md state the rule once",
+      "verification": "Fourth drive: invalid_base64 \"Invalid symbol 35, offset 0\" answered a plain-text exact_bytes query and named nothing. Test exact_bytes_query_refusals_name_the_rule (cli_flow.rs): mutation = restore error_value.to_string() and the field/mode message assertion fails.",
       "found_by": "fourth ai-text-editor test drive 2026-09-06 (D9)",
       "notes": null,
       "created_at": "2026-09-06T14:19:47Z",
-      "updated_at": "2026-09-06T14:19:47Z"
+      "updated_at": "2026-09-06T15:21:44Z"
     },
     {
       "id": "B25",
