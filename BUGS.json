@@ -4342,6 +4342,28 @@
       "updated_at": "2026-09-06T14:16:19Z"
     },
     {
+      "id": "B215",
+      "title": "exact_bytes quietly re-reads query as base64; no surface says so and the refusal names neither field nor mode",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "search with mode exact_bytes and a plain-text query answers invalid_base64 - \"Invalid symbol 35, offset 0\" - no mention of which field, which mode flipped the interpretation, or that a query_base64 alternative exists. The convention is invisible: protocol.md 141-153 promises base64 in the results, SKILL.md and help say nothing about the query, and the capability listing gives no hint. The same search with the bytes properly encoded returns byte_start/byte_end - the very locator B214 asks for - so the working path exists purely by reverse-engineering the decoder error.",
+      "observed": "A successful tool contract discoverable only by guessing the mechanism; the error quotes a base64 crate Display string with no field name.",
+      "expected": "The refusal names the argument and the rule (exact_bytes decodes query as base64; query_base64 is the explicit alternative), and help()/protocol state the convention once.",
+      "mechanism": "src/ai-text-editor/src/bin/ai-text-editor-server.rs:2838 and :2981 push the raw decode error string into invalid_base64; the query-vs-query_base64 convention lives only in the code.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/references/protocol.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D9)",
+      "notes": null,
+      "created_at": "2026-09-06T14:19:47Z",
+      "updated_at": "2026-09-06T14:19:47Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
