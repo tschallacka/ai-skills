@@ -125,3 +125,14 @@ todo/bin/*/
 /.env
 /.env.*
 !/.env.example
+
+# Editor brutal-review notes file: agent-owned, never committed.
+.Ai-EDITOR-BRUTAL-REVIEW.md
+.Ai-EDITOR-BRUTAL-REVIEW-3.md
+.Ai-EDITOR-BRUTAL-REVIEW-4.md
+.Ai-EDITOR-BRUTAL-REVIEW-5.md
+
+# Agent-owned drive state: opencode's goal files, the brutal-review brief and
+# its per-drive notes. Never committed; the drives read and write them in place.
+.opencode/
+.Ai-EDITOR-BRUTAL-REVIEW-PROMPT.md
