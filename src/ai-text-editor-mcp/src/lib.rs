@@ -479,13 +479,23 @@ fn call_tool(id: Value, params: Value) -> Value {
     payload.remove("document_mode");
     payload.remove("normalize_nfc");
     payload.remove("idle_timeout_seconds");
-    // B175: accept both the envelope's wire name (`revision`) and the
-    // documented `expected_revision`, so a client that follows the schema can
-    // actually satisfy the server's revision guard.
-    let revision = payload
+    // B175, made honest: accept both the envelope's wire name (`revision`)
+    // and the documented `expected_revision`, and honour the schema the
+    // adapter itself advertises — the guard is typed as a string, so "7"
+    // must satisfy it exactly as 7 does. A value that is present but
+    // unsatisfiable is refused by name here; dropping it silently surfaced
+    // as the server's revision_required and told the caller nothing about
+    // which argument failed.
+    let revision = match payload
         .remove("expected_revision")
         .or_else(|| payload.remove("revision"))
-        .and_then(|value| value.as_u64());
+    {
+        None => None,
+        Some(value) => match parse_revision_argument(&value) {
+            Ok(revision) => Some(revision),
+            Err(error) => return tool_error(id, &error),
+        },
+    };
     let auth_token = payload
         .remove("auth_token")
         .and_then(|value| value.as_str().map(str::to_owned));
@@ -527,9 +537,72 @@ fn call_tool(id: Value, params: Value) -> Value {
             returned_session_token.or(resolved.session_token.as_deref()),
         );
     }
-    json!({"jsonrpc":"2.0","id":id,"result":{"content":[{"type":"text","text":serde_json::to_string(&frames).unwrap()}]}})
+    // A refusal must look refused on the MCP wire too: the CLI exits
+    // non-zero when an error frame is in the answer, and an MCP harness
+    // reads that verdict from isError. Serving a refusal as an ordinary
+    // success let a failed edit pass as an applied one.
+    let mut result =
+        json!({"content": [{"type": "text", "text": serde_json::to_string(&frames).unwrap()}]});
+    if failed {
+        result["isError"] = json!(true);
+    }
+    json!({"jsonrpc":"2.0","id":id,"result":result})
 }
 
 fn tool_error(id: Value, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"result":{"isError":true,"content":[{"type":"text","text":message}]}})
+}
+
+fn parse_revision_argument(value: &Value) -> Result<u64, String> {
+    let digits = match value {
+        Value::String(text) => text.trim().to_string(),
+        Value::Number(number) => number.to_string(),
+        other => {
+            return Err(format!(
+                "expected_revision {other} is not a revision number; read open or history first"
+            ))
+        }
+    };
+    digits.parse::<u64>().map_err(|_| {
+        format!("expected_revision {value} is not a revision number; read open or history first")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_revision_argument;
+    use serde_json::json;
+
+    #[test]
+    fn a_string_revision_satisfies_the_guard() {
+        // The advertised schema types expected_revision as a string; a
+        // client that follows it must pass the server's guard exactly as a
+        // numeric caller does. B175 was closed once without this pinned,
+        // and every schema-following MCP client hit revision_required
+        // again on the shipped build.
+        assert_eq!(parse_revision_argument(&json!("0")), Ok(0));
+        assert_eq!(parse_revision_argument(&json!(" 17 ")), Ok(17));
+        assert_eq!(parse_revision_argument(&json!(17)), Ok(17));
+    }
+
+    #[test]
+    fn an_unsatisfiable_revision_is_refused_by_name() {
+        // Silence here was the defect: the argument vanished and the
+        // server's revision_required then blamed the caller for omitting
+        // the very value it had been given.
+        for value in [
+            json!(""),
+            json!("seven"),
+            json!(-1),
+            json!(3.5),
+            json!(null),
+            json!(true),
+        ] {
+            let error = parse_revision_argument(&value).unwrap_err();
+            assert!(
+                error.starts_with("expected_revision"),
+                "{value} refused with: {error}"
+            );
+        }
+    }
 }
