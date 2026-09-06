@@ -1794,6 +1794,13 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             let replacement = if let Some(encoded) = envelope.payload.get("bytes_base64").and_then(Value::as_str) {
                 match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) { Ok(bytes) => bytes, Err(error_value) => { frames.push(error(&envelope.request_id, "invalid_base64", error_value.to_string())); return frames; } }
             } else { envelope.payload.get("text").and_then(Value::as_str).unwrap_or("").as_bytes().to_vec() };
+            // B212: an edit with nothing to insert and nothing to delete is
+            // not an edit; it must not spend a revision the guard machinery
+            // will later refuse to explain.
+            if replacement.is_empty() && delete_len == 0 {
+                frames.push(error(&envelope.request_id, "empty_edit", "insert/replace with empty text and a zero delete would change nothing; pass text or bytes_base64 to insert, or a non-zero delete_len to delete"));
+                return frames;
+            }
             let before = tab.document.clone();
             let mut after = before.clone();
             match after.apply_bytes(offset, delete_len, &replacement) {
@@ -3318,18 +3325,22 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                 .get("query_base64")
                 .and_then(Value::as_str)
                 .unwrap_or(query);
-            let bytes =
-                match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
-                    Ok(bytes) => bytes,
-                    Err(error_value) => {
-                        frames.push(error(
+            let bytes = match base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                encoded,
+            ) {
+                Ok(bytes) => bytes,
+                Err(error_value) => {
+                    // B215: name the field and the rule, not just the
+                    // decoder's complaint.
+                    frames.push(error(
                             &envelope.request_id,
                             "invalid_base64",
-                            error_value.to_string(),
+                            format!("the exact_bytes search decodes the query as base64 bytes (in `query` or `query_base64`); {error_value}"),
                         ));
-                        return;
-                    }
-                };
+                    return;
+                }
+            };
             let Some(start) = envelope
                 .payload
                 .get("range_start_byte")
@@ -3461,18 +3472,22 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
             .get("query_base64")
             .and_then(Value::as_str)
             .unwrap_or(query);
-        let bytes =
-            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
-                Ok(bytes) => bytes,
-                Err(error_value) => {
-                    frames.push(error(
+        let bytes = match base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            encoded,
+        ) {
+            Ok(bytes) => bytes,
+            Err(error_value) => {
+                // B215: name the field and the rule, not just the
+                // decoder's complaint.
+                frames.push(error(
                         &envelope.request_id,
                         "invalid_base64",
-                        error_value.to_string(),
+                        format!("the exact_bytes search decodes the query as base64 bytes (in `query` or `query_base64`); {error_value}"),
                     ));
-                    return;
-                }
-            };
+                return;
+            }
+        };
         let found_matches: Vec<Value> = find_bytes(&bytes, tab.document.bytes())
             .into_iter()
             .map(|(start, end)| {
@@ -3508,7 +3523,10 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
                                         line: 1,
                                         column: 0,
                                     });
-                            found_matches.push(json!({"line": coordinate.line, "column_start": coordinate.column, "column_end": coordinate.column + content[start..end].chars().count(), "contents": &content[start..end]}));
+                            // B214: text hits carry the absolute byte offsets
+                            // the editing verbs consume, so a search result is
+                            // directly editable without manual coordinate math.
+                            found_matches.push(json!({"line": coordinate.line, "column_start": coordinate.column, "column_end": coordinate.column + content[start..end].chars().count(), "contents": &content[start..end], "byte_start": line_start + start, "byte_end": line_start + end}));
                         }
                     }
                     Err(error_value) => {

@@ -110,6 +110,27 @@ impl Harness {
         serde_json::from_str(line.trim()).expect("adapter answers one JSON line per request")
     }
 
+    fn tools_list(&mut self, id: i64) -> Value {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/list",
+            "params": {},
+        });
+        writeln!(self.stdin, "{request}").expect("adapter stdin must accept a request");
+        self.stdin.flush().unwrap();
+        let mut line = String::new();
+        let read = self
+            .stdout
+            .read_line(&mut line)
+            .expect("adapter must answer one line per request");
+        assert!(
+            read > 0,
+            "adapter closed the pipe without answering tools/list"
+        );
+        serde_json::from_str(line.trim()).expect("adapter answers one JSON line per request")
+    }
+
     fn content(response: &Value) -> String {
         response["result"]["content"][0]["text"]
             .as_str()
@@ -227,4 +248,94 @@ fn a_refusal_is_marked_refused_on_the_wire() {
         !junk_text.contains("revision_required"),
         "the bad argument must not hide behind revision_required: {junk_text}"
     );
+}
+
+#[test]
+fn the_page_tool_advertises_and_honours_the_historical_escape() {
+    // B211: the transport forwarded `historical` and the server honoured it,
+    // but `page`'s published schema omitted the key while two lines below
+    // `search` declared it - a schema-following client was stripped of the
+    // documented stale-result escape and saw only the plain refusal.
+    let Some(mut h) = Harness::new("historical") else {
+        return;
+    };
+    let listing = h.tools_list(1);
+    let page = listing["result"]["tools"]
+        .as_array()
+        .expect("a tools array")
+        .iter()
+        .find(|tool| tool["name"] == json!("page"))
+        .expect("the page tool is published");
+    assert!(
+        page["inputSchema"]["properties"]
+            .get("historical")
+            .is_some(),
+        "page's schema still hides the escape: {page}"
+    );
+    let opened = h.call(2, "open", vec![("file", json!(h.file()))]);
+    assert!(!Harness::refused(&opened), "open refused: {opened}");
+    let found = h.call(
+        3,
+        "search",
+        vec![
+            ("file", json!(h.file())),
+            ("mode", json!("exact_text")),
+            ("query", json!("alpha")),
+        ],
+    );
+    let pager_key = Harness::frames(&found)[0]["payload"]["pager_key"]
+        .as_str()
+        .expect("a pager key")
+        .to_string();
+    let inserted = h.call(
+        4,
+        "insert",
+        vec![
+            ("file", json!(h.file())),
+            ("offset", json!(0)),
+            ("text", json!("Z")),
+            ("expected_revision", json!("0")),
+        ],
+    );
+    assert!(!Harness::refused(&inserted), "edit refused: {inserted}");
+    let plain = h.call(
+        5,
+        "page",
+        vec![
+            ("file", json!(h.file())),
+            ("pager_key", json!(pager_key.clone())),
+        ],
+    );
+    assert!(
+        Harness::refused(&plain),
+        "a post-edit page must still refuse by default: {plain}"
+    );
+    let escaped = h.call(
+        6,
+        "page",
+        vec![
+            ("file", json!(h.file())),
+            ("pager_key", json!(pager_key)),
+            ("historical", json!(true)),
+        ],
+    );
+    assert!(
+        !Harness::refused(&escaped),
+        "the advertised escape was refused: {escaped}"
+    );
+    let frames = Harness::frames(&escaped);
+    assert_eq!(frames[0]["payload"]["stale"], json!(true), "{frames:?}");
+    assert!(
+        frames[0]["payload"].get("source_revision").is_some(),
+        "a historical page must name its source revision: {frames:?}"
+    );
+    let closed = h.call(
+        7,
+        "close",
+        vec![
+            ("file", json!(h.file())),
+            ("journal_action", json!("clean")),
+        ],
+    );
+    assert!(!Harness::refused(&closed), "close refused: {closed}");
 }

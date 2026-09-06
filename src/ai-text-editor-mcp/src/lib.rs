@@ -309,10 +309,15 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec![],
     ));
-    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name, and `historical` reads the persisted result as it was at its source revision.", { let mut p = routing(); p.extend(Vec::from([
         ("pager_key", string("Pager key from a previous search or index response.")),
         ("offset", int("Zero-based match offset to resume from.")),
         ("limit", int("Matches to return.")),
+        // B211: the transport already forwards this key and the server
+        // honours it; omitting it from the published schema made the
+        // documented stale-result escape undiscoverable to a
+        // schema-following client.
+        ("historical", boolean("Replay the persisted result set as it was recorded, accepting that it is stale, instead of refusing a post-edit page.")),
     ])); p }, vec![]));
     tools.push(("search", "Run exactly one explicit search mode and receive an immutable result id and pager key. Offset is not a search argument: page the result with `page`.", { let mut p = routing(); p.extend(Vec::from([
         ("mode", string("exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex.")),
