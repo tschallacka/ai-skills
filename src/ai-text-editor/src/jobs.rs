@@ -237,6 +237,21 @@ impl JobRegistry {
             .any(|job| matches!(job.snapshot.state, JobState::Queued | JobState::Running))
     }
 
+    /// True while a job that was *detached* — started to outlive its
+    /// connection, per the documented `--detached` contract — is still
+    /// queued or running. A non-detached active job belongs to a client;
+    /// when that client dies the job is an orphan, and pinning an idle
+    /// watchdog to it accumulates servers nobody can reach (B199).
+    pub fn has_active_detached(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|job| job.snapshot.detached && Self::is_live_state(&job.snapshot.state))
+    }
+
+    fn is_live_state(state: &JobState) -> bool {
+        matches!(state, JobState::Queued | JobState::Running)
+    }
+
     fn evict_expired(&mut self) {
         let now = SystemTime::now();
         for job in self.jobs.values_mut() {

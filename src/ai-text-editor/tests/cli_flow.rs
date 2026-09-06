@@ -114,6 +114,22 @@ impl Harness {
         opened
     }
 
+    fn client_cwd(&self, dir: &std::path::Path, args: &[&str]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor"));
+        command
+            .env("HOME", &self.scratch)
+            .env("XDG_RUNTIME_DIR", self.scratch.join("runtime"))
+            .env("TSCH_AI_EDITOR_METADATA_DIR", self.scratch.join("meta"))
+            .env("TSCH_AI_EDITOR_SESSION_DIR", self.scratch.join("sessions"))
+            .env("TSCH_AI_EDITOR_AGENT", &self.agent)
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CODEX_SESSION_ID")
+            .env_remove("OPENCODE_PID")
+            .current_dir(dir)
+            .args(args);
+        command.output().expect("client binary must run")
+    }
+
     fn client_env(&self, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor"));
         command
@@ -818,5 +834,217 @@ fn a_stopped_server_leaves_no_session_registry_records_behind() {
     assert!(
         !after.contains("server_generation"),
         "ghost records survive shutdown: {after}"
+    );
+}
+
+fn process_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::c_int, 0) == 0 }
+}
+
+fn wait_for_death(pid: u32, seconds: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while std::time::Instant::now() < deadline {
+        if !process_alive(pid) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    !process_alive(pid)
+}
+
+#[test]
+fn a_replayed_tab_arms_the_external_change_guard() {
+    // B204: the journal buffer was stale against a disk that moved while
+    // no server listened; observe_external compared disk against a stamp
+    // taken from that same disk, so the tab reported disk_diverged while
+    // external_change_pending stayed false — reload refused
+    // (`no_external_change`), and only a coincidental byte-size mismatch
+    // kept a stale buffer from saving over newer bytes.
+    let harness = Harness::new("replayarm");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "6",
+        "-t",
+        "gamma\n",
+        "-r",
+        "0",
+    ]);
+    assert!(inserted.status.success(), "{}", refusal_text(&inserted));
+    terminate(pid);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::fs::write(&file, "external\n").unwrap();
+    let reopened = harness.open(&file);
+    let payload = first_payload(&reopened);
+    assert!(
+        payload["journal_replay"]["edits"].is_number(),
+        "expected a replayed tab: {payload}"
+    );
+    assert_eq!(payload["disk_diverged"], json!(true), "{payload}");
+    assert_eq!(
+        payload["external_change_pending"],
+        json!(true),
+        "a stale replayed buffer must arrive as a pending external change: {payload}"
+    );
+    let resolved = harness.client(&["resolve", "-f", file.to_str().unwrap(), "-a", "reload"]);
+    assert!(resolved.status.success(), "{}", refusal_text(&resolved));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "external\n");
+}
+
+#[test]
+fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
+    // B199: every job-start leg of this file owns its job from a
+    // short-lived client; when the watchdog pinned to any active job, the
+    // autostarted servers outlived every reaper — sixteen were observed
+    // 5 to 13 hours old on one machine, and CI runners reap them per job
+    // as routine cleanup.
+    let harness = Harness::new("jobpin");
+    let file = harness.write("doc.txt", "a\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--idle-timeout-seconds",
+        "2",
+    ]);
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let started = harness.client(&["job-start", "-f", file.to_str().unwrap(), "--owner", "drv"]);
+    assert!(started.status.success(), "{}", refusal_text(&started));
+    assert!(
+        wait_for_death(pid, 30),
+        "the server outlived a 2s idle timeout on the strength of a job whose client is gone"
+    );
+}
+
+#[test]
+fn a_detached_job_pins_the_watchdog_until_its_owner_releases_it() {
+    // The other half of B199: `--detached` is the documented contract to
+    // survive a client, and that grace must survive the fix.
+    let harness = Harness::new("jobdetached");
+    let file = harness.write("doc.txt", "a\n");
+    let opened = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--idle-timeout-seconds",
+        "2",
+    ]);
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let started = harness.client(&[
+        "job-start",
+        "-f",
+        file.to_str().unwrap(),
+        "--owner",
+        "drv",
+        "--detached",
+    ]);
+    assert!(started.status.success(), "{}", refusal_text(&started));
+    let job = &first_payload(&started)["job"];
+    let token = job["resume_token"].as_str().unwrap().to_owned();
+    let id = job["id"].to_string();
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    assert!(process_alive(pid), "a detached job must pin the watchdog");
+    let released = harness.client(&[
+        "job-release",
+        "-f",
+        file.to_str().unwrap(),
+        "-j",
+        &id,
+        "--resume-token",
+        &token,
+    ]);
+    assert!(released.status.success(), "{}", refusal_text(&released));
+    assert!(
+        wait_for_death(pid, 30),
+        "the server kept living after its last detached job was released"
+    );
+}
+
+#[test]
+fn save_into_a_missing_parent_names_the_path_and_the_parent() {
+    // B200: `open` promises creation on first save; the save then failed
+    // with a bare unnamed ENOENT that named neither side.
+    let harness = Harness::new("saveparent");
+    // The server must already be up: an autostart refuses a path whose
+    // parent does not exist, loudly and named; the unnamed failure this
+    // test pins happens when a live server accepts the open on the
+    // create-promise and the save dies later (observed on drive three).
+    let anchor = harness.write("anchor.txt", "a\n");
+    harness.open(&anchor);
+    let target = harness.scratch.join("nope/new.txt");
+    let opened = harness.client(&["open", "-f", target.to_str().unwrap()]);
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        target.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "hi\n",
+        "-r",
+        "0",
+    ]);
+    assert!(inserted.status.success(), "{}", refusal_text(&inserted));
+    let saved = harness.client(&["save", "-f", target.to_str().unwrap(), "-r", "1"]);
+    assert!(!saved.status.success());
+    let refusal = refusal_text(&saved);
+    assert!(refusal.contains("save_failed"), "{refusal}");
+    assert!(refusal.contains("new.txt"), "{refusal}");
+    assert!(
+        refusal.contains("parent directory") && refusal.contains("nope"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn relative_and_absolute_spellings_address_the_same_tab() {
+    // B201: routing hashed canonical paths while the tab check compared
+    // request strings, so one file could hold two mismatched spellings and
+    // the refusal advised opening a presumed second tab.
+    let harness = Harness::new("relpath");
+    let file = harness.write("doc.txt", "a\n");
+    let opened = harness.client_cwd(&harness.scratch, &["open", "-f", "doc.txt"]);
+    assert!(opened.status.success(), "{}", refusal_text(&opened));
+    let history = harness.client(&["history", "-f", file.to_str().unwrap()]);
+    assert!(
+        history.status.success(),
+        "the absolute spelling must reach the relatively-opened tab: {}",
+        refusal_text(&history)
+    );
+    let inserted = harness.client_cwd(
+        &harness.scratch,
+        &["insert", "-f", "doc.txt", "-o", "0", "-t", "X", "-r", "0"],
+    );
+    assert!(inserted.status.success(), "{}", refusal_text(&inserted));
+    let history = harness.client(&["history", "-f", file.to_str().unwrap()]);
+    assert_eq!(
+        first_payload(&history)["revision"],
+        json!(1),
+        "both spellings must observe one tab's revision"
+    );
+}
+
+#[test]
+fn a_missing_flag_value_names_the_flag_at_fault() {
+    // B202: an empty variable left `-r` swallowing the next flag, and the
+    // refusal blamed that flag.
+    let harness = Harness::new("flagname");
+    let file = harness.write("doc.txt", "a\n");
+    harness.open(&file);
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-r", "-p", "text"]);
+    assert!(!saved.status.success());
+    let refusal = String::from_utf8_lossy(&saved.stderr).to_string();
+    assert!(
+        refusal.contains("--expected-revision") && refusal.contains("\"-p\""),
+        "{refusal}"
     );
 }

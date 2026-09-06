@@ -203,7 +203,12 @@ fn main() {
     let mut journal_seq = 0;
     let mut large_undo = Vec::new();
     let mut large_redo = Vec::new();
+    let disk_at_entry = document.bytes().to_vec();
+    let mut journal_base: Option<Vec<u8>> = None;
     for record in records {
+        if record.kind == "save" {
+            journal_base = Some(document.bytes().to_vec());
+        }
         journal_seq = journal_seq.max(record.seq);
         recovered_revision = recovered_revision.max(
             record
@@ -256,6 +261,9 @@ fn main() {
             .unwrap_or_else(|error| die(&format!("journal snapshot is invalid: {error}")));
         let after_document = Document::new(after, mode)
             .unwrap_or_else(|error| die(&format!("journal snapshot is invalid: {error}")));
+        if journal_base.is_none() {
+            journal_base = Some(before_document.bytes().to_vec());
+        }
         document = after_document.clone();
         history.record(&before_document, &after_document);
     }
@@ -309,6 +317,24 @@ fn main() {
         saved_digest,
         replayed_edits,
     };
+    // B204 (both constructors): a tab recovered from the journal holds the
+    // journal's buffer while `disk_digest` was stamped from the disk that
+    // exists now. If the disk moved while no server was listening, the
+    // buffer is stale by construction and the guard must start armed —
+    // `observe_external` compares disk against the stamp, equal by design
+    // here, so without this the tab reported `disk_diverged` while
+    // `external_change_pending` stayed false, reload refused with
+    // `no_external_change`, and the replayed buffer could save over newer
+    // bytes with nothing refusing.
+    if tab.large_file.is_none() {
+        if let Ok(bytes) = fs::read(&tab.path) {
+            if bytes != journal_base.unwrap_or_else(|| disk_at_entry.clone())
+                && bytes != tab.document.bytes()
+            {
+                tab.pending_external = Some(bytes);
+            }
+        }
+    }
     if !loaded_index {
         persist_index(&mut tab);
     }
@@ -494,9 +520,13 @@ fn spawn_idle_watchdog(state: Arc<Mutex<ServerState>>, idle_timeout: Duration) {
         if idle_for < idle_timeout || in_flight > 0 {
             continue;
         }
+        // B199: only a *detached* job earns this grace — it was explicitly
+        // started to outlive its connection. An undetached job belongs to a
+        // client, and pinning the watchdog to an orphan of one produced
+        // servers that outlived every reaper.
         let any_job_active = tabs
             .iter()
-            .any(|tab| tab.lock().is_ok_and(|tab| tab.jobs.has_active()));
+            .any(|tab| tab.lock().is_ok_and(|tab| tab.jobs.has_active_detached()));
         if any_job_active {
             continue;
         }
@@ -615,7 +645,12 @@ fn open_additional_tab(
     let mut journal_seq = 0;
     let mut large_undo = Vec::new();
     let mut large_redo = Vec::new();
+    let disk_at_entry = document.bytes().to_vec();
+    let mut journal_base: Option<Vec<u8>> = None;
     for record in records {
+        if record.kind == "save" {
+            journal_base = Some(document.bytes().to_vec());
+        }
         journal_seq = journal_seq.max(record.seq);
         recovered_revision = recovered_revision.max(
             record
@@ -669,6 +704,9 @@ fn open_additional_tab(
             .map_err(|error| format!("journal snapshot is invalid: {error}"))?;
         let after_document = Document::new(after, mode)
             .map_err(|error| format!("journal snapshot is invalid: {error}"))?;
+        if journal_base.is_none() {
+            journal_base = Some(before_document.bytes().to_vec());
+        }
         document = after_document.clone();
         history.record(&before_document, &after_document);
     }
@@ -724,6 +762,23 @@ fn open_additional_tab(
         saved_digest,
         replayed_edits,
     };
+    // B204: a tab recovered from the journal holds the journal's buffer,
+    // while `disk_digest` was stamped from the disk that exists now. When
+    // the disk moved while no server was listening, the buffer is stale by
+    // construction and the guard must start armed: `observe_external`
+    // compares disk against the stamp — equal by design here — so without
+    // this the tab reported `disk_diverged` while `external_change_pending`
+    // stayed false, `resolve -a reload` answered `no_external_change`, and
+    // a replayed buffer could save over newer bytes with nothing refusing.
+    if tab.large_file.is_none() {
+        if let Ok(bytes) = fs::read(&tab.path) {
+            if bytes != journal_base.unwrap_or_else(|| disk_at_entry.clone())
+                && bytes != tab.document.bytes()
+            {
+                tab.pending_external = Some(bytes);
+            }
+        }
+    }
     if !index_loaded {
         persist_index(&mut tab);
     }
@@ -1187,7 +1242,11 @@ fn ensure_tab_file(
     };
     let held = tab.lock().ok().map(|tab| tab.path.clone());
     match held {
-        Some(path) if &path == requested => Ok(()),
+        // B201: routing already hashes the canonical path (`tab_key`), so
+        // two spellings of one file address one tab; the string equality
+        // here disagreed with the router and asked callers to open a second
+        // tab for the file they were already holding.
+        Some(path) if tab_key(&path) == tab_key(requested) => Ok(()),
         Some(path) => Err(format!(
             "file_mismatch: the request names {requested:?} but this tab holds {}; run `ai-text-editor open -f {}` to route to the named file",
             path.display(),
@@ -2420,10 +2479,22 @@ fn save(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &m
         .unwrap_or_else(|| std::path::Path::new("."));
     let temp = unique_temp_path(parent, "save");
     if let Err(error_value) = write_atomic(&temp, &tab.path, tab.document.bytes()) {
+        // B200: the bare `No such file or directory (os error 2)` this used
+        // to print named neither the target nor the missing parent — and an
+        // `open` on such a path promises creation on first save, so the
+        // refusal is the only place the recovery can be said.
+        let hint = if error_value.kind() == io::ErrorKind::NotFound && !parent.exists() {
+            format!(
+                "; the parent directory {} does not exist — create it and save again, or close the tab to discard the buffer",
+                parent.display()
+            )
+        } else {
+            String::new()
+        };
         frames.push(error(
             &envelope.request_id,
             "save_failed",
-            error_value.to_string(),
+            format!("cannot save {}: {error_value}{hint}", tab.path.display()),
         ));
         return;
     }
