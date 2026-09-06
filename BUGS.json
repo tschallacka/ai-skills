@@ -2122,7 +2122,7 @@
     {
       "id": "B204",
       "title": "After journal replay the external-change guard is inert: disk_diverged true, external_change_pending false, reload refused",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B194",
@@ -2133,12 +2133,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ad51b47 (PR #66, merged 02e5e70) — both tab constructors track the journal's own base (first record's before, or the document at the last save) and arm pending_external when the current disk moved off that base while no server listened",
+      "verification": "cli_flow a_replayed_tab_arms_the_external_change_guard: unsaved insert, kill -9, external disk rewrite, reopen asserts journal_replay + disk_diverged + external_change_pending true, resolve -a reload succeeds, read returns the external bytes; the pre-existing killed_server_is_replaced_by_the_next_open_and_the_journal_replays still saves (buffer==journal base, no false arming). Removing the arming fails the first; widening it to buffer-vs-disk failed the second during development — both directions pinned.",
       "found_by": "third test drive, 2026-09-06 — recovered with close --journal-action clean before the stale buffer could save",
       "notes": null,
       "created_at": "2026-09-06T09:54:33Z",
-      "updated_at": "2026-09-06T09:54:33Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B14",
@@ -2789,7 +2789,7 @@
     {
       "id": "B199",
       "title": "A job its owning client left behind pins the idle watchdog forever; abandoned servers accumulate",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": "B192",
@@ -2801,12 +2801,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "src/ai-text-editor/src/jobs.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ad51b47 (PR #66, merged 02e5e70) — the idle watchdog pins only on detached active jobs (jobs.rs has_active_detached); an undetached orphan no longer suspends the timeout",
+      "verification": "cli_flow an_ownerless_queued_job_does_not_pin_the_idle_watchdog (2s idle timeout, unreleased job-start, server must die) and a_detached_job_pins_the_watchdog_until_its_owner_releases_it (alive past the timeout while detached, dead after release); removing either half of the pin split fails the matching test. Green on the x86_64-musl and darwin CI legs.",
       "found_by": "third test drive, 2026-09-06 — pre-existing process census at drive start",
       "notes": null,
       "created_at": "2026-09-06T09:54:09Z",
-      "updated_at": "2026-09-06T09:54:09Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B6",
@@ -4064,7 +4064,7 @@
     {
       "id": "B200",
       "title": "save into a missing parent directory reports an unnamed ENOENT after open promised creation on first save",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4075,17 +4075,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ad51b47 (PR #66, merged 02e5e70) — the save refusal carries the target path, and when the write fails ENOENT with no parent, names the parent and the recovery",
+      "verification": "cli_flow save_into_a_missing_parent_names_the_path_and_the_parent asserts refusal contains save_failed, the file name, \"parent directory\" and the missing dir; fails without the format change.",
       "found_by": "third test drive, 2026-09-06",
       "notes": null,
       "created_at": "2026-09-06T09:54:09Z",
-      "updated_at": "2026-09-06T09:54:09Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B201",
       "title": "Tab identity is the request path string, so one file can hold two mismatched tabs under relative and absolute spellings",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4096,17 +4096,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ad51b47 (PR #66, merged 02e5e70) — the tab-address check compares canonical keys (tab_key) instead of request strings, agreeing with routing",
+      "verification": "cli_flow relative_and_absolute_spellings_address_the_same_tab: a tab opened by relative path answers history by absolute path, and an edit through one spelling shows in the other revision. The old comparison refuses exactly this.",
       "found_by": "third test drive, 2026-09-06 — the refusal text is genuinely good; the seam is not",
       "notes": null,
       "created_at": "2026-09-06T09:54:09Z",
-      "updated_at": "2026-09-06T09:54:09Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B203",
       "title": "run-tests.sh crate discovery sorts with the ambient locale, so per-crate legs run in a machine-dependent order",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4117,17 +4117,17 @@
       "surfaces": [
         "run-tests.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "33bd1eb (PR #66, merged 02e5e70) — discover_crates pins LC_ALL=C on the sort",
+      "verification": "Suite order is now identical under any ambient locale; PR #66 ran the three suite legs green on ubuntu, macOS default bash and bash 3.2 with the pinned order.",
       "found_by": "PR #65 CI iteration, 2026-09-06",
       "notes": null,
       "created_at": "2026-09-06T09:54:33Z",
-      "updated_at": "2026-09-06T09:54:33Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B205",
       "title": "bugs add silently discards --fix and --verification, then refuses a fixed-status add with the check's message",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4139,12 +4139,12 @@
         "src/bug-report/src/main.rs",
         "src/bug-report/src/mutate.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "a72685a (PR #66, merged 02e5e70) — NewBug carries fix/verification, add() writes them, and an evidence-free --status fixed is refused naming both flags and the two-step path",
+      "verification": "mutate.rs add_closes_in_one_step_when_the_evidence_arrives_with_the_entry and an_add_closed_without_evidence_is_refused_naming_both_flags (register unchanged on refusal); 19 bug-report tests green on the musl and darwin legs. Live: the closure pass that filed this update used nothing — update still works; add as fixed now works too.",
       "found_by": "third-drive registers pass, 2026-09-06 — filing B197/B198, fixed by PR #65 before the register round-trip",
       "notes": "accepts-but-ignores plus an error that names the wrong side — the two failure classes the drives keep hunting, now in the register tool itself; the check message is true of the built entry, which is why it survived looking. A separate defect, same lesson: --notes is not an add flag either (update --append-note is).",
       "created_at": "2026-09-06T09:59:02Z",
-      "updated_at": "2026-09-06T09:59:02Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B25",
@@ -4409,7 +4409,7 @@
     {
       "id": "B202",
       "title": "parse_number errors name the consumed token, not the flag at fault: -r with no value reports the next flag as invalid",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -4420,12 +4420,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ad51b47 (PR #66, merged 02e5e70) — parse_number takes the flag name and reports the argument at fault with the token it swallowed",
+      "verification": "cli_flow a_missing_flag_value_names_the_flag_at_fault asserts --expected-revision appears and the swallowed -p is quoted; passes on all legs.",
       "found_by": "third test drive, 2026-09-06 — a chained empty variable in a script surfaced it",
       "notes": null,
       "created_at": "2026-09-06T09:54:09Z",
-      "updated_at": "2026-09-06T09:54:09Z"
+      "updated_at": "2026-09-06T11:03:24Z"
     },
     {
       "id": "B93",
