@@ -4277,6 +4277,27 @@
       "updated_at": "2026-09-06T13:52:38Z"
     },
     {
+      "id": "B212",
+      "title": "empty-text insert advances the revision counter and reports success with no content change",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On a live tab: insert offset N with text \"\" (and no bytes_base64) - the tab revision advances by one, the document is byte-for-byte unchanged, dirty stays false, the response is a plain success data frame.",
+      "observed": "A zero-length mutation consumes the revision guard: later callers, undo depth, and journal sequence carry a step no content change explains. Observed fourth-drive 2026-09-06 as revision 13 to 14 with identical bytes.",
+      "expected": "Refuse with an empty_edit error naming the offset and the text/bytes_base64 requirement, or perform a true no-op that advances nothing.",
+      "mechanism": "The insert/replace arm reads text via as_str().unwrap_or(\"\") at src/ai-text-editor/src/bin/ai-text-editor-server.rs:1426 and never validates emptiness when bytes_base64 is absent.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D7)",
+      "notes": null,
+      "created_at": "2026-09-06T13:59:50Z",
+      "updated_at": "2026-09-06T13:59:50Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
