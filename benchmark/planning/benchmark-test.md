@@ -87,6 +87,12 @@ the worker's current directory. `start-worker.sh` is generated for that
 benchmark case and resolves the benchmark runtime through `REPO_ROOT` (exported
 by `benchmark-env.sh`), so it can be run directly from a normal shell.
 
+Historical plan trees live in `benchmark/planning/fixtures/plans/` as committed
+fixtures. Preparing a run that should see one is the launching agent's job —
+copy it into `.plans/` before invoking the runner. The harness never does:
+`.plans/` stays excluded from `source/` and the worker's case workspace, so the
+runner's isolation property is unchanged by any fixture.
+
 ## Setup behavior
 
 `setup-benchmark.sh` performs the per-tag setup:
