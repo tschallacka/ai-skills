@@ -77,29 +77,35 @@ fn main() {
         payload.insert("bytes_base64".into(), Value::String(value));
     }
     if let Some(value) = option(&args, &["--id"]) {
-        payload.insert("id".into(), json!(parse_number(&value)));
+        payload.insert("id".into(), json!(parse_number(&value, "--id")));
     }
     if let Some(value) = option(&args, &["--line", "-l"]) {
-        payload.insert("line".into(), json!(parse_number(&value)));
+        payload.insert("line".into(), json!(parse_number(&value, "--line")));
     }
     if let Some(value) = option(&args, &["--column", "-c"]) {
-        payload.insert("column".into(), json!(parse_number(&value)));
+        payload.insert("column".into(), json!(parse_number(&value, "--column")));
     }
     if let Some(value) = option(&args, &["--action", "-a"]) {
         payload.insert("action".into(), Value::String(value));
     }
     if let Some(value) = option(&args, &["--page-lines"]) {
-        payload.insert("page_lines".into(), json!(parse_number(&value)));
+        payload.insert(
+            "page_lines".into(),
+            json!(parse_number(&value, "--page-lines")),
+        );
     }
     if let Some(value) = option(&args, &["--wrap-width", "-w"]) {
-        payload.insert("wrap_width".into(), json!(parse_number(&value)));
+        payload.insert(
+            "wrap_width".into(),
+            json!(parse_number(&value, "--wrap-width")),
+        );
     }
     if flag(&args, &["--visual", "-V"]) {
         payload.insert("visual".into(), Value::Bool(true));
     }
     for (names, field) in [(["--before", "-b"], "before"), (["--after", "-B"], "after")] {
         if let Some(value) = option(&args, &names) {
-            payload.insert(field.into(), json!(parse_number(&value)));
+            payload.insert(field.into(), json!(parse_number(&value, names[0])));
         }
     }
     for (argument, field) in [
@@ -109,7 +115,7 @@ fn main() {
         ("--range-end-byte", "range_end_byte"),
     ] {
         if let Some(value) = option(&args, &[argument]) {
-            payload.insert(field.into(), json!(parse_number(&value)));
+            payload.insert(field.into(), json!(parse_number(&value, argument)));
         }
     }
     if let Some(value) = option(&args, &["--order"]) {
@@ -123,25 +129,31 @@ fn main() {
                 .unwrap_or_else(|_| die("--gradient must be a number"))),
         );
     }
-    let expected_revision =
-        option(&args, &["--expected-revision", "-r"]).map(|value| parse_number(&value));
+    let expected_revision = option(&args, &["--expected-revision", "-r"])
+        .map(|value| parse_number(&value, "--expected-revision"));
     if let Some(value) = option(&args, &["--offset", "-o"]) {
-        payload.insert("offset".into(), json!(parse_number(&value)));
+        payload.insert("offset".into(), json!(parse_number(&value, "--offset")));
     }
     if let Some(value) = option(&args, &["--length", "-L"]) {
-        payload.insert("length".into(), json!(parse_number(&value)));
+        payload.insert("length".into(), json!(parse_number(&value, "--length")));
     }
     if let Some(value) = option(&args, &["--granularity"]) {
-        payload.insert("granularity".into(), json!(parse_number(&value)));
+        payload.insert(
+            "granularity".into(),
+            json!(parse_number(&value, "--granularity")),
+        );
     }
     if let Some(value) = option(&args, &["--pager-key"]) {
         payload.insert("pager_key".into(), Value::String(value));
     }
     if let Some(value) = option(&args, &["--limit", "-n"]) {
-        payload.insert("limit".into(), json!(parse_number(&value)));
+        payload.insert("limit".into(), json!(parse_number(&value, "--limit")));
     }
     if let Some(value) = option(&args, &["--delete-len", "-d"]) {
-        payload.insert("delete_len".into(), json!(parse_number(&value)));
+        payload.insert(
+            "delete_len".into(),
+            json!(parse_number(&value, "--delete-len")),
+        );
     }
     if let Some(value) = option(&args, &["--text", "-t"]) {
         payload.insert("text".into(), Value::String(value));
@@ -180,7 +192,7 @@ fn main() {
     ] {
         if let Some(value) = option(&args, &[argument]) {
             if field == "job_id" || field == "cursor_id" {
-                payload.insert(field.into(), json!(parse_number(&value)));
+                payload.insert(field.into(), json!(parse_number(&value, argument)));
             } else {
                 payload.insert(field.into(), Value::String(value));
             }
@@ -335,10 +347,15 @@ fn flag(args: &[String], names: &[&str]) -> bool {
     args.iter().any(|arg| names.contains(&arg.as_str()))
 }
 
-fn parse_number(value: &str) -> u64 {
-    value
-        .parse()
-        .unwrap_or_else(|_| die(&format!("{value} is not a non-negative integer")))
+fn parse_number(value: &str, flag: &str) -> u64 {
+    value.parse().unwrap_or_else(|_| {
+        // B202: name the argument at fault, not the token it swallowed —
+        // an empty shell variable left `-r` holding the next flag, and the
+        // old text blamed that flag.
+        die(&format!(
+            "{flag} requires a non-negative integer, got {value:?}"
+        ))
+    })
 }
 fn die(message: &str) -> ! {
     eprintln!("ai-text-editor: {message}");

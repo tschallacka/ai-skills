@@ -211,8 +211,12 @@ discover() {
 # workspace member rather than naming one crate: each planning command and
 # reusable library is independently testable and must be covered by the gate.
 discover_crates() {
+    # B203: a bare `sort` inherits the ambient collation, and under
+    # LC_ALL=C `src/ai-text-editor-mcp` precedes `src/ai-text-editor/`
+    # (dash 0x2D < slash 0x2F) while a UTF-8 shell reverses it — per-crate
+    # legs then depend on a machine, not the runner. Pin the collation.
     find "$repo_root/src" -mindepth 2 -maxdepth 2 -type f -name Cargo.toml -print \
-        | sort \
+        | LC_ALL=C sort \
         | sed "s#^$repo_root/##; s#/Cargo.toml\$##"
 }
 

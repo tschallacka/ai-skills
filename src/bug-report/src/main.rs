@@ -38,6 +38,7 @@ Usage:
   bugs add --title T --reproduce R --observed O --expected E
            [--severity major] [--priority normal] [--status reported]
            [--mechanism M] [--parent B37] [--found-by W] [--surfaces a,b]
+           [--fix F] [--verification V]   (closure evidence; required with --status fixed)
   bugs update <ID> [--status S] [--fix F] [--verification V] [--reason R]
                    [--priority P] [--mechanism M] [--append-note N]
   bugs show <ID>
@@ -219,6 +220,8 @@ fn add(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         parent: args.flag("parent").map(str::to_string),
         found_by: args.flag("found-by").unwrap_or("").to_string(),
         surfaces: args.list("surfaces"),
+        fix: args.flag("fix").map(str::to_string),
+        verification: args.flag("verification").map(str::to_string),
     };
 
     match mutate::add(&mut register, new) {

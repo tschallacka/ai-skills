@@ -28,6 +28,13 @@ pub struct NewBug {
     pub parent: Option<String>,
     pub found_by: String,
     pub surfaces: Vec<String>,
+    /// Closure evidence a defect may arrive with: an entry found already
+    /// fixed (drive reports, external patches) allocates its id and closes
+    /// in one place. Without these fields `add` silently discarded the
+    /// flags and the soundness check then blamed the constructed entry
+    /// (B205).
+    pub fix: Option<String>,
+    pub verification: Option<String>,
 }
 
 /// Add one entry, returning the id it was given.
@@ -38,6 +45,14 @@ pub struct NewBug {
 pub fn add(register: &mut Register, new: NewBug) -> Result<String, Vec<String>> {
     let now = clock::now();
     let id = format!("B{}", register.next_id());
+    if new.status == Status::Fixed
+        && (new.fix.as_deref().unwrap_or("").trim().is_empty()
+            || new.verification.as_deref().unwrap_or("").trim().is_empty())
+    {
+        return Err(vec![
+            "filing as fixed needs --fix and --verification together; the alternative is add as confirmed, then update --status fixed once the fix lands".to_string(),
+        ]);
+    }
 
     register.bugs.push(Bug {
         id: id.clone(),
@@ -51,8 +66,8 @@ pub fn add(register: &mut Register, new: NewBug) -> Result<String, Vec<String>> 
         expected: new.expected,
         mechanism: new.mechanism,
         surfaces: new.surfaces,
-        fix: None,
-        verification: None,
+        fix: new.fix,
+        verification: new.verification,
         found_by: new.found_by,
         notes: None,
         created_at: now.clone(),
@@ -175,4 +190,55 @@ pub fn update(register: &mut Register, id: &str, change: Change) -> Result<(), U
     }
     register.sort();
     Ok(())
+}
+
+#[cfg(test)]
+mod add_closure_tests {
+    use super::*;
+
+    fn register() -> Register {
+        serde_json::from_str(
+            r#"{"skill":"bug-report","skill_version":"1.4.2","comment":"t","bugs":[]}"#,
+        )
+        .unwrap()
+    }
+
+    fn new_bug(status: Status) -> NewBug {
+        NewBug {
+            title: "t".into(),
+            reproduce: "r".into(),
+            observed: "o".into(),
+            expected: "e".into(),
+            severity: Severity::Minor,
+            priority: Priority::Normal,
+            status,
+            mechanism: Some("m".into()),
+            parent: None,
+            found_by: "f".into(),
+            surfaces: vec!["s".into()],
+            fix: None,
+            verification: None,
+        }
+    }
+
+    #[test]
+    fn add_closes_in_one_step_when_the_evidence_arrives_with_the_entry() {
+        let mut r = register();
+        let mut bug = new_bug(Status::Fixed);
+        bug.fix = Some("abc123 — test".into());
+        bug.verification = Some("tested".into());
+        let id = add(&mut r, bug).unwrap();
+        let entry = r.find(&id).unwrap();
+        assert_eq!(entry.verification.as_deref(), Some("tested"));
+    }
+
+    #[test]
+    fn an_add_closed_without_evidence_is_refused_naming_both_flags() {
+        let mut r = register();
+        let error = add(&mut r, new_bug(Status::Fixed)).unwrap_err();
+        assert_eq!(error.len(), 1, "{error:?}");
+        assert!(error[0].contains("--fix and --verification"), "{error:?}");
+        assert!(error[0].contains("confirmed"), "{error:?}");
+        assert!(r.bugs.is_empty());
+    }
 }
