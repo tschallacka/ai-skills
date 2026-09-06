@@ -1048,3 +1048,177 @@ fn a_missing_flag_value_names_the_flag_at_fault() {
         "{refusal}"
     );
 }
+
+#[test]
+fn unknown_options_are_refused_before_anything_is_sent() {
+    // B207: the pull-based parser dropped unrecognized options silently, so
+    // a typo-ed parameter let the operation succeed WITHOUT it - a mistyped
+    // `--delete-lent` inserted while the delete vanished.
+    let harness = Harness::new("unknownopt");
+    let file = harness.write("doc.txt", "x\n");
+    let long = harness.client(&[
+        "cursor",
+        "-f",
+        file.to_str().unwrap(),
+        "--zzz",
+        "5",
+        "-a",
+        "home",
+    ]);
+    assert_eq!(long.status.code(), Some(64));
+    let refusal = stderr_text(&long);
+    assert!(refusal.contains("unknown option --zzz"), "{refusal}");
+    // `-i` was the drive's real casualty: not an alias of anything, it used
+    // to route navigation to cursor 0 while reporting success.
+    let short = harness.client(&[
+        "cursor",
+        "-f",
+        file.to_str().unwrap(),
+        "-i",
+        "1",
+        "-a",
+        "home",
+    ]);
+    assert_eq!(short.status.code(), Some(64));
+    assert!(
+        stderr_text(&short).contains("unknown option -i"),
+        "{refusal}"
+    );
+    // Control: every flag the parser really reads still parses - the
+    // rejection must not invent false unknowns for value positions.
+    harness.open(&file);
+    let moved = harness.client(&[
+        "cursor",
+        "-f",
+        file.to_str().unwrap(),
+        "--id",
+        "1",
+        "-a",
+        "home",
+    ]);
+    assert!(moved.status.success(), "{}", stderr_text(&moved));
+    assert_eq!(first_payload(&moved)["id"], json!(1));
+}
+
+#[test]
+fn an_unreachable_workspace_exits_66_not_usage() {
+    // B213: a command line that was correct when typed meets the documented
+    // idle-reap; the old exit blamed the caller's syntax (64) for a world
+    // change, so retry logic keyed on usage-vs-runtime misfiled it.
+    let harness = Harness::new("runtimexit");
+    let file = harness.write("never-opened.txt", "x\n");
+    let refused = harness.client(&["read", "-f", file.to_str().unwrap()]);
+    assert_eq!(refused.status.code(), Some(66));
+    assert!(
+        stderr_text(&refused).contains("no editor server is reachable"),
+        "{}",
+        stderr_text(&refused)
+    );
+}
+
+#[test]
+fn an_empty_edit_is_refused_without_spending_a_revision() {
+    // B212: insert/replace with nothing to insert and nothing to delete
+    // advanced the revision counter and journalled a no-op edit; later
+    // guards now refuse against a revision no content change explains.
+    let harness = Harness::new("emptyedit");
+    let file = harness.write("doc.txt", "keep\n");
+    harness.open(&file);
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "",
+        "-r",
+        "0",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("empty_edit"));
+    let history = harness.client(&["history", "-f", file.to_str().unwrap()]);
+    assert_eq!(first_payload(&history)["revision"], json!(0));
+}
+
+#[test]
+fn text_search_hits_carry_the_editable_byte_offsets() {
+    // B214: search answers line/column, editing consumes bytes, and nothing
+    // converted - the fourth drive counted bytes through read windows whose
+    // character and byte counts disagreed over a 3-byte arrow.
+    let harness = Harness::new("searchbytes");
+    let file = harness.write("multi.txt", "alpha\nÜnicode β\nalpha again\n");
+    harness.open(&file);
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_text",
+        "-q",
+        "alpha",
+    ]);
+    let matches = first_payload(&found)["matches"]
+        .as_array()
+        .expect("matches")
+        .clone();
+    assert_eq!(matches.len(), 2);
+    assert_eq!(matches[0]["byte_start"], json!(0));
+    // "alpha\n" is 6 bytes; "Ünicode β\n" is 11 + the newline (Ü and β are
+    // two bytes each, the rest ASCII).
+    assert_eq!(matches[1]["byte_start"], json!(18));
+    assert_eq!(matches[1]["byte_end"], json!(23));
+    // The offsets are directly editable, which is the point.
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "18",
+        "-d",
+        "5",
+        "-t",
+        "X",
+        "-r",
+        "0",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    harness.client(&["save", "-f", file.to_str().unwrap(), "-r", "1"]);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nÜnicode β\nX again\n"
+    );
+}
+
+#[test]
+fn exact_bytes_query_refusals_name_the_rule() {
+    // B215: the refusal was the base64 crate's bare Display string - no
+    // field, no mode convention, no hint of query_base64.
+    let harness = Harness::new("b64rule");
+    let file = harness.write("doc.txt", "needle\n");
+    harness.open(&file);
+    let refused = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_bytes",
+        "-q",
+        "not base64 ##",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("invalid_base64"));
+    let message = refusal["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("exact_bytes") && message.contains("query_base64"),
+        "the refusal must name the mode and the alternative field: {message}"
+    );
+}

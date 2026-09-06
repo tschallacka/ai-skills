@@ -231,6 +231,12 @@ fn main() {
     }
     let method = method.to_string();
     let payload = Value::Object(payload);
+    // Bound here so the rejection below sees it as consulted (B207), and the
+    // persistence decision below still runs after the response.
+    let saved_token_path = option(&args, &["--save-session-token"]).map(PathBuf::from);
+    // B207: refuse unknown options before anything leaves the process; a
+    // server-side unknown_argument guard can only protect keys that arrive.
+    reject_unknown_options(&args);
     let (frames, resolved) = client::execute(&resolve_request, |resolved| Envelope {
         version: ai_text_editor::PROTOCOL_VERSION,
         request_id: "cli-1".into(),
@@ -240,13 +246,14 @@ fn main() {
         session_token: resolved.session_token.clone(),
         payload: payload.clone(),
     })
-    .unwrap_or_else(|error| die(&error));
+    // B213: a valid command line whose workspace disappeared underneath it
+    // (the documented idle-reap) is not a usage error; sysexits-style 66 says
+    // "no such thing" and leaves 64 for genuine argument mistakes.
+    .unwrap_or_else(|error| die_runtime(&error));
     let failed = frames
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"));
-    let save_path = option(&args, &["--save-session-token"])
-        .map(PathBuf::from)
-        .or(resolved.cache_path);
+    let save_path = saved_token_path.or(resolved.cache_path);
     let returned_session_token = frames
         .iter()
         .find(|frame| frame.get("type").and_then(Value::as_str) == Some("data"))
@@ -337,14 +344,58 @@ fn main() {
     }
 }
 
+thread_local! {
+    // B207: the pull-based parser below reads only the names it asks for, so
+    // an unknown option used to vanish without a trace and the operation
+    // succeeded with whatever the dropped argument would have changed. Each
+    // lookup registers the names it consulted; `reject_unknown_options` then
+    // requires every option-shaped token in the command line to have been
+    // consulted, or to sit in the value position after a name that takes one.
+    static VALUE_OPTIONS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static BOOL_OPTIONS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn option(args: &[String], names: &[&str]) -> Option<String> {
+    VALUE_OPTIONS.with(|known| {
+        let mut known = known.borrow_mut();
+        known.extend(names.iter().map(|name| (*name).to_string()));
+    });
     args.windows(2)
         .find(|pair| names.contains(&pair[0].as_str()))
         .map(|pair| pair[1].clone())
 }
 
 fn flag(args: &[String], names: &[&str]) -> bool {
+    BOOL_OPTIONS.with(|known| {
+        let mut known = known.borrow_mut();
+        known.extend(names.iter().map(|name| (*name).to_string()));
+    });
     args.iter().any(|arg| names.contains(&arg.as_str()))
+}
+
+fn reject_unknown_options(args: &[String]) {
+    let unknown = args.iter().enumerate().find(|(index, token)| {
+        if *index < 2 || !token.starts_with('-') || *token == "-" {
+            return false;
+        }
+        let known = VALUE_OPTIONS.with(|names| names.borrow().contains(token))
+            || BOOL_OPTIONS.with(|names| names.borrow().contains(token));
+        if known {
+            return false;
+        }
+        let value_position = args
+            .get(index - 1)
+            .is_some_and(|previous| VALUE_OPTIONS.with(|names| names.borrow().contains(previous)));
+        !value_position
+    });
+    if let Some((_, token)) = unknown {
+        die(&format!(
+            "unknown option {token} for command {}; every option a command reads is listed in `ai-text-editor help`",
+            args.get(1).map(String::as_str).unwrap_or("")
+        ));
+    }
 }
 
 fn parse_number(value: &str, flag: &str) -> u64 {
@@ -361,6 +412,11 @@ fn die(message: &str) -> ! {
     eprintln!("ai-text-editor: {message}");
     std::process::exit(64);
 }
+fn die_runtime(message: &str) -> ! {
+    // B213: distinct from usage; the command line was fine, the world moved.
+    eprintln!("ai-text-editor: {message}");
+    std::process::exit(66);
+}
 fn help() {
     println!("Usage: ai-text-editor COMMAND -f FILE [OPTIONS]  (or --endpoint/-e ENDPOINT for an already-open tab)");
     println!("open starts its own server when none is running yet: no separate `ai-text-editor-server start` call is needed. Use --document-mode/-M and --normalize-nfc to shape that autostart; open --endpoint ENDPOINT -f PATH adds another isolated tab to a server that is already up.");
@@ -372,10 +428,12 @@ fn help() {
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
-    println!("Common flags (long / short): --file -f, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C, --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
+    println!("Common flags (long / short): --file -f, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
+    println!("Navigation: --id N routes a cursor command to numbered cursor N (every cursor is created by its first move); home and end move to the first and last column of the CURRENT line, not the document's start or end; next_word/previous_word step words; page_up/page_down move --page-lines N lines (default 40).");
+    println!("Exit codes: 0 success; 64 usage, including any option the command does not read; 66 no such tab, file, or reachable server (run open first); 1 when the server itself refused, with the refusal code printed.");
     println!("Boolean flags with a short form: --visual -V, --historical -H. Safety acknowledgements (--acknowledge-force-save, --acknowledge-large-edit) and auth/session flags are deliberately long-form only.");
     println!("Document modes: text_utf8, raw_bytes, hex_view (select at autostart with --document-mode/-M, or when starting the server yourself with --mode).");
-    println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults.");
+    println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults. exact_bytes decodes its query as base64-encoded bytes; plain text belongs in exact_text.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
     println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");

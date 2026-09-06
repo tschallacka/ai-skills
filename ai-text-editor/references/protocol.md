@@ -121,11 +121,16 @@ the server user the same path access as the server process. Keep endpoints
 private and use OS-level isolation when a client must not access other files.
 
 Search mode is required and must be one of `exact_text`, `exact_bytes`,
-`wildcard`, `shell_wildcard`, `path_wildcard`, `regex_rust`, `regex_pcre2`,
+wildcard, `shell_wildcard`, `path_wildcard`, `regex_rust`, `regex_pcre2`,
 `fuzzy_edit`, `fuzzy_subsequence`, `fuzzy_token`, `fuzzy_ngram`,
 `fuzzy_phonetic`, or `fuzzy_soundex`. Results include line/column coordinates,
 matched contents, a revision-bound result identifier, count, pager key,
-completeness, and the first four matches when no limit is supplied.
+completeness, and the first four matches when no limit is supplied. Text-mode
+results also carry absolute `byte_start`/`byte_end` offsets into the document —
+the coordinates `insert` and `replace` consume, so a hit is editable without
+manual line/column-to-byte arithmetic. `exact_bytes` decodes its query as
+base64-encoded bytes whether it arrives in `query` or `query_base64`; an
+undecodable `query` is refused by `invalid_base64` naming the rule.
 
 `path_wildcard` matches canonical absolute document paths under an explicit
 search root; it does not search line contents and returns null line/columns.
