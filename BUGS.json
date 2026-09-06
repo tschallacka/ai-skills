@@ -431,7 +431,7 @@
     {
       "id": "B150",
       "title": "register-resolve.sh reads index stage 1 as the merge base, so during a rebase it reports no collisions and advises taking one side whole",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "high",
       "parent": null,
@@ -442,12 +442,12 @@
       "surfaces": [
         "planning/scripts/register-resolve.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #67 (d91bb46): register-resolve.sh computes merge-base(HEAD, orig-head) from rebase-merge/rebase-apply state as the base during a rebase instead of index stage 1, and names the substitution on stderr",
+      "verification": "Reproduced on 441d42d before the fix: mid-rebase second stop answered \"no id collisions between the two sides; the conflict is textual only\" while B50 held two unrelated entries. test-register-resolve.sh gains a rebase fixture plus merge control. Mutation named: reverting the base-selection hunk (the rebase-state branch that replaces \":1:\" with merge-base(HEAD,orig-head)) fails the eight rebase assertions with the textual-only advice; the merge control passes both ways. Verified fixed on b0895a5; pre-push-check green with the npm baseline row.",
       "found_by": "pr13-rescue, rebasing PR #31 onto master 16c8c06",
       "notes": "Peer of B151: both are register-resolve.sh assuming a merge where a rebase is the other half of the same workflow. B151 is the refusal's guidance naming no available action; this one is the silent wrong answer, and it is the dangerous half -- the tool exists to stop a register merge losing bug states, and here it advises exactly that. Workaround used on pr13-rescue: install the real merge base as stage 1 before running it, with 'git show $(git merge-base origin/master <branch-tip>):BUGS.json | git hash-object -w --stdin' and 'git update-index --index-info'. With that stage 1 in place it found both collisions immediately. Went unnoticed because every test and every use so far has been a merge, where stage 1 is the merge base by definition.",
       "created_at": "2026-09-03T22:06:04Z",
-      "updated_at": "2026-09-03T22:06:23Z"
+      "updated_at": "2026-09-06T13:52:19Z"
     },
     {
       "id": "B166",
@@ -2809,6 +2809,27 @@
       "updated_at": "2026-09-06T11:03:24Z"
     },
     {
+      "id": "B207",
+      "title": "ai-text-editor CLI silently drops unknown --flags/-x options: a typo-ed parameter vanishes and the operation succeeds without it",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "On the installed build: cursor -f F -a home --zzz 5 answers a normal data frame rc 0; cursor -f F -a home -i 1 answers \"id\": 0 (cursor 0 acted on); replace -f F -o 0 --delete-lent 8 -t X -r 0 answers revision 1 and the buffer reads back XDELETEME-keep - the insert ran, the 8-byte delete was silently discarded.",
+      "observed": "Unknown long and short options are accepted and ignored by the client; the requested operation then runs with whatever the dropped argument would have changed. The server-side unknown_argument guard cannot help: the key never leaves the client.",
+      "expected": "An unknown option is a usage error (64) naming the offending token, the way unknown command already dies; nothing is sent to the server.",
+      "mechanism": "src/ai-text-editor/src/bin/ai-text-editor.rs option() (master line 340) pull-extracts known names from argv and nothing ever inspects the residue; every verb shares the flaw. Accepts-but-ignores class: B171/B175/B205 shipped the same shape one layer in.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D1)",
+      "notes": null,
+      "created_at": "2026-09-06T13:52:19Z",
+      "updated_at": "2026-09-06T13:52:19Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -4166,6 +4187,94 @@
       "notes": null,
       "created_at": "2026-09-06T11:28:42Z",
       "updated_at": "2026-09-06T11:28:42Z"
+    },
+    {
+      "id": "B208",
+      "title": "help() never mentions --id, the only flag that routes the cursor verb to a numbered cursor",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor help | grep -c -e -- --id answers 0; cursor -f F -a home --id 1 creates and routes cursor 1 (response \"id\": 1). To find the flag, the fourth drive read src/ai-text-editor/src/bin/ai-text-editor.rs:79 after -i 1 did nothing (B207).",
+      "observed": "help lists -C/--cursor-id only as the edit anchor and says nothing about a navigation cursor id; SKILL.md 5 promises \"create any number of numeric cursors\".",
+      "expected": "A reader learns the cursor-verb id flag from help()/the man page alone.",
+      "mechanism": "The --id payload key is parsed at src/ai-text-editor/src/bin/ai-text-editor.rs:79; help() (line 364) omits it.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor.rs",
+        "ai-text-editor/ai-text-editor.1"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D2, documentation blind)",
+      "notes": null,
+      "created_at": "2026-09-06T13:52:38Z",
+      "updated_at": "2026-09-06T13:52:38Z"
+    },
+    {
+      "id": "B209",
+      "title": "home and end are line anchors, and no surface says so",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cursor -f F -a home at (6,0) answers (6,0); navigation::home (src/ai-text-editor/src/navigation.rs:38) keeps the line and zeroes the column. help(), the man page, and capabilities name the actions without semantics.",
+      "observed": "A reader must read Rust to learn home means start-of-line, not start-of-document; the fourth drive spent two probe rounds assuming IDE home.",
+      "expected": "help()/man page say one word: home/end move within the current line.",
+      "mechanism": "src/ai-text-editor/src/navigation.rs:38-49.",
+      "surfaces": [
+        "src/ai-text-editor/src/navigation.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D3, documentation blind)",
+      "notes": null,
+      "created_at": "2026-09-06T13:52:38Z",
+      "updated_at": "2026-09-06T13:52:38Z"
+    },
+    {
+      "id": "B210",
+      "title": "the man page still describes the pre-autostart world: says open needs the server started first and that --agent/--session never start one",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor.1 lines 30-31: \"open --file PATH Query an already running server... Start the server first.\"; lines 42-43: --session/--agent \"never starts or impersonates a server\". Live on the installed build: open -f (no server) autostarts, and open -f G --agent docprobe1 autostarted a registered workspace (pid 789613).",
+      "observed": "The man page - a declared source of truth and an MCP-published resource - contradicts SKILL.md Start and MAINTAINER.md autostart semantics.",
+      "expected": "A reader of the man page learns the open-autostarts, and that identity plus file starts-or-reconnects the workspace.",
+      "mechanism": "Behavior lives in client::autostart_server (src/ai-text-editor/src/client.rs); the man page predates it.",
+      "surfaces": [
+        "ai-text-editor/ai-text-editor.1",
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D4, documentation blind)",
+      "notes": null,
+      "created_at": "2026-09-06T13:52:38Z",
+      "updated_at": "2026-09-06T13:52:38Z"
+    },
+    {
+      "id": "B211",
+      "title": "the MCP page tool schema omits historical, the documented stale-result escape the transport forwards anyway",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "tools/list page inputSchema properties: agent,endpoint,file,limit,offset,pager_key,session - no historical; protocol.md 155 documents the escape; a raw JSON-RPC page with historical:true and the CLI -H both return the persisted row after edits, while a schema-following client (this drive session harness) strips the argument and gets the plain stale_result.",
+      "observed": "A working argument invisible in the published schema; search declares historical, page does not - two lines apart.",
+      "expected": "page advertises historical as search does.",
+      "mechanism": "src/ai-text-editor-mcp/src/lib.rs:312 builds the page entry without the key the server reads (bin/ai-text-editor-server.rs:1621).",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "ai-text-editor/references/protocol.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D6)",
+      "notes": null,
+      "created_at": "2026-09-06T13:52:38Z",
+      "updated_at": "2026-09-06T13:52:38Z"
     },
     {
       "id": "B25",
