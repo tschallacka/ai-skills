@@ -4125,6 +4125,28 @@
       "updated_at": "2026-09-06T09:54:33Z"
     },
     {
+      "id": "B205",
+      "title": "bugs add silently discards --fix and --verification, then refuses a fixed-status add with the check's message",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bugs --file COPY-OF-BUGS.json add --title T --reproduce R --observed O --expected E --status fixed --fix \"deadbeef — test\" --verification \"test-verifies\"",
+      "observed": "B205: fixed without verification — entry refused, file unchanged, exit 65 — although both evidence flags were on the command line; the only way to file an already-fixed defect is add --status confirmed then update --status fixed, and nothing in the refusal says so",
+      "expected": "either add accepts a complete closure (allocating the id and closing it in one place), or the refusal names the discarded flags and the two-step lifecycle",
+      "mechanism": "the NewBug builder on the add path carries no fix/verification fields — args.flag(\"fix\") and (\"verification\") are never read by add, so the entry is constructed empty and the mutate::add soundness check reports \"fixed without verification\" about the constructed entry, not about the discarded request; the flags parse cleanly because the value-flag list is shared across subcommands",
+      "surfaces": [
+        "src/bug-report/src/main.rs",
+        "src/bug-report/src/mutate.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "third-drive registers pass, 2026-09-06 — filing B197/B198, fixed by PR #65 before the register round-trip",
+      "notes": "accepts-but-ignores plus an error that names the wrong side — the two failure classes the drives keep hunting, now in the register tool itself; the check message is true of the built entry, which is why it survived looking. A separate defect, same lesson: --notes is not an add flag either (update --append-note is).",
+      "created_at": "2026-09-06T09:59:02Z",
+      "updated_at": "2026-09-06T09:59:02Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
