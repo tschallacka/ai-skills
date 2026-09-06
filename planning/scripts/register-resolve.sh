@@ -152,9 +152,16 @@ if [ -z "$unmerged" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The three clean copies. Stage 1 is the merge base and is absent when both
-# sides added the file, which is why its failure is tolerated and the others
-# are not.
+# The three clean copies. Ours and theirs come from index stages 2 and 3 in
+# both workflows; the base does not. Stage 1 is the merge base only for
+# `git merge`. During a rebase it is the parent of the commit being replayed
+# — a commit on the branch's own history — so an id the other side added
+# independently already appears in "base" with the branch's content, theirs
+# reads as unchanged, and the both-sides-added collision this tool exists to
+# catch is reported as textual (B150). When a rebase is in progress, compare
+# against the real merge base of HEAD and the branch's original head. Stage 1
+# stays the answer everywhere else, including where the rebase state gives no
+# usable orig-head or merge-base.
 # ─────────────────────────────────────────────────────────────────────────────
 # plan_register_temp_file records a path for the cleanup and prints nothing, so
 # the assignment comes first and the registration second.
@@ -165,7 +172,29 @@ plan_register_temp_file "$base_file"
 plan_register_temp_file "$ours_file"
 plan_register_temp_file "$theirs_file"
 
-git -C "$repo_root" show ":1:$register_rel" > "$base_file" 2>/dev/null \
+base_spec=":1:$register_rel"
+rebase_note=""
+git_dir="$(git -C "$repo_root" rev-parse --absolute-git-dir 2>/dev/null || true)"
+rebase_state=""
+for candidate in "${git_dir:+$git_dir/rebase-merge}" "${git_dir:+$git_dir/rebase-apply}"; do
+    [ -n "$candidate" ] && [ -d "$candidate" ] && { rebase_state="$candidate"; break; }
+done
+if [ -n "$rebase_state" ]; then
+    orig_head="$(cat "$rebase_state/orig-head" 2>/dev/null || true)"
+    # A sha is all hex digits, so this trims any trailing tab-subject the
+    # apply backend leaves in the file before the reference is verified.
+    orig_head="${orig_head%%[!0-9a-fA-F]*}"
+    rebase_tip="$(git -C "$repo_root" rev-parse --verify --quiet "$orig_head" 2>/dev/null || true)"
+    rebase_base=""
+    [ -n "$rebase_tip" ] && rebase_base="$(git -C "$repo_root" merge-base HEAD "$rebase_tip" 2>/dev/null || true)"
+    if [ -n "$rebase_base" ]; then
+        base_spec="$rebase_base:$register_rel"
+        rebase_note="during a rebase: base is merge-base(HEAD, $orig_head), not index stage 1"
+    fi
+fi
+[ -n "$rebase_note" ] && note "$rebase_note"
+
+git -C "$repo_root" show "$base_spec" > "$base_file" 2>/dev/null \
     || printf '{"%s":[]}\n' "$entries_key" > "$base_file"
 git -C "$repo_root" show ":2:$register_rel" > "$ours_file" 2>/dev/null \
     || plan_die "no 'ours' stage for $register_rel in the index; is this a merge conflict?" 65
