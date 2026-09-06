@@ -4298,6 +4298,50 @@
       "updated_at": "2026-09-06T13:59:50Z"
     },
     {
+      "id": "B213",
+      "title": "a routed verb against an unreachable workspace exits 64 - the usage-error code - for a perfectly valid command line",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor close -f FILE --agent A --journal-action clean, where the FILE workspace server has idle-reaped (normal documented lifecycle): the CLI prints \"no editor server is reachable ... run open -f FILE first\" and exits 64. Identical for read. A correct invocation against a changed environment is reported as if it were a malformed one.",
+      "observed": "exit 64 = usage. Callers branching on the documented code classes (0 ok, 64 usage, 65/66 state) misfile an ordinary lifecycle race as their own typo; the third drive already recorded the raw os-error-2 tail on this same message (A7).",
+      "expected": "a distinct runtime exit (the register convention 66 class: no such tab/server), leaving 64 for genuine usage errors; the message itself is exemplary and needs no change.",
+      "mechanism": "src/ai-text-editor/src/bin/ai-text-editor.rs - the no-reachable-server routing refusal is issued through the same die-with-usage path as malformed flag parsing.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D9)",
+      "notes": null,
+      "created_at": "2026-09-06T14:16:19Z",
+      "updated_at": "2026-09-06T14:16:19Z"
+    },
+    {
+      "id": "B214",
+      "title": "nothing converts a text-search line/column hit into the byte offset insert/replace demand; the exact_bytes locator trick is unadvertised",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "search mode exact_text answers line 175 column 24; the next wanted call is replace --offset N, in bytes. No surface returns that N for a text hit: cursor reports line/column only, and the byte window a read returns shows no offsets of its own. During the fourth drive the offset had to be found by reading a window small enough to count bytes by eye - and a 3-byte UTF-8 arrow character inside the window broke the arithmetic, forcing a shrink to 56 bytes. The working locator - search mode exact_bytes with a UTF-8 query returns absolute byte_start/byte_end (protocol.md mentions it only in passing) - is never suggested by the text-search response, help, or SKILL.md 3.",
+      "observed": "coordinate-to-offset conversion is agent-side manual counting, unsafe to do blind on multibyte content.",
+      "expected": "text search matches carry byte_start/byte_end the way exact_bytes results already do, or help/protocol advertise exact_bytes as the byte-addressing locator for a text query.",
+      "mechanism": "search response shaping in src/ai-text-editor/src/bin/ai-text-editor-server.rs (text modes emit line/column only; exact_bytes emits byte_start/byte_end).",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "ai-text-editor/references/protocol.md",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fourth ai-text-editor test drive 2026-09-06 (D8, the arrow-and-the-56-byte-window limitation)",
+      "notes": null,
+      "created_at": "2026-09-06T14:16:19Z",
+      "updated_at": "2026-09-06T14:16:19Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
