@@ -80,12 +80,16 @@ The deterministic whole-repo suite is `./run-tests.sh`:
 - Always run the suite (or at least the targeted test) after changing code, and
   run `git diff --check` and `bash -n` on edited scripts.
 
-Tests that reference a specific `.plans/<plan>/` directory as fixture data
-(e.g. `benchmark/planning/tests/test-review-lifecycle.sh` → `.plans/
-reviewer-oracle-evidence-hardening/`) depend on gitignored transient plans. If
-those are missing, restore them from git history (`git log --all -- .plans/`,
-`git archive`) or make the test self-contained — do not silently delete the
-.gitignore rule.
+Benchmark history plans are committed fixtures under
+`benchmark/planning/fixtures/plans/` (`chat-irc-rust-migration`,
+`untrack-generated-files`), sanitized like `tests/fixtures/` is: no `.env`,
+`fix-keys.json`, `commands.json`, or `context/`. A test or drive that needs a
+historical plan tree reads it from there, never from a live `.plans/` —
+`test-review-lifecycle.sh` and its committed `tests/fixtures/review-lifecycle-plan/`
+are the pattern. `.plans/` itself stays gitignored transient work orders: the
+preparing agent copies a fixture plan into `.plans/` when a run wants it
+present, and the benchmark runner keeps excluding `.plans/` from every case
+workspace — the runner stays isolated; prep is the launcher's job.
 
 ## Running a benchmark
 
@@ -97,6 +101,11 @@ CPU/memory-hungry. Use `benchmark/planning/run-benchmark.sh` (or
 ```bash
 benchmark/planning/run-benchmark.sh <name> <testing-base-dir> --sequential <tag...>
 ```
+
+Prep work belongs to the launching agent, never to the harness: if the run
+should see a historical plan tree, `cp -R` it from
+`benchmark/planning/fixtures/plans/<name>` into `.plans/` before launching —
+the runner keeps excluding `.plans/` from every case workspace.
 
 ### Smoke-test the current state (verbatim recipe)
 

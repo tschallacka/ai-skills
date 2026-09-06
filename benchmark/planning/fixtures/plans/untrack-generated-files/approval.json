@@ -1,0 +1,18 @@
+{
+  "reviewer_session_id": "reviewer-b-focused",
+  "mode": "fresh-review",
+  "approved_findings": [
+    "AR-1",
+    "AR-2",
+    "AR-3",
+    "AR-4",
+    "AR-5",
+    "AR-6",
+    "AR-7",
+    "AR-8",
+    "AR-9"
+  ],
+  "rejected_findings": [],
+  "approved_at": "2026-08-31T13:50:59Z",
+  "overall_plan_approval": true
+}
