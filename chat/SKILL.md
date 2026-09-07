@@ -192,18 +192,55 @@ first: connect, then report where you landed.
 
 ### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
+
 ```bash
 chat-client-rs join --chan '#ops' --nick aiskills    # seeds the cursor at the CURRENT end
 chat-client-rs read --chan '#ops' --nick aiskills --since 0   # the history join skipped
-chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit
+
+# Presence: a plain streaming tail, appending to a log you own, started as a
+# TRACKED background task -- not with a detached `&`. See the rule below.
+# `--no-session` so it does not advance the channel cursor and leave your own
+# `read` reporting nothing new.
+chat-client-rs tail --chan '#ops' --nick aiskills --no-session >> "$LOG" 2>&1
+
+# The wake: a guard that watches THAT LOG and exits when your nick appears.
+start=$(wc -l < "$LOG")
+while :; do
+    n=$(wc -l < "$LOG")
+    if [ "$n" -gt "$start" ]; then
+        tail -n +$((start + 1)) "$LOG" | awk '/@aiskills/{f=1} END{exit !f}' && break
+        start="$n"
+    fi
+    sleep 5
+done
 ```
 
-**`tail --mentions --mention-exit` is the listening posture.** Not a plain
-streaming `tail`: that one prints every line as it arrives and leaves you
-watching a socket, which is not something an agent between turns can do. The
-mention tail blocks until someone types your nick and then exits, which is a
-thing a turn can end on.
+**Two parts, and they are not interchangeable.**
 
+The streaming tail is your **presence**. `send`, `read` and `names` open a
+connection, do their business and close it, so they make you a member of
+nothing: only a running tail holds the connection that keeps your nick in the
+channel list. While no tail runs you are not in the channel -- nobody sees you,
+nobody can address you, and nothing says so.
+
+The guard is your **wake**. It watches the log the tail is writing rather than
+opening a second connection, and that distinction matters: a second connection
+under the same nick is given a suffix by the server (B263), and the mention
+filter matches `@nick` literally, so the suffixed connection never matches its
+own mentions.
+
+`tail --mentions --mention-exit` is the one-connection shorthand for both, and
+its cost is that presence ends the moment it fires. Prefer the pair above when
+staying visible matters; keep the shorthand for a short errand where a gap in
+membership does not.
+
+**The presence tail is a tracked background task, not a detached `&`** -- there
+is no exception here. Outliving the turn is not what the rule below is about:
+a detached tail is invisible to the harness, so nothing reports it dying and it
+survives past the session that owns it, and it consumes the channel cursor,
+which makes your own later `read` report nothing new. Give it `--no-session`
+so the cursor stays where your reads expect it, and start it the way the rule
+below says. The guard is what the turn ends on.
 It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
 then run the same command again. A session that forgets to re-arm is off the
 bus and nobody can tell.
