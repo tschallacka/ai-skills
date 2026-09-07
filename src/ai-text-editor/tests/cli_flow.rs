@@ -50,9 +50,28 @@ fn terminate(pid: u32) {
     }
 }
 
+/// Whether a pid still names a live process. `kill(pid, 0)` asks the kernel
+/// without sending anything, which is the only honest way to assert a server
+/// this harness was supposed to stop is actually gone.
+fn process_is_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::c_int, 0) == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 struct Harness {
     scratch: PathBuf,
     agent: String,
+    /// Every client this harness ran, by the session id it was spawned into.
+    /// See `run` for why the session and not the pid, and `Drop` for what is
+    /// done with them.
+    sessions: std::cell::RefCell<Vec<u32>>,
 }
 
 impl Harness {
@@ -78,6 +97,7 @@ impl Harness {
         let scratch = std::fs::canonicalize(scratch).unwrap();
         Self {
             scratch,
+            sessions: std::cell::RefCell::new(Vec::new()),
             // A literal identity keeps each test's workspace isolated from
             // any harness session this test process itself runs under.
             agent: format!("flow-test-{name}"),
@@ -127,7 +147,42 @@ impl Harness {
             .env_remove("OPENCODE_PID")
             .current_dir(dir)
             .args(args);
-        command.output().expect("client binary must run")
+        self.run(command)
+    }
+
+    /// Run one client in a session of its own, and remember that session so
+    /// `Drop` can stop whatever the client left behind.
+    ///
+    /// B239: `Drop` used to look for servers to kill by reading the pid out of
+    /// the `.endpoint` discovery records. That finds nothing for a server that
+    /// has not announced yet, nothing once a takeover has renamed a record to
+    /// `.stale-<generation>`, and nothing at all once the tree is gone — 173
+    /// servers survived one run of this file and were killed by hand. A client
+    /// spawned into its own session puts every server it autostarts into that
+    /// session too (a spawned child inherits both), so one `killpg` per client
+    /// stops them whether they ever announced or not. The session id cannot be
+    /// recycled while the group still has members, so it keeps naming this
+    /// harness's own processes after the client itself has been reaped.
+    fn run(&self, mut command: Command) -> Output {
+        // `output()` would have set these; `spawn()` inherits instead, and an
+        // inherited stdout means `wait_with_output` hands back nothing and
+        // every assertion in this file reads an empty payload.
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                // Async-signal-safe, which is all a pre_exec closure may be.
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let child = command.spawn().expect("client binary must run");
+        self.sessions.borrow_mut().push(child.id());
+        child.wait_with_output().expect("client binary must run")
     }
 
     fn client_env(&self, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
@@ -145,12 +200,23 @@ impl Harness {
         for (key, value) in extra_env {
             command.env(key, value);
         }
-        command.output().expect("client binary must run")
+        self.run(command)
     }
 }
 
 impl Drop for Harness {
     fn drop(&mut self) {
+        // B239, and the reliable half: every client ran in a session of its
+        // own and every server it started inherited that session, so this
+        // stops them without needing to have found a record naming them. The
+        // record sweep below stays as a backstop for a server this harness did
+        // not start through `run`.
+        #[cfg(unix)]
+        for session in self.sessions.borrow().iter() {
+            unsafe {
+                libc::killpg(*session as libc::c_int, libc::SIGKILL);
+            }
+        }
         // Autostarted servers outlive their short-lived client; stop the
         // ones this test left behind before removing the tree they run in.
         // The records live under the endpoint directory nested inside the
@@ -1893,4 +1959,63 @@ fn exact_bytes_query_refusals_name_the_rule() {
         message.contains("exact_bytes") && message.contains("query_base64"),
         "the refusal must name the mode and the alternative field: {message}"
     );
+}
+
+/// B239: the harness stops every server it started, including one nothing can
+/// find a record for.
+///
+/// The old `Drop` swept `XDG_RUNTIME_DIR/tsch-ai-skills-editor` for
+/// `.endpoint` records and killed the pid each one named. That misses a server
+/// that has not announced yet — the sweep races the announce — and misses one
+/// whose record a takeover renamed to `.stale-<generation>` or a test deleted.
+/// 173 servers survived a single run of this file and had to be killed by hand.
+///
+/// Taking the runtime tree away before the drop reproduces that state
+/// deterministically, and it is the entry's own last clause — "once the tree is
+/// gone there is nothing left to find it by". The server keeps running: it is
+/// holding its listening socket open, not looking the path up again. What stops
+/// it is the session every client is spawned into, which every server it
+/// autostarts inherits.
+///
+/// Deliberately not "delete the .endpoint record": whether that record is even
+/// inside the harness depends on how long the scratch path is.
+/// `endpoint_for_file` abandons the configured XDG_RUNTIME_DIR for a
+/// machine-global `/tmp/tsch-ai-skills-editor` once the path it would build
+/// reaches 96 characters, so under a long TMPDIR the sweep read an empty
+/// directory for every test in this file — the larger half of why one run left
+/// 173 servers behind. Removing the tree the sweep reads is the one form of
+/// this test that bites for the same reason on a short path and a long one.
+#[test]
+fn a_dropped_harness_stops_a_server_no_record_names() {
+    let pid;
+    {
+        let harness = Harness::new("noleak");
+        let file = harness.write("noleak.txt", "alpha\n");
+        pid = server_pid(&harness.open(&file));
+        assert!(
+            process_is_alive(pid),
+            "the autostarted server {pid} was not running to begin with"
+        );
+        let runtime = harness.scratch.join("runtime");
+        std::fs::remove_dir_all(&runtime).expect("the runtime tree is removable");
+        assert!(
+            !runtime.exists(),
+            "the sweep's own directory must be gone for this test to mean anything"
+        );
+        assert!(
+            process_is_alive(pid),
+            "losing the runtime tree must not stop the server; that it survives is the point"
+        );
+    }
+    // The harness has been dropped. A SIGKILLed server whose client parent has
+    // already exited is reparented to init, which reaps it, so the pid does go
+    // away — give it a moment rather than asserting on the same instant.
+    for _ in 0..100 {
+        if !process_is_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    terminate(pid);
+    panic!("the dropped harness left server {pid} running");
 }
