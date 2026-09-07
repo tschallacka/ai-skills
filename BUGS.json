@@ -3699,6 +3699,27 @@
       "updated_at": "2026-09-07T20:56:12Z"
     },
     {
+      "id": "B279",
+      "title": "chat/SKILL.md gives the presence tail a bare & and then forbids it",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read chat/SKILL.md:201, :234 and :277 together.",
+      "observed": ":201 is a copyable command ending in a bare '&' for the presence tail, and :234 calls backgrounding it with '&' the exception to the rule below. :277 states that rule as 'Start it as a tracked background task, never with a detached &', and :285-287 says a plain '&' inside another command is invisible to the Claude Code harness. The two passages give opposite instructions for the same command.",
+      "expected": "One instruction for how to start the presence tail. On Claude Code that is run_in_background, since the document's own reasoning at :277-283 applies to the presence tail as much as to the guard.",
+      "mechanism": "The exception at :234 was written for the harness-wake argument only: the presence tail is meant to outlive the turn, so nothing needs to be woken when it exits. But :277-283 gives a second, independent reason that the exception does not address - a tail advances the channel cursor as it reads, so an '&' tail invisible to the harness consumes messages that the next read then skips as already seen. That harm is caused by the tail consuming the stream, not by anything waiting on its exit, so it applies to the presence tail unchanged. An agent copying :201 in Claude Code gets the silent message loss :283 records as having already happened.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T21:07:49Z",
+      "updated_at": "2026-09-07T21:07:49Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
