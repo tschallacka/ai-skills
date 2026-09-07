@@ -515,6 +515,19 @@
       "updated_at": "2026-09-07T20:07:58Z"
     },
     {
+      "id": "T102",
+      "title": "installable agent profiles: ship .agents/profiles/ the way skills are shipped",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The nitpicker profile lives at .agents/profiles/nitpicker.md and is installed by hand: copy it to ~/.claude/agents/ and restart the session. Nothing declares it, nothing installs it, and nothing checks the copy has not drifted from the repository's.\n\nSkills already solve this: a manifest declares the files, install.sh writes them into each agent root, and a test refuses a tracked file nobody declared. Profiles need the same treatment, with two differences that decide the shape:\n\n- The destination differs per harness. Claude Code reads ~/.claude/agents/, and codex and opencode place agent definitions elsewhere; the installer already resolves per-agent roots for skills, so this is the same resolution, not a new one.\n- A profile is only picked up at session start. The registry is read once, so an install has to say plainly that a restart is required before the profile can be used, the way the skill install already tells the reader to restart the agent CLI.\n\nConsumers: installer/src/50-manifest.sh (skill_files or a profiles equivalent), PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv, installer/build.sh, and a declarations test so a new profile cannot be added without being declared.\n\nFiled at Michael's request while adding the first profile to the repository.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-07T20:30:56Z",
+      "updated_at": "2026-09-07T20:30:56Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
