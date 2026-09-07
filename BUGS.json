@@ -5802,6 +5802,27 @@
       "updated_at": "2026-09-07T21:18:24Z"
     },
     {
+      "id": "B286",
+      "title": "two concurrent test-npm-package runs fight over one tarball in the repo root",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run planning/tests/test-npm-package.sh twice at once from the same checkout, or once while any other process runs npm pack there.",
+      "observed": "One run failed with 'gzip: stdin: unexpected end of file' followed by 'tar: Unexpected EOF in archive' and 'tar: Error is not recoverable: exiting now'. Re-running the same test alone on the same tree PASSes.",
+      "expected": "The test isolates the artifact it builds, as it already isolates its scratch directory, so a concurrent run cannot corrupt it.",
+      "mechanism": "planning/tests/test-npm-package.sh:11 takes a randomised scratch dir with mktemp -d, but :15 runs 'npm pack --silent' in the repository root, and npm names that tarball from the package name and version. Every concurrent run therefore writes and reads the SAME path. :13's EXIT trap then does 'rm -f $repo_root/$tarball', so a run that finishes first deletes the tarball a slower sibling is still reading, and a second pack overwrites one mid-read. Same family as B270 and B274: a test not isolated from other activity on the machine. It bites here because several agents share this checkout and run suites.",
+      "surfaces": [
+        "planning/tests/test-npm-package.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T21:54:17Z",
+      "updated_at": "2026-09-07T21:54:17Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
