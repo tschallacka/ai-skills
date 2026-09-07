@@ -442,6 +442,36 @@ fn valid_umode_set(flags: &str) -> bool {
     !body.is_empty() && body.chars().all(|ch| matches!(ch, 'i' | 'w' | 's'))
 }
 
+// `MODE #chan b` asks for the ban list; `MODE #chan +b mask` sets one. The sign
+// is what separates a query from a change, so a sign-less string of list
+// letters (b ban, e exception, I invite) is a query and nothing else is.
+//
+// Konversation sends the ban-list query immediately after JOIN, so treating it
+// as a change printed "[Error] You need to be a channel operator in #chan to do
+// that." on every join.
+fn list_mode_query(flags: &str) -> bool {
+    !flags.is_empty()
+        && !flags.starts_with(['+', '-'])
+        && flags.chars().all(|ch| matches!(ch, 'b' | 'e' | 'I'))
+}
+
+// The two lines that answer one list query: the list itself, which is always
+// empty because the bus keeps no bans, exceptions or invites, and the
+// end-of-list numeric a client waits for before it stops expecting entries.
+// `None` for a letter this server does not answer, so the caller can skip it.
+fn empty_list_reply(server: &str, nick: &str, chan: &str, letter: char) -> Option<[String; 1]> {
+    let (end_code, end_text) = match letter {
+        'b' => (368, "End of channel ban list"),
+        'e' => (349, "End of channel exception list"),
+        'I' => (347, "End of channel invite list"),
+        _ => return None,
+    };
+    Some([format!(
+        ":{} {} {} {} :{}",
+        server, end_code, nick, chan, end_text
+    )])
+}
+
 fn valid_nick(n: &str) -> bool {
     (1..=32).contains(&n.len())
         && n.chars()
@@ -1075,9 +1105,27 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             if target == sess.nick && valid_umode_set(&flags) {
                                 let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
                                 w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
+                            } else if valid_chan(&target) && list_mode_query(&flags) {
+                                // `MODE #chan b` is a QUERY for the ban list,
+                                // not an attempt to set one: a mode CHANGE
+                                // carries a + or - sign. Konversation sends it
+                                // immediately after JOIN, and answering 482
+                                // made a routine join print "[Error] You need
+                                // to be a channel operator in #chan to do
+                                // that." The bus keeps no lists, so each
+                                // queried letter gets an empty list and its
+                                // end-of-list numeric.
+                                for letter in flags.chars() {
+                                    for line in
+                                        empty_list_reply(&sn, &me, &target, letter).iter().flatten()
+                                    {
+                                        w(st, line);
+                                    }
+                                }
                             } else if valid_chan(&target) {
-                                // Channel modes need an operator model the bus
-                                // does not have; refuse rather than pretend.
+                                // A real change. Channel modes need an operator
+                                // model the bus does not have; refuse rather
+                                // than pretend.
                                 w(
                                     st,
                                     &format!(
@@ -1716,6 +1764,57 @@ mod announce_tests {
         assert!(host_is_dialable("192.168.1.106"));
         assert!(host_is_dialable("localhost"));
         assert!(host_is_dialable("some.host.example"));
+    }
+}
+
+#[cfg(test)]
+mod mode_query_tests {
+    use super::{empty_list_reply, list_mode_query};
+
+    // The sign is the whole distinction. Without it a routine join printed
+    // "[Error] You need to be a channel operator in #chan to do that.", because
+    // Konversation asks for the ban list straight after JOIN and the handler
+    // read the query as an attempt to set one.
+    #[test]
+    fn a_signless_list_letter_is_a_query() {
+        assert!(list_mode_query("b"), "MODE #chan b asks for the ban list");
+        assert!(list_mode_query("e"), "exception list");
+        assert!(list_mode_query("I"), "invite list");
+        assert!(list_mode_query("bI"), "several letters at once");
+    }
+
+    #[test]
+    fn a_signed_change_is_not_a_query() {
+        assert!(
+            !list_mode_query("+b"),
+            "+b sets a ban and must still refuse"
+        );
+        assert!(!list_mode_query("-b"), "-b removes one");
+        assert!(!list_mode_query(""), "an empty flag string is not a query");
+    }
+
+    // A letter this server does not answer must not be silently swallowed as an
+    // empty list: it falls through to the refusal instead.
+    #[test]
+    fn only_the_list_letters_are_answered() {
+        assert!(!list_mode_query("k"), "a key is not a list");
+        assert!(
+            !list_mode_query("bk"),
+            "one unknown letter disqualifies the set"
+        );
+        assert!(empty_list_reply("s", "me", "#c", 'k').is_none());
+    }
+
+    // The client waits for the end-of-list numeric before it stops expecting
+    // entries, so the reply must carry the right one per letter.
+    #[test]
+    fn each_list_query_ends_with_its_own_numeric() {
+        let ban = empty_list_reply("srv", "me", "#ops", 'b').expect("b is answered");
+        assert_eq!(ban[0], ":srv 368 me #ops :End of channel ban list");
+        let exc = empty_list_reply("srv", "me", "#ops", 'e').expect("e is answered");
+        assert_eq!(exc[0], ":srv 349 me #ops :End of channel exception list");
+        let inv = empty_list_reply("srv", "me", "#ops", 'I').expect("I is answered");
+        assert_eq!(inv[0], ":srv 347 me #ops :End of channel invite list");
     }
 }
 
