@@ -88,6 +88,12 @@ pub fn add(register: &mut Register, new: NewBug) -> Result<String, Vec<String>> 
 /// What `update` may change. All optional: an update names only what moves.
 #[derive(Default)]
 pub struct Change {
+    /// B224: `--title` was in the accepted flag list from the start and had
+    /// no member here, so a caller who named it was told they had named no
+    /// field at all. A title is the one part of an entry that is written
+    /// before the mechanism is understood, so it is the part most likely to
+    /// need correcting later.
+    pub title: Option<String>,
     pub status: Option<Status>,
     pub priority: Option<Priority>,
     pub fix: Option<String>,
@@ -99,13 +105,28 @@ pub struct Change {
 
 impl Change {
     pub fn is_empty(&self) -> bool {
-        self.status.is_none()
+        self.title.is_none()
+            && self.status.is_none()
             && self.priority.is_none()
             && self.fix.is_none()
             && self.verification.is_none()
             && self.mechanism.is_none()
             && self.reason.is_none()
             && self.append_note.is_none()
+    }
+
+    /// A title that is present but blank, which would erase the only line
+    /// that says what the entry is about. Refused by name rather than
+    /// applied: `--title ''` is a mistake, never an instruction.
+    pub fn blank_title(&self) -> Option<String> {
+        match self.title.as_deref() {
+            Some(title) if title.trim().is_empty() => Some(
+                "--title needs the corrected title; a blank one would erase \
+                 the only line that says what the entry is about"
+                    .into(),
+            ),
+            _ => None,
+        }
     }
 
     /// The evidence a status change owes, checked before anything is built so
@@ -159,6 +180,9 @@ pub fn update(register: &mut Register, id: &str, change: Change) -> Result<(), U
     };
 
     bug.updated_at = now;
+    if let Some(title) = change.title {
+        bug.title = title;
+    }
     if let Some(status) = change.status {
         bug.status = status;
     }
@@ -240,5 +264,45 @@ mod add_closure_tests {
         assert!(error[0].contains("--fix and --verification"), "{error:?}");
         assert!(error[0].contains("confirmed"), "{error:?}");
         assert!(r.bugs.is_empty());
+    }
+
+    /// B224: `--title` was an accepted flag with no member on `Change`, so
+    /// naming it stored nothing, left `is_empty()` true, and produced a
+    /// refusal claiming no field had been named.
+    #[test]
+    fn a_title_alone_is_a_change_and_is_applied() {
+        let mut r = register();
+        let id = add(&mut r, new_bug(Status::Confirmed)).unwrap();
+
+        let change = Change {
+            title: Some("a corrected title".into()),
+            ..Change::default()
+        };
+        assert!(
+            !change.is_empty(),
+            "a change naming only --title must not read as empty"
+        );
+
+        assert!(
+            update(&mut r, &id, change).is_ok(),
+            "the title change applies"
+        );
+        assert_eq!(r.find(&id).unwrap().title, "a corrected title");
+    }
+
+    #[test]
+    fn a_blank_title_is_refused_naming_the_flag() {
+        let change = Change {
+            title: Some("   ".into()),
+            ..Change::default()
+        };
+        let refusal = change.blank_title().expect("a blank title is refused");
+        assert!(refusal.contains("--title"), "{refusal}");
+        assert!(Change {
+            title: Some("real".into()),
+            ..Change::default()
+        }
+        .blank_title()
+        .is_none());
     }
 }

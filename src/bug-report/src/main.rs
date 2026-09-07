@@ -39,8 +39,9 @@ Usage:
            [--severity major] [--priority normal] [--status reported]
            [--mechanism M] [--parent B37] [--found-by W] [--surfaces a,b]
            [--fix F] [--verification V]   (closure evidence; required with --status fixed)
-  bugs update <ID> [--status S] [--fix F] [--verification V] [--reason R]
-                   [--priority P] [--mechanism M] [--append-note N]
+  bugs update <ID> [--title T] [--status S] [--fix F] [--verification V]
+                   [--reason R] [--priority P] [--mechanism M]
+                   [--append-note N]
   bugs show <ID>
   bugs list [--status S] [--priority P] [--severity S] [--parent ID]
             [--surface TEXT] [--since ISO8601]
@@ -246,6 +247,7 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
     let mut register = read(path)?;
 
     let change = mutate::Change {
+        title: args.flag("title").map(str::to_string),
         status: opt_enum(args.flag("status"), "--status", register::STATUSES)?,
         priority: opt_enum(args.flag("priority"), "--priority", register::PRIORITIES)?,
         fix: args.flag("fix").map(str::to_string),
@@ -262,6 +264,9 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         );
     }
     // Checked before the change is applied, so the message is about the request.
+    if let Some(refusal) = change.blank_title() {
+        return fail(refusal, EX_USAGE);
+    }
     if let Some(missing) = change.missing_evidence() {
         return fail(missing, EX_USAGE);
     }
