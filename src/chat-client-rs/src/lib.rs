@@ -1271,40 +1271,10 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     for segment in &segments {
         println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, segment);
     }
-    // Advance the channel cursor to the newest id. The echo line is the
-    // IRC-prefix form (no id), so fetch history to learn the id of the message
-    // just stored.
-    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, 0));
-    let deadline = SystemTime::now() + Duration::from_secs(3);
-    let mut max_id: u64 = Session::load(state_dir).cursor(&o.chan);
-    while SystemTime::now() < deadline {
-        match read_line(&mut tls) {
-            Ok(l) => {
-                if l.starts_with(":server 000 end-of-history") {
-                    break;
-                }
-                if l.starts_with("MSG ") {
-                    if let Some(id) = l
-                        .split_whitespace()
-                        .nth(2)
-                        .and_then(|s| s.parse::<u64>().ok())
-                    {
-                        if id > max_id {
-                            max_id = id;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
-                    break;
-                }
-            }
-        }
-    }
-    if max_id > 0 {
-        save_cursor(state_dir, &o.chan, max_id, o.no_session);
-    }
+    // The cursor is NOT advanced here: sending is not reading (B254). A cursor
+    // is one watermark over a shared channel, and no id skips only your own --
+    // other agents' ids interleave with yours -- so advancing it past your own
+    // message marks theirs as seen too.
     let _ = write_line(&mut tls, "QUIT");
 }
 
