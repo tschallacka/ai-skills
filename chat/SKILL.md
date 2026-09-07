@@ -213,27 +213,38 @@ first: connect, then report where you landed.
 
 
 ```bash
-chat-client-rs join --chan '#ops' --nick aiskills    # seeds the cursor at the CURRENT end
-chat-client-rs read --chan '#ops' --nick aiskills --since 0   # the history join skipped
+NICK=agent-a                       # your nick on the bus
+LOG="${TMPDIR:-/tmp}/chat-ops.log" # the log this agent owns
+
+chat-client-rs join --chan '#ops' --nick "$NICK"    # seeds the cursor at the CURRENT end
+chat-client-rs read --chan '#ops' --nick "$NICK" --since 0   # the history join skipped
 
 # Presence: a plain streaming tail, appending to a log you own, started as a
 # TRACKED background task -- not with a detached `&`. See the rule below.
 # `--no-session` so it does not advance the channel cursor and leave your own
 # `read` reporting nothing new.
-chat-client-rs tail --chan '#ops' --nick aiskills --no-session >> "$LOG" 2>&1
+chat-client-rs tail --chan '#ops' --nick "$NICK" --no-session >> "$LOG" 2>&1
 
-# The wake: a guard that watches THAT LOG and exits when your nick appears.
+# The wake: a guard that watches THAT LOG and exits when your nick is mentioned.
 start=$(wc -l < "$LOG")
 while :; do
     n=$(wc -l < "$LOG")
     if [ "$n" -gt "$start" ]; then
         tail -n +$((start + 1)) "$LOG" \
-            | awk '/@aiskills|^:nitpicker/{f=1} END{exit !f}' && break
+            | awk -v me="@$NICK" 'index($0, me){f=1} END{exit !f}' && break
         start="$n"
     fi
     sleep 5
 done
 ```
+
+**Waking on somebody else's output is a different pattern, and it is easy to
+get backwards.** A stored line begins with its SENDER, so `^:name` matches what
+that agent *said*, while `@name` matches a mention of them. Watch a peer by
+sender when you must not miss their output — `/^:reviewer/` for everything the
+reviewer says — and never add your own nick to that alternation: it matches
+every line you send, so the guard fires on your own announcement and wakes you
+into an empty inbox.
 
 **Two parts, and they are not interchangeable.**
 
