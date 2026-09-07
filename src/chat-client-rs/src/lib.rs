@@ -1,6 +1,12 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The TLS chat client.
+//! The TLS chat client, as a library plus its CLI entry point (`run`).
+//!
+//! The plumbing every front end needs is public: discovery and the resolution
+//! ladder, the TLS connect with its TOFU pin, registration, the line I/O, and
+//! the per-agent session with its channel cursors. The CLI verbs are private —
+//! they are one front end's argument handling, not the client's interface.
+//! `chat-mcp` is the second front end (T90).
 //!
 //! Finds a chat server (UDP announce beacon), connects over TLS, pins the
 //! server certificate on first connect (TOFU), and then either sends a message,
@@ -24,7 +30,7 @@ use std::time::{Duration, Instant, SystemTime};
 use chat_proto::Message;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
-const DEFAULT_BEACON_PORT: u16 = 7780;
+pub const DEFAULT_BEACON_PORT: u16 = 7780;
 
 fn usage() {
     eprintln!(
@@ -68,7 +74,7 @@ fn usage() {
     std::process::exit(64);
 }
 
-fn main() {
+pub fn run() {
     let mut args: Vec<String> = std::env::args().collect();
     // --session is a global option, so it is accepted before the subcommand as
     // well as after it. session_key() reads it straight out of argv either way;
@@ -181,7 +187,7 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
 // while its caller believed it was isolated. Given that a shared state
 // directory is what makes two agents share a nick and a cursor (B116), a flag
 // that pretends to separate them and does not is the wrong failure.
-fn client_state_dir(args: &[String]) -> PathBuf {
+pub fn client_state_dir(args: &[String]) -> PathBuf {
     if let Some(dir) = parse_flag(args, "--state") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir);
@@ -194,7 +200,7 @@ fn client_state_dir(args: &[String]) -> PathBuf {
 
 // The central state home everything global shares: the XDG config home's
 // tsch-ai-skills directory, beside the shared bin/ and the global plans.
-fn chat_default_home() -> PathBuf {
+pub fn chat_default_home() -> PathBuf {
     match std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.is_empty())
@@ -216,7 +222,7 @@ fn dirs_home() -> PathBuf {
 /// Where the session key came from, so `session show` can say which rung of the
 /// ladder decided and an agent can tell a shared key from its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum KeySource {
+pub enum KeySource {
     /// `--session ID` or `$CHAT_SESSION_ID`.
     Explicit,
     /// A session id the coding harness itself exports.
@@ -229,7 +235,7 @@ enum KeySource {
 }
 
 impl KeySource {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             KeySource::Explicit => "explicit",
             KeySource::Harness => "harness",
@@ -305,7 +311,7 @@ fn safe_key(raw: &str) -> String {
 /// cursors the session exists to keep. Inside codex's sandbox they are worse
 /// than unstable: they are pinned at 3/2/1 for every session on the machine, so
 /// they are stable and identical, which would merge every codex agent into one.
-fn resolve_session_key(
+pub fn resolve_session_key(
     explicit: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
     worktree_root: Option<&str>,
@@ -360,7 +366,7 @@ fn resolve_session_key(
 /// The session this process owns, resolved once. Reading `--session` straight
 /// out of argv keeps every existing call site unchanged: the session key is a
 /// property of the invocation, like argv itself.
-fn session_key() -> &'static (String, KeySource) {
+pub fn session_key() -> &'static (String, KeySource) {
     static KEY: std::sync::OnceLock<(String, KeySource)> = std::sync::OnceLock::new();
     KEY.get_or_init(|| {
         let args: Vec<String> = std::env::args().collect();
@@ -397,15 +403,15 @@ fn git_worktree_root() -> Option<String> {
 /// per agent, so agents sharing an `AI_CHAT_HOME` do not share a nick or a
 /// cursor.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
-struct Session {
-    server: String,
-    nick: String,
+pub struct Session {
+    pub server: String,
+    pub nick: String,
     #[serde(default)]
-    cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
+    pub cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
 }
 
 impl Session {
-    fn path(state_dir: &std::path::Path) -> PathBuf {
+    pub fn path(state_dir: &std::path::Path) -> PathBuf {
         Session::path_for(state_dir, &session_key().0)
     }
 
@@ -427,7 +433,7 @@ impl Session {
     /// drop the nick and cursors an agent was already using. The shared file is
     /// only read, never moved or rewritten: every agent still holding state in
     /// it needs it to stay put, and each writes to its own file from then on.
-    fn load(state_dir: &std::path::Path) -> Session {
+    pub fn load(state_dir: &std::path::Path) -> Session {
         let mut path = Session::path(state_dir);
         if !path.exists() {
             let legacy = Session::legacy_path(state_dir);
@@ -451,7 +457,7 @@ impl Session {
         }
     }
 
-    fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
+    pub fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
         let path = Session::path(state_dir);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -460,7 +466,7 @@ impl Session {
         fs::write(path, json)
     }
 
-    fn cursor(&self, chan: &str) -> u64 {
+    pub fn cursor(&self, chan: &str) -> u64 {
         self.cursors.get(chan).copied().unwrap_or(0)
     }
 }
@@ -515,7 +521,7 @@ fn cache_record(state_dir: &std::path::Path, server: &str) {
 // Listen for beacons and return candidate servers, LAN addresses before
 // loopback ones: a beacon whose host (or sender) is 127.0.0.1 is only
 // interesting when nothing routable announces.
-fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
+pub fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, beacon_port)) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -559,7 +565,7 @@ fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
 }
 
 // The resolution ladder; returns the server to dial.
-fn resolve_server(
+pub fn resolve_server(
     arg_server: &str,
     sess_server: &str,
     state_dir: &std::path::Path,
@@ -616,7 +622,7 @@ fn resolve_server(
 /// Fill missing command options from the session (if a session is active).
 /// Returns (server, nick) with the session's values where the caller left them
 /// empty, and whether the session was consulted.
-fn apply_session(
+pub fn apply_session(
     server: &str,
     nick: &str,
     state_dir: &std::path::Path,
@@ -707,7 +713,7 @@ fn parse_opts(args: &[String]) -> Opts {
 }
 
 /// Record a sent/received message id as the channel cursor in the session.
-fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
+pub fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
     if no_session {
         return;
     }
@@ -719,7 +725,7 @@ fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: boo
 }
 
 /// Remember the server+nick for later calls.
-fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
+pub fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
     let mut s = Session::load(state_dir);
     if !server.is_empty() {
         s.server = server.to_string();
@@ -741,9 +747,9 @@ fn parse_flag(args: &[String], name: &str) -> Option<String> {
     None
 }
 
-type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+pub type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-fn connect(
+pub fn connect(
     server: &str,
     nick: &str,
     state_dir: &std::path::Path,
@@ -847,7 +853,7 @@ fn server_safe(server: &str) -> String {
 /// otherwise a trailing numeric port removed at the LAST colon -- so the host
 /// this returns is the host the connect resolves to. IPv4 and hostnames carry
 /// at most one colon, so they take the same path they always did.
-fn server_host(server: &str) -> String {
+pub fn server_host(server: &str) -> String {
     let s = server.trim();
     if let Ok(sa) = s.parse::<SocketAddr>() {
         return sa.ip().to_string();
@@ -887,7 +893,77 @@ fn resolve(server: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("no address for {}", server))
 }
 
-fn write_line(
+/// The wire segments one message becomes: never more than one IRC line each,
+/// and never a line carrying an embedded newline.
+///
+/// Both cuts are made here because either one, left out, is a silent loss. A
+/// newline inside a PRIVMSG trailing is a second line terminator, so a
+/// multi-line message reaches the server as its first line alone (B266); and
+/// RFC 1459 caps a message at 512 bytes including the prefix the server
+/// prepends and the CRLF, so one long paragraph overruns on its own. The room
+/// the text has is what is left after `:nick!nick@localhost PRIVMSG #chan :`,
+/// and the caller sends one PRIVMSG per segment.
+///
+/// In the library rather than a front end because both front ends need it and
+/// neither may disagree about it.
+pub fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
+    let overhead = format!(":{}!{}@localhost PRIVMSG {} :", nick, nick, chan).len() + 2;
+    let budget = 512usize.saturating_sub(overhead).max(1);
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        // A CRLF-terminated input line keeps no stray CR: it would reach the
+        // wire as a second line terminator.
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            // A blank line is a paragraph break, and an empty PRIVMSG trailing
+            // is what a server is entitled to drop. One space keeps the break
+            // visible in a line-based medium rather than silently closing it up.
+            out.push(" ".to_string());
+            continue;
+        }
+        let mut rest = line;
+        while !rest.is_empty() {
+            let (head, tail) = split_at_budget(rest, budget);
+            out.push(head.to_string());
+            rest = tail;
+        }
+    }
+    out
+}
+
+/// Split a line at no more than `budget` bytes, on a word boundary where there
+/// is one and always on a character boundary. The head is never empty, so a
+/// caller looping on the tail terminates.
+fn split_at_budget(line: &str, budget: usize) -> (&str, &str) {
+    if line.len() <= budget {
+        return (line, "");
+    }
+    // The last byte index that is both within budget and a char boundary.
+    let mut cut = budget;
+    while cut > 0 && !line.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    // Prefer the last space inside the budget, so a cut lands between words
+    // rather than inside one. A single word longer than the budget has none,
+    // and is cut where it is.
+    if let Some(space) = line[..cut].rfind(' ') {
+        if space > 0 {
+            return (&line[..space], line[space + 1..].trim_start_matches(' '));
+        }
+    }
+    if cut == 0 {
+        // A single character wider than the budget: emit it rather than loop.
+        let one = line
+            .char_indices()
+            .nth(1)
+            .map(|(index, _)| index)
+            .unwrap_or(line.len());
+        return (&line[..one], &line[one..]);
+    }
+    (&line[..cut], &line[cut..])
+}
+
+pub fn write_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     line: &str,
 ) -> Result<(), String> {
@@ -897,7 +973,7 @@ fn write_line(
     Ok(())
 }
 
-fn read_line(
+pub fn read_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
 ) -> io::Result<String> {
     let mut buf = Vec::new();
@@ -990,7 +1066,7 @@ fn discover(args: &[String]) {
     }
 }
 
-fn json_field(s: &str, key: &str) -> Option<String> {
+pub fn json_field(s: &str, key: &str) -> Option<String> {
     let marker = format!("\"{}\":", key);
     let idx = s.find(&marker)?;
     let rest = &s[idx + marker.len()..];
@@ -1099,7 +1175,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
 }
 
 /// Read the server's `:server 999 <nick> #chan <id>` reply (current max id).
-fn read_last_id(
+pub fn read_last_id(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     chan: &str,
     pending: &mut VecDeque<String>,
@@ -1234,7 +1310,7 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
 /// Kept character-for-character identical to the server's rule rather than
 /// merely "safe": a name the server would refuse must not be readable by going
 /// around it, or the two disagree about what a channel is.
-fn valid_chan(c: &str) -> bool {
+pub fn valid_chan(c: &str) -> bool {
     c.len() > 1
         && c.len() <= 33
         && c.starts_with('#')
@@ -1243,7 +1319,7 @@ fn valid_chan(c: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
 }
 
-fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
+pub fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
     home.join("channels").join(format!("{}.log", chan))
 }
 
@@ -1254,14 +1330,14 @@ fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
 /// must still read the channels everyone shares, so a local read resolves the
 /// home from `$AI_CHAT_HOME` (or the XDG default) exactly as the server does,
 /// and ignores `--state`.
-fn channels_home() -> PathBuf {
+pub fn channels_home() -> PathBuf {
     std::env::var("AI_CHAT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| chat_default_home())
 }
 
 /// One stored `MSG #chan <id> ...` line's id, or None for anything else.
-fn msg_line_id(line: &str) -> Option<u64> {
+pub fn msg_line_id(line: &str) -> Option<u64> {
     if !line.starts_with("MSG ") {
         return None;
     }
@@ -1272,7 +1348,7 @@ fn msg_line_id(line: &str) -> Option<u64> {
 ///
 /// Taken from the maximum over all rows rather than the last line: a truncated
 /// or interleaved final write must not make the cursor go backwards.
-fn local_last_id(home: &std::path::Path, chan: &str) -> u64 {
+pub fn local_last_id(home: &std::path::Path, chan: &str) -> u64 {
     let path = local_chan_log(home, chan);
     let file = match fs::File::open(&path) {
         Ok(f) => f,
@@ -1653,7 +1729,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     }
 }
 
-fn wait_for_welcome(
+pub fn wait_for_welcome(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     base_nick: &str,
 ) -> Result<(), String> {
@@ -2076,6 +2152,62 @@ mod tests {
         assert_eq!(s.nick, "n");
         assert_eq!(s.cursor("#x"), 0);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    // ---- wire_segments ---------------------------------------------------
+
+    #[test]
+    fn a_multi_line_message_becomes_one_segment_per_line() {
+        let out = wire_segments("me", "#c", "alpha\nbeta\ngamma");
+        assert_eq!(out, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn a_crlf_line_carries_no_stray_carriage_return() {
+        let out = wire_segments("me", "#c", "alpha\r\nbeta");
+        assert_eq!(out, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn a_blank_line_stays_a_paragraph_break() {
+        let out = wire_segments("me", "#c", "alpha\n\nbeta");
+        assert_eq!(out, vec!["alpha", " ", "beta"]);
+    }
+
+    #[test]
+    fn a_paragraph_longer_than_the_line_limit_is_split_not_truncated() {
+        let word = "word ".repeat(200); // 1000 bytes on one line
+        let out = wire_segments("me", "#c", word.trim_end());
+        assert!(
+            out.len() > 1,
+            "one line was not split: {} segments",
+            out.len()
+        );
+        let overhead = ":me!me@localhost PRIVMSG #c :".len() + 2;
+        for segment in &out {
+            assert!(
+                segment.len() + overhead <= 512,
+                "a segment overruns the 512-byte message: {} bytes",
+                segment.len()
+            );
+        }
+        // Nothing is lost: the words come back in order and in full.
+        assert_eq!(out.join(" ").split_whitespace().count(), 200);
+    }
+
+    #[test]
+    fn a_single_word_wider_than_the_budget_still_terminates() {
+        let out = wire_segments("me", "#c", &"x".repeat(2000));
+        assert!(out.len() >= 5, "{} segments", out.len());
+        assert_eq!(out.concat().len(), 2000, "no bytes were dropped");
+    }
+
+    #[test]
+    fn a_split_never_lands_inside_a_character() {
+        // Multi-byte characters only, so a byte-indexed cut would panic or
+        // produce mojibake rather than a shorter line.
+        let out = wire_segments("me", "#c", &"é".repeat(600));
+        assert_eq!(out.concat().chars().count(), 600);
     }
 
     #[test]
