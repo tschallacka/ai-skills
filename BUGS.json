@@ -244,6 +244,50 @@
       "updated_at": "2026-09-07T11:32:16Z"
     },
     {
+      "id": "B278",
+      "title": "folding the nick into the session key makes a saved session unreachable to any call that omits --nick",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "On feat/chat-mcp-and-session-keys (PR 75), against a private server: AI_CHAT_HOME=$H chat-client-rs session set --server 127.0.0.1:$PORT --nick solo; then AI_CHAT_HOME=$H chat-client-rs send --chan \"#q3\" --text \"no nick on this call\". Same two commands with the master client as a control.",
+      "observed": "PR 75: \"chat-client-rs: send needs --server --nick --chan --text (or a saved session)\" -- the session it just wrote is not found. Master: \":solo!solo@localhost PRIVMSG #q3 :no nick on this call\". session show with no --nick likewise opens a different, empty file (h-398375cf47245be6) from the one session set wrote (h-80c958639a2070e6 for --nick parent).",
+      "expected": "A saved session is what removes the need to repeat --server and --nick on every call, so a call that omits --nick finds the session that was set.",
+      "mechanism": "resolve_session_key now appends \"nick=\" plus the nick to the harness and worktree material, and the nick comes from argv. A call that passes no --nick hashes an empty nick, which is a different key, so it opens a different file. session set stores under the nick-bearing key and every later call without --nick looks under the empty-nick one.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": "1267ac11 on feat/chat-mcp-and-session-keys (PR 75) - the key is h-<identity>-<nick>, so the identity half is a stable prefix and a nick-less call can find the single session its identity owns.",
+      "verification": "session set --nick solo then session show with no --nick reports that session's server and nick, where before it reported an empty one. Two nicks still resolve to separate files (B271 holds) and an ambiguous identity resolves to neither. Four tests, one pinning the key SHAPE so the suffix cannot quietly go back to being hashed in.",
+      "found_by": "t90-chat-mcp, verifying B271's fix at Michael's request before PR 75 merges",
+      "notes": "B271 (the defect this change fixes) is genuinely fixed by it: under one CLAUDE_CODE_SESSION_ID, --nick parent and --nick child resolve to h-80c958639a2070e6 and h-15ab5ff6b3eaee04 on PR 75 and to one key h-011bc5c0e5b7b760 on master, and a child join no longer consumes the parent unread message. The regression is the other half of the same rung: the nick is now required material and the ladder has no way to supply it from the session it is trying to open. A fix has to resolve the nick before the key -- read the saved nick from a nick-free location, or key the file on the harness id and hold per-nick state inside it. Found by t90-chat-mcp against PR 75 before it merged, which is the point of reviewing a branch rather than a release. chat/tests/test-chat.sh already covers this shape -- it sets a nick then uses send and show without one -- so the suite would have caught it; that test is currently failing on the branch for an unrelated reason (measured identically with the fix, without it, and with the pre-nick-keying client), which is the live-bus interference family B270 and B274.",
+      "created_at": "2026-09-07T21:01:12Z",
+      "updated_at": "2026-09-07T21:13:26Z"
+    },
+    {
+      "id": "B288",
+      "title": "send advances the channel cursor to the channel maximum, so it marks everyone else's unread messages as seen",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Two agents on one channel. Agent A reads to its cursor. Agent B posts. Agent A sends anything to that channel, then reads: chat-client-rs send --chan \"#ops\" --text \"anything\"; chat-client-rs read --chan \"#ops\".",
+      "observed": "B's message is never returned by A's read. A's session cursor jumped to the channel's highest id at send time. Observed live on #ai-skills: Tschallacka posted an instruction with no @mention, this agent sent an unrelated message, and the instruction was never returned by any later read while sitting in the agent's own tail log.",
+      "expected": "Sending marks nothing read that the sender has not been shown. A cursor is what the agent has SEEN, and posting is not reading.",
+      "mechanism": "send (src/chat-client-rs/src/lib.rs:1277-1306) issues FETCH <chan> 0, walks every row to take the maximum id, and calls save_cursor with it. The intent is to record the id of the message just stored, which the IRC-form echo does not carry; the effect is to record the id of the LAST message in the channel, whoever wrote it. Everything another agent posted since the sender last read is skipped permanently, because read only ever returns rows after the cursor. src/chat-mcp/src/conn.rs send() takes the same maximum from LASTID and has the same effect.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "src/chat-mcp/src/conn.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp: an instruction from Tschallacka went unread because this agent sent a message after it arrived",
+      "notes": "The loss is silent in both directions: the sender sees no gap, and the writer of the skipped message sees a delivered line. It is worse for an instruction with no @mention, which the mention guard also does not wake on, so nothing else compensates. A fix has to separate \"what I have seen\" from \"what exists\": either send leaves the cursor alone and read tolerates returning the senders own message, or send records only the ids it authored. B269 is the neighbouring cursor defect on the read side.",
+      "created_at": "2026-09-07T22:00:29Z",
+      "updated_at": "2026-09-07T22:00:42Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -373,6 +417,29 @@
       "notes": "This is an app-agnostic inference problem. Any fix must remain a heuristic and expose confidence rather than asserting mc semantics.",
       "created_at": "2026-09-01T18:00:00Z",
       "updated_at": "2026-09-01T18:20:00Z"
+    },
+    {
+      "id": "B283",
+      "title": "a presence tail makes every later send appear under a suffixed nick",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Hold the channel with a presence tail as nick N, then run: chat-client-rs send --chan \"#ai-skills\" --nick N --text hello",
+      "observed": "The message arrives from N-2. Measured in #ai-skills: aiskills messages arrived as aiskills-2 and t90-chat-mcp as t90-chat-mcp-2, in both cases while their presence tail held the plain nick.",
+      "expected": "A message sent under a nick is attributed to that nick. Who said a thing is the one piece of a chat message that cannot be reconstructed later.",
+      "mechanism": "send opens its own short-lived connection, and the server suffixes a nick already held by another connection (B263). The two-part posture chat/SKILL.md now teaches guarantees the collision on every send, because the presence tail is holding the plain nick by design. B263 recorded the suffixing; this is the consequence the posture makes unavoidable rather than incidental.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs",
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, noticing its own messages arriving as aiskills-2 while holding a presence tail",
+      "notes": "Michael, on seeing aiskills-2 in the channel: 'why the -2 on sends... thats not how i envisioned it.' So the suffix is contrary to intent, not a tolerable side effect of the posture -- raised to urgent on that.\n\nTwo candidate fixes, and they are different bugs underneath:\n(a) the CLIENT should not open a second connection for a send when it already holds one. That is the real shape: a presence tail is a live connection, and send/read/names each open another. Reusing the held connection removes the collision at the source and is what makes the posture coherent.\n(b) the SERVER should not silently rename a connection. Suffixing is a guess at what the caller wanted; refusing the duplicate, or letting a nick be held by several connections of the same owner, are both more honest. B263 records the suffixing itself.\n\n(a) is the one that fixes what Michael saw. (b) is worth deciding separately, because the suffix will keep surprising whoever hits it next. Michael, sharpening it: 'it also makes the guard hard as the send is targetted and not the tail.' The suffix SPLITS one agent's identity across two names. The presence tail holds the plain nick, which is the name a mention has to use for the guard to fire; the sends carry the suffixed nick, which is the name a peer reads and naturally replies to. So a reply addressed to what someone actually saw in the channel goes to a nick nobody is listening on, and the guard never fires.\n\nThat is worse than misattribution and is why this is now blocking rather than major: the channel looks like it is working from both ends while a reply can be silently unreachable. It also means a wider guard alternation cannot rescue it -- matching the suffixed form too would make an agent wake on its own sends, which is the self-wake fault t90 found in the step-1 example.",
+      "created_at": "2026-09-07T21:18:44Z",
+      "updated_at": "2026-09-07T21:51:52Z"
     },
     {
       "id": "B108",
@@ -2703,6 +2770,120 @@
       "updated_at": "2026-09-07T20:16:17Z"
     },
     {
+      "id": "B276",
+      "title": "the membership guard cannot pass: names lists open connections, join creates none",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "From the main checkout: ./target/release/chat-client-rs join --chan '#ai-skills' --nick nitpick-probe --session nitpick-probe, then ./target/release/chat-client-rs names --chan '#ai-skills' --nick nitpicker --session nitpicker. Control: start 'tail --chan #ai-skills --nick nitpicker --session nitpicker' in the background, wait 3s, run names again.",
+      "observed": "join prints 'joined #ai-skills (resuming after id 164)' and exits 0, and names does not list the nick, on that run or any later one. The nick appears in names within 3s of a tail starting and disappears when the tail ends. send works throughout, so messages land while the nick is absent from names.",
+      "expected": "Either names lists a nick that has joined regardless of whether a connection is currently open, or the membership check the profile prescribes is written against something that a short-lived client can satisfy.",
+      "mechanism": "names reports the connections the server currently holds, not the channel's joined set. Every chat-client-rs invocation except tail is short-lived, so it holds a connection only for the length of the call. The guard added to .agents/profiles/nitpicker.md in f66a9199 says 'if your nick is not in the list, rejoin' and 'if the command fails at all, the server is down'. For an agent that is not blocked inside a tail the first condition is permanently true and join cannot clear it, so the until-loop spins against a command that always exits 0; the second condition never fires because names succeeds. The guard therefore reports a healthy, reachable agent as absent, and its recovery path cannot terminate.",
+      "surfaces": [
+        "src/chat-client-rs",
+        ".agents/profiles/nitpicker.md",
+        "AGENTS.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T20:45:40Z",
+      "updated_at": "2026-09-07T20:45:40Z"
+    },
+    {
+      "id": "B280",
+      "title": "chat/SKILL.md blesses a detached & for the presence tail while its own rule below forbids one",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Read chat/SKILL.md: the copyable line at :201 ends in a bare \"&\", :234 calls that \"the exception to the rule below\", and the rule below at :277 says \"Start it as a tracked background task, never with a detached &\".",
+      "observed": "The document gives an agent a copyable command that its own rule forbids, and then names it an exception without saying why the stated harm does not apply.",
+      "expected": "One instruction. The presence tail is started as a tracked background task like every other long-lived process, or the exception states plainly why the harm at :277 does not reach it.",
+      "mechanism": "The exception was written for the wrong reason: that the tail must outlive the turn. The harm :277 names is not about lifetime - a detached tail is invisible to the harness AND advances the channel cursor, so it consumes messages a later read then skips as already seen. :283 records that happening here. Both halves apply to a presence tail exactly as much as to any other.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing 8e67302a and f66a9199 in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:05Z",
+      "updated_at": "2026-09-07T21:18:05Z"
+    },
+    {
+      "id": "B281",
+      "title": "the nitpicker profile restates the chat posture chat/SKILL.md owns, and restates the wrong half",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Compare .agents/profiles/nitpicker.md:56-66 with chat/SKILL.md:196-236.",
+      "observed": "The profile teaches tail --mentions --mention-exit as THE wait for a pseudo-daemon whose whole job is staying visible in the channel. chat/SKILL.md:229-232 already says that form is the one-connection shorthand whose cost is that presence ends the moment it fires, to be kept for a short errand.",
+      "expected": "The profile references the mechanism rather than restating it, and where it must name a form it names the two-part one. MAINTAINER 1.2: shared facts live in exactly one place, docs reference and never duplicate.",
+      "mechanism": "Written in 8e67302a before chat/SKILL.md carried the two-part posture, and not revisited when f66a9199 added it. A second copy of a mechanism drifts from the first, and this one drifted immediately: it kept the half that costs presence for the agent that most needs presence.",
+      "surfaces": [
+        ".agents/profiles/nitpicker.md",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing its own profile in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:24Z",
+      "updated_at": "2026-09-07T21:18:24Z"
+    },
+    {
+      "id": "B284",
+      "title": "an mcp-mode install copies the adapter binary but registers it with no agent",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Read the generated install.sh for any MCP registration: awk on install.sh and installer/src/*.sh for mcpServers, \"mcp add\", mcp_servers or .mcp.json returns nothing. Then read ai-text-editor/SKILL.md for a registration instruction: none. install.sh --skill ai-text-editor --integration mcp and install.sh --skill chat --integration chat=mcp both take the same path.",
+      "observed": "No installer part writes an MCP server entry to any agent configuration, and no SKILL.md tells the user to. The mode copies ai-text-editor-mcp or chat-mcp into the skill directory and stops there. test-installer-integration-mode.sh asserts which binaries land and nothing about reachability.",
+      "expected": "After an mcp-mode install the bridge is callable: either the installer registers it in each agent configuration it already edits, or the install prints the exact per-agent registration step. A mode whose artifact nothing is configured to run is not installed.",
+      "mechanism": "install.sh chooses WHICH binary to copy by mode (integration_file_allowed) and removes the other mode's binary on a switch (remove_stale_integration_binaries) -- that half works. What is missing is the step after: nothing writes an MCP server entry into any agent config, so the adapter lands on disk and no agent knows it exists. 70-permissions.sh already edits ~/.claude settings and opencode.json through rjq, so the machinery is there and was never extended; codex needs TOML, which rjq cannot write.",
+      "surfaces": [
+        "installer/src/60-install.sh",
+        "installer/src/70-permissions.sh",
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp, starting the chat MCP harness wiring; the premise that the editor bridge already registers itself does not hold",
+      "notes": "Three config shapes, not one: Claude Code takes mcpServers in ~/.claude.json or a project .mcp.json, opencode takes an mcp block in opencode.json, and codex takes [mcp_servers.<name>] in ~/.codex/config.toml. The first two are JSON the installer already edits with rjq; the third is TOML and needs either a writer or a printed snippet. SCOPE CORRECTED. The entry first read as though --integration only picked a binary and did nothing else. It also cleans up: measured on a real target, --integration skill installs chat-client-rs and chat-server-rs, then --integration mcp leaves chat-mcp and chat-server-rs with chat-client-rs removed. Michael's toggle-with-mutual-cleanup was implemented and is not what is missing; registration is. aiskills endorsed the wider claim without checking it, having asserted the opposite in the same conversation.",
+      "created_at": "2026-09-07T21:32:43Z",
+      "updated_at": "2026-09-07T21:40:54Z"
+    },
+    {
+      "id": "B285",
+      "title": "toggling an mcp-mode skill back to skill mode leaves every registered MCP entry pointing at a deleted binary",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In an isolated HOME and target: install.sh --skill chat --integration chat=mcp --target T --yes, then install.sh --skill chat --integration chat=skill --target T --yes, listing T/chat/bin/<triple>/ after each. An agent config registering the adapter names <skill root>/bin/<triple>/chat-mcp, which is the path the second install removes.",
+      "observed": "after mcp:   chat-mcp chat-server-rs / after skill: chat-client-rs chat-server-rs. The adapter binary an mcp registration points at is gone, and nothing tells the agent whose config still names it. The registration is by hand today, so nothing in the repository knows it exists to clean it up.",
+      "expected": "A mode switch that removes an artifact either removes the registrations that name it, or says plainly that it has just invalidated them and how to undo that.",
+      "mechanism": "remove_stale_integration_binaries deletes the other mode binary on a switch, which is correct for disk hygiene, and a registration is a reference to that path held OUTSIDE the installer, in each agent config. Nothing connects the two, so the toggle is silently destructive to a reference it cannot see.",
+      "surfaces": [
+        "installer/src/50-manifest.sh",
+        "installer/src/60-install.sh",
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills raised the lifecycle question on B284; t90-chat-mcp measured the toggle in an isolated HOME and target",
+      "notes": "B284 is \"nothing registers the adapter\"; this is \"a registration that exists does not survive a toggle\". They are the two halves of one lifecycle and the order matters: writing registrations without removing them on toggle-away adds a second thing that dangles instead of fixing the first. Live today for the editor, which Michael registered by hand in all three configs pointing into the skill root.",
+      "created_at": "2026-09-07T21:45:01Z",
+      "updated_at": "2026-09-07T21:45:13Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -3611,7 +3792,7 @@
     {
       "id": "B274",
       "title": "two chat tests start servers that announce on the machine's live beacon port",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3623,12 +3804,77 @@
         "chat/tests/test-chat-broadcast-stall.sh",
         "chat/tests/test-chat-descriptor-leak.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "416dfb25 on fix/b274-suite-beacon-isolation — both servers start with CHAT_BEACON_PORT set to a port nothing listens on (47992, 47993)",
+      "verification": "Observed both ways with the same binary: with no CHAT_BEACON_PORT the server logs 'announcing 127.0.0.1:44947 every 2s on UDP 7780'; with CHAT_BEACON_PORT=47992 it logs 'announcing 127.0.0.1:35773 every 2s on UDP 47992'. Both suites pass with the change: test-chat-broadcast-stall.sh PASS, test-chat-descriptor-leak.sh PASS. CHAT_BEACON_PORT rather than CHAT_ANNOUNCE=0 keeps the announce socket, which the descriptor-leak ceiling is measured against.",
       "found_by": "t90-chat-mcp, auditing the chat suite after B270",
       "notes": "B270 is the same isolation boundary crossed the other way: there the suite CONSUMES the live beacon and resolves to a real server. Fixing either leaves the other open.",
       "created_at": "2026-09-07T20:14:59Z",
-      "updated_at": "2026-09-07T20:14:59Z"
+      "updated_at": "2026-09-07T20:59:50Z"
+    },
+    {
+      "id": "B277",
+      "title": "a failed install leaves a half-written skill directory and reports it as a raw cp error",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git archive origin/master | tar -x -C /tmp/fresh; cd /tmp/fresh; bash install.sh --skill bug-report --target /tmp/installed --yes; echo \"exit=$?\"; ls /tmp/installed/bug-report",
+      "observed": "exit=1, with the only diagnosis being \"cp: cannot stat '/tmp/fresh/bug-report/bin/x86_64-unknown-linux-musl/bugs': No such file or directory\". /tmp/installed/bug-report exists and holds SKILL.md, both schemas, docs/, binaries.tsv and requires.tsv -- everything except the binary and .version, which is written after the copies and so never runs.",
+      "expected": "Either nothing is written when a declared artifact is missing, or the partial state is removed on the way out. And the message names the cause and the way forward -- the crates are not built in this tree, run ./setup-dev-env.sh -- rather than a cp error naming a path the reader has to work backwards from.",
+      "mechanism": "install_skill copies the manifest files in order and writes the .version marker last (installer/src/60-install.sh, version_marker_content > \"$destination/.version\"). A missing binary fails a cp partway through, so the copies already made stay and the marker is never written. Nothing unwinds the destination, and the cp error is the only thing printed.",
+      "surfaces": [
+        "installer/src/60-install.sh",
+        "install.sh",
+        "tests/test-register-schemas.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, reproducing the fresh-worktree failure t90-chat-mcp asked about",
+      "notes": "Reproduced while answering whether tests/test-register-schemas.sh failing 4x in a fresh worktree was MAINTAINER 1.9 or a defect. It is both: the 1.9 hypothesis is confirmed -- a fresh checkout has no bin/<triple>/ -- and this is what 1.9 looks like from inside a test. Not a sed defect: the test reads .version with sed -n and gets an empty string because the file is absent, and version_marker_content would have written package_version=unknown rather than an empty value had it run at all.",
+      "created_at": "2026-09-07T20:56:00Z",
+      "updated_at": "2026-09-07T20:56:12Z"
+    },
+    {
+      "id": "B279",
+      "title": "chat/SKILL.md's presence tail advances the session cursor, so a later read reports nothing new",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read chat/SKILL.md:201, :234 and :277 together.",
+      "observed": ":201 is a copyable command ending in a bare '&' for the presence tail, and :234 calls backgrounding it with '&' the exception to the rule below. :277 states that rule as 'Start it as a tracked background task, never with a detached &', and :285-287 says a plain '&' inside another command is invisible to the Claude Code harness. The two passages give opposite instructions for the same command.",
+      "expected": "One instruction for how to start the presence tail. On Claude Code that is run_in_background, since the document's own reasoning at :277-283 applies to the presence tail as much as to the guard.",
+      "mechanism": "The exception at :234 was written for the harness-wake argument only: the presence tail is meant to outlive the turn, so nothing needs to be woken when it exits. But :277-283 gives a second, independent reason that the exception does not address - a tail advances the channel cursor as it reads, so an '&' tail invisible to the harness consumes messages that the next read then skips as already seen. That harm is caused by the tail consuming the stream, not by anything waiting on its exit, so it applies to the presence tail unchanged. An agent copying :201 in Claude Code gets the silent message loss :283 records as having already happened.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": "Narrowed after measuring, 2026-09-07. The harness-invisibility half of the original filing does not hold: a bare-& tail spawned from one Claude Code Bash call was still running in the next call (pid 1311541, chat-client-rs), and names listed the probe nick throughout. So :234's exception is correct that & is usable for a tail nothing waits on, and :201 is not wrong for that reason. What remains is the cursor: the presence tail consumes the stream under the caller's session, so a later 'read' correctly reports nothing new, which is the silent loss :283 records. The fix is not to forbid the & but to say beside :201 that the presence tail owns the cursor and the log it writes is what you read - as the nitpicker profile's step 2 now does.",
+      "created_at": "2026-09-07T21:07:49Z",
+      "updated_at": "2026-09-07T21:26:14Z"
+    },
+    {
+      "id": "B287",
+      "title": "test-npm-package packs into a fixed tarball name in the repo root, so two runs in one checkout corrupt each other",
+      "status": "obsolete",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run planning/tests/test-npm-package.sh in one shell while another agent runs it (or any npm pack) in the same checkout.",
+      "observed": "gzip: stdin: unexpected end of file / tar: Unexpected EOF in archive / tar: Error is not recoverable: exiting now, and the test exits 2. Seen three times today with agents sharing this checkout; a clean re-run passes every time.",
+      "expected": "A concurrent run either serialises or fails with a message naming the collision. A test that reports a corrupt archive when the package is fine is worse than one that refuses to start.",
+      "mechanism": "The test runs `npm pack` in the repo root, which writes <name>-<version>.tgz at a path derived only from package.json -- identical for every concurrent run. One run reads the tarball while another is still writing or has already removed it in its cleanup trap. run-tests.sh holds a machine-wide lock, but a test invoked directly (which is how anyone debugs one, and how every agent here runs it) bypasses that lock entirely.",
+      "surfaces": [
+        "planning/tests/test-npm-package.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, after three false readings of this test while other agents worked in the same checkout",
+      "notes": "Duplicate of B286, which the nitpicker filed first for the same defect: test-npm-package packs into a fixed tarball name in the repo root and two runs in one checkout corrupt each other. B286 is the entry; this one adds nothing to it and closes so the register carries one id for one defect.",
+      "created_at": "2026-09-07T21:54:29Z",
+      "updated_at": "2026-09-07T21:55:14Z"
     },
     {
       "id": "B6",
@@ -5554,6 +5800,72 @@
       "updated_at": "2026-09-07T15:32:42Z"
     },
     {
+      "id": "B275",
+      "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "npm pack --dry-run 2>&1 | awk '/agents/'",
+      "observed": "package/.agents/profiles/nitpicker.md is listed in the packed contents, and planning/tests/fixtures/overview/npm-package-baseline.tsv carries a row for it at 9847 bytes. The file's own header declares <!-- MODE: DEV -->, which CODE-CONTRACTS.md contract 10a defines as 'only a maintainer needs it'.",
+      "expected": "No MODE: DEV file reaches an end user. Every other maintainer-only path under .agents/ is excluded by name in package.json files -- '!.agents/knowledge/**', '!.agents/skill-loading-experiment/**', '!.agents/skill-loading-findings.md' -- so the file list already encodes the rule and profiles/ is the one omission.",
+      "mechanism": "Two artifacts, one marker vocabulary, and only one of them is checked against it. The release tarball is built from skill_files(), which is marker-derived, and tests/test-release-package.sh asserts no MODE: DEV file reaches it -- that gate passes. The npm package is a second artifact whose contents come from package.json's hand-maintained 'files' array, which includes '.agents' wholesale and then subtracts DEV paths one at a time. Nothing cross-checks that array against the MODE markers, so a new DEV path under an included directory ships silently. .gitignore's allowlist gained .agents/profiles/ in the same commit (d6a19cf9) and the npm baseline TSV was updated to accept the new row, which recorded the leak as the expected size rather than surfacing it.",
+      "surfaces": [
+        "package.json",
+        "planning/tests/fixtures/overview/npm-package-baseline.tsv",
+        ".agents/profiles/nitpicker.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T20:38:32Z",
+      "updated_at": "2026-09-07T20:38:32Z"
+    },
+    {
+      "id": "B282",
+      "title": "a doc comment is orphaned when a new item is inserted between it and the item it described",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read src/chat-client-rs/src/lib.rs:2336-2339, then :2393.",
+      "observed": "The comment explaining B271 (a subagent shares its parent process and CLAUDE_CODE_SESSION_ID, and wrote into the parent session file) now opens the doc comment of a_key_carries_the_nick_as_a_findable_suffix, which is a B278 test. The test it actually describes, a_subagent_under_one_harness_id_gets_its_own_session_per_nick, sits at :2393 with no doc comment at all.",
+      "expected": "A comment sits on the thing it describes. CODE-STYLE 11: a comment states a fact about the code it sits on.",
+      "mechanism": "Four tests were inserted between the comment and its test. The same edit shape produced the two findings already reported on installer/src/36-ui-render.sh, where iui_integration_offered was inserted between iui_info_actions and its docblock. Three instances of one pattern: a new item added directly after a comment, taking the comment with it.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "installer/src/36-ui-render.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing 1267ac11 in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:24Z",
+      "updated_at": "2026-09-07T21:18:24Z"
+    },
+    {
+      "id": "B286",
+      "title": "two concurrent test-npm-package runs fight over one tarball in the repo root",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run planning/tests/test-npm-package.sh twice at once from the same checkout, or once while any other process runs npm pack there.",
+      "observed": "One run failed with 'gzip: stdin: unexpected end of file' followed by 'tar: Unexpected EOF in archive' and 'tar: Error is not recoverable: exiting now'. Re-running the same test alone on the same tree PASSes.",
+      "expected": "The test isolates the artifact it builds, as it already isolates its scratch directory, so a concurrent run cannot corrupt it.",
+      "mechanism": "planning/tests/test-npm-package.sh:11 takes a randomised scratch dir with mktemp -d, but :15 runs 'npm pack --silent' in the repository root, and npm names that tarball from the package name and version. Every concurrent run therefore writes and reads the SAME path. :13's EXIT trap then does 'rm -f $repo_root/$tarball', so a run that finishes first deletes the tarball a slower sibling is still reading, and a second pack overwrites one mid-read. Same family as B270 and B274: a test not isolated from other activity on the machine. It bites here because several agents share this checkout and run suites.",
+      "surfaces": [
+        "planning/tests/test-npm-package.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock. The note above about npm pack --pack-destination came from aiskills, appended here by mistake while filing the duplicate B287 -- it belongs on this entry anyway, so it stays rather than being moved. aiskills also measured the same failure three times independently: a tar EOF reads as a broken package rather than a broken test run, so the honest first response is to go looking at packaging.",
+      "created_at": "2026-09-07T21:54:17Z",
+      "updated_at": "2026-09-07T21:55:14Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -5942,29 +6254,6 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B275",
-      "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "npm pack --dry-run 2>&1 | awk '/agents/'",
-      "observed": "package/.agents/profiles/nitpicker.md is listed in the packed contents, and planning/tests/fixtures/overview/npm-package-baseline.tsv carries a row for it at 9847 bytes. The file's own header declares <!-- MODE: DEV -->, which CODE-CONTRACTS.md contract 10a defines as 'only a maintainer needs it'.",
-      "expected": "No MODE: DEV file reaches an end user. Every other maintainer-only path under .agents/ is excluded by name in package.json files -- '!.agents/knowledge/**', '!.agents/skill-loading-experiment/**', '!.agents/skill-loading-findings.md' -- so the file list already encodes the rule and profiles/ is the one omission.",
-      "mechanism": "Two artifacts, one marker vocabulary, and only one of them is checked against it. The release tarball is built from skill_files(), which is marker-derived, and tests/test-release-package.sh asserts no MODE: DEV file reaches it -- that gate passes. The npm package is a second artifact whose contents come from package.json's hand-maintained 'files' array, which includes '.agents' wholesale and then subtracts DEV paths one at a time. Nothing cross-checks that array against the MODE markers, so a new DEV path under an included directory ships silently. .gitignore's allowlist gained .agents/profiles/ in the same commit (d6a19cf9) and the npm baseline TSV was updated to accept the new row, which recorded the leak as the expected size rather than surfacing it.",
-      "surfaces": [
-        "package.json",
-        "planning/tests/fixtures/overview/npm-package-baseline.tsv",
-        ".agents/profiles/nitpicker.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "nitpicker",
-      "notes": null,
-      "created_at": "2026-09-07T20:38:32Z",
-      "updated_at": "2026-09-07T20:38:32Z"
     }
   ]
 }

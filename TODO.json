@@ -528,6 +528,19 @@
       "updated_at": "2026-09-07T20:30:56Z"
     },
     {
+      "id": "T103",
+      "title": "CODE-STYLE 11: say that an item inserted after a comment must not adopt it",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Three instances of one edit shape in a day, each reported separately by the nitpicker: installer/src/36-ui-render.sh twice (iui_integration_offered inserted between iui_info_actions and its docblock, and the same on the pane actions) and src/chat-client-rs/src/lib.rs:2336 (four tests inserted between a B271 comment and the B271 test, so the comment now heads a B278 test and the described test has none).\n\nFiled as B282, but the nitpicker's point is that three corrections are worse value than one rule: CODE-STYLE 11 already says a comment states a fact about the code it sits on, and what is missing is the editing rule that follows from it -- when you insert an item directly after a comment, the comment belongs to what was there before, so move your item below it or carry the comment with the thing it describes.\n\nCheap to enforce beyond prose: a check that a doc comment naming a symbol sits on a symbol of that name would have caught all three.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-07T21:18:44Z",
+      "updated_at": "2026-09-07T21:18:44Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
