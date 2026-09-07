@@ -1003,6 +1003,33 @@ fn expected_text_refuses_the_double_replace_that_corrupted_a_file() {
         "no orphan digit: the buffer must be untouched by the refused edit"
     );
 
+    // An insert deletes nothing, so its span is empty and expected_text there
+    // could only ever mismatch. Refused by name rather than left to fail.
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "--expected-text",
+        longer,
+        "-t",
+        "x",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "text",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "insert must refuse expected_text"
+    );
+    assert!(
+        refusal_text(&refused).contains("expected_text_unsupported"),
+        "{}",
+        refusal_text(&refused)
+    );
+
     // Without expected_text the same call still corrupts, because nothing
     // relates the length to the bytes. This is the control that proves the
     // guard is what refuses above, rather than some other check.

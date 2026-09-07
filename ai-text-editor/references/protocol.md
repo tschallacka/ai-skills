@@ -162,6 +162,10 @@ otherwise, quoting both what was expected and what is actually there. When
 so `delete_len` need not be computed at all; supplying both with different
 lengths is `expected_text_length_mismatch`.
 
+An `insert` deletes nothing, so its span is empty and any `expected_text`
+could only ever mismatch; it is refused with `expected_text_unsupported`
+rather than left to fail confusingly.
+
 This is not the revision guard, and it catches what the revision guard cannot.
 A revision proves the *document* has not moved since the caller last read it. It
 says nothing about whether `delete_len` still matches the text at `offset` — so

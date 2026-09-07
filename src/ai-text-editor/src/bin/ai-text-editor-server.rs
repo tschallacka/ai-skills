@@ -2209,6 +2209,17 @@ fn expected_span_bytes(
         .and_then(Value::as_str);
     match (text, encoded) {
         (None, None) => Ok(None),
+        // An `insert` deletes nothing, so its span is empty and any
+        // expected_text could only ever mismatch. An argument that can only
+        // fail is refused by name rather than left to fail confusingly —
+        // the same rule B180 and B224 are about.
+        _ if envelope.method != "replace" => Err((
+            "expected_text_unsupported",
+            format!(
+                "expected_text verifies the bytes a span replaces and {} deletes nothing; use `replace` (with no text, it deletes the span)",
+                envelope.method
+            ),
+        )),
         (Some(_), Some(_)) => Err((
             "expected_text_conflict",
             "expected_text and expected_bytes_base64 name the same bytes two ways; pass one".into(),
