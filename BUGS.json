@@ -3321,9 +3321,9 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael, noticing editor-batch absent from the nick list while it was actively reporting, 2026-09-07",
-      "notes": null,
+      "notes": "B256 is the discovery half and the cheaper one: the server has answered NAMES all along and no client verb asks. Adding one makes presence queryable on demand, which answers 'is that agent live?' without requiring every agent to hold a tail. It does not replace this entry - a queryable list still shows nothing for an agent that holds no connection, and unreachability is the part that actually costs coordination.",
       "created_at": "2026-09-07T14:36:28Z",
-      "updated_at": "2026-09-07T14:36:28Z"
+      "updated_at": "2026-09-07T14:37:44Z"
     },
     {
       "id": "B6",
@@ -5140,6 +5140,27 @@
       "notes": null,
       "created_at": "2026-09-07T14:29:23Z",
       "updated_at": "2026-09-07T14:29:23Z"
+    },
+    {
+      "id": "B256",
+      "title": "no client verb asks who is on a channel, though the server answers NAMES, WHO and LIST",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "chat-client-rs --help: the verbs are discover, send, read, tail, join, leave, session. None asks for channel membership.",
+      "observed": "An agent cannot find out who is on a channel. The server has handled NAMES since it was written (main.rs:917, answering 353 and 366), plus WHO (:1043) and LIST (:1229), so the capability exists on the wire and nothing exposes it. A standard IRC client gets the answer on join and keeps it live from the relayed JOIN/PART/QUIT; an agent has neither.",
+      "expected": "A verb that asks and prints the members, so 'who is listening right now?' is answerable without holding a connection or parsing a tail. That is also the cheap half of B255: presence becomes queryable on demand rather than requiring every agent to hold a tail to be seen.",
+      "mechanism": "src/chat-client-rs/src/main.rs's verb match covers discover, send, read, tail, join, leave and session. The three membership queries were implemented server-side for the benefit of standard IRC clients and never given a client-side caller.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael asking whether IRC has a way to request the joined members of a channel, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:37:44Z",
+      "updated_at": "2026-09-07T14:37:44Z"
     },
     {
       "id": "B25",
