@@ -2274,6 +2274,27 @@
       "updated_at": "2026-09-07T10:32:50Z"
     },
     {
+      "id": "B229",
+      "title": "open on a path whose parent directory is missing blames the server with failed-to-start instead of naming the absent directory",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "ai-text-editor open -f /tmp/does-not-exist-dir-b229/x.php",
+      "observed": "ai-text-editor: server for /tmp/does-not-exist-dir-b229/x.php failed to start: ai-text-editor-server: cannot resolve /tmp/does-not-exist-dir-b229/x.php: No such file or directory (os error 2) - exit 66. Reproduced verbatim on this machine. Nothing is wrong with the server, and the message offers no recovery. With the parent present the same open succeeds, the tab starts empty and save writes the file, as SKILL.md promises - so the two cases differ only in the parent directory and only one of them says so.",
+      "expected": "open detects the missing parent and uses the wording save already uses for the identical condition, which is excellent: 'the parent directory <dir> does not exist - create it and save again, or close the tab to discard the buffer'. And it is never reported as failed-to-start: the server is fine, the path is not.",
+      "mechanism": "the autostart path reports any server-launch failure as failed-to-start and passes the child's stderr through verbatim; the server's own resolve step reports the ENOENT without distinguishing an absent leaf (legitimate, a new file) from an absent parent (unusable). save already has the good message for this condition, so the wording exists and is simply not reached from open.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer session 2026-09-07, relayed on the chat bus and reproduced here",
+      "notes": null,
+      "created_at": "2026-09-07T10:40:43Z",
+      "updated_at": "2026-09-07T10:40:43Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
