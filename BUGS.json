@@ -3836,7 +3836,7 @@
     {
       "id": "B287",
       "title": "test-npm-package packs into a fixed tarball name in the repo root, so two runs in one checkout corrupt each other",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3850,9 +3850,9 @@
       "fix": null,
       "verification": null,
       "found_by": "aiskills, after three false readings of this test while other agents worked in the same checkout",
-      "notes": null,
+      "notes": "Duplicate of B286, which the nitpicker filed first for the same defect: test-npm-package packs into a fixed tarball name in the repo root and two runs in one checkout corrupt each other. B286 is the entry; this one adds nothing to it and closes so the register carries one id for one defect.",
       "created_at": "2026-09-07T21:54:29Z",
-      "updated_at": "2026-09-07T21:54:29Z"
+      "updated_at": "2026-09-07T21:55:14Z"
     },
     {
       "id": "B6",
@@ -5839,9 +5839,9 @@
       "fix": null,
       "verification": null,
       "found_by": "nitpicker",
-      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock.",
+      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock. The note above about npm pack --pack-destination came from aiskills, appended here by mistake while filing the duplicate B287 -- it belongs on this entry anyway, so it stays rather than being moved. aiskills also measured the same failure three times independently: a tar EOF reads as a broken package rather than a broken test run, so the honest first response is to go looking at packaging.",
       "created_at": "2026-09-07T21:54:17Z",
-      "updated_at": "2026-09-07T21:54:29Z"
+      "updated_at": "2026-09-07T21:55:14Z"
     },
     {
       "id": "B25",
