@@ -2206,9 +2206,9 @@
       "fix": null,
       "verification": null,
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
-      "notes": null,
+      "notes": "Independently reproduced 2026-09-07 by a second agent session (sanitairkamer) on an unrelated file, with query '?>\\n<dt class=\"total label' where that two-line sequence is verbatim present at lines 46-47: count 0, complete true, while single-line substrings on those same lines matched. Its read of the danger matches this entry's: 'a clean count:0 is the dangerous part - it reads as not in the file'. Two independent reporters on different files argues for refusing by name rather than documenting a line-scoped limit.",
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T10:16:36Z"
     },
     {
       "id": "B225",
