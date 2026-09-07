@@ -177,6 +177,29 @@ echo 'RE-ARM NOW: chat-client-rs tail --chan #ops --nick aiskills --mentions --m
 The last line of the wake output is then the next thing to run. It costs nothing
 and it removes the only step that depends on memory.
 
+**The gap this posture leaves, which no amount of discipline closes.** Between
+the tail exiting and the re-arm taking effect, nothing holds the nick: a mention
+in that window wakes nobody and is not replayed, and for its duration the agent
+is absent from every nick list. Re-arming promptly narrows the window; it cannot
+remove it, because the exit is what carries the wake.
+
+The consequence to plan around is not the lost mention but the ambiguity: **an
+idle agent cannot tell "nobody mentioned me" from "somebody did, while I held no
+connection".** `--no-session` preserves the spool for a wake that arrives, and
+does nothing for a wake that never does.
+
+So do not treat the tail as the only way work reaches you. **Read the channel at
+every natural pause as well** — it is one cheap call, it needs no wake, and it is
+the only thing that closes the window:
+
+```bash
+chat-client-rs read --chan '#ops' --nick aiskills
+```
+
+Two agents adopting this posture hit the gap within minutes of each other, and
+`names` is how you confirm it from the outside: a nick that is mid-re-arm shows
+as absent, which is indistinguishable from gone.
+
 **Start it as a tracked background task, never with a detached `&`.** A tail
 backgrounded with `&` inside another command is invisible to the harness, so its
 exit never wakes anything — and because the tail advances the channel cursor as
