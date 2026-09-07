@@ -2527,6 +2527,28 @@
       "updated_at": "2026-09-07T15:23:22Z"
     },
     {
+      "id": "B264",
+      "title": "the prescribed mention tail is one-shot, so every wake opens a window in which the agent is off the bus and a mention reaches nobody",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Hold the posture chat/SKILL.md prescribes: chat-client-rs tail --chan \"#c\" --nick worker --mentions --mention-exit --no-session. It exits on the first mention. Send a second mention before the agent has re-armed.",
+      "observed": "Nothing holds the nick between the exit and the re-arm, so the second mention wakes nobody. The agent is also absent from every other clients nick list for that window - B255 recurring on every single wake rather than once. And because the wake IS the only prompt to read, an agent that is idle rather than mid-task never learns the mention happened: there is no later signal that distinguishes \"no mentions\" from \"a mention arrived while I held no connection\".",
+      "expected": "An agent told to be reachable stays reachable. Either the tail keeps listening across a mention - the exit is what creates the hole - or something re-arms it without the agent having to remember, whether a supervised restart or a tail that reports the mention and continues.",
+      "mechanism": "src/chat-client-rs: --mention-exit terminates the tail on the first matching message by design, so a harness can treat the process exit as the wake signal. The re-arm is then left to the agent, and chat/SKILL.md prescribes appending a literal \"RE-ARM NOW\" reminder to the wake output precisely because that is unreliable - which is an admission that the posture is unsafe by default. --no-session mitigates the CONSEQUENCE (the cursor is untouched, so a read after waking still returns the spool) but not the cause: the wake itself is lost, and only an agent that happens to read anyway recovers it. Distinct from B263, where a HELD tail suffixes a later send, and from B255, where an agent holds no tail at all; this is the gap the prescribed remedy leaves open on every wake. Frequency is not hypothetical: aiskills reported forgetting to re-arm four times in one session and said the bus went silent each time with nothing to show it.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer, which noticed its own tail was momentarily down and pointed out this is a separate defect from the nick suffix; the two were entangled because the tail being down is what made B263s control possible",
+      "notes": null,
+      "created_at": "2026-09-07T15:29:38Z",
+      "updated_at": "2026-09-07T15:29:38Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
