@@ -1,0 +1,30 @@
+# MODE: PROD
+# Which artifacts belong to which integration mode.
+#
+# A skill that offers more than one way to be driven declares it here, and
+# `install.sh --integration <skill>=<mode>` picks one without a prompt, so an
+# agent can choose its own interface headlessly.
+#
+# The rule is deliberately narrow: a binary named below installs ONLY in its
+# mode, and every file not named installs in every mode. So SKILL.md, the
+# requirements table and the binaries registry are never mode-dependent.
+#
+# `skill` is the default, because it is the interface that needs no client
+# configuration -- which is what a `curl | bash` install has to leave working.
+# `mcp` is opt-in: its tools are listed in every session that configures the
+# server, so it is worth choosing rather than assuming.
+#
+# chat-server-rs is deliberately UNLISTED, not `skill`-only. Somebody has to
+# run the server, and in mcp mode that somebody is the same agent: the adapter
+# finds a server and refuses to guess a port, but it does not start one. An
+# mcp-only install with no server binary would be an install that can only ever
+# join a channel somebody else's install created.
+#
+# chat-mcp needs no chat-client-rs beside it: the client is a LIBRARY it links,
+# not a process it spawns, so discovery, the TOFU pin and the session are the
+# same code either way. What a `skill`-mode install keeps that an mcp one gives
+# up is the CLI's own maintenance path -- `read --local`, which walks the
+# channel log with no server at all.
+mode	binary	why
+skill	chat-client-rs	Short-lived client the skill's own instructions drive
+mcp	chat-mcp	MCP bridge an agent calls as typed tools instead

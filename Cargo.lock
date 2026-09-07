@@ -228,6 +228,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-mcp"
+version = "0.1.0"
+dependencies = [
+ "chat-client-rs",
+ "chat-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "chat-proto"
 version = "0.1.0"
 

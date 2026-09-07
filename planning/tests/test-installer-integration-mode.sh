@@ -57,7 +57,8 @@ t_begin
 # installs succeed, the assertions compare the wrong thing, and the only
 # symptom is that the test takes two minutes.
 source_root="$work/source"
-mkdir -p "$source_root/planning" "$source_root/ai-text-editor/bin/$triple"
+mkdir -p "$source_root/planning" "$source_root/ai-text-editor/bin/$triple" \
+    "$source_root/chat/bin/$triple"
 cp "$repo_dir/install.sh" "$source_root/install.sh"
 printf '# stub: download_source() probes for this file to detect a checkout.\n' \
     > "$source_root/planning/SKILL.md"
@@ -65,6 +66,11 @@ t_copy_tree "$repo_dir/ai-text-editor" "$source_root/ai-text-editor"
 for binary in ai-text-editor ai-text-editor-server ai-text-editor-mcp; do
     printf '#!/bin/sh\nexit 0\n' > "$source_root/ai-text-editor/bin/$triple/$binary$suffix"
     chmod +x "$source_root/ai-text-editor/bin/$triple/$binary$suffix"
+done
+t_copy_tree "$repo_dir/chat" "$source_root/chat"
+for binary in chat-server-rs chat-client-rs chat-mcp; do
+    printf '#!/bin/sh\nexit 0\n' > "$source_root/chat/bin/$triple/$binary$suffix"
+    chmod +x "$source_root/chat/bin/$triple/$binary$suffix"
 done
 
 # Which artifacts landed, one basename per line, sorted.
@@ -136,10 +142,33 @@ t_expect_exit 64 'an undeclared mode is refused per skill' \
     "$source_root/install.sh" --skill ai-text-editor --integration ai-text-editor=bogus \
     --target "$work/refused" --yes
 # ---- 7. Naming a skill that offers no choice is a mistake about the tool, so
-#         it is refused rather than accepted as a preference. chat has no MCP
-#         server at all today -- TODO.json T90 is the request for one.
+#         it is refused rather than accepted as a preference. todo declares no
+#         integration.tsv, so it has one mode and the flag is meaningless to it.
 t_expect_exit 64 'a skill with no modes refuses the flag' \
-    "$source_root/install.sh" --skill chat --integration chat=mcp \
+    "$source_root/install.sh" --skill todo --integration todo=mcp \
     --target "$work/refused" --yes
+
+# ---- 8. chat is the second skill to offer the choice (T90), and the shape is
+#         the same in both directions: the bridge or the CLI, never both, and
+#         the server in either mode -- somebody has to run one, and in mcp mode
+#         that is the same agent.
+install_chat_with() { # <target-name> <flag...>
+    local target="$work/$1"
+    shift
+    rm -rf "$target"
+    ( cd "$source_root" && ./install.sh --skill chat \
+        --target "$target" --yes "$@" >/dev/null 2>&1 )
+    installed_binaries "$target"
+}
+
+t_assert_eq 'chat mcp mode installs the bridge and the server, not the CLI' \
+    "$(install_chat_with chatmcp --integration chat=mcp)" \
+    "chat-mcp$suffix chat-server-rs$suffix "
+t_assert_eq 'chat skill mode installs the CLI and the server, not the bridge' \
+    "$(install_chat_with chatskill --integration chat=skill)" \
+    "chat-client-rs$suffix chat-server-rs$suffix "
+t_assert_eq 'chat with no flag installs the CLI and the server' \
+    "$(install_chat_with chatdefault)" \
+    "chat-client-rs$suffix chat-server-rs$suffix "
 
 t_end
