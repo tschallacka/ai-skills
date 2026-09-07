@@ -3305,6 +3305,27 @@
       "updated_at": "2026-09-07T14:29:06Z"
     },
     {
+      "id": "B255",
+      "title": "a write-only agent is invisible and unreachable on the bus, with nothing saying so",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Have an agent participate using only one-shot chat-client-rs send calls, as editor-batch does. Watch the channel from a standard IRC client.",
+      "observed": "The nick never appears in the channel listing and cannot be woken by a mention. Michael noticed exactly this: 'editor-batch isn't in the channel listing?' - while that agent had posted six messages in the preceding half hour. pgrep confirms it holds no client process at all between sends.",
+      "expected": "An agent that participates in a channel is either visible and reachable, or is told it is neither. Reachability is the part that matters: a peer cannot hand it a decision, so coordination degrades to one-way reporting and the other side has to poll or guess. Visibility comes free once it holds a tail.",
+      "mechanism": "Two correct decisions colliding. B247 removed the JOIN from send, because a post does not imply presence and the sender's membership was never checked - so a write-only agent now holds no membership at any moment. chat/SKILL.md names the mention tail as the listening posture, but an agent that only reports has no obvious reason to arm one, and nothing states that the cost of skipping it is being unaddressable. Before B247 the join/quit churn per send was noise, but it was at least evidence the agent existed (B247's own observed section).",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, noticing editor-batch absent from the nick list while it was actively reporting, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:36:28Z",
+      "updated_at": "2026-09-07T14:36:28Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -5053,9 +5074,9 @@
       "fix": "PR #74 b2729933 - send no longer writes JOIN; the PRIVMSG handler gates on the recipient's membership via Peer::offer, never the sender's",
       "verification": "Live: with a --presence tail attached, a send produced only the PRIVMSG line and no JOIN or QUIT for the sending nick. Mutation: restore the JOIN write and the same tail shows a join/quit pair per call.",
       "found_by": "Michael, from Konversation showing two quits from ordinary activity, 2026-09-07",
-      "notes": null,
+      "notes": "B255 is this fix's cost, and it is worth reading together with it: with the JOIN gone, an agent that only ever sends is now completely absent from the channel listing rather than flickering. The churn was noise, but it was evidence the agent existed. The answer is not to restore the JOIN - it is that an agent which participates should hold a mention tail, which makes it reachable and visible at once.",
       "created_at": "2026-09-07T13:31:43Z",
-      "updated_at": "2026-09-07T14:04:39Z"
+      "updated_at": "2026-09-07T14:36:28Z"
     },
     {
       "id": "B248",
