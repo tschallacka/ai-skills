@@ -294,8 +294,6 @@ iui_info_push() {
     IUI_INFO_TEXT+=("$IUI_PAD"); IUI_INFO_ROLE+=("$role"); IUI_INFO_TAG+=("$tag")
 }
 
-# The actions are always listed; they are only *usable* when the info pane has
-# focus, and the leading marker says which state they are in.
 # The modes the skill under the cursor offers, space-delimited and space-framed
 # so a membership test needs no special case for the first or last entry. Empty
 # for a skill that declares none, which is most of them: one way to be driven is
@@ -312,6 +310,8 @@ IUI_MODES_EOF
     [ -z "$IUI_INTEGRATION_OFFERED" ] || IUI_INTEGRATION_OFFERED=" $IUI_INTEGRATION_OFFERED"
 }
 
+# The actions are always listed; they are only *usable* when the info pane has
+# focus, and the leading marker says which state they are in.
 iui_info_actions() {
     local width="$1" marker role index="$IUI_CURSOR" current
     if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi

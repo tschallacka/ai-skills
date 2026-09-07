@@ -2340,8 +2340,6 @@ iui_info_push() {
     IUI_INFO_TEXT+=("$IUI_PAD"); IUI_INFO_ROLE+=("$role"); IUI_INFO_TAG+=("$tag")
 }
 
-# The actions are always listed; they are only *usable* when the info pane has
-# focus, and the leading marker says which state they are in.
 # The modes the skill under the cursor offers, space-delimited and space-framed
 # so a membership test needs no special case for the first or last entry. Empty
 # for a skill that declares none, which is most of them: one way to be driven is
@@ -2358,6 +2356,8 @@ IUI_MODES_EOF
     [ -z "$IUI_INTEGRATION_OFFERED" ] || IUI_INTEGRATION_OFFERED=" $IUI_INTEGRATION_OFFERED"
 }
 
+# The actions are always listed; they are only *usable* when the info pane has
+# focus, and the leading marker says which state they are in.
 iui_info_actions() {
     local width="$1" marker role index="$IUI_CURSOR" current
     if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi
@@ -4788,24 +4788,6 @@ not grant broad or all-tools access.
 PROMPT
 }
 
-# The worktrees root is granted on its own, and unconditionally. Two reasons it
-# is not folded into planning_permission_step: an agent takes a worktree
-# whatever skills were selected, so gating it on planning left every
-# non-planning install with no grant at all; and the paths have nothing to do
-# with each other.
-#
-# Read, Edit AND Write, all three. Edit alone covers changing a file that
-# already exists, so CREATING one still prompted — which is most of what working
-# in a fresh checkout consists of. Bash joins them because a checkout carries
-# its own scripts (./pre-push-check.sh, ./run-tests.sh) that an agent has to
-# run, the same reasoning the planning temp dir already gets.
-#
-# The rules name the worktrees root and nothing above it, deliberately. The
-# obvious-looking home for this was under tsch-ai-skills/, beside bin/ — but
-# that tree also holds the chat server's server.key, the editor's private
-# session registry and, on a shared install, the installed binaries. A
-# directory an agent may freely write must not be the one holding a private key
-# and the binaries the agent is running, so tsch-ai-worktrees is a sibling.
 # Merge a jq-computed `entries` list into Claude's permissions.allow.
 #
 # $1 is a jq fragment defining `entries`, $2 the line to print when everything
@@ -4872,10 +4854,6 @@ claude_worktrees_permissions() {
 ];' 'worktree grant already in place' --arg worktrees "$worktrees"
 }
 
-# Merge a jq-computed `wanted` list of [tool, [patterns]] pairs into opencode's
-# permission block. Same split, and for the same reason, as claude_merge_allow:
-# $1 defines `wanted`, $2 is the config path, $3 the already-present line, and
-# the rest goes to rjq.
 # The shared jq preamble for an opencode permission merge, given a fragment
 # defining `wanted`. Its own function so the merge below stays inside the
 # 40-line cap.
@@ -4898,6 +4876,10 @@ def base:
 PROGRAM
 }
 
+# Merge a jq-computed `wanted` list of [tool, [patterns]] pairs into opencode's
+# permission block. Same split, and for the same reason, as claude_merge_allow:
+# $1 defines `wanted`, $2 is the config path, $3 the already-present line, and
+# the rest goes to rjq.
 opencode_merge_permission() {
     local wanted_def="$1" cfg="$2" present_label="$3"
     shift 3

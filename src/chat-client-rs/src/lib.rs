@@ -2333,10 +2333,6 @@ mod tests {
         );
     }
 
-    /// A Claude Code subagent shares its parent's process and its
-    /// CLAUDE_CODE_SESSION_ID, so the harness rung alone hands both the same
-    /// key: measured, a subagent joined as itself and wrote into the parent's
-    /// session file, moving the parent's cursors past unread messages.
     /// B278. The nick is a suffix on an identity that does not include it, so
     /// a call with no --nick can still find the session it owns. Hashing the
     /// two together made that impossible and broke the one thing a saved
@@ -2390,6 +2386,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A Claude Code subagent shares its parent's process and its
+    /// CLAUDE_CODE_SESSION_ID, so the harness rung alone hands both the same
+    /// key: measured, a subagent joined as itself and wrote into the parent's
+    /// session file, moving the parent's cursors past unread messages.
     #[test]
     fn a_subagent_under_one_harness_id_gets_its_own_session_per_nick() {
         let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
