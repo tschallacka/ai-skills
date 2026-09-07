@@ -37,6 +37,33 @@ directory named, and nothing is created; retry with
 confirmation is the point — a silent recursive create would build a directory
 tree out of a typo.
 
+## Addressing a tab
+
+Every response reports a `tab_id`, and that id is addressing enough on its own
+for every verb — no path, no endpoint:
+
+```text
+ai-text-editor read --tab-id 4f2a...      # no -f needed
+ai-text-editor replace --tab-id 4f2a... --range-start-line 3 --range-end-line 3 -t 'new line' -r 7
+```
+
+Lost the id? Name the tab by its filename, or by enough of its path to be
+unique, with `--tab-path`. Matching is on path components, not substrings. If
+the fragment names more than one open tab the request is refused with
+`tab_ambiguous` **and the candidates with their ids**, so the next attempt is
+informed rather than another guess; if it names none, `tab_unmatched` lists
+what is open.
+
+A request that names nothing at all runs on the **focused** tab: the tab the
+last successful call under this identity was served by. `open` focuses the tab
+it opens, so "open, then work" means what it looks like, and a refused call
+never moves the focus. With no focus and nothing named, the request is refused
+with all four forms named rather than served by a tab nobody chose.
+
+**Every response names the tab it answered.** That is the safety half of
+allowing an unmarked request: check `tab_id` in the answer rather than assuming
+the focus was where you left it.
+
 Opening a second, unrelated file does not start a second,
 unrelated server: this agent's already-running workspace is found again
 automatically, and the file is added to it as a new tab — the way opening a
@@ -123,7 +150,13 @@ same way the CLI does.
 2. Inspect text as UTF-8, exact raw bytes, or 16-byte-row hex pairs; a text
    read honors an inclusive line range
    (`--range-start-line`/`--range-end-line`) and a raw or hex read a
-   half-open byte range (`--range-start-byte`/`--range-end-byte`).
+   half-open byte range (`--range-start-byte`/`--range-end-byte`). Choose the
+   mode per tab with `open --document-mode raw_bytes|hex_view` — a property of
+   the tab, not of the workspace, so it applies to a file added to an
+   already-running workspace as much as to the first one. A tab's mode is
+   fixed for its lifetime (its buffer, index and coordinates all committed to
+   one reading of the bytes): reopening one under a different mode is refused
+   with `document_mode_conflict`, and `close` then `open` is how to change it.
 3. Use one-based line and zero-based scalar columns for text; raw and hex use
    byte offsets. Invalid UTF-8 is never replaced silently: use raw or hex mode.
 4. Opt into NFC normalization with explicit restoration-conflict reporting.
@@ -174,7 +207,9 @@ same way the CLI does.
     demonstrably gone is reclaimed automatically by the next `open` (which
     replays the journal); only when the owning process is still alive or
     unknown does a replacement require the explicit `--takeover-stale-endpoint`
-    flag after verifying ownership.
+    flag (MCP: `takeover_stale_endpoint`) after verifying ownership. The
+    refusal names the recorded pid and generation so there is something to
+    verify against.
 13. Query `open` or the read-only `resources` command for available memory,
    estimated server overhead, recommended working set, and the active
    large-file threshold before accepting a costly rewrite.
@@ -188,7 +223,11 @@ same way the CLI does.
 ## Agent responsibilities
 
 1. Select every search and presentation mode explicitly when the default is not
-   desired; do not infer fuzzy, regex, wildcard, byte, or path search.
+   desired; do not infer fuzzy, regex, wildcard, byte, or path search. An
+   argument the verb you are calling does not read is refused by name with
+   `unknown_argument`, and the refusal lists the keys that verb does accept —
+   it is checked per verb, so an argument that is valid on a *different* verb
+   is refused here too rather than silently ignored.
 2. Treat revisions, result generations, completeness, and stale-page errors as
    authoritative; refetch after a change instead of applying stale coordinates.
 3. Acknowledge recovery, large-file work, force-save, and other safety prompts.
@@ -200,7 +239,9 @@ same way the CLI does.
    stale revisions are never merged implicitly.
 6. A request that names a file is only served by the tab holding that file;
    a request routed to a different tab is refused with `file_mismatch` and
-   the fix is to `open` the named file first. Mutating `--offset`/`--delete-len`
+   the fix is to `open` the named file first. Prefer `--tab-id` once you hold
+   one: it addresses the tab directly and cannot be mismatched. Read the
+   `tab_id` in every answer rather than assuming which tab served it. Mutating `--offset`/`--delete-len`
    address bytes, not columns, and a delete that crosses a line end is
    reported as `spans_lines`.
 7. Keep snapshots/commits in the surrounding workflow when useful; the editor

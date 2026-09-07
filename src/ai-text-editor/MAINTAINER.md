@@ -239,7 +239,49 @@ regardless of order or repetition.
 The no-file identity resume case (`open --agent NAME` alone) still uses a
 single slot per identity (`file: None`) — there is no file to key by, and
 that call means "resume whatever tab I was last using," which a single slot
-answers correctly.
+answers correctly. That slot is now also the **focused tab** (T98): see below.
+
+## Addressing: id first, path as recovery, focus as default
+
+T96–T98, one design, and worth reading as one. The problem is Michael's: an AI
+editor is forgetful, and B225 solved re-finding a *file* while leaving the
+*tab* — the thing that actually holds the buffer, the revision and the cursors
+— reachable only by path or by a token the caller had to keep.
+
+Three handles, tried in this order, and the order is the design:
+
+1. **`tab_id`** wins, because it is the most specific thing a caller can say.
+   `session::resolve_tab` turns an id into the endpoint that serves it *and*
+   the token that authorizes it, so an id alone is a complete request for any
+   verb. Its failure is deliberately **fatal rather than a fall-through**: a
+   caller that named a tab did not ask for whichever tab discovery would have
+   found instead, and quietly serving that one is the exact silent
+   mis-addressing this design exists to stop.
+2. **`tab_path`** is the recovery, not a convenience. Matching is on path
+   *components*, so `port.txt` does not name `report.txt`; and an ambiguous
+   fragment answers with the candidates and their ids rather than a guess or a
+   bare refusal, because "no" leaves an agent with nothing to try next. Only
+   the server can build that set — it is the only side that knows what is
+   open — which is why the client resolves the workspace by identity and lets
+   the server do the matching.
+3. **The focus** is the identity-wide cache slot above, which is why T98 needed
+   almost no new machinery. The bug was that nothing ever *wrote* it, and the
+   accident that left behind was worse than the gap: a bare request was served
+   by whichever tab a no-file call had cached **first**, so `open B` followed by
+   an unmarked read silently read A. A successful call now focuses the tab that
+   served it; a refused one never does, because the tab that answered a refusal
+   is not the tab the caller meant.
+
+The safety half is that **every response names its tab**. An unmarked request
+is only tolerable if the answer says where it went — otherwise a caller whose
+assumption about the focus was wrong finds out from the damage. That is also
+why `tab_id` sits at verbosity level 0 (T99): it is not metadata.
+
+A tab id is not a weaker credential than the session token it stands for —
+`tab_uuid_for` is a BLAKE3 of that token and the server generation — so
+accepting it as authorization is not a loosening. It is the *stable* half of
+the pair: short, safe to quote in every answer, and the half an agent can carry
+in its own notes.
 
 ## stale-lock: what the guarantee actually is
 

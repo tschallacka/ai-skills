@@ -11,6 +11,42 @@ path or creates a new isolated tab in that server. Each tab receives a distinct
 session token and metadata database; a token for one tab cannot authorize
 another. Closing one tab leaves the endpoint alive while other tabs remain.
 
+## Addressing a tab
+
+A request says which tab it means in one of four ways, and they are tried in
+this order:
+
+1. **`tab_id`** — the handle every response reports. It is addressing enough on
+   its own, for every method including the job methods: the session registry
+   knows which endpoint serves that tab and which token authorizes it, so a
+   caller holding an id needs no path, no cache and no identity. An id that
+   names no tab is refused with `tab_unknown` and the open tabs listed; it
+   never falls through to whichever tab discovery would have found instead,
+   because a caller that named a tab did not ask for a different one.
+2. **`tab_path`** — a filename, or a trailing run of path components, naming an
+   open tab. The recovery for a caller that has lost the id. Matched on
+   component boundaries, not as a substring, so `port.txt` does not name
+   `report.txt`. Naming several tabs is refused with `tab_ambiguous` and a
+   candidate list of `{tab_id, path}`; naming none with `tab_unmatched` and the
+   open tabs. Neither is a guess and neither is a bare error — the answer to
+   "which one did you mean" is the set, with the ids needed to say.
+3. **`file`** — the path. See below: naming a file also opens it.
+4. **Nothing at all** — the session's *focused* tab, which is the tab the last
+   successful call under this identity was served by. `open` focuses the tab it
+   opens, so "open, then work" means what it looks like. A refused call never
+   moves the focus: the tab that answered a refusal is not the tab the caller
+   meant. With no focus and nothing named, the request is refused with the four
+   forms above named, rather than served by a tab nobody chose.
+
+`tab_id` is not a weaker credential than the session token it stands for: it is
+a BLAKE3 of that token and the server generation, so holding one is holding the
+other. It is the stable, quotable half of the pair, and the half an agent can
+carry in its own notes.
+
+**Every response names the tab it answered**, in `tab_id`. That is the other
+half of allowing an unmarked request at all: a caller that assumed the wrong
+focus has to be able to see it in the answer rather than in the damage.
+
 Naming a `file` on a request means "act on that file's tab", and opening it is
 part of that. Every method does it, not only `open`: a client that discovers no
 tab for the named file opens one and starts a server if none is running, then
@@ -39,9 +75,20 @@ the owning `pid`, the server `generation`, and `status: active`; clients may
 still read legacy plain endpoint files. Graceful shutdown removes the active
 record. A crashed Unix server leaves its socket and record in place so that
 the next server cannot silently impersonate it. Startup refuses an unreachable
-socket until the operator explicitly supplies `--takeover-stale-endpoint`; the
-old record is renamed with a `stale-` suffix before replacement. The agent is
-responsible for verifying the recorded owner is gone before taking over.
+socket until `--takeover-stale-endpoint` is explicitly supplied; the old record
+is renamed with a `stale-` suffix before replacement. The caller is responsible
+for verifying the recorded owner is gone before taking over. Both clients carry
+that confirmation through: the CLI as `--takeover-stale-endpoint` and the MCP
+adapter as `takeover_stale_endpoint`, forwarded to the server this call starts.
+Without it the refusal names the recorded pid and generation and nothing is
+replaced.
+
+A record whose path would be too long to hold a Unix socket beside it — the
+`sun_path` limit — is written to a fallback directory instead, keyed to both
+the runtime directory it stands in for and the user it belongs to. It used to
+be one machine-global directory, which silently abandoned the isolation the
+configured runtime directory expresses and left one 0700 directory shared
+between every user on the host.
 
 For TCP, the server first sends a `challenge` frame containing a fresh 32-byte
 URL-safe `nonce` and process `generation`. The client replies with an
@@ -65,6 +112,15 @@ parsing presentation text.
 The protocol frame ceiling is 8 MiB. Large raw reads default to and are capped
 at 4 MiB before base64/JSON framing; oversized result or index windows return
 `response_too_large` and must be requested as smaller pages.
+
+An argument no handler for a method reads is refused with `unknown_argument`,
+naming the key, the method, and the keys that method does accept. The check is
+per method: a key belonging to a *different* method is refused too, which it
+was not before — one protocol-wide list let `replace` name `range_start_line`
+because `read` takes that key, and the replace handler then dropped all four
+range keys and edited at the cursor instead. The MCP adapter's advertised
+`inputSchema` is built from the same declaration the server refuses against, so
+a key one surface offers and the other rejects cannot exist.
 
 `open` returns a server-issued `session_token` and `server_generation`. The
 client may persist them with `--save-session-token PATH`; subsequent requests
@@ -100,14 +156,26 @@ block list. The response reports `block_count`, `block_offset`, and
 3. `hex_view`: 16-byte rows, complete byte-pair edits only, never nibbles.
 4. Invalid UTF-8 returns `invalid_utf8` for text operations without replacement
    characters; raw/hex modes preserve and save exact bytes.
-5. NFC is opt-in with the server's `--normalize-nfc` startup option.
+5. A tab's mode is chosen per TAB, not per server: `open` takes
+   `document_mode` (`text_utf8`, `raw_bytes`, `hex_view`) and applies it to the
+   tab it opens, whether or not a workspace is already running. It used to
+   shape only a newly started server, which — since every method autostarts and
+   reconnects — meant an agent's very first `open` decided the mode of every
+   tab it would ever open. A tab's mode is fixed for its lifetime, because its
+   buffer, index and every coordinate committed to one reading of the bytes:
+   reopening an existing tab under a different mode is refused with
+   `document_mode_conflict`, and `close` then `open` is the way to change it.
+   An unknown mode name is refused with `document_mode_invalid`. The `mode` a
+   response reports uses these same names, so a caller can compare what it
+   asked for against what it was given.
+6. NFC is opt-in with the server's `--normalize-nfc` startup option.
    Coordinates continue to address stored bytes; normalized search results
    report positions in the normalized presentation. Mapping-preserving edits
    may restore original bytes; lossy edits return `restoration_conflict`.
    The `restore` operation explicitly disables normalized presentation when the
    mapping is still lossless; it returns `restoration_conflict` after a lossy
    normalized edit.
-6. `wrap_width` is optional and reports visual coordinates in addition to the
+7. `wrap_width` is optional and reports visual coordinates in addition to the
    stored logical cursor. Visual rows are one-based and columns are zero-based
    within the wrapped row; newline boundaries always start a new visual row.
    Send `visual: true` with `line` and `column` to interpret the input as a
