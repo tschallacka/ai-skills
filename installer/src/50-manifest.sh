@@ -411,6 +411,7 @@ tests/test-lib-document.sh
 tests/test-lib-progress.sh
 tests/test-lib-table.sh
 tests/test-limited-run-contract.sh
+tests/test-man-page-roff.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
@@ -479,6 +480,7 @@ tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
 tests/test-verifier-reach-memo.sh
 tests/test-voice-artifact-drift.sh
+tests/test-workspace-copy-excludes-build-trees.sh
 EOF
             ;;
         project-specificies)
@@ -645,26 +647,9 @@ ISHEOF
     esac
 }
 
-# Which mode this run installs a skill in: the per-skill choice if one was made,
-# else the run-wide one, else `skill`.
-#
-# `skill` is the default on purpose. It is the interface that needs no client
-# configuration and no running server, which is what a piped-from-curl install
-# has to leave working; an MCP server's tools are listed in every session that
-# configures it, so it is opted into rather than assumed.
-integration_mode_for() {
-    local skill="$1" line
-    # bash 3.2 is the floor and has no associative arrays, so the per-skill
-    # choices are newline-delimited `skill=mode` records.
-    while IFS= read -r line; do
-        case "$line" in
-            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
-        esac
-    done <<INTEGRATION_SELECTION_EOF
-$INTEGRATION_SELECTION
-INTEGRATION_SELECTION_EOF
-    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
-}
+# integration_mode_for() moved to 05-config.sh, beside the INTEGRATION_*
+# variables it reads and the writers that set them: the picker calls it too
+# (T95), and install-ui.sh does not source this part.
 
 # Does this file belong in the mode this skill is being installed in?
 #

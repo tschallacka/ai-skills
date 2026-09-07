@@ -90,6 +90,20 @@ pub fn canonical_or_near(path: &Path) -> io::Result<PathBuf> {
     }
 }
 
+/// The endpoint-record root a given runtime directory implies, and the
+/// fallback used when that root is too long to hold a socket beside a record.
+/// Both, because a caller that has to find or clean up records cannot know
+/// which of the two a given file landed in without repeating the length rule.
+///
+/// Exists because the flow harness *did* repeat it and got it wrong: it swept
+/// one hardcoded path for the servers it had to stop, every record was in the
+/// other, and a run left 173 servers behind (B239).
+pub fn endpoint_roots(runtime_dir: &Path) -> [PathBuf; 2] {
+    let configured = runtime_dir.join("tsch-ai-skills-editor");
+    let fallback = short_root(&configured);
+    [configured, fallback]
+}
+
 pub fn endpoint_for_file(path: &Path) -> PathBuf {
     let configured_root = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -106,11 +120,43 @@ pub fn endpoint_for_file(path: &Path) -> PathBuf {
     if configured.to_string_lossy().len() < 96 {
         return configured;
     }
+    short_root(&configured_root).join(format!("{key}.endpoint"))
+}
+
+/// Where the endpoint records go when the configured root is too long to hold
+/// a Unix socket beside them.
+///
+/// This used to be the machine-global `/tmp/tsch-ai-skills-editor`, one
+/// directory for every root that overflowed and every user on the host. Two
+/// faults came out of that, and the second is what made the first routine:
+///
+///  - Two callers with *different* configured roots landed in one directory,
+///    so the isolation the configured root expresses was silently abandoned.
+///    Measured in `cli_flow`: with the long TMPDIR this repo now mandates for
+///    scratch, every endpoint record all 38 tests wrote left the harness for
+///    the shared directory, and the harness's own cleanup sweep spent the
+///    whole run reading an empty directory. Neither the `sun_path` fallback
+///    nor the TMPDIR mandate is wrong alone; together they are.
+///  - The directory is created 0700 by whoever gets there first, so on a
+///    multi-user host the second user could not write to it at all, and its
+///    name was predictable enough to squat.
+///
+/// Both go away by keying the fallback to the root it stands in for and to the
+/// user it belongs to. One directory level, not two, so the 0700 the record
+/// writers already set on the immediate parent lands on it.
+fn short_root(configured_root: &Path) -> PathBuf {
+    let root_key = blake3::hash(configured_root.to_string_lossy().as_bytes()).to_hex();
     #[cfg(unix)]
-    let short_root = PathBuf::from("/tmp/tsch-ai-skills-editor");
+    let owner = unsafe { libc::getuid() }.to_string();
     #[cfg(not(unix))]
-    let short_root = std::env::temp_dir().join("tsch-ai-skills-editor");
-    short_root.join(format!("{key}.endpoint"))
+    let owner = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+    // /tmp rather than temp_dir() on Unix: temp_dir() honours TMPDIR, and
+    // TMPDIR being long is the very condition that got us here.
+    #[cfg(unix)]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(unix))]
+    let base = std::env::temp_dir();
+    base.join(format!("tsch-ai-skills-editor-{owner}-{}", &root_key[..8]))
 }
 
 pub fn socket_for_file(path: &Path) -> PathBuf {
@@ -459,6 +505,62 @@ mod tests {
         assert!(fs::read_to_string(&path)
             .unwrap()
             .contains("\"status\":\"active\""));
+    }
+
+    /// The `sun_path` fallback must not throw away the isolation the
+    /// configured root expresses.
+    ///
+    /// It used to answer one machine-global `/tmp/tsch-ai-skills-editor` for
+    /// every root that overflowed: two callers with different configured roots
+    /// shared a directory, and on a multi-user host they shared a 0700
+    /// directory owned by whichever got there first. Measured in cli_flow,
+    /// under the long TMPDIR this repo mandates for scratch, that is not a
+    /// corner case - it is what every test in the file did.
+    #[test]
+    fn the_long_path_fallback_is_per_root_and_per_user() {
+        let long = "x".repeat(120);
+        let first = short_root(Path::new(&format!("/run/user/1000/{long}/a")));
+        let second = short_root(Path::new(&format!("/run/user/1000/{long}/b")));
+        assert_ne!(
+            first, second,
+            "two configured roots must not fall back to one directory"
+        );
+        #[cfg(unix)]
+        {
+            let owner = unsafe { libc::getuid() }.to_string();
+            for root in [&first, &second] {
+                let name = root.file_name().unwrap().to_string_lossy().into_owned();
+                assert!(
+                    name.contains(&format!("-{owner}-")),
+                    "the fallback must be per-user, got {name}"
+                );
+            }
+        }
+        // And on Unix it has to be short enough to be the point: a socket
+        // beside the record must still fit a Unix socket address. 108 is the
+        // Linux sun_path size, 104 the macOS one; stay under the smaller.
+        //
+        // Unix only, and not merely because the constant is a Unix one. There
+        // is no Unix socket on Windows at all -- Endpoint::Unix is itself
+        // #[cfg(unix)] and a Windows server answers over loopback TCP -- so no
+        // Windows path is ever a sun_path and nothing there has this budget to
+        // blow. Asserting it anyway failed the Windows leg at 117 bytes on a
+        // path the code does not choose: short_root uses env::temp_dir() off
+        // Unix, so the length was dominated by the runner's own
+        // C:\Users\RUNNER~1\AppData\Local\Temp. Shortening that to satisfy a
+        // limit Windows does not have would trade a real property (the
+        // fallback lives where the OS says temporary files go) for a fake one.
+        #[cfg(unix)]
+        {
+            let record = first.join(format!("{}.endpoint", "f".repeat(32)));
+            let socket = record.with_extension("sock");
+            assert!(
+                socket.as_os_str().len() < 104,
+                "the fallback socket path is {} bytes: {}",
+                socket.as_os_str().len(),
+                socket.display()
+            );
+        }
     }
 
     #[test]

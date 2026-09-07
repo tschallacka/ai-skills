@@ -50,9 +50,28 @@ fn terminate(pid: u32) {
     }
 }
 
+/// Whether a pid still names a live process. `kill(pid, 0)` asks the kernel
+/// without sending anything, which is the only honest way to assert a server
+/// this harness was supposed to stop is actually gone.
+fn process_is_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::c_int, 0) == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 struct Harness {
     scratch: PathBuf,
     agent: String,
+    /// Every client this harness ran, by the session id it was spawned into.
+    /// See `run` for why the session and not the pid, and `Drop` for what is
+    /// done with them.
+    sessions: std::cell::RefCell<Vec<u32>>,
 }
 
 impl Harness {
@@ -78,10 +97,17 @@ impl Harness {
         let scratch = std::fs::canonicalize(scratch).unwrap();
         Self {
             scratch,
+            sessions: std::cell::RefCell::new(Vec::new()),
             // A literal identity keeps each test's workspace isolated from
             // any harness session this test process itself runs under.
             agent: format!("flow-test-{name}"),
         }
+    }
+
+    /// The two directories an endpoint record for this harness can be in.
+    /// Asked of the library, not spelled out here — see `Drop`.
+    fn endpoint_roots(&self) -> [PathBuf; 2] {
+        ai_text_editor::transport::endpoint_roots(&self.scratch.join("runtime"))
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -103,7 +129,26 @@ impl Harness {
     /// on the Windows runner a swallowed open failure turned into six
     /// cascading "no server discovered" panics that hid the real cause.
     fn open(&self, file: &std::path::Path) -> Output {
-        let opened = self.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+        self.open_at(file, &[])
+    }
+
+    /// An `open` asking for the whole payload (T99 level 3).
+    ///
+    /// For the tests that need the tab's *identity* rather than its content —
+    /// `server_pid` above all, which is tier 3 because an agent has no use for
+    /// the server's process id and a test of the plumbing does. Deliberately a
+    /// separate method rather than widening `open`: almost every test in this
+    /// file goes through `open`, so putting `--verbosity 3` there would mean
+    /// the default level is barely exercised by the suite that is supposed to
+    /// hold it.
+    fn open_verbose(&self, file: &std::path::Path) -> Output {
+        self.open_at(file, &["--verbosity", "3"])
+    }
+
+    fn open_at(&self, file: &std::path::Path, extra: &[&str]) -> Output {
+        let mut args = vec!["open", "-f", file.to_str().unwrap(), "-p", "structured"];
+        args.extend_from_slice(extra);
+        let opened = self.client(&args);
         assert!(
             opened.status.success(),
             "open of {} failed: {}{}",
@@ -127,7 +172,42 @@ impl Harness {
             .env_remove("OPENCODE_PID")
             .current_dir(dir)
             .args(args);
-        command.output().expect("client binary must run")
+        self.run(command)
+    }
+
+    /// Run one client in a session of its own, and remember that session so
+    /// `Drop` can stop whatever the client left behind.
+    ///
+    /// B239: `Drop` used to look for servers to kill by reading the pid out of
+    /// the `.endpoint` discovery records. That finds nothing for a server that
+    /// has not announced yet, nothing once a takeover has renamed a record to
+    /// `.stale-<generation>`, and nothing at all once the tree is gone — 173
+    /// servers survived one run of this file and were killed by hand. A client
+    /// spawned into its own session puts every server it autostarts into that
+    /// session too (a spawned child inherits both), so one `killpg` per client
+    /// stops them whether they ever announced or not. The session id cannot be
+    /// recycled while the group still has members, so it keeps naming this
+    /// harness's own processes after the client itself has been reaped.
+    fn run(&self, mut command: Command) -> Output {
+        // `output()` would have set these; `spawn()` inherits instead, and an
+        // inherited stdout means `wait_with_output` hands back nothing and
+        // every assertion in this file reads an empty payload.
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                // Async-signal-safe, which is all a pre_exec closure may be.
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let child = command.spawn().expect("client binary must run");
+        self.sessions.borrow_mut().push(child.id());
+        child.wait_with_output().expect("client binary must run")
     }
 
     fn client_env(&self, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
@@ -145,20 +225,35 @@ impl Harness {
         for (key, value) in extra_env {
             command.env(key, value);
         }
-        command.output().expect("client binary must run")
+        self.run(command)
     }
 }
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        // Autostarted servers outlive their short-lived client; stop the
-        // ones this test left behind before removing the tree they run in.
-        // The records live under the endpoint directory nested inside the
-        // runtime root (XDG_RUNTIME_DIR/tsch-ai-skills-editor/), so a sweep
-        // of the runtime root itself finds nothing and leaks every server
-        // an autostarted flow started.
-        let endpoint_root = self.scratch.join("runtime").join("tsch-ai-skills-editor");
-        if let Ok(entries) = std::fs::read_dir(endpoint_root) {
+        // B239, and the reliable half: every client ran in a session of its
+        // own and every server it started inherited that session, so this
+        // stops them without needing to have found a record naming them. The
+        // record sweep below stays as a backstop for a server this harness did
+        // not start through `run`.
+        #[cfg(unix)]
+        for session in self.sessions.borrow().iter() {
+            unsafe {
+                libc::killpg(*session as libc::c_int, libc::SIGKILL);
+            }
+        }
+        // Autostarted servers outlive their short-lived client; stop the ones
+        // this test left behind before removing the tree they run in.
+        //
+        // Both roots, taken from the library's own answer rather than a path
+        // spelled out here: a record whose configured root was too long to
+        // hold a socket beside it lives in the length fallback instead, and
+        // this sweep used to know only the configured one. `endpoint_roots` is
+        // where that rule lives now, so the two cannot disagree again.
+        for root in self.endpoint_roots() {
+            let Ok(entries) = std::fs::read_dir(&root) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !name.ends_with(".endpoint") {
@@ -180,6 +275,11 @@ impl Drop for Harness {
                 }
             }
         }
+        // The fallback root is outside the scratch tree by construction, so
+        // removing the tree does not remove it. It is keyed to this harness's
+        // own runtime directory, so this deletes nothing another test owns.
+        let [_, fallback] = self.endpoint_roots();
+        let _ = std::fs::remove_dir_all(fallback);
         let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }
@@ -212,11 +312,16 @@ fn revision_of(open_output: &Output) -> u64 {
         .unwrap()
 }
 
+/// The server's own process id, which is tier 3 (T99): an agent never needs
+/// it and a test of the plumbing does. Read it from `open_verbose`, not
+/// `open`, or there is nothing to read.
 fn server_pid(open_output: &Output) -> u32 {
     first_payload(open_output)
         .get("server_pid")
         .and_then(Value::as_u64)
-        .unwrap() as u32
+        .unwrap_or_else(|| {
+            panic!("no server_pid in the answer; it is tier 3, so open with `open_verbose`")
+        }) as u32
 }
 
 #[test]
@@ -398,7 +503,7 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
 fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     let harness = Harness::new("killed");
     let file = harness.write("journal.txt", "alpha\nbeta\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     let pid = server_pid(&opened);
     let revision = revision_of(&opened).to_string();
     let edited = harness.client(&[
@@ -437,7 +542,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
         "the unsaved edit must replay into the replacement's buffer"
     );
     // `open` reports the replacement and the replayed revision explicitly.
-    let reopened = harness.open(&file);
+    let reopened = harness.open_verbose(&file);
     assert!(reopened.status.success(), "{}", stderr_text(&reopened));
     let payload = first_payload(&reopened);
     assert!(
@@ -468,10 +573,15 @@ fn text_reads_honor_a_byte_window_and_deletes_report_line_spans() {
         "2",
         "-L",
         "5",
+        "--verbosity",
+        "2",
     ]);
     let payload = first_payload(&window);
     assert_eq!(payload["text"], json!("23456"));
     assert_eq!(payload["offset"], json!(2));
+    // total_bytes is tier 2 (T99): "what this answer covers" is verification
+    // and sits at the default level, but "how big the whole document is" is
+    // navigation, so this window was asked for at level 2.
     assert_eq!(payload["total_bytes"], json!(20));
     assert_eq!(payload["eof"], json!(false));
     // Deleting across the line end must say so.
@@ -721,7 +831,7 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
     // server) and the reopened tab must say it replayed the journal.
     let harness = Harness::new("cacheheal");
     let file = harness.write("doc.txt", "one\ntwo\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     let revision = revision_of(&opened).to_string();
     let edited = harness.client(&[
         "insert",
@@ -769,7 +879,7 @@ fn a_dead_server_is_replaced_by_the_next_read_rather_than_refused() {
     // never surface a bare "Connection refused" either.
     let harness = Harness::new("cachehealdead");
     let file = harness.write("doc.txt", "one\ntwo\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
     let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
@@ -1504,8 +1614,8 @@ fn a_replayed_tab_arms_the_external_change_guard() {
     // kept a stale buffer from saving over newer bytes.
     let harness = Harness::new("replayarm");
     let file = harness.write("doc.txt", "alpha\nbeta\n");
-    let opened = harness.open(&file);
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let opened = harness.open_verbose(&file);
+    let pid = server_pid(&opened);
     let inserted = harness.client(&[
         "insert",
         "-f",
@@ -1569,9 +1679,13 @@ fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
         file.to_str().unwrap(),
         "--idle-timeout-seconds",
         "2",
+        // server_pid is tier 3 (T99), and this test watches that pid to see
+        // whether the idle watchdog reaped it.
+        "--verbosity",
+        "3",
     ]);
     assert!(opened.status.success(), "{}", refusal_text(&opened));
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let pid = server_pid(&opened);
     let started = harness.client(&["job-start", "-f", file.to_str().unwrap(), "--owner", "drv"]);
     assert!(started.status.success(), "{}", refusal_text(&started));
     assert!(
@@ -1592,9 +1706,13 @@ fn a_detached_job_pins_the_watchdog_until_its_owner_releases_it() {
         file.to_str().unwrap(),
         "--idle-timeout-seconds",
         "2",
+        // server_pid is tier 3 (T99), and this test watches that pid to see
+        // whether the idle watchdog reaped it.
+        "--verbosity",
+        "3",
     ]);
     assert!(opened.status.success(), "{}", refusal_text(&opened));
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let pid = server_pid(&opened);
     let started = harness.client(&[
         "job-start",
         "-f",
@@ -1892,5 +2010,1121 @@ fn exact_bytes_query_refusals_name_the_rule() {
     assert!(
         message.contains("exact_bytes") && message.contains("query_base64"),
         "the refusal must name the mode and the alternative field: {message}"
+    );
+}
+
+/// B239: the harness stops every server it started, including one nothing can
+/// find a record for.
+///
+/// The old `Drop` swept `XDG_RUNTIME_DIR/tsch-ai-skills-editor` for
+/// `.endpoint` records and killed the pid each one named. That misses a server
+/// that has not announced yet — the sweep races the announce — and misses one
+/// whose record a takeover renamed to `.stale-<generation>` or a test deleted.
+/// 173 servers survived a single run of this file and had to be killed by hand.
+///
+/// Taking the runtime tree away before the drop reproduces that state
+/// deterministically, and it is the entry's own last clause — "once the tree is
+/// gone there is nothing left to find it by". The server keeps running: it is
+/// holding its listening socket open, not looking the path up again. What stops
+/// it is the session every client is spawned into, which every server it
+/// autostarts inherits.
+///
+/// Deliberately not "delete the .endpoint record": whether that record is even
+/// inside the harness depends on how long the scratch path is.
+/// `endpoint_for_file` abandons the configured XDG_RUNTIME_DIR for a
+/// machine-global `/tmp/tsch-ai-skills-editor` once the path it would build
+/// reaches 96 characters, so under a long TMPDIR the sweep read an empty
+/// directory for every test in this file — the larger half of why one run left
+/// 173 servers behind. Removing the tree the sweep reads is the one form of
+/// this test that bites for the same reason on a short path and a long one.
+#[test]
+fn a_dropped_harness_stops_a_server_no_record_names() {
+    let pid;
+    {
+        let harness = Harness::new("noleak");
+        let file = harness.write("noleak.txt", "alpha\n");
+        pid = server_pid(&harness.open_verbose(&file));
+        assert!(
+            process_is_alive(pid),
+            "the autostarted server {pid} was not running to begin with"
+        );
+        let runtime = harness.scratch.join("runtime");
+        std::fs::remove_dir_all(&runtime).expect("the runtime tree is removable");
+        assert!(
+            !runtime.exists(),
+            "the sweep's own directory must be gone for this test to mean anything"
+        );
+        assert!(
+            process_is_alive(pid),
+            "losing the runtime tree must not stop the server; that it survives is the point"
+        );
+    }
+    // The harness has been dropped. A SIGKILLed server whose client parent has
+    // already exited is reparented to init, which reaps it, so the pid does go
+    // away — give it a moment rather than asserting on the same instant.
+    for _ in 0..100 {
+        if !process_is_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    terminate(pid);
+    panic!("the dropped harness left server {pid} running");
+}
+
+/// The discovery record a given server announced, wherever it landed.
+///
+/// The file name is not predictable from here and the pid is the only handle
+/// that is, so both of this harness's roots are searched for a record naming
+/// the server in question. Which of the two holds it depends on whether the
+/// configured root was short enough to keep a socket beside the record, which
+/// depends in turn on how long this test process's TMPDIR happens to be.
+fn endpoint_record(harness: &Harness, pid: u32) -> PathBuf {
+    for root in harness.endpoint_roots() {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(".endpoint") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let recorded = serde_json::from_str::<Value>(&content)
+                .ok()
+                .and_then(|value| value.get("pid").and_then(Value::as_u64));
+            if recorded == Some(pid as u64) {
+                return entry.path();
+            }
+        }
+    }
+    panic!("no endpoint record names server {pid}");
+}
+
+/// B241: the explicit stale-endpoint takeover is reachable from the client
+/// that meets the condition.
+///
+/// The server refuses to bind over a stale Unix endpoint whose recorded owner
+/// it cannot rule out, and its refusal names `--takeover-stale-endpoint` as
+/// the recovery. Nothing forwarded that flag: `autostart_server` built its
+/// argv from document_mode, normalize_nfc and idle_timeout_seconds only, and
+/// no client had a flag for it at all — so capability 12's documented
+/// recovery could not be performed by the only tool that ever hits the
+/// refusal. B217 covered arguments the adapter forwards without declaring;
+/// this one was forwarded by nothing.
+///
+/// A killed server leaves its socket and its record behind. Rewriting the
+/// record's pid to a process that IS alive is what puts the endpoint in the
+/// state that needs the flag — with a dead owner the next open reclaims it
+/// automatically and the refusal never happens, which is why the flag went
+/// unnoticed as unreachable.
+#[test]
+fn a_stale_endpoint_is_taken_over_only_when_the_client_says_so() {
+    let harness = Harness::new("takeover");
+    let file = harness.write("takeover.txt", "alpha\n");
+    let pid = server_pid(&harness.open_verbose(&file));
+    let record = endpoint_record(&harness, pid);
+    terminate(pid);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!process_is_alive(pid), "the server must be dead");
+
+    // The recorded owner is now this test process, which is alive, so the
+    // server cannot rule it out and must refuse.
+    let content = std::fs::read_to_string(&record).expect("the record is readable");
+    let mut value: Value = serde_json::from_str(&content).expect("the record is JSON");
+    let socket = value["endpoint"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_start_matches("unix:")
+        .to_owned();
+    assert!(
+        std::path::Path::new(&socket).exists(),
+        "a killed server leaves its socket behind; without it there is nothing stale to take over"
+    );
+    value["pid"] = json!(std::process::id());
+    std::fs::write(&record, serde_json::to_vec(&value).unwrap()).expect("the record is writable");
+
+    let refused = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        refused.status.code(),
+        Some(66),
+        "a start refused over a live recorded owner is not a success: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stderr_text(&refused);
+    assert!(
+        refusal.contains("--takeover-stale-endpoint"),
+        "the refusal must name the recovery: {refusal}"
+    );
+
+    // And the recovery works, which is the whole of this bug: before the fix
+    // the flag reached the client's argument parser and stopped there.
+    let taken = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--takeover-stale-endpoint",
+        "-p",
+        "structured",
+        // server_pid below is tier 3, and a replacement having answered is
+        // exactly what this asserts.
+        "--verbosity",
+        "3",
+    ]);
+    assert!(
+        taken.status.success(),
+        "the acknowledged takeover was refused too: {}{}",
+        stderr_text(&taken),
+        String::from_utf8_lossy(&taken.stdout)
+    );
+    assert!(
+        server_pid(&taken) != pid,
+        "a replacement server must have answered"
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\n");
+}
+
+/// B237: the unknown-argument door is per-verb, not protocol-wide.
+///
+/// B180 and B187 set out to refuse "an argument no handler for this verb
+/// reads". The check they produced was one list for the whole protocol, so a
+/// key belonging to a *different* verb passed and was silently dropped:
+/// `replace` naming `range_start_line` got through because `read` takes that
+/// key, and the replace handler then edited at the cursor instead — a
+/// misplaced edit reported as a success with a fresh revision.
+///
+/// This drives the real client against a real server, because the defect is in
+/// the door and nowhere else. A unit test on the key table would pass with the
+/// door still consulting a protocol-wide union, which is exactly the state
+/// being fixed: mutate `handle`'s lookup to `METHODS.iter().any(...)` and every
+/// assertion below goes silent again.
+#[test]
+fn a_key_another_verb_reads_is_refused_by_name_not_dropped() {
+    let harness = Harness::new("perverb");
+    let file = harness.write("perverb.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // `delete_len` is a `replace` key. `insert` ignored it completely, so an
+    // insert carrying one was performed as a plain insert and answered as a
+    // success — the caller's stated intent to delete five bytes vanished.
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-d",
+        "5",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        refused.status.code(),
+        Some(1),
+        "an insert naming delete_len must be refused, not performed: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("delete_len"));
+    let message = refusal["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("delete_len") && message.contains("insert"),
+        "the refusal must name both the key and the verb: {message}"
+    );
+    // The accepted set travels with the refusal, so a caller that guessed
+    // wrong can see what this verb does take rather than guessing again.
+    let accepted = refusal["details"]["accepted_keys"]
+        .as_array()
+        .cloned()
+        .expect("the refusal carries the accepted key set");
+    assert!(
+        accepted.contains(&json!("offset")),
+        "accepted: {accepted:?}"
+    );
+    assert!(accepted.contains(&json!("text")), "accepted: {accepted:?}");
+    assert!(
+        !accepted.contains(&json!("delete_len")),
+        "delete_len must not be listed as acceptable to insert: {accepted:?}"
+    );
+    // Nothing was applied: the buffer and the revision are untouched.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n"
+    );
+
+    // A read key on a verb that reads nothing at all. `offset` is legal for
+    // read, insert, replace, index, page and search, which is precisely why
+    // the protocol-wide list let it through here.
+    let refused = harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "3",
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(refused.status.code(), Some(1), "history takes no offset");
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("offset"));
+
+    // And the door must not have become a blanket refusal: the keys each verb
+    // really does read still work, including the range spelling whose silent
+    // loss was the entry's own reproduction.
+    let windowed = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-p",
+        "text",
+    ]);
+    assert!(windowed.status.success(), "{}", stderr_text(&windowed));
+    assert_eq!(String::from_utf8_lossy(&windowed.stdout), "beta\n");
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "BETA\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nBETA\ngamma\n",
+        "a range replace must still land where it says"
+    );
+}
+
+/// B238: a document mode is a property of a tab, so a file added to an
+/// already-running workspace can be a raw or hex tab.
+///
+/// It used to be a property of the SERVER: `select_tab`'s open path passed
+/// `state_guard.mode` — the mode the server was started with — to
+/// `open_additional_tab`, and `document_mode` reached only the autostart argv.
+/// So an agent's very first `open` decided the mode of every tab it would ever
+/// open. Since B225 made every verb autostart and reconnect, a cold open is
+/// rare, which left SKILL.md capability 2 effectively unreachable in a long
+/// session.
+///
+/// The first open here is deliberately a plain text one, so the workspace is
+/// already running with `mode: text_utf8` when the second file asks for hex —
+/// the exact condition the entry reproduces, and the one a cold-open test
+/// cannot reach.
+#[test]
+fn a_second_file_opens_in_its_own_mode_not_the_servers() {
+    let harness = Harness::new("tabmode");
+    let text = harness.write("plain.txt", "alpha\n");
+    let opened = harness.open_verbose(&text);
+    assert_eq!(first_payload(&opened)["mode"], json!("text_utf8"));
+    let server = server_pid(&opened);
+
+    let binary = harness.write("bytes.bin", "\u{feff}alpha\n");
+    let hex = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "hex_view",
+        "-p",
+        "structured",
+        // server_pid below is tier 3: this test's point is that ONE server
+        // answered both opens.
+        "--verbosity",
+        "3",
+    ]);
+    assert!(hex.status.success(), "{}", stderr_text(&hex));
+    let payload = first_payload(&hex);
+    assert_eq!(
+        payload["mode"],
+        json!("hex_view"),
+        "a file added to a running workspace must open in the mode it asked for"
+    );
+    assert_eq!(
+        server_pid(&hex), server,
+        "the point is that this is the SAME workspace: a second server would make the mode a startup argument again and prove nothing"
+    );
+    // The first tab is untouched by the second tab's mode.
+    let reopened = harness.open(&text);
+    assert_eq!(first_payload(&reopened)["mode"], json!("text_utf8"));
+
+    // A raw tab in the same workspace too, so the answer is the requested
+    // mode rather than merely "not the server's".
+    let raw = harness.write("raw.bin", "beta\n");
+    let raw_opened = harness.client(&[
+        "open",
+        "-f",
+        raw.to_str().unwrap(),
+        "-M",
+        "raw_bytes",
+        "-p",
+        "structured",
+    ]);
+    assert!(raw_opened.status.success(), "{}", stderr_text(&raw_opened));
+    assert_eq!(first_payload(&raw_opened)["mode"], json!("raw_bytes"));
+
+    // A tab's mode is fixed for its lifetime: its buffer, index and every
+    // coordinate committed to one reading of the bytes. Reopening under a
+    // different mode is refused by name rather than answered with a mode the
+    // caller did not ask for, which is the shape of the bug being fixed.
+    let conflict = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "text_utf8",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !conflict.status.success(),
+        "reopening a hex tab as text must be refused: {}",
+        String::from_utf8_lossy(&conflict.stdout)
+    );
+    let refusal = stdout_json(&conflict)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("document_mode_conflict"));
+    assert!(
+        refusal["message"].as_str().unwrap_or("").contains("close"),
+        "the refusal must name the way out: {}",
+        refusal["message"]
+    );
+    // Reopening in the mode it already holds is not a conflict.
+    let same = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "hex_view",
+        "-p",
+        "structured",
+    ]);
+    assert!(same.status.success(), "{}", stderr_text(&same));
+
+    // An unknown mode name is refused by name, not silently ignored.
+    let bad = harness.client(&[
+        "open",
+        "-f",
+        harness.path("other.txt").to_str().unwrap(),
+        "-M",
+        "ebcdic",
+        "-p",
+        "structured",
+    ]);
+    assert!(!bad.status.success(), "an unknown mode must be refused");
+    let refusal = stdout_json(&bad)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("document_mode_invalid"));
+}
+
+/// The tab handle a response reports. T96's whole premise is that this is
+/// enough to address the tab again, so every test below gets it the way an
+/// agent would: out of the answer it already had.
+fn tab_id_of(output: &Output) -> String {
+    first_payload(output)["tab_id"]
+        .as_str()
+        .expect("every response names the tab it answered")
+        .to_owned()
+}
+
+/// T96: a tab id is addressing enough on its own, for every verb.
+///
+/// Verbs routed by file, endpoint or session token; the tab uuid came back in
+/// every `open` answer and could not be used for anything. An agent that held
+/// one still had to keep the path beside it, and "an AI editor is forgetful"
+/// is the problem the whole T96-T98 design is against.
+///
+/// Two tabs in ONE workspace, so a wrong route lands on a real other tab
+/// rather than failing to connect — that is what mis-addressing looks like in
+/// practice, and it is why the mutation of the routing branch is caught here
+/// as wrong CONTENT rather than as an error.
+#[test]
+fn a_tab_id_is_addressing_enough_on_its_own() {
+    let harness = Harness::new("tabid");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let beta = harness.write("beta.txt", "in beta\n");
+    let opened_alpha = harness.open_verbose(&alpha);
+    let opened_beta = harness.open_verbose(&beta);
+    let id_alpha = tab_id_of(&opened_alpha);
+    let id_beta = tab_id_of(&opened_beta);
+    assert_ne!(id_alpha, id_beta, "two tabs must have two ids");
+    assert_eq!(
+        server_pid(&opened_alpha),
+        server_pid(&opened_beta),
+        "one workspace: the ids have to disambiguate tabs, not servers"
+    );
+
+    // No -f anywhere below. The id is the whole of the addressing.
+    let read = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in alpha\n");
+    let read = harness.client(&["read", "--tab-id", &id_beta, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in beta\n");
+
+    // A mutation too, since a misrouted read is recoverable and a misrouted
+    // write is not. -r comes from the tab's own answer, by id.
+    let revision = revision_of(&opened_beta).to_string();
+    let edited = harness.client(&[
+        "replace",
+        "--tab-id",
+        &id_beta,
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "EDITED\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", stderr_text(&edited));
+    assert_eq!(
+        tab_id_of(&edited),
+        id_beta,
+        "the answer must name the tab it edited"
+    );
+    let after_beta = harness.client(&["read", "--tab-id", &id_beta, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&after_beta.stdout), "EDITED\n");
+    let after_alpha = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&after_alpha.stdout),
+        "in alpha\n",
+        "the other tab must be untouched"
+    );
+
+    // A read-only verb with no path either, to pin "every verb" rather than
+    // "the ones that happen to take a file".
+    let history = harness.client(&["history", "--tab-id", &id_beta, "-p", "structured"]);
+    assert!(history.status.success(), "{}", stderr_text(&history));
+    assert_eq!(first_payload(&history)["revision"], json!(1));
+
+    // An id that names nothing is refused by name, and the refusal carries
+    // what the server does hold. Never a fall-through to another tab: a
+    // caller that named a tab did not ask for whichever one discovery would
+    // have found instead.
+    let refused = harness.client(&["read", "--tab-id", &"0".repeat(64), "-p", "structured"]);
+    assert!(
+        !refused.status.success(),
+        "an unknown tab id must be refused"
+    );
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("tab_unknown") || refusal.contains("tab_stale"),
+        "the refusal must be named: {refusal}"
+    );
+}
+
+/// T97: a filename or a partial path resolves the tab, and an ambiguous one
+/// answers with the candidates and their ids.
+///
+/// The recovery for an agent that forgot the id. Not a guess and not a bare
+/// error: a refusal that only says "no" leaves an agent with nothing to try,
+/// which is the failure this exists to fix.
+#[test]
+fn a_tab_path_resolves_or_answers_with_the_candidates() {
+    let harness = Harness::new("tabpath");
+    std::fs::create_dir_all(harness.path("one")).unwrap();
+    std::fs::create_dir_all(harness.path("two")).unwrap();
+    let first = harness.write("one/report.txt", "first report\n");
+    let second = harness.write("two/report.txt", "second report\n");
+    let notes = harness.write("notes.txt", "the notes\n");
+    let id_first = tab_id_of(&harness.open(&first));
+    let id_second = tab_id_of(&harness.open(&second));
+    harness.open(&notes);
+
+    // A unique file name needs nothing else.
+    let read = harness.client(&["read", "--tab-path", "notes.txt", "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "the notes\n");
+
+    // A name shared by two tabs is refused WITH both ids, so the next attempt
+    // is informed rather than another guess.
+    let ambiguous = harness.client(&["read", "--tab-path", "report.txt", "-p", "structured"]);
+    assert!(
+        !ambiguous.status.success(),
+        "an ambiguous tab path must not be guessed at: {}",
+        String::from_utf8_lossy(&ambiguous.stdout)
+    );
+    let refusal = refusal_text(&ambiguous);
+    assert!(refusal.contains("tab_ambiguous"), "named: {refusal}");
+    assert!(
+        refusal.contains(&id_first) && refusal.contains(&id_second),
+        "the candidate set must carry both tab ids: {refusal}"
+    );
+
+    // And the disambiguation the candidate set invites works: enough path
+    // components to be unique.
+    let read = harness.client(&["read", "--tab-path", "one/report.txt", "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "first report\n");
+
+    // Component boundaries, not substrings: `port.txt` is a suffix of
+    // `report.txt` as a string and names no tab as a path.
+    let unmatched = harness.client(&["read", "--tab-path", "port.txt", "-p", "structured"]);
+    assert!(
+        !unmatched.status.success(),
+        "a substring must not match a tab path"
+    );
+    let refusal = refusal_text(&unmatched);
+    assert!(refusal.contains("tab_unmatched"), "named: {refusal}");
+    assert!(
+        refusal.contains("notes.txt"),
+        "an unmatched path must still say what IS open: {refusal}"
+    );
+}
+
+/// T98: a session carries a focused tab, an unmarked request runs on it, and
+/// every response names the tab it answered.
+///
+/// The last is the safety half: an unmarked request is only tolerable if the
+/// answer says which tab it went to, or a caller cannot tell that its
+/// assumption about the focus was wrong until the damage is done.
+#[test]
+fn an_unmarked_request_runs_on_the_focused_tab_and_the_answer_names_it() {
+    let harness = Harness::new("focus");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let beta = harness.write("beta.txt", "in beta\n");
+
+    let opened_alpha = harness.open(&alpha);
+    let id_alpha = tab_id_of(&opened_alpha);
+    // No -f, no --tab-id, no --endpoint: the focus is the whole addressing.
+    let bare = harness.client(&["read", "-p", "text"]);
+    assert!(
+        bare.status.success(),
+        "an unmarked read must run on the focused tab: {}",
+        stderr_text(&bare)
+    );
+    assert_eq!(String::from_utf8_lossy(&bare.stdout), "in alpha\n");
+
+    // `open` moves the focus, which is what makes the plain sequence
+    // "open, then work" mean what an agent expects.
+    let opened_beta = harness.open(&beta);
+    let id_beta = tab_id_of(&opened_beta);
+    let bare = harness.client(&["read", "-p", "structured"]);
+    assert!(bare.status.success(), "{}", stderr_text(&bare));
+    assert_eq!(first_payload(&bare)["text"], json!("in beta\n"));
+    assert_eq!(
+        tab_id_of(&bare),
+        id_beta,
+        "the answer must name the tab the focus sent it to"
+    );
+
+    // Every response names its tab, on every verb — a mutating one included,
+    // because writing to the wrong tab silently is the failure being
+    // prevented, and `history`, which reports no content at all.
+    let revision = revision_of(&opened_beta).to_string();
+    let edited = harness.client(&[
+        "insert",
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", stderr_text(&edited));
+    assert_eq!(tab_id_of(&edited), id_beta);
+    let history = harness.client(&["history", "-p", "structured"]);
+    assert_eq!(tab_id_of(&history), id_beta);
+    // The unmarked edit landed on beta and nowhere else.
+    let alpha_after = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&alpha_after.stdout), "in alpha\n");
+
+    // Addressing a tab explicitly moves the focus with it, so a sequence that
+    // names a tab once and then works on it needs no repetition.
+    let read_alpha = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert!(read_alpha.status.success(), "{}", stderr_text(&read_alpha));
+    let bare = harness.client(&["read", "-p", "structured"]);
+    assert_eq!(
+        tab_id_of(&bare),
+        id_alpha,
+        "the focus must follow the last tab a call was served by"
+    );
+}
+
+/// B250: an `insert` naming `delete_len` is refused, not answered as a
+/// success.
+///
+/// `delete_len` is a `replace` key. The shared insert/replace handler reads it
+/// for `replace` and ignores it for `insert`, and the protocol-wide door let it
+/// through, so an insert stating "delete five bytes first" was performed as a
+/// plain insert and answered with a fresh revision and `bytes_written`. That is
+/// the worst available outcome: the instruction was partially performed and the
+/// answer was indistinguishable from a complete one, so nothing downstream
+/// could tell.
+///
+/// The assertion is therefore on the REFUSAL and on the buffer being untouched,
+/// not on a value. The old behaviour had no wrong value to catch.
+#[test]
+fn an_insert_naming_delete_len_is_refused_rather_than_half_performed() {
+    let harness = Harness::new("insdel");
+    let file = harness.write("insdel.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-d",
+        "5",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        refused.status.code(),
+        Some(1),
+        "an insert naming delete_len must be refused, not performed: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("delete_len"));
+    let message = refusal["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("delete_len") && message.contains("insert"),
+        "the refusal must name both the key and the verb: {message}"
+    );
+    // What the old behaviour looked like, and what must not be there now: a
+    // success payload reporting bytes written.
+    assert!(
+        stdout_json(&refused)
+            .iter()
+            .all(|frame| frame.pointer("/payload/bytes_written").is_none()),
+        "the refused insert must not report an applied edit: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    // And the accepted set says what insert does take, so the caller's next
+    // attempt is informed rather than another guess.
+    let accepted = refusal["details"]["accepted_keys"]
+        .as_array()
+        .cloned()
+        .expect("the refusal carries the accepted key set");
+    assert!(accepted.contains(&json!("text")), "accepted: {accepted:?}");
+    assert!(
+        !accepted.contains(&json!("delete_len")),
+        "delete_len must not be listed as acceptable to insert: {accepted:?}"
+    );
+
+    // Nothing was applied, and the revision did not move.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\nbeta\n");
+    let history = harness.client(&["history", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&history)["revision"]
+            .as_u64()
+            .map(|r| r.to_string()),
+        Some(revision.clone()),
+        "a refused edit must not spend a revision"
+    );
+
+    // The same argument on `replace`, which does read it, still works — the
+    // point is per-verb routing, not a blanket refusal of the key.
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "OMEGA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "OMEGA\nbeta\n");
+}
+
+/// B251: `search` refuses `pager_key`, which only `page` reads.
+///
+/// The MCP schema advertised `pager_key` ("existing result set to re-page
+/// instead of rescanning") and `historical` ("replay the stored result set for
+/// this query rather than rescanning") on `search`, and the search handler
+/// reads neither. Both are `page`'s. This inverts the arguments' whole
+/// purpose: a caller passed them precisely to AVOID a rescan, and the call
+/// rescanned and built a brand-new result set with nothing saying the argument
+/// had been dropped. Sibling of B186, where `search` silently ignored
+/// `--offset` — that one is refused by name already, and this is the same
+/// class arriving through the schema instead.
+#[test]
+fn a_search_naming_a_page_argument_is_refused_and_points_at_page() {
+    let harness = Harness::new("searchpager");
+    let file = harness.write("searchpager.txt", "needle\nhay\nneedle\n");
+    harness.open(&file);
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_text",
+        "-q",
+        "needle",
+        "-p",
+        "structured",
+    ]);
+    assert!(found.status.success(), "{}", stderr_text(&found));
+    let pager_key = first_payload(&found)["pager_key"]
+        .as_str()
+        .expect("a search answers with a pager key")
+        .to_owned();
+
+    let refused = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_text",
+        "-q",
+        "needle",
+        "--pager-key",
+        &pager_key,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "a search naming a pager key must be refused rather than rescanning: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("pager_key"));
+    // The key really does work on `page`, which is what makes refusing it on
+    // `search` a routing fix rather than a removal of capability.
+    let paged = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "-o",
+        "0",
+        "-p",
+        "structured",
+    ]);
+    assert!(paged.status.success(), "{}", stderr_text(&paged));
+    assert_eq!(first_payload(&paged)["pager_key"], json!(pager_key));
+}
+
+/// B252: `index` refuses `action`, which no verb reads at all.
+///
+/// A different kind from B250 and B251: those keys belong to a sibling verb and
+/// were misrouted. `action` on `index` belonged to nothing — the schema
+/// advertised "build or inspect" and the handler always performs the complete
+/// scan and then pages the blocks, so a caller asking to inspect got a full
+/// rebuild.
+///
+/// Both halves of the fix are asserted here, because either alone leaves the
+/// defect half-open: the schema no longer offers the argument (so a
+/// schema-following client cannot be misled into sending it) AND the server
+/// refuses it by name (so a CLI or hand-sent caller that learned it from the
+/// old schema is told, rather than silently getting a rebuild). Deleting it
+/// from the schema alone would have left every existing caller's behaviour
+/// unchanged and unexplained.
+#[test]
+fn an_index_naming_action_is_refused_and_the_scan_still_works() {
+    let harness = Harness::new("indexaction");
+    let file = harness.write("indexaction.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+
+    let refused = harness.client(&[
+        "index",
+        "-f",
+        file.to_str().unwrap(),
+        "-a",
+        "inspect",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "an index naming action must be refused rather than silently rebuilding: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("action"));
+
+    // And what index does read still works, so this is the argument removed
+    // and not the verb.
+    let indexed = harness.client(&[
+        "index",
+        "-f",
+        file.to_str().unwrap(),
+        "--granularity",
+        "1",
+        "-p",
+        "structured",
+    ]);
+    assert!(indexed.status.success(), "{}", stderr_text(&indexed));
+    let payload = first_payload(&indexed);
+    assert_eq!(payload["granularity"], json!(1));
+    assert_eq!(payload["complete"], json!(true));
+}
+
+/// T99: the verbosity ladder, on the wire.
+///
+/// Michael measured the problem: `open` on a two-line file was 1199 bytes over
+/// 47 lines and a one-word `insert` 378 bytes whose entire actionable content
+/// was `revision` and `dirty`. The cost lands hardest on the MCP surface,
+/// where every response is context an agent pays for on every edit.
+///
+/// What this pins is the four properties the ladder has to have, because each
+/// one is a way the change could be wrong rather than merely verbose:
+///
+///  1. the default really is level 1, not level 3 — otherwise nothing improves
+///     for an agent that does not know the flag exists, which was the whole
+///     point;
+///  2. level 1 still carries the revision, because a mutation's guard requires
+///     one, which is why the default is 1 and not the specification's 0;
+///  3. every level names the tab and carries the verb's own result — a `read`
+///     whose text was a luxury would make the low levels useless rather than
+///     terse;
+///  4. level 3 is byte-for-byte what a caller used to get.
+#[test]
+fn the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard() {
+    let harness = Harness::new("verbosity");
+    let file = harness.write("verbosity.txt", "alpha\nbeta\n");
+
+    // (1) The default is level 1: an `open` with no flag must equal an `open`
+    // asking for 1, and must NOT equal one asking for 3.
+    let defaulted = first_payload(&harness.open(&file));
+    let explicit_one = first_payload(&harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "1",
+    ]));
+    assert_eq!(
+        defaulted, explicit_one,
+        "the default must BE level 1, not merely resemble it"
+    );
+    let full = first_payload(&harness.open_verbose(&file));
+    assert_ne!(
+        defaulted, full,
+        "if the default equals level 3 the ladder changes nothing for an agent that never learns the flag"
+    );
+
+    // (4) Level 3 is the whole payload: the fields the low levels drop are
+    // still there, so nothing regresses for a caller that wants it all.
+    for key in [
+        "resources",
+        "server_generation",
+        "server_pid",
+        "normalize_nfc",
+    ] {
+        assert!(
+            full.get(key).is_some(),
+            "level 3 must still carry {key}: {full}"
+        );
+        assert!(
+            defaulted.get(key).is_none(),
+            "level 1 must not carry {key}: {defaulted}"
+        );
+    }
+
+    // (2) and (3) on the default: the revision guard survives, the tab is
+    // named, and the coordinate space is stated (B238 made mode a per-tab
+    // choice, so a caller needs to know which one answered).
+    for key in ["revision", "dirty", "tab_id", "mode", "session_token"] {
+        assert!(
+            defaulted.get(key).is_some(),
+            "the default must carry {key}: {defaulted}"
+        );
+    }
+
+    // A mutation at the default reports what it did: B226 and B230 added the
+    // resolved span precisely because a caller could not see what its
+    // arithmetic had addressed, so those fields are verification-grade.
+    let revision = defaulted["revision"]
+        .as_u64()
+        .expect("a revision")
+        .to_string();
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "OMEGA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let payload = first_payload(&replaced);
+    for key in [
+        "revision",
+        "offset",
+        "delete_len",
+        "bytes_written",
+        "deleted",
+    ] {
+        assert!(
+            payload.get(key).is_some(),
+            "a mutation at the default must report {key}: {payload}"
+        );
+    }
+    assert!(
+        payload.get("cursors").is_none(),
+        "cursors are navigation, not verification: {payload}"
+    );
+
+    // (3) Level 0 keeps the answer and the tab, and nothing else. A read's
+    // text is the answer; a mutation has none, so the frame type is the status.
+    let bare = first_payload(&harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert_eq!(bare["text"], json!("OMEGA\nbeta\n"));
+    assert!(
+        bare.get("tab_id").is_some(),
+        "level 0 names the tab: {bare}"
+    );
+    assert!(
+        bare.get("revision").is_none() && bare.get("dirty").is_none(),
+        "level 0 is the answer and the tab, nothing else: {bare}"
+    );
+
+    // A level outside the range is a caller error, refused by name rather
+    // than clamped: a typo must not silently buy a different answer.
+    let refused = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "9",
+    ]);
+    assert!(!refused.status.success(), "verbosity 9 must be refused");
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("verbosity_invalid"));
+    assert!(
+        refusal["details"]["levels"].get("1").is_some(),
+        "the refusal must describe the levels: {refusal}"
+    );
+
+    // A refusal is never trimmed, at any level: its code, message and
+    // recovery choices are the answer.
+    let stale = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "1",
+        "-t",
+        "X",
+        "-r",
+        "999",
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]);
+    assert!(!stale.status.success());
+    let refusal = stdout_json(&stale)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("stale_revision"));
+    assert!(
+        refusal["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("999"),
+        "a refusal keeps its whole message even at level 0: {refusal}"
+    );
+
+    // And `capabilities` is exempt, because its payload is metadata by
+    // definition — trimming it would leave an empty discovery answer.
+    let caps = first_payload(&harness.client(&[
+        "capabilities",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        caps.get("protocol_version").is_some() && caps.get("document_modes").is_some(),
+        "capabilities must answer in full at every level: {caps}"
     );
 }

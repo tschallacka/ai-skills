@@ -6,12 +6,76 @@ use ai_text_editor::client::{self, ResolveRequest};
 use ai_text_editor::protocol::Envelope;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::SystemTime;
+
+/// The adapter binary's timestamp as it was when this session started.
+static ADAPTER_STAMP: OnceLock<Option<SystemTime>> = OnceLock::new();
+
+fn adapter_stamp() -> Option<SystemTime> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|metadata| metadata.modified().ok())
+}
+
+/// B261. An MCP client fetches `tools/list` ONCE per session and validates
+/// every later call against what it cached. Over stdio the client also
+/// *launched* this process, so installing a newer adapter does not change the
+/// running one: this process is the old code, and it cannot advertise
+/// arguments it does not have.
+///
+/// That rules out the tempting fix. `notifications/tools/list_changed` would
+/// make a compliant client re-fetch `tools/list` — from this same old process,
+/// which returns the same old list. There is nothing a running adapter can do
+/// to teach its client an argument it was not built with.
+///
+/// What it can do is say so. The failure this prevents is specific and was
+/// observed: after T96/T97 added `tab_id` and `tab_path`, every response
+/// carried a `tab_id` while the agent's cached schema rejected the argument
+/// that consumes it — so the answers advertised a handle the caller was not
+/// permitted to use, and the agent kept passing `file` with no idea why.
+/// Michael saw it from outside as "you're not using the tab shorthands".
+fn staleness_notice(first: Option<SystemTime>, now: Option<SystemTime>) -> Option<String> {
+    match (first, now) {
+        (Some(started), Some(current)) if started != current => Some(
+            "notice: the installed ai-text-editor MCP adapter was replaced after this session \
+            started, so the tool definitions this session holds are the older ones and may be \
+            missing arguments the installed adapter accepts. A newly added argument is then \
+            refused by your own client against its cached schema, not by the editor. Restart \
+            the MCP session to re-fetch tools/list."
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// Seeded at `initialize`, which is the same moment the client fetches
+/// `tools/list`, so the stamp records the build whose schema the client holds.
+fn adapter_replaced() -> Option<String> {
+    let first = *ADAPTER_STAMP.get_or_init(adapter_stamp);
+    staleness_notice(first, adapter_stamp())
+}
+
+/// Attach a notice to a tools/call result without disturbing its content.
+fn attach_notice(mut response: Value, notice: String) -> Value {
+    if let Some(content) = response
+        .get_mut("result")
+        .and_then(|result| result.get_mut("content"))
+        .and_then(Value::as_array_mut)
+    {
+        content.push(json!({"type": "text", "text": notice}));
+    }
+    response
+}
 
 pub fn handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     match method {
         "initialize" => {
+            // Seed the stamp for this session before answering.
+            let _ = adapter_replaced();
             json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}}})
         }
         "notifications/initialized" => Value::Null,
@@ -20,7 +84,13 @@ pub fn handle(message: Value) -> Value {
             json!({"jsonrpc":"2.0","id":id,"result":{"resources": resource_definitions()}})
         }
         "resources/read" => read_resource(id, message.get("params").cloned().unwrap_or_default()),
-        "tools/call" => call_tool(id, message.get("params").cloned().unwrap_or_default()),
+        "tools/call" => {
+            let response = call_tool(id, message.get("params").cloned().unwrap_or_default());
+            match adapter_replaced() {
+                Some(notice) => attach_notice(response, notice),
+                None => response,
+            }
+        }
         _ => json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"method not found"}}),
     }
 }
@@ -114,6 +184,7 @@ pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "normalize_nfc",
     "idle_timeout_seconds",
     "acknowledge_create_parents",
+    "takeover_stale_endpoint",
     "auth_token",
     "session_token",
 ];
@@ -142,6 +213,9 @@ fn adapter_argument(key: &str) -> Value {
         "acknowledge_create_parents" => boolean(
             "Confirms that a path whose parent directory does not exist is meant as typed. Without it such an open is refused with the missing directory named and nothing is created; with it the directory chain is created and the tab opens.",
         ),
+        "takeover_stale_endpoint" => boolean(
+            "Confirms that the process recorded as owning a stale endpoint has been verified gone, so a server this call starts may replace it. Without it such a start is refused with the recorded pid and generation named and nothing is replaced; this is capability 12's explicit takeover.",
+        ),
         "auth_token" => string(
             "Shared secret required by a server reached over a loopback TCP endpoint.",
         ),
@@ -152,14 +226,54 @@ fn adapter_argument(key: &str) -> Value {
     }
 }
 
+/// The protocol method a tool name addresses. Only one differs: `resolve` is
+/// the tool, `resolve_external` the method, and `call_tool` maps it the same
+/// way — a second spelling of that mapping is how the schema and the router
+/// would come apart.
+fn server_method(tool: &str) -> &str {
+    if tool == "resolve" {
+        "resolve_external"
+    } else {
+        tool
+    }
+}
+
 fn tool_definitions() -> Vec<Value> {
     let routing = || {
-        let mut properties: ToolProperties = Vec::from([(
-            "file",
-            string(
-                "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+        let mut properties: ToolProperties = Vec::from([
+            (
+                "file",
+                string(
+                    "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+                ),
             ),
-        )]);
+            // T96: declared on every tool, including the job verbs, because
+            // the point is that an id is sufficient addressing for all of
+            // them. Not an ADAPTER_ARGUMENTS entry: the server routes on it,
+            // so it stays in the payload the way `file` does.
+            (
+                "tab_id",
+                string(
+                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. Wins over file and tab_path, and is refused by name (tab_unknown) rather than falling back to some other tab if it names none.",
+                ),
+            ),
+            // T99: on every tool, because the ladder applies to every
+            // answer. Not an ADAPTER_ARGUMENTS entry: the server consumes it,
+            // so it stays in the payload like `file` and `tab_id`.
+            (
+                "verbosity",
+                int(
+                    "How much of the answer to return: 0 the result and the tab that gave it and nothing else, 1 (default) adds what verification and the next step need - revision, dirty, the tab's mode, the resolved edit span, completeness, and a search's pager key and count, 2 adds navigation - cursors, byte windows, block paging, undo depths, 3 everything. A level outside 0-3 is refused by name rather than clamped. capabilities and resources ignore it, their payload being metadata by definition, and a refusal always carries its full code, message and recovery choices whatever the level.",
+                ),
+            ),
+            // T97: the recovery for an agent that lost the id.
+            (
+                "tab_path",
+                string(
+                    "A filename, or a trailing run of path components, naming an open tab in this agent's workspace - the recovery when the tab_id is lost. Matched on component boundaries, not as a substring. Naming several tabs is refused with tab_ambiguous and the candidates with their tab_ids; naming none with tab_unmatched and the open tabs, so the next attempt is informed rather than another guess.",
+                ),
+            ),
+        ]);
         properties.extend(
             ADAPTER_ARGUMENTS
                 .iter()
@@ -168,16 +282,23 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
-    tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", routing(), vec![]));
-    tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", routing(), vec![]));
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
+        // B238: this description is the whole point of the fix. The mode used
+        // to be a property of the SERVER, so the honest schema had to say it
+        // "shapes only a newly started server" — and since B225 made every
+        // verb autostart and reconnect, that made a raw or hex tab reachable
+        // only on an agent's very first open.
+        ("document_mode", string("Mode of the tab this call opens: text_utf8 (default), raw_bytes, or hex_view (16-byte rows). A property of the tab, not of the workspace, so it applies to a file added to an already-running workspace as much as to the first one. Reopening a tab that already exists under a DIFFERENT mode is refused with document_mode_conflict: a tab's mode is fixed for its lifetime because its buffer, index and coordinates all committed to one reading of the bytes - close it and open it again.")),
+    ]), vec![]));
+    tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", Vec::new(), vec![]));
+    tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", Vec::new(), vec![]));
     tools.push((
         "history",
         "Inspect undo/redo depths and journal sequence without changing the tab.",
-        routing(),
+        Vec::new(),
         vec![],
     ));
-    tools.push(("read", "Read the current document or a bounded byte/line range. Line ranges are inclusive on text tabs; byte ranges half-open on raw and hex tabs; offset/length is a byte window snapped to UTF-8 boundaries.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("read", "Read the current document or a bounded byte/line range. Line ranges are inclusive on text tabs; byte ranges half-open on raw and hex tabs; offset/length is a byte window snapped to UTF-8 boundaries.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("cursor_id", int("Numeric cursor whose position anchors a before/after window.")),
         ("before", int("Lines before the cursor to include.")),
         ("after", int("Lines after the cursor to include.")),
@@ -193,7 +314,7 @@ fn tool_definitions() -> Vec<Value> {
         "insert",
         "Insert text or base64 bytes at a byte offset; preserve the revision guard.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "offset",
@@ -218,7 +339,7 @@ fn tool_definitions() -> Vec<Value> {
         "replace",
         "Replace a span with text or base64 bytes; preserve the revision guard. Address the span three ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), or range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "offset",
@@ -264,7 +385,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         mutating_required(),
     ));
-    tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Queued job this edit executes.")),
         ("resume_token", string("The job's resume token; required, and never disclosed to callers without it.")),
         ("acknowledge_large_edit", boolean("Must be true; confirms the streamed rewrite cost.")),
@@ -274,23 +395,23 @@ fn tool_definitions() -> Vec<Value> {
         ("bytes_base64", string("Replacement bytes, alternative to text.")),
         ("expected_revision", revision_guard()),
     ])); p }, mutating_required()));
-    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p = routing(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
     tools.push((
         "end_transaction",
         "Close the explicit undo transaction and commit its grouped undo step.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
         mutating_required(),
     ));
-    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p = routing(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
     tools.push((
         "undo",
         "Undo one server history transaction; the server returns the new revision.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
@@ -300,7 +421,7 @@ fn tool_definitions() -> Vec<Value> {
         "redo",
         "Redo one server history transaction; the server returns the new revision.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
@@ -310,18 +431,18 @@ fn tool_definitions() -> Vec<Value> {
         "save",
         "Atomically save the current working view after external-change resolution.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
         mutating_required(),
     ));
-    tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p = routing(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
+    tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
     tools.push((
         "close",
         "Close the tab; first obtain and then explicitly choose journal preservation or cleanup.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([(
                 "journal_action",
                 string("preserve or clean; clean deletes the tab journal and metadata database."),
@@ -334,7 +455,7 @@ fn tool_definitions() -> Vec<Value> {
         "resolve",
         "Resolve an external change with backup, reload, merge, keep, or acknowledged force_save.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "action",
@@ -359,11 +480,15 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "index",
-        "Build or inspect the lazy line/byte index, optionally with explicit granularity.",
+        // B237, found by binding this schema to the server's own key table:
+        // `action` was advertised here as "build or inspect" and the handler
+        // reads no such key — it always performs the complete scan and then
+        // pages the blocks. A caller asking to inspect got a full rebuild and
+        // no sign that its argument had been dropped.
+        "Perform a complete scan of the lazy line/byte index at an explicit granularity, persist it, and page the resulting blocks.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
-                ("action", string("build or inspect.")),
                 ("granularity", int("Lines per index block.")),
                 ("offset", int("Block offset when paging index blocks.")),
                 ("limit", int("Blocks to return.")),
@@ -376,7 +501,7 @@ fn tool_definitions() -> Vec<Value> {
         "cursor",
         "Create, move, or inspect numeric cursors and navigation positions.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "action",
@@ -401,7 +526,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec![],
     ));
-    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name, and `historical` reads the persisted result as it was at its source revision.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name, and `historical` reads the persisted result as it was at its source revision.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("pager_key", string("Pager key from a previous search or index response.")),
         ("offset", int("Zero-based match offset to resume from.")),
         ("limit", int("Matches to return.")),
@@ -411,13 +536,18 @@ fn tool_definitions() -> Vec<Value> {
         // schema-following client.
         ("historical", boolean("Replay the persisted result set as it was recorded, accepting that it is stale, instead of refusing a post-edit page.")),
     ])); p }, vec![]));
-    tools.push(("search", "Run exactly one explicit search mode and receive an immutable result id and pager key. Offset is not a search argument: page the result with `page`.", { let mut p = routing(); p.extend(Vec::from([
+    // B237, found by binding this schema to the server's own key table:
+    // `pager_key` and `historical` were advertised here — "re-page instead of
+    // rescanning", "replay the stored result set rather than rescanning" — and
+    // the search handler reads neither. Both are `page`'s keys. A caller that
+    // followed this schema to avoid a rescan got a full rescan and a brand-new
+    // result set, with nothing saying its argument had been dropped. The
+    // description now points at the verb that does page.
+    tools.push(("search", "Run exactly one explicit search mode and receive an immutable result id and pager key. Neither offset nor pager_key is a search argument: a fresh search always rescans, and re-paging or replaying an existing result set is `page`, with that pager_key.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("mode", string("exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex.")),
         ("query", string("Search query, interpreted by mode.")),
         ("query_base64", string("Base64 query, alternative to query.")),
         ("limit", int("Preview matches to return (default 4).")),
-        ("pager_key", string("Existing result set to re-page instead of rescanning.")),
-        ("historical", boolean("Replay the stored result set for this query rather than rescanning.")),
         ("order", string("forward or reverse.")),
         ("gradient", number("Fuzzy score floor between 0.0 and 1.0.")),
         ("range_start_line", int("Inclusive first line (required on large tabs).")),
@@ -429,7 +559,7 @@ fn tool_definitions() -> Vec<Value> {
         "job_start",
         "Create a lifecycle record for agent-owned long work; this tool does not execute the work.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("owner", string("Name of the driving agent or process.")),
                 (
@@ -441,12 +571,12 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec![],
     ));
-    tools.push(("job_poll", "Read the current state, progress, and result of a job. Requires the resume_token issued at start; the token is never disclosed to a caller without it.", routing().into_iter().chain(Vec::from([("job_id", int("Job id.")), ("resume_token", string("Token from job_start; required."))])).collect(), vec!["job_id", "resume_token"]));
+    tools.push(("job_poll", "Read the current state, progress, and result of a job. Requires the resume_token issued at start; the token is never disclosed to a caller without it.", Vec::new().into_iter().chain(Vec::from([("job_id", int("Job id.")), ("resume_token", string("Token from job_start; required."))])).collect(), vec!["job_id", "resume_token"]));
     tools.push((
         "job_progress",
         "Publish truthful progress for work the driving agent owns.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("job_id", int("Job id.")),
                 ("resume_token", string("Token from job_start; required.")),
@@ -459,7 +589,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec!["job_id", "resume_token"],
     ));
-    tools.push(("job_complete", "Publish a terminal result for work the driving agent owns. The result must be a JSON array of result frames; a single object is accepted and wrapped, never dropped.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("job_complete", "Publish a terminal result for work the driving agent owns. The result must be a JSON array of result frames; a single object is accepted and wrapped, never dropped.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Job id.")),
         ("resume_token", string("Token from job_start; required.")),
         ("result", json!({"description": "Array of result frames (a bare object is wrapped into one)."})),
@@ -467,7 +597,7 @@ fn tool_definitions() -> Vec<Value> {
     tools.push((
         "job_cancel",
         "Cancel a non-terminal job; cancellation wins races with completion.",
-        routing()
+        Vec::new()
             .into_iter()
             .chain(Vec::from([
                 ("job_id", int("Job id.")),
@@ -480,7 +610,7 @@ fn tool_definitions() -> Vec<Value> {
         "job_transfer",
         "Transfer ownership using the current resume token.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("job_id", int("Job id.")),
                 ("resume_token", string("Current token; required.")),
@@ -493,7 +623,7 @@ fn tool_definitions() -> Vec<Value> {
     tools.push((
         "job_release",
         "Permanently release a job and invalidate its resume token.",
-        routing()
+        Vec::new()
             .into_iter()
             .chain(Vec::from([
                 ("job_id", int("Job id.")),
@@ -505,12 +635,37 @@ fn tool_definitions() -> Vec<Value> {
     tools
         .into_iter()
         .map(|(name, description, props, required)| {
+            // B237: the advertised payload keys are not a second list. They are
+            // `ai_text_editor::verbs`, the table the server's door refuses
+            // against, so a key one surface knows about and the other does not
+            // cannot be written — an extra here panics as unadvertised, a
+            // missing one panics as undescribed. `ADAPTER_ARGUMENTS` did this
+            // for the arguments the adapter consumes (B217); this is the same
+            // binding for the arguments the server consumes.
+            let method = server_method(name);
+            let described: std::collections::HashMap<&str, Value> = props.into_iter().collect();
             let mut properties = serde_json::Map::new();
             for (key, value) in routing() {
                 properties.insert(key.to_string(), value);
             }
-            for (key, value) in props {
-                properties.insert(key.to_string(), value);
+            let accepted = ai_text_editor::verbs::extra_payload_keys(method)
+                .unwrap_or_else(|| panic!("{name} maps to {method}, which the server does not dispatch"));
+            for key in accepted {
+                let value = described.get(key).cloned().unwrap_or_else(|| {
+                    panic!("{name} accepts the payload key {key} and describes no schema for it")
+                });
+                properties.insert((*key).to_string(), value);
+            }
+            // The revision guard rides the envelope, not the payload, so it is
+            // the one described key with no row in the table.
+            if let Some(value) = described.get("expected_revision") {
+                properties.insert("expected_revision".into(), value.clone());
+            }
+            for key in described.keys() {
+                assert!(
+                    *key == "expected_revision" || accepted.contains(key),
+                    "{name} advertises {key}, which {method} does not read - the server would refuse it as an unknown argument"
+                );
             }
             json!({
                 "name": name,
@@ -532,11 +687,7 @@ fn call_tool(id: Value, params: Value) -> Value {
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let method = if name == "resolve" {
-        "resolve_external"
-    } else {
-        name
-    };
+    let method = server_method(name);
     let mut payload = arguments.as_object().cloned().unwrap_or_default();
     let file = payload
         .get("file")
@@ -544,6 +695,15 @@ fn call_tool(id: Value, params: Value) -> Value {
         .map(PathBuf::from);
     let resolve_request = ResolveRequest {
         file: file.clone(),
+        // Read, and left in the payload: the server routes on both.
+        tab_id: payload
+            .get("tab_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        tab_path: payload
+            .get("tab_path")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         method: method.to_string(),
         explicit_endpoint: payload
             .get("endpoint")
@@ -572,6 +732,10 @@ fn call_tool(id: Value, params: Value) -> Value {
             .get("acknowledge_create_parents")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        takeover_stale_endpoint: payload
+            .get("takeover_stale_endpoint")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         force_refresh: false,
     };
     let auth_token = payload
@@ -583,8 +747,21 @@ fn call_tool(id: Value, params: Value) -> Value {
     // One sweep from the same const `tool_definitions` declares, so an
     // argument the adapter consumes and an argument a client is allowed to
     // send cannot come apart again (B217).
+    let tab_mode = payload.get("document_mode").cloned();
     for key in ADAPTER_ARGUMENTS {
         payload.remove(*key);
+    }
+    // B238: `document_mode` is consumed twice on `open` and once everywhere
+    // else. As an adapter argument it becomes the argv of a server this call
+    // may start; as an `open` payload key it is the mode of the tab being
+    // opened, which is the half that was missing — a second file added to a
+    // running workspace inherited the server's startup mode and could never
+    // be a raw or hex tab. Put back for `open` alone, so on any other verb the
+    // server still refuses it as an argument that verb does not read.
+    if method == "open" {
+        if let Some(mode) = tab_mode {
+            payload.insert("document_mode".into(), mode);
+        }
     }
     // B175, made honest: accept both the envelope's wire name (`revision`)
     // and the documented `expected_revision`, and honour the schema the
@@ -637,6 +814,15 @@ fn call_tool(id: Value, params: Value) -> Value {
             auth_token.as_deref().or(resolved.auth_token.as_deref()),
             returned_session_token.or(resolved.session_token.as_deref()),
         );
+        // T98, and the surface it matters most on: an MCP agent's context is
+        // the forgetful one, so a successful call focusing the tab that served
+        // it is what lets the next call name nothing at all.
+        client::persist_focus(
+            &resolve_request,
+            &resolved.endpoint,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            returned_session_token.or(resolved.session_token.as_deref()),
+        );
     }
     // A refusal must look refused on the MCP wire too: the CLI exits
     // non-zero when an error frame is in the answer, and an MCP harness
@@ -671,6 +857,47 @@ fn parse_revision_argument(value: &Value) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
+    /// B261. The comparison is a pure function precisely so it can be tested
+    /// without waiting on a filesystem timestamp to change.
+    #[test]
+    fn a_replaced_adapter_is_reported_and_an_unchanged_one_is_silent() {
+        let started = SystemTime::UNIX_EPOCH;
+        let later = started + std::time::Duration::from_secs(1);
+        assert!(
+            super::staleness_notice(Some(started), Some(started)).is_none(),
+            "an unchanged adapter must say nothing at all"
+        );
+        let notice = super::staleness_notice(Some(started), Some(later))
+            .expect("a replaced adapter must be reported");
+        assert!(notice.contains("Restart the MCP session"));
+        // The notice has to name the thing that is actually refusing, or the
+        // reader debugs the editor instead of their own cached schema.
+        assert!(notice.contains("refused by your own client against its cached schema"));
+    }
+
+    /// An unreadable timestamp is not evidence of a swap. Guessing would put a
+    /// restart notice on every call in an environment where current_exe or its
+    /// metadata is unavailable.
+    #[test]
+    fn an_unknown_timestamp_is_never_reported_as_a_swap() {
+        assert!(super::staleness_notice(None, None).is_none());
+        assert!(super::staleness_notice(Some(SystemTime::UNIX_EPOCH), None).is_none());
+        assert!(super::staleness_notice(None, Some(SystemTime::UNIX_EPOCH)).is_none());
+    }
+
+    /// The notice rides alongside the answer, never instead of it.
+    #[test]
+    fn attaching_a_notice_keeps_the_original_content() {
+        let response = json!({"result": {"content": [{"type":"text","text":"the answer"}]}});
+        let attached = super::attach_notice(response, "the notice".into());
+        let content = attached["result"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], "the answer");
+        assert_eq!(content[1]["text"], "the notice");
+    }
+
     use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
     use serde_json::{json, Value};
 
@@ -793,6 +1020,54 @@ mod tests {
             }
         }
         assert!(found >= 7, "expected the mutating tools, found {found}");
+    }
+
+    /// B251 and B252, the schema half. The server refusing these by name is
+    /// pinned in cli_flow; this pins that the schema no longer OFFERS them,
+    /// which is the half that matters to a schema-following client — it would
+    /// otherwise be told to send an argument the server now rejects, and the
+    /// fix would read as a regression.
+    ///
+    /// Not spelled out per tool by hand: `tool_definitions` builds every
+    /// property list from `ai_text_editor::verbs`, and advertising a key that
+    /// table does not carry panics at build time. So this asserts the
+    /// consequence for the three keys the entries name, and the binding itself
+    /// is what keeps the rest honest.
+    #[test]
+    fn no_tool_advertises_an_argument_its_verb_does_not_read() {
+        let tools = tools();
+        let named = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+                .unwrap_or_else(|| panic!("{name} is advertised"))
+        };
+        // B251: both are `page` keys, and search reads neither. Advertising
+        // them inverted their purpose — they exist to avoid a rescan.
+        let search = properties(named("search"));
+        for key in ["pager_key", "historical"] {
+            assert!(
+                !search.contains_key(key),
+                "search must not advertise {key}, which only page reads"
+            );
+        }
+        // They are real arguments, on the verb that does read them.
+        let page = properties(named("page"));
+        assert!(page.contains_key("pager_key") && page.contains_key("historical"));
+        // B252: no verb reads this one at all, so it is deleted rather than
+        // relocated.
+        assert!(
+            !properties(named("index")).contains_key("action"),
+            "index must not advertise an action it never reads"
+        );
+        // The verbs that DO take an action still advertise it, so the deletion
+        // was of a stale entry and not of the concept.
+        for name in ["cursor", "resolve"] {
+            assert!(
+                properties(named(name)).contains_key("action"),
+                "{name} reads action and must still advertise it"
+            );
+        }
     }
 
     #[test]

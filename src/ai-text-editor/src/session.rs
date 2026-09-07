@@ -199,6 +199,41 @@ pub fn resolve_workspace(identity: &str) -> Result<SessionRecord, String> {
     ))
 }
 
+/// The record for one tab, found by the `tab_uuid` every `open` answer
+/// reports (T96).
+///
+/// This is what makes a tab id sufficient addressing on its own: a caller
+/// holding an id needs no path, because the registry already knows which
+/// endpoint serves that tab and which session token authorizes it. Every tab
+/// registers, not only the first, so a tab added to a running workspace is
+/// findable this way too.
+///
+/// The id is not a weaker credential than the token it stands for:
+/// `tab_uuid_for` is a blake3 of the session token and the server generation,
+/// so guessing one is guessing the other. It is the *stable* half of the pair —
+/// short, safe to quote back in a response, and the thing an agent can carry
+/// in its own notes.
+pub fn resolve_tab(tab_uuid: &str) -> Result<SessionRecord, String> {
+    let path = registry_path();
+    let mut candidates: Vec<SessionRecord> = read_records(&path)
+        .map_err(|error| format!("cannot read session registry: {error}"))?
+        .into_iter()
+        .filter(|record| record.tab_uuid == tab_uuid)
+        .collect();
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.start_time_ns));
+    let Some(record) = candidates.into_iter().next() else {
+        return Err(format!(
+            "tab_unknown: no session record has tab_id {tab_uuid}; the tab may belong to a server that has since exited - `open` the file again for a current id (the journal replays)"
+        ));
+    };
+    if !endpoint_is_reachable(&record.endpoint) {
+        return Err(format!(
+            "tab_stale: tab {tab_uuid} belonged to a server that is no longer reachable; `open` the file again for a current id (the journal replays)"
+        ));
+    }
+    Ok(record)
+}
+
 fn read_records(path: &Path) -> io::Result<Vec<SessionRecord>> {
     let Ok(content) = fs::read_to_string(path) else {
         return Ok(Vec::new());
@@ -295,6 +330,30 @@ mod tests {
         );
         let value = record.value();
         assert_eq!(SessionRecord::from_value(&value), Some(record));
+    }
+
+    /// T96: the tab uuid an `open` answer reports is enough to find the tab
+    /// again — the same record, by the id rather than by the token.
+    #[test]
+    fn a_tab_uuid_identifies_the_record_that_reported_it() {
+        let record = new_record(
+            "unix:/tmp/editor.sock",
+            "generation",
+            "secret",
+            None,
+            Some("agent".into()),
+        );
+        assert_eq!(record.tab_uuid, tab_uuid_for("secret", "generation"));
+        // Distinct tabs get distinct ids even under one identity, which is
+        // what makes the id addressing rather than a hint.
+        let sibling = new_record(
+            "unix:/tmp/editor.sock",
+            "generation",
+            "other-secret",
+            None,
+            Some("agent".into()),
+        );
+        assert_ne!(record.tab_uuid, sibling.tab_uuid);
     }
 
     #[test]

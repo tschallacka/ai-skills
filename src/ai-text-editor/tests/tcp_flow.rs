@@ -129,6 +129,14 @@ impl Drop for TcpHarness {
             let _ = server.kill();
             let _ = server.wait();
         }
+        // Removing the scratch tree is not enough: an endpoint record whose
+        // configured root was too long to hold a socket beside it lives in the
+        // length fallback, outside that tree by construction. This file left
+        // one stale record directory behind per run. Keyed to this harness's
+        // own runtime directory, so it removes nothing another test owns.
+        let [_, fallback] =
+            ai_text_editor::transport::endpoint_roots(&self.scratch.join("runtime"));
+        let _ = std::fs::remove_dir_all(fallback);
         let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }

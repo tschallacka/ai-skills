@@ -210,7 +210,7 @@ impl Hub {
     /// server, so the SECOND agent on a machine could never register that nick
     /// again. The nick is only surrendered when the registry still points at
     /// THIS connection index; a later connection that took it over keeps it.
-    fn deregister(&self, nick: &str, idx: usize, chans: &[String]) {
+    fn deregister(&self, nick: &str, prefix: &str, idx: usize, chans: &[String]) {
         if !nick.is_empty() {
             if let Ok(mut nicks) = self.nicks.lock() {
                 if nicks.get(nick).copied() == Some(idx as u64) {
@@ -223,6 +223,28 @@ impl Hub {
                 if let Some(members) = channels.get_mut(chan) {
                     members.retain(|m| m != nick);
                 }
+            }
+        }
+        // Tell each channel the nick is gone (B245). A connection that simply
+        // ends - which is the normal case here, since `tail --mention-exit`
+        // leaves on every mention - sends no PART, so without this the nick
+        // stayed in every other client's list until they reconnected.
+        //
+        // Relayed after the memberships are dropped and outside that lock:
+        // `relay` takes `writers`, and taking it while holding `channels` would
+        // put two locks in one place, which is the shape B122 came from.
+        //
+        // The prefix is the full `nick!user@host`, not a bare nick. A first
+        // version sent `:nick QUIT` on the reasoning that a deregister can run
+        // for a connection that never registered - but a bare-nick prefix is
+        // what Konversation rendered as "[quit] connection closed" with nobody
+        // named, so the announcement did not say who left, which is the whole
+        // point of sending it. The caller passes the prefix it already has, and
+        // the empty-nick guard below still covers the unregistered case.
+        if !nick.is_empty() {
+            let from = if prefix.is_empty() { nick } else { prefix };
+            for chan in chans {
+                self.relay(chan, &format!(":{} QUIT :connection closed", from), idx);
             }
         }
         // The peer itself stays in `writers` so live connections keep their
@@ -337,6 +359,48 @@ impl Hub {
         self.scan_highest(chan)
     }
 
+    /// Relay one line to every member of `chan` except the connection at
+    /// `except_idx`, which has already had it written directly.
+    ///
+    /// Named `relay` rather than `announce`: the announce_* family in this file is
+    /// the UDP discovery beacon, a different thing entirely. Extracted so JOIN,
+    /// PART and a closing connection reach the channel the way PRIVMSG does,
+    /// rather than each growing its own copy of the fanout.
+    /// Membership changes were not announced at all before (B244, B245): the
+    /// handlers echoed to the acting connection and told nobody else, so a
+    /// client already in the channel never saw a nick arrive or leave and its
+    /// nick list showed whoever happened to be present when IT joined.
+    ///
+    /// The lock discipline is the point and is not incidental. `writers` is held
+    /// only long enough to copy the peer list, and every `offer` happens after
+    /// it is released: writing to a peer's socket while holding `writers` blocks
+    /// for as long as that peer declines to read, and because `writers` is the
+    /// lock the accept loop needs, one idle subscriber wedged the whole server
+    /// (B122). `Peer::offer` skips a non-member, so passing the channel is all
+    /// the scoping this needs.
+    fn relay(&self, chan: &str, line: &str, except_idx: usize) {
+        let peers: Vec<Arc<Peer>> = match self.writers.lock() {
+            Ok(writers) => writers
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != except_idx)
+                .map(|(_, p)| Arc::clone(p))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        for p in &peers {
+            if p.offer(chan, line) == Offer::Dropped {
+                // The peer is not draining its queue. It is marked dead, so its
+                // own thread tears it down; say so, because a silently dropped
+                // subscriber looks like message loss.
+                eprintln!(
+                    "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
+                    chan, OUTBOX_MAX_BYTES
+                );
+            }
+        }
+    }
+
     /// Like `fetch`, but only rows whose text mentions `@nick` (server-side
     /// mention tracking, so a client can watch for its name without pulling
     /// the whole channel).
@@ -376,6 +440,38 @@ fn valid_chan(c: &str) -> bool {
 fn valid_umode_set(flags: &str) -> bool {
     let body = flags.trim_start_matches(['+', '-']);
     !body.is_empty() && body.chars().all(|ch| matches!(ch, 'i' | 'w' | 's'))
+}
+
+// A list query asks for the bans, exceptions or invites on a channel; a change
+// adds or removes one. What separates them is the MASK, not the sign: `MODE
+// #chan b` and `MODE #chan +b` both ask, and only `MODE #chan +b nick!*@*`
+// sets. A sign with no mask cannot act on anything, so it can only be a
+// question.
+//
+// The first version of this got it wrong by keying on the sign, and the error it
+// was meant to fix came straight back on the next join, because Konversation
+// asks with `+b`. The caller must therefore also check that no mask parameter
+// follows; this function only judges the letters.
+fn list_mode_query(flags: &str) -> bool {
+    let letters = flags.trim_start_matches(['+', '-']);
+    !letters.is_empty() && letters.chars().all(|ch| matches!(ch, 'b' | 'e' | 'I'))
+}
+
+// The two lines that answer one list query: the list itself, which is always
+// empty because the bus keeps no bans, exceptions or invites, and the
+// end-of-list numeric a client waits for before it stops expecting entries.
+// `None` for a letter this server does not answer, so the caller can skip it.
+fn empty_list_reply(server: &str, nick: &str, chan: &str, letter: char) -> Option<[String; 1]> {
+    let (end_code, end_text) = match letter {
+        'b' => (368, "End of channel ban list"),
+        'e' => (349, "End of channel exception list"),
+        'I' => (347, "End of channel invite list"),
+        _ => return None,
+    };
+    Some([format!(
+        ":{} {} {} {} :{}",
+        server, end_code, nick, chan, end_text
+    )])
 }
 
 fn valid_nick(n: &str) -> bool {
@@ -767,6 +863,14 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             sess.joined.push(chan.clone());
                         }
                         peer.set_joined(&sess.joined);
+                        // Tell the channel, which is what puts this nick in
+                        // every other client's list (B244). Without it only a
+                        // client joining LATER ever learns the nick, from its
+                        // own 353 reply, so whether an agent appears depended on
+                        // join order. Announced with the standard `JOIN #chan`
+                        // form rather than the trailing-colon spelling echoed
+                        // above, since this is what other clients parse.
+                        hub.relay(&chan, &format!(":{} JOIN {}", prefix, chan), idx);
                         let members = {
                             if let Ok(ch) = hub.channels.lock() {
                                 ch.get(&chan).cloned().unwrap_or_default()
@@ -795,6 +899,16 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             }
                         }
                         sess.joined.retain(|j| j != &chan);
+                        // Announced BEFORE set_joined, deliberately: the parting
+                        // peer is excluded by index anyway, and narrowing its
+                        // own membership first would make the ordering look
+                        // load-bearing when it is not.
+                        //
+                        // Without this a departed nick stayed in every other
+                        // client's list for the life of their connection
+                        // (B245), which reads worse than the arrival gap: the
+                        // list only ever grew.
+                        hub.relay(&chan, &format!(":{} PART {}", prefix, chan), idx);
                         // Broadcast membership is read from the outbox, so a
                         // PART has to update it or a parted connection keeps
                         // receiving the channel.
@@ -838,7 +952,7 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             continue;
                         }
                         match hub.append(&chan, &sess.nick, &text) {
-                            Ok(_) => {
+                            Ok((id, _)) => {
                                 let m = Message {
                                     prefix: Some(format!(
                                         "{}!{}@{}",
@@ -849,42 +963,37 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                                     trailing: Some(text.clone()),
                                 };
                                 let out = m.serialize();
-                                w(st, &out);
-                                // Broadcast to OTHER connections by queueing on
-                                // each peer's outbox. Deliberately not by
-                                // writing to their sockets from this thread:
-                                // that write blocks for as long as the peer
-                                // declines to read, and it happened while
-                                // holding `hub.writers` -- the lock the accept
-                                // loop needs -- so one idle subscriber wedged
-                                // the whole server (B122).
+                                // The sender is told NOTHING here, which is the
+                                // RFC 1459 flow: a PRIVMSG is relayed to the
+                                // other members, and a client renders its own
+                                // line locally. Echoing it made every message
+                                // appear twice in a standard client's own
+                                // window (B249) - Michael's diagnosis from the
+                                // Konversation log was exactly that, "once
+                                // conquerer printing itself, and once the
+                                // channel sending it".
                                 //
-                                // `hub.writers` is held only to copy the peer
-                                // list, and the offers happen after it is
-                                // released, so no second lock is ever taken
-                                // under it.
-                                let peers: Vec<Arc<Peer>> = match hub.writers.lock() {
-                                    Ok(writers) => writers
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(i, _)| *i != idx)
-                                        .map(|(_, p)| Arc::clone(p))
-                                        .collect(),
-                                    Err(_) => Vec::new(),
-                                };
-                                for p in &peers {
-                                    if p.offer(&chan, &out) == Offer::Dropped {
-                                        // The peer is not draining its queue.
-                                        // It is marked dead, so its own thread
-                                        // tears it down; say so, because a
-                                        // silently dropped subscriber looks
-                                        // like message loss.
-                                        eprintln!(
-                                            "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
-                                            chan, OUTBOX_MAX_BYTES
-                                        );
-                                    }
-                                }
+                                // An unsolicited acknowledgement is no better.
+                                // A first attempt pushed `999 <nick> #chan
+                                // <id>` here, and a standard client rendered
+                                // the numeric verbatim: `[999] mdibbets
+                                // #ai-skills 59`. Trading a duplicate line for
+                                // a stray one is not a fix.
+                                //
+                                // So confirmation is SOLICITED instead: our own
+                                // client asks `LASTID #chan` after the PRIVMSG
+                                // and reads the 999 that already answers it. A
+                                // client that does not ask sees nothing extra,
+                                // and the id still proves the line was
+                                // persisted rather than merely reflected.
+                                let _ = id;
+                                // Broadcast to OTHER connections by queueing on
+                                // each peer's outbox rather than writing to
+                                // their sockets from this thread. Hub::relay
+                                // owns that fanout and the lock discipline it
+                                // depends on (B122); it is shared with JOIN and
+                                // PART so the three cannot drift apart.
+                                hub.relay(&chan, &out, idx);
                             }
                             Err(e) => w(st, &format!("ERROR :{}", e)),
                         }
@@ -1021,9 +1130,47 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             if target == sess.nick && valid_umode_set(&flags) {
                                 let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
                                 w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
+                            } else if valid_chan(&target)
+                                && params.len() == 2
+                                && list_mode_query(&flags)
+                            {
+                                // A QUERY for the ban list, not an attempt to
+                                // set one. `params.len() == 2` is the whole
+                                // test: flags and no MASK. `MODE #chan b` and
+                                // `MODE #chan +b` both ask; only
+                                // `MODE #chan +b nick!*@*` sets.
+                                //
+                                // Measured rather than assumed, after the sign
+                                // was tried as the discriminator and the error
+                                // came back on the next join: Konversation asks
+                                // with `+b`, which the server logged as
+                                // `refusing MODE change on #ai-skills from
+                                // mdibbets: flags "+b"`.
+                                //
+                                // The bus keeps no lists, so each queried
+                                // letter gets an empty list and its
+                                // end-of-list numeric.
+                                for letter in flags.trim_start_matches(['+', '-']).chars() {
+                                    for line in
+                                        empty_list_reply(&sn, &me, &target, letter).iter().flatten()
+                                    {
+                                        w(st, line);
+                                    }
+                                }
                             } else if valid_chan(&target) {
-                                // Channel modes need an operator model the bus
-                                // does not have; refuse rather than pretend.
+                                // A real change. Channel modes need an operator
+                                // model the bus does not have; refuse rather
+                                // than pretend.
+                                //
+                                // Logged with the flags, because a refusal that
+                                // does not say what it refused is unreadable
+                                // from the outside: B248 was fixed once against
+                                // a guess at what a client sends after JOIN,
+                                // and the error came back.
+                                eprintln!(
+                                    "chat-server-rs: refusing MODE change on {} from {}: flags {:?}",
+                                    target, me, flags
+                                );
                                 w(
                                     st,
                                     &format!(
@@ -1175,13 +1322,21 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         let _ = st.tcp.shutdown(std::net::Shutdown::Both);
         let leaving_nick = st.nick.clone();
         let leaving_chans = sess.joined.clone();
+        // The prefix a QUIT is attributed by. Built here because the session
+        // still holds user and host, and a bare nick is what left Konversation
+        // rendering "[quit] connection closed" with nobody named.
+        let leaving_prefix = if leaving_nick.is_empty() {
+            String::new()
+        } else {
+            format!("{}!{}@{}", leaving_nick, sess.user, sess.host)
+        };
         // Drop the ConnState so the socket closes rather than lingering in
         // CLOSE-WAIT, then release the slot guard BEFORE taking any hub lock:
         // holding a slot while acquiring `writers` is the ABBA deadlock the
         // Hub comments warn about.
         *guard = None;
         drop(guard);
-        hub.deregister(&leaving_nick, idx, &leaving_chans);
+        hub.deregister(&leaving_nick, &leaving_prefix, idx, &leaving_chans);
         break;
     }
 }
@@ -1654,6 +1809,226 @@ mod announce_tests {
         assert!(host_is_dialable("192.168.1.106"));
         assert!(host_is_dialable("localhost"));
         assert!(host_is_dialable("some.host.example"));
+    }
+}
+
+#[cfg(test)]
+mod mode_query_tests {
+    use super::{empty_list_reply, list_mode_query};
+
+    // RFC 1459 4.2.3 / RFC 2812 3.2.3: omitting the MASK is what makes a ban
+    // mode a list request, answered with RPL_BANLIST and RPL_ENDOFBANLIST. The
+    // sign does not decide it, and the first version of these tests asserted
+    // that it did -- so the error they were written for came straight back on
+    // the next join, because Konversation asks with `+b`. The server's own
+    // refusal log named it: `refusing MODE change on #ai-skills ... flags "+b"`.
+    // The spec had this answer before the log did.
+    #[test]
+    fn a_list_letter_is_a_query_signed_or_not() {
+        assert!(list_mode_query("b"), "MODE #chan b asks for the ban list");
+        assert!(
+            list_mode_query("+b"),
+            "and so does MODE #chan +b, which is what Konversation sends"
+        );
+        assert!(
+            list_mode_query("-b"),
+            "a sign with no mask cannot act either"
+        );
+        assert!(list_mode_query("e"), "exception list");
+        assert!(list_mode_query("I"), "invite list");
+        assert!(list_mode_query("bI"), "several letters at once");
+    }
+
+    // The mask is the CALLER's check (`params.len() == 2`); this function judges
+    // only the letters. Asserted so nobody reads a `true` here as "no mask was
+    // given" and drops the caller's guard.
+    #[test]
+    fn the_letters_are_judged_but_the_mask_is_not() {
+        assert!(
+            list_mode_query("+b"),
+            "+b nick!*@* must still refuse, and that is params.len(), not this"
+        );
+        assert!(!list_mode_query(""), "an empty flag string is not a query");
+        assert!(!list_mode_query("+"), "a bare sign names no list");
+    }
+
+    // A letter this server does not answer must not be silently swallowed as an
+    // empty list: it falls through to the refusal instead.
+    #[test]
+    fn only_the_list_letters_are_answered() {
+        assert!(!list_mode_query("k"), "a key is not a list");
+        assert!(!list_mode_query("+k"), "nor is a signed key");
+        assert!(
+            !list_mode_query("bk"),
+            "one unknown letter disqualifies the set"
+        );
+        assert!(empty_list_reply("s", "me", "#c", 'k').is_none());
+    }
+
+    // The client waits for the end-of-list numeric before it stops expecting
+    // entries, so the reply must carry the right one per letter.
+    #[test]
+    fn each_list_query_ends_with_its_own_numeric() {
+        let ban = empty_list_reply("srv", "me", "#ops", 'b').expect("b is answered");
+        assert_eq!(ban[0], ":srv 368 me #ops :End of channel ban list");
+        let exc = empty_list_reply("srv", "me", "#ops", 'e').expect("e is answered");
+        assert_eq!(exc[0], ":srv 349 me #ops :End of channel exception list");
+        let inv = empty_list_reply("srv", "me", "#ops", 'I').expect("I is answered");
+        assert_eq!(inv[0], ":srv 347 me #ops :End of channel invite list");
+    }
+}
+
+#[cfg(test)]
+mod membership_relay_tests {
+    use super::{Hub, Peer};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    // The fanout is what puts a nick in another client's list. Before B244 the
+    // JOIN handler wrote only to the joining connection, so a client already in
+    // the channel was never told and its nick list showed whoever happened to
+    // be present when IT joined.
+    fn hub_with(peers: Vec<Arc<Peer>>) -> Hub {
+        Hub {
+            chan_dir: PathBuf::from("/nonexistent"),
+            highest: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            topics: Mutex::new(HashMap::new()),
+            nicks: Mutex::new(HashMap::new()),
+            writers: Mutex::new(peers),
+        }
+    }
+
+    #[test]
+    fn announce_reaches_the_other_members_and_not_the_actor() {
+        let actor = Arc::new(Peer::new());
+        let watcher = Arc::new(Peer::new());
+        actor.set_joined(&["#ops".to_string()]);
+        watcher.set_joined(&["#ops".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&actor), Arc::clone(&watcher)]);
+
+        hub.relay("#ops", ":new!u@h JOIN #ops", 0);
+
+        let (actor_lines, _) = actor.drain();
+        assert!(
+            actor_lines.is_empty(),
+            "the acting connection is excluded by index; it was written to directly"
+        );
+        let (watcher_lines, _) = watcher.drain();
+        assert_eq!(
+            watcher_lines,
+            vec![":new!u@h JOIN #ops".to_string()],
+            "a member already in the channel must be told a nick arrived"
+        );
+    }
+
+    // Channel scoping comes from Peer::offer, so announcing must not leak a
+    // membership change to a connection that is elsewhere.
+    #[test]
+    fn announce_skips_a_peer_in_another_channel() {
+        let elsewhere = Arc::new(Peer::new());
+        elsewhere.set_joined(&["#other".to_string()]);
+        let hub = hub_with(vec![Arc::new(Peer::new()), Arc::clone(&elsewhere)]);
+
+        hub.relay("#ops", ":new!u@h JOIN #ops", 0);
+
+        let (lines, _) = elsewhere.drain();
+        assert!(lines.is_empty(), "a non-member was told about #ops");
+    }
+
+    // B245: a connection that simply ends sends no PART, which is the normal
+    // case for `tail --mention-exit`, so deregister has to announce the QUIT or
+    // the nick stays listed for the life of every other connection.
+    #[test]
+    fn deregister_announces_a_quit_to_each_channel() {
+        let leaving = Arc::new(Peer::new());
+        let watcher = Arc::new(Peer::new());
+        watcher.set_joined(&["#ops".to_string(), "#dev".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&leaving), Arc::clone(&watcher)]);
+
+        hub.deregister(
+            "gone",
+            "gone!u@h",
+            0,
+            &["#ops".to_string(), "#dev".to_string()],
+        );
+
+        let (lines, _) = watcher.drain();
+        assert_eq!(
+            lines,
+            vec![
+                ":gone!u@h QUIT :connection closed".to_string(),
+                ":gone!u@h QUIT :connection closed".to_string()
+            ],
+            "each channel the nick held must hear that it went, ATTRIBUTED: a bare-nick prefix rendered as \"[quit] connection closed\" with nobody named"
+        );
+    }
+
+    // The JOIN and PART handlers live inside the connection loop, which needs a
+    // live TLS peer to drive, so the tests above reach `relay` directly and
+    // prove its semantics rather than that those handlers call it. Removing
+    // either call therefore broke nothing -- a fix nothing can fail -- so the
+    // call sites are pinned here instead.
+    //
+    // A source assertion is the weaker kind and this says so: it cannot see
+    // whether the line reaches the wire, only that the handler asks. The wire
+    // itself needs a raw IRC client (the dev shell has no openssl, deliberately),
+    // and in practice a standard client's nick list is the check.
+    // The needle is never written out in full here, and that is not stylistic.
+    // The first version of this test asserted `src.contains("<the exact relay
+    // line>")` -- which passed with the call deleted, because include_str! reads
+    // the very file holding the test's own assertion literal. The test was its
+    // own evidence. Slicing the handler region and looking for a call inside it
+    // cannot be satisfied that way: this module sits after every region below.
+    fn region<'a>(src: &'a str, from: &str, to: &str) -> &'a str {
+        let start = src
+            .find(from)
+            .unwrap_or_else(|| panic!("region start not found: {}", from));
+        let rest = &src[start..];
+        let end = rest
+            .find(to)
+            .unwrap_or_else(|| panic!("region end not found: {}", to));
+        &rest[..end]
+    }
+
+    #[test]
+    fn the_join_and_part_handlers_relay_to_the_channel() {
+        let src = include_str!("main.rs");
+        let call = "hub.relay(";
+
+        let join = region(src, "\"JOIN\" =>", "\"PART\" =>");
+        assert!(
+            join.contains(call),
+            "the JOIN handler must relay to the channel, or a client already present never sees the nick arrive (B244)"
+        );
+        let part = region(src, "\"PART\" =>", "\"NAMES\" =>");
+        assert!(
+            part.contains(call),
+            "the PART handler must relay to the channel, or a departed nick stays in every other list (B245)"
+        );
+        let dereg = region(src, "fn deregister(", "fn scan_highest(");
+        assert!(
+            dereg.contains("self.relay("),
+            "deregister must relay a QUIT: a dropped connection sends no PART (B245)"
+        );
+    }
+
+    // A deregister can run for a connection that never registered a nick, and
+    // relaying ":  QUIT" would be a malformed line on the wire.
+    #[test]
+    fn deregister_announces_nothing_for_an_unregistered_connection() {
+        let watcher = Arc::new(Peer::new());
+        watcher.set_joined(&["#ops".to_string()]);
+        let hub = hub_with(vec![Arc::new(Peer::new()), Arc::clone(&watcher)]);
+
+        hub.deregister("", "", 0, &["#ops".to_string()]);
+
+        let (lines, _) = watcher.drain();
+        assert!(
+            lines.is_empty(),
+            "announced a QUIT for a nickless connection"
+        );
     }
 }
 

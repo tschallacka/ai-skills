@@ -339,7 +339,12 @@ if command -v mmdc >/dev/null 2>&1; then
     # status; the caller retries and classifies.
     render_once() {
         local diagram="$1" output="$2"
-        profile="$(mktemp -d "$work/profile.XXXXXX")"
+        # The profile goes under the SHORT socket root, not $work: chromium opens
+        # a singleton socket inside --user-data-dir, and a unix socket path is
+        # capped near 104 bytes. This is the one place in the suite that needs a
+        # short path, and giving it its own root is what frees the data root to
+        # honour an operator's TMPDIR (see lib-test.sh).
+        profile="$(mktemp -d "${T_SOCKET_TMPDIR:-/tmp}/profile.XXXXXX")"
         printf '%s\n' "{ \"args\": [\"--no-sandbox\", \"--disable-dev-shm-usage\", \"--user-data-dir=$profile\"] }" > "$work/puppeteer.json"
         if mmdc -q -p "$work/puppeteer.json" -i "$diagram" -o "$output" >"$work/render.log" 2>&1; then
             rm -rf "$profile"

@@ -9,18 +9,18 @@ ai-text-editor \- agent-oriented local text and byte editor
 The editor is a server-owned, revision-aware editor for agents. The server
 owns document state, journals, indexes, SQLite metadata, sessions, and jobs.
 One server may own multiple isolated file tabs; each tab has separate state,
-metadata, and authorization. The initial Bstart --file PATHR creates the
-shared endpoint, while Bopen --endpoint ENDPOINT --file PATHR opens or
+metadata, and authorization. The initial \fBstart --file PATH\fR creates the
+shared endpoint, while \fBopen --endpoint ENDPOINT --file PATH\fR opens or
 selects another tab. Closing one tab leaves the endpoint running until the
 last tab closes.
 The client opens a short-lived request connection and exits after completion.
-After BopenR, the server returns a tab-scoped Bsession_tokenR. Save it
-with B--save-session-token PATHR and reuse it with B--session-token PATHR;
+After \fBopen\fR, the server returns a tab-scoped \fBsession_token\fR. Save it
+with \fB--save-session-token PATH\fR and reuse it with \fB--session-token PATH\fR;
 requests without the current token are rejected before mutation.
 .PP
-Mutating commands BinsertR, BreplaceR, Blarge-editR, BrestoreR,
-BundoR, BredoR, and BsaveR require B--expected-revisionR. A
-missing or stale value is refused; read BopenR or BhistoryR again before
+Mutating commands \fBinsert\fR, \fBreplace\fR, \fBlarge-edit\fR, \fBrestore\fR,
+\fBundo\fR, \fBredo\fR, and \fBsave\fR require \fB--expected-revision\fR. A
+missing or stale value is refused; read \fBopen\fR or \fBhistory\fR again before
 retrying. The server has no project-root jail: the session token grants the
 server process's normal filesystem permissions, so keep the endpoint private
 and use operating-system isolation when stronger confinement is needed.
@@ -33,6 +33,11 @@ A PATH that does not exist opens an empty new tab; the file is created at
 its path by the first successful \fBsave\fR. A PATH whose parent directory
 does not exist is refused with that directory named and nothing created;
 \fB--acknowledge-create-parents\fR creates the chain and opens the tab.
+\fB--document-mode\fR chooses the mode of the tab being opened
+(\fBtext_utf8\fR, \fBraw_bytes\fR, \fBhex_view\fR), whether or not a
+workspace is already running. A tab's mode is fixed for its lifetime:
+reopening one under a different mode is refused with
+\fBdocument_mode_conflict\fR, and \fBclose\fR then \fBopen\fR changes it.
 .IP "help"
 Print the complete capability and option reference. This file is colocated
 with the skill and is available with \fBman -l\fR when binaries are not on PATH.
@@ -85,6 +90,51 @@ impersonates a different server. Combined with \fB--file PATH\fR it may
 autostart a fresh server, as \fBopen\fR does, and that server registers itself
 under the named identity; identity resolution alone, with no file, starts
 nothing.
+.SH RESPONSE SIZE
+Every command takes \fB--verbosity 0|1|2|3\fR, and 1 is the default. Level 0 is
+the command's own result and the \fBtab_id\fR that produced it, and nothing
+else. Level 1 adds what verification and the next step need: \fBrevision\fR,
+\fBdirty\fR, \fBdisk_diverged\fR, \fBexternal_change_pending\fR, the tab's
+\fBmode\fR, the resolved edit span, completeness, and a search's pager key and
+count. Level 2 adds navigation: cursors, byte windows, index block paging and
+undo depths. Level 3 is everything.
+.PP
+Three rules the levels do not bend: every level carries the command's own
+result and names its tab; a refusal keeps its whole code, message and recovery
+choices at every level; and \fBcapabilities\fR and \fBresources\fR ignore the
+level, their payload being metadata by definition. A level outside 0-3 is
+refused with \fBverbosity_invalid\fR rather than clamped.
+.PP
+The default is 1 and not 0 by deliberate choice: level 0 cannot carry a
+revision, and every mutation's guard requires one, so a level-0 default would
+break the revision contract for any caller that then tried to edit.
+.SH ADDRESSING A TAB
+Every response reports a \fBtab_id\fR, and that id is addressing enough on its
+own for every command: \fB--tab-id ID\fR needs no \fB--file\fR and no
+\fB--endpoint\fR. An id naming no tab is refused with \fBtab_unknown\fR and
+the open tabs listed; it never falls through to another tab.
+.PP
+\fB--tab-path FRAGMENT\fR is the recovery when the id is lost: a filename, or
+a trailing run of path components, naming an open tab. Matching is on path
+components rather than substrings, so \fBport.txt\fR does not name
+\fBreport.txt\fR. A fragment naming several tabs is refused with
+\fBtab_ambiguous\fR and the candidates with their ids; one naming none with
+\fBtab_unmatched\fR and the open tabs. Neither is a guess and neither is a
+bare refusal.
+.PP
+A command naming nothing at all runs on the \fIfocused\fR tab: the tab the
+last successful call under this identity was served by. \fBopen\fR focuses the
+tab it opens, and a refused call never moves the focus. With no focus and
+nothing named, the command is refused with all four forms named.
+.PP
+Every response names the tab it answered. That is the safety half of allowing
+an unmarked command: read \fBtab_id\fR from the answer rather than assuming
+the focus is where you left it.
+.PP
+An argument the command does not read is refused with
+\fBunknown_argument\fR, and the refusal lists what that command does accept.
+The check is per command, so an argument valid on a \fIdifferent\fR command is
+refused too rather than silently ignored.
 .SH MODES
 Text, raw bytes, and hex view are explicit document modes. Search modes are
 explicit: exact text/bytes, wildcard, shell wildcard, path wildcard, Rust or
@@ -104,7 +154,7 @@ with a zero, which would be indistinguishable from absent text.
 and whose query contains HTML entities carries a note, and the count it would
 have found, when the same query unescaped does match.
 .PP
-BcapabilitiesR is read-only machine-readable discovery for these modes,
+\fBcapabilities\fR is read-only machine-readable discovery for these modes,
 coordinate units, defaults, resource limits, and transports. Use it before
 choosing behavior that is not already known to the agent.
 .PP
@@ -154,19 +204,19 @@ Files above 256 MiB use bounded file-backed reads and sparse index scans.
 The protocol caps frames at 8 MiB; large raw reads are capped at 4 MiB before
 base64 framing, and oversized result windows must be paged.
 Large searches persist matches incrementally in bounded SQLite chunks and keep
-only the preview in memory; use the returned pager key with BpageR to fetch
+only the preview in memory; use the returned pager key with \fBpage\fR to fetch
 bounded result slices.
 Startup records only a bounded prefix index for a large tab. Use the
 index operation for an explicit full scan and inspect the reported coverage.
-Index output returns four blocks by default; use B--offsetR and
-B--limitR to page the persisted block list. The response reports its total
+Index output returns four blocks by default; use \fB--offset\fR and
+\fB--limit\fR to page the persisted block list. The response reports its total
 block count and returned window.
 Use \fB--offset\fR and \fB--length\fR for reads. Ordinary mutations are
 refused; start a job and use \fBlarge-edit\fR with
 \fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.
 Large edits retain file-backed before/after snapshots for undo and redo; clean
 the tab journal when those snapshots are no longer needed.
-Large-tab external backup streams the current file to an atomic B.backR
+Large-tab external backup streams the current file to an atomic \fB.back\fR
 copy, and reload refreshes metadata and lazy index coverage. Merge and
 force-save require an acknowledged bounded rewrite job.
 .PP

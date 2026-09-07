@@ -95,6 +95,18 @@ render_template() {
         "$template" > "$output"
 }
 
+# Build artifacts are excluded as well as secrets, and the reason is a measured
+# one rather than tidiness: with only the .env exclusions this copied the Rust
+# `target/` tree, and a workspace with a warm debug build grew the destination
+# from 276 KB to 5,479,476 KB in about eight seconds -- two 51M rjq binaries
+# among them (B243). On a machine whose /tmp is tmpfs that is 6G of RAM, which
+# is enough to take the host down, and it was invisible in CI because a fresh
+# checkout has nothing built to copy.
+#
+# Both spellings of each directory are needed: the Rust workspace has a
+# top-level `target/` and seven more under `src/*/`, so an anchored pattern
+# alone would miss the nested ones. `.git` is deliberately NOT excluded -- the
+# published workspace is used as a git repository.
 copy_workspace_for_publication() {
     local source_root="$1" target_root="$2"
     mkdir -p "$target_root"
@@ -103,6 +115,10 @@ copy_workspace_for_publication() {
         --exclude='.env.tmp.*' \
         --exclude='*/.env' \
         --exclude='*/.env.tmp.*' \
+        --exclude='./target' \
+        --exclude='*/target' \
+        --exclude='./node_modules' \
+        --exclude='*/node_modules' \
         -cf - . | tar -C "$target_root" -xf -
 }
 
@@ -118,9 +134,25 @@ fi
 
 mkdir -p "$SRC_ROOT" "$BENCH_ROOT" "$STAGING_RESULT_DIR"
 if [ "$TAG" = current ]; then
+    # Build artifacts are excluded for a measured reason, not tidiness. With
+    # only the four exclusions below this copied the Rust `target/` tree, and on
+    # a workspace with a warm debug build the destination grew from 276 KB to
+    # 5,479,476 KB in about eight seconds -- two 51M rjq binaries among them
+    # (B243). Where /tmp is tmpfs that is 6G of RAM, which is enough to take the
+    # host down. It stayed invisible because the volume is whatever the
+    # developer's local target/ holds: a fresh CI checkout has nothing built to
+    # copy, so only a working machine ever paid it.
+    #
+    # Both spellings of each are required. The Rust workspace has a top-level
+    # `target/` and seven more under `src/*/`, so an anchored pattern alone
+    # misses the nested ones. The `git archive` branch below needs none of this:
+    # it carries tracked files only, and build output is never tracked.
     tar -C "$REPO_ROOT" \
         --exclude='.git' --exclude='.plans' --exclude='benchmark/results' \
-        --exclude='benchmark/.git' -cf - . | tar -x -C "$SRC_ROOT"
+        --exclude='benchmark/.git' \
+        --exclude='./target' --exclude='*/target' \
+        --exclude='./node_modules' --exclude='*/node_modules' \
+        -cf - . | tar -x -C "$SRC_ROOT"
 else
     git -C "$REPO_ROOT" archive "$TAG" | tar -x -C "$SRC_ROOT"
 fi

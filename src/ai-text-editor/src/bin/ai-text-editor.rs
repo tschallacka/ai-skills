@@ -54,8 +54,12 @@ fn main() {
         option(&args, &["--presentation", "-p"]).unwrap_or_else(|| "structured".into());
     let explicit_identity =
         option(&args, &["--session", "-s"]).or_else(|| option(&args, &["--agent", "-A"]));
+    let tab_id = option(&args, &["--tab-id", "-T"]);
+    let tab_path = option(&args, &["--tab-path"]);
     let resolve_request = ResolveRequest {
         file: file.clone(),
+        tab_id: tab_id.clone(),
+        tab_path: tab_path.clone(),
         method: method.to_string(),
         explicit_endpoint: option(&args, &["--endpoint", "-e"]),
         explicit_identity,
@@ -65,6 +69,7 @@ fn main() {
         normalize_nfc: flag(&args, &["--normalize-nfc"]),
         idle_timeout_seconds: option(&args, &["--idle-timeout-seconds"]),
         acknowledge_create_parents: flag(&args, &["--acknowledge-create-parents"]),
+        takeover_stale_endpoint: flag(&args, &["--takeover-stale-endpoint"]),
         force_refresh: false,
     };
     let mut payload = serde_json::Map::new();
@@ -73,6 +78,31 @@ fn main() {
             "file".into(),
             Value::String(file.to_string_lossy().into_owned()),
         );
+    }
+    // T99: the response verbosity ladder. Every verb takes it, and the
+    // server refuses a level outside 0..=3 by name rather than clamping.
+    if let Some(value) = option(&args, &["--verbosity"]) {
+        payload.insert(
+            "verbosity".into(),
+            json!(parse_number(&value, "--verbosity")),
+        );
+    }
+    // T96/T97: the server routes on these, so they travel in the payload the
+    // way `file` does rather than being consumed by the client alone.
+    if let Some(value) = &tab_id {
+        payload.insert("tab_id".into(), Value::String(value.clone()));
+    }
+    if let Some(value) = &tab_path {
+        payload.insert("tab_path".into(), Value::String(value.clone()));
+    }
+    // B238: on `open`, -M/--document-mode is the mode of the TAB being
+    // opened, so it travels in the payload as well as into the autostart
+    // argv. On every other verb it shapes only a server this call starts,
+    // and the server refuses it as an argument that verb does not read.
+    if method == "open" {
+        if let Some(value) = option(&args, &["--document-mode", "-M"]) {
+            payload.insert("document_mode".into(), Value::String(value));
+        }
     }
     if let Some(value) = option(&args, &["--bytes-base64"]) {
         payload.insert("bytes_base64".into(), Value::String(value));
@@ -281,6 +311,15 @@ fn main() {
             persisted_session_token,
         )
         .unwrap_or_else(|error| die(&error));
+        // T98: a successful call focuses the tab that served it, so the next
+        // request naming nothing is served by the same tab. Not on a refusal:
+        // the tab that answered one is not the tab the caller meant.
+        client::persist_focus(
+            &resolve_request,
+            &resolved.endpoint,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            persisted_session_token,
+        );
     }
     // A refused operation must look refused in every presentation. Before
     // this, `text`/`paging`/`stream` dropped error frames silently, so a
@@ -433,15 +472,18 @@ fn help() {
     println!("Opening a second file under the same agent identity (an explicit --session/--agent, or your coding harness's own session env vars) reconnects to that agent's already-running workspace and adds the file there as a new tab, rather than starting an unrelated second server.");
     println!("New files: open on a path that does not exist yet is not an error — the tab starts empty and the file is created on disk by the first successful save.");
     println!("Recovery: if the server died, open again (a stale endpoint whose owning process is gone is reclaimed automatically); reads report dirty/external_change_pending state, and every server refusal is named on stderr in every presentation.");
+    println!("Stale endpoints: when the recorded owner is still alive or cannot be ruled out, the start is refused with that pid and generation named. Verify the process is gone, then repeat the command with --takeover-stale-endpoint; the old record is kept under a stale- suffix rather than overwritten.");
     println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
-    println!("Common flags (long / short): --file -f, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
+    println!("Response size: --verbosity 0|1|2|3 (default 1). 0 is the answer and the tab that gave it, nothing else. 1 adds what verification and the next step need - revision, dirty, the tab mode, the resolved edit span, completeness, and a searchs pager key and count. 2 adds navigation - cursors, byte windows, block paging, undo depths. 3 is everything. capabilities and resources are exempt (their payload IS metadata), and a refusal always carries its full code, message and choices whatever the level.");
+    println!("Addressing a tab: every response reports a tab_id, and -T/--tab-id ID addresses that tab for any command with no --file and no --endpoint. --tab-path FRAGMENT names a tab by filename or by a trailing run of path components (component boundaries, not substrings) and is the recovery when the id is lost; several matches are refused with tab_ambiguous AND the candidates with their ids, none with tab_unmatched and the open tabs. A command naming nothing runs on the focused tab - the tab the last successful call was served by, which open sets and a refusal never moves.");
+    println!("Common flags (long / short): --file -f, --tab-id -T, --tab-path, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
     println!("Navigation: --id N routes a cursor command to numbered cursor N (every cursor is created by its first move); home and end move to the first and last column of the CURRENT line, not the document's start or end; next_word/previous_word step words; page_up/page_down move --page-lines N lines (default 40).");
     println!("Exit codes: 0 success; 64 usage, including any option the command does not read; 66 no such tab, file, or reachable server (run open first); 1 when the server itself refused, with the refusal code printed.");
     println!("Boolean flags with a short form: --visual -V, --historical -H. Safety acknowledgements (--acknowledge-force-save, --acknowledge-large-edit) and auth/session flags are deliberately long-form only.");
-    println!("Document modes: text_utf8, raw_bytes, hex_view (select at autostart with --document-mode/-M, or when starting the server yourself with --mode).");
+    println!("Document modes: text_utf8, raw_bytes, hex_view. On open, -M/--document-mode is the mode of the TAB being opened, whether or not a workspace is already running; a tab's mode is fixed for its lifetime, so reopening one under a different mode is refused with document_mode_conflict and close+open is how to change it. --mode selects it when starting a server yourself.");
     println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults. exact_bytes decodes its query as base64-encoded bytes; plain text belongs in exact_text.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");

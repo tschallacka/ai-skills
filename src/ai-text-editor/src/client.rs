@@ -24,6 +24,15 @@ use std::time::{Duration, Instant};
 #[derive(Clone)]
 pub struct ResolveRequest {
     pub file: Option<PathBuf>,
+    /// T96: the `tab_id` an `open` answer reported, and addressing enough on
+    /// its own. The registry knows which endpoint serves that tab and which
+    /// token authorizes it, so a caller holding an id needs no path.
+    pub tab_id: Option<String>,
+    /// T97: a filename, or a trailing run of path components, naming a tab in
+    /// this agent's workspace — the recovery for a caller that lost the id.
+    /// Resolves the endpoint by identity and lets the server match the tab,
+    /// which is the only side that knows what is open.
+    pub tab_path: Option<String>,
     pub method: String,
     /// An already-parsed `--endpoint` flag (CLI) or `arguments.endpoint`
     /// (MCP).
@@ -53,6 +62,14 @@ pub struct ResolveRequest {
     /// for, which is exactly what the verify step exists to prevent. Same
     /// shape as `--acknowledge-force-save` and `--acknowledge-large-edit`.
     pub acknowledge_create_parents: bool,
+    /// B241: "I have verified the recorded owner is gone; replace it." The
+    /// server refuses to bind over a stale Unix endpoint whose recorded owner
+    /// it cannot rule out, and its refusal names `--takeover-stale-endpoint`
+    /// as the way past — a flag no client had, so the one documented recovery
+    /// for capability 12 could not be performed by the tool that meets the
+    /// condition. Forwarded to a server this call starts, like the other
+    /// startup arguments above; it does nothing when a server is already live.
+    pub takeover_stale_endpoint: bool,
     /// Skip every cached or registered session token (the endpoint may still
     /// be reused). `execute` sets it on its recovery pass, when the token on
     /// file belongs to a server generation that is gone (B179).
@@ -134,6 +151,18 @@ pub fn cache_path(identity: &str, file: Option<&Path>) -> PathBuf {
 /// only fatal when there is no file to fall back on: a brand-new agent with
 /// nothing registered yet is the ordinary first call, not an error, and must
 /// reach the file-based discovery/autostart path below rather than dying.
+/// Where this identity's *focused* tab is remembered (T98).
+///
+/// The same file the `(identity, no file)` cache already used, which is what
+/// makes the focus work with no new machinery: a request that names no file,
+/// endpoint, tab id or tab path reads this entry and is served by the tab it
+/// points at. What was missing was anything ever *writing* it — a successful
+/// `open --file X` cached only under `(identity, X)`, so the focus was never
+/// set and a bare request had nothing to resolve.
+pub fn focus_path(identity: &str) -> PathBuf {
+    cache_path(identity, None)
+}
+
 pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     let identity = identity(request.explicit_identity.as_deref(), &request.agent_env_var);
     let cache_path = request.session_token_path.clone().or_else(|| {
@@ -163,6 +192,23 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             endpoint: Endpoint::parse(value),
             auth_token: session.as_ref().and_then(|s| s.auth_token.clone()),
             session_token: session.and_then(|s| s.session_token),
+            cache_path,
+        });
+    }
+
+    // T96: a tab id beats every discovery path below it, because it is the
+    // most specific thing a caller can say. The registry answers with the
+    // endpoint AND the tab's own session token, so an id alone is a complete
+    // request — no file, no cache, no identity lookup. Its failure is fatal
+    // rather than a fall-through: a caller that named a tab did not ask for
+    // whichever tab discovery would have found instead, and quietly serving
+    // that one is the silent mis-addressing T96-T98 exist to prevent.
+    if let Some(wanted) = &request.tab_id {
+        let record = session::resolve_tab(wanted)?;
+        return Ok(Resolved {
+            endpoint: Endpoint::parse(&record.endpoint),
+            auth_token: record.auth_token.clone(),
+            session_token: Some(record.session_token.clone()),
             cache_path,
         });
     }
@@ -240,9 +286,40 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     }
 
     let Some(file) = request.file.as_ref() else {
+        // T97: with a tab path and no file, the endpoint is this agent's own
+        // workspace and the server does the matching — it is the only side
+        // that knows which tabs are open, and the answer to an ambiguous
+        // fragment is a candidate set only it can build.
+        if request.tab_path.is_some() {
+            if let Some(Ok(record)) = &identity_lookup {
+                let endpoint = Endpoint::parse(&record.endpoint);
+                if endpoint.is_live() {
+                    return Ok(Resolved {
+                        endpoint,
+                        auth_token: record.auth_token.clone(),
+                        // Deliberately withheld: the token would route to the
+                        // tab that happened to register it, before the server
+                        // ever looked at `tab_path`. Same leak `open --file`
+                        // withholds it for.
+                        session_token: None,
+                        cache_path,
+                    });
+                }
+            }
+            return Err(format!(
+                "no running workspace to search for {}; `open` a file first, or name one with the request",
+                request.tab_path.as_deref().unwrap_or_default()
+            ));
+        }
         return match identity_lookup {
             Some(Err(error)) => Err(error),
-            _ => Err("a file or an endpoint is required".to_owned()),
+            // T98: a bare request is served by the focused tab, and this is
+            // what "there is no focus" reads as. Naming the handles is the
+            // difference between an agent retrying usefully and guessing.
+            _ => Err(
+                "no tab is focused and the request names none: `open` a file (which focuses it), or address one with tab_id, tab_path, file, or an explicit endpoint"
+                    .to_owned(),
+            ),
         };
     };
     let discovery = endpoint_for_file(file);
@@ -289,15 +366,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             file.display()
         )),
         _ => {
-            let autostart_auth = autostart_server(
-                file,
-                request.document_mode.as_deref(),
-                request.normalize_nfc,
-                request.idle_timeout_seconds.as_deref(),
-                request.explicit_identity.as_deref(),
-                &request.agent_env_var,
-                request.acknowledge_create_parents,
-            )?;
+            let autostart_auth = autostart_server(request, file)?;
             let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
                     "server was started but never announced an endpoint for {}: {error}",
@@ -332,6 +401,32 @@ pub fn persist_cache(
             .map_err(|error| format!("cannot save session token: {error}"))?;
     }
     Ok(())
+}
+
+/// Remember the tab this call was served by as this identity's focused tab
+/// (T98), so a later request that names nothing is served by it.
+///
+/// Called only on a SUCCESSFUL call, and only when there is an identity to
+/// focus under. A refused request must not move the focus: the tab that
+/// answered a refusal is not the tab the caller meant, and focusing it would
+/// send the next bare request somewhere the caller never chose — the same rule
+/// that keeps a refusal from rewriting the per-(identity, file) cache.
+pub fn persist_focus(
+    request: &ResolveRequest,
+    endpoint: &Endpoint,
+    auth_token: Option<&str>,
+    session_token: Option<&str>,
+) {
+    let Some(identity) = identity(request.explicit_identity.as_deref(), &request.agent_env_var)
+    else {
+        return;
+    };
+    // Nothing to focus on: without a tab-scoped token the entry would point at
+    // an endpoint and no tab, which is what the focus is for.
+    if session_token.is_none() {
+        return;
+    }
+    let _ = write_session(&focus_path(&identity), endpoint, auth_token, session_token);
 }
 
 /// `open` with no discovered endpoint starts one itself: the agent should
@@ -373,15 +468,32 @@ pub fn persist_cache(
 /// `agent_env_var` on just this child process (not the caller's own
 /// environment) closes that gap: the new server's own identity resolution
 /// then sees the same explicit value the client already resolved.
-pub fn autostart_server(
-    file: &Path,
-    document_mode: Option<&str>,
-    normalize_nfc: bool,
-    idle_timeout_seconds: Option<&str>,
-    explicit_identity: Option<&str>,
-    agent_env_var: &str,
-    acknowledge_create_parents: bool,
-) -> Result<Option<String>, String> {
+/// Takes the whole [`ResolveRequest`] rather than one parameter per startup
+/// argument: every argument here is already a field on it, the list had grown
+/// to eight, and each of B217, B229 and B241 was in part a startup argument
+/// that failed to reach this argv. One struct means adding the next one is an
+/// edit in two places (the field and the `command.arg`), not four.
+pub fn autostart_server(request: &ResolveRequest, file: &Path) -> Result<Option<String>, String> {
+    let ResolveRequest {
+        document_mode,
+        normalize_nfc,
+        idle_timeout_seconds,
+        explicit_identity,
+        agent_env_var,
+        acknowledge_create_parents,
+        takeover_stale_endpoint,
+        ..
+    } = request;
+    let (document_mode, idle_timeout_seconds, explicit_identity) = (
+        document_mode.as_deref(),
+        idle_timeout_seconds.as_deref(),
+        explicit_identity.as_deref(),
+    );
+    let (normalize_nfc, acknowledge_create_parents, takeover_stale_endpoint) = (
+        *normalize_nfc,
+        *acknowledge_create_parents,
+        *takeover_stale_endpoint,
+    );
     // B229: a path whose parent directory is missing used to be reported as
     // "server for <path> failed to start: ai-text-editor-server: cannot
     // resolve <path>: No such file or directory (os error 2)" — blaming the
@@ -476,6 +588,12 @@ pub fn autostart_server(
     }
     if let Some(timeout) = idle_timeout_seconds {
         command.arg("--idle-timeout-seconds").arg(timeout);
+    }
+    // B241: the server's own gate. Without this argument reaching it, a
+    // server that refuses a stale endpoint whose owner it cannot rule out
+    // names a recovery the caller has no way to perform.
+    if takeover_stale_endpoint {
+        command.arg("--takeover-stale-endpoint");
     }
     command
         .stdin(Stdio::null())

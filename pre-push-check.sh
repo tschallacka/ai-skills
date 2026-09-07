@@ -268,6 +268,60 @@ else
     note "shellcheck not installed locally; CI still gates on it"
 fi
 
+# ---- 3b. the two static shell gates CI fails on, over the same changed set --
+# Both of these are pure static checks over shell source, both are CI-fatal, and
+# neither ran here before: they live in the suite, so the default gate printed
+# "the whole deterministic suite is ./run-tests.sh" and pushed anyway. That note
+# is not a substitute for the check. This is the same gap the workspace clippy
+# leg closed for Rust, and the same one section 6 closed for skill declarations
+# after a CI-only failure -- three separate times the cheap half of a suite test
+# belonged in the default gate.
+#
+# Scoped to $changed_sh, the list section 3 already built, so the cost is
+# proportional to the change: measured whole-tree, the cap check is ~1s and the
+# portability scan ~11s, and per-file they are a fraction of that.
+#
+# What each scoped form does and does NOT prove:
+#   - the cap check reports what THIS change is responsible for: a function
+#     newly over the 40-line cap, or an already over-cap one that grew. It is
+#     diffed against $base for exactly that reason -- flagging every over-cap
+#     function in a touched file would refuse any edit to a file that already
+#     contains one, which is how a gate teaches people to bypass it. It says
+#     nothing about the tree-wide COUNT, which is a ratchet (may shrink, never
+#     grow) and so a global property no per-file run can evaluate; CI keeps that.
+#   - the portability scan applies the real rules and allowlists to the changed
+#     files only, so it cannot see a construct introduced in a file the change
+#     did not name. CI remains the authority on the whole tree.
+if [ -z "$changed_sh" ]; then
+    note "no shell scripts differ from ${base_label:-the base}; cap and portability scans skipped"
+else
+    cap_test="$repo_root/planning/tests/test-function-length-ratchet.sh"
+    if [ -x "$cap_test" ]; then
+        # shellcheck disable=SC2086
+        if cap_out="$("$cap_test" --files --base "$base" $changed_sh 2>&1)"; then
+            ok "no function newly over the 40-line cap"
+        else
+            bad "this change puts a function over CODE-STYLE.md's 40-line cap"
+            printf '%s\n' "$cap_out" | sed -n '1,20p' >&2
+        fi
+    else
+        note "no $cap_test to check the function cap with"
+    fi
+
+    port_test="$repo_root/planning/tests/test-portability-contract.sh"
+    if [ -x "$port_test" ]; then
+        # shellcheck disable=SC2086
+        if port_out="$("$port_test" --files $changed_sh 2>&1)"; then
+            ok "no banned portability construct in the changed scripts"
+        else
+            bad "a changed script uses a construct PORTABILITY.md bans"
+            printf '%s\n' "$port_out" | sed -n '1,20p' >&2
+        fi
+    else
+        note "no $port_test to check portability constructs with"
+    fi
+fi
+
 # ---- 4. rust crates under src/ touched by the change -----------------------
 crates="$(for f in $(changed -E '^src/[^/]+/'); do
     crate="${f#src/}"; crate="${crate%%/*}"

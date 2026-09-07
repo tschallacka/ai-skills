@@ -38,6 +38,7 @@ fn usage() {
          \x20 chat-client-rs tail  --local --chan #c [--mentions] [--mention-exit] [--nick N]\n\
          \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
+         \x20 chat-client-rs names [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options (after the subcommand, unless noted):\n\
          \x20 --state DIR     client state dir, beats $AI_CHAT_HOME (default: $AI_CHAT_HOME\n\
@@ -86,6 +87,7 @@ fn main() {
         "read" => read_delta(&args[2..], &state_dir),
         "tail" => tail(&args[2..], &state_dir),
         "join" => join_channel(&args[2..], &state_dir),
+        "names" => names(&args[2..], &state_dir),
         "leave" => leave_channel(&args[2..], &state_dir),
         "session" => session_cmd(&args[2..], &state_dir),
         other => {
@@ -650,6 +652,10 @@ struct Opts {
     no_session: bool,
     mentions: bool,
     mention_exit: bool,
+    // Show JOIN/PART/QUIT as well as messages. Off by default: every existing
+    // reader of `tail` receives PRIVMSG only, and widening that silently would
+    // change what they all see (B246).
+    presence: bool,
     local: bool,
 }
 
@@ -664,6 +670,7 @@ fn parse_opts(args: &[String]) -> Opts {
         no_session: false,
         mentions: false,
         mention_exit: false,
+        presence: false,
         local: false,
     };
     let mut i = 0;
@@ -698,6 +705,7 @@ fn parse_opts(args: &[String]) -> Opts {
             "--no-session" => o.no_session = true,
             "--mentions" => o.mentions = true,
             "--mention-exit" => o.mention_exit = true,
+            "--presence" => o.presence = true,
             "--local" => o.local = true,
             _ => {}
         }
@@ -887,6 +895,72 @@ fn resolve(server: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("no address for {}", server))
 }
 
+/// The wire segments one `--text` becomes: never more than one IRC line each,
+/// and never a line carrying an embedded newline.
+///
+/// B266. Splitting on newlines ALONE would have traded one silent truncation
+/// for another, because a single paragraph can exceed the line limit on its
+/// own: RFC 1459 caps a message at 512 bytes including the prefix the server
+/// prepends and the CRLF, so the room the text actually has is what is left
+/// after `:nick!nick@localhost PRIVMSG #chan :`. Both cuts are therefore made
+/// here, and the caller sends one PRIVMSG per segment.
+fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
+    let overhead = format!(":{nick}!{nick}@localhost PRIVMSG {chan} :").len() + 2;
+    let budget = 512usize.saturating_sub(overhead).max(1);
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        // A CRLF-terminated input line keeps no stray CR: it would reach the
+        // wire as a second line terminator.
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            // A blank line is a paragraph break, and an empty PRIVMSG trailing
+            // is what a server is entitled to drop. One space keeps the break
+            // visible in a line-based medium rather than silently closing it up.
+            out.push(" ".to_string());
+            continue;
+        }
+        let mut rest = line;
+        while !rest.is_empty() {
+            let (head, tail) = split_at_budget(rest, budget);
+            out.push(head.to_string());
+            rest = tail;
+        }
+    }
+    out
+}
+
+/// Split one over-long line at the budget, preferring a word boundary, always
+/// on a UTF-8 boundary. Never returns an empty head, or the caller loops.
+fn split_at_budget(line: &str, budget: usize) -> (&str, &str) {
+    if line.len() <= budget {
+        return (line, "");
+    }
+    let mut end = budget;
+    while end > 0 && !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == 0 {
+        // One character wider than the whole budget. Emit it anyway: a segment
+        // one char over beats an infinite loop, and this needs a 4-byte char
+        // under a 3-byte budget to reach.
+        end = line
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| i)
+            .unwrap_or(line.len());
+        return (&line[..end], &line[end..]);
+    }
+    // Prefer breaking at a space, but do not give back more than a quarter of
+    // the window chasing one -- a long unbroken token would otherwise be cut
+    // far short of the limit.
+    if let Some(space) = line[..end].rfind(' ') {
+        if space >= budget * 3 / 4 {
+            return (&line[..space], line[space + 1..].trim_start());
+        }
+    }
+    (&line[..end], &line[end..])
+}
+
 fn write_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     line: &str,
@@ -1036,17 +1110,51 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     }
     // drain to registration complete
     let _ = wait_for_welcome(&mut tls, &nick);
-    let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    let _ = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, o.text));
-    // read the echo of the stored line
-    let mut out = String::new();
+    // No JOIN. A post does not imply presence, and the server's PRIVMSG handler
+    // never checked the SENDER's membership -- it appends and relays, and
+    // Peer::offer gates on the RECIPIENT being joined -- so this JOIN bought
+    // nothing and cost a join/quit pair per call. Harmless while nothing could
+    // see it; once membership was relayed (B244/B245) it made every send
+    // flicker the nick in every other client's list (B247).
+    // One PRIVMSG per wire segment, and the write result is CHECKED.
+    //
+    // B266: this was a single write of the whole --text with the result thrown
+    // away by `let _ =`. write_line appends CRLF, so an embedded newline ended
+    // the IRC line early and the server read the remainder as a command of its
+    // own and discarded it. sanitairkamer measured ~1900-character messages
+    // arriving as 415, 257 and less -- each cut exactly at its first paragraph
+    // break -- and nothing anywhere reported a failure.
+    let segments = wire_segments(&nick, &o.chan, &o.text);
+    for segment in &segments {
+        if let Err(e) = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, segment)) {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    }
+    // ASK for the acknowledgement rather than expecting one to be pushed. The
+    // server sends the sender nothing after a PRIVMSG, deliberately: an echo
+    // rendered twice in a standard client (B249), and an unsolicited numeric
+    // rendered as a stray `[999] nick #chan 59` line, which is no better. 999
+    // is LASTID's own reply, so asking makes the confirmation invisible to any
+    // client that does not ask.
+    let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+    // Wait for the 999 acknowledgement, not an echo of the message.
+    //
+    // The server used to write the PRIVMSG back to its sender, which is not the
+    // RFC flow -- a client renders its own line locally -- so a standard client
+    // showed every message twice (B249). It confirms with `999 <nick> #chan
+    // <id>` now, which is a better signal anyway: it proves the line was
+    // PERSISTED and names the id, where an echo only proved it was reflected.
+    let mut acked = false;
     let deadline = SystemTime::now() + Duration::from_secs(4);
     while SystemTime::now() < deadline {
         match read_line(&mut tls) {
             Ok(l) => {
-                if l.contains("PRIVMSG") && l.contains(&o.chan) && l.contains(&o.text) {
-                    out = l;
-                    break;
+                if let Ok(m) = Message::parse(&l) {
+                    if m.command == "999" && m.params.iter().any(|p| p == &o.chan) {
+                        acked = true;
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -1056,11 +1164,18 @@ fn send(args: &[String], state_dir: &std::path::Path) {
             }
         }
     }
-    if out.is_empty() {
-        eprintln!("chat-client-rs: no echo from server");
+    if !acked {
+        eprintln!("chat-client-rs: server did not acknowledge the message");
         std::process::exit(70);
     }
-    println!("{}", out);
+    // Printed locally, from what was SENT -- one line per wire segment, not one
+    // line holding the whole --text. The server no longer echoes, so this print
+    // is the only thing a caller sees, and printing the full text while the wire
+    // carried a prefix of it is exactly how B266 stayed invisible: the sender's
+    // own success output was the argument it passed, never the bytes that left.
+    for segment in &segments {
+        println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, segment);
+    }
     // Advance the channel cursor to the newest id. The echo line is the
     // IRC-prefix form (no id), so fetch history to learn the id of the message
     // just stored.
@@ -1129,6 +1244,81 @@ fn read_last_id(
 
 /// Join a channel without reading its history: seed the session cursor to the
 /// channel's current end so later read/tail resume from "now".
+// `names --chan #c` asks who is on a channel and prints them, one per line.
+//
+// The server has answered NAMES since it was written and nothing on the client
+// ever asked (B256), so "is that peer listening right now?" was answered by
+// guessing. A standard IRC client gets the list on join and keeps it live from
+// the relayed JOIN/PART/QUIT; an agent has neither, and this gives it the same
+// answer on demand.
+//
+// It deliberately does NOT join: NAMES reads the channel map and needs no
+// membership, so asking who is present does not make the asker present. Same
+// reasoning that took the JOIN out of `send` (B247) - a query is not a presence
+// claim.
+fn names(args: &[String], state_dir: &std::path::Path) {
+    let o = parse_opts(args);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: names needs --server --nick --chan (or a saved session)");
+        std::process::exit(64);
+    }
+    let session_current = used_session && server == from_session;
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    };
+    if !session_current {
+        save_session(state_dir, &server, &nick);
+    }
+    let _ = wait_for_welcome(&mut tls, &nick);
+    let _ = write_line(&mut tls, &format!("NAMES {}", o.chan));
+
+    // 353 carries the members, 366 ends the list. Read until the end numeric, so
+    // a server splitting 353 over several lines is handled.
+    let mut members: Vec<String> = Vec::new();
+    let deadline = SystemTime::now() + Duration::from_secs(4);
+    let mut ended = false;
+    while SystemTime::now() < deadline && !ended {
+        match read_line(&mut tls) {
+            Ok(l) => {
+                if let Ok(m) = Message::parse(&l) {
+                    match m.command.as_str() {
+                        "353" => {
+                            if let Some(list) = m.trailing.as_deref() {
+                                members.extend(list.split_whitespace().map(|n| n.to_string()));
+                            }
+                        }
+                        "366" => ended = true,
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = write_line(&mut tls, "QUIT");
+    if !ended {
+        eprintln!("chat-client-rs: no end-of-names from server");
+        std::process::exit(70);
+    }
+    // An empty channel prints nothing and exits 0: "nobody is here" is an
+    // answer, not a failure, and a caller distinguishes it by the empty output.
+    for m in members {
+        println!("{m}");
+    }
+}
+
 fn join_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
     let (mut server, nick, used_session) =
@@ -1610,6 +1800,26 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                     Ok(message) => message,
                     Err(_) => continue,
                 };
+                // Membership lines, when asked for. The server relays JOIN,
+                // PART and QUIT correctly (B244/B245), and this loop used to
+                // drop every one of them before the mention filter ran -- so a
+                // human with a standard client could see who was present and a
+                // tailing agent could not (B246). "Is that peer listening right
+                // now?" was unanswerable from the bus, which matters because
+                // agents coordinate handoffs through it.
+                //
+                // A QUIT carries no channel parameter: it goes to every channel
+                // the leaver shared, and the server only relays it to members of
+                // this one, so an unfiltered command is already scoped.
+                if o.presence && matches!(message.command.as_str(), "JOIN" | "PART" | "QUIT") {
+                    let in_this_chan = message.command == "QUIT"
+                        || message.params.iter().any(|p| p == &o.chan)
+                        || message.trailing.as_deref() == Some(o.chan.as_str());
+                    if in_this_chan {
+                        println!("{}", l);
+                    }
+                    continue;
+                }
                 if message.command != "PRIVMSG"
                     || message.params.first().map(String::as_str) != Some(o.chan.as_str())
                 {
@@ -1847,6 +2057,72 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
 
 #[cfg(test)]
 mod tests {
+
+    /// B266: a newline used to end the IRC line, so everything after the first
+    /// paragraph break was parsed by the server as a command and discarded.
+    #[test]
+    fn a_multiline_text_becomes_one_segment_per_line() {
+        let segments = wire_segments("editor-batch", "#ai-skills", "first\n\nsecond\nthird");
+        assert_eq!(segments, vec!["first", " ", "second", "third"]);
+        for segment in &segments {
+            assert!(
+                !segment.contains('\n') && !segment.contains('\r'),
+                "a segment may not carry a line terminator: {segment:?}"
+            );
+        }
+    }
+
+    /// Splitting on newlines alone would have replaced one silent truncation
+    /// with another: a single paragraph can exceed 512 bytes by itself.
+    #[test]
+    fn a_long_paragraph_is_split_to_fit_the_irc_line_limit() {
+        let nick = "editor-batch";
+        let chan = "#ai-skills";
+        let text = "word ".repeat(500);
+        let segments = wire_segments(nick, chan, &text);
+        assert!(segments.len() > 1, "a 2500-byte line must be split");
+        for segment in &segments {
+            let wire = format!(":{nick}!{nick}@localhost PRIVMSG {chan} :{segment}\r\n");
+            assert!(
+                wire.len() <= 512,
+                "a segment must fit an IRC line, got {} bytes",
+                wire.len()
+            );
+        }
+    }
+
+    /// Every byte of the input has to survive somewhere. A fix that fits the
+    /// limit by dropping text is the bug with a different cut point.
+    #[test]
+    fn no_input_word_is_lost_in_splitting() {
+        let text = format!("alpha {} omega", "filler ".repeat(300));
+        let segments = wire_segments("n", "#c", &text);
+        let rejoined = segments.join(" ");
+        for word in ["alpha", "omega"] {
+            assert!(rejoined.contains(word), "{word} was dropped");
+        }
+        assert_eq!(
+            rejoined.split_whitespace().count(),
+            text.split_whitespace().count(),
+            "splitting changed the word count"
+        );
+    }
+
+    /// A token longer than the budget still has to make progress, and must not
+    /// be cut mid-character.
+    #[test]
+    fn an_unbroken_token_and_multibyte_text_still_terminate() {
+        let segments = wire_segments("n", "#c", &"x".repeat(2000));
+        assert!(segments.len() > 1);
+        assert!(segments.iter().all(|s| !s.is_empty()));
+
+        let multibyte = "é".repeat(1000);
+        let segments = wire_segments("n", "#c", &multibyte);
+        assert!(segments.iter().all(|s| !s.is_empty()));
+        // Reassembly proves no character was severed: a cut inside a UTF-8
+        // sequence could not round-trip as the same string.
+        assert_eq!(segments.concat(), multibyte);
+    }
     use super::*;
     use std::fs;
 
@@ -2127,6 +2403,23 @@ mod tests {
         // A trailing --state with no value must not panic.
         let dir = client_state_dir(&["--state".into()]);
         assert_ne!(dir, PathBuf::from(""));
+    }
+
+    // B246: presence is opt-in. Every existing reader of `tail` receives PRIVMSG
+    // only, so turning membership on by default would change what all of them
+    // see. The flag is the whole contract, so the default is worth asserting.
+    #[test]
+    fn presence_is_off_unless_asked_for() {
+        let o = parse_opts(&["--chan".into(), "#ops".into(), "--nick".into(), "me".into()]);
+        assert!(!o.presence, "membership lines must not appear by default");
+        let p = parse_opts(&[
+            "--chan".into(),
+            "#ops".into(),
+            "--nick".into(),
+            "me".into(),
+            "--presence".into(),
+        ]);
+        assert!(p.presence, "--presence turns them on");
     }
 
     #[test]

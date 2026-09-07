@@ -241,6 +241,37 @@ iui_action_reverify() {
     IUI_MESSAGE=('reverified; the per-tool cache is shared by every skill')
 }
 
+# T95. Cycle the skill under the cursor to its next declared integration mode,
+# wrapping. Cycling rather than a submenu because the picker has no modal layer
+# and the choice is between two or three named things -- a fourth mode would
+# still cycle legibly, since the line names the mode in force.
+#
+# The record is prepended, which is how record_skill_integration writes it and
+# what integration_mode_for expects: it returns the FIRST `skill=mode` line it
+# finds, so a later choice shadows an earlier one and the run installs what was
+# chosen last. Validation is not repeated here -- every mode offered came from
+# integration_modes itself, so there is nothing to refuse, and calling the
+# validating writer would risk die_usage killing the picker mid-frame.
+iui_action_cycle_integration() {
+    local index="$IUI_CURSOR" skill current next='' first='' mode taken=0
+    skill="${IUI_SKILL_NAMES[$index]}"
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "$skill")"
+    for mode in $IUI_INTEGRATION_OFFERED; do
+        [ -n "$first" ] || first="$mode"
+        if [ "$taken" -eq 1 ]; then next="$mode"; taken=0; fi
+        [ "$mode" = "$current" ] && taken=1
+    done
+    # Past the end, or a current mode that is not in the offered list at all
+    # (a --integration default naming a mode this skill does not declare).
+    [ -n "$next" ] || next="$first"
+    INTEGRATION_SELECTION="$skill=$next
+$INTEGRATION_SELECTION"
+    IUI_MESSAGE=("$skill will be installed in $next mode")
+}
 iui_handle_mouse() {
     [ "$IUI_MOUSE_RELEASE" -eq 0 ] || return 0
     case "$IUI_MOUSE_BTN" in
@@ -253,6 +284,7 @@ iui_handle_mouse() {
         IUI_FOCUS=info
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_DEP" ] && iui_action_dep_hint
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_VERIFY" ] && iui_action_reverify
+        [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_MODE" ] && iui_action_cycle_integration
         return 0
     fi
     [ "$IUI_FOCUS" = "info" ] && return 0
@@ -298,6 +330,11 @@ iui_handle_key() {
         n) for ((i = 0; i < count; i++)); do IUI_SKILL_SEL[$i]=0; done ;;
         d) [ "$IUI_FOCUS" = "info" ] && iui_action_dep_hint ;;
         r) [ "$IUI_FOCUS" = "info" ] && iui_action_reverify ;;
+        # Focus-gated like d and r: the ACTIONS lines are only usable when the
+        # info pane holds focus, and m is one of them. `i` was already taken by
+        # install -- the key that starts the run -- so binding integration mode
+        # to it would have replaced the picker's primary action with a toggle.
+        m) [ "$IUI_FOCUS" = "info" ] && iui_action_cycle_integration ;;
         i) IUI_DONE=1; IUI_RC=0 ;;
         q|ESC|EOF) IUI_DONE=1; IUI_RC=130 ;;
         MOUSE) iui_handle_mouse ;;

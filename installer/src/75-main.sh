@@ -54,6 +54,10 @@ else
         planning_permission_step
     fi
 
+    # Outside the planning branch on purpose: any agent may be asked to take a
+    # worktree, whatever skills this install selected.
+    worktrees_permission_step
+
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi

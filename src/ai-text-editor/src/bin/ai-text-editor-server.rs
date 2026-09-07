@@ -151,12 +151,8 @@ fn main() {
         }
     };
     let mode = match option(&args, "--mode").as_deref() {
-        None | Some("text_utf8") => DocumentMode::TextUtf8,
-        Some("raw_bytes") => DocumentMode::RawBytes,
-        Some("hex_view") => DocumentMode::HexView,
-        Some(value) => die(&format!(
-            "unknown mode {value}; use text_utf8, raw_bytes, or hex_view"
-        )),
+        None => DocumentMode::TextUtf8,
+        Some(value) => parse_document_mode(value).unwrap_or_else(|error| die(&error)),
     };
     let mut document = match Document::new(bytes, mode) {
         Ok(document) => document,
@@ -785,6 +781,20 @@ fn open_additional_tab(
     Ok(tab)
 }
 
+/// One spelling of the mode names, for the startup argument and for the
+/// per-tab `document_mode` an `open` carries (B238). Two copies of this match
+/// is how the two would come to accept different sets.
+fn parse_document_mode(value: &str) -> Result<DocumentMode, String> {
+    match value {
+        "text_utf8" => Ok(DocumentMode::TextUtf8),
+        "raw_bytes" => Ok(DocumentMode::RawBytes),
+        "hex_view" => Ok(DocumentMode::HexView),
+        other => Err(format!(
+            "unknown mode {other}; use text_utf8, raw_bytes, or hex_view"
+        )),
+    }
+}
+
 fn option(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .find(|pair| pair[0] == name)
@@ -869,14 +879,13 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
     let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
         Ok(envelope) => match select_tab(&envelope, &state) {
             Ok(selected) => (handle(envelope, &selected), selected),
-            Err(message) => (
-                vec![error(
-                    &envelope.request_id,
-                    select_tab_error_code(&message),
-                    message,
-                )],
-                default_tab.clone(),
-            ),
+            Err(message) => {
+                let (code, message) = select_tab_refusal(message);
+                (
+                    vec![error(&envelope.request_id, code, message)],
+                    default_tab.clone(),
+                )
+            }
         },
         Err(error_value) => (
             vec![error(
@@ -978,14 +987,13 @@ fn serve_tcp(
             envelope.auth_token = Some(String::from_utf8_lossy(secret).into_owned());
             match select_tab(&envelope, &state) {
                 Ok(selected) => (handle(envelope, &selected), selected),
-                Err(message) => (
-                    vec![error(
-                        &envelope.request_id,
-                        select_tab_error_code(&message),
-                        message,
-                    )],
-                    default_tab.clone(),
-                ),
+                Err(message) => {
+                    let (code, message) = select_tab_refusal(message);
+                    (
+                        vec![error(&envelope.request_id, code, message)],
+                        default_tab.clone(),
+                    )
+                }
             }
         }
         Ok(_) => (
@@ -1266,8 +1274,106 @@ fn select_tab_error_code(message: &str) -> &'static str {
         "session_unauthorized" => "session_unauthorized",
         "file_mismatch" => "file_mismatch",
         "tab_unavailable" => "tab_unavailable",
+        // B238's two refusals: a mode name the server does not know, and a
+        // mode that disagrees with the tab already holding this file.
+        "document_mode_invalid" => "document_mode_invalid",
+        "document_mode_conflict" => "document_mode_conflict",
+        // T96/T97's routing refusals, each recoverable in its own way and so
+        // each distinguishable by code.
+        "tab_unknown" => "tab_unknown",
+        "tab_unmatched" => "tab_unmatched",
+        "tab_ambiguous" => "tab_ambiguous",
         _ => "tab_open_failed",
     }
+}
+
+/// The stable public handle for a tab: the `tab_uuid` every `open` answer
+/// reports, and from T96 onward the whole of a request's addressing.
+/// The tail of a routing refusal: what this server does hold, with the ids
+/// needed to address it. A refusal that only says "no" leaves an agent with
+/// nothing to try next, which is the whole failure T97 exists to fix.
+fn candidate_advice(state_guard: &ServerState) -> String {
+    let candidates = tab_candidates(state_guard);
+    if candidates.is_empty() {
+        return "this server has no open tabs; `open` the file you mean".to_owned();
+    }
+    format!(
+        "the open tabs are: {}",
+        serde_json::to_string(&candidates).unwrap_or_default()
+    )
+}
+
+fn tab_id(tab: &Tab) -> String {
+    session::tab_uuid_for(&tab.session_token, &tab.server_generation)
+}
+
+/// Every open tab as `{tab_id, path}`, newest addressing first. The candidate
+/// set T97 answers an ambiguous or unmatched `tab_path` with, and the thing an
+/// agent that has lost its bearings needs: not "no", but "here is what there
+/// is, with the ids".
+fn tab_candidates(state_guard: &ServerState) -> Vec<Value> {
+    let mut candidates: Vec<Value> = state_guard
+        .tabs
+        .values()
+        .filter_map(|tab| {
+            tab.lock()
+                .ok()
+                .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+        })
+        .collect();
+    // Deterministic, so a caller comparing two answers sees the same order.
+    candidates.sort_by_key(|candidate| {
+        candidate
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    });
+    candidates
+}
+
+/// Whether `path` is named by the fragment `hint`: its whole file name, or a
+/// trailing run of its path components.
+///
+/// Component-boundary matching, not a substring: `report.txt` must not be
+/// matched by `port.txt`, and `src/lib.rs` must not be matched by
+/// `other/src/lib.rs`. A leading separator on the hint is ignored so a caller
+/// can paste either `src/lib.rs` or `/src/lib.rs` from a workspace-root path.
+fn path_names_tab(path: &Path, hint: &str) -> bool {
+    let hint = hint.trim_start_matches('/');
+    if hint.is_empty() {
+        return false;
+    }
+    let wanted: Vec<&str> = hint.split('/').filter(|part| !part.is_empty()).collect();
+    let held: Vec<String> = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if wanted.len() > held.len() {
+        return false;
+    }
+    held[held.len() - wanted.len()..]
+        .iter()
+        .zip(&wanted)
+        .all(|(held, wanted)| held == wanted)
+}
+
+/// A `select_tab` refusal split into the code it names and the message
+/// without that prefix.
+///
+/// The prefix is how the message carries its own code (see
+/// `select_tab_error_code`), and every presentation prints the code alongside
+/// the message — so leaving it in produced "file_mismatch: file_mismatch: the
+/// request names ...". Stripped once, here, rather than at each of the two
+/// call sites that build the frame.
+fn select_tab_refusal(message: String) -> (&'static str, String) {
+    let code = select_tab_error_code(&message);
+    let body = message
+        .strip_prefix(code)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .map(str::to_owned)
+        .unwrap_or(message);
+    (code, body)
 }
 
 fn select_tab(
@@ -1276,6 +1382,67 @@ fn select_tab(
 ) -> Result<Arc<Mutex<Tab>>, String> {
     let state_guard = state.lock().unwrap();
     let requested = requested_file(envelope);
+    // T96: a tab id is addressing on its own, for every verb. It is checked
+    // before the session token because it is the more specific of the two: a
+    // caller that names a tab means that tab, whatever token its cache
+    // happens to hold. It is not the weaker credential either - the id is a
+    // blake3 of the session token and the server generation, so holding one is
+    // holding the other.
+    if let Some(wanted) = envelope.payload.get("tab_id").and_then(Value::as_str) {
+        for tab in state_guard.tabs.values() {
+            if tab.lock().ok().is_some_and(|tab| tab_id(&tab) == wanted) {
+                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab.clone());
+            }
+        }
+        return Err(format!(
+            "tab_unknown: no tab on this server has tab_id {wanted}; {}",
+            candidate_advice(&state_guard)
+        ));
+    }
+    // T97: the recovery for a caller that forgot the id. A filename, or a
+    // trailing run of path components, resolves to the one tab it names -
+    // and on none or several, answers with the candidates and their ids
+    // rather than guessing or a bare refusal.
+    if let Some(hint) = envelope.payload.get("tab_path").and_then(Value::as_str) {
+        let matched: Vec<Arc<Mutex<Tab>>> = state_guard
+            .tabs
+            .values()
+            .filter(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| path_names_tab(&tab.path, hint))
+            })
+            .cloned()
+            .collect();
+        match matched.len() {
+            1 => {
+                let tab = matched.into_iter().next().unwrap();
+                ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab);
+            }
+            0 => {
+                return Err(format!(
+                    "tab_unmatched: no open tab is named by {hint}; {}",
+                    candidate_advice(&state_guard)
+                ))
+            }
+            count => {
+                let ambiguous: Vec<Value> = matched
+                    .iter()
+                    .filter_map(|tab| {
+                        tab.lock()
+                            .ok()
+                            .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+                    })
+                    .collect();
+                return Err(format!(
+                    "tab_ambiguous: {hint} names {count} open tabs; address one by its tab_id: {}",
+                    serde_json::to_string(&ambiguous).unwrap_or_default()
+                ));
+            }
+        }
+    }
     if let Some(token) = envelope.session_token.as_deref() {
         for tab in state_guard.tabs.values() {
             if tab
@@ -1294,11 +1461,49 @@ fn select_tab(
     }
     if envelope.method == "open" {
         if let Some(path) = requested.as_ref() {
+            // B238: a mode is a property of a TAB, not of the server hosting
+            // it. This used to pass `state_guard.mode` — the mode the server
+            // was started with — so a second file added to a running workspace
+            // could never be a raw or hex tab, whatever it asked for. Since
+            // B225 made every verb autostart and reconnect, a cold open is
+            // rare, which left SKILL.md capability 2 effectively unreachable
+            // in a long session: an agent's first open decided the mode of
+            // every tab it would ever open. B217 made the argument declarable
+            // and honoured on a cold start, which is as far as a schema fix
+            // can go.
+            let requested_mode = match envelope
+                .payload
+                .get("document_mode")
+                .and_then(Value::as_str)
+            {
+                None => None,
+                Some(value) => Some(
+                    parse_document_mode(value)
+                        .map_err(|error| format!("document_mode_invalid: {error}"))?,
+                ),
+            };
             let key = tab_key(path);
             if let Some(tab) = state_guard.tabs.get(&key) {
+                // Reopening an existing tab in a different mode is not a mode
+                // change: the buffer, the index, the journal and every
+                // coordinate already committed to one interpretation of the
+                // bytes. Refused by name rather than answered with a mode the
+                // caller did not ask for, which is the shape of the bug this
+                // fixes.
+                if let Some(wanted) = requested_mode {
+                    let held = tab.lock().ok().map(|tab| tab.document.mode);
+                    if held.is_some_and(|held| held != wanted) {
+                        return Err(format!(
+                            "document_mode_conflict: {} is already open as {:?} and a tab's mode is fixed for its lifetime; `close` it and open it again to read it as {:?}",
+                            path.display(),
+                            held.unwrap_or(DocumentMode::TextUtf8),
+                            wanted
+                        ));
+                    }
+                }
                 return Ok(tab.clone());
             }
-            let mode = state_guard.mode;
+            let mode = requested_mode.unwrap_or(state_guard.mode);
             let normalize_nfc = state_guard.normalize_nfc;
             let auth_token = state_guard.auth_token.clone();
             let generation = state_guard.server_generation.clone();
@@ -1361,7 +1566,26 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
     }
+    // T96/T97: a request that addressed this tab by `tab_id` or `tab_path`
+    // has already been routed to it by name, and that is authorization enough.
+    // The session token is tab-routing hygiene, not the security boundary —
+    // the endpoint is (SKILL.md: "treat the endpoint token as full file-access
+    // authority"), and any caller that can reach it can already `open` any
+    // path and be handed a token. A tab id is not the weaker credential of the
+    // two in any case: it is a blake3 of the session token and the server
+    // generation.
+    let addressed_by_handle = envelope
+        .payload
+        .get("tab_id")
+        .and_then(Value::as_str)
+        .is_some_and(|wanted| wanted == tab_id(&tab))
+        || envelope
+            .payload
+            .get("tab_path")
+            .and_then(Value::as_str)
+            .is_some_and(|hint| path_names_tab(&tab.path, hint));
     if envelope.method != "open"
+        && !addressed_by_handle
         && envelope.session_token.as_deref() != Some(tab.session_token.as_str())
     {
         frames.push(error(
@@ -1371,25 +1595,65 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         ));
         return frames;
     }
-    // B180/B187: refuse arguments no handler for this verb reads. A typo'd
-    // or misplaced flag must fail here, not become a silent no-op.
-    if let Some(key) = envelope
-        .payload
-        .as_object()
-        .and_then(|map| {
-            map.keys()
-                .find(|key| !KNOWN_PAYLOAD_KEYS.contains(&key.as_str()))
-        })
-        .cloned()
-    {
+    // B180/B187 wanted "an argument no handler for this verb reads is refused
+    // by name". What they produced was one list for the whole protocol, so
+    // `replace` naming `range_start_line` passed the door because *`read`*
+    // takes that key, and the replace handler then dropped all four range keys
+    // and edited at the cursor instead — a misplaced edit reported as a
+    // success (B237). The per-verb sets existed only in the MCP adapter's tool
+    // schemas, which the CLI and hand-sent NDJSON never consult.
+    //
+    // `ai_text_editor::verbs` is now the one declaration both surfaces read:
+    // this check and the adapter's advertised `inputSchema`. An unknown method
+    // declares no key set at all and must fall through to `unknown_method`
+    // below rather than be reported as a bad argument.
+    if let Some(accepted) = ai_text_editor::verbs::payload_keys(&envelope.method) {
+        if let Some(key) = envelope
+            .payload
+            .as_object()
+            .and_then(|map| {
+                map.keys()
+                    .find(|key| !ai_text_editor::verbs::reads_payload_key(&envelope.method, key))
+            })
+            .cloned()
+        {
+            frames.push(error_details(
+                &envelope.request_id,
+                "unknown_argument",
+                format!(
+                    "the request carries {key}, which {} does not read",
+                    envelope.method
+                ),
+                // The accepted set, so a caller that guessed wrong can see what
+                // this verb does take instead of guessing again.
+                json!({"offending_key": key, "accepted_keys": accepted}),
+            ));
+            return frames;
+        }
+    }
+    // The same door, for the VALUE rather than the name (B267). A count key
+    // present but not a non-negative integer is refused here, once, for every
+    // verb -- rather than reaching a reader that spells it
+    // `.and_then(Value::as_u64)` and cannot tell an out-of-range value from an
+    // absent one, and so applies its absent-case default.
+    //
+    // That is what made B267 dangerous rather than merely wrong: `insert
+    // --offset -1` reported `{"offset": 0, "bytes_written": 11}` and wrote at
+    // the top of the file, and the response was indistinguishable from a
+    // correct call. A refusal that names the key and echoes the value back is
+    // the only answer a caller can act on.
+    if let Some((key, value)) = envelope.payload.as_object().and_then(|map| {
+        map.iter()
+            .find(|(key, value)| {
+                ai_text_editor::verbs::is_count_key(key) && value.as_u64().is_none()
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+    }) {
         frames.push(error_details(
             &envelope.request_id,
-            "unknown_argument",
-            format!(
-                "the request carries {key}, which no handler for {} reads",
-                envelope.method
-            ),
-            json!({"offending_key": key}),
+            "argument_out_of_range",
+            format!("{key} must be a non-negative whole number, not {value}"),
+            json!({"offending_key": key, "offending_value": value}),
         ));
         return frames;
     }
@@ -1478,7 +1742,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     }
     match envelope.method.as_str() {
         "open" => {
-            let mut payload = json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)});
+            let mut payload = json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)});
             if tab.replayed_edits > 0 {
                 payload["journal_replay"] =
                     json!({"edits": tab.replayed_edits, "through_sequence": tab.journal_seq});
@@ -1973,6 +2237,50 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "job_release" => job_release(&envelope, &mut tab, &mut frames),
         _ => frames.push(error(&envelope.request_id, "unknown_method", format!("unsupported method {}", envelope.method))),
     }
+    // T99: the ladder, applied once here rather than at each of the ~forty
+    // places a payload is built. A level outside the range is a caller error
+    // and is refused by name rather than clamped, so a typo does not silently
+    // buy a different answer than the one asked for.
+    let level = match ai_text_editor::verbosity::requested(&envelope.payload) {
+        Some(level) => level,
+        None => {
+            return vec![error_details(
+                &envelope.request_id,
+                "verbosity_invalid",
+                format!(
+                    "verbosity must be an integer from 0 through {}; 1 is the default",
+                    ai_text_editor::verbosity::MAX_VERBOSITY
+                ),
+                json!({"levels": {"0": "status and the answer only", "1": "revision, dirty, mode and the resolved edit span (default)", "2": "adds cursors, coordinates, completeness and paging keys", "3": "everything"}}),
+            )];
+        }
+    };
+    if !ai_text_editor::verbosity::verb_is_exempt(&envelope.method) {
+        for frame in &mut frames {
+            // Never an error frame: a refusal's code, message and recovery
+            // choices are the answer, at every level.
+            if frame.get("type").and_then(Value::as_str) != Some("data") {
+                continue;
+            }
+            if let Some(payload) = frame.get_mut("payload").and_then(Value::as_object_mut) {
+                ai_text_editor::verbosity::apply(payload, level);
+            }
+        }
+    }
+    // T98: every response names the tab it answered, at every verbosity
+    // level, because addressing the wrong tab silently is the failure the
+    // whole T96-T98 design exists to prevent. One name for the handle - the
+    // same `tab_id` a request addresses a tab by - rather than the `tab_uuid`
+    // only `open` used to report under a second name.
+    let answered_by = tab_id(&tab);
+    for frame in &mut frames {
+        if frame.get("type").and_then(Value::as_str) != Some("data") {
+            continue;
+        }
+        if let Some(payload) = frame.get_mut("payload").and_then(Value::as_object_mut) {
+            payload.insert("tab_id".into(), json!(answered_by));
+        }
+    }
     if !frames
         .iter()
         .any(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
@@ -2104,56 +2412,6 @@ fn tab_disk_diverged(tab: &Tab) -> bool {
     disk_state(&tab.path, None, &tab_base_bytes(&tab.path)) != tab.disk_digest
 }
 
-/// Every payload key any handler reads. Requests carrying anything outside
-/// this list are refused by name instead of having the extra silently
-/// ignored (B180); keep in step with the client's flag table.
-const KNOWN_PAYLOAD_KEYS: &[&str] = &[
-    "acknowledge_force_save",
-    "acknowledge_large_edit",
-    "action",
-    "after",
-    "before",
-    "bytes_base64",
-    "column",
-    "cursor_id",
-    "delete_len",
-    "detached",
-    "file",
-    "gradient",
-    "granularity",
-    "historical",
-    "id",
-    "expected_bytes_base64",
-    "expected_text",
-    "job_id",
-    "journal_action",
-    "length",
-    "limit",
-    "line",
-    "mode",
-    "offset",
-    "order",
-    "owner",
-    "page_lines",
-    "pager_key",
-    "presentation",
-    "preserve_external",
-    "progress",
-    "query",
-    "query_base64",
-    "range_end_byte",
-    "range_end_line",
-    "range_start_byte",
-    "range_start_line",
-    "resume_token",
-    "result",
-    "backup_path",
-    "target_path",
-    "text",
-    "visual",
-    "wrap_width",
-];
-
 /// How much of a byte span an error or a response quotes back. Enough to
 /// recognise a token or a line, short enough that a block edit's answer does
 /// not become the edit.
@@ -2277,9 +2535,10 @@ fn line_span(bytes: &[u8], start: u64, end: u64) -> Option<(usize, usize)> {
 /// for every single edit. The verify-read existed only because the arithmetic
 /// was untrustworthy, so what correct addressing removes is that loop, not the
 /// keystrokes. Worse than the entry recorded: the four `range_*` keys were
-/// already in `KNOWN_PAYLOAD_KEYS` for `read`'s sake, so a `replace` naming
-/// them passed the door and had them silently ignored, falling back to the
-/// cursor position.
+/// already accepted at the door for `read`'s sake, so a `replace` naming them
+/// passed and had them silently ignored, falling back to the cursor position.
+/// That door is per-verb now (B237, `ai_text_editor::verbs`), so the class no
+/// longer has a fifth instance to find.
 ///
 /// Two spellings, deliberately the same two `read` already takes:
 ///  - `range_start_line`/`range_end_line`: inclusive, 1-based, whole lines

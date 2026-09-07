@@ -181,6 +181,31 @@ record_integration() {
     INTEGRATION_DEFAULT="$mode"
 }
 
+# Which mode this run installs a skill in: the per-skill choice if one was made,
+# else the run-wide one, else `skill`.
+#
+# `skill` is the default on purpose. It is the interface that needs no client
+# configuration and no running server, which is what a piped-from-curl install
+# has to leave working; an MCP server's tools are listed in every session that
+# configures it, so it is opted into rather than assumed.
+#
+# Here rather than in 50-manifest.sh because the picker reads it too (T95), and
+# install-ui.sh sources only 05-config, 20-runtime-tools, 30-render and the
+# three ui parts. A ui function calling into an unsourced part is B49.
+integration_mode_for() {
+    local skill="$1" line
+    # bash 3.2 is the floor and has no associative arrays, so the per-skill
+    # choices are newline-delimited `skill=mode` records.
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
@@ -2314,12 +2339,42 @@ iui_info_push() {
 
 # The actions are always listed; they are only *usable* when the info pane has
 # focus, and the leading marker says which state they are in.
+# The modes the skill under the cursor offers, space-delimited and space-framed
+# so a membership test needs no special case for the first or last entry. Empty
+# for a skill that declares none, which is most of them: one way to be driven is
+# not a choice, and offering to cycle it would be a control that does nothing.
+iui_integration_offered() {
+    local index="$1" mode
+    IUI_INTEGRATION_OFFERED=''
+    while IFS= read -r mode; do
+        [ -n "$mode" ] || continue
+        IUI_INTEGRATION_OFFERED="$IUI_INTEGRATION_OFFERED$mode "
+    done <<IUI_MODES_EOF
+$(integration_modes "${IUI_SKILL_NAMES[$index]}")
+IUI_MODES_EOF
+    [ -z "$IUI_INTEGRATION_OFFERED" ] || IUI_INTEGRATION_OFFERED=" $IUI_INTEGRATION_OFFERED"
+}
+
 iui_info_actions() {
-    local width="$1" marker role
+    local width="$1" marker role index="$IUI_CURSOR" current
     if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi
     iui_info_push diamond 'ACTIONS' body "$width"
     iui_info_push "$role" " $marker d  help me install dependencies" act-dep "$width"
     iui_info_push "$role" " $marker r  reverify dependencies" act-verify "$width"
+    # T95: --integration could pick a skill's bridge headlessly, but the
+    # interactive picker offered no way to choose one at all, so a human running
+    # the plain installer could not reach mcp mode -- only a scripted caller
+    # could. The line is present only for a skill that declares more than one
+    # mode, and it names the mode in force rather than only the key, because the
+    # question a reader has here is "which am I about to install".
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "${IUI_SKILL_NAMES[$index]}")"
+    iui_info_push "$role" \
+        " $marker m  integration mode: $current   (cycles:${IUI_INTEGRATION_OFFERED%" "})" \
+        act-mode "$width"
 }
 
 iui_info_message() {
@@ -2373,7 +2428,7 @@ iui_count_states() {
 }
 
 iui_hint_bar() {
-    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  i install  q quit' "$IUI_COLS"
+    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  m mode  i install  q quit' "$IUI_COLS"
     iui_seg stone "$IUI_PAD"
     iui_out_line "$IUI_ROWS" "$IUI_SEG"
 }
@@ -2390,6 +2445,7 @@ iui_render_frame() {
     iui_layout
     iui_clamp_scroll
     IUI_ACTION_ROW_DEP=0
+    IUI_ACTION_ROW_MODE=0
     IUI_ACTION_ROW_VERIFY=0
     [ "$IUI_POSITION" -eq 1 ] && printf '\033[H'
     iui_title_bar
@@ -2563,6 +2619,7 @@ iui_info_cell() {
     case "${IUI_INFO_TAG[$i]}" in
         act-dep) IUI_ACTION_ROW_DEP="$row" ;;
         act-verify) IUI_ACTION_ROW_VERIFY="$row" ;;
+        act-mode) IUI_ACTION_ROW_MODE="$row" ;;
     esac
     iui_seg "${IUI_INFO_ROLE[$i]}" "${IUI_INFO_TEXT[$i]}"
     IUI_INFO_CELL="$IUI_SEG"
@@ -2843,6 +2900,37 @@ iui_action_reverify() {
     IUI_MESSAGE=('reverified; the per-tool cache is shared by every skill')
 }
 
+# T95. Cycle the skill under the cursor to its next declared integration mode,
+# wrapping. Cycling rather than a submenu because the picker has no modal layer
+# and the choice is between two or three named things -- a fourth mode would
+# still cycle legibly, since the line names the mode in force.
+#
+# The record is prepended, which is how record_skill_integration writes it and
+# what integration_mode_for expects: it returns the FIRST `skill=mode` line it
+# finds, so a later choice shadows an earlier one and the run installs what was
+# chosen last. Validation is not repeated here -- every mode offered came from
+# integration_modes itself, so there is nothing to refuse, and calling the
+# validating writer would risk die_usage killing the picker mid-frame.
+iui_action_cycle_integration() {
+    local index="$IUI_CURSOR" skill current next='' first='' mode taken=0
+    skill="${IUI_SKILL_NAMES[$index]}"
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "$skill")"
+    for mode in $IUI_INTEGRATION_OFFERED; do
+        [ -n "$first" ] || first="$mode"
+        if [ "$taken" -eq 1 ]; then next="$mode"; taken=0; fi
+        [ "$mode" = "$current" ] && taken=1
+    done
+    # Past the end, or a current mode that is not in the offered list at all
+    # (a --integration default naming a mode this skill does not declare).
+    [ -n "$next" ] || next="$first"
+    INTEGRATION_SELECTION="$skill=$next
+$INTEGRATION_SELECTION"
+    IUI_MESSAGE=("$skill will be installed in $next mode")
+}
 iui_handle_mouse() {
     [ "$IUI_MOUSE_RELEASE" -eq 0 ] || return 0
     case "$IUI_MOUSE_BTN" in
@@ -2855,6 +2943,7 @@ iui_handle_mouse() {
         IUI_FOCUS=info
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_DEP" ] && iui_action_dep_hint
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_VERIFY" ] && iui_action_reverify
+        [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_MODE" ] && iui_action_cycle_integration
         return 0
     fi
     [ "$IUI_FOCUS" = "info" ] && return 0
@@ -2900,6 +2989,11 @@ iui_handle_key() {
         n) for ((i = 0; i < count; i++)); do IUI_SKILL_SEL[$i]=0; done ;;
         d) [ "$IUI_FOCUS" = "info" ] && iui_action_dep_hint ;;
         r) [ "$IUI_FOCUS" = "info" ] && iui_action_reverify ;;
+        # Focus-gated like d and r: the ACTIONS lines are only usable when the
+        # info pane holds focus, and m is one of them. `i` was already taken by
+        # install -- the key that starts the run -- so binding integration mode
+        # to it would have replaced the picker's primary action with a toggle.
+        m) [ "$IUI_FOCUS" = "info" ] && iui_action_cycle_integration ;;
         i) IUI_DONE=1; IUI_RC=0 ;;
         q|ESC|EOF) IUI_DONE=1; IUI_RC=130 ;;
         MOUSE) iui_handle_mouse ;;
@@ -3660,6 +3754,7 @@ tests/test-lib-document.sh
 tests/test-lib-progress.sh
 tests/test-lib-table.sh
 tests/test-limited-run-contract.sh
+tests/test-man-page-roff.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
@@ -3728,6 +3823,7 @@ tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
 tests/test-verifier-reach-memo.sh
 tests/test-voice-artifact-drift.sh
+tests/test-workspace-copy-excludes-build-trees.sh
 EOF
             ;;
         project-specificies)
@@ -3894,26 +3990,9 @@ ISHEOF
     esac
 }
 
-# Which mode this run installs a skill in: the per-skill choice if one was made,
-# else the run-wide one, else `skill`.
-#
-# `skill` is the default on purpose. It is the interface that needs no client
-# configuration and no running server, which is what a piped-from-curl install
-# has to leave working; an MCP server's tools are listed in every session that
-# configures it, so it is opted into rather than assumed.
-integration_mode_for() {
-    local skill="$1" line
-    # bash 3.2 is the floor and has no associative arrays, so the per-skill
-    # choices are newline-delimited `skill=mode` records.
-    while IFS= read -r line; do
-        case "$line" in
-            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
-        esac
-    done <<INTEGRATION_SELECTION_EOF
-$INTEGRATION_SELECTION
-INTEGRATION_SELECTION_EOF
-    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
-}
+# integration_mode_for() moved to 05-config.sh, beside the INTEGRATION_*
+# variables it reads and the writers that set them: the picker calls it too
+# (T95), and install-ui.sh does not source this part.
 
 # Does this file belong in the mode this skill is being installed in?
 #
@@ -4705,6 +4784,220 @@ not grant broad or all-tools access.
 PROMPT
 }
 
+# The worktrees root is granted on its own, and unconditionally. Two reasons it
+# is not folded into planning_permission_step: an agent takes a worktree
+# whatever skills were selected, so gating it on planning left every
+# non-planning install with no grant at all; and the paths have nothing to do
+# with each other.
+#
+# Read, Edit AND Write, all three. Edit alone covers changing a file that
+# already exists, so CREATING one still prompted — which is most of what working
+# in a fresh checkout consists of. Bash joins them because a checkout carries
+# its own scripts (./pre-push-check.sh, ./run-tests.sh) that an agent has to
+# run, the same reasoning the planning temp dir already gets.
+#
+# The rules name the worktrees root and nothing above it, deliberately. The
+# obvious-looking home for this was under tsch-ai-skills/, beside bin/ — but
+# that tree also holds the chat server's server.key, the editor's private
+# session registry and, on a shared install, the installed binaries. A
+# directory an agent may freely write must not be the one holding a private key
+# and the binaries the agent is running, so tsch-ai-worktrees is a sibling.
+# Merge a jq-computed `entries` list into Claude's permissions.allow.
+#
+# $1 is a jq fragment defining `entries`, $2 the line to print when everything
+# was already there, and everything after them is passed through to rjq -- so
+# paths travel as --arg values and are never interpolated into the program text.
+# Extracted because the caller below would otherwise be a second copy of this
+# whole merge, which CODE-STYLE.md's 40-line cap correctly refuses.
+claude_merge_allow() {
+    local entries_def="$1" present_label="$2"
+    shift 2
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    local doc added tmpfile program
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program="def objectify: if type == \"object\" then . else {} end;
+$entries_def
+def allowed: objectify | .permissions | objectify | .allow
+    | if type == \"array\" then . else [] end;
+"
+    added="$(printf '%s' "$doc" | rjq -r "$@" "$program"'(entries - allowed)[]')"
+
+    # mktemp in the config's own directory so the rename is atomic, and cp -p to
+    # inherit the user's mode before rjq truncates it.
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq "$@" "$program"'
+        objectify
+        | (.permissions | objectify) as $perm
+        | ($perm.allow | if type == "array" then . else [] end) as $allow
+        | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ -n "$added" ]; then
+        printf '  claude-code: added to permissions.allow:\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  claude-code: %s\n' "$present_label"
+    fi
+}
+
+claude_worktrees_permissions() {
+    local worktrees="$1"
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions claude "$worktrees"
+        return 0
+    fi
+    worktrees="$(strip_trailing_slashes "$worktrees")"
+    backup_file "$cfg"
+    # "worktree grant already in place" rather than the planning arm's
+    # "permissions already present": both grants now run in one install, and
+    # test-installer-opencode-permissions counts that phrase expecting exactly
+    # one. Distinct wording keeps its count honest and tells the two apart in
+    # the output.
+    claude_merge_allow 'def entries: [
+    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)",
+    "Write(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
+];' 'worktree grant already in place' --arg worktrees "$worktrees"
+}
+
+# Merge a jq-computed `wanted` list of [tool, [patterns]] pairs into opencode's
+# permission block. Same split, and for the same reason, as claude_merge_allow:
+# $1 defines `wanted`, $2 is the config path, $3 the already-present line, and
+# the rest goes to rjq.
+# The shared jq preamble for an opencode permission merge, given a fragment
+# defining `wanted`. Its own function so the merge below stays inside the
+# 40-line cap.
+#
+# opencode's permission block is keyed by tool name; each value is either an
+# action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
+# action string is preserved as the "*" fallback pattern, and a stray
+# Claude-style allow/deny/ask list is not valid here, so `base` drops it.
+opencode_permission_program() {
+    printf 'def objectify: if type == "object" then . else {} end;\n%s\n' "$1"
+    cat <<'PROGRAM'
+def rules: if type == "object" then . elif type == "string" then {"*": .} else {} end;
+def base:
+    objectify
+    | .permission as $p
+    | (if ($p | type) == "string"
+       then reduce wanted[] as $w ({}; .[$w[0]] = {"*": $p})
+       else ($p | objectify) end)
+    | del(.allow, .deny, .ask);
+PROGRAM
+}
+
+opencode_merge_permission() {
+    local wanted_def="$1" cfg="$2" present_label="$3"
+    shift 3
+    local doc added tmpfile program
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program="$(opencode_permission_program "$wanted_def")"
+    added="$(printf '%s' "$doc" | rjq -r "$@" "$program"'
+        [ wanted[] as $w
+          | ($w[0]) as $tool
+          | (base[$tool] | rules) as $rule
+          | $w[1][] as $pattern
+          | select($rule[$pattern] != "allow")
+          | "\($tool): \($pattern)" ][]')"
+
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq "$@" "$program"'
+        (if type == "object" then . else {} end) as $data
+        | (reduce wanted[] as $w (base;
+              .[$w[0]] = (reduce $w[1][] as $pattern ((.[$w[0]] | rules); .[$pattern] = "allow"))
+          )) as $perm
+        | $data | .permission = $perm' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ -n "$added" ]; then
+        printf '  opencode: allowed\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  opencode: %s\n' "$present_label"
+    fi
+}
+
+opencode_worktrees_permissions() {
+    local worktrees="$1"
+    local cfg created=0
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" \
+            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    worktrees="$(strip_trailing_slashes "$worktrees")"
+    # A config strict rjq cannot parse carries comments or trailing commas a
+    # rewrite would strip, so print instructions rather than rebuild it. The
+    # wording avoids the planning arm's "is not strict JSON", which
+    # test-installer-opencode-permissions counts expecting exactly one.
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add the worktree rules by hand:" >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+    opencode_merge_permission 'def wanted: [
+    ["read",               ["\($worktrees)/**"]],
+    ["edit",               ["\($worktrees)/**"]],
+    ["write",              ["\($worktrees)/**"]],
+    ["bash",               ["\($worktrees)/**"]],
+    ["external_directory", ["\($worktrees)/**"]]
+];' "$cfg" 'worktree grant already in place' --arg worktrees "$worktrees"
+}
+
+print_manual_worktrees_permissions() {
+    local kind="$1" worktrees="$2"
+    echo "  $kind: no safe auto-editable permission file was modified." >&2
+    echo "    - grant $kind read, write and execute under $worktrees" >&2
+    echo "    - example (Claude Code settings.json permissions.allow):" >&2
+    echo "        Read($worktrees/**), Edit($worktrees/**), Write($worktrees/**), Bash($worktrees/**:*)" >&2
+}
+
+# Runs for every install, not only a planning one: any agent may be asked to
+# take a worktree. See git-worktrees/SKILL.md for why this root sits beside
+# tsch-ai-skills rather than inside it.
+worktrees_permission_step() {
+    local worktrees="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees" root kind
+    echo >&2
+    echo "== Agent worktree permissions ==" >&2
+    if confirm "Create $worktrees as the agent worktree root?"; then
+        mkdir -p "$worktrees" && echo "  Created $worktrees" >&2
+    fi
+    if confirm "Grant the selected agents read/write/execute on $worktrees, so a worktree there needs no prompt per file? (Each edited config is backed up beside itself, unless git already tracks it)"; then
+        for root in "${SELECTED_TARGET_PATHS[@]}"; do
+            kind="$(agent_kind_for_root "$root")"
+            case "$kind" in
+                claude)   claude_worktrees_permissions "$worktrees" ;;
+                opencode) opencode_worktrees_permissions "$worktrees" ;;
+                *)        print_manual_worktrees_permissions "$kind" "$worktrees" ;;
+            esac
+        done
+    fi
+}
+
 planning_permission_step() {
     local plans="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
     echo >&2
@@ -4779,6 +5072,10 @@ else
         ensure_plan_root_after_install
         planning_permission_step
     fi
+
+    # Outside the planning branch on purpose: any agent may be asked to take a
+    # worktree, whatever skills this install selected.
+    worktrees_permission_step
 
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
