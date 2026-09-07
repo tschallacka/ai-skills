@@ -435,9 +435,9 @@
       "detail": "install.sh's --integration flag lets an automation caller pick ai-text-editor's mcp bridge vs its skill client, but the interactive terminal UI (iui_info_actions and the rest of the iui_ pane rendering) only offers 'install dependencies' / 'reverify dependencies' as actions -- there is no toggle or prompt anywhere in the TUI for integration mode. A human running the plain interactive installer cannot choose mcp mode at all; only a scripted --integration flag can. Add an action (or a per-skill toggle in the info pane) that lets an interactive user pick among the modes integration_modes() declares for the skill under the cursor, for skills that offer more than one.",
       "blocked_on": null,
       "refs": [],
-      "note": null,
+      "note": "Implemented on fix/worktrees-tmpdir-chat-relay at eb076758; closes on merge. The info pane gains an m action for a skill declaring more than one mode, naming the mode in force and cycling it. Two things the implementation had to move: integration_mode_for() to 05-config.sh (install-ui.sh does not source 50-manifest.sh, so a ui function calling it would repeat B49), and the generated INTEGRATION block into iui_dev_load_tables (the mode tables live only in the artifact, so the standalone picker had an empty integration_modes and would have rendered no line).",
       "created_at": "2026-09-04T20:52:21Z",
-      "updated_at": "2026-09-04T20:52:21Z"
+      "updated_at": "2026-09-07T20:00:00Z"
     },
     {
       "id": "T96",

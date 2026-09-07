@@ -5425,7 +5425,7 @@
     {
       "id": "B261",
       "title": "a newly installed adapter's arguments are invisible to an already-running agent, and nothing says the schema is stale",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5436,12 +5436,12 @@
       "surfaces": [
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "eb076758 on fix/worktrees-tmpdir-chat-relay - the adapter compares its binary's timestamp against the one recorded at initialize and appends a notice to each tools/call result when they differ. Not yet merged.",
+      "verification": "staleness_notice is a pure function with three tests: a changed timestamp yields a notice naming the restart and stating that the refusal comes from the caller's own cached schema; an unchanged one is silent; an unreadable timestamp is never reported as a swap. attach_notice keeps the original content and appends. 10 adapter tests, fmt clean.",
       "found_by": "Michael, noticing the tab shorthands going unused right after the dev install, 2026-09-07",
-      "notes": "The capability itself is T96 and T97 (tab addressing by id, and by filename or partial path with a candidate set on ambiguity), implemented on the editor batch's branch and not yet merged - so this entry is NOT that work outstanding. It is the deployment gap sitting on top of it: the adapter accepts tab_id and tab_path today, and a session that connected before the swap cannot pass either, because it validates against the tools/list it fetched at startup.\n\nPractical consequence while it stands: after installing a new adapter, the tab shorthands are unavailable to every already-running agent until it restarts, and the only symptom is that agents keep passing file - which is what Michael spotted. Worth stating in ai-text-editor/SKILL.md next to the addressing contract, so the first thing an agent reads about tab_id also tells it why its own tooling may not offer it yet.",
+      "notes": "The capability itself is T96 and T97 (tab addressing by id, and by filename or partial path with a candidate set on ambiguity), implemented on the editor batch's branch and not yet merged - so this entry is NOT that work outstanding. It is the deployment gap sitting on top of it: the adapter accepts tab_id and tab_path today, and a session that connected before the swap cannot pass either, because it validates against the tools/list it fetched at startup.\n\nPractical consequence while it stands: after installing a new adapter, the tab shorthands are unavailable to every already-running agent until it restarts, and the only symptom is that agents keep passing file - which is what Michael spotted. Worth stating in ai-text-editor/SKILL.md next to the addressing contract, so the first thing an agent reads about tab_id also tells it why its own tooling may not offer it yet. The tempting fix does not work and is recorded so it is not retried: notifications/tools/list_changed would make a compliant client re-fetch tools/list, but over stdio the client launched this adapter, so the re-fetch hits the same old process and returns the same old list. A running adapter cannot teach its client an argument it was not built with; it can only say so.",
       "created_at": "2026-09-07T15:12:38Z",
-      "updated_at": "2026-09-07T15:13:10Z"
+      "updated_at": "2026-09-07T20:00:00Z"
     },
     {
       "id": "B263",
