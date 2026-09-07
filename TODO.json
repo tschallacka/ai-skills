@@ -451,9 +451,9 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "src/ai-text-editor/src/client.rs"
       ],
-      "note": null,
+      "note": "B261 records why this is not usable immediately after an install: an already-running agent validates calls against the tools/list it fetched at startup, so tab_id and tab_path are invisible to it until it restarts. Closing this does not make the shorthand reachable for sessions already connected.",
       "created_at": "2026-09-06T17:57:12Z",
-      "updated_at": "2026-09-06T17:57:12Z"
+      "updated_at": "2026-09-07T15:13:10Z"
     },
     {
       "id": "T97",
