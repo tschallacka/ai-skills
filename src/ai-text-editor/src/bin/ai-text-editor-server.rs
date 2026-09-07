@@ -1371,27 +1371,41 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         ));
         return frames;
     }
-    // B180/B187: refuse arguments no handler for this verb reads. A typo'd
-    // or misplaced flag must fail here, not become a silent no-op.
-    if let Some(key) = envelope
-        .payload
-        .as_object()
-        .and_then(|map| {
-            map.keys()
-                .find(|key| !KNOWN_PAYLOAD_KEYS.contains(&key.as_str()))
-        })
-        .cloned()
-    {
-        frames.push(error_details(
-            &envelope.request_id,
-            "unknown_argument",
-            format!(
-                "the request carries {key}, which no handler for {} reads",
-                envelope.method
-            ),
-            json!({"offending_key": key}),
-        ));
-        return frames;
+    // B180/B187 wanted "an argument no handler for this verb reads is refused
+    // by name". What they produced was one list for the whole protocol, so
+    // `replace` naming `range_start_line` passed the door because *`read`*
+    // takes that key, and the replace handler then dropped all four range keys
+    // and edited at the cursor instead — a misplaced edit reported as a
+    // success (B237). The per-verb sets existed only in the MCP adapter's tool
+    // schemas, which the CLI and hand-sent NDJSON never consult.
+    //
+    // `ai_text_editor::verbs` is now the one declaration both surfaces read:
+    // this check and the adapter's advertised `inputSchema`. An unknown method
+    // declares no key set at all and must fall through to `unknown_method`
+    // below rather than be reported as a bad argument.
+    if let Some(accepted) = ai_text_editor::verbs::payload_keys(&envelope.method) {
+        if let Some(key) = envelope
+            .payload
+            .as_object()
+            .and_then(|map| {
+                map.keys()
+                    .find(|key| !ai_text_editor::verbs::reads_payload_key(&envelope.method, key))
+            })
+            .cloned()
+        {
+            frames.push(error_details(
+                &envelope.request_id,
+                "unknown_argument",
+                format!(
+                    "the request carries {key}, which {} does not read",
+                    envelope.method
+                ),
+                // The accepted set, so a caller that guessed wrong can see what
+                // this verb does take instead of guessing again.
+                json!({"offending_key": key, "accepted_keys": accepted}),
+            ));
+            return frames;
+        }
     }
     if envelope.method == "search" && envelope.payload.get("offset").is_some() {
         frames.push(error(
@@ -2104,56 +2118,6 @@ fn tab_disk_diverged(tab: &Tab) -> bool {
     disk_state(&tab.path, None, &tab_base_bytes(&tab.path)) != tab.disk_digest
 }
 
-/// Every payload key any handler reads. Requests carrying anything outside
-/// this list are refused by name instead of having the extra silently
-/// ignored (B180); keep in step with the client's flag table.
-const KNOWN_PAYLOAD_KEYS: &[&str] = &[
-    "acknowledge_force_save",
-    "acknowledge_large_edit",
-    "action",
-    "after",
-    "before",
-    "bytes_base64",
-    "column",
-    "cursor_id",
-    "delete_len",
-    "detached",
-    "file",
-    "gradient",
-    "granularity",
-    "historical",
-    "id",
-    "expected_bytes_base64",
-    "expected_text",
-    "job_id",
-    "journal_action",
-    "length",
-    "limit",
-    "line",
-    "mode",
-    "offset",
-    "order",
-    "owner",
-    "page_lines",
-    "pager_key",
-    "presentation",
-    "preserve_external",
-    "progress",
-    "query",
-    "query_base64",
-    "range_end_byte",
-    "range_end_line",
-    "range_start_byte",
-    "range_start_line",
-    "resume_token",
-    "result",
-    "backup_path",
-    "target_path",
-    "text",
-    "visual",
-    "wrap_width",
-];
-
 /// How much of a byte span an error or a response quotes back. Enough to
 /// recognise a token or a line, short enough that a block edit's answer does
 /// not become the edit.
@@ -2277,9 +2241,10 @@ fn line_span(bytes: &[u8], start: u64, end: u64) -> Option<(usize, usize)> {
 /// for every single edit. The verify-read existed only because the arithmetic
 /// was untrustworthy, so what correct addressing removes is that loop, not the
 /// keystrokes. Worse than the entry recorded: the four `range_*` keys were
-/// already in `KNOWN_PAYLOAD_KEYS` for `read`'s sake, so a `replace` naming
-/// them passed the door and had them silently ignored, falling back to the
-/// cursor position.
+/// already accepted at the door for `read`'s sake, so a `replace` naming them
+/// passed and had them silently ignored, falling back to the cursor position.
+/// That door is per-verb now (B237, `ai_text_editor::verbs`), so the class no
+/// longer has a fifth instance to find.
 ///
 /// Two spellings, deliberately the same two `read` already takes:
 ///  - `range_start_line`/`range_end_line`: inclusive, 1-based, whole lines

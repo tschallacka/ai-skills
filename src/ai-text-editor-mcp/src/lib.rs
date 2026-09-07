@@ -156,6 +156,18 @@ fn adapter_argument(key: &str) -> Value {
     }
 }
 
+/// The protocol method a tool name addresses. Only one differs: `resolve` is
+/// the tool, `resolve_external` the method, and `call_tool` maps it the same
+/// way — a second spelling of that mapping is how the schema and the router
+/// would come apart.
+fn server_method(tool: &str) -> &str {
+    if tool == "resolve" {
+        "resolve_external"
+    } else {
+        tool
+    }
+}
+
 fn tool_definitions() -> Vec<Value> {
     let routing = || {
         let mut properties: ToolProperties = Vec::from([(
@@ -172,16 +184,16 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
-    tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", routing(), vec![]));
-    tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", routing(), vec![]));
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", Vec::new(), vec![]));
+    tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", Vec::new(), vec![]));
+    tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", Vec::new(), vec![]));
     tools.push((
         "history",
         "Inspect undo/redo depths and journal sequence without changing the tab.",
-        routing(),
+        Vec::new(),
         vec![],
     ));
-    tools.push(("read", "Read the current document or a bounded byte/line range. Line ranges are inclusive on text tabs; byte ranges half-open on raw and hex tabs; offset/length is a byte window snapped to UTF-8 boundaries.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("read", "Read the current document or a bounded byte/line range. Line ranges are inclusive on text tabs; byte ranges half-open on raw and hex tabs; offset/length is a byte window snapped to UTF-8 boundaries.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("cursor_id", int("Numeric cursor whose position anchors a before/after window.")),
         ("before", int("Lines before the cursor to include.")),
         ("after", int("Lines after the cursor to include.")),
@@ -197,7 +209,7 @@ fn tool_definitions() -> Vec<Value> {
         "insert",
         "Insert text or base64 bytes at a byte offset; preserve the revision guard.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "offset",
@@ -222,7 +234,7 @@ fn tool_definitions() -> Vec<Value> {
         "replace",
         "Replace a span with text or base64 bytes; preserve the revision guard. Address the span three ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), or range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "offset",
@@ -268,7 +280,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         mutating_required(),
     ));
-    tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("large_edit", "Stream an acknowledged job-owned rewrite of a large file and atomically replace it.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Queued job this edit executes.")),
         ("resume_token", string("The job's resume token; required, and never disclosed to callers without it.")),
         ("acknowledge_large_edit", boolean("Must be true; confirms the streamed rewrite cost.")),
@@ -278,23 +290,23 @@ fn tool_definitions() -> Vec<Value> {
         ("bytes_base64", string("Replacement bytes, alternative to text.")),
         ("expected_revision", revision_guard()),
     ])); p }, mutating_required()));
-    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p = routing(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("begin_transaction", "Begin an explicit undo transaction; subsequent ordinary edits are grouped until end_transaction.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
     tools.push((
         "end_transaction",
         "Close the explicit undo transaction and commit its grouped undo step.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
         mutating_required(),
     ));
-    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p = routing(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
+    tools.push(("restore", "Turn off lossless NFC presentation; refuses with not_normalized when the tab never normalized, and refuses when edits made restoration lossy.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("expected_revision", revision_guard())])); p }, mutating_required()));
     tools.push((
         "undo",
         "Undo one server history transaction; the server returns the new revision.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
@@ -304,7 +316,7 @@ fn tool_definitions() -> Vec<Value> {
         "redo",
         "Redo one server history transaction; the server returns the new revision.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
@@ -314,18 +326,18 @@ fn tool_definitions() -> Vec<Value> {
         "save",
         "Atomically save the current working view after external-change resolution.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([("expected_revision", revision_guard())]));
             p
         },
         mutating_required(),
     ));
-    tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p = routing(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
+    tools.push(("save_as", "Atomically create a new target file without changing the active tab; existing targets are refused.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([("target_path", string("New file to create; must not already exist."))])); p }, vec![]));
     tools.push((
         "close",
         "Close the tab; first obtain and then explicitly choose journal preservation or cleanup.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([(
                 "journal_action",
                 string("preserve or clean; clean deletes the tab journal and metadata database."),
@@ -338,7 +350,7 @@ fn tool_definitions() -> Vec<Value> {
         "resolve",
         "Resolve an external change with backup, reload, merge, keep, or acknowledged force_save.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "action",
@@ -363,11 +375,15 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "index",
-        "Build or inspect the lazy line/byte index, optionally with explicit granularity.",
+        // B237, found by binding this schema to the server's own key table:
+        // `action` was advertised here as "build or inspect" and the handler
+        // reads no such key — it always performs the complete scan and then
+        // pages the blocks. A caller asking to inspect got a full rebuild and
+        // no sign that its argument had been dropped.
+        "Perform a complete scan of the lazy line/byte index at an explicit granularity, persist it, and page the resulting blocks.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
-                ("action", string("build or inspect.")),
                 ("granularity", int("Lines per index block.")),
                 ("offset", int("Block offset when paging index blocks.")),
                 ("limit", int("Blocks to return.")),
@@ -380,7 +396,7 @@ fn tool_definitions() -> Vec<Value> {
         "cursor",
         "Create, move, or inspect numeric cursors and navigation positions.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 (
                     "action",
@@ -405,7 +421,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec![],
     ));
-    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name, and `historical` reads the persisted result as it was at its source revision.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("page", "Page a previous search or index result set by its pager key. Pages are refetched after any write; a stale generation is refused by name, and `historical` reads the persisted result as it was at its source revision.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("pager_key", string("Pager key from a previous search or index response.")),
         ("offset", int("Zero-based match offset to resume from.")),
         ("limit", int("Matches to return.")),
@@ -415,13 +431,18 @@ fn tool_definitions() -> Vec<Value> {
         // schema-following client.
         ("historical", boolean("Replay the persisted result set as it was recorded, accepting that it is stale, instead of refusing a post-edit page.")),
     ])); p }, vec![]));
-    tools.push(("search", "Run exactly one explicit search mode and receive an immutable result id and pager key. Offset is not a search argument: page the result with `page`.", { let mut p = routing(); p.extend(Vec::from([
+    // B237, found by binding this schema to the server's own key table:
+    // `pager_key` and `historical` were advertised here — "re-page instead of
+    // rescanning", "replay the stored result set rather than rescanning" — and
+    // the search handler reads neither. Both are `page`'s keys. A caller that
+    // followed this schema to avoid a rescan got a full rescan and a brand-new
+    // result set, with nothing saying its argument had been dropped. The
+    // description now points at the verb that does page.
+    tools.push(("search", "Run exactly one explicit search mode and receive an immutable result id and pager key. Neither offset nor pager_key is a search argument: a fresh search always rescans, and re-paging or replaying an existing result set is `page`, with that pager_key.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("mode", string("exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex.")),
         ("query", string("Search query, interpreted by mode.")),
         ("query_base64", string("Base64 query, alternative to query.")),
         ("limit", int("Preview matches to return (default 4).")),
-        ("pager_key", string("Existing result set to re-page instead of rescanning.")),
-        ("historical", boolean("Replay the stored result set for this query rather than rescanning.")),
         ("order", string("forward or reverse.")),
         ("gradient", number("Fuzzy score floor between 0.0 and 1.0.")),
         ("range_start_line", int("Inclusive first line (required on large tabs).")),
@@ -433,7 +454,7 @@ fn tool_definitions() -> Vec<Value> {
         "job_start",
         "Create a lifecycle record for agent-owned long work; this tool does not execute the work.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("owner", string("Name of the driving agent or process.")),
                 (
@@ -445,12 +466,12 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec![],
     ));
-    tools.push(("job_poll", "Read the current state, progress, and result of a job. Requires the resume_token issued at start; the token is never disclosed to a caller without it.", routing().into_iter().chain(Vec::from([("job_id", int("Job id.")), ("resume_token", string("Token from job_start; required."))])).collect(), vec!["job_id", "resume_token"]));
+    tools.push(("job_poll", "Read the current state, progress, and result of a job. Requires the resume_token issued at start; the token is never disclosed to a caller without it.", Vec::new().into_iter().chain(Vec::from([("job_id", int("Job id.")), ("resume_token", string("Token from job_start; required."))])).collect(), vec!["job_id", "resume_token"]));
     tools.push((
         "job_progress",
         "Publish truthful progress for work the driving agent owns.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("job_id", int("Job id.")),
                 ("resume_token", string("Token from job_start; required.")),
@@ -463,7 +484,7 @@ fn tool_definitions() -> Vec<Value> {
         },
         vec!["job_id", "resume_token"],
     ));
-    tools.push(("job_complete", "Publish a terminal result for work the driving agent owns. The result must be a JSON array of result frames; a single object is accepted and wrapped, never dropped.", { let mut p = routing(); p.extend(Vec::from([
+    tools.push(("job_complete", "Publish a terminal result for work the driving agent owns. The result must be a JSON array of result frames; a single object is accepted and wrapped, never dropped.", { let mut p: ToolProperties = Vec::new(); p.extend(Vec::from([
         ("job_id", int("Job id.")),
         ("resume_token", string("Token from job_start; required.")),
         ("result", json!({"description": "Array of result frames (a bare object is wrapped into one)."})),
@@ -471,7 +492,7 @@ fn tool_definitions() -> Vec<Value> {
     tools.push((
         "job_cancel",
         "Cancel a non-terminal job; cancellation wins races with completion.",
-        routing()
+        Vec::new()
             .into_iter()
             .chain(Vec::from([
                 ("job_id", int("Job id.")),
@@ -484,7 +505,7 @@ fn tool_definitions() -> Vec<Value> {
         "job_transfer",
         "Transfer ownership using the current resume token.",
         {
-            let mut p = routing();
+            let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
                 ("job_id", int("Job id.")),
                 ("resume_token", string("Current token; required.")),
@@ -497,7 +518,7 @@ fn tool_definitions() -> Vec<Value> {
     tools.push((
         "job_release",
         "Permanently release a job and invalidate its resume token.",
-        routing()
+        Vec::new()
             .into_iter()
             .chain(Vec::from([
                 ("job_id", int("Job id.")),
@@ -509,12 +530,37 @@ fn tool_definitions() -> Vec<Value> {
     tools
         .into_iter()
         .map(|(name, description, props, required)| {
+            // B237: the advertised payload keys are not a second list. They are
+            // `ai_text_editor::verbs`, the table the server's door refuses
+            // against, so a key one surface knows about and the other does not
+            // cannot be written — an extra here panics as unadvertised, a
+            // missing one panics as undescribed. `ADAPTER_ARGUMENTS` did this
+            // for the arguments the adapter consumes (B217); this is the same
+            // binding for the arguments the server consumes.
+            let method = server_method(name);
+            let described: std::collections::HashMap<&str, Value> = props.into_iter().collect();
             let mut properties = serde_json::Map::new();
             for (key, value) in routing() {
                 properties.insert(key.to_string(), value);
             }
-            for (key, value) in props {
-                properties.insert(key.to_string(), value);
+            let accepted = ai_text_editor::verbs::extra_payload_keys(method)
+                .unwrap_or_else(|| panic!("{name} maps to {method}, which the server does not dispatch"));
+            for key in accepted {
+                let value = described.get(key).cloned().unwrap_or_else(|| {
+                    panic!("{name} accepts the payload key {key} and describes no schema for it")
+                });
+                properties.insert((*key).to_string(), value);
+            }
+            // The revision guard rides the envelope, not the payload, so it is
+            // the one described key with no row in the table.
+            if let Some(value) = described.get("expected_revision") {
+                properties.insert("expected_revision".into(), value.clone());
+            }
+            for key in described.keys() {
+                assert!(
+                    *key == "expected_revision" || accepted.contains(key),
+                    "{name} advertises {key}, which {method} does not read - the server would refuse it as an unknown argument"
+                );
             }
             json!({
                 "name": name,
@@ -536,11 +582,7 @@ fn call_tool(id: Value, params: Value) -> Value {
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let method = if name == "resolve" {
-        "resolve_external"
-    } else {
-        name
-    };
+    let method = server_method(name);
     let mut payload = arguments.as_object().cloned().unwrap_or_default();
     let file = payload
         .get("file")
