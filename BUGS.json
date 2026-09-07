@@ -4995,6 +4995,27 @@
       "updated_at": "2026-09-07T13:39:21Z"
     },
     {
+      "id": "B249",
+      "title": "the server echoes a sender's own PRIVMSG back, so a standard client shows every message twice",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Send a message from a standard IRC client (Konversation) joined to #ai-skills. Michael's paste shows each of his own lines rendered twice.",
+      "observed": "Every message the sender writes appears twice in its own window: once rendered locally by the client, once received back from the server. Michael's own diagnosis, which is correct: 'probably once conquerer printing itself, and once the channel sending it'.",
+      "expected": "RFC 1459 flow: a PRIVMSG is relayed to the OTHER members of the channel and never back to its sender, which renders its own line locally. So a sender sees one copy.",
+      "mechanism": "src/chat-server-rs/src/main.rs PRIVMSG arm: w(st, &out) writes the serialized message back to the sending connection before hub.relay(&chan, &out, idx) fans it out to the others. The echo is not incidental - src/chat-client-rs/src/main.rs's send path WAITS for it, matching on a line containing PRIVMSG, the channel and the text, and prints it as its success confirmation. So dropping the echo server-side without changing the client would make every send hang until timeout.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, from Konversation showing his own messages twice, 2026-09-07",
+      "notes": "Both sides must change together, which is why this is one entry rather than two: the server stops echoing, and chat-client-rs's send stops waiting for an echo and instead prints the line it constructed once the write succeeds (or confirms with a cheap round trip such as LASTID). Handing it to whoever holds chat-client-rs, since B246 and B247 are already there and a split fix would leave send hanging.",
+      "created_at": "2026-09-07T13:44:48Z",
+      "updated_at": "2026-09-07T13:44:48Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
