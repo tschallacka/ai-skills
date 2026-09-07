@@ -225,6 +225,21 @@ impl Hub {
                 }
             }
         }
+        // Tell each channel the nick is gone (B245). A connection that simply
+        // ends - which is the normal case here, since `tail --mention-exit`
+        // leaves on every mention - sends no PART, so without this the nick
+        // stayed in every other client's list until they reconnected.
+        //
+        // Announced after the memberships are dropped and outside that lock:
+        // `announce` takes `writers`, and taking it while holding `channels`
+        // would put two locks in one place, which is the shape B122 came from.
+        // The nick is named without a user@host prefix because a deregister can
+        // run for a connection that never completed registration.
+        if !nick.is_empty() {
+            for chan in chans {
+                self.relay(chan, &format!(":{} QUIT :connection closed", nick), idx);
+            }
+        }
         // The peer itself stays in `writers` so live connections keep their
         // index (broadcast addresses members by index). Its connection state is
         // dropped by the owning thread and its outbox is marked dead, so it is
@@ -335,6 +350,48 @@ impl Hub {
     /// this to seed a cursor without reading the whole history.
     fn last_id(&self, chan: &str) -> u64 {
         self.scan_highest(chan)
+    }
+
+    /// Relay one line to every member of `chan` except the connection at
+    /// `except_idx`, which has already had it written directly.
+    ///
+    /// Named `relay` rather than `announce`: the announce_* family in this file is
+    /// the UDP discovery beacon, a different thing entirely. Extracted so JOIN,
+    /// PART and a closing connection reach the channel the way PRIVMSG does,
+    /// rather than each growing its own copy of the fanout.
+    /// Membership changes were not announced at all before (B244, B245): the
+    /// handlers echoed to the acting connection and told nobody else, so a
+    /// client already in the channel never saw a nick arrive or leave and its
+    /// nick list showed whoever happened to be present when IT joined.
+    ///
+    /// The lock discipline is the point and is not incidental. `writers` is held
+    /// only long enough to copy the peer list, and every `offer` happens after
+    /// it is released: writing to a peer's socket while holding `writers` blocks
+    /// for as long as that peer declines to read, and because `writers` is the
+    /// lock the accept loop needs, one idle subscriber wedged the whole server
+    /// (B122). `Peer::offer` skips a non-member, so passing the channel is all
+    /// the scoping this needs.
+    fn relay(&self, chan: &str, line: &str, except_idx: usize) {
+        let peers: Vec<Arc<Peer>> = match self.writers.lock() {
+            Ok(writers) => writers
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != except_idx)
+                .map(|(_, p)| Arc::clone(p))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        for p in &peers {
+            if p.offer(chan, line) == Offer::Dropped {
+                // The peer is not draining its queue. It is marked dead, so its
+                // own thread tears it down; say so, because a silently dropped
+                // subscriber looks like message loss.
+                eprintln!(
+                    "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
+                    chan, OUTBOX_MAX_BYTES
+                );
+            }
+        }
     }
 
     /// Like `fetch`, but only rows whose text mentions `@nick` (server-side
@@ -767,6 +824,14 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             sess.joined.push(chan.clone());
                         }
                         peer.set_joined(&sess.joined);
+                        // Tell the channel, which is what puts this nick in
+                        // every other client's list (B244). Without it only a
+                        // client joining LATER ever learns the nick, from its
+                        // own 353 reply, so whether an agent appears depended on
+                        // join order. Announced with the standard `JOIN #chan`
+                        // form rather than the trailing-colon spelling echoed
+                        // above, since this is what other clients parse.
+                        hub.relay(&chan, &format!(":{} JOIN {}", prefix, chan), idx);
                         let members = {
                             if let Ok(ch) = hub.channels.lock() {
                                 ch.get(&chan).cloned().unwrap_or_default()
@@ -795,6 +860,16 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             }
                         }
                         sess.joined.retain(|j| j != &chan);
+                        // Announced BEFORE set_joined, deliberately: the parting
+                        // peer is excluded by index anyway, and narrowing its
+                        // own membership first would make the ordering look
+                        // load-bearing when it is not.
+                        //
+                        // Without this a departed nick stayed in every other
+                        // client's list for the life of their connection
+                        // (B245), which reads worse than the arrival gap: the
+                        // list only ever grew.
+                        hub.relay(&chan, &format!(":{} PART {}", prefix, chan), idx);
                         // Broadcast membership is read from the outbox, so a
                         // PART has to update it or a parted connection keeps
                         // receiving the channel.
@@ -851,40 +926,12 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                                 let out = m.serialize();
                                 w(st, &out);
                                 // Broadcast to OTHER connections by queueing on
-                                // each peer's outbox. Deliberately not by
-                                // writing to their sockets from this thread:
-                                // that write blocks for as long as the peer
-                                // declines to read, and it happened while
-                                // holding `hub.writers` -- the lock the accept
-                                // loop needs -- so one idle subscriber wedged
-                                // the whole server (B122).
-                                //
-                                // `hub.writers` is held only to copy the peer
-                                // list, and the offers happen after it is
-                                // released, so no second lock is ever taken
-                                // under it.
-                                let peers: Vec<Arc<Peer>> = match hub.writers.lock() {
-                                    Ok(writers) => writers
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(i, _)| *i != idx)
-                                        .map(|(_, p)| Arc::clone(p))
-                                        .collect(),
-                                    Err(_) => Vec::new(),
-                                };
-                                for p in &peers {
-                                    if p.offer(&chan, &out) == Offer::Dropped {
-                                        // The peer is not draining its queue.
-                                        // It is marked dead, so its own thread
-                                        // tears it down; say so, because a
-                                        // silently dropped subscriber looks
-                                        // like message loss.
-                                        eprintln!(
-                                            "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
-                                            chan, OUTBOX_MAX_BYTES
-                                        );
-                                    }
-                                }
+                                // each peer's outbox rather than writing to
+                                // their sockets from this thread. Hub::announce
+                                // owns that fanout and the lock discipline it
+                                // depends on (B122); it is shared with JOIN and
+                                // PART so the three cannot drift apart.
+                                hub.relay(&chan, &out, idx);
                             }
                             Err(e) => w(st, &format!("ERROR :{}", e)),
                         }
@@ -1654,6 +1701,155 @@ mod announce_tests {
         assert!(host_is_dialable("192.168.1.106"));
         assert!(host_is_dialable("localhost"));
         assert!(host_is_dialable("some.host.example"));
+    }
+}
+
+#[cfg(test)]
+mod membership_relay_tests {
+    use super::{Hub, Peer};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    // The fanout is what puts a nick in another client's list. Before B244 the
+    // JOIN handler wrote only to the joining connection, so a client already in
+    // the channel was never told and its nick list showed whoever happened to
+    // be present when IT joined.
+    fn hub_with(peers: Vec<Arc<Peer>>) -> Hub {
+        Hub {
+            chan_dir: PathBuf::from("/nonexistent"),
+            highest: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            topics: Mutex::new(HashMap::new()),
+            nicks: Mutex::new(HashMap::new()),
+            writers: Mutex::new(peers),
+        }
+    }
+
+    #[test]
+    fn announce_reaches_the_other_members_and_not_the_actor() {
+        let actor = Arc::new(Peer::new());
+        let watcher = Arc::new(Peer::new());
+        actor.set_joined(&["#ops".to_string()]);
+        watcher.set_joined(&["#ops".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&actor), Arc::clone(&watcher)]);
+
+        hub.relay("#ops", ":new!u@h JOIN #ops", 0);
+
+        let (actor_lines, _) = actor.drain();
+        assert!(
+            actor_lines.is_empty(),
+            "the acting connection is excluded by index; it was written to directly"
+        );
+        let (watcher_lines, _) = watcher.drain();
+        assert_eq!(
+            watcher_lines,
+            vec![":new!u@h JOIN #ops".to_string()],
+            "a member already in the channel must be told a nick arrived"
+        );
+    }
+
+    // Channel scoping comes from Peer::offer, so announcing must not leak a
+    // membership change to a connection that is elsewhere.
+    #[test]
+    fn announce_skips_a_peer_in_another_channel() {
+        let elsewhere = Arc::new(Peer::new());
+        elsewhere.set_joined(&["#other".to_string()]);
+        let hub = hub_with(vec![Arc::new(Peer::new()), Arc::clone(&elsewhere)]);
+
+        hub.relay("#ops", ":new!u@h JOIN #ops", 0);
+
+        let (lines, _) = elsewhere.drain();
+        assert!(lines.is_empty(), "a non-member was told about #ops");
+    }
+
+    // B245: a connection that simply ends sends no PART, which is the normal
+    // case for `tail --mention-exit`, so deregister has to announce the QUIT or
+    // the nick stays listed for the life of every other connection.
+    #[test]
+    fn deregister_announces_a_quit_to_each_channel() {
+        let leaving = Arc::new(Peer::new());
+        let watcher = Arc::new(Peer::new());
+        watcher.set_joined(&["#ops".to_string(), "#dev".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&leaving), Arc::clone(&watcher)]);
+
+        hub.deregister("gone", 0, &["#ops".to_string(), "#dev".to_string()]);
+
+        let (lines, _) = watcher.drain();
+        assert_eq!(
+            lines,
+            vec![
+                ":gone QUIT :connection closed".to_string(),
+                ":gone QUIT :connection closed".to_string()
+            ],
+            "each channel the nick held must hear that it went"
+        );
+    }
+
+    // The JOIN and PART handlers live inside the connection loop, which needs a
+    // live TLS peer to drive, so the tests above reach `relay` directly and
+    // prove its semantics rather than that those handlers call it. Removing
+    // either call therefore broke nothing -- a fix nothing can fail -- so the
+    // call sites are pinned here instead.
+    //
+    // A source assertion is the weaker kind and this says so: it cannot see
+    // whether the line reaches the wire, only that the handler asks. The wire
+    // itself needs a raw IRC client (the dev shell has no openssl, deliberately),
+    // and in practice a standard client's nick list is the check.
+    // The needle is never written out in full here, and that is not stylistic.
+    // The first version of this test asserted `src.contains("<the exact relay
+    // line>")` -- which passed with the call deleted, because include_str! reads
+    // the very file holding the test's own assertion literal. The test was its
+    // own evidence. Slicing the handler region and looking for a call inside it
+    // cannot be satisfied that way: this module sits after every region below.
+    fn region<'a>(src: &'a str, from: &str, to: &str) -> &'a str {
+        let start = src
+            .find(from)
+            .unwrap_or_else(|| panic!("region start not found: {}", from));
+        let rest = &src[start..];
+        let end = rest
+            .find(to)
+            .unwrap_or_else(|| panic!("region end not found: {}", to));
+        &rest[..end]
+    }
+
+    #[test]
+    fn the_join_and_part_handlers_relay_to_the_channel() {
+        let src = include_str!("main.rs");
+        let call = "hub.relay(";
+
+        let join = region(src, "\"JOIN\" =>", "\"PART\" =>");
+        assert!(
+            join.contains(call),
+            "the JOIN handler must relay to the channel, or a client already present never sees the nick arrive (B244)"
+        );
+        let part = region(src, "\"PART\" =>", "\"NAMES\" =>");
+        assert!(
+            part.contains(call),
+            "the PART handler must relay to the channel, or a departed nick stays in every other list (B245)"
+        );
+        let dereg = region(src, "fn deregister(", "fn scan_highest(");
+        assert!(
+            dereg.contains("self.relay("),
+            "deregister must relay a QUIT: a dropped connection sends no PART (B245)"
+        );
+    }
+
+    // A deregister can run for a connection that never registered a nick, and
+    // relaying ":  QUIT" would be a malformed line on the wire.
+    #[test]
+    fn deregister_announces_nothing_for_an_unregistered_connection() {
+        let watcher = Arc::new(Peer::new());
+        watcher.set_joined(&["#ops".to_string()]);
+        let hub = hub_with(vec![Arc::new(Peer::new()), Arc::clone(&watcher)]);
+
+        hub.deregister("", 0, &["#ops".to_string()]);
+
+        let (lines, _) = watcher.drain();
+        assert!(
+            lines.is_empty(),
+            "announced a QUIT for a nickless connection"
+        );
     }
 }
 
