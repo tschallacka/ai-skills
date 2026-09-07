@@ -3590,7 +3590,7 @@
     {
       "id": "B273",
       "title": "the TLS-only assertion in test-chat.sh cannot fail: both arms of its case are no-ops",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3601,12 +3601,12 @@
       "surfaces": [
         "chat/tests/test-chat.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "2e119d55 on fix/b273-tls-only-assertion — the block writes IRC to a plain socket over /dev/tcp and fails on a welcome numeric, replacing an openssl s_client probe whose case arms were both no-ops",
+      "verification": "chat/tests/test-chat.sh PASS with the new block against the real server. Mutation: the same probe run against a listener that answers ':server 001 plainprobe :Welcome to the plaintext bus' takes the t_fail arm, so the assertion detects a server that registers a plaintext client. /dev/tcp measured present in the bash 3.2 floor build, and the probe prints a SKIP where it is absent.",
       "found_by": "t90-chat-mcp, while auditing the chat suite's tool dependencies for B272",
       "notes": "The probe it runs is also not the one the comment describes: openssl s_client speaks TLS, so it cannot show what a PLAIN connect does. Asserting the contract needs a plain socket write and no handshake in the reply. B272 covers the same block depending on an undeclared openssl.",
       "created_at": "2026-09-07T20:11:20Z",
-      "updated_at": "2026-09-07T20:11:35Z"
+      "updated_at": "2026-09-07T20:24:09Z"
     },
     {
       "id": "B274",
