@@ -402,6 +402,7 @@ tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-manifest.sh
+tests/test-installer-mcp-registration.sh
 tests/test-installer-noninteractive.sh
 tests/test-installer-opencode-permissions.sh
 tests/test-installer-skill-selection.sh

@@ -37,7 +37,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7039
-package/install.sh	217264
+package/install.sh	225684
 package/interactive-shell/SKILL.md	8627
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
