@@ -3113,6 +3113,27 @@
       "updated_at": "2026-09-06T15:21:16Z"
     },
     {
+      "id": "B235",
+      "title": "the installer can write no codex permission config, so codex is told to grant its own access by hand",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run the permission step with a codex root selected: SELECTED_TARGET_PATHS=($HOME/.codex/skills) worktrees_permission_step (same for planning_permission_step). Observed live on 2026-09-07 while verifying the worktree grant across three agents.",
+      "observed": "codex: no safe auto-editable permission file was modified. - grant codex read, write and execute under /home/mdibbets/.config/tsch-ai-worktrees ... Claude and opencode both had their configs edited in the same run; codex fell through to printed instructions, because agent_kind_for_root returns 'codex' and neither permission step has a codex arm.",
+      "expected": "The installer edits ~/.codex/config.toml the way it edits the other two. Codex has exactly the knobs needed: sandbox_workspace_write.writable_roots is a list of paths writable outside the workspace, and [projects.\"<path>\"] trust_level = \"trusted\" marks a directory trusted. This machine's config already carries \"/home/mdibbets/.config/tsch-ai-skills\" and \"/tmp\" in writable_roots, added by hand - which is the work the installer should be doing.",
+      "mechanism": "installer/src/70-permissions.sh: both permission steps dispatch on agent_kind_for_root with arms for claude and opencode only; every other kind, codex included, hits the *) print_manual_* fallback. There is no codex writer at all, and config.toml is TOML rather than JSON, so rjq - the installer's only permitted runtime dependency - cannot edit it, which is presumably why it was never written.",
+      "surfaces": [
+        "installer/src/70-permissions.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "live three-agent verification of the worktrees grant, 2026-09-07",
+      "notes": "B236 is the cosmetic half found in the same output: the fallback's worked example is Claude Code settings.json syntax whatever agent it addresses. Separate entry because a codex writer removes the fallback for codex without fixing the example for openclaw, cline or a custom root.\n\nLive test result that bears on the priority: codex DID write and edit files in a worktree under the new root with no prompt - but only because the worktree was its own cwd, which workspace-write makes writable by definition. It was not the grant working; there was no grant. An agent whose cwd is elsewhere, writing into a worktree, is still outside writable_roots and would be refused. So this is filed major but not urgent: it bites the cross-worktree case rather than the common one.",
+      "created_at": "2026-09-07T11:19:04Z",
+      "updated_at": "2026-09-07T11:19:23Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -4886,6 +4907,27 @@
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
       "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B236",
+      "title": "the manual permission fallback prints Claude Code settings.json syntax whatever agent it is talking to",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Trigger the fallback for a non-claude, non-opencode kind: SELECTED_TARGET_PATHS=($HOME/.codex/skills) worktrees_permission_step",
+      "observed": "codex: no safe auto-editable permission file was modified. ... - example (Claude Code settings.json permissions.allow): Read(<dir>/**), Edit(<dir>/**), Write(<dir>/**), Bash(<dir>/**:*) - Claude Code's own rule syntax, printed verbatim to a codex user. Codex configures this in TOML as sandbox_workspace_write.writable_roots and [projects.\"<path>\"] trust_level; none of the printed text applies to it.",
+      "expected": "The example matches the agent being addressed, or - if per-agent syntax is more than the fallback wants to carry - the function states the requirement in prose only and does not offer a worked example in another agent's format. The function already receives the kind as its first argument, so it can branch.",
+      "mechanism": "print_manual_permissions and print_manual_worktrees_permissions both take $kind and use it only in the leading 'no safe auto-editable permission file' line; the example line below is a hardcoded Claude Code string.",
+      "surfaces": [
+        "installer/src/70-permissions.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "live three-agent verification of the worktrees grant, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T11:19:23Z",
+      "updated_at": "2026-09-07T11:19:23Z"
     },
     {
       "id": "B59",
