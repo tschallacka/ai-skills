@@ -3200,6 +3200,27 @@
       "updated_at": "2026-09-07T11:32:16Z"
     },
     {
+      "id": "B244",
+      "title": "the server never relays JOIN to a channel's other members, so a client already connected never sees a nick arrive",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Open a standard IRC client (Konversation) on the channel, then start a second client: chat-client-rs tail --chan '#ai-skills' --nick aiskills --mentions --mention-exit",
+      "observed": "The IRC client's nick list shows only its own nick while the tail is connected and receiving PRIVMSG from that channel. Reported from a Konversation screenshot: joined #ai-skills at 14:12, nick list contains mdibbets alone, while aiskills was tailing and answering.",
+      "expected": "A nick that joins is announced to the channel, as RFC 1459 requires: every other member receives ':nick!user@host JOIN #chan' and their client adds it to the nick list. A human watching the channel can see which agents are listening; at the moment they cannot.",
+      "mechanism": "src/chat-server-rs/src/main.rs:755-787, the JOIN handler. It echoes the JOIN to the JOINING connection only (line 762, w(st, ...)), adds the nick to hub.channels (764), and answers 353/366 to the joiner (781/785). Nothing is offered to the other peers, so a connection that was already in the channel is never told. The membership itself is correct - the tail does send JOIN (src/chat-client-rs/src/main.rs:1582) and is in hub.channels - which is why it receives broadcasts while remaining invisible. Only a client that joins LATER sees it, via the 353 NAMES reply, so whether an agent appears depends on join order.\n\nThe fanout to reuse is right there in the PRIVMSG handler (lines 866-876): copy the peer list under hub.writers, release the lock, then p.offer(&chan, &out) per peer, excluding *i != idx. Peer::offer (151) already skips a non-member, so the scoping is free.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, from a Konversation nick list on 2026-09-07",
+      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately.",
+      "created_at": "2026-09-07T12:44:52Z",
+      "updated_at": "2026-09-07T12:45:07Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -4888,6 +4909,27 @@
       "notes": null,
       "created_at": "2026-09-07T11:32:47Z",
       "updated_at": "2026-09-07T11:32:47Z"
+    },
+    {
+      "id": "B245",
+      "title": "a departure is never relayed either, so a nick that left stays in every other client's nick list",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With a standard IRC client on the channel, connect a second client, then let it leave: chat-client-rs leave --chan '#ai-skills' --nick probe, or simply let a tail exit (--mention-exit does this on every mention).",
+      "observed": "The departed nick remains in the other clients' nick lists indefinitely. Nothing on the wire tells them it went.",
+      "expected": "A departing nick is announced to the channel: PART reaches the other members, and a connection that simply ends produces a QUIT for them, so a nick list reflects who is actually present.",
+      "mechanism": "src/chat-server-rs/src/main.rs:788-797, the PART handler: it echoes PART to the PARTING connection (791) and removes the nick from hub.channels (792-795), but offers nothing to the other peers. The disconnect path (around 223) likewise retains the membership list without announcing a QUIT. Same omission as B244 and the same fix shape, using the PRIVMSG fanout at 866-876.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "found while pinning B244, 2026-09-07",
+      "notes": "B244 is the arrival half and the reported symptom; this one was found by reading the same handler region.",
+      "created_at": "2026-09-07T12:45:07Z",
+      "updated_at": "2026-09-07T12:45:07Z"
     },
     {
       "id": "B25",
