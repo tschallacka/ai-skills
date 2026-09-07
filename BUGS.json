@@ -2484,6 +2484,28 @@
       "updated_at": "2026-09-07T14:32:45Z"
     },
     {
+      "id": "B258",
+      "title": "a response key with no verbosity tier panics the connection thread, and the caller sees only \"the server closed the connection without answering\"",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On the T99 branch feat/t99-verbosity-ladder: ai-text-editor cursor -f FILE -a home -p structured, or any cursor command. In the suite it presents as cli_flow::unknown_options_are_refused_before_anything_is_sent failing.",
+      "observed": "ai-text-editor: the server at unix:/.../<key>.sock closed the connection without answering (endpoint unix:/.../<key>.sock). No error frame, no code, no message, nothing on the servers stderr the client keeps - the log is deleted on a successful start. Indistinguishable from a crashed or wedged server, and there is nothing in it that names a key, a verb, or verbosity.",
+      "expected": "A key nobody has classified is loud in a way that names itself. The debug_assert was put in deliberately as the safety net for exactly this - an unclassified key is kept at every level so production fails safe rather than silently dropping a field - but a debug_assert inside the request handler takes the connection thread down with it, and the assert text never reaches the caller. It should be caught before the handler runs, or reported as a refusal frame naming the key.",
+      "mechanism": "src/ai-text-editor/src/verbosity.rs, tier(): debug_assert!(false, \"response key `{key}` has no verbosity tier\") on the None arm. It is reached from handle() while a payload is being filtered, inside the per-connection thread that `serve` spawned, so the panic unwinds that thread and the socket closes with no frame written. The cursor verbs own response keys (line, column, visual, wrap_width, range) are the unclassified set that fires it: they are the ANSWER of the cursor verb, so line and column want tier 0 and the wrapped-view fields tier 2. Release builds do not assert at all, so the symptom exists only in debug - which is to say only in the test suite and only for whoever is developing it.",
+      "surfaces": [
+        "src/ai-text-editor/src/verbosity.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the safety net firing for real while measuring T99s blast radius; filed on the coordinators instruction that the symptom be recorded prominently, because nobody debugging a closed connection blind would guess an unclassified response key",
+      "notes": null,
+      "created_at": "2026-09-07T14:57:12Z",
+      "updated_at": "2026-09-07T14:57:12Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -4966,9 +4988,9 @@
       "fix": null,
       "verification": null,
       "found_by": "the fifth drive's fix batch, cleaning up after its own test runs",
-      "notes": "B253 is the larger half of the same leak: endpoint_for_file falls back to a machine-global /tmp dir once the socket path passes 96 characters, so under a long TMPDIR the harness sweep was reading an empty directory for all 38 tests. Fixing this entry's sweep without B253 leaves most of the leak in place.",
+      "notes": "B253 is the larger half of the same leak: endpoint_for_file falls back to a machine-global /tmp dir once the socket path passes 96 characters, so under a long TMPDIR the harness sweep was reading an empty directory for all 38 tests. Fixing this entry's sweep without B253 leaves most of the leak in place. Two more instances of this exact class turned up in files this entry does not name - mcp_flow.rs (six servers per run) and tcp_flow.rs (a stale record directory per run) - filed as the child B259 rather than folded in here, so this entrys 173-server measurement and its cli_flow reproduction stay exactly what they were. B253 is the larger half of the cause: fixing this sweep without it leaves most of the leak, because the records were never in the directory the sweep read.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T14:29:46Z"
+      "updated_at": "2026-09-07T14:57:41Z"
     },
     {
       "id": "B241",
@@ -5161,6 +5183,49 @@
       "notes": null,
       "created_at": "2026-09-07T14:37:44Z",
       "updated_at": "2026-09-07T14:37:44Z"
+    },
+    {
+      "id": "B257",
+      "title": "the mode a response reports is spelled differently from the mode the protocol accepts, so a caller cannot compare them",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor open -f FILE -M hex_view -p structured, and read the `mode` field of the answer.",
+      "observed": "The answer says \"HexView\". The request said hex_view, --mode says hex_view, and the document_modes list in `capabilities` says hex_view. Three snake_case spellings in, one CamelCase spelling out.",
+      "expected": "The mode a response reports is the same string the protocol accepts and advertises, so a caller can compare the mode it ASKED for against the mode it was GIVEN without knowing to translate. That comparison is the whole purpose of the field now that a mode is a per-tab property a caller chooses (B238) and every response names it.",
+      "mechanism": "src/ai-text-editor/src/document.rs: `enum DocumentMode` derives Serialize with no rename, so serde emits the Rust variant names TextUtf8/RawBytes/HexView. The input side never went through serde - the server parsed --mode by hand and matched the snake_case names - so the two spellings were never compared in one place. Nothing on disk depends on the serialized form: the tab metadata stores the mode as format!(\"{mode:?}\"), which is Debug, and nothing reads it back.",
+      "surfaces": [
+        "src/ai-text-editor/src/document.rs"
+      ],
+      "fix": "serde(rename_all = \"snake_case\") on DocumentMode, so the wire spelling is the one the protocol already accepts and capabilities already advertises.",
+      "verification": "cli_flow::a_second_file_opens_in_its_own_mode_not_the_servers asserts mode == \"text_utf8\" and \"hex_view\" and \"raw_bytes\" on the wire. Before the rename it failed with left String(\"TextUtf8\") right String(\"text_utf8\") - that failure is what found this. Landed in the B238 commit because B238 is not usable without it.",
+      "found_by": "fixing B238, and forced by T99: the coordinator decision was that a response must name the tabs mode at verbosity level 1 so a caller knows which coordinate space it is in, which made the spelling mismatch load-bearing rather than cosmetic",
+      "notes": null,
+      "created_at": "2026-09-07T14:56:53Z",
+      "updated_at": "2026-09-07T14:56:53Z"
+    },
+    {
+      "id": "B259",
+      "title": "the mcp and tcp flow harnesses leak the same way cli_flow did, in files B239 does not name",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B239",
+      "reproduce": "cargo test -p ai-text-editor-mcp, then pgrep -af \"ai-text-edito[r]-server\". Separately: cargo test -p ai-text-editor --test tcp_flow, then ls -d /tmp/tsch-ai-skills-editor*.",
+      "observed": "Six servers still running after a run of mcp_flow.rs, every one pointing at a scratch directory the harness had already deleted - measured, and they were killed by hand. tcp_flow.rs leaves no servers but one stale endpoint-record directory per run, outside the scratch tree it does remove.",
+      "expected": "Every flow harness stops what it started and removes what it wrote. B239 is the same defect and its entry names only cli_flow.rs, so fixing that one alone left two thirds of the class open - and the two files were never going to be found by re-reading B239.",
+      "mechanism": "src/ai-text-editor-mcp/tests/mcp_flow.rs, impl Drop for Harness: found servers only by reading the pid out of an .endpoint record under the scratch runtime dir, which misses a server that has not announced yet and every server at all once B253s length fallback put the records outside that tree. src/ai-text-editor/tests/tcp_flow.rs, impl Drop for TcpHarness: removes self.scratch and nothing else, and the length fallback is outside it by construction.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/tests/mcp_flow.rs",
+        "src/ai-text-editor/tests/tcp_flow.rs"
+      ],
+      "fix": "mcp_flow spawns its adapter into a session of its own (setsid in pre_exec) and killpgs it on drop, so every server the adapter autostarted goes with it whether a record ever named it - the same fix B239 took. Both harnesses now sweep BOTH endpoint roots via transport::endpoint_roots and remove their own length-fallback directory, which is keyed to their runtime dir so it deletes nothing another test owns.",
+      "verification": "Measured before and after on the same branch: a full run of both crates left 6 servers and 3 stray directories, and now leaves 0 and 0. Landed with B239 and B253 because the three are one cause seen from three files; the shared mechanism is pinned by cli_flow::a_dropped_harness_stops_a_server_no_record_names and transport::the_long_path_fallback_is_per_root_and_per_user, whose mutations are recorded on those entries.",
+      "found_by": "counting leftover servers after each crates suite while verifying B239, then finding six that cli_flow could not account for",
+      "notes": null,
+      "created_at": "2026-09-07T14:57:31Z",
+      "updated_at": "2026-09-07T14:57:31Z"
     },
     {
       "id": "B25",
