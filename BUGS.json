@@ -2400,6 +2400,27 @@
       "updated_at": "2026-09-07T10:55:32Z"
     },
     {
+      "id": "B243",
+      "title": "test-review-lifecycle writes about 6G into a hardcoded /tmp directory, so the suite can exhaust a tmpfs machine",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "export TMPDIR=$HOME/.config/tsch-ai-skills/tmp; resource-limited-testing/scripts/limited-run.sh 6G 400 -- ./run-tests.sh   # then, while it runs: du -sh /tmp/* | sort -rh | head",
+      "observed": "/tmp/reviewer-lifecycle-goal03.HsLHzX reached 6.0G, and TMPDIR was exported to a real-disk directory throughout, so the export did not redirect it. On this workstation /tmp is tmpfs, so that is 6G of RAM: free reported 473Mi free and 6.7Gi shared with the run in progress. test-review-lifecycle itself FAILED with exit 137 (SIGKILL) - the 6G cgroup ceiling from limited-run.sh, which counts tmpfs pages against the scope that allocated them. The directory was still present and full AFTER the test died, so a failed run leaks the whole 6G until something removes it. test-ai-text-editor failed in the same run and PASSES in isolation, so it was collateral of the pressure rather than a defect of its own.",
+      "expected": "The test writes its scratch under TMPDIR (or the repo's chosen scratch root) so an operator can put it on disk, and it removes it on failure as well as on success. A single test should not be able to allocate 6G of RAM on a machine whose /tmp is tmpfs, and it should not be able to fail the suite under the memory cap the repo's own resource-limited-testing skill documents as the preset for a large suite.",
+      "mechanism": "benchmark/planning/tests/test-review-lifecycle.sh:142 - tmp=\"$(mktemp -d /tmp/reviewer-lifecycle-goal03.XXXXXX)\". The path is hardcoded, so TMPDIR cannot move it. Distinct from planning/tests/lib-test.sh:55-58, which prefers /tmp for every test root DELIBERATELY and says why (chromium's socket path caps near 104 bytes; /tmp/t.XXXXX is 12 characters, measured at 75 failed / 62 passed for longer paths) - those roots are small individually, and that reasoning does not extend to a 6G artifact tree.",
+      "surfaces": [
+        "benchmark/planning/tests/test-review-lifecycle.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "a suite run after the machine had already been rebooted once for an out-of-memory crash, 2026-09-07",
+      "notes": "This is very likely the cause of the out-of-memory crash that forced a reboot on 2026-09-07, and the attribution matters because the first diagnosis was wrong. Agent scratch in /tmp was blamed and cleaned up first - roughly 20 logs and two 200KB install.sh copies, about 640KB total. That is three orders of magnitude too small to matter. This single test directory is 6G. Anyone reading the earlier /tmp-hygiene guidance should know it was necessary housekeeping but not the fix.\n\nTwo consequences worth acting on separately from the fix:\n1. The documented preset is the problem's detector, not its cause. resource-limited-testing's table names 6G/400% for a large suite, and this test needs about 6G on its own, so the suite cannot pass under its own recommended cap while this stands.\n2. It leaks on failure. The 6G tree was still there after exit 137, so a killed run leaves it until a reboot or a manual rm. A trap that removes the directory would at least bound the damage.",
+      "created_at": "2026-09-07T12:18:33Z",
+      "updated_at": "2026-09-07T12:18:45Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
