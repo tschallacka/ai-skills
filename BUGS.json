@@ -2838,7 +2838,7 @@
     {
       "id": "B284",
       "title": "an mcp-mode install copies the adapter binary but registers it with no agent",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2852,17 +2852,17 @@
         "ai-text-editor/SKILL.md",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "8e4271b5 on feat/b284-mcp-registration — installer/src/72-mcp-registration.sh registers the adapter through each agent's own CLI after the install loop, and removes a registration this installer owns when the skill is no longer in mcp mode",
+      "verification": "planning/tests/test-installer-mcp-registration.sh PASS under bash 5 and under the bash 3.2 floor (bash32-run). It stubs claude, codex and opencode and asserts on argv. Mutation: dropping the 'claude mcp remove' line fails it with 'claude was not asked to remove before adding'. The CLI behaviours it encodes were measured against the real binaries in an isolated HOME: claude mcp add on an existing name exits 0 without updating the command, codex overwrites in place, and opencode mcp add NAME -- PATH registers non-interactively and writes the global config.",
       "found_by": "t90-chat-mcp, starting the chat MCP harness wiring; the premise that the editor bridge already registers itself does not hold",
       "notes": "Three config shapes, not one: Claude Code takes mcpServers in ~/.claude.json or a project .mcp.json, opencode takes an mcp block in opencode.json, and codex takes [mcp_servers.<name>] in ~/.codex/config.toml. The first two are JSON the installer already edits with rjq; the third is TOML and needs either a writer or a printed snippet. SCOPE CORRECTED. The entry first read as though --integration only picked a binary and did nothing else. It also cleans up: measured on a real target, --integration skill installs chat-client-rs and chat-server-rs, then --integration mcp leaves chat-mcp and chat-server-rs with chat-client-rs removed. Michael's toggle-with-mutual-cleanup was implemented and is not what is missing; registration is. aiskills endorsed the wider claim without checking it, having asserted the opposite in the same conversation.",
       "created_at": "2026-09-07T21:32:43Z",
-      "updated_at": "2026-09-07T21:40:54Z"
+      "updated_at": "2026-09-07T22:18:37Z"
     },
     {
       "id": "B285",
       "title": "toggling an mcp-mode skill back to skill mode leaves every registered MCP entry pointing at a deleted binary",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2876,12 +2876,12 @@
         "ai-text-editor/SKILL.md",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "8e4271b5 on feat/b284-mcp-registration — installer/src/72-mcp-registration.sh registers the adapter through each agent's own CLI after the install loop, and removes a registration this installer owns when the skill is no longer in mcp mode",
+      "verification": "planning/tests/test-installer-mcp-registration.sh PASS under bash 5 and under the bash 3.2 floor (bash32-run). It stubs claude, codex and opencode and asserts on argv. Mutation: dropping the 'claude mcp remove' line fails it with 'claude was not asked to remove before adding'. The CLI behaviours it encodes were measured against the real binaries in an isolated HOME: claude mcp add on an existing name exits 0 without updating the command, codex overwrites in place, and opencode mcp add NAME -- PATH registers non-interactively and writes the global config.",
       "found_by": "aiskills raised the lifecycle question on B284; t90-chat-mcp measured the toggle in an isolated HOME and target",
       "notes": "B284 is \"nothing registers the adapter\"; this is \"a registration that exists does not survive a toggle\". They are the two halves of one lifecycle and the order matters: writing registrations without removing them on toggle-away adds a second thing that dangles instead of fixing the first. Live today for the editor, which Michael registered by hand in all three configs pointing into the skill root.",
       "created_at": "2026-09-07T21:45:01Z",
-      "updated_at": "2026-09-07T21:45:13Z"
+      "updated_at": "2026-09-07T22:18:37Z"
     },
     {
       "id": "B289",
