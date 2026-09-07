@@ -244,6 +244,28 @@
       "updated_at": "2026-09-07T11:32:16Z"
     },
     {
+      "id": "B278",
+      "title": "folding the nick into the session key makes a saved session unreachable to any call that omits --nick",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "On feat/chat-mcp-and-session-keys (PR 75), against a private server: AI_CHAT_HOME=$H chat-client-rs session set --server 127.0.0.1:$PORT --nick solo; then AI_CHAT_HOME=$H chat-client-rs send --chan \"#q3\" --text \"no nick on this call\". Same two commands with the master client as a control.",
+      "observed": "PR 75: \"chat-client-rs: send needs --server --nick --chan --text (or a saved session)\" -- the session it just wrote is not found. Master: \":solo!solo@localhost PRIVMSG #q3 :no nick on this call\". session show with no --nick likewise opens a different, empty file (h-398375cf47245be6) from the one session set wrote (h-80c958639a2070e6 for --nick parent).",
+      "expected": "A saved session is what removes the need to repeat --server and --nick on every call, so a call that omits --nick finds the session that was set.",
+      "mechanism": "resolve_session_key now appends \"nick=\" plus the nick to the harness and worktree material, and the nick comes from argv. A call that passes no --nick hashes an empty nick, which is a different key, so it opens a different file. session set stores under the nick-bearing key and every later call without --nick looks under the empty-nick one.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp, verifying B271's fix at Michael's request before PR 75 merges",
+      "notes": "B271 (the defect this change fixes) is genuinely fixed by it: under one CLAUDE_CODE_SESSION_ID, --nick parent and --nick child resolve to h-80c958639a2070e6 and h-15ab5ff6b3eaee04 on PR 75 and to one key h-011bc5c0e5b7b760 on master, and a child join no longer consumes the parent unread message. The regression is the other half of the same rung: the nick is now required material and the ladder has no way to supply it from the session it is trying to open. A fix has to resolve the nick before the key -- read the saved nick from a nick-free location, or key the file on the harness id and hold per-nick state inside it.",
+      "created_at": "2026-09-07T21:01:12Z",
+      "updated_at": "2026-09-07T21:01:27Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
