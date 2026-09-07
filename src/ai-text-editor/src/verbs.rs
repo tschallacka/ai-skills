@@ -41,10 +41,13 @@
 
 /// Keys every verb accepts.
 ///
-/// `file` is how the server routes (`requested_file`), and the CLI puts
-/// `presentation` on every payload it builds, so both are legal everywhere
-/// even on the verbs that ignore them.
-pub const UNIVERSAL_KEYS: &[&str] = &["file", "presentation"];
+/// The three addressing keys are universal because addressing is: T96 makes
+/// `tab_id` sufficient on its own for every verb including the job verbs, T97
+/// makes `tab_path` the recovery for a caller that lost the id, and `file` is
+/// the original spelling. `presentation` is here because the CLI puts it on
+/// every payload it builds, and `verbosity` because the response ladder
+/// applies to every answer (T99).
+pub const UNIVERSAL_KEYS: &[&str] = &["file", "tab_id", "tab_path", "presentation"];
 
 /// Every method the server dispatches, in the order `handle` matches them.
 /// Used by the tests that prove this table and the dispatch cover the same
