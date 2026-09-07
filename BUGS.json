@@ -3834,6 +3834,27 @@
       "updated_at": "2026-09-07T21:26:14Z"
     },
     {
+      "id": "B287",
+      "title": "test-npm-package packs into a fixed tarball name in the repo root, so two runs in one checkout corrupt each other",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Run planning/tests/test-npm-package.sh in one shell while another agent runs it (or any npm pack) in the same checkout.",
+      "observed": "gzip: stdin: unexpected end of file / tar: Unexpected EOF in archive / tar: Error is not recoverable: exiting now, and the test exits 2. Seen three times today with agents sharing this checkout; a clean re-run passes every time.",
+      "expected": "A concurrent run either serialises or fails with a message naming the collision. A test that reports a corrupt archive when the package is fine is worse than one that refuses to start.",
+      "mechanism": "The test runs `npm pack` in the repo root, which writes <name>-<version>.tgz at a path derived only from package.json -- identical for every concurrent run. One run reads the tarball while another is still writing or has already removed it in its cleanup trap. run-tests.sh holds a machine-wide lock, but a test invoked directly (which is how anyone debugs one, and how every agent here runs it) bypasses that lock entirely.",
+      "surfaces": [
+        "planning/tests/test-npm-package.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, after three false readings of this test while other agents worked in the same checkout",
+      "notes": null,
+      "created_at": "2026-09-07T21:54:29Z",
+      "updated_at": "2026-09-07T21:54:29Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
@@ -5818,9 +5839,9 @@
       "fix": null,
       "verification": null,
       "found_by": "nitpicker",
-      "notes": null,
+      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock.",
       "created_at": "2026-09-07T21:54:17Z",
-      "updated_at": "2026-09-07T21:54:17Z"
+      "updated_at": "2026-09-07T21:54:29Z"
     },
     {
       "id": "B25",
