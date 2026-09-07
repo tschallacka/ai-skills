@@ -2838,6 +2838,30 @@
       "updated_at": "2026-09-07T21:40:54Z"
     },
     {
+      "id": "B285",
+      "title": "toggling an mcp-mode skill back to skill mode leaves every registered MCP entry pointing at a deleted binary",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In an isolated HOME and target: install.sh --skill chat --integration chat=mcp --target T --yes, then install.sh --skill chat --integration chat=skill --target T --yes, listing T/chat/bin/<triple>/ after each. An agent config registering the adapter names <skill root>/bin/<triple>/chat-mcp, which is the path the second install removes.",
+      "observed": "after mcp:   chat-mcp chat-server-rs / after skill: chat-client-rs chat-server-rs. The adapter binary an mcp registration points at is gone, and nothing tells the agent whose config still names it. The registration is by hand today, so nothing in the repository knows it exists to clean it up.",
+      "expected": "A mode switch that removes an artifact either removes the registrations that name it, or says plainly that it has just invalidated them and how to undo that.",
+      "mechanism": "remove_stale_integration_binaries deletes the other mode binary on a switch, which is correct for disk hygiene, and a registration is a reference to that path held OUTSIDE the installer, in each agent config. Nothing connects the two, so the toggle is silently destructive to a reference it cannot see.",
+      "surfaces": [
+        "installer/src/50-manifest.sh",
+        "installer/src/60-install.sh",
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills raised the lifecycle question on B284; t90-chat-mcp measured the toggle in an isolated HOME and target",
+      "notes": "B284 is \"nothing registers the adapter\"; this is \"a registration that exists does not survive a toggle\". They are the two halves of one lifecycle and the order matters: writing registrations without removing them on toggle-away adds a second thing that dangles instead of fixing the first. Live today for the editor, which Michael registered by hand in all three configs pointing into the skill root.",
+      "created_at": "2026-09-07T21:45:01Z",
+      "updated_at": "2026-09-07T21:45:13Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
