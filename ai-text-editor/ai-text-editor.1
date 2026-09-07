@@ -33,6 +33,11 @@ A PATH that does not exist opens an empty new tab; the file is created at
 its path by the first successful \fBsave\fR. A PATH whose parent directory
 does not exist is refused with that directory named and nothing created;
 \fB--acknowledge-create-parents\fR creates the chain and opens the tab.
+\fB--document-mode\fR chooses the mode of the tab being opened
+(\fBtext_utf8\fR, \fBraw_bytes\fR, \fBhex_view\fR), whether or not a
+workspace is already running. A tab's mode is fixed for its lifetime:
+reopening one under a different mode is refused with
+\fBdocument_mode_conflict\fR, and \fBclose\fR then \fBopen\fR changes it.
 .IP "help"
 Print the complete capability and option reference. This file is colocated
 with the skill and is available with \fBman -l\fR when binaries are not on PATH.
@@ -85,6 +90,33 @@ impersonates a different server. Combined with \fB--file PATH\fR it may
 autostart a fresh server, as \fBopen\fR does, and that server registers itself
 under the named identity; identity resolution alone, with no file, starts
 nothing.
+.SH ADDRESSING A TAB
+Every response reports a \fBtab_id\fR, and that id is addressing enough on its
+own for every command: \fB--tab-id ID\fR needs no \fB--file\fR and no
+\fB--endpoint\fR. An id naming no tab is refused with \fBtab_unknown\fR and
+the open tabs listed; it never falls through to another tab.
+.PP
+\fB--tab-path FRAGMENT\fR is the recovery when the id is lost: a filename, or
+a trailing run of path components, naming an open tab. Matching is on path
+components rather than substrings, so \fBport.txt\fR does not name
+\fBreport.txt\fR. A fragment naming several tabs is refused with
+\fBtab_ambiguous\fR and the candidates with their ids; one naming none with
+\fBtab_unmatched\fR and the open tabs. Neither is a guess and neither is a
+bare refusal.
+.PP
+A command naming nothing at all runs on the \fIfocused\fR tab: the tab the
+last successful call under this identity was served by. \fBopen\fR focuses the
+tab it opens, and a refused call never moves the focus. With no focus and
+nothing named, the command is refused with all four forms named.
+.PP
+Every response names the tab it answered. That is the safety half of allowing
+an unmarked command: read \fBtab_id\fR from the answer rather than assuming
+the focus is where you left it.
+.PP
+An argument the command does not read is refused with
+\fBunknown_argument\fR, and the refusal lists what that command does accept.
+The check is per command, so an argument valid on a \fIdifferent\fR command is
+refused too rather than silently ignored.
 .SH MODES
 Text, raw bytes, and hex view are explicit document modes. Search modes are
 explicit: exact text/bytes, wildcard, shell wildcard, path wildcard, Rust or
