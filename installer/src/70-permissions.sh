@@ -291,39 +291,32 @@ PROMPT
 # session registry and, on a shared install, the installed binaries. A
 # directory an agent may freely write must not be the one holding a private key
 # and the binaries the agent is running, so tsch-ai-worktrees is a sibling.
-claude_worktrees_permissions() {
-    local worktrees="$1"
+# Merge a jq-computed `entries` list into Claude's permissions.allow.
+#
+# $1 is a jq fragment defining `entries`, $2 the line to print when everything
+# was already there, and everything after them is passed through to rjq -- so
+# paths travel as --arg values and are never interpolated into the program text.
+# Extracted because the caller below would otherwise be a second copy of this
+# whole merge, which CODE-STYLE.md's 40-line cap correctly refuses.
+claude_merge_allow() {
+    local entries_def="$1" present_label="$2"
+    shift 2
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
     local doc added tmpfile program
-    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
-    if ! command -v rjq >/dev/null 2>&1; then
-        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
-        print_manual_worktrees_permissions claude "$worktrees"
-        return 0
-    fi
-    worktrees="$(strip_trailing_slashes "$worktrees")"
-    backup_file "$cfg"
-
     doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
-    program='
-def objectify: if type == "object" then . else {} end;
-def entries: [
-    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)",
-    "Write(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
-];
+    program="def objectify: if type == \"object\" then . else {} end;
+$entries_def
 def allowed: objectify | .permissions | objectify | .allow
-    | if type == "array" then . else [] end;
-'
-    added="$(printf '%s' "$doc" | rjq -r \
-        --arg worktrees "$worktrees" \
-        "$program"'(entries - allowed)[]')"
+    | if type == \"array\" then . else [] end;
+"
+    added="$(printf '%s' "$doc" | rjq -r "$@" "$program"'(entries - allowed)[]')"
 
+    # mktemp in the config's own directory so the rename is atomic, and cp -p to
+    # inherit the user's mode before rjq truncates it.
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | rjq \
-        --arg worktrees "$worktrees" \
-        "$program"'
+    if ! printf '%s' "$doc" | rjq "$@" "$program"'
         objectify
         | (.permissions | objectify) as $perm
         | ($perm.allow | if type == "array" then . else [] end) as $allow
@@ -338,49 +331,47 @@ def allowed: objectify | .permissions | objectify | .allow
         printf '  claude-code: added to permissions.allow:\n'
         printf '%s\n' "$added" | sed 's|^|    - |'
     else
-        printf '  claude-code: worktree permissions already present\n'
+        printf '  claude-code: %s\n' "$present_label"
     fi
 }
 
-opencode_worktrees_permissions() {
+claude_worktrees_permissions() {
     local worktrees="$1"
-    local cfg doc added tmpfile program created=0
-    cfg="$(opencode_configfile)"
-    if [ ! -f "$cfg" ]; then
-        mkdir -p "$(dirname "$cfg")" \
-            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
-        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
-            || { echo "  opencode: cannot write $cfg" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
-        echo "  opencode: created $cfg" >&2
-        created=1
-    fi
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
     if ! command -v rjq >/dev/null 2>&1; then
-        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
-        print_manual_worktrees_permissions opencode "$worktrees"
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions claude "$worktrees"
         return 0
     fi
     worktrees="$(strip_trailing_slashes "$worktrees")"
-    # Same reasoning as opencode_permissions: a config strict rjq cannot parse
-    # carries comments or trailing commas that a rewrite would strip, so print
-    # instructions rather than rebuild it.
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
-        echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
-        print_manual_worktrees_permissions opencode "$worktrees"
-        return 0
-    fi
-    [ "$created" -eq 1 ] || backup_file "$cfg"
+    backup_file "$cfg"
+    # "worktree grant already in place" rather than the planning arm's
+    # "permissions already present": both grants now run in one install, and
+    # test-installer-opencode-permissions counts that phrase expecting exactly
+    # one. Distinct wording keeps its count honest and tells the two apart in
+    # the output.
+    claude_merge_allow 'def entries: [
+    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)",
+    "Write(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
+];' 'worktree grant already in place' --arg worktrees "$worktrees"
+}
 
-    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
-    [ -n "$doc" ] || doc='{}'
-    program='
-def objectify: if type == "object" then . else {} end;
-def wanted: [
-    ["read",               ["\($worktrees)/**"]],
-    ["edit",               ["\($worktrees)/**"]],
-    ["write",              ["\($worktrees)/**"]],
-    ["bash",               ["\($worktrees)/**"]],
-    ["external_directory", ["\($worktrees)/**"]]
-];
+# Merge a jq-computed `wanted` list of [tool, [patterns]] pairs into opencode's
+# permission block. Same split, and for the same reason, as claude_merge_allow:
+# $1 defines `wanted`, $2 is the config path, $3 the already-present line, and
+# the rest goes to rjq.
+# The shared jq preamble for an opencode permission merge, given a fragment
+# defining `wanted`. Its own function so the merge below stays inside the
+# 40-line cap.
+#
+# opencode's permission block is keyed by tool name; each value is either an
+# action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
+# action string is preserved as the "*" fallback pattern, and a stray
+# Claude-style allow/deny/ask list is not valid here, so `base` drops it.
+opencode_permission_program() {
+    printf 'def objectify: if type == "object" then . else {} end;\n%s\n' "$1"
+    cat <<'PROGRAM'
 def rules: if type == "object" then . elif type == "string" then {"*": .} else {} end;
 def base:
     objectify
@@ -389,10 +380,17 @@ def base:
        then reduce wanted[] as $w ({}; .[$w[0]] = {"*": $p})
        else ($p | objectify) end)
     | del(.allow, .deny, .ask);
-'
-    added="$(printf '%s' "$doc" | rjq -r \
-        --arg worktrees "$worktrees" \
-        "$program"'
+PROGRAM
+}
+
+opencode_merge_permission() {
+    local wanted_def="$1" cfg="$2" present_label="$3"
+    shift 3
+    local doc added tmpfile program
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program="$(opencode_permission_program "$wanted_def")"
+    added="$(printf '%s' "$doc" | rjq -r "$@" "$program"'
         [ wanted[] as $w
           | ($w[0]) as $tool
           | (base[$tool] | rules) as $rule
@@ -402,9 +400,7 @@ def base:
 
     tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
     cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | rjq \
-        --arg worktrees "$worktrees" \
-        "$program"'
+    if ! printf '%s' "$doc" | rjq "$@" "$program"'
         (if type == "object" then . else {} end) as $data
         | (reduce wanted[] as $w (base;
               .[$w[0]] = (reduce $w[1][] as $pattern ((.[$w[0]] | rules); .[$pattern] = "allow"))
@@ -420,8 +416,45 @@ def base:
         printf '  opencode: allowed\n'
         printf '%s\n' "$added" | sed 's|^|    - |'
     else
-        printf '  opencode: worktree permissions already present\n'
+        printf '  opencode: %s\n' "$present_label"
     fi
+}
+
+opencode_worktrees_permissions() {
+    local worktrees="$1"
+    local cfg created=0
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" \
+            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    worktrees="$(strip_trailing_slashes "$worktrees")"
+    # A config strict rjq cannot parse carries comments or trailing commas a
+    # rewrite would strip, so print instructions rather than rebuild it. The
+    # wording avoids the planning arm's "is not strict JSON", which
+    # test-installer-opencode-permissions counts expecting exactly one.
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add the worktree rules by hand:" >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+    opencode_merge_permission 'def wanted: [
+    ["read",               ["\($worktrees)/**"]],
+    ["edit",               ["\($worktrees)/**"]],
+    ["write",              ["\($worktrees)/**"]],
+    ["bash",               ["\($worktrees)/**"]],
+    ["external_directory", ["\($worktrees)/**"]]
+];' "$cfg" 'worktree grant already in place' --arg worktrees "$worktrees"
 }
 
 print_manual_worktrees_permissions() {

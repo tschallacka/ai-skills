@@ -22,6 +22,90 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 note_fail() { printf 'function-length-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
+# Over-cap functions in one function's worth of awk, so the scoped mode below
+# and the whole-tree ratchet measure shape identically. Prints "<len> <line>
+# <name>" per over-cap function in the file named by $1.
+over_cap_in() {
+    awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{[[:space:]]*(#.*)?$/{start=NR; name=$0} start && /^\}$/{if (NR-start+1>40) print NR-start+1, start, name; start=""}' "$1"
+}
+
+# `--files [--base REF] <path>...` applies the ratchet's SPIRIT to one change
+# rather than the tree: an over-cap function may not be added, and an already
+# over-cap one may not grow. It says nothing about the tree-wide count, which is
+# a global property no per-file run can evaluate; CI keeps that.
+#
+# Comparing against the base matters, and the first draft of this got it wrong.
+# Flagging every over-cap function in a touched file would refuse any edit to a
+# file that already contains one -- 70-permissions.sh carries three from before
+# this mode existed -- which is how a gate teaches people to bypass it. What is
+# reported is what the change is responsible for: a function newly over cap, or
+# one that was over cap and is now longer.
+#
+# With no --base (or an unknown ref) there is nothing to compare against, so
+# every over-cap function in the named files is reported and the caller decides.
+if [ "${1:-}" = "--files" ]; then
+    shift
+    base_ref=""
+    if [ "${1:-}" = "--base" ]; then
+        base_ref="${2:-}"
+        shift 2
+    fi
+    [ "$#" -gt 0 ] || { printf 'function-length-ratchet: --files needs at least one path\n' >&2; exit 64; }
+
+    # "<name> <length>" per over-cap function, so a length can be looked up by
+    # name on either side of the comparison.
+    lengths_for() { # <file-on-disk-or-empty>
+        [ -n "$1" ] && [ -f "$1" ] || return 0
+        over_cap_in "$1" | while read -r len _line name_; do
+            [ -n "$len" ] || continue
+            printf '%s %s\n' "${name_%%(*}" "$len"
+        done
+    }
+
+    scoped_over=""
+    base_tmp="$(mktemp "${TMPDIR:-/tmp}/cap-base.XXXXXX")"
+    trap 'rm -f "$base_tmp"' EXIT
+    for arg in "$@"; do
+        target="$root/$arg"
+        [ -f "$target" ] || target="$arg"
+        [ -f "$target" ] || continue
+
+        : > "$base_tmp"
+        if [ -n "$base_ref" ]; then
+            git -C "$root" show "$base_ref:$arg" > "$base_tmp" 2>/dev/null || : > "$base_tmp"
+        fi
+        base_lengths="$(lengths_for "$base_tmp")"
+
+        while read -r name_ len; do
+            [ -n "$name_" ] || continue
+            was=""
+            while read -r bname blen; do
+                [ "$bname" = "$name_" ] && was="$blen"
+            done <<BASE_EOF
+$base_lengths
+BASE_EOF
+            if [ -z "$was" ]; then
+                scoped_over="$scoped_over  $arg: $name_() is $len lines (new, cap is 40)
+"
+            elif [ "$len" -gt "$was" ]; then
+                scoped_over="$scoped_over  $arg: $name_() grew $was -> $len lines (cap is 40)
+"
+            fi
+        done <<NOW_EOF
+$(lengths_for "$target")
+NOW_EOF
+    done
+
+    if [ -n "$scoped_over" ]; then
+        printf 'function-length-ratchet: this change adds or grows a function over the 40-line cap:\n' >&2
+        printf '%s' "$scoped_over" >&2
+        printf 'function-length-ratchet: split it; CODE-STYLE.md caps a function at 40 lines\n' >&2
+        exit 1
+    fi
+    printf '%s\n' 'test-function-length-ratchet: PASS (changed files, nothing added or grown over the cap)'
+    exit 0
+fi
+
 CAP=58
 count=0
 worst=""
@@ -39,7 +123,7 @@ for f in $(git -C "$root" ls-files '*.sh' | grep -v '^benchmark/results/'); do
         worst="$worst$len $f:$line $name_
 "
     done <<EOF
-$(awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{[[:space:]]*(#.*)?$/{start=NR; name=$0} start && /^\}$/{if (NR-start+1>40) print NR-start+1, start, name; start=""}' "$root/$f")
+$(over_cap_in "$root/$f")
 EOF
 done
 
