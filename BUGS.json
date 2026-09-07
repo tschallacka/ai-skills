@@ -2506,6 +2506,27 @@
       "updated_at": "2026-09-07T15:17:03Z"
     },
     {
+      "id": "B262",
+      "title": "an unmarked request was served by whichever tab a no-file call cached first, so a read after opening a second file could answer from the first",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In one agent workspace: open file A, then open file B, then issue a request with no file, endpoint or tab marker - a plain read.",
+      "observed": "The read is answered from A. The per-(identity,file) client cache had stored A's session token for the identity-only lookup, so a call naming nothing resolved to whichever tab happened to be cached first rather than the tab most recently opened. It answers successfully and reports A's content, so a caller has no signal that it read the wrong document.",
+      "expected": "An unmarked request resolves to a defined tab - the session's focused tab, which open sets - or is refused. Silently answering from a different document than the caller last opened is the failure mode a revision guard cannot catch, because the answer is internally consistent: A's content with A's revision.",
+      "mechanism": "Found while implementing T98 (a session carries a focused tab): the focus made the ambiguity visible because there was previously nothing that DEFINED which tab an unmarked request meant. The identity-only path in the client cache resolved to a first-cached token; with several tabs open in one workspace, 'first cached' and 'most recently opened' diverge. Fixed by T98's focus, which open now sets, and every response names the tab it answered so a caller can see it.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-batch agent while implementing T98, 2026-09-07; reported in its final summary and unfiled until now",
+      "notes": "Filed by the coordinator from the agent's closing report rather than by the agent, so it exists independently of whether T98's branch lands. Related but distinct: B178 was cached endpoint reuse with no liveness or generation check - that was a dead endpoint being reused; this is a LIVE tab being the wrong one. Same cache, different failure.",
+      "created_at": "2026-09-07T15:23:22Z",
+      "updated_at": "2026-09-07T15:23:22Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
