@@ -2682,7 +2682,7 @@
     {
       "id": "B272",
       "title": "the chat suite's broadcast-delivery assertion needs openssl, which the dev flake deliberately does not declare",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2695,12 +2695,12 @@
         "chat/tests/test-chat-broadcast-stall.sh",
         "chat/tests/test-chat.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "77de7201 on fix/b272-flake-openssl — pkgs.openssl declared in the dev shell, with the digest-fallback half of the old exclusion comment kept for rjq",
+      "verification": "Measured in the same shell both ways: with the line, nativeBuildInputs carries openssl-3.6.3-dev; with it removed, nativeBuildInputs carries no openssl while command -v openssl still resolves into the store, which is the transitive path this closes. The broadcast test itself was NOT run: it announces on the live beacon port (B274) and this machine has a live bus.",
       "found_by": "t90-chat-mcp, on Michael's report that the chat skill is not using the flake",
       "notes": "Nothing shipped calls openssl any more: plan_sha256_hex.sh and plan-context-lib.sh both record it as removed from the digest chain, and the only remaining call site is lib-test.sh t_sha256, third behind sha256sum and shasum. So declaring it in the flake cannot mask a plan-crypt defect, which is what the exclusion was protecting. ps is a second undeclared tool the chat tests use (ps -o state=, ps -o time=), but it is in the base system on every platform the flake targets and nixpkgs procps is Linux-only, so it is not the same class and is left borrowed.",
       "created_at": "2026-09-07T20:11:04Z",
-      "updated_at": "2026-09-07T20:11:20Z"
+      "updated_at": "2026-09-07T20:16:17Z"
     },
     {
       "id": "B14",
