@@ -39,7 +39,7 @@ Usage:
   todo add --title T --detail D
            [--priority normal] [--status open] [--id T42] [--parent T7]
            [--blocked-on TEXT] [--refs a,b] [--note N]
-  todo update <ID> [--status S] [--priority P] [--detail D]
+  todo update <ID> [--title T] [--status S] [--priority P] [--detail D]
                    [--blocked-on TEXT] [--note N] [--append-note N]
   todo show <ID>
   todo list [--status S] [--priority P] [--parent ID] [--touching TEXT]
@@ -238,6 +238,7 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
     let mut register = read(path)?;
 
     let change = mutate::Change {
+        title: args.flag("title").map(str::to_string),
         status: opt_enum(args.flag("status"), "--status", register::STATUSES)?,
         priority: opt_enum(args.flag("priority"), "--priority", register::PRIORITIES)?,
         detail: args.flag("detail").map(str::to_string),
@@ -251,6 +252,9 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
             format!("nothing to set for {id}; name at least one field to change"),
             EX_USAGE,
         );
+    }
+    if let Some(refusal) = change.blank_title() {
+        return fail(refusal, EX_USAGE);
     }
     if let Some(missing) = change.missing_evidence() {
         return fail(missing, EX_USAGE);

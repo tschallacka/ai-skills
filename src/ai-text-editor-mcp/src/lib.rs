@@ -90,17 +90,85 @@ type ToolSpec = (
     Vec<&'static str>,
 );
 
+/// Every argument the adapter consumes out of `arguments` itself: it is
+/// stripped before the rest becomes the server payload, so a schema-following
+/// client can only ever send it if every tool declares it —
+/// `additionalProperties` is false, and an MCP harness that validates will
+/// refuse the call outright rather than pass it through.
+///
+/// `call_tool` strips exactly this list and `routing()` declares exactly this
+/// list. Binding the two to one const is the actual fix: B195 (empty
+/// inputSchemas), B197 (dropped expected_revision), B211 (page's `historical`)
+/// and B217 (`open`'s document_mode and normalize_nfc) were four instances of
+/// one class — the request builder forwarded a key the advertised schema did
+/// not offer. A fifth per-tool patch would not have stopped a sixth.
+///
+/// `file` is not here: the server routes on it, so it stays in the payload.
+/// `expected_revision` is not here either — it is declared on the mutating
+/// tools only, and `mutating_required` is what pins that.
+pub const ADAPTER_ARGUMENTS: &[&str] = &[
+    "endpoint",
+    "agent",
+    "session",
+    "document_mode",
+    "normalize_nfc",
+    "idle_timeout_seconds",
+    "acknowledge_create_parents",
+    "auth_token",
+    "session_token",
+];
+
+/// The advertised schema for one `ADAPTER_ARGUMENTS` key. Exhaustive on
+/// purpose: adding a key to the const without describing it here does not
+/// compile away quietly, it panics the schema test.
+fn adapter_argument(key: &str) -> Value {
+    match key {
+        "endpoint" => string(
+            "Explicit editor endpoint (unix:/path or host:port); wins over discovery.",
+        ),
+        "agent" => string(
+            "Agent identity used to reconnect to this agent's running workspace.",
+        ),
+        "session" => string("Session identity; same resolution as agent."),
+        "document_mode" => string(
+            "Document mode for a server this call starts: text_utf8 (default), raw_bytes, or hex_view (16-byte rows). It shapes only a newly started server — when a workspace already serves the file, the tab reports what it actually is.",
+        ),
+        "normalize_nfc" => boolean(
+            "Normalize the document to Unicode NFC when this call starts the server. Shapes only a newly started server; `restore` answers not_normalized on a tab opened without it.",
+        ),
+        "idle_timeout_seconds" => int(
+            "Idle seconds after which a server this call starts shuts itself down.",
+        ),
+        "acknowledge_create_parents" => boolean(
+            "Confirms that a path whose parent directory does not exist is meant as typed. Without it such an open is refused with the missing directory named and nothing is created; with it the directory chain is created and the tab opens.",
+        ),
+        "auth_token" => string(
+            "Shared secret required by a server reached over a loopback TCP endpoint.",
+        ),
+        "session_token" => string(
+            "Server-issued tab token, supplied explicitly instead of the one discovery cached.",
+        ),
+        other => panic!("ADAPTER_ARGUMENTS lists {other} with no advertised schema"),
+    }
+}
+
 fn tool_definitions() -> Vec<Value> {
     let routing = || {
-        Vec::from([
-            ("file", string("Path served by this request; routes to that file's own tab in the agent's workspace.")),
-            ("endpoint", string("Explicit editor endpoint (unix:/path or host:port); wins over discovery.")),
-            ("agent", string("Agent identity used to reconnect to this agent's running workspace.")),
-            ("session", string("Session identity; same resolution as agent.")),
-        ])
+        let mut properties: ToolProperties = Vec::from([(
+            "file",
+            string(
+                "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+            ),
+        )]);
+        properties.extend(
+            ADAPTER_ARGUMENTS
+                .iter()
+                .map(|key| (*key, adapter_argument(key))),
+        );
+        properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors. Opens the file if the workspace does not have it yet; starting a server when none runs. document_mode and normalize_nfc only shape an autostarted server - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
     tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", routing(), vec![]));
     tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", routing(), vec![]));
     tools.push((
@@ -148,7 +216,7 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "replace",
-        "Replace a byte range with text or base64 bytes; preserve the revision guard.",
+        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span three ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), or range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
             let mut p = routing();
             p.extend(Vec::from([
@@ -160,7 +228,31 @@ fn tool_definitions() -> Vec<Value> {
                     "cursor_id",
                     int("Numeric cursor to replace at when offset is omitted."),
                 ),
-                ("delete_len", int("Byte length to delete before inserting.")),
+                ("delete_len", int("Byte length to delete before inserting. Omit it when expected_text names the span: its own length is then the length, so there is no arithmetic to get wrong.")),
+                (
+                    "range_start_line",
+                    int("Inclusive first line of a line-range replace (text tabs). Needs range_end_line, and may not be combined with offset, delete_len or cursor_id."),
+                ),
+                (
+                    "range_end_line",
+                    int("Inclusive last line of a line-range replace; its newline goes with it, so replacing with no text deletes the lines outright."),
+                ),
+                (
+                    "range_start_byte",
+                    int("Inclusive first byte of a byte-range replace — a search hit's byte_start. Needs range_end_byte."),
+                ),
+                (
+                    "range_end_byte",
+                    int("Exclusive last byte of a byte-range replace — a search hit's byte_end, so a span across two hits needs no arithmetic."),
+                ),
+                (
+                    "expected_text",
+                    string("The bytes the caller believes are at the span. Verified BEFORE anything is deleted and refused by name on mismatch, which the revision guard cannot do: a revision proves the document has not moved since you read it, not that your length still matches the text there — an edit of your own that changed that text's length leaves the revision perfectly current and the length wrong."),
+                ),
+                (
+                    "expected_bytes_base64",
+                    string("expected_text for a raw or hex tab, or for bytes that are not UTF-8. Pass one of the two, not both."),
+                ),
                 ("text", string("Replacement text.")),
                 (
                     "bytes_base64",
@@ -422,7 +514,7 @@ fn tool_definitions() -> Vec<Value> {
             }
             json!({
                 "name": name,
-                "description": format!("{description} Either an endpoint, or a file (for open) plus an optional agent/session id to reconnect to that agent's already-running workspace, resolves the target; a new workspace-server is started automatically if `open` finds none. The server is authoritative and every mutation needs a current revision."),
+                "description": format!("{description} Either an endpoint, or a file plus an optional agent/session id to reconnect to that agent's already-running workspace, resolves the target. Naming a file opens that file's tab if the workspace does not have it yet, starting a server when none runs — on this tool as on open. The exception is the revision-guarded tools (insert, replace, large_edit, restore, undo, redo, save): on a file with no tab they are refused, because the revision they carry cannot have come from a tab that never existed. The server is authoritative and every mutation needs a current revision."),
                 "inputSchema": {
                     "type": "object",
                     "properties": Value::Object(properties),
@@ -476,14 +568,24 @@ fn call_tool(id: Value, params: Value) -> Value {
             .get("idle_timeout_seconds")
             .and_then(Value::as_u64)
             .map(|value| value.to_string()),
+        acknowledge_create_parents: payload
+            .get("acknowledge_create_parents")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         force_refresh: false,
     };
-    payload.remove("endpoint");
-    payload.remove("session");
-    payload.remove("agent");
-    payload.remove("document_mode");
-    payload.remove("normalize_nfc");
-    payload.remove("idle_timeout_seconds");
+    let auth_token = payload
+        .get("auth_token")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let session_token = payload
+        .get("session_token")
+        .and_then(|value| value.as_str().map(str::to_owned));
+    // One sweep from the same const `tool_definitions` declares, so an
+    // argument the adapter consumes and an argument a client is allowed to
+    // send cannot come apart again (B217).
+    for key in ADAPTER_ARGUMENTS {
+        payload.remove(*key);
+    }
     // B175, made honest: accept both the envelope's wire name (`revision`)
     // and the documented `expected_revision`, and honour the schema the
     // adapter itself advertises — the guard is typed as a string, so "7"
@@ -501,12 +603,6 @@ fn call_tool(id: Value, params: Value) -> Value {
             Err(error) => return tool_error(id, &error),
         },
     };
-    let auth_token = payload
-        .remove("auth_token")
-        .and_then(|value| value.as_str().map(str::to_owned));
-    let session_token = payload
-        .remove("session_token")
-        .and_then(|value| value.as_str().map(str::to_owned));
     let payload = Value::Object(payload);
     let method = method.to_string();
     let (frames, resolved) = match client::execute(&resolve_request, |resolved| Envelope {
@@ -575,8 +671,129 @@ fn parse_revision_argument(value: &Value) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_revision_argument;
-    use serde_json::json;
+    use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
+    use serde_json::{json, Value};
+
+    fn tools() -> Vec<Value> {
+        let answer = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}));
+        answer
+            .pointer("/result/tools")
+            .and_then(Value::as_array)
+            .cloned()
+            .expect("tools/list answers with an array")
+    }
+
+    fn properties(tool: &Value) -> &serde_json::Map<String, Value> {
+        tool.pointer("/inputSchema/properties")
+            .and_then(Value::as_object)
+            .expect("every tool advertises an object of properties")
+    }
+
+    /// B217, and the whole class it belongs to (B195, B197, B211): a key the
+    /// adapter consumes out of `arguments` but no tool declares cannot be
+    /// sent at all — `additionalProperties` is false, so a validating client
+    /// refuses the call before it is made, and a capability the surface has
+    /// is unreachable from it.
+    ///
+    /// This walks `tools/list` against the adapter's own consumed-key list
+    /// rather than checking one tool's schema, so the next argument added to
+    /// `ADAPTER_ARGUMENTS` is covered without anyone remembering to add a
+    /// case here.
+    #[test]
+    fn every_argument_the_adapter_consumes_is_declared_on_every_tool() {
+        let tools = tools();
+        assert!(
+            tools.len() >= 28,
+            "expected the full tool set, got {}",
+            tools.len()
+        );
+        for tool in &tools {
+            let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
+            let properties = properties(tool);
+            assert!(
+                properties.contains_key("file"),
+                "{name} does not declare `file`"
+            );
+            for key in ADAPTER_ARGUMENTS {
+                assert!(
+                    properties.contains_key(*key),
+                    "{name} does not declare `{key}`, which call_tool strips from every request"
+                );
+            }
+        }
+    }
+
+    /// The headline of B217 spelled out, so the entry's reproduction reads
+    /// back from the test: `open` advertised exactly agent, endpoint, file
+    /// and session, which put raw_bytes, hex_view and NFC normalization out
+    /// of reach of every schema-following MCP client.
+    #[test]
+    fn open_declares_document_mode_and_normalize_nfc() {
+        let tools = tools();
+        let open = tools
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some("open"))
+            .expect("open is advertised");
+        let properties = properties(open);
+        assert!(properties.contains_key("document_mode"));
+        assert!(properties.contains_key("normalize_nfc"));
+        assert_eq!(
+            properties["document_mode"]["type"], "string",
+            "document_mode carries the mode name"
+        );
+        assert_eq!(
+            properties["normalize_nfc"]["type"], "boolean",
+            "normalize_nfc is a flag, not a string"
+        );
+    }
+
+    /// A required key that is not in `properties` is required and unsendable
+    /// at once — the shape B197 had.
+    #[test]
+    fn every_required_key_is_also_declared() {
+        for tool in tools() {
+            let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
+            let required = tool
+                .pointer("/inputSchema/required")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let properties = properties(&tool);
+            for key in required {
+                let key = key.as_str().unwrap_or_default();
+                assert!(
+                    properties.contains_key(key),
+                    "{name} requires `{key}` and does not declare it"
+                );
+            }
+        }
+    }
+
+    /// The mutating tools' revision guard is the one adapter-consumed
+    /// argument that is deliberately not on every tool, so it is pinned
+    /// where it does belong rather than left to the sweep above.
+    #[test]
+    fn the_revision_guard_is_declared_wherever_it_is_required() {
+        let guard = mutating_required();
+        assert_eq!(guard, vec!["expected_revision"]);
+        let mut found = 0;
+        for tool in tools() {
+            let required = tool
+                .pointer("/inputSchema/required")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if required.iter().any(|key| key == "expected_revision") {
+                let name = tool.get("name").and_then(Value::as_str).unwrap_or("?");
+                assert!(
+                    properties(&tool).contains_key("expected_revision"),
+                    "{name} requires the revision guard and does not declare it"
+                );
+                found += 1;
+            }
+        }
+        assert!(found >= 7, "expected the mutating tools, found {found}");
+    }
 
     #[test]
     fn a_string_revision_satisfies_the_guard() {

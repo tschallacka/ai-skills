@@ -421,17 +421,22 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\n");
     terminate(pid);
     std::thread::sleep(std::time::Duration::from_millis(200));
-    // A plain command must explain that its server is gone, not die on a
-    // bare connection error.
-    let blocked = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
-    assert!(!blocked.status.success());
+    // A plain command reclaims the dead endpoint itself and answers from the
+    // replayed buffer — it used to be refused with "has stopped; run
+    // `ai-text-editor open -f X`" (B225). Never a bare connection error
+    // either way.
+    let recovered = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert!(
-        stderr_text(&blocked).contains("has stopped"),
-        "stderr must point at open: {}",
-        stderr_text(&blocked)
+        recovered.status.success(),
+        "a read must start the replacement itself: {}",
+        stderr_text(&recovered)
     );
-    // `open` reclaims the dead endpoint, starts a replacement, and replays
-    // the unsaved edit into the buffer.
+    assert_eq!(
+        String::from_utf8_lossy(&recovered.stdout),
+        "BETA\nbeta\n",
+        "the unsaved edit must replay into the replacement's buffer"
+    );
+    // `open` reports the replacement and the replayed revision explicitly.
     let reopened = harness.open(&file);
     assert!(reopened.status.success(), "{}", stderr_text(&reopened));
     let payload = first_payload(&reopened);
@@ -732,9 +737,10 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
     assert!(edited.status.success(), "{}", refusal_text(&edited));
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
-    // The next plain `read` finds the socket dead and the journal replays
-    // through the autostart recovery path; open first (the verb allowed to
-    // autostart), which must both replay and say so.
+    // The next call finds the socket dead and the journal replays through the
+    // autostart recovery path. `open` is the one that reports the replay in
+    // its payload, so it goes first here — since B225 any verb would have
+    // started the replacement.
     let reopened = harness.client(&["open", "-f", file.to_str().unwrap()]);
     let payload = first_payload(&reopened);
     assert!(
@@ -755,25 +761,611 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
 }
 
 #[test]
-fn a_dead_server_without_a_replacement_fails_with_guidance_not_a_raw_socket_error() {
-    // B179's other half: with no live server, non-open verbs must explain
-    // that the server stopped and name `open` as the fix, never surface a
-    // bare "Connection refused" the agent cannot act on.
+fn a_dead_server_is_replaced_by_the_next_read_rather_than_refused() {
+    // B179's other half, now answered rather than explained (B225): a read
+    // against a dead server used to be refused with "the editor server for X
+    // has stopped; run `ai-text-editor open -f X`". The client can do that
+    // itself — the journal replays, so the answer is lossless — and it must
+    // never surface a bare "Connection refused" either.
     let harness = Harness::new("cachehealdead");
     let file = harness.write("doc.txt", "one\ntwo\n");
     let opened = harness.open(&file);
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
-    let read = harness.client(&["read", "-f", file.to_str().unwrap()]);
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert!(
-        !read.status.success(),
-        "read against a dead server must fail"
+        read.status.success(),
+        "a read after the server died must autostart a replacement, not refuse: {}",
+        refusal_text(&read)
     );
-    let refusal = refusal_text(&read);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "one\ntwo\n",
+        "the replayed buffer must come back through the replacement"
+    );
+}
+
+#[test]
+fn a_read_only_verb_opens_a_file_that_has_no_tab_yet() {
+    // B225: only `open` autostarted, so `search`/`read`/`history` naming a
+    // readable path were refused with "no editor server is reachable for X",
+    // and B219: that headline was untrue whenever this agent's server was
+    // alive and serving other tabs, which the routed case below is.
+    let harness = Harness::new("openonuse");
+    let second = harness.write("second.txt", "needle here\n");
+
+    // (a) Cold: nothing running at all, and the first call is a search.
+    let searched = harness.client(&[
+        "search",
+        "-f",
+        second.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "needle",
+        "-p",
+        "structured",
+    ]);
     assert!(
-        refusal.contains("open"),
-        "the failure must point at the recovery: {refusal}"
+        searched.status.success(),
+        "a cold search must open the file itself: {}",
+        refusal_text(&searched)
     );
+    assert_eq!(
+        first_payload(&searched)["count"],
+        json!(1),
+        "the search must answer, not just resolve"
+    );
+
+    // (b) Routed: a live workspace holding a different file's tab. This is
+    //     the case whose refusal claimed no server was reachable while one
+    //     was answering in the same second (B219).
+    let harness = Harness::new("openonuse2");
+    let first = harness.write("first.txt", "one\n");
+    let second = harness.write("second.txt", "needle here\n");
+    harness.open(&first);
+    let history = harness.client(&["history", "-f", second.to_str().unwrap()]);
+    assert!(
+        history.status.success(),
+        "a verb naming an unopened file in a live workspace must open it: {}",
+        refusal_text(&history)
+    );
+    // The first tab is untouched by the second's arrival.
+    let back = harness.client(&["read", "-f", first.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&back.stdout), "one\n");
+}
+
+#[test]
+fn a_revision_guarded_verb_still_refuses_a_file_with_no_tab() {
+    // The exception B225 keeps: a revision cannot have come from a tab that
+    // never existed, so opening one and applying the edit against a guessable
+    // revision 0 is the blind write the guard exists to stop. Refused by
+    // name, and the file is unchanged.
+    let harness = Harness::new("guardedcold");
+    let file = harness.write("doc.txt", "one\n");
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "a guarded verb on a file with no tab must refuse"
+    );
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("revision guard") && refusal.contains("open"),
+        "the refusal must name the guard and the remedy: {refusal}"
+    );
+    assert!(
+        !refusal.contains("no editor server is reachable"),
+        "and must not claim there is no server (B219): {refusal}"
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
+}
+
+#[test]
+fn a_replace_deletes_a_whole_line_range_without_byte_arithmetic() {
+    // B226: byte offset plus delete_len was the only addressing, so removing a
+    // method together with its docblock meant summing line lengths in bytes by
+    // hand — off by one twice in the session that reported this, and a
+    // search -> read -> verify -> replace -> read loop for every edit. Worse
+    // than reported: the range_* keys were already accepted at the door for
+    // `read`'s sake, so a replace naming them was silently placed at the
+    // cursor instead.
+    let harness = Harness::new("linerange");
+    let file = harness.write(
+        "doc.php",
+        "keep 1\n/** doc */\nfunction gone() {}\n/* also gone */\nkeep 2\n",
+    );
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let deleted = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "4",
+        "-t",
+        "",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        deleted.status.success(),
+        "a line-range delete must apply: {}",
+        refusal_text(&deleted)
+    );
+    let payload = first_payload(&deleted);
+    // The answer says what was changed, so no verify-read is needed.
+    assert_eq!(payload["offset"], json!(7), "{payload}");
+    assert_eq!(payload["delete_len"], json!(46), "{payload}"); // 11 + 19 + 16
+    assert_eq!(payload["spans_lines"], json!(true), "{payload}");
+
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "keep 1\nkeep 2\n",
+        "the range's terminator must go with it, leaving no blank line"
+    );
+}
+
+#[test]
+fn expected_text_refuses_the_double_replace_that_corrupted_a_file() {
+    // B230, replayed exactly. Two replaces at one offset: the first swaps a
+    // 35-byte comparison for a 36-byte one, and the second carries a
+    // delete_len that was correct for the ORIGINAL. It deleted 35 of 36 and
+    // left the orphan digit — `=== 01`, valid PHP, wrong logic, reported as a
+    // success with a fresh revision, caught only by a later read.
+    //
+    // The revision guard did not and cannot catch this. It proves the document
+    // has not moved since the caller read it, and this caller held a perfectly
+    // current revision: its own previous edit had changed the length of the
+    // very text it was addressing. expected_text is the missing relation
+    // between delete_len and the bytes actually at the offset.
+    let harness = Harness::new("expectedtext");
+    let original = "(int) $quote->getItemsCount() === 0";
+    let longer = "(int) $quote->getItemsCount() === 10";
+    assert_eq!(original.len(), 35);
+    assert_eq!(longer.len(), 36);
+    let file = harness.write("Total.php", &format!("if ({original}) {{\n"));
+    let opened = harness.open(&file);
+    let mut revision = revision_of(&opened);
+
+    // First edit: 35 bytes out, 36 in.
+    let first = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "--expected-text",
+        original,
+        "-t",
+        longer,
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(first.status.success(), "{}", refusal_text(&first));
+    let payload = first_payload(&first);
+    revision = payload["revision"].as_u64().unwrap();
+    // The answer says what went, so the caller need not read to find out.
+    assert_eq!(payload["deleted"]["text"], json!(original), "{payload}");
+    assert_eq!(payload["deleted"]["bytes"], json!(35), "{payload}");
+
+    // The second edit, which is the corruption: delete_len 35 against 36 bytes
+    // of text. The revision is current, and that is exactly the point.
+    let refused = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "-d",
+        "35",
+        "--expected-text",
+        original,
+        "-t",
+        "true",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "text",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "the double replace must be refused, not applied"
+    );
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("expected_text"),
+        "the refusal must name the guard: {refusal}"
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        format!("if ({longer}) {{\n"),
+        "no orphan digit: the buffer must be untouched by the refused edit"
+    );
+
+    // An insert deletes nothing, so its span is empty and expected_text there
+    // could only ever mismatch. Refused by name rather than left to fail.
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "--expected-text",
+        longer,
+        "-t",
+        "x",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "text",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "insert must refuse expected_text"
+    );
+    assert!(
+        refusal_text(&refused).contains("expected_text_unsupported"),
+        "{}",
+        refusal_text(&refused)
+    );
+
+    // Without expected_text the same call still corrupts, because nothing
+    // relates the length to the bytes. This is the control that proves the
+    // guard is what refuses above, rather than some other check.
+    let corrupted = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "-d",
+        "35",
+        "-t",
+        "true",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(corrupted.status.success(), "{}", refusal_text(&corrupted));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "if (true0) {\n",
+        "the unguarded call leaves the orphan digit — that is the defect"
+    );
+    // And the answer at least says what it deleted, so the damage is
+    // visible without a read: 35 of the 36 bytes, orphaning the trailing 0.
+    assert_eq!(
+        first_payload(&corrupted)["deleted"]["text"],
+        json!("(int) $quote->getItemsCount() === 1"),
+        "the deleted bytes must be reported back"
+    );
+    let revision = first_payload(&corrupted)["revision"].as_u64().unwrap();
+
+    // Put it back, then show the intended edit succeeding with expected_text
+    // as the ONLY length: the arithmetic is not performed at all.
+    let restored = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "--expected-text",
+        "true0",
+        "-t",
+        longer,
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(restored.status.success(), "{}", refusal_text(&restored));
+    let revision = first_payload(&restored)["revision"].as_u64().unwrap();
+    let applied = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "4",
+        "--expected-text",
+        longer,
+        "-t",
+        "true",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(applied.status.success(), "{}", refusal_text(&applied));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "if (true) {\n");
+}
+
+#[test]
+fn a_replace_takes_a_pair_of_search_hit_bounds() {
+    // The other half of B226: a span across two hits is the two numbers a
+    // search already reports (B214 gave text hits absolute byte_start and
+    // byte_end), copied across — not a subtraction, and no reasoning about
+    // whether a bound is inclusive.
+    let harness = Harness::new("hitpair");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let begin = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "BEGIN",
+        "-p",
+        "structured",
+    ]);
+    let end = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "END",
+        "-p",
+        "structured",
+    ]);
+    let start_byte = first_payload(&begin)["matches"][0]["byte_start"]
+        .as_u64()
+        .expect("a hit carries byte_start")
+        .to_string();
+    let end_byte = first_payload(&end)["matches"][0]["byte_end"]
+        .as_u64()
+        .expect("a hit carries byte_end")
+        .to_string();
+
+    let applied = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-byte",
+        &start_byte,
+        "--range-end-byte",
+        &end_byte,
+        "-t",
+        "GONE",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        applied.status.success(),
+        "a hit-pair replace must apply: {}",
+        refusal_text(&applied)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha GONE omega\n");
+}
+
+#[test]
+fn a_range_and_an_offset_addressing_the_same_edit_are_refused() {
+    // Two addressings for one edit is a mistake, not a precedence question,
+    // and silently preferring one is how B226's silent-ignore behaved.
+    let harness = Harness::new("rangeconflict");
+    let file = harness.write("doc.txt", "one\ntwo\nthree\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let cases: [&[&str]; 3] = [
+        &[
+            "--range-start-line",
+            "1",
+            "--range-end-line",
+            "2",
+            "-o",
+            "0",
+        ],
+        &[
+            "--range-start-line",
+            "1",
+            "--range-start-byte",
+            "0",
+            "--range-end-byte",
+            "3",
+        ],
+        &["--range-start-line", "3", "--range-end-line", "1"],
+    ];
+    for extra in cases {
+        let mut args = vec!["replace", "-f", file.to_str().unwrap()];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["-t", "X", "-r", &revision, "-p", "text"]);
+        let refused = harness.client(&args);
+        assert!(
+            !refused.status.success(),
+            "{extra:?} was accepted instead of refused"
+        );
+        let refusal = refusal_text(&refused);
+        assert!(
+            refusal.contains("edit_range") || refusal.contains("range"),
+            "{extra:?} must be refused by name: {refusal}"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\ntwo\nthree\n");
+}
+
+#[test]
+fn a_zero_result_says_when_the_query_looks_html_escaped() {
+    // B227: `&lt;dt class=` against a file holding `<dt class=` answered the
+    // same clean count 0 that genuinely absent text does, twice in one
+    // session. The note only appears when the unescaped query really does
+    // match, so it carries a count rather than a guess.
+    let harness = Harness::new("htmlentity");
+    let file = harness.write("page.phtml", "<dt class=\"label\">Name</dt>\n");
+    harness.open(&file);
+    let searched = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "&lt;dt class=",
+        "-p",
+        "structured",
+    ]);
+    assert!(searched.status.success(), "{}", refusal_text(&searched));
+    let payload = first_payload(&searched);
+    assert_eq!(payload["count"], json!(0), "{payload}");
+    assert_eq!(payload["unescaped_query_matches"], json!(1), "{payload}");
+    let note = payload["note"].as_str().unwrap_or_default();
+    assert!(
+        note.contains("&lt;"),
+        "the note must name the entity: {note}"
+    );
+
+    // Silent when the text really is absent: no note to mislead with.
+    let absent = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "&lt;table id=",
+        "-p",
+        "structured",
+    ]);
+    let payload = first_payload(&absent);
+    assert_eq!(payload["count"], json!(0), "{payload}");
+    assert!(
+        payload.get("note").is_none(),
+        "a genuine absence must not be explained away: {payload}"
+    );
+}
+
+#[test]
+fn open_under_a_missing_parent_names_the_directory_not_the_server() {
+    // B229: this reported "server for <path> failed to start:
+    // ai-text-editor-server: cannot resolve <path>: No such file or directory
+    // (os error 2)" — blaming the server, with no recovery. With the parent
+    // present the same open succeeds and save writes the file, so the two
+    // cases differ only in the directory and only one of them said so.
+    let harness = Harness::new("missingparent");
+    let path = harness.path("no-such-dir/new.txt");
+    let refused = harness.client(&["open", "-f", path.to_str().unwrap(), "-p", "text"]);
+    assert!(!refused.status.success(), "the open must fail");
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("parent directory") && refusal.contains("no-such-dir"),
+        "the refusal must name the directory: {refusal}"
+    );
+    assert!(
+        !refusal.contains("failed to start"),
+        "and must not blame the server: {refusal}"
+    );
+
+    // Control: the same open, with only the parent added, succeeds and save
+    // creates the file. That is what makes the message above the whole
+    // difference between the two cases.
+    std::fs::create_dir(harness.path("no-such-dir")).unwrap();
+    let opened = harness.open(&path);
+    let revision = revision_of(&opened).to_string();
+    let written = harness.client(&[
+        "insert",
+        "-f",
+        path.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "hello\n",
+        "-r",
+        &revision,
+    ]);
+    assert!(written.status.success(), "{}", refusal_text(&written));
+    let saved = harness.client(&["save", "-f", path.to_str().unwrap(), "-r", "1"]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello\n");
+}
+
+#[test]
+fn a_text_search_whose_query_crosses_a_line_is_refused_by_name() {
+    // B218: every text mode is line-scoped, because both callers strip the
+    // newline before the matcher sees it. A query carrying one answered
+    // `count: 0, complete: true` — indistinguishable from "not in this file",
+    // which is how an agent concludes an anchor is absent and edits the wrong
+    // place. exact_bytes spans lines and is named in the refusal.
+    let harness = Harness::new("crossline");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    for mode in ["exact_text", "regex_rust", "wildcard", "fuzzy_edit"] {
+        let refused = harness.client(&[
+            "search",
+            "-f",
+            file.to_str().unwrap(),
+            "--mode",
+            mode,
+            "--query",
+            "alpha\nbeta",
+            "-p",
+            "structured",
+        ]);
+        assert!(
+            !refused.status.success(),
+            "{mode} answered a cross-line query instead of refusing"
+        );
+        let refusal = refusal_text(&refused);
+        assert!(
+            refusal.contains("search_query_crosses_lines") || refusal.contains("within one line"),
+            "{mode}'s refusal must name the rule: {refusal}"
+        );
+        assert!(
+            refusal.contains("exact_bytes"),
+            "{mode}'s refusal must name the mode that can span lines: {refusal}"
+        );
+    }
+    // exact_bytes is the escape hatch, and it finds the span the text modes
+    // cannot: "alpha\nbeta" as base64.
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_bytes",
+        "--query",
+        "YWxwaGEKYmV0YQ==",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        found.status.success(),
+        "exact_bytes must still answer: {}",
+        refusal_text(&found)
+    );
+    let payload = first_payload(&found);
+    assert_eq!(payload["count"], json!(1), "{payload}");
+    assert_eq!(payload["matches"][0]["byte_start"], json!(0), "{payload}");
+    assert_eq!(payload["matches"][0]["byte_end"], json!(10), "{payload}");
 }
 
 #[test]
@@ -1170,12 +1762,27 @@ fn an_unreachable_workspace_exits_66_not_usage() {
     // B213: a command line that was correct when typed meets the documented
     // idle-reap; the old exit blamed the caller's syntax (64) for a world
     // change, so retry logic keyed on usage-vs-runtime misfiled it.
+    //
+    // Since B225 a read simply opens the reaped file again, so the surviving
+    // refusal on a never-opened file is a revision-guarded verb — whose
+    // revision cannot have come from a tab that never existed. It is still a
+    // runtime condition, not a usage error.
     let harness = Harness::new("runtimexit");
     let file = harness.write("never-opened.txt", "x\n");
-    let refused = harness.client(&["read", "-f", file.to_str().unwrap()]);
-    assert_eq!(refused.status.code(), Some(66));
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "y",
+        "-r",
+        "0",
+    ]);
+    assert_eq!(refused.status.code(), Some(66), "{}", stderr_text(&refused));
     assert!(
-        stderr_text(&refused).contains("no editor server is reachable"),
+        stderr_text(&refused).contains("revision guard"),
         "{}",
         stderr_text(&refused)
     );

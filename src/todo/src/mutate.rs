@@ -68,6 +68,11 @@ pub fn add(register: &mut Register, new: NewTask) -> Result<String, Vec<String>>
 
 #[derive(Default)]
 pub struct Change {
+    /// B224: `--title` was in the accepted flag list from the start and had
+    /// no member here, so a caller who named it was told they had named no
+    /// field at all. A title is written before the work is understood, so it
+    /// is the part most likely to need correcting later.
+    pub title: Option<String>,
     pub status: Option<Status>,
     pub priority: Option<Priority>,
     pub detail: Option<String>,
@@ -78,12 +83,27 @@ pub struct Change {
 
 impl Change {
     pub fn is_empty(&self) -> bool {
-        self.status.is_none()
+        self.title.is_none()
+            && self.status.is_none()
             && self.priority.is_none()
             && self.detail.is_none()
             && self.blocked_on.is_none()
             && self.note.is_none()
             && self.append_note.is_none()
+    }
+
+    /// A title that is present but blank, which would erase the only line
+    /// that says what the task is. Refused by name rather than applied:
+    /// `--title ''` is a mistake, never an instruction.
+    pub fn blank_title(&self) -> Option<String> {
+        match self.title.as_deref() {
+            Some(title) if title.trim().is_empty() => Some(
+                "--title needs the corrected title; a blank one would erase \
+                 the only line that says what the task is"
+                    .into(),
+            ),
+            _ => None,
+        }
     }
 
     /// Closing owes evidence, checked before anything is built so the message is
@@ -112,6 +132,9 @@ pub fn update(register: &mut Register, id: &str, change: Change) -> Result<(), U
     };
 
     task.updated_at = now;
+    if let Some(title) = change.title {
+        task.title = title;
+    }
     if let Some(status) = change.status {
         task.status = status;
     }
@@ -192,6 +215,46 @@ mod tests {
         assert!(update.missing_evidence().is_some());
         let added = new_task(Status::Dropped, Some(" "));
         assert!(missing_evidence(added.status, added.note.as_deref()).is_some());
+    }
+
+    /// B224: `--title` was an accepted flag with no member on `Change`, so
+    /// naming it stored nothing, left `is_empty()` true, and produced a
+    /// refusal claiming no field had been named.
+    #[test]
+    fn a_title_alone_is_a_change_and_is_applied() {
+        let mut register = empty();
+        let id = add(&mut register, new_task(Status::Open, None)).expect("added");
+
+        let change = Change {
+            title: Some("a corrected title".into()),
+            ..Default::default()
+        };
+        assert!(
+            !change.is_empty(),
+            "a change naming only --title must not read as empty"
+        );
+
+        update(&mut register, &id, change).expect("the title change applies");
+        assert_eq!(
+            register.tasks.iter().find(|t| t.id == id).unwrap().title,
+            "a corrected title"
+        );
+    }
+
+    #[test]
+    fn a_blank_title_is_refused_naming_the_flag() {
+        let change = Change {
+            title: Some("   ".into()),
+            ..Default::default()
+        };
+        let refusal = change.blank_title().expect("a blank title is refused");
+        assert!(refusal.contains("--title"), "{refusal}");
+        assert!(Change {
+            title: Some("real".into()),
+            ..Default::default()
+        }
+        .blank_title()
+        .is_none());
     }
 
     #[test]

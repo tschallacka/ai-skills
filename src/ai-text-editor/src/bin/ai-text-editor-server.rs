@@ -872,11 +872,7 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
             Err(message) => (
                 vec![error(
                     &envelope.request_id,
-                    if message.starts_with("session_unauthorized:") {
-                        "session_unauthorized"
-                    } else {
-                        "tab_open_failed"
-                    },
+                    select_tab_error_code(&message),
                     message,
                 )],
                 default_tab.clone(),
@@ -985,11 +981,7 @@ fn serve_tcp(
                 Err(message) => (
                     vec![error(
                         &envelope.request_id,
-                        if message.starts_with("session_unauthorized:") {
-                            "session_unauthorized"
-                        } else {
-                            "tab_open_failed"
-                        },
+                        select_tab_error_code(&message),
                         message,
                     )],
                     default_tab.clone(),
@@ -1247,12 +1239,34 @@ fn ensure_tab_file(
         // here disagreed with the router and asked callers to open a second
         // tab for the file they were already holding.
         Some(path) if tab_key(&path) == tab_key(requested) => Ok(()),
+        // B219: the remedy used to be printed as a CLI command line, on a
+        // surface where an mcp-mode install ships no CLI client at all and the
+        // caller passes the file as an argument. B187 fixed that class in
+        // SKILL.md and the man page and left it live in the runtime strings.
+        // The verb's name is the remedy on both surfaces.
         Some(path) => Err(format!(
-            "file_mismatch: the request names {requested:?} but this tab holds {}; run `ai-text-editor open -f {}` to route to the named file",
-            path.display(),
-            requested.display()
+            "file_mismatch: the request names {requested:?} but the tab this session token addresses holds {}; `open` the named file to route to its own tab",
+            path.display()
         )),
         None => Err("tab_unavailable: the tab lock is poisoned".into()),
+    }
+}
+
+/// The error code for a `select_tab` refusal, taken from the prefix the
+/// message already carries.
+///
+/// B219: `file_mismatch` arrived under the code `tab_open_failed`, so the one
+/// routing refusal a client can recover from on its own — this agent's server
+/// is alive, the token just addresses another of its tabs — was
+/// indistinguishable by code from a tab that genuinely could not be opened.
+/// The message said `file_mismatch` and the code disagreed with it; a caller
+/// branching on the code, which is what a code is for, could not see it.
+fn select_tab_error_code(message: &str) -> &'static str {
+    match message.split(':').next().unwrap_or_default() {
+        "session_unauthorized" => "session_unauthorized",
+        "file_mismatch" => "file_mismatch",
+        "tab_unavailable" => "tab_unavailable",
+        _ => "tab_open_failed",
     }
 }
 
@@ -1353,7 +1367,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         frames.push(error(
             &envelope.request_id,
             "session_unauthorized",
-            "a valid server-issued session_token is required for this tab operation; if the server restarted, run `open` again (the journal replays)",
+            "a valid server-issued session_token is required for this tab operation; if the server restarted, `open` the file again for a current one (the journal replays)",
         ));
         return frames;
     }
@@ -1424,10 +1438,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
     }
-    if matches!(
-        envelope.method.as_str(),
-        "insert" | "replace" | "undo" | "redo" | "save" | "large_edit" | "restore"
-    ) {
+    if ai_text_editor::is_revision_guarded(&envelope.method) {
         if tab.large_file.is_some()
             && !matches!(envelope.method.as_str(), "large_edit" | "undo" | "redo")
         {
@@ -1483,7 +1494,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
             "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
             "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
-            "revision_required_methods": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"],
+            "revision_required_methods": ai_text_editor::REVISION_GUARDED_METHODS,
             "transports": ["unix_socket", "loopback_tcp"]
         }))),
         "resources" => frames.push(response(&envelope.request_id, json!(resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)))),
@@ -1771,26 +1782,103 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             }
         },
         "replace" | "insert" => {
-            let offset = envelope
-                .payload
-                .get("offset")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize)
-                .unwrap_or_else(|| {
-                    let cursor_id = envelope
-                        .payload
-                        .get("cursor_id")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
-                    position_offset(
-                        &tab.document,
-                        tab.cursors
-                            .get(&cursor_id)
-                            .copied()
-                            .unwrap_or(Position { line: 1, column: 0 }),
-                    )
-                });
-            let delete_len = if envelope.method == "insert" { 0 } else { envelope.payload.get("delete_len").and_then(Value::as_u64).unwrap_or(0) as usize };
+            // B226: a line range or a pair of search-hit byte bounds resolves
+            // to the same (offset, delete_len) the byte spelling names, so
+            // everything below — the journal record, cursor adjustment, the
+            // undo entry — is untouched by the addressing.
+            let span = match edit_span(&envelope, &tab) {
+                Ok(span) => span,
+                Err((code, message)) => {
+                    frames.push(error(&envelope.request_id, code, message));
+                    return frames;
+                }
+            };
+            let offset = span.map(|(offset, _)| offset).unwrap_or_else(|| {
+                envelope
+                    .payload
+                    .get("offset")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as usize)
+                    .unwrap_or_else(|| {
+                        let cursor_id = envelope
+                            .payload
+                            .get("cursor_id")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0);
+                        position_offset(
+                            &tab.document,
+                            tab.cursors
+                                .get(&cursor_id)
+                                .copied()
+                                .unwrap_or(Position { line: 1, column: 0 }),
+                        )
+                    })
+            });
+            // B230: the content guard. `expected_text` says which bytes the
+            // caller believes are at `offset`; when it is the only thing
+            // naming a length, it IS the length, so the arithmetic that got
+            // this wrong is not performed at all.
+            let expected = match expected_span_bytes(&envelope) {
+                Ok(expected) => expected,
+                Err((code, message)) => {
+                    frames.push(error(&envelope.request_id, code, message));
+                    return frames;
+                }
+            };
+            let named_delete_len = envelope.payload.get("delete_len").and_then(Value::as_u64);
+            let delete_len = match (span, &expected) {
+                (Some((_, length)), _) => length,
+                (None, Some(expected)) => match named_delete_len {
+                    None => expected.len(),
+                    Some(named) if named as usize == expected.len() => named as usize,
+                    Some(named) => {
+                        frames.push(error_details(
+                            &envelope.request_id,
+                            "expected_text_length_mismatch",
+                            format!(
+                                "delete_len {named} disagrees with the {} bytes of expected_text; name one, or make them agree",
+                                expected.len()
+                            ),
+                            json!({"delete_len": named, "expected_text_bytes": expected.len()}),
+                        ));
+                        return frames;
+                    }
+                },
+                (None, None) if envelope.method == "insert" => 0,
+                (None, None) => named_delete_len.unwrap_or(0) as usize,
+            };
+            if let Some(expected) = &expected {
+                let bytes = tab.document.bytes();
+                let end = offset.saturating_add(delete_len);
+                let actual: &[u8] = bytes.get(offset..end).unwrap_or_default();
+                if actual != expected.as_slice() {
+                    // This is the corruption itself, refused. Two `replace`
+                    // calls at one offset with a delete_len correct for the
+                    // ORIGINAL token, while the buffer already held a longer
+                    // one, deleted 35 of 36 bytes and left the orphan digit:
+                    // `=== 01`, valid PHP, wrong logic, reported as a success
+                    // with a fresh revision. The revision guard could not
+                    // catch it and never could — it proves the document has
+                    // not moved since the caller read it, and this caller held
+                    // a perfectly current revision. What was missing was any
+                    // relation between delete_len and the bytes at the offset.
+                    frames.push(error_details(
+                        &envelope.request_id,
+                        "expected_text_mismatch",
+                        format!(
+                            "the bytes at offset {offset} are not what expected_text names, so the edit was not applied; read the range and retry against what is actually there (a previous edit of your own may have changed its length)"
+                        ),
+                        json!({
+                            "offset": offset,
+                            "delete_len": delete_len,
+                            "expected": byte_preview(expected),
+                            "actual": byte_preview(actual),
+                            "actual_bytes_available": bytes.len().saturating_sub(offset),
+                        }),
+                    ));
+                    return frames;
+                }
+            }
             let replacement = if let Some(encoded) = envelope.payload.get("bytes_base64").and_then(Value::as_str) {
                 match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) { Ok(bytes) => bytes, Err(error_value) => { frames.push(error(&envelope.request_id, "invalid_base64", error_value.to_string())); return frames; } }
             } else { envelope.payload.get("text").and_then(Value::as_str).unwrap_or("").as_bytes().to_vec() };
@@ -1831,7 +1919,21 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
                             // nothing in the coordinates says so otherwise.
                             let spans_lines =
                                 before.bytes()[offset..offset + delete_len].contains(&b'\n');
-                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab)});
+                            // B226: echo the span that was actually changed.
+                            // The verify-read after every edit existed because
+                            // the caller could not tell what its arithmetic
+                            // had addressed; with the resolved offset and
+                            // length in the answer, it can.
+                            let mut payload = json!({"revision": tab.revision, "cursors": tab.cursors, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "offset": offset, "delete_len": delete_len, "bytes_written": replacement.len()});
+                            // B230's second half: the bytes that actually
+                            // went. The corruption this closes was reported
+                            // as a plain success and only a later read caught
+                            // it; a caller that can see what it deleted can
+                            // see the orphan digit it left behind.
+                            if delete_len > 0 {
+                                payload["deleted"] =
+                                    byte_preview(&before.bytes()[offset..offset + delete_len]);
+                            }
                             if spans_lines {
                                 payload["spans_lines"] = json!(true);
                             }
@@ -2021,6 +2123,8 @@ const KNOWN_PAYLOAD_KEYS: &[&str] = &[
     "granularity",
     "historical",
     "id",
+    "expected_bytes_base64",
+    "expected_text",
     "job_id",
     "journal_action",
     "length",
@@ -2049,6 +2153,233 @@ const KNOWN_PAYLOAD_KEYS: &[&str] = &[
     "visual",
     "wrap_width",
 ];
+
+/// How much of a byte span an error or a response quotes back. Enough to
+/// recognise a token or a line, short enough that a block edit's answer does
+/// not become the edit.
+const BYTE_PREVIEW_LIMIT: usize = 256;
+
+/// A span of bytes as something a caller can read: `text` when the shown
+/// prefix is UTF-8, `base64` when it is not. `bytes` is always the span's full
+/// length and `truncated` says whether anything was left out, so the two
+/// numbers stay trustworthy however the content is rendered.
+fn byte_preview(bytes: &[u8]) -> Value {
+    let shown = bytes.len().min(BYTE_PREVIEW_LIMIT);
+    // Never cut a multi-byte character in half: back off to a boundary. A
+    // span that is UTF-8 but longer than the limit is still reported as text
+    // (short by up to three bytes, with `truncated` set) rather than falling
+    // back to base64 — the point of the field is that a caller can read what
+    // it deleted.
+    let mut end = shown;
+    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
+        end -= 1;
+    }
+    let mut preview = json!({"bytes": bytes.len(), "truncated": end < bytes.len()});
+    match std::str::from_utf8(&bytes[..end]) {
+        Ok(text) if !text.is_empty() || bytes.is_empty() => preview["text"] = json!(text),
+        _ => {
+            preview["base64"] = json!(base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &bytes[..shown]
+            ))
+        }
+    }
+    preview
+}
+
+/// The bytes `expected_text`/`expected_bytes_base64` names, or `None` when the
+/// request names neither.
+///
+/// B230: the guard the revision guard cannot be. A revision proves the
+/// *document* has not moved since the caller read it; it says nothing about
+/// whether `delete_len` still matches the bytes at `offset`. A caller whose
+/// own previous mutation lengthened the very token it was addressing held a
+/// perfectly current revision and still deleted 35 of 36 bytes. This is the
+/// revision guard's shape applied to content rather than sequence.
+fn expected_span_bytes(
+    envelope: &ai_text_editor::protocol::Envelope,
+) -> Result<Option<Vec<u8>>, (&'static str, String)> {
+    let text = envelope
+        .payload
+        .get("expected_text")
+        .and_then(Value::as_str);
+    let encoded = envelope
+        .payload
+        .get("expected_bytes_base64")
+        .and_then(Value::as_str);
+    match (text, encoded) {
+        (None, None) => Ok(None),
+        // An `insert` deletes nothing, so its span is empty and any
+        // expected_text could only ever mismatch. An argument that can only
+        // fail is refused by name rather than left to fail confusingly —
+        // the same rule B180 and B224 are about.
+        _ if envelope.method != "replace" => Err((
+            "expected_text_unsupported",
+            format!(
+                "expected_text verifies the bytes a span replaces and {} deletes nothing; use `replace` (with no text, it deletes the span)",
+                envelope.method
+            ),
+        )),
+        (Some(_), Some(_)) => Err((
+            "expected_text_conflict",
+            "expected_text and expected_bytes_base64 name the same bytes two ways; pass one".into(),
+        )),
+        (Some(text), None) => Ok(Some(text.as_bytes().to_vec())),
+        (None, Some(encoded)) => {
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(error_value) => Err((
+                    "invalid_base64",
+                    format!("expected_bytes_base64 does not decode: {error_value}"),
+                )),
+            }
+        }
+    }
+}
+
+/// The byte span of inclusive 1-based lines `start..=end`, the last line's
+/// newline included, or `None` when the buffer has fewer than `end` lines.
+///
+/// Including the terminator is the whole point: deleting lines 10 through 20
+/// must remove those lines, not leave a blank one behind where line 20's
+/// newline used to be. One pass, two offsets — no per-line table, so this
+/// costs no memory on a large buffer.
+fn line_span(bytes: &[u8], start: u64, end: u64) -> Option<(usize, usize)> {
+    let mut line: u64 = 1;
+    let mut begin = if start == 1 { Some(0usize) } else { None };
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+        if line == end {
+            return begin.map(|first| (first, index + 1));
+        }
+        line += 1;
+        if line == start {
+            begin = Some(index + 1);
+        }
+    }
+    // A final line with no terminator still exists and still ends at EOF.
+    if line == end {
+        return begin.map(|first| (first, bytes.len()));
+    }
+    None
+}
+
+/// Resolve how a `replace` addresses the bytes it changes, as
+/// `(offset, delete_len)`, or `Ok(None)` when the request names no range and
+/// the `offset`/`cursor_id` path applies.
+///
+/// B226: byte `offset` + `delete_len` was the only addressing, so deleting a
+/// PHP method together with its docblock meant summing line lengths in bytes
+/// by hand. A peer session driving this over MCP was off by one twice and
+/// settled into search -> read a window -> verify -> replace -> read again,
+/// for every single edit. The verify-read existed only because the arithmetic
+/// was untrustworthy, so what correct addressing removes is that loop, not the
+/// keystrokes. Worse than the entry recorded: the four `range_*` keys were
+/// already in `KNOWN_PAYLOAD_KEYS` for `read`'s sake, so a `replace` naming
+/// them passed the door and had them silently ignored, falling back to the
+/// cursor position.
+///
+/// Two spellings, deliberately the same two `read` already takes:
+///  - `range_start_line`/`range_end_line`: inclusive, 1-based, whole lines
+///    with the last one's terminator. Text tabs only, as for `read`.
+///  - `range_start_byte`/`range_end_byte`: half-open, which is exactly the
+///    shape a search hit reports as `byte_start`/`byte_end`. So a span across
+///    two hits is those two numbers copied across, not a subtraction — and
+///    `end` from hit B with `start` from hit A needs no reasoning about
+///    whether the bound is inclusive.
+fn edit_span(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<(usize, usize)>, (&'static str, String)> {
+    let key = |name: &str| envelope.payload.get(name).and_then(Value::as_u64);
+    let (start_line, end_line) = (key("range_start_line"), key("range_end_line"));
+    let (start_byte, end_byte) = (key("range_start_byte"), key("range_end_byte"));
+    let lines = start_line.is_some() || end_line.is_some();
+    let bytes = start_byte.is_some() || end_byte.is_some();
+    if !lines && !bytes {
+        return Ok(None);
+    }
+    if lines && bytes {
+        return Err((
+            "edit_range_conflict",
+            "a line range and a byte range address the same span two ways; name one pair".into(),
+        ));
+    }
+    for name in ["offset", "delete_len", "cursor_id"] {
+        if envelope.payload.get(name).is_some() {
+            return Err((
+                "edit_range_conflict",
+                format!("a range and {name} address the same edit two ways; name one"),
+            ));
+        }
+    }
+    if envelope.method != "replace" {
+        return Err((
+            "edit_range_unsupported",
+            format!(
+                "a range is a span and {} places bytes at a point; `replace` takes the range (with no text, it deletes it)",
+                envelope.method
+            ),
+        ));
+    }
+    if lines {
+        if tab.document.mode != DocumentMode::TextUtf8 {
+            return Err((
+                "edit_range_unsupported",
+                "lines are not the coordinate on a raw or hex tab; use range_start_byte/range_end_byte".into(),
+            ));
+        }
+        let (Some(start), Some(end)) = (start_line, end_line) else {
+            return Err((
+                "edit_range_incomplete",
+                "a line range needs both range_start_line and range_end_line".into(),
+            ));
+        };
+        if start == 0 {
+            return Err((
+                "edit_range_invalid",
+                "lines are 1-based; range_start_line 0 addresses nothing".into(),
+            ));
+        }
+        if end < start {
+            return Err((
+                "edit_range_invalid",
+                format!("range_end_line {end} is before range_start_line {start}"),
+            ));
+        }
+        let Some(span) = line_span(tab.document.bytes(), start, end) else {
+            return Err((
+                "edit_range_invalid",
+                format!(
+                    "the tab has no line {end}; read or index it first to see how far the buffer goes"
+                ),
+            ));
+        };
+        return Ok(Some((span.0, span.1 - span.0)));
+    }
+    let (Some(start), Some(end)) = (start_byte, end_byte) else {
+        return Err((
+            "edit_range_incomplete",
+            "a byte range needs both range_start_byte and range_end_byte".into(),
+        ));
+    };
+    if end < start {
+        return Err((
+            "edit_range_invalid",
+            format!("range_end_byte {end} is before range_start_byte {start}"),
+        ));
+    }
+    let length = tab.document.bytes().len() as u64;
+    if end > length {
+        return Err((
+            "edit_range_invalid",
+            format!("range_end_byte {end} is past the tab's {length} bytes"),
+        ));
+    }
+    Ok(Some(((start as usize), (end - start) as usize)))
+}
 
 /// A large-edit refused before it ever touched the file must not leave its
 /// job Queued forever (B194): fail it with the refusal reason.
@@ -3282,6 +3613,28 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         .get("query")
         .and_then(Value::as_str)
         .unwrap_or("");
+    // B218: every text mode is line-scoped. Both callers split the buffer on
+    // '\n' and hand the matcher a line with its terminator already stripped
+    // (ai-text-editor-server.rs, the split_inclusive loop below; large_file.rs
+    // read_until), so a query carrying a newline cannot match — the byte it
+    // needs is never in the haystack. That answered `count: 0, complete: true`,
+    // which is indistinguishable from "the text is not in this file": an agent
+    // locating an anchor by its own indented line concluded the anchor was
+    // absent and edited elsewhere.
+    //
+    // Refused by name rather than answered, on B171's `read_range_unsupported`
+    // precedent: a rule the caller cannot see must be stated, and the mode that
+    // can do the job is named in the same breath. `exact_bytes` runs
+    // `find_bytes` over the whole buffer and spans lines correctly.
+    if mode != SearchMode::ExactBytes && query.contains('\n') {
+        frames.push(error_details(
+            &envelope.request_id,
+            "search_query_crosses_lines",
+            "every text search mode matches within one line: the document is split on newlines and each line is matched without its terminator, so a query containing one can never match. Search with mode exact_bytes, whose query (or query_base64) is matched against the whole buffer and may span lines, or search for a single line of the anchor.",
+            json!({"mode": mode_name, "spanning_mode": "exact_bytes"}),
+        ));
+        return;
+    }
     let gradient = match envelope.payload.get("gradient") {
         None => None,
         Some(value) => match value.as_f64() {
@@ -3656,23 +4009,102 @@ fn emit_results(
         true,
     );
     tab.results.insert(result_id.clone(), results);
-    frames.push(response(
-        &envelope.request_id,
-        json!({
-            "result_id": result_id,
-            "count": count,
-            "pager_key": result_id,
-            "matches": visible,
-            "returned": preview.min(count),
-            "complete": true,
-            "search_range": {
-                "start_line": envelope.payload.get("range_start_line").and_then(Value::as_u64),
-                "end_line": envelope.payload.get("range_end_line").and_then(Value::as_u64),
-                "start_byte": envelope.payload.get("range_start_byte").and_then(Value::as_u64),
-                "end_byte": envelope.payload.get("range_end_byte").and_then(Value::as_u64)
-            }
-        }),
-    ));
+    let mut payload = json!({
+        "result_id": result_id,
+        "count": count,
+        "pager_key": result_id,
+        "matches": visible,
+        "returned": preview.min(count),
+        "complete": true,
+        "search_range": {
+            "start_line": envelope.payload.get("range_start_line").and_then(Value::as_u64),
+            "end_line": envelope.payload.get("range_end_line").and_then(Value::as_u64),
+            "start_byte": envelope.payload.get("range_start_byte").and_then(Value::as_u64),
+            "end_byte": envelope.payload.get("range_end_byte").and_then(Value::as_u64)
+        }
+    });
+    // B227: a zero that can say why it is probably a zero.
+    if count == 0 {
+        if let Some((note, would_match)) = unescaped_query_would_match(envelope, tab) {
+            payload["note"] = json!(note);
+            payload["unescaped_query_matches"] = json!(would_match);
+        }
+    }
+    frames.push(response(&envelope.request_id, payload));
+}
+
+/// The HTML entities a query picked out of rendered or escaped source carries,
+/// and what each one stands for. `&amp;` is last on purpose: unescaping it
+/// first would turn `&amp;lt;` into `<` rather than the `&lt;` it means.
+const HTML_ENTITIES: &[(&str, &str)] = &[
+    ("&lt;", "<"),
+    ("&gt;", ">"),
+    ("&quot;", "\""),
+    ("&apos;", "'"),
+    ("&#39;", "'"),
+    ("&nbsp;", " "),
+    ("&amp;", "&"),
+];
+
+/// When a text search found nothing and the same query with its HTML entities
+/// unescaped *does* find something, the note that says so and the number of
+/// hits it would have got.
+///
+/// B227: an `exact_text` query whose angle brackets were escaped
+/// (`&lt;dt class=` against a file holding `<dt class=`) answered the same
+/// clean `count: 0, complete: true` that genuinely absent text does. It
+/// happened twice in one session and the agent nearly concluded the string was
+/// not in the file. Peer of B218: the same uninformative zero, a different
+/// cause — there a matcher limitation, here a query-encoding mistake.
+///
+/// This does not guess. It only speaks when the unescaped query actually
+/// matches, so the note carries a count the caller can act on and a query that
+/// merely happens to contain `&amp;` in text that really is absent stays
+/// silent. That also keeps it honest on a document that legitimately holds the
+/// entities: there the original query matches and this is never reached.
+fn unescaped_query_would_match(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Option<(String, usize)> {
+    let mode_name = envelope.payload.get("mode").and_then(Value::as_str)?;
+    let mode = parse_mode(Some(mode_name)).ok()?;
+    // exact_bytes matches the raw buffer and path_wildcard matches the tab's
+    // path, so neither has a document-encoding mismatch to diagnose.
+    if matches!(mode, SearchMode::ExactBytes | SearchMode::PathWildcard) {
+        return None;
+    }
+    let query = envelope.payload.get("query").and_then(Value::as_str)?;
+    let mut unescaped = query.to_string();
+    let mut named = Vec::new();
+    for (entity, literal) in HTML_ENTITIES {
+        if unescaped.contains(entity) {
+            named.push(*entity);
+            unescaped = unescaped.replace(entity, literal);
+        }
+    }
+    if named.is_empty() || unescaped == query {
+        return None;
+    }
+    let text = tab.document.text().ok()?;
+    let gradient = envelope.payload.get("gradient").and_then(Value::as_f64);
+    let mut hits = 0usize;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        hits += matches_with_gradient(mode, &unescaped, content, gradient)
+            .ok()?
+            .len();
+    }
+    if hits == 0 {
+        return None;
+    }
+    Some((
+        format!(
+            "the query contains the HTML {} {} while this document holds the unescaped form; the same query unescaped matches {hits} time(s), so the query is probably escaped source rather than absent text",
+            if named.len() == 1 { "entity" } else { "entities" },
+            named.join(" "),
+        ),
+        hits,
+    ))
 }
 
 struct LargeResultSpec {

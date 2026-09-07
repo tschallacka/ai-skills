@@ -5,11 +5,16 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    println!("Usage: register-command.sh [--plan-dir] <plan-directory> <key> <command> <when>");
-    println!("       register-command.sh [--plan-dir] <plan-directory> --remove <key>");
-    println!("       register-command.sh [--plan-dir] <plan-directory> --list");
-    println!("       register-command.sh --help");
+    println!("Usage: {TOOL} [--plan-dir] <plan-directory> <key> <command> <when>");
+    println!("       {TOOL} [--plan-dir] <plan-directory> --remove <key>");
+    println!("       {TOOL} [--plan-dir] <plan-directory> --list");
+    println!("       {TOOL} --help");
     std::process::exit(code);
 }
 
@@ -41,7 +46,7 @@ fn main() {
                 break;
             }
             value if value.starts_with('-') => {
-                eprintln!("register-command.sh: unknown option: {value}");
+                eprintln!("{TOOL}: unknown option: {value}");
                 usage(64);
             }
             value => positionals.push(value.to_string()),
@@ -60,7 +65,7 @@ fn main() {
         .output()
         .is_err()
     {
-        die("rjq is required by register-command.sh; install rjq (macOS: brew install rjq, Debian: apt-get install rjq)", 69);
+        die(format!("rjq is required by {TOOL}; install rjq (macOS: brew install rjq, Debian: apt-get install rjq)"), 69);
     }
     let commands_file = plan.join("commands.json");
     if !commands_file.is_file() {

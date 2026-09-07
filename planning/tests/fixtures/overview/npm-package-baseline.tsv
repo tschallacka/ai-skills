@@ -3,13 +3,13 @@ package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	10289
 package/LICENSE	1068
 package/README.md	15683
-package/ai-text-editor/SKILL.md	12583
+package/ai-text-editor/SKILL.md	15139
 package/ai-text-editor/agents/openai.yaml	111
-package/ai-text-editor/ai-text-editor.1	10458
+package/ai-text-editor/ai-text-editor.1	13120
 package/ai-text-editor/binaries.tsv	500
 package/ai-text-editor/docs/README.md	1307
 package/ai-text-editor/integration.tsv	1638
-package/ai-text-editor/references/protocol.md	14151
+package/ai-text-editor/references/protocol.md	21435
 package/ai-text-editor/requires.tsv	190
 package/ai-text-editor/schemas/capabilities.v1.json	2086
 package/ai-text-editor/schemas/protocol.v1.json	764
@@ -22,7 +22,7 @@ package/bug-report/docs/README.md	1305
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
-package/chat/SKILL.md	19835
+package/chat/SKILL.md	22090
 package/chat/binaries.tsv	1195
 package/chat/docs/README.md	1676
 package/chat/requires.tsv	467
@@ -116,7 +116,7 @@ package/planning/scripts/plan-table-lib.sh	12187
 package/planning/scripts/plans-board-lib.sh	10626
 package/planning/scripts/rebuild-plan-progress.sh	4239
 package/planning/scripts/register-command.sh	4423
-package/planning/scripts/register-lib.sh	5320
+package/planning/scripts/register-lib.sh	5317
 package/planning/scripts/register-read.sh	5446
 package/planning/scripts/register-rebuild.sh	2919
 package/planning/scripts/register-resolve.sh	27412

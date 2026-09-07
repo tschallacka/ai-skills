@@ -216,5 +216,66 @@ rjq -e --arg id "$bid" '.bugs[] | select(.id == $id
 out="$(run_bugup "$bid" --reason 'probe reason' --mechanism 'second mechanism' --append-note 'appended')"
 case "$out" in *Updated*) : ;; *) fail "bug-update --reason/--mechanism/--append-note refused: $out" ;; esac
 
+# ---- every register binary names itself, and names no .sh script (B223) ----
+# The rustified helpers carried the usage and die strings of the shell scripts
+# they replaced. `bug-update --help` printed "Usage: bug-update.sh ...", and
+# planning/scripts/bug-update.sh has not existed since the binary took over —
+# so an agent following the tool's own advice looked for a file that is not in
+# the tree. Each binary now derives its name from CARGO_BIN_NAME, so the two
+# cannot drift again.
+for tool in bug-add bug-update todo-add todo-update \
+            register-read register-command register-rebuild; do
+    tool_bin="$(resolve_register_bin bug-report "$tool" || true)"
+    if [ -z "$tool_bin" ]; then
+        printf 'register-helpers: SKIP %s (not built)\n' "$tool" >&2
+        continue
+    fi
+    out="$("$tool_bin" --help 2>&1 || true)"
+    case "$out" in
+        *"$tool"*) : ;;
+        *) fail "$tool --help does not name itself: $out" ;;
+    esac
+    case "$out" in
+        *.sh*) fail "$tool --help names a .sh script: $out" ;;
+        *) : ;;
+    esac
+done
+
+# A refusal names the binary too — that is the path B223 was found on. --file
+# is not a flag these four take, so an absent register in the environment is
+# how their "register not found" arm is reached without touching a real one.
+absent="$work/absent-register.json"
+for tool in bug-add bug-update todo-add todo-update; do
+    tool_bin="$(resolve_register_bin bug-report "$tool" || true)"
+    [ -n "$tool_bin" ] || continue
+    case "$tool" in
+        bug-update|todo-update)
+            out="$(BUGS_JSON="$absent" TODO_JSON="$absent" "$tool_bin" X1 --status open 2>&1 || true)" ;;
+        *)
+            out="$(BUGS_JSON="$absent" TODO_JSON="$absent" "$tool_bin" --title t 2>&1 || true)" ;;
+    esac
+    case "$out" in
+        *"$tool"*) : ;;
+        *) fail "$tool's refusal does not name itself: $out" ;;
+    esac
+    case "$out" in
+        *.sh*) fail "$tool's refusal names a .sh script: $out" ;;
+        *) : ;;
+    esac
+done
+
+# The repair advice names the shipped tool. bug-update told a caller to run
+# `register-rebuild.sh`, which a prod install does not carry at all: the script
+# is MODE: DEV and only the binary ships. Read from the source, because the arm
+# that prints it needs an unsound register to reach.
+for advice_source in "$repo_root_tests/src/bug-update/src/main.rs" \
+                     "$scripts/register-lib.sh"; do
+    [ -f "$advice_source" ] || continue
+    case "$(cat "$advice_source")" in
+        *register-rebuild.sh*) fail "${advice_source##*/} still advises register-rebuild.sh" ;;
+        *) : ;;
+    esac
+done
+
 [ "$FAILED" -eq 0 ] || exit 1
 printf '%s\n' 'test-register-helpers: PASS'
