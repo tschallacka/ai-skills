@@ -2405,3 +2405,232 @@ fn a_second_file_opens_in_its_own_mode_not_the_servers() {
         .expect("an error frame");
     assert_eq!(refusal["code"], json!("document_mode_invalid"));
 }
+
+/// The tab handle a response reports. T96's whole premise is that this is
+/// enough to address the tab again, so every test below gets it the way an
+/// agent would: out of the answer it already had.
+fn tab_id_of(output: &Output) -> String {
+    first_payload(output)["tab_id"]
+        .as_str()
+        .expect("every response names the tab it answered")
+        .to_owned()
+}
+
+/// T96: a tab id is addressing enough on its own, for every verb.
+///
+/// Verbs routed by file, endpoint or session token; the tab uuid came back in
+/// every `open` answer and could not be used for anything. An agent that held
+/// one still had to keep the path beside it, and "an AI editor is forgetful"
+/// is the problem the whole T96-T98 design is against.
+///
+/// Two tabs in ONE workspace, so a wrong route lands on a real other tab
+/// rather than failing to connect — that is what mis-addressing looks like in
+/// practice, and it is why the mutation of the routing branch is caught here
+/// as wrong CONTENT rather than as an error.
+#[test]
+fn a_tab_id_is_addressing_enough_on_its_own() {
+    let harness = Harness::new("tabid");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let beta = harness.write("beta.txt", "in beta\n");
+    let opened_alpha = harness.open(&alpha);
+    let opened_beta = harness.open(&beta);
+    let id_alpha = tab_id_of(&opened_alpha);
+    let id_beta = tab_id_of(&opened_beta);
+    assert_ne!(id_alpha, id_beta, "two tabs must have two ids");
+    assert_eq!(
+        server_pid(&opened_alpha),
+        server_pid(&opened_beta),
+        "one workspace: the ids have to disambiguate tabs, not servers"
+    );
+
+    // No -f anywhere below. The id is the whole of the addressing.
+    let read = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in alpha\n");
+    let read = harness.client(&["read", "--tab-id", &id_beta, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "in beta\n");
+
+    // A mutation too, since a misrouted read is recoverable and a misrouted
+    // write is not. -r comes from the tab's own answer, by id.
+    let revision = revision_of(&opened_beta).to_string();
+    let edited = harness.client(&[
+        "replace",
+        "--tab-id",
+        &id_beta,
+        "--range-start-line",
+        "1",
+        "--range-end-line",
+        "1",
+        "-t",
+        "EDITED\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", stderr_text(&edited));
+    assert_eq!(
+        tab_id_of(&edited),
+        id_beta,
+        "the answer must name the tab it edited"
+    );
+    let after_beta = harness.client(&["read", "--tab-id", &id_beta, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&after_beta.stdout), "EDITED\n");
+    let after_alpha = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&after_alpha.stdout),
+        "in alpha\n",
+        "the other tab must be untouched"
+    );
+
+    // A read-only verb with no path either, to pin "every verb" rather than
+    // "the ones that happen to take a file".
+    let history = harness.client(&["history", "--tab-id", &id_beta, "-p", "structured"]);
+    assert!(history.status.success(), "{}", stderr_text(&history));
+    assert_eq!(first_payload(&history)["revision"], json!(1));
+
+    // An id that names nothing is refused by name, and the refusal carries
+    // what the server does hold. Never a fall-through to another tab: a
+    // caller that named a tab did not ask for whichever one discovery would
+    // have found instead.
+    let refused = harness.client(&["read", "--tab-id", &"0".repeat(64), "-p", "structured"]);
+    assert!(
+        !refused.status.success(),
+        "an unknown tab id must be refused"
+    );
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("tab_unknown") || refusal.contains("tab_stale"),
+        "the refusal must be named: {refusal}"
+    );
+}
+
+/// T97: a filename or a partial path resolves the tab, and an ambiguous one
+/// answers with the candidates and their ids.
+///
+/// The recovery for an agent that forgot the id. Not a guess and not a bare
+/// error: a refusal that only says "no" leaves an agent with nothing to try,
+/// which is the failure this exists to fix.
+#[test]
+fn a_tab_path_resolves_or_answers_with_the_candidates() {
+    let harness = Harness::new("tabpath");
+    std::fs::create_dir_all(harness.path("one")).unwrap();
+    std::fs::create_dir_all(harness.path("two")).unwrap();
+    let first = harness.write("one/report.txt", "first report\n");
+    let second = harness.write("two/report.txt", "second report\n");
+    let notes = harness.write("notes.txt", "the notes\n");
+    let id_first = tab_id_of(&harness.open(&first));
+    let id_second = tab_id_of(&harness.open(&second));
+    harness.open(&notes);
+
+    // A unique file name needs nothing else.
+    let read = harness.client(&["read", "--tab-path", "notes.txt", "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "the notes\n");
+
+    // A name shared by two tabs is refused WITH both ids, so the next attempt
+    // is informed rather than another guess.
+    let ambiguous = harness.client(&["read", "--tab-path", "report.txt", "-p", "structured"]);
+    assert!(
+        !ambiguous.status.success(),
+        "an ambiguous tab path must not be guessed at: {}",
+        String::from_utf8_lossy(&ambiguous.stdout)
+    );
+    let refusal = refusal_text(&ambiguous);
+    assert!(refusal.contains("tab_ambiguous"), "named: {refusal}");
+    assert!(
+        refusal.contains(&id_first) && refusal.contains(&id_second),
+        "the candidate set must carry both tab ids: {refusal}"
+    );
+
+    // And the disambiguation the candidate set invites works: enough path
+    // components to be unique.
+    let read = harness.client(&["read", "--tab-path", "one/report.txt", "-p", "text"]);
+    assert!(read.status.success(), "{}", stderr_text(&read));
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "first report\n");
+
+    // Component boundaries, not substrings: `port.txt` is a suffix of
+    // `report.txt` as a string and names no tab as a path.
+    let unmatched = harness.client(&["read", "--tab-path", "port.txt", "-p", "structured"]);
+    assert!(
+        !unmatched.status.success(),
+        "a substring must not match a tab path"
+    );
+    let refusal = refusal_text(&unmatched);
+    assert!(refusal.contains("tab_unmatched"), "named: {refusal}");
+    assert!(
+        refusal.contains("notes.txt"),
+        "an unmatched path must still say what IS open: {refusal}"
+    );
+}
+
+/// T98: a session carries a focused tab, an unmarked request runs on it, and
+/// every response names the tab it answered.
+///
+/// The last is the safety half: an unmarked request is only tolerable if the
+/// answer says which tab it went to, or a caller cannot tell that its
+/// assumption about the focus was wrong until the damage is done.
+#[test]
+fn an_unmarked_request_runs_on_the_focused_tab_and_the_answer_names_it() {
+    let harness = Harness::new("focus");
+    let alpha = harness.write("alpha.txt", "in alpha\n");
+    let beta = harness.write("beta.txt", "in beta\n");
+
+    let opened_alpha = harness.open(&alpha);
+    let id_alpha = tab_id_of(&opened_alpha);
+    // No -f, no --tab-id, no --endpoint: the focus is the whole addressing.
+    let bare = harness.client(&["read", "-p", "text"]);
+    assert!(
+        bare.status.success(),
+        "an unmarked read must run on the focused tab: {}",
+        stderr_text(&bare)
+    );
+    assert_eq!(String::from_utf8_lossy(&bare.stdout), "in alpha\n");
+
+    // `open` moves the focus, which is what makes the plain sequence
+    // "open, then work" mean what an agent expects.
+    let opened_beta = harness.open(&beta);
+    let id_beta = tab_id_of(&opened_beta);
+    let bare = harness.client(&["read", "-p", "structured"]);
+    assert!(bare.status.success(), "{}", stderr_text(&bare));
+    assert_eq!(first_payload(&bare)["text"], json!("in beta\n"));
+    assert_eq!(
+        tab_id_of(&bare),
+        id_beta,
+        "the answer must name the tab the focus sent it to"
+    );
+
+    // Every response names its tab, on every verb — a mutating one included,
+    // because writing to the wrong tab silently is the failure being
+    // prevented, and `history`, which reports no content at all.
+    let revision = revision_of(&opened_beta).to_string();
+    let edited = harness.client(&[
+        "insert",
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(edited.status.success(), "{}", stderr_text(&edited));
+    assert_eq!(tab_id_of(&edited), id_beta);
+    let history = harness.client(&["history", "-p", "structured"]);
+    assert_eq!(tab_id_of(&history), id_beta);
+    // The unmarked edit landed on beta and nowhere else.
+    let alpha_after = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&alpha_after.stdout), "in alpha\n");
+
+    // Addressing a tab explicitly moves the focus with it, so a sequence that
+    // names a tab once and then works on it needs no repetition.
+    let read_alpha = harness.client(&["read", "--tab-id", &id_alpha, "-p", "text"]);
+    assert!(read_alpha.status.success(), "{}", stderr_text(&read_alpha));
+    let bare = harness.client(&["read", "-p", "structured"]);
+    assert_eq!(
+        tab_id_of(&bare),
+        id_alpha,
+        "the focus must follow the last tab a call was served by"
+    );
+}

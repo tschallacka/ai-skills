@@ -54,8 +54,12 @@ fn main() {
         option(&args, &["--presentation", "-p"]).unwrap_or_else(|| "structured".into());
     let explicit_identity =
         option(&args, &["--session", "-s"]).or_else(|| option(&args, &["--agent", "-A"]));
+    let tab_id = option(&args, &["--tab-id", "-T"]);
+    let tab_path = option(&args, &["--tab-path"]);
     let resolve_request = ResolveRequest {
         file: file.clone(),
+        tab_id: tab_id.clone(),
+        tab_path: tab_path.clone(),
         method: method.to_string(),
         explicit_endpoint: option(&args, &["--endpoint", "-e"]),
         explicit_identity,
@@ -74,6 +78,14 @@ fn main() {
             "file".into(),
             Value::String(file.to_string_lossy().into_owned()),
         );
+    }
+    // T96/T97: the server routes on these, so they travel in the payload the
+    // way `file` does rather than being consumed by the client alone.
+    if let Some(value) = &tab_id {
+        payload.insert("tab_id".into(), Value::String(value.clone()));
+    }
+    if let Some(value) = &tab_path {
+        payload.insert("tab_path".into(), Value::String(value.clone()));
     }
     // B238: on `open`, -M/--document-mode is the mode of the TAB being
     // opened, so it travels in the payload as well as into the autostart
@@ -291,6 +303,15 @@ fn main() {
             persisted_session_token,
         )
         .unwrap_or_else(|error| die(&error));
+        // T98: a successful call focuses the tab that served it, so the next
+        // request naming nothing is served by the same tab. Not on a refusal:
+        // the tab that answered one is not the tab the caller meant.
+        client::persist_focus(
+            &resolve_request,
+            &resolved.endpoint,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            persisted_session_token,
+        );
     }
     // A refused operation must look refused in every presentation. Before
     // this, `text`/`paging`/`stream` dropped error frames silently, so a

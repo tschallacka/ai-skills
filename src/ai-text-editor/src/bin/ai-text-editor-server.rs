@@ -879,14 +879,13 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
     let (value, selected_tab) = match validate_ndjson(&line).and_then(validate_request) {
         Ok(envelope) => match select_tab(&envelope, &state) {
             Ok(selected) => (handle(envelope, &selected), selected),
-            Err(message) => (
-                vec![error(
-                    &envelope.request_id,
-                    select_tab_error_code(&message),
-                    message,
-                )],
-                default_tab.clone(),
-            ),
+            Err(message) => {
+                let (code, message) = select_tab_refusal(message);
+                (
+                    vec![error(&envelope.request_id, code, message)],
+                    default_tab.clone(),
+                )
+            }
         },
         Err(error_value) => (
             vec![error(
@@ -988,14 +987,13 @@ fn serve_tcp(
             envelope.auth_token = Some(String::from_utf8_lossy(secret).into_owned());
             match select_tab(&envelope, &state) {
                 Ok(selected) => (handle(envelope, &selected), selected),
-                Err(message) => (
-                    vec![error(
-                        &envelope.request_id,
-                        select_tab_error_code(&message),
-                        message,
-                    )],
-                    default_tab.clone(),
-                ),
+                Err(message) => {
+                    let (code, message) = select_tab_refusal(message);
+                    (
+                        vec![error(&envelope.request_id, code, message)],
+                        default_tab.clone(),
+                    )
+                }
             }
         }
         Ok(_) => (
@@ -1280,8 +1278,102 @@ fn select_tab_error_code(message: &str) -> &'static str {
         // mode that disagrees with the tab already holding this file.
         "document_mode_invalid" => "document_mode_invalid",
         "document_mode_conflict" => "document_mode_conflict",
+        // T96/T97's routing refusals, each recoverable in its own way and so
+        // each distinguishable by code.
+        "tab_unknown" => "tab_unknown",
+        "tab_unmatched" => "tab_unmatched",
+        "tab_ambiguous" => "tab_ambiguous",
         _ => "tab_open_failed",
     }
+}
+
+/// The stable public handle for a tab: the `tab_uuid` every `open` answer
+/// reports, and from T96 onward the whole of a request's addressing.
+/// The tail of a routing refusal: what this server does hold, with the ids
+/// needed to address it. A refusal that only says "no" leaves an agent with
+/// nothing to try next, which is the whole failure T97 exists to fix.
+fn candidate_advice(state_guard: &ServerState) -> String {
+    let candidates = tab_candidates(state_guard);
+    if candidates.is_empty() {
+        return "this server has no open tabs; `open` the file you mean".to_owned();
+    }
+    format!(
+        "the open tabs are: {}",
+        serde_json::to_string(&candidates).unwrap_or_default()
+    )
+}
+
+fn tab_id(tab: &Tab) -> String {
+    session::tab_uuid_for(&tab.session_token, &tab.server_generation)
+}
+
+/// Every open tab as `{tab_id, path}`, newest addressing first. The candidate
+/// set T97 answers an ambiguous or unmatched `tab_path` with, and the thing an
+/// agent that has lost its bearings needs: not "no", but "here is what there
+/// is, with the ids".
+fn tab_candidates(state_guard: &ServerState) -> Vec<Value> {
+    let mut candidates: Vec<Value> = state_guard
+        .tabs
+        .values()
+        .filter_map(|tab| {
+            tab.lock()
+                .ok()
+                .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+        })
+        .collect();
+    // Deterministic, so a caller comparing two answers sees the same order.
+    candidates.sort_by_key(|candidate| {
+        candidate
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    });
+    candidates
+}
+
+/// Whether `path` is named by the fragment `hint`: its whole file name, or a
+/// trailing run of its path components.
+///
+/// Component-boundary matching, not a substring: `report.txt` must not be
+/// matched by `port.txt`, and `src/lib.rs` must not be matched by
+/// `other/src/lib.rs`. A leading separator on the hint is ignored so a caller
+/// can paste either `src/lib.rs` or `/src/lib.rs` from a workspace-root path.
+fn path_names_tab(path: &Path, hint: &str) -> bool {
+    let hint = hint.trim_start_matches('/');
+    if hint.is_empty() {
+        return false;
+    }
+    let wanted: Vec<&str> = hint.split('/').filter(|part| !part.is_empty()).collect();
+    let held: Vec<String> = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if wanted.len() > held.len() {
+        return false;
+    }
+    held[held.len() - wanted.len()..]
+        .iter()
+        .zip(&wanted)
+        .all(|(held, wanted)| held == wanted)
+}
+
+/// A `select_tab` refusal split into the code it names and the message
+/// without that prefix.
+///
+/// The prefix is how the message carries its own code (see
+/// `select_tab_error_code`), and every presentation prints the code alongside
+/// the message — so leaving it in produced "file_mismatch: file_mismatch: the
+/// request names ...". Stripped once, here, rather than at each of the two
+/// call sites that build the frame.
+fn select_tab_refusal(message: String) -> (&'static str, String) {
+    let code = select_tab_error_code(&message);
+    let body = message
+        .strip_prefix(code)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .map(str::to_owned)
+        .unwrap_or(message);
+    (code, body)
 }
 
 fn select_tab(
@@ -1290,6 +1382,67 @@ fn select_tab(
 ) -> Result<Arc<Mutex<Tab>>, String> {
     let state_guard = state.lock().unwrap();
     let requested = requested_file(envelope);
+    // T96: a tab id is addressing on its own, for every verb. It is checked
+    // before the session token because it is the more specific of the two: a
+    // caller that names a tab means that tab, whatever token its cache
+    // happens to hold. It is not the weaker credential either - the id is a
+    // blake3 of the session token and the server generation, so holding one is
+    // holding the other.
+    if let Some(wanted) = envelope.payload.get("tab_id").and_then(Value::as_str) {
+        for tab in state_guard.tabs.values() {
+            if tab.lock().ok().is_some_and(|tab| tab_id(&tab) == wanted) {
+                ensure_tab_file(tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab.clone());
+            }
+        }
+        return Err(format!(
+            "tab_unknown: no tab on this server has tab_id {wanted}; {}",
+            candidate_advice(&state_guard)
+        ));
+    }
+    // T97: the recovery for a caller that forgot the id. A filename, or a
+    // trailing run of path components, resolves to the one tab it names -
+    // and on none or several, answers with the candidates and their ids
+    // rather than guessing or a bare refusal.
+    if let Some(hint) = envelope.payload.get("tab_path").and_then(Value::as_str) {
+        let matched: Vec<Arc<Mutex<Tab>>> = state_guard
+            .tabs
+            .values()
+            .filter(|tab| {
+                tab.lock()
+                    .ok()
+                    .is_some_and(|tab| path_names_tab(&tab.path, hint))
+            })
+            .cloned()
+            .collect();
+        match matched.len() {
+            1 => {
+                let tab = matched.into_iter().next().unwrap();
+                ensure_tab_file(&tab, requested.as_ref(), &envelope.method)?;
+                return Ok(tab);
+            }
+            0 => {
+                return Err(format!(
+                    "tab_unmatched: no open tab is named by {hint}; {}",
+                    candidate_advice(&state_guard)
+                ))
+            }
+            count => {
+                let ambiguous: Vec<Value> = matched
+                    .iter()
+                    .filter_map(|tab| {
+                        tab.lock()
+                            .ok()
+                            .map(|tab| json!({"tab_id": tab_id(&tab), "path": tab.path}))
+                    })
+                    .collect();
+                return Err(format!(
+                    "tab_ambiguous: {hint} names {count} open tabs; address one by its tab_id: {}",
+                    serde_json::to_string(&ambiguous).unwrap_or_default()
+                ));
+            }
+        }
+    }
     if let Some(token) = envelope.session_token.as_deref() {
         for tab in state_guard.tabs.values() {
             if tab
@@ -1413,7 +1566,26 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
     }
+    // T96/T97: a request that addressed this tab by `tab_id` or `tab_path`
+    // has already been routed to it by name, and that is authorization enough.
+    // The session token is tab-routing hygiene, not the security boundary —
+    // the endpoint is (SKILL.md: "treat the endpoint token as full file-access
+    // authority"), and any caller that can reach it can already `open` any
+    // path and be handed a token. A tab id is not the weaker credential of the
+    // two in any case: it is a blake3 of the session token and the server
+    // generation.
+    let addressed_by_handle = envelope
+        .payload
+        .get("tab_id")
+        .and_then(Value::as_str)
+        .is_some_and(|wanted| wanted == tab_id(&tab))
+        || envelope
+            .payload
+            .get("tab_path")
+            .and_then(Value::as_str)
+            .is_some_and(|hint| path_names_tab(&tab.path, hint));
     if envelope.method != "open"
+        && !addressed_by_handle
         && envelope.session_token.as_deref() != Some(tab.session_token.as_str())
     {
         frames.push(error(
@@ -1544,7 +1716,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
     }
     match envelope.method.as_str() {
         "open" => {
-            let mut payload = json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "tab_uuid": session::tab_uuid_for(&tab.session_token, &tab.server_generation), "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)});
+            let mut payload = json!({"path": tab.path, "mode": tab.document.mode, "normalize_nfc": tab.document.normalize_nfc, "revision": tab.revision, "dirty": tab_dirty(&tab), "disk_diverged": tab_disk_diverged(&tab), "external_change_pending": tab.pending_external.is_some(), "bytes": tab.large_file.as_ref().map(|file| file.bytes).unwrap_or(tab.document.bytes().len() as u64), "large_file": tab.large_file.is_some(), "index_loaded": tab.index_loaded, "index_complete": tab.index_complete, "index_coverage": {"through_line": tab.index.blocks.last().map(|block| block.line).unwrap_or(0), "through_byte": tab.index.blocks.last().map(|block| block.byte_offset).unwrap_or(0)}, "cursors": tab.cursors, "session_token": tab.session_token, "server_generation": tab.server_generation, "server_pid": std::process::id(), "resources": resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)});
             if tab.replayed_edits > 0 {
                 payload["journal_replay"] =
                     json!({"edits": tab.replayed_edits, "through_sequence": tab.journal_seq});
@@ -2038,6 +2210,20 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "job_transfer" => job_transfer(&envelope, &mut tab, &mut frames),
         "job_release" => job_release(&envelope, &mut tab, &mut frames),
         _ => frames.push(error(&envelope.request_id, "unknown_method", format!("unsupported method {}", envelope.method))),
+    }
+    // T98: every response names the tab it answered, at every verbosity
+    // level, because addressing the wrong tab silently is the failure the
+    // whole T96-T98 design exists to prevent. One name for the handle - the
+    // same `tab_id` a request addresses a tab by - rather than the `tab_uuid`
+    // only `open` used to report under a second name.
+    let answered_by = tab_id(&tab);
+    for frame in &mut frames {
+        if frame.get("type").and_then(Value::as_str) != Some("data") {
+            continue;
+        }
+        if let Some(payload) = frame.get_mut("payload").and_then(Value::as_object_mut) {
+            payload.insert("tab_id".into(), json!(answered_by));
+        }
     }
     if !frames
         .iter()

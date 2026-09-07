@@ -170,12 +170,31 @@ fn server_method(tool: &str) -> &str {
 
 fn tool_definitions() -> Vec<Value> {
     let routing = || {
-        let mut properties: ToolProperties = Vec::from([(
-            "file",
-            string(
-                "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+        let mut properties: ToolProperties = Vec::from([
+            (
+                "file",
+                string(
+                    "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+                ),
             ),
-        )]);
+            // T96: declared on every tool, including the job verbs, because
+            // the point is that an id is sufficient addressing for all of
+            // them. Not an ADAPTER_ARGUMENTS entry: the server routes on it,
+            // so it stays in the payload the way `file` does.
+            (
+                "tab_id",
+                string(
+                    "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. Wins over file and tab_path, and is refused by name (tab_unknown) rather than falling back to some other tab if it names none.",
+                ),
+            ),
+            // T97: the recovery for an agent that lost the id.
+            (
+                "tab_path",
+                string(
+                    "A filename, or a trailing run of path components, naming an open tab in this agent's workspace - the recovery when the tab_id is lost. Matched on component boundaries, not as a substring. Naming several tabs is refused with tab_ambiguous and the candidates with their tab_ids; naming none with tab_unmatched and the open tabs, so the next attempt is informed rather than another guess.",
+                ),
+            ),
+        ]);
         properties.extend(
             ADAPTER_ARGUMENTS
                 .iter()
@@ -597,6 +616,15 @@ fn call_tool(id: Value, params: Value) -> Value {
         .map(PathBuf::from);
     let resolve_request = ResolveRequest {
         file: file.clone(),
+        // Read, and left in the payload: the server routes on both.
+        tab_id: payload
+            .get("tab_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        tab_path: payload
+            .get("tab_path")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         method: method.to_string(),
         explicit_endpoint: payload
             .get("endpoint")
@@ -703,6 +731,15 @@ fn call_tool(id: Value, params: Value) -> Value {
     if !failed {
         let _ = client::persist_cache(
             resolved.cache_path.as_deref(),
+            &resolved.endpoint,
+            auth_token.as_deref().or(resolved.auth_token.as_deref()),
+            returned_session_token.or(resolved.session_token.as_deref()),
+        );
+        // T98, and the surface it matters most on: an MCP agent's context is
+        // the forgetful one, so a successful call focusing the tab that served
+        // it is what lets the next call name nothing at all.
+        client::persist_focus(
+            &resolve_request,
             &resolved.endpoint,
             auth_token.as_deref().or(resolved.auth_token.as_deref()),
             returned_session_token.or(resolved.session_token.as_deref()),
