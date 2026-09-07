@@ -296,12 +296,42 @@ iui_info_push() {
 
 # The actions are always listed; they are only *usable* when the info pane has
 # focus, and the leading marker says which state they are in.
+# The modes the skill under the cursor offers, space-delimited and space-framed
+# so a membership test needs no special case for the first or last entry. Empty
+# for a skill that declares none, which is most of them: one way to be driven is
+# not a choice, and offering to cycle it would be a control that does nothing.
+iui_integration_offered() {
+    local index="$1" mode
+    IUI_INTEGRATION_OFFERED=''
+    while IFS= read -r mode; do
+        [ -n "$mode" ] || continue
+        IUI_INTEGRATION_OFFERED="$IUI_INTEGRATION_OFFERED$mode "
+    done <<IUI_MODES_EOF
+$(integration_modes "${IUI_SKILL_NAMES[$index]}")
+IUI_MODES_EOF
+    [ -z "$IUI_INTEGRATION_OFFERED" ] || IUI_INTEGRATION_OFFERED=" $IUI_INTEGRATION_OFFERED"
+}
+
 iui_info_actions() {
-    local width="$1" marker role
+    local width="$1" marker role index="$IUI_CURSOR" current
     if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi
     iui_info_push diamond 'ACTIONS' body "$width"
     iui_info_push "$role" " $marker d  help me install dependencies" act-dep "$width"
     iui_info_push "$role" " $marker r  reverify dependencies" act-verify "$width"
+    # T95: --integration could pick a skill's bridge headlessly, but the
+    # interactive picker offered no way to choose one at all, so a human running
+    # the plain installer could not reach mcp mode -- only a scripted caller
+    # could. The line is present only for a skill that declares more than one
+    # mode, and it names the mode in force rather than only the key, because the
+    # question a reader has here is "which am I about to install".
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "${IUI_SKILL_NAMES[$index]}")"
+    iui_info_push "$role" \
+        " $marker m  integration mode: $current   (cycles:${IUI_INTEGRATION_OFFERED%" "})" \
+        act-mode "$width"
 }
 
 iui_info_message() {
@@ -355,7 +385,7 @@ iui_count_states() {
 }
 
 iui_hint_bar() {
-    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  i install  q quit' "$IUI_COLS"
+    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  m mode  i install  q quit' "$IUI_COLS"
     iui_seg stone "$IUI_PAD"
     iui_out_line "$IUI_ROWS" "$IUI_SEG"
 }
@@ -372,6 +402,7 @@ iui_render_frame() {
     iui_layout
     iui_clamp_scroll
     IUI_ACTION_ROW_DEP=0
+    IUI_ACTION_ROW_MODE=0
     IUI_ACTION_ROW_VERIFY=0
     [ "$IUI_POSITION" -eq 1 ] && printf '\033[H'
     iui_title_bar
@@ -545,6 +576,7 @@ iui_info_cell() {
     case "${IUI_INFO_TAG[$i]}" in
         act-dep) IUI_ACTION_ROW_DEP="$row" ;;
         act-verify) IUI_ACTION_ROW_VERIFY="$row" ;;
+        act-mode) IUI_ACTION_ROW_MODE="$row" ;;
     esac
     iui_seg "${IUI_INFO_ROLE[$i]}" "${IUI_INFO_TEXT[$i]}"
     IUI_INFO_CELL="$IUI_SEG"

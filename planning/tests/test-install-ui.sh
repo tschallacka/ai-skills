@@ -656,6 +656,72 @@ iui_header_seg SKILLS 20 0
 
 note_pass 'the detail pane scrolls under focus and the focused pane is marked'
 
+# ── 6e. The integration-mode action (T95) ────────────────────────────────────
+# --integration could pick a skill's bridge headlessly; the picker offered no
+# way to choose one, so mcp mode was unreachable interactively.
+#
+# The mode tables are generated into install.sh, so this depends on
+# iui_dev_load_tables loading the INTEGRATION block as well as the DEPENDENCY
+# one. An empty integration_modes() would make the "no line for a single-mode
+# skill" assertion pass while the feature shipped dead, so the table is
+# asserted non-empty first.
+#
+# The demo fixture names skills that declare no modes, and its arrays are
+# index-parallel, so a synthetic entry would have to be added to five of them to
+# stay consistent. Renaming the entry under the cursor is enough: the functions
+# under test read the NAME at IUI_CURSOR and ask the generated tables about it,
+# so this exercises the real lookup rather than a stub.
+mode_index="$IUI_CURSOR"
+mode_name_before="${IUI_SKILL_NAMES[$mode_index]}"
+IUI_SKILL_NAMES[$mode_index]=ai-text-editor
+[ -n "$(integration_modes ai-text-editor)" ] \
+    || note_fail 'integration_modes is empty; install-ui.sh did not load the INTEGRATION block'
+IUI_FOCUS=info
+INTEGRATION_SELECTION=''
+INTEGRATION_DEFAULT=skill
+
+iui_info_lines "$IUI_RIGHT_W"
+case "${IUI_INFO_TAG[*]}" in
+    *act-mode*) : ;;
+    *) note_fail 'a skill declaring two modes must offer the integration-mode action' ;;
+esac
+case "${IUI_INFO_TEXT[*]}" in
+    *'integration mode: skill'*) : ;;
+    *) note_fail 'the action line must name the mode in force, not only the key' ;;
+esac
+
+# m cycles, and integration_mode_for -- the resolver the install itself reads --
+# must follow. Asserting the render alone would pass while the choice was
+# discarded.
+iui_handle_key m
+[ "$(integration_mode_for ai-text-editor)" = "mcp" ] \
+    || note_fail "m must cycle to mcp; got $(integration_mode_for ai-text-editor)"
+iui_handle_key m
+[ "$(integration_mode_for ai-text-editor)" = "skill" ] \
+    || note_fail "m must wrap back to skill; got $(integration_mode_for ai-text-editor)"
+
+# Focus-gated like d and r.
+IUI_FOCUS=list
+iui_handle_key m
+[ "$(integration_mode_for ai-text-editor)" = "skill" ] \
+    || note_fail 'm must do nothing while the list pane holds focus'
+IUI_FOCUS=info
+
+# A skill declaring nothing has one way to be driven, so there is no choice to
+# offer and no line for it.
+IUI_SKILL_NAMES[$mode_index]="$mode_name_before"
+[ -z "$(integration_modes "$mode_name_before")" ] \
+    || note_fail "the fixture's own $mode_name_before was expected to declare no modes"
+iui_info_lines "$IUI_RIGHT_W"
+case "${IUI_INFO_TAG[*]}" in
+    *act-mode*) note_fail 'a skill with one way to be driven must not offer a mode toggle' ;;
+esac
+
+INTEGRATION_SELECTION=''
+INTEGRATION_DEFAULT=skill
+IUI_CURSOR=0
+IUI_FOCUS=list
+note_pass 'the picker offers an integration mode only where there is a choice, and m cycles it'
 # ── 7a. Wrapping breaks words, and marks the break when it cannot ────────────
 # A token wider than the pane used to be cut with no mark, so a reader could not
 # tell a break from the end of a word.

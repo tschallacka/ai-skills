@@ -181,6 +181,33 @@ record_integration() {
     INTEGRATION_DEFAULT="$mode"
 }
 
+# Which mode this run installs a skill in: the per-skill choice if one was made,
+# else the run-wide one, else `skill`.
+#
+# `skill` is the default on purpose. It is the interface that needs no client
+# configuration and no running server, which is what a piped-from-curl install
+# has to leave working; an MCP server's tools are listed in every session that
+# configures it, so it is opted into rather than assumed.
+#
+# Here rather than in 50-manifest.sh, where it used to live, because the picker
+# reads it too (T95) and install-ui.sh sources only 05-config, 20-runtime-tools,
+# 30-render and the three ui parts. A ui function calling into an unsourced part
+# is B49's failure exactly, and it stayed hidden there until a previewed skill
+# happened to need the missing function.
+integration_mode_for() {
+    local skill="$1" line
+    # bash 3.2 is the floor and has no associative arrays, so the per-skill
+    # choices are newline-delimited `skill=mode` records.
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
@@ -2314,12 +2341,42 @@ iui_info_push() {
 
 # The actions are always listed; they are only *usable* when the info pane has
 # focus, and the leading marker says which state they are in.
+# The modes the skill under the cursor offers, space-delimited and space-framed
+# so a membership test needs no special case for the first or last entry. Empty
+# for a skill that declares none, which is most of them: one way to be driven is
+# not a choice, and offering to cycle it would be a control that does nothing.
+iui_integration_offered() {
+    local index="$1" mode
+    IUI_INTEGRATION_OFFERED=''
+    while IFS= read -r mode; do
+        [ -n "$mode" ] || continue
+        IUI_INTEGRATION_OFFERED="$IUI_INTEGRATION_OFFERED$mode "
+    done <<IUI_MODES_EOF
+$(integration_modes "${IUI_SKILL_NAMES[$index]}")
+IUI_MODES_EOF
+    [ -z "$IUI_INTEGRATION_OFFERED" ] || IUI_INTEGRATION_OFFERED=" $IUI_INTEGRATION_OFFERED"
+}
+
 iui_info_actions() {
-    local width="$1" marker role
+    local width="$1" marker role index="$IUI_CURSOR" current
     if [ "$IUI_FOCUS" = "info" ]; then marker='>'; role=gold; else marker='-'; role=stone; fi
     iui_info_push diamond 'ACTIONS' body "$width"
     iui_info_push "$role" " $marker d  help me install dependencies" act-dep "$width"
     iui_info_push "$role" " $marker r  reverify dependencies" act-verify "$width"
+    # T95: --integration could pick a skill's bridge headlessly, but the
+    # interactive picker offered no way to choose one at all, so a human running
+    # the plain installer could not reach mcp mode -- only a scripted caller
+    # could. The line is present only for a skill that declares more than one
+    # mode, and it names the mode in force rather than only the key, because the
+    # question a reader has here is "which am I about to install".
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "${IUI_SKILL_NAMES[$index]}")"
+    iui_info_push "$role" \
+        " $marker m  integration mode: $current   (cycles:${IUI_INTEGRATION_OFFERED%" "})" \
+        act-mode "$width"
 }
 
 iui_info_message() {
@@ -2373,7 +2430,7 @@ iui_count_states() {
 }
 
 iui_hint_bar() {
-    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  i install  q quit' "$IUI_COLS"
+    iui_pad ' Up/Dn move  Enter/Space toggle  click toggle  Tab focus  a all  n none  m mode  i install  q quit' "$IUI_COLS"
     iui_seg stone "$IUI_PAD"
     iui_out_line "$IUI_ROWS" "$IUI_SEG"
 }
@@ -2390,6 +2447,7 @@ iui_render_frame() {
     iui_layout
     iui_clamp_scroll
     IUI_ACTION_ROW_DEP=0
+    IUI_ACTION_ROW_MODE=0
     IUI_ACTION_ROW_VERIFY=0
     [ "$IUI_POSITION" -eq 1 ] && printf '\033[H'
     iui_title_bar
@@ -2563,6 +2621,7 @@ iui_info_cell() {
     case "${IUI_INFO_TAG[$i]}" in
         act-dep) IUI_ACTION_ROW_DEP="$row" ;;
         act-verify) IUI_ACTION_ROW_VERIFY="$row" ;;
+        act-mode) IUI_ACTION_ROW_MODE="$row" ;;
     esac
     iui_seg "${IUI_INFO_ROLE[$i]}" "${IUI_INFO_TEXT[$i]}"
     IUI_INFO_CELL="$IUI_SEG"
@@ -2843,6 +2902,37 @@ iui_action_reverify() {
     IUI_MESSAGE=('reverified; the per-tool cache is shared by every skill')
 }
 
+# T95. Cycle the skill under the cursor to its next declared integration mode,
+# wrapping. Cycling rather than a submenu because the picker has no modal layer
+# and the choice is between two or three named things -- a fourth mode would
+# still cycle legibly, since the line names the mode in force.
+#
+# The record is prepended, which is how record_skill_integration writes it and
+# what integration_mode_for expects: it returns the FIRST `skill=mode` line it
+# finds, so a later choice shadows an earlier one and the run installs what was
+# chosen last. Validation is not repeated here -- every mode offered came from
+# integration_modes itself, so there is nothing to refuse, and calling the
+# validating writer would risk die_usage killing the picker mid-frame.
+iui_action_cycle_integration() {
+    local index="$IUI_CURSOR" skill current next='' first='' mode taken=0
+    skill="${IUI_SKILL_NAMES[$index]}"
+    iui_integration_offered "$index"
+    case "$IUI_INTEGRATION_OFFERED" in
+        ''|' skill ') return 0 ;;
+    esac
+    current="$(integration_mode_for "$skill")"
+    for mode in $IUI_INTEGRATION_OFFERED; do
+        [ -n "$first" ] || first="$mode"
+        if [ "$taken" -eq 1 ]; then next="$mode"; taken=0; fi
+        [ "$mode" = "$current" ] && taken=1
+    done
+    # Past the end, or a current mode that is not in the offered list at all
+    # (a --integration default naming a mode this skill does not declare).
+    [ -n "$next" ] || next="$first"
+    INTEGRATION_SELECTION="$skill=$next
+$INTEGRATION_SELECTION"
+    IUI_MESSAGE=("$skill will be installed in $next mode")
+}
 iui_handle_mouse() {
     [ "$IUI_MOUSE_RELEASE" -eq 0 ] || return 0
     case "$IUI_MOUSE_BTN" in
@@ -2855,6 +2945,7 @@ iui_handle_mouse() {
         IUI_FOCUS=info
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_DEP" ] && iui_action_dep_hint
         [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_VERIFY" ] && iui_action_reverify
+        [ "$IUI_MOUSE_ROW" -eq "$IUI_ACTION_ROW_MODE" ] && iui_action_cycle_integration
         return 0
     fi
     [ "$IUI_FOCUS" = "info" ] && return 0
@@ -2900,6 +2991,11 @@ iui_handle_key() {
         n) for ((i = 0; i < count; i++)); do IUI_SKILL_SEL[$i]=0; done ;;
         d) [ "$IUI_FOCUS" = "info" ] && iui_action_dep_hint ;;
         r) [ "$IUI_FOCUS" = "info" ] && iui_action_reverify ;;
+        # Focus-gated like d and r: the ACTIONS lines are only usable when the
+        # info pane holds focus, and m is one of them. `i` was already taken by
+        # install -- the key that starts the run -- so binding integration mode
+        # to it would have replaced the picker's primary action with a toggle.
+        m) [ "$IUI_FOCUS" = "info" ] && iui_action_cycle_integration ;;
         i) IUI_DONE=1; IUI_RC=0 ;;
         q|ESC|EOF) IUI_DONE=1; IUI_RC=130 ;;
         MOUSE) iui_handle_mouse ;;
@@ -3896,26 +3992,9 @@ ISHEOF
     esac
 }
 
-# Which mode this run installs a skill in: the per-skill choice if one was made,
-# else the run-wide one, else `skill`.
-#
-# `skill` is the default on purpose. It is the interface that needs no client
-# configuration and no running server, which is what a piped-from-curl install
-# has to leave working; an MCP server's tools are listed in every session that
-# configures it, so it is opted into rather than assumed.
-integration_mode_for() {
-    local skill="$1" line
-    # bash 3.2 is the floor and has no associative arrays, so the per-skill
-    # choices are newline-delimited `skill=mode` records.
-    while IFS= read -r line; do
-        case "$line" in
-            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
-        esac
-    done <<INTEGRATION_SELECTION_EOF
-$INTEGRATION_SELECTION
-INTEGRATION_SELECTION_EOF
-    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
-}
+# integration_mode_for() moved to 05-config.sh, beside the INTEGRATION_*
+# variables it reads and the writers that set them: the picker calls it too
+# (T95), and install-ui.sh does not source this part.
 
 # Does this file belong in the mode this skill is being installed in?
 #

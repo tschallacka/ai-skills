@@ -39,26 +39,34 @@ for iui_part in 05-config 20-runtime-tools 30-render 35-ui-model 36-ui-render 37
 done
 unset iui_part
 
-# The dependency tables are generated into install.sh between its marker
-# comments and exist nowhere else, so the standalone path reads them from the
-# artifact rather than keeping a second copy of the same data.
+# The dependency and integration tables are generated into install.sh between
+# its marker comments and exist nowhere else, so the standalone path reads them
+# from the artifact rather than keeping a second copy of the same data.
+#
+# INTEGRATION is loaded as well as DEPENDENCY because the picker offers the
+# integration-mode action (T95), and that action asks integration_modes() what
+# a skill declares. The part file's block is empty by design -- the tables are
+# built into the artifact -- so without this the standalone picker would render
+# no mode line at all and a test asserting its absence would pass vacuously.
 iui_dev_load_tables() {
-    local artifact="$1" block
+    local artifact="$1" name block
     if [ ! -f "$artifact" ]; then
         printf 'install-ui.sh: missing %s; run installer/build.sh\n' "$artifact" >&2
         return 66
     fi
-    block="$(awk '
-        /^# END GENERATED DEPENDENCY BLOCK$/ { inside = 0 }
-        inside { print }
-        /^# BEGIN GENERATED DEPENDENCY BLOCK$/ { inside = 1 }
-    ' "$artifact")"
-    if [ -z "$block" ]; then
-        printf 'install-ui.sh: %s carries no dependency block; run installer/build.sh\n' \
-            "$artifact" >&2
-        return 65
-    fi
-    eval "$block"
+    for name in DEPENDENCY INTEGRATION; do
+        block="$(awk -v name="$name" '
+            $0 == "# END GENERATED " name " BLOCK" { inside = 0 }
+            inside { print }
+            $0 == "# BEGIN GENERATED " name " BLOCK" { inside = 1 }
+        ' "$artifact")"
+        if [ -z "$block" ]; then
+            printf 'install-ui.sh: %s carries no %s block; run installer/build.sh\n' \
+                "$artifact" "$name" >&2
+            return 65
+        fi
+        eval "$block"
+    done
 }
 iui_dev_load_tables "$script_dir/install.sh"
 

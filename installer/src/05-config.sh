@@ -131,6 +131,33 @@ record_integration() {
     INTEGRATION_DEFAULT="$mode"
 }
 
+# Which mode this run installs a skill in: the per-skill choice if one was made,
+# else the run-wide one, else `skill`.
+#
+# `skill` is the default on purpose. It is the interface that needs no client
+# configuration and no running server, which is what a piped-from-curl install
+# has to leave working; an MCP server's tools are listed in every session that
+# configures it, so it is opted into rather than assumed.
+#
+# Here rather than in 50-manifest.sh, where it used to live, because the picker
+# reads it too (T95) and install-ui.sh sources only 05-config, 20-runtime-tools,
+# 30-render and the three ui parts. A ui function calling into an unsourced part
+# is B49's failure exactly, and it stayed hidden there until a previewed skill
+# happened to need the missing function.
+integration_mode_for() {
+    local skill="$1" line
+    # bash 3.2 is the floor and has no associative arrays, so the per-skill
+    # choices are newline-delimited `skill=mode` records.
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf '%s\n' "${line#*=}"; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'

@@ -6,12 +6,76 @@ use ai_text_editor::client::{self, ResolveRequest};
 use ai_text_editor::protocol::Envelope;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::SystemTime;
+
+/// The adapter binary's timestamp as it was when this session started.
+static ADAPTER_STAMP: OnceLock<Option<SystemTime>> = OnceLock::new();
+
+fn adapter_stamp() -> Option<SystemTime> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|metadata| metadata.modified().ok())
+}
+
+/// B261. An MCP client fetches `tools/list` ONCE per session and validates
+/// every later call against what it cached. Over stdio the client also
+/// *launched* this process, so installing a newer adapter does not change the
+/// running one: this process is the old code, and it cannot advertise
+/// arguments it does not have.
+///
+/// That rules out the tempting fix. `notifications/tools/list_changed` would
+/// make a compliant client re-fetch `tools/list` — from this same old process,
+/// which returns the same old list. There is nothing a running adapter can do
+/// to teach its client an argument it was not built with.
+///
+/// What it can do is say so. The failure this prevents is specific and was
+/// observed: after T96/T97 added `tab_id` and `tab_path`, every response
+/// carried a `tab_id` while the agent's cached schema rejected the argument
+/// that consumes it — so the answers advertised a handle the caller was not
+/// permitted to use, and the agent kept passing `file` with no idea why.
+/// Michael saw it from outside as "you're not using the tab shorthands".
+fn staleness_notice(first: Option<SystemTime>, now: Option<SystemTime>) -> Option<String> {
+    match (first, now) {
+        (Some(started), Some(current)) if started != current => Some(
+            "notice: the installed ai-text-editor MCP adapter was replaced after this session \
+            started, so the tool definitions this session holds are the older ones and may be \
+            missing arguments the installed adapter accepts. A newly added argument is then \
+            refused by your own client against its cached schema, not by the editor. Restart \
+            the MCP session to re-fetch tools/list."
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// Seeded at `initialize`, which is the same moment the client fetches
+/// `tools/list`, so the stamp records the build whose schema the client holds.
+fn adapter_replaced() -> Option<String> {
+    let first = *ADAPTER_STAMP.get_or_init(adapter_stamp);
+    staleness_notice(first, adapter_stamp())
+}
+
+/// Attach a notice to a tools/call result without disturbing its content.
+fn attach_notice(mut response: Value, notice: String) -> Value {
+    if let Some(content) = response
+        .get_mut("result")
+        .and_then(|result| result.get_mut("content"))
+        .and_then(Value::as_array_mut)
+    {
+        content.push(json!({"type": "text", "text": notice}));
+    }
+    response
+}
 
 pub fn handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     match method {
         "initialize" => {
+            // Seed the stamp for this session before answering.
+            let _ = adapter_replaced();
             json!({"jsonrpc":"2.0","id":id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{"subscribe":false,"listChanged":false}},"serverInfo":{"name":"ai-text-editor","version":"0.1.0"}}})
         }
         "notifications/initialized" => Value::Null,
@@ -20,7 +84,13 @@ pub fn handle(message: Value) -> Value {
             json!({"jsonrpc":"2.0","id":id,"result":{"resources": resource_definitions()}})
         }
         "resources/read" => read_resource(id, message.get("params").cloned().unwrap_or_default()),
-        "tools/call" => call_tool(id, message.get("params").cloned().unwrap_or_default()),
+        "tools/call" => {
+            let response = call_tool(id, message.get("params").cloned().unwrap_or_default());
+            match adapter_replaced() {
+                Some(notice) => attach_notice(response, notice),
+                None => response,
+            }
+        }
         _ => json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"method not found"}}),
     }
 }
@@ -787,6 +857,47 @@ fn parse_revision_argument(value: &Value) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
+    /// B261. The comparison is a pure function precisely so it can be tested
+    /// without waiting on a filesystem timestamp to change.
+    #[test]
+    fn a_replaced_adapter_is_reported_and_an_unchanged_one_is_silent() {
+        let started = SystemTime::UNIX_EPOCH;
+        let later = started + std::time::Duration::from_secs(1);
+        assert!(
+            super::staleness_notice(Some(started), Some(started)).is_none(),
+            "an unchanged adapter must say nothing at all"
+        );
+        let notice = super::staleness_notice(Some(started), Some(later))
+            .expect("a replaced adapter must be reported");
+        assert!(notice.contains("Restart the MCP session"));
+        // The notice has to name the thing that is actually refusing, or the
+        // reader debugs the editor instead of their own cached schema.
+        assert!(notice.contains("refused by your own client against its cached schema"));
+    }
+
+    /// An unreadable timestamp is not evidence of a swap. Guessing would put a
+    /// restart notice on every call in an environment where current_exe or its
+    /// metadata is unavailable.
+    #[test]
+    fn an_unknown_timestamp_is_never_reported_as_a_swap() {
+        assert!(super::staleness_notice(None, None).is_none());
+        assert!(super::staleness_notice(Some(SystemTime::UNIX_EPOCH), None).is_none());
+        assert!(super::staleness_notice(None, Some(SystemTime::UNIX_EPOCH)).is_none());
+    }
+
+    /// The notice rides alongside the answer, never instead of it.
+    #[test]
+    fn attaching_a_notice_keeps_the_original_content() {
+        let response = json!({"result": {"content": [{"type":"text","text":"the answer"}]}});
+        let attached = super::attach_notice(response, "the notice".into());
+        let content = attached["result"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], "the answer");
+        assert_eq!(content[1]["text"], "the notice");
+    }
+
     use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
     use serde_json::{json, Value};
 
