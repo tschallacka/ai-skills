@@ -536,17 +536,31 @@ mod tests {
                 );
             }
         }
-        // And it has to be short enough to be the point: a socket beside the
-        // record must still fit a Unix socket address. 108 is the Linux
-        // sun_path size, 104 the macOS one; stay under the smaller.
-        let record = first.join(format!("{}.endpoint", "f".repeat(32)));
-        let socket = record.with_extension("sock");
-        assert!(
-            socket.as_os_str().len() < 104,
-            "the fallback socket path is {} bytes: {}",
-            socket.as_os_str().len(),
-            socket.display()
-        );
+        // And on Unix it has to be short enough to be the point: a socket
+        // beside the record must still fit a Unix socket address. 108 is the
+        // Linux sun_path size, 104 the macOS one; stay under the smaller.
+        //
+        // Unix only, and not merely because the constant is a Unix one. There
+        // is no Unix socket on Windows at all -- Endpoint::Unix is itself
+        // #[cfg(unix)] and a Windows server answers over loopback TCP -- so no
+        // Windows path is ever a sun_path and nothing there has this budget to
+        // blow. Asserting it anyway failed the Windows leg at 117 bytes on a
+        // path the code does not choose: short_root uses env::temp_dir() off
+        // Unix, so the length was dominated by the runner's own
+        // C:\Users\RUNNER~1\AppData\Local\Temp. Shortening that to satisfy a
+        // limit Windows does not have would trade a real property (the
+        // fallback lives where the OS says temporary files go) for a fake one.
+        #[cfg(unix)]
+        {
+            let record = first.join(format!("{}.endpoint", "f".repeat(32)));
+            let socket = record.with_extension("sock");
+            assert!(
+                socket.as_os_str().len() < 104,
+                "the fallback socket path is {} bytes: {}",
+                socket.as_os_str().len(),
+                socket.display()
+            );
+        }
     }
 
     #[test]
