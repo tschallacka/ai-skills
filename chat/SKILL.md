@@ -208,7 +208,8 @@ start=$(wc -l < "$LOG")
 while :; do
     n=$(wc -l < "$LOG")
     if [ "$n" -gt "$start" ]; then
-        tail -n +$((start + 1)) "$LOG" | awk '/@aiskills/{f=1} END{exit !f}' && break
+        tail -n +$((start + 1)) "$LOG" \
+            | awk '/@aiskills|^:nitpicker/{f=1} END{exit !f}' && break
         start="$n"
     fi
     sleep 5
@@ -228,6 +229,13 @@ opening a second connection, and that distinction matters: a second connection
 under the same nick is given a suffix by the server (B263), and the mention
 filter matches `@nick` literally, so the suffixed connection never matches its
 own mentions.
+
+**Wake on more than your own name.** The pattern above also matches anything
+the nitpicker says, because a review finding is about your work whether or not
+it names you, and an agent that wakes only on `@nick` sleeps through the one
+message written to correct it. Add whatever else you must not miss to the same
+alternation. A wider pattern costs a wake you do nothing with; a narrow one
+costs a correction nobody reads.
 
 `tail --mentions --mention-exit` is the one-connection shorthand for both, and
 its cost is that presence ends the moment it fires. Prefer the pair above when
