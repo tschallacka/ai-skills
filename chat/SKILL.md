@@ -136,6 +136,11 @@ Register it with your harness pointing at the per-triple binary, e.g.
 claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
 ```
 
+That path is inside the skill root, and switching the skill back to `skill`
+mode deletes the binary it names: the registration survives the switch and
+stops working, in every config that holds it. Re-register after a switch back
+to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+
 | tool | takes | answers |
 |---|---|---|
 | `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
@@ -153,6 +158,20 @@ connection for the life of the session, so a message is delivered when it
 arrives rather than on the next poll — `tail`'s liveness without a process to
 babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
 it is, so the messages it skipped are still unread for a plain `read`.
+
+**That held connection is also your presence, and it needs no tail.** The
+adapter registers once and keeps the connection for the life of the MCP
+process, so your nick is in `names` from the first tool call until the process
+ends — measured: a `join` over stdio, then `names` from a second nick four
+seconds after the call returned, reports the adapter's nick; after killing the
+adapter the same query reports nobody.
+
+So an mcp-mode install does not run the presence tail and wake guard that step
+1 of *Connecting to a channel* describes, and does not inherit the gap they
+leave. There is nothing to re-arm, because nothing exits to wake you: `wait`
+blocks on the connection that is already holding your membership. What the two
+postures share is the rule underneath — read the channel at every natural
+pause, because a blocked `wait` is not the only way work reaches you.
 
 What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
 with no server at all. That is a maintenance path, and it has no tool.
@@ -194,27 +213,38 @@ first: connect, then report where you landed.
 
 
 ```bash
-chat-client-rs join --chan '#ops' --nick aiskills    # seeds the cursor at the CURRENT end
-chat-client-rs read --chan '#ops' --nick aiskills --since 0   # the history join skipped
+NICK=agent-a                       # your nick on the bus
+LOG="${TMPDIR:-/tmp}/chat-ops.log" # the log this agent owns
+
+chat-client-rs join --chan '#ops' --nick "$NICK"    # seeds the cursor at the CURRENT end
+chat-client-rs read --chan '#ops' --nick "$NICK" --since 0   # the history join skipped
 
 # Presence: a plain streaming tail, appending to a log you own, started as a
 # TRACKED background task -- not with a detached `&`. See the rule below.
 # `--no-session` so it does not advance the channel cursor and leave your own
 # `read` reporting nothing new.
-chat-client-rs tail --chan '#ops' --nick aiskills --no-session >> "$LOG" 2>&1
+chat-client-rs tail --chan '#ops' --nick "$NICK" --no-session >> "$LOG" 2>&1
 
-# The wake: a guard that watches THAT LOG and exits when your nick appears.
+# The wake: a guard that watches THAT LOG and exits when your nick is mentioned.
 start=$(wc -l < "$LOG")
 while :; do
     n=$(wc -l < "$LOG")
     if [ "$n" -gt "$start" ]; then
         tail -n +$((start + 1)) "$LOG" \
-            | awk '/@aiskills|^:nitpicker/{f=1} END{exit !f}' && break
+            | awk -v me="@$NICK" 'index($0, me){f=1} END{exit !f}' && break
         start="$n"
     fi
     sleep 5
 done
 ```
+
+**Waking on somebody else's output is a different pattern, and it is easy to
+get backwards.** A stored line begins with its SENDER, so `^:name` matches what
+that agent *said*, while `@name` matches a mention of them. Watch a peer by
+sender when you must not miss their output — `/^:reviewer/` for everything the
+reviewer says — and never add your own nick to that alternation: it matches
+every line you send, so the guard fires on your own announcement and wakes you
+into an empty inbox.
 
 **Two parts, and they are not interchangeable.**
 
@@ -282,8 +312,14 @@ every natural pause as well** — it is one cheap call, it needs no wake, and it
 the only thing that closes the window:
 
 ```bash
-chat-client-rs read --chan '#ops' --nick aiskills
+chat-client-rs read --chan '#ops' --nick <your nick>
 ```
+
+**A mention with nothing after it is an instruction to read, not a question.**
+A wake carrying only your nick means there is something in the channel for you:
+read from your cursor and act on what is there. Asking what was wanted spends a
+round trip on what the log already answers, and the answer is usually in the
+messages that arrived while you were between wakes.
 
 Two agents adopting this posture hit the gap within minutes of each other, and
 `names` is how you confirm it from the outside: a nick that is mid-re-arm shows
