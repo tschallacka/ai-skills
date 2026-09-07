@@ -313,11 +313,28 @@ fn safe_key(raw: &str) -> String {
 /// cursors the session exists to keep. Inside codex's sandbox they are worse
 /// than unstable: they are pinned at 3/2/1 for every session on the machine, so
 /// they are stable and identical, which would merge every codex agent into one.
+/// `nick` joins the inferred rungs, and only the inferred ones.
+///
+/// A Claude Code subagent is not a separate process: measured, every subagent
+/// of one session shares that session's pid and its CLAUDE_CODE_SESSION_ID, so
+/// the harness rung alone gives them one key. A subagent joining under its own
+/// nick then wrote into the parent's session file and moved the parent's
+/// cursors, which is unread messages lost with nothing to see.
+///
+/// The nick is what actually distinguishes two agents on this bus, so it is
+/// folded in alongside the harness identity rather than replacing it: identity
+/// alone collides between a session and its children, and nick alone would let
+/// an unrelated process on the machine claim a session by picking the name.
+///
+/// Explicit is deliberately left alone. `--session ID` is a caller naming a
+/// session, and two callers naming the same one mean to share it.
 pub fn resolve_session_key(
     explicit: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
     worktree_root: Option<&str>,
+    nick: Option<&str>,
 ) -> (String, KeySource) {
+    let nick = nick.unwrap_or("").trim();
     // 1. What Tschallacka asked for by name always wins; no inference.
     let chosen = explicit
         .map(|s| s.to_string())
@@ -330,7 +347,9 @@ pub fn resolve_session_key(
         }
     }
 
-    // 2. Whatever identity the harness already knows about itself.
+    // 2. Whatever identity the harness already knows about itself, plus the
+    //    nick, because that identity is shared by a session and every subagent
+    //    it runs.
     let mut material = String::new();
     for name in HARNESS_ID_VARS.iter() {
         if let Some(v) = env(name).filter(|v| !v.is_empty()) {
@@ -341,42 +360,58 @@ pub fn resolve_session_key(
         }
     }
     if !material.is_empty() {
+        material.push_str("nick=");
+        material.push_str(nick);
         return (
             format!("h-{:016x}", fnv1a64(material.as_bytes())),
             KeySource::Harness,
         );
     }
 
-    // 3. The worktree root. Agents on one project in separate worktrees are the
-    //    case this skill exists for, and the root is already unique per
-    //    checkout on a machine, so the shared repository directory would add
-    //    nothing to distinctness -- two checkouts of one repo have different
-    //    roots, and sibling worktrees must NOT share a session.
+    // 3. The worktree root, plus the nick. Agents on one project in separate
+    //    worktrees are the case this skill exists for, and the root is already
+    //    unique per checkout on a machine, so the shared repository directory
+    //    would add nothing to distinctness -- two checkouts of one repo have
+    //    different roots, and sibling worktrees must NOT share a session. Two
+    //    agents in ONE worktree are separated by the nick and nothing else.
     if let Some(root) = worktree_root.filter(|r| !r.is_empty()) {
         return (
-            format!("w-{:016x}", fnv1a64(root.as_bytes())),
+            format!(
+                "w-{:016x}",
+                fnv1a64(format!("{root}\u{1f}nick={nick}").as_bytes())
+            ),
             KeySource::Worktree,
         );
     }
 
     // 4. Nothing to go on -- outside a repository, with no harness and no
-    //    explicit id. One shared session, which is the behaviour that predates
-    //    this ladder, under a name that says so.
-    ("shared".to_string(), KeySource::Shared)
+    //    explicit id. One shared session per nick, which is the behaviour that
+    //    predates this ladder for a single agent, under a name that says so.
+    let key = match safe_key(nick) {
+        n if n.is_empty() => "shared".to_string(),
+        n => format!("shared-{n}"),
+    };
+    (key, KeySource::Shared)
 }
 
-/// The session this process owns, resolved once. Reading `--session` straight
-/// out of argv keeps every existing call site unchanged: the session key is a
-/// property of the invocation, like argv itself.
+/// The session this process owns, resolved once. Reading `--session` and
+/// `--nick` straight out of argv keeps every existing call site unchanged: the
+/// session key is a property of the invocation, like argv itself.
+///
+/// A subcommand carrying no `--nick` (`session show`) resolves the no-nick key,
+/// which is the key a nick-less invocation would have written. That is the
+/// honest answer rather than a guess at which agent is asking.
 pub fn session_key() -> &'static (String, KeySource) {
     static KEY: std::sync::OnceLock<(String, KeySource)> = std::sync::OnceLock::new();
     KEY.get_or_init(|| {
         let args: Vec<String> = std::env::args().collect();
         let explicit = parse_flag(&args, "--session");
+        let nick = parse_flag(&args, "--nick");
         resolve_session_key(
             explicit.as_deref(),
             &|name| std::env::var(name).ok(),
             git_worktree_root().as_deref(),
+            nick.as_deref(),
         )
     })
 }
@@ -2165,7 +2200,7 @@ mod tests {
             ("CHAT_SESSION_ID", "from-env"),
             ("CLAUDE_CODE_SESSION_ID", "claude-1"),
         ]);
-        let (key, src) = resolve_session_key(Some("agent-b"), &env, Some("/repo"));
+        let (key, src) = resolve_session_key(Some("agent-b"), &env, Some("/repo"), None);
         assert_eq!(key, "agent-b");
         assert_eq!(src, KeySource::Explicit);
     }
@@ -2176,7 +2211,7 @@ mod tests {
             ("CHAT_SESSION_ID", "from-env"),
             ("CLAUDE_CODE_SESSION_ID", "claude-1"),
         ]);
-        let (key, src) = resolve_session_key(None, &env, Some("/repo"));
+        let (key, src) = resolve_session_key(None, &env, Some("/repo"), None);
         assert_eq!(key, "from-env");
         assert_eq!(src, KeySource::Explicit);
     }
@@ -2184,7 +2219,7 @@ mod tests {
     #[test]
     fn explicit_id_is_reduced_to_a_safe_filename() {
         let env = env_of(&[]);
-        let (key, src) = resolve_session_key(Some("../../etc/passwd"), &env, None);
+        let (key, src) = resolve_session_key(Some("../../etc/passwd"), &env, None, None);
         assert_eq!(src, KeySource::Explicit);
         assert!(!key.contains('/'), "key must not contain a path separator");
         // What matters is where the key resolves: one file directly inside
@@ -2203,49 +2238,130 @@ mod tests {
     #[test]
     fn an_all_dots_explicit_id_falls_through_rather_than_naming_a_directory() {
         let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "claude-1")]);
-        let (key, src) = resolve_session_key(Some(".."), &env, Some("/repo"));
+        let (key, src) = resolve_session_key(Some(".."), &env, Some("/repo"), None);
         assert_eq!(src, KeySource::Harness, "got key {}", key);
     }
 
     #[test]
     fn each_harness_session_id_gives_a_distinct_key() {
-        let a = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
-        let b = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]), None);
+        let a = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            None,
+        );
+        let b = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]),
+            None,
+            None,
+        );
         assert_eq!(a.1, KeySource::Harness);
         assert_ne!(a.0, b.0, "two Claude Code sessions must not share a key");
 
-        let c = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "c")]), None);
-        let d = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "d")]), None);
+        let c = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "c")]), None, None);
+        let d = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "d")]), None, None);
         assert_eq!(c.1, KeySource::Harness);
         assert_ne!(c.0, d.0, "two codex sessions must not share a key");
 
-        let e = resolve_session_key(None, &env_of(&[("OPENCODE_PID", "111")]), None);
+        let e = resolve_session_key(None, &env_of(&[("OPENCODE_PID", "111")]), None, None);
         assert_eq!(e.1, KeySource::Harness);
         assert_ne!(
             e.0,
-            resolve_session_key(None, &env_of(&[("OPENCODE_PID", "222")]), None).0
+            resolve_session_key(None, &env_of(&[("OPENCODE_PID", "222")]), None, None).0
         );
     }
 
     #[test]
     fn a_harness_key_is_stable_for_the_same_ids() {
         let pairs = [("CODEX_SESSION_ID", "same"), ("OPENCODE_PID", "9")];
-        let first = resolve_session_key(None, &env_of(&pairs), Some("/a"));
-        let again = resolve_session_key(None, &env_of(&pairs), Some("/b"));
+        let first = resolve_session_key(None, &env_of(&pairs), Some("/a"), None);
+        let again = resolve_session_key(None, &env_of(&pairs), Some("/b"), None);
         assert_eq!(
             first.0, again.0,
             "the harness rung must not depend on the worktree"
         );
     }
 
+    /// A Claude Code subagent shares its parent's process and its
+    /// CLAUDE_CODE_SESSION_ID, so the harness rung alone hands both the same
+    /// key: measured, a subagent joined as itself and wrote into the parent's
+    /// session file, moving the parent's cursors past unread messages.
+    #[test]
+    fn a_subagent_under_one_harness_id_gets_its_own_session_per_nick() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
+        let parent = resolve_session_key(None, &env, None, Some("aiskills"));
+        let child = resolve_session_key(None, &env, None, Some("t90-chat-mcp"));
+        assert_eq!(parent.1, KeySource::Harness);
+        assert_ne!(
+            parent.0, child.0,
+            "one harness id and two nicks must not share a session file"
+        );
+        // Same nick, same key: a session has to survive the next invocation.
+        assert_eq!(
+            parent.0,
+            resolve_session_key(None, &env, None, Some("aiskills")).0
+        );
+    }
+
+    /// The nick alone must not name a session, or any process on the machine
+    /// could claim another's by choosing the name.
+    #[test]
+    fn the_same_nick_under_a_different_harness_id_is_a_different_session() {
+        let a = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            Some("aiskills"),
+        );
+        let b = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]),
+            None,
+            Some("aiskills"),
+        );
+        assert_ne!(a.0, b.0, "the harness id must still separate two sessions");
+    }
+
+    /// Two agents in ONE worktree have nothing but the nick to tell them apart.
+    #[test]
+    fn two_nicks_in_one_worktree_do_not_share_a_session() {
+        let env = env_of(&[]);
+        let a = resolve_session_key(None, &env, Some("/repo"), Some("one"));
+        let b = resolve_session_key(None, &env, Some("/repo"), Some("two"));
+        assert_eq!(a.1, KeySource::Worktree);
+        assert_ne!(a.0, b.0);
+        let c = resolve_session_key(None, &env, None, Some("one"));
+        let d = resolve_session_key(None, &env, None, Some("two"));
+        assert_eq!(c.1, KeySource::Shared);
+        assert_ne!(c.0, d.0, "the shared rung is per nick too");
+    }
+
+    /// `--session ID` is a caller naming a session, so two callers naming the
+    /// same one mean to share it. Folding the nick in would break that.
+    #[test]
+    fn an_explicit_session_id_is_not_split_by_nick() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
+        let a = resolve_session_key(Some("shared-desk"), &env, None, Some("one"));
+        let b = resolve_session_key(Some("shared-desk"), &env, None, Some("two"));
+        assert_eq!(a.1, KeySource::Explicit);
+        assert_eq!(a.0, b.0, "an explicitly named session is shared on purpose");
+    }
+
     #[test]
     fn a_nested_harness_does_not_inherit_the_outer_agents_session() {
         // Measured: a codex launched from a Claude Code agent keeps that
         // agent's CLAUDE_CODE_SESSION_ID and adds its own CODEX_SESSION_ID.
-        let outer = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
+        let outer = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            None,
+        );
         let inner = resolve_session_key(
             None,
             &env_of(&[("CLAUDE_CODE_SESSION_ID", "a"), ("CODEX_SESSION_ID", "z")]),
+            None,
             None,
         );
         assert_ne!(
@@ -2257,20 +2373,20 @@ mod tests {
     #[test]
     fn the_worktree_rung_separates_worktrees_and_only_applies_without_a_harness() {
         let env = env_of(&[]);
-        let a = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"));
-        let b = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/two"));
+        let a = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"), None);
+        let b = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/two"), None);
         assert_eq!(a.1, KeySource::Worktree);
         assert_ne!(a.0, b.0, "sibling worktrees must not share a session");
         // Same root, twice: the same key.
         assert_eq!(
             a.0,
-            resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one")).0
+            resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"), None).0
         );
     }
 
     #[test]
     fn outside_a_repository_with_no_harness_one_shared_session_is_named_as_such() {
-        let (key, src) = resolve_session_key(None, &env_of(&[]), None);
+        let (key, src) = resolve_session_key(None, &env_of(&[]), None, None);
         assert_eq!(key, "shared");
         assert_eq!(src, KeySource::Shared);
     }
