@@ -487,6 +487,19 @@
       "updated_at": "2026-09-06T17:57:28Z"
     },
     {
+      "id": "T100",
+      "title": "Optional CodeGraph-backed structural lookup in the editor, active only when codegraph is installed",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Michael asked whether the editor and CodeGraph can integrate for search, and whether MCP servers are strictly separated.\n\nThey are not separated: nothing stops one program from being a client of another. But for this pairing MCP is the wrong pipe -- codegraph ships a CLI (codegraph explore), so the editor can simply exec it. Detection: a codegraph binary on PATH plus a .codegraph/ directory at the repo root. Absent either, the verb is not advertised at all.\n\nWHY IT MUST NOT JOIN search. The editor's contract is that the server owns the buffer and every search result is revision-guarded against it. CodeGraph indexes files ON DISK and its own guidance says the watcher lags writes by about a second. So a codegraph hit can name a line that does not exist in the tab, and it is stalest precisely while a file is being edited -- which is the whole time the editor is in use. Merging those hits into search results would manufacture this project's most-filed defect class: an answer advertised as authoritative that is not (B217, B237, B250-B252, and B261 are all that family).\n\nSHAPE. A separate verb, not a search mode. It answers from the on-disk index, says so, reports the index staleness it can see, and returns symbols, definitions and callers -- NOT buffer coordinates a caller could hand to replace. The value is the question the editor genuinely cannot answer: who calls the function I am about to change, and what is the blast radius.\n\nConsumers: verbs.rs must declare the verb and its keys (the per-verb door, B237), the MCP adapter must advertise it only when codegraph is present, and T99's verbosity ladder needs tiers for its response keys or B258's panic shape recurs.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-07T19:39:33Z",
+      "updated_at": "2026-09-07T19:39:33Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
