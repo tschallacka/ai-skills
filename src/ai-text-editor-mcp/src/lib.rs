@@ -113,6 +113,7 @@ pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "document_mode",
     "normalize_nfc",
     "idle_timeout_seconds",
+    "acknowledge_create_parents",
     "auth_token",
     "session_token",
 ];
@@ -137,6 +138,9 @@ fn adapter_argument(key: &str) -> Value {
         ),
         "idle_timeout_seconds" => int(
             "Idle seconds after which a server this call starts shuts itself down.",
+        ),
+        "acknowledge_create_parents" => boolean(
+            "Confirms that a path whose parent directory does not exist is meant as typed. Without it such an open is refused with the missing directory named and nothing is created; with it the directory chain is created and the tab opens.",
         ),
         "auth_token" => string(
             "Shared secret required by a server reached over a loopback TCP endpoint.",
@@ -212,7 +216,7 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "replace",
-        "Replace a byte range with text or base64 bytes; preserve the revision guard.",
+        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span three ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), or range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
             let mut p = routing();
             p.extend(Vec::from([
@@ -224,7 +228,31 @@ fn tool_definitions() -> Vec<Value> {
                     "cursor_id",
                     int("Numeric cursor to replace at when offset is omitted."),
                 ),
-                ("delete_len", int("Byte length to delete before inserting.")),
+                ("delete_len", int("Byte length to delete before inserting. Omit it when expected_text names the span: its own length is then the length, so there is no arithmetic to get wrong.")),
+                (
+                    "range_start_line",
+                    int("Inclusive first line of a line-range replace (text tabs). Needs range_end_line, and may not be combined with offset, delete_len or cursor_id."),
+                ),
+                (
+                    "range_end_line",
+                    int("Inclusive last line of a line-range replace; its newline goes with it, so replacing with no text deletes the lines outright."),
+                ),
+                (
+                    "range_start_byte",
+                    int("Inclusive first byte of a byte-range replace — a search hit's byte_start. Needs range_end_byte."),
+                ),
+                (
+                    "range_end_byte",
+                    int("Exclusive last byte of a byte-range replace — a search hit's byte_end, so a span across two hits needs no arithmetic."),
+                ),
+                (
+                    "expected_text",
+                    string("The bytes the caller believes are at the span. Verified BEFORE anything is deleted and refused by name on mismatch, which the revision guard cannot do: a revision proves the document has not moved since you read it, not that your length still matches the text there — an edit of your own that changed that text's length leaves the revision perfectly current and the length wrong."),
+                ),
+                (
+                    "expected_bytes_base64",
+                    string("expected_text for a raw or hex tab, or for bytes that are not UTF-8. Pass one of the two, not both."),
+                ),
                 ("text", string("Replacement text.")),
                 (
                     "bytes_base64",
@@ -540,6 +568,10 @@ fn call_tool(id: Value, params: Value) -> Value {
             .get("idle_timeout_seconds")
             .and_then(Value::as_u64)
             .map(|value| value.to_string()),
+        acknowledge_create_parents: payload
+            .get("acknowledge_create_parents")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         force_refresh: false,
     };
     let auth_token = payload

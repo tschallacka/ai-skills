@@ -45,6 +45,14 @@ pub struct ResolveRequest {
     pub document_mode: Option<String>,
     pub normalize_nfc: bool,
     pub idle_timeout_seconds: Option<String>,
+    /// B229: "I meant this path, the missing directories and all." A path
+    /// whose parent directory does not exist is refused with the parent named
+    /// and a confirmation asked for; this is that confirmation, and only with
+    /// it are the directories created. A silent `mkdir -p` is deliberately not
+    /// the behaviour — a typo would then build a directory tree nobody asked
+    /// for, which is exactly what the verify step exists to prevent. Same
+    /// shape as `--acknowledge-force-save` and `--acknowledge-large-edit`.
+    pub acknowledge_create_parents: bool,
     /// Skip every cached or registered session token (the endpoint may still
     /// be reused). `execute` sets it on its recovery pass, when the token on
     /// file belongs to a server generation that is gone (B179).
@@ -288,6 +296,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
                 request.idle_timeout_seconds.as_deref(),
                 request.explicit_identity.as_deref(),
                 &request.agent_env_var,
+                request.acknowledge_create_parents,
             )?;
             let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
@@ -371,7 +380,44 @@ pub fn autostart_server(
     idle_timeout_seconds: Option<&str>,
     explicit_identity: Option<&str>,
     agent_env_var: &str,
+    acknowledge_create_parents: bool,
 ) -> Result<Option<String>, String> {
+    // B229: a path whose parent directory is missing used to be reported as
+    // "server for <path> failed to start: ai-text-editor-server: cannot
+    // resolve <path>: No such file or directory (os error 2)" — blaming the
+    // server, when nothing about the server is wrong, and offering no
+    // recovery. With the parent present that same open succeeds, the tab
+    // starts empty and `save` writes the file, so the two cases differ only in
+    // the parent directory and only one of them said so.
+    //
+    // The wording is `save`'s own for the identical condition, which the
+    // server already gets right; this only reaches it from the other end.
+    //
+    // Two steps, not one: the refusal names the parent and asks for a
+    // confirmation, and only an acknowledged retry creates the chain. A
+    // silent `mkdir -p` would build a directory tree nobody asked for out of
+    // a typo, which is what the verify step exists to prevent.
+    if let Some(parent) = file
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        if !parent.is_dir() {
+            if !acknowledge_create_parents {
+                return Err(format!(
+                    "cannot open {}: the parent directory {} does not exist. If the path is right, retry with acknowledge_create_parents (CLI: --acknowledge-create-parents) and the directories will be created; if it is a typo, fix the path — nothing was created",
+                    file.display(),
+                    parent.display()
+                ));
+            }
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "cannot create the parent directory {} for {}: {error}",
+                    parent.display(),
+                    file.display()
+                )
+            })?;
+        }
+    }
     let discovery = endpoint_for_file(file);
     let lock_path = discovery.with_extension("start.lock");
     let _lock = StaleLock::acquire(&lock_path, Duration::from_secs(20))

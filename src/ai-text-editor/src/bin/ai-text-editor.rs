@@ -64,6 +64,7 @@ fn main() {
         document_mode: option(&args, &["--document-mode", "-M"]),
         normalize_nfc: flag(&args, &["--normalize-nfc"]),
         idle_timeout_seconds: option(&args, &["--idle-timeout-seconds"]),
+        acknowledge_create_parents: flag(&args, &["--acknowledge-create-parents"]),
         force_refresh: false,
     };
     let mut payload = serde_json::Map::new();
@@ -154,6 +155,14 @@ fn main() {
             "delete_len".into(),
             json!(parse_number(&value, "--delete-len")),
         );
+    }
+    for (argument, field) in [
+        ("--expected-text", "expected_text"),
+        ("--expected-bytes-base64", "expected_bytes_base64"),
+    ] {
+        if let Some(value) = option(&args, &[argument]) {
+            payload.insert(field.into(), Value::String(value));
+        }
     }
     if let Some(value) = option(&args, &["--text", "-t"]) {
         payload.insert("text".into(), Value::String(value));
@@ -436,7 +445,7 @@ fn help() {
     println!("Search requires -m/--mode and -q/--query (or --query-base64): exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex. Fuzzy modes accept -g/--gradient 0.0..1.0 with strategy-specific defaults. exact_bytes decodes its query as base64-encoded bytes; plain text belongs in exact_text.");
     println!("Coordinates: text lines are 1-based and Unicode-scalar columns are 0-based; raw/hex coordinates are byte offsets. Refetch after every revision.");
     println!("Wrapped navigation: -w/--wrap-width N adds visual coordinates; -V/--visual interprets -l/-c as wrapped coordinates. Stored cursors remain logical.");
-    println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");
+    println!("Edits: -o/--offset N (a BYTE offset into the document) or -C/--cursor-id N, plus -d/--delete-len N (bytes to delete from the offset; it may cross line ends and is reported back as spans_lines when it does) and -t/--text TEXT or --bytes-base64 B64; omitting -o inserts/replaces at that cursor. For replace, a whole span can be addressed directly instead of by arithmetic: --range-start-line N --range-end-line N (inclusive, 1-based, the last line's newline included, so replacing with no text deletes the lines outright) or --range-start-byte N --range-end-byte N (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). A range may not be combined with -o, -d or -C, and insert takes no range - it places bytes at a point. -r/--expected-revision N is required for safe concurrent edits. Edits are journal-and-buffer only: they return a new revision but nothing reaches the file until save succeeds; mutating responses carry a dirty flag. Use begin-transaction/end-transaction to group edits into one undo step.");
     println!("Reading: -b/--before N -B/--after N (line window around the cursor), -o/--offset N -L/--length N (a BYTE window of the text, snapped to UTF-8 boundaries), --range-start-line N --range-end-line N (an inclusive line window on text tabs), --range-start-byte N --range-end-byte N (a half-open byte window on raw and hex tabs).");
     println!("Paging search results: -n/--limit N, --pager-key KEY, --historical, and the page command's -o/--offset N; --order forward|reverse applies to search responses. A search command itself refuses -o/--offset: the offset pages an existing result set, it never trims a fresh scan.");
     println!("Presentation: -p/--presentation structured|text|paging|stream; paging/stream readers must restart after the FILE EDITED delimiter.");
