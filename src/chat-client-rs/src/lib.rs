@@ -1855,19 +1855,23 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     }
     let _ = wait_for_welcome(&mut tls, &nick);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    // Resume from the session cursor; with no cursor yet, default to the
+    // Resume from the session cursor; with NO cursor recorded, default to the
     // channel's CURRENT end (LASTID) so tailing an old channel does not dump
     // its whole history — only new messages are shown from now on.
+    //
+    // A recorded 0 is a position, not an absence (B269): it means this agent
+    // joined while the channel was empty. `read` was fixed and this was not,
+    // which left the collapse in the path every agent actually sits in.
     let mut pending = VecDeque::new();
     let mut last_id: u64 = if o.no_session {
         0
     } else {
-        let cur = Session::load(state_dir).cursor(&o.chan);
-        if cur > 0 {
-            cur
-        } else {
-            let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-            read_last_id(&mut tls, &o.chan, &mut pending)
+        match Session::load(state_dir).cursor_recorded(&o.chan) {
+            Some(cur) => cur,
+            None => {
+                let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+                read_last_id(&mut tls, &o.chan, &mut pending)
+            }
         }
     };
     // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
