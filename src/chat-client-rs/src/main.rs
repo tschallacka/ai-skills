@@ -895,6 +895,72 @@ fn resolve(server: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("no address for {}", server))
 }
 
+/// The wire segments one `--text` becomes: never more than one IRC line each,
+/// and never a line carrying an embedded newline.
+///
+/// B266. Splitting on newlines ALONE would have traded one silent truncation
+/// for another, because a single paragraph can exceed the line limit on its
+/// own: RFC 1459 caps a message at 512 bytes including the prefix the server
+/// prepends and the CRLF, so the room the text actually has is what is left
+/// after `:nick!nick@localhost PRIVMSG #chan :`. Both cuts are therefore made
+/// here, and the caller sends one PRIVMSG per segment.
+fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
+    let overhead = format!(":{nick}!{nick}@localhost PRIVMSG {chan} :").len() + 2;
+    let budget = 512usize.saturating_sub(overhead).max(1);
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        // A CRLF-terminated input line keeps no stray CR: it would reach the
+        // wire as a second line terminator.
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            // A blank line is a paragraph break, and an empty PRIVMSG trailing
+            // is what a server is entitled to drop. One space keeps the break
+            // visible in a line-based medium rather than silently closing it up.
+            out.push(" ".to_string());
+            continue;
+        }
+        let mut rest = line;
+        while !rest.is_empty() {
+            let (head, tail) = split_at_budget(rest, budget);
+            out.push(head.to_string());
+            rest = tail;
+        }
+    }
+    out
+}
+
+/// Split one over-long line at the budget, preferring a word boundary, always
+/// on a UTF-8 boundary. Never returns an empty head, or the caller loops.
+fn split_at_budget(line: &str, budget: usize) -> (&str, &str) {
+    if line.len() <= budget {
+        return (line, "");
+    }
+    let mut end = budget;
+    while end > 0 && !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == 0 {
+        // One character wider than the whole budget. Emit it anyway: a segment
+        // one char over beats an infinite loop, and this needs a 4-byte char
+        // under a 3-byte budget to reach.
+        end = line
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| i)
+            .unwrap_or(line.len());
+        return (&line[..end], &line[end..]);
+    }
+    // Prefer breaking at a space, but do not give back more than a quarter of
+    // the window chasing one -- a long unbroken token would otherwise be cut
+    // far short of the limit.
+    if let Some(space) = line[..end].rfind(' ') {
+        if space >= budget * 3 / 4 {
+            return (&line[..space], line[space + 1..].trim_start());
+        }
+    }
+    (&line[..end], &line[end..])
+}
+
 fn write_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     line: &str,
@@ -1050,7 +1116,21 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     // nothing and cost a join/quit pair per call. Harmless while nothing could
     // see it; once membership was relayed (B244/B245) it made every send
     // flicker the nick in every other client's list (B247).
-    let _ = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, o.text));
+    // One PRIVMSG per wire segment, and the write result is CHECKED.
+    //
+    // B266: this was a single write of the whole --text with the result thrown
+    // away by `let _ =`. write_line appends CRLF, so an embedded newline ended
+    // the IRC line early and the server read the remainder as a command of its
+    // own and discarded it. sanitairkamer measured ~1900-character messages
+    // arriving as 415, 257 and less -- each cut exactly at its first paragraph
+    // break -- and nothing anywhere reported a failure.
+    let segments = wire_segments(&nick, &o.chan, &o.text);
+    for segment in &segments {
+        if let Err(e) = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, segment)) {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    }
     // ASK for the acknowledgement rather than expecting one to be pushed. The
     // server sends the sender nothing after a PRIVMSG, deliberately: an echo
     // rendered twice in a standard client (B249), and an unsolicited numeric
@@ -1088,9 +1168,14 @@ fn send(args: &[String], state_dir: &std::path::Path) {
         eprintln!("chat-client-rs: server did not acknowledge the message");
         std::process::exit(70);
     }
-    // Printed locally, from what was sent: the server no longer echoes, and this
-    // keeps the command's output the same shape callers already parse.
-    println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, o.text);
+    // Printed locally, from what was SENT -- one line per wire segment, not one
+    // line holding the whole --text. The server no longer echoes, so this print
+    // is the only thing a caller sees, and printing the full text while the wire
+    // carried a prefix of it is exactly how B266 stayed invisible: the sender's
+    // own success output was the argument it passed, never the bytes that left.
+    for segment in &segments {
+        println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, segment);
+    }
     // Advance the channel cursor to the newest id. The echo line is the
     // IRC-prefix form (no id), so fetch history to learn the id of the message
     // just stored.
@@ -1972,6 +2057,72 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
 
 #[cfg(test)]
 mod tests {
+
+    /// B266: a newline used to end the IRC line, so everything after the first
+    /// paragraph break was parsed by the server as a command and discarded.
+    #[test]
+    fn a_multiline_text_becomes_one_segment_per_line() {
+        let segments = wire_segments("editor-batch", "#ai-skills", "first\n\nsecond\nthird");
+        assert_eq!(segments, vec!["first", " ", "second", "third"]);
+        for segment in &segments {
+            assert!(
+                !segment.contains('\n') && !segment.contains('\r'),
+                "a segment may not carry a line terminator: {segment:?}"
+            );
+        }
+    }
+
+    /// Splitting on newlines alone would have replaced one silent truncation
+    /// with another: a single paragraph can exceed 512 bytes by itself.
+    #[test]
+    fn a_long_paragraph_is_split_to_fit_the_irc_line_limit() {
+        let nick = "editor-batch";
+        let chan = "#ai-skills";
+        let text = "word ".repeat(500);
+        let segments = wire_segments(nick, chan, &text);
+        assert!(segments.len() > 1, "a 2500-byte line must be split");
+        for segment in &segments {
+            let wire = format!(":{nick}!{nick}@localhost PRIVMSG {chan} :{segment}\r\n");
+            assert!(
+                wire.len() <= 512,
+                "a segment must fit an IRC line, got {} bytes",
+                wire.len()
+            );
+        }
+    }
+
+    /// Every byte of the input has to survive somewhere. A fix that fits the
+    /// limit by dropping text is the bug with a different cut point.
+    #[test]
+    fn no_input_word_is_lost_in_splitting() {
+        let text = format!("alpha {} omega", "filler ".repeat(300));
+        let segments = wire_segments("n", "#c", &text);
+        let rejoined = segments.join(" ");
+        for word in ["alpha", "omega"] {
+            assert!(rejoined.contains(word), "{word} was dropped");
+        }
+        assert_eq!(
+            rejoined.split_whitespace().count(),
+            text.split_whitespace().count(),
+            "splitting changed the word count"
+        );
+    }
+
+    /// A token longer than the budget still has to make progress, and must not
+    /// be cut mid-character.
+    #[test]
+    fn an_unbroken_token_and_multibyte_text_still_terminate() {
+        let segments = wire_segments("n", "#c", &"x".repeat(2000));
+        assert!(segments.len() > 1);
+        assert!(segments.iter().all(|s| !s.is_empty()));
+
+        let multibyte = "é".repeat(1000);
+        let segments = wire_segments("n", "#c", &multibyte);
+        assert!(segments.iter().all(|s| !s.is_empty()));
+        // Reassembly proves no character was severed: a cut inside a UTF-8
+        // sequence could not round-trip as the same string.
+        assert_eq!(segments.concat(), multibyte);
+    }
     use super::*;
     use std::fs;
 
