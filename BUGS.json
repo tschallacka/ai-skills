@@ -2316,6 +2316,69 @@
       "updated_at": "2026-09-07T10:43:36Z"
     },
     {
+      "id": "B231",
+      "title": "the git-worktrees skill prescribes a worktree location the EnterWorktree tool does not use, and warns against the one it does",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Read chat of the rule: awk on ~/.claude/skills/git-worktrees/SKILL.md section 'Where worktrees live', then compare with the actual path EnterWorktree creates: git worktree list in this repository.",
+      "observed": "SKILL.md: 'Agent worktrees go under ~/.config/tsch-ai-skills/worktrees/, one named directory each ... Never /tmp ... and a worktree under the repository itself confuses the repo's own filesystem scans and cleanup tools.' Meanwhile every worktree in use sits under the repository: git worktree list reports /home/mdibbets/git/ai-skills/.claude/worktrees/{registers,fix-drive5-batch,agent-a4c12403322e18fc2,fix-b111-source-shipped}, which is what the EnterWorktree tool creates.",
+      "expected": "The skill states the location that is actually used, or states the exception explicitly. As written an agent following the skill puts its worktree somewhere no other agent or tool looks, and an agent following the tool is violating a documented rule for a stated reason - so one of the two is wrong and nothing says which.",
+      "mechanism": "Documentation predating the harness's own worktree support: the section was written for worktrees an agent created by hand with git worktree add, where the author chose a central location on purpose. EnterWorktree creates them under the repository's .claude/worktrees/ instead, and the skill was never reconciled with it.",
+      "surfaces": [
+        "chat/../git-worktrees/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael 2026-09-07, asking whether the skill already specified the main-agent/subagent division; checking it surfaced this instead",
+      "notes": "Correcting the surfaces field, which was mistyped on filing: the file is git-worktrees/SKILL.md at the repository root (the skill is tracked here and installs to ~/.claude/skills/git-worktrees/). Verified present: /home/mdibbets/git/ai-skills/git-worktrees/SKILL.md. B232 and B233 are the other two gaps in the same file, kept separate because each has its own fix and closing one leaves the others: B232 is the missing main-agent/subagent division, B233 the session-wide pin hazard. This entry is the wrong location.",
+      "created_at": "2026-09-07T10:53:20Z",
+      "updated_at": "2026-09-07T10:53:59Z"
+    },
+    {
+      "id": "B232",
+      "title": "the git-worktrees skill never says worktrees are for subagents while the main agent works in the main checkout",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Search the skill for the division of labour: awk 'tolower($0) ~ /main checkout|main agent|subagent|coordinator|main session/' git-worktrees/SKILL.md",
+      "observed": "Two hits, neither stating it: the description's 'a risky change kept off the main checkout' and 'that you want the main checkout untouched'. The skill covers one-worktree-per-agent, disjoint scopes, branch naming and the concurrent-sweep hazard, but never says who is entitled to a worktree.",
+      "expected": "The skill states the division Michael gave on 2026-09-07: worktrees are for the SUBAGENTS; the main agent works directly in the repository checkout. Without it the reasonable reading is that every agent isolates, including the coordinator - which is what I did, and it broke a running subagent (see B233).",
+      "mechanism": "Documentation omission. The skill is written from the point of view of a worker deciding how to lay out parallel work, and never addresses the coordinator's own position, so it reads as advice to everyone equally.",
+      "surfaces": [
+        "git-worktrees/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael 2026-09-07: 'You can work in the ~/git/ai-skills directory. worktrees is only for the subagens, not the main agent', then 'didn't the worktree skill specify that?' - it did not",
+      "notes": "B231 (the prescribed location contradicts what EnterWorktree creates) and B233 (the pin is session-wide) are the other two gaps in this file. B233 is the consequence of this omission going unstated, so the two are worth fixing in one pass even though they close separately.",
+      "created_at": "2026-09-07T10:53:38Z",
+      "updated_at": "2026-09-07T10:53:59Z"
+    },
+    {
+      "id": "B233",
+      "title": "nothing warns that the worktree isolation pin is session-wide, so entering one breaks every subagent already working in another",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "With a subagent working in .claude/worktrees/<its-own>, call EnterWorktree from the main session for an unrelated task. Then have the subagent run any Bash command in its own worktree.",
+      "observed": "Every command the subagent runs is refused: 'This session is isolated in the worktree .../fix-b111-source-shipped ... refusing to run it in the shared checkout (.../fix-drive5-batch)'. Observed live on 2026-09-07: the ai-editor-drive-5 agent lost git access mid-batch and one edit was refused mid-write. It cannot recover on its own - EnterWorktree back to its own path appears to succeed while Bash keeps refusing, and ExitWorktree answers 'cannot be called from a subagent with a cwd override'. A pre-push-check run in that state also measures the WRONG working tree and reports PASS for a branch it never examined.",
+      "expected": "The skill warns that the pin is session-wide rather than per-agent, so a coordinator must not enter a worktree while a subagent holds one, and states the recovery: ExitWorktree with action keep from the main session releases the pin, after which the subagent re-issues EnterWorktree with its own path. It should also tell a stranded subagent NOT to repoint another agent's worktree to unblock itself.",
+      "mechanism": "The isolation pin is session state, and a subagent shares its parent's session, so the guard resolves one pin for all of them. The skill's parallel-agents section assumes each agent's isolation is its own, which is true of the worktrees themselves but not of the pin that decides which one the guard permits.",
+      "surfaces": [
+        "git-worktrees/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "hit live on 2026-09-07 while picking up a second bug alongside a running subagent; the subagent reported it correctly and refused to work around it",
+      "notes": "B232 is the omission that made this reachable - nothing said the coordinator should stay in the main checkout. B231 is the third gap in the same file. All three want one editing pass over the skill's parallel-agents guidance.",
+      "created_at": "2026-09-07T10:53:51Z",
+      "updated_at": "2026-09-07T10:53:59Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
