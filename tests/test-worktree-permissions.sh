@@ -93,12 +93,30 @@ allow="$(rjq -r '.permissions.allow[]' "$work/claude.json")"
 # t_record() records a FINDING, which t_end counts as a failure -- it is not a
 # "this passed" call. So the passing path here does nothing at all, and only
 # t_fail is reached on a real problem.
+#
+# Membership is tested with `case` against a newline-padded copy rather than
+# `grep -qx`: PORTABILITY.md bans a `printf | grep -q` pipeline (pipefail-grep-q)
+# because grep exits at the first match, the writer takes SIGPIPE, and pipefail
+# then fails the whole line. The padding makes each comparison whole-line, which
+# is what -x was there for.
+padded="
+$allow
+"
+has_rule() { # <exact rule text>
+    case "$padded" in
+        *"
+$1
+"*) return 0 ;;
+    esac
+    return 1
+}
+
 for verb in Read Edit Write; do
-    printf '%s\n' "$allow" | grep -qxF "$verb($worktrees/**)" \
+    has_rule "$verb($worktrees/**)" \
         || t_fail "claude grants $verb on the worktree root: no $verb($worktrees/**) in $(printf '%s' "$allow" | tr '\n' ' ')"
 done
 
-printf '%s\n' "$allow" | grep -qxF "Bash($worktrees/**:*)" \
+has_rule "Bash($worktrees/**:*)" \
     || t_fail "claude may run the checkout's own scripts: no Bash($worktrees/**:*) in $(printf '%s' "$allow" | tr '\n' ' ')"
 
 # A pre-existing entry is preserved, not replaced: the writer merges.

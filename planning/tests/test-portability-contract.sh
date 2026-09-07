@@ -114,7 +114,31 @@ in_allowlist() {
     return 1
 }
 
+# `--files <path>...` narrows the SUBJECT list to the named scripts, so
+# pre-push-check can run these exact rules over only what a change touched. It
+# narrows the subjects and never the rules, and the whole-tree form stays the
+# authority -- a per-file run cannot see a construct introduced in a file the
+# change did not name. Paths arrive repo-relative and are normalised to the
+# './path' form the rest of this scan and every allowlist entry use.
+scoped_files=""
+if [ "${1:-}" = "--files" ]; then
+    shift
+    [ "$#" -gt 0 ] || { printf 'portability: --files needs at least one path\n' >&2; exit 64; }
+    for arg in "$@"; do
+        case "$arg" in
+            ./*) scoped_files="$scoped_files$arg
+" ;;
+            *) scoped_files="$scoped_files./$arg
+" ;;
+        esac
+    done
+fi
+
 script_list() {
+    if [ -n "$scoped_files" ]; then
+        printf '%s' "$scoped_files" | LC_ALL=C sort
+        return
+    fi
     ( cd "$repo_root" && find . -name '*.sh' -type f \
         -not -path './benchmark/results/*' -not -path './.git/*' -not -path './.plans/*' \
         -not -path './.claude/*' \
