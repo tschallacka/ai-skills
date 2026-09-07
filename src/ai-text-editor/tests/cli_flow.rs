@@ -2019,3 +2019,125 @@ fn a_dropped_harness_stops_a_server_no_record_names() {
     terminate(pid);
     panic!("the dropped harness left server {pid} running");
 }
+
+/// The discovery record a given server announced, wherever it landed.
+///
+/// Neither the directory nor the file name is predictable from here, and the
+/// pid is the only handle that is. `endpoint_for_file` abandons the configured
+/// XDG_RUNTIME_DIR for a machine-global `/tmp/tsch-ai-skills-editor` as soon
+/// as the path it would build reaches 96 characters, so which of the two
+/// directories holds the record depends on how long this test process's TMPDIR
+/// happens to be — and the socket sits next to the record, so the endpoint it
+/// names cannot tell one harness's records from another's in the shared
+/// directory either. Matching the recorded pid against a pid this test was
+/// handed leaves no ambiguity even with the whole file running in parallel.
+fn endpoint_record(harness: &Harness, pid: u32) -> PathBuf {
+    let roots = [
+        harness
+            .scratch
+            .join("runtime")
+            .join("tsch-ai-skills-editor"),
+        PathBuf::from("/tmp/tsch-ai-skills-editor"),
+    ];
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(".endpoint") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let recorded = serde_json::from_str::<Value>(&content)
+                .ok()
+                .and_then(|value| value.get("pid").and_then(Value::as_u64));
+            if recorded == Some(pid as u64) {
+                return entry.path();
+            }
+        }
+    }
+    panic!("no endpoint record names server {pid}");
+}
+
+/// B241: the explicit stale-endpoint takeover is reachable from the client
+/// that meets the condition.
+///
+/// The server refuses to bind over a stale Unix endpoint whose recorded owner
+/// it cannot rule out, and its refusal names `--takeover-stale-endpoint` as
+/// the recovery. Nothing forwarded that flag: `autostart_server` built its
+/// argv from document_mode, normalize_nfc and idle_timeout_seconds only, and
+/// no client had a flag for it at all — so capability 12's documented
+/// recovery could not be performed by the only tool that ever hits the
+/// refusal. B217 covered arguments the adapter forwards without declaring;
+/// this one was forwarded by nothing.
+///
+/// A killed server leaves its socket and its record behind. Rewriting the
+/// record's pid to a process that IS alive is what puts the endpoint in the
+/// state that needs the flag — with a dead owner the next open reclaims it
+/// automatically and the refusal never happens, which is why the flag went
+/// unnoticed as unreachable.
+#[test]
+fn a_stale_endpoint_is_taken_over_only_when_the_client_says_so() {
+    let harness = Harness::new("takeover");
+    let file = harness.write("takeover.txt", "alpha\n");
+    let pid = server_pid(&harness.open(&file));
+    let record = endpoint_record(&harness, pid);
+    terminate(pid);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!process_is_alive(pid), "the server must be dead");
+
+    // The recorded owner is now this test process, which is alive, so the
+    // server cannot rule it out and must refuse.
+    let content = std::fs::read_to_string(&record).expect("the record is readable");
+    let mut value: Value = serde_json::from_str(&content).expect("the record is JSON");
+    let socket = value["endpoint"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_start_matches("unix:")
+        .to_owned();
+    assert!(
+        std::path::Path::new(&socket).exists(),
+        "a killed server leaves its socket behind; without it there is nothing stale to take over"
+    );
+    value["pid"] = json!(std::process::id());
+    std::fs::write(&record, serde_json::to_vec(&value).unwrap()).expect("the record is writable");
+
+    let refused = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        refused.status.code(),
+        Some(66),
+        "a start refused over a live recorded owner is not a success: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stderr_text(&refused);
+    assert!(
+        refusal.contains("--takeover-stale-endpoint"),
+        "the refusal must name the recovery: {refusal}"
+    );
+
+    // And the recovery works, which is the whole of this bug: before the fix
+    // the flag reached the client's argument parser and stopped there.
+    let taken = harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "--takeover-stale-endpoint",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        taken.status.success(),
+        "the acknowledged takeover was refused too: {}{}",
+        stderr_text(&taken),
+        String::from_utf8_lossy(&taken.stdout)
+    );
+    assert!(
+        server_pid(&taken) != pid,
+        "a replacement server must have answered"
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\n");
+}

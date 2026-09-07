@@ -114,6 +114,7 @@ pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "normalize_nfc",
     "idle_timeout_seconds",
     "acknowledge_create_parents",
+    "takeover_stale_endpoint",
     "auth_token",
     "session_token",
 ];
@@ -141,6 +142,9 @@ fn adapter_argument(key: &str) -> Value {
         ),
         "acknowledge_create_parents" => boolean(
             "Confirms that a path whose parent directory does not exist is meant as typed. Without it such an open is refused with the missing directory named and nothing is created; with it the directory chain is created and the tab opens.",
+        ),
+        "takeover_stale_endpoint" => boolean(
+            "Confirms that the process recorded as owning a stale endpoint has been verified gone, so a server this call starts may replace it. Without it such a start is refused with the recorded pid and generation named and nothing is replaced; this is capability 12's explicit takeover.",
         ),
         "auth_token" => string(
             "Shared secret required by a server reached over a loopback TCP endpoint.",
@@ -570,6 +574,10 @@ fn call_tool(id: Value, params: Value) -> Value {
             .map(|value| value.to_string()),
         acknowledge_create_parents: payload
             .get("acknowledge_create_parents")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        takeover_stale_endpoint: payload
+            .get("takeover_stale_endpoint")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         force_refresh: false,

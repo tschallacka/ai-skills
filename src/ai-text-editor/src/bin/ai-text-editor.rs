@@ -65,6 +65,7 @@ fn main() {
         normalize_nfc: flag(&args, &["--normalize-nfc"]),
         idle_timeout_seconds: option(&args, &["--idle-timeout-seconds"]),
         acknowledge_create_parents: flag(&args, &["--acknowledge-create-parents"]),
+        takeover_stale_endpoint: flag(&args, &["--takeover-stale-endpoint"]),
         force_refresh: false,
     };
     let mut payload = serde_json::Map::new();
@@ -433,6 +434,7 @@ fn help() {
     println!("Opening a second file under the same agent identity (an explicit --session/--agent, or your coding harness's own session env vars) reconnects to that agent's already-running workspace and adds the file there as a new tab, rather than starting an unrelated second server.");
     println!("New files: open on a path that does not exist yet is not an error — the tab starts empty and the file is created on disk by the first successful save.");
     println!("Recovery: if the server died, open again (a stale endpoint whose owning process is gone is reclaimed automatically); reads report dirty/external_change_pending state, and every server refusal is named on stderr in every presentation.");
+    println!("Stale endpoints: when the recorded owner is still alive or cannot be ruled out, the start is refused with that pid and generation named. Verify the process is gone, then repeat the command with --takeover-stale-endpoint; the old record is kept under a stale- suffix rather than overwritten.");
     println!("Commands: open capabilities history resources read insert replace large-edit begin-transaction end-transaction restore undo redo save save-as close resolve index cursor page search");
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
