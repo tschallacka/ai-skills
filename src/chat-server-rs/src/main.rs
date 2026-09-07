@@ -442,17 +442,19 @@ fn valid_umode_set(flags: &str) -> bool {
     !body.is_empty() && body.chars().all(|ch| matches!(ch, 'i' | 'w' | 's'))
 }
 
-// `MODE #chan b` asks for the ban list; `MODE #chan +b mask` sets one. The sign
-// is what separates a query from a change, so a sign-less string of list
-// letters (b ban, e exception, I invite) is a query and nothing else is.
+// A list query asks for the bans, exceptions or invites on a channel; a change
+// adds or removes one. What separates them is the MASK, not the sign: `MODE
+// #chan b` and `MODE #chan +b` both ask, and only `MODE #chan +b nick!*@*`
+// sets. A sign with no mask cannot act on anything, so it can only be a
+// question.
 //
-// Konversation sends the ban-list query immediately after JOIN, so treating it
-// as a change printed "[Error] You need to be a channel operator in #chan to do
-// that." on every join.
+// The first version of this got it wrong by keying on the sign, and the error it
+// was meant to fix came straight back on the next join, because Konversation
+// asks with `+b`. The caller must therefore also check that no mask parameter
+// follows; this function only judges the letters.
 fn list_mode_query(flags: &str) -> bool {
-    !flags.is_empty()
-        && !flags.starts_with(['+', '-'])
-        && flags.chars().all(|ch| matches!(ch, 'b' | 'e' | 'I'))
+    let letters = flags.trim_start_matches(['+', '-']);
+    !letters.is_empty() && letters.chars().all(|ch| matches!(ch, 'b' | 'e' | 'I'))
 }
 
 // The two lines that answer one list query: the list itself, which is always
@@ -1105,17 +1107,27 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             if target == sess.nick && valid_umode_set(&flags) {
                                 let prefix = format!("{}!{}@{}", sess.nick, sess.user, sess.host);
                                 w(st, &format!(":{} MODE {} :{}", prefix, me, flags));
-                            } else if valid_chan(&target) && list_mode_query(&flags) {
-                                // `MODE #chan b` is a QUERY for the ban list,
-                                // not an attempt to set one: a mode CHANGE
-                                // carries a + or - sign. Konversation sends it
-                                // immediately after JOIN, and answering 482
-                                // made a routine join print "[Error] You need
-                                // to be a channel operator in #chan to do
-                                // that." The bus keeps no lists, so each
-                                // queried letter gets an empty list and its
+                            } else if valid_chan(&target)
+                                && params.len() == 2
+                                && list_mode_query(&flags)
+                            {
+                                // A QUERY for the ban list, not an attempt to
+                                // set one. `params.len() == 2` is the whole
+                                // test: flags and no MASK. `MODE #chan b` and
+                                // `MODE #chan +b` both ask; only
+                                // `MODE #chan +b nick!*@*` sets.
+                                //
+                                // Measured rather than assumed, after the sign
+                                // was tried as the discriminator and the error
+                                // came back on the next join: Konversation asks
+                                // with `+b`, which the server logged as
+                                // `refusing MODE change on #ai-skills from
+                                // mdibbets: flags "+b"`.
+                                //
+                                // The bus keeps no lists, so each queried
+                                // letter gets an empty list and its
                                 // end-of-list numeric.
-                                for letter in flags.chars() {
+                                for letter in flags.trim_start_matches(['+', '-']).chars() {
                                     for line in
                                         empty_list_reply(&sn, &me, &target, letter).iter().flatten()
                                     {
@@ -1126,6 +1138,16 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                                 // A real change. Channel modes need an operator
                                 // model the bus does not have; refuse rather
                                 // than pretend.
+                                //
+                                // Logged with the flags, because a refusal that
+                                // does not say what it refused is unreadable
+                                // from the outside: B248 was fixed once against
+                                // a guess at what a client sends after JOIN,
+                                // and the error came back.
+                                eprintln!(
+                                    "chat-server-rs: refusing MODE change on {} from {}: flags {:?}",
+                                    target, me, flags
+                                );
                                 w(
                                     st,
                                     &format!(
@@ -1771,26 +1793,40 @@ mod announce_tests {
 mod mode_query_tests {
     use super::{empty_list_reply, list_mode_query};
 
-    // The sign is the whole distinction. Without it a routine join printed
-    // "[Error] You need to be a channel operator in #chan to do that.", because
-    // Konversation asks for the ban list straight after JOIN and the handler
-    // read the query as an attempt to set one.
+    // RFC 1459 4.2.3 / RFC 2812 3.2.3: omitting the MASK is what makes a ban
+    // mode a list request, answered with RPL_BANLIST and RPL_ENDOFBANLIST. The
+    // sign does not decide it, and the first version of these tests asserted
+    // that it did -- so the error they were written for came straight back on
+    // the next join, because Konversation asks with `+b`. The server's own
+    // refusal log named it: `refusing MODE change on #ai-skills ... flags "+b"`.
+    // The spec had this answer before the log did.
     #[test]
-    fn a_signless_list_letter_is_a_query() {
+    fn a_list_letter_is_a_query_signed_or_not() {
         assert!(list_mode_query("b"), "MODE #chan b asks for the ban list");
+        assert!(
+            list_mode_query("+b"),
+            "and so does MODE #chan +b, which is what Konversation sends"
+        );
+        assert!(
+            list_mode_query("-b"),
+            "a sign with no mask cannot act either"
+        );
         assert!(list_mode_query("e"), "exception list");
         assert!(list_mode_query("I"), "invite list");
         assert!(list_mode_query("bI"), "several letters at once");
     }
 
+    // The mask is the CALLER's check (`params.len() == 2`); this function judges
+    // only the letters. Asserted so nobody reads a `true` here as "no mask was
+    // given" and drops the caller's guard.
     #[test]
-    fn a_signed_change_is_not_a_query() {
+    fn the_letters_are_judged_but_the_mask_is_not() {
         assert!(
-            !list_mode_query("+b"),
-            "+b sets a ban and must still refuse"
+            list_mode_query("+b"),
+            "+b nick!*@* must still refuse, and that is params.len(), not this"
         );
-        assert!(!list_mode_query("-b"), "-b removes one");
         assert!(!list_mode_query(""), "an empty flag string is not a query");
+        assert!(!list_mode_query("+"), "a bare sign names no list");
     }
 
     // A letter this server does not answer must not be silently swallowed as an
@@ -1798,6 +1834,7 @@ mod mode_query_tests {
     #[test]
     fn only_the_list_letters_are_answered() {
         assert!(!list_mode_query("k"), "a key is not a list");
+        assert!(!list_mode_query("+k"), "nor is a signed key");
         assert!(
             !list_mode_query("bk"),
             "one unknown letter disqualifies the set"
