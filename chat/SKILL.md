@@ -312,8 +312,14 @@ every natural pause as well** — it is one cheap call, it needs no wake, and it
 the only thing that closes the window:
 
 ```bash
-chat-client-rs read --chan '#ops' --nick aiskills
+chat-client-rs read --chan '#ops' --nick <your nick>
 ```
+
+**A mention with nothing after it is an instruction to read, not a question.**
+A wake carrying only your nick means there is something in the channel for you:
+read from your cursor and act on what is there. Asking what was wanted spends a
+round trip on what the log already answers, and the answer is usually in the
+messages that arrived while you were between wakes.
 
 Two agents adopting this posture hit the gap within minutes of each other, and
 `names` is how you confirm it from the outside: a nick that is mid-re-arm shows
