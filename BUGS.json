@@ -3634,7 +3634,7 @@
     {
       "id": "B274",
       "title": "two chat tests start servers that announce on the machine's live beacon port",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3646,12 +3646,12 @@
         "chat/tests/test-chat-broadcast-stall.sh",
         "chat/tests/test-chat-descriptor-leak.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "416dfb25 on fix/b274-suite-beacon-isolation — both servers start with CHAT_BEACON_PORT set to a port nothing listens on (47992, 47993)",
+      "verification": "Observed both ways with the same binary: with no CHAT_BEACON_PORT the server logs 'announcing 127.0.0.1:44947 every 2s on UDP 7780'; with CHAT_BEACON_PORT=47992 it logs 'announcing 127.0.0.1:35773 every 2s on UDP 47992'. Both suites pass with the change: test-chat-broadcast-stall.sh PASS, test-chat-descriptor-leak.sh PASS. CHAT_BEACON_PORT rather than CHAT_ANNOUNCE=0 keeps the announce socket, which the descriptor-leak ceiling is measured against.",
       "found_by": "t90-chat-mcp, auditing the chat suite after B270",
       "notes": "B270 is the same isolation boundary crossed the other way: there the suite CONSUMES the live beacon and resolves to a real server. Fixing either leaves the other open.",
       "created_at": "2026-09-07T20:14:59Z",
-      "updated_at": "2026-09-07T20:14:59Z"
+      "updated_at": "2026-09-07T20:59:50Z"
     },
     {
       "id": "B277",
