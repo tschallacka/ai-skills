@@ -246,7 +246,7 @@
     {
       "id": "B278",
       "title": "folding the nick into the session key makes a saved session unreachable to any call that omits --nick",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -258,12 +258,12 @@
         "src/chat-client-rs/src/lib.rs",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "1267ac11 on feat/chat-mcp-and-session-keys (PR 75) - the key is h-<identity>-<nick>, so the identity half is a stable prefix and a nick-less call can find the single session its identity owns.",
+      "verification": "session set --nick solo then session show with no --nick reports that session's server and nick, where before it reported an empty one. Two nicks still resolve to separate files (B271 holds) and an ambiguous identity resolves to neither. Four tests, one pinning the key SHAPE so the suffix cannot quietly go back to being hashed in.",
       "found_by": "t90-chat-mcp, verifying B271's fix at Michael's request before PR 75 merges",
-      "notes": "B271 (the defect this change fixes) is genuinely fixed by it: under one CLAUDE_CODE_SESSION_ID, --nick parent and --nick child resolve to h-80c958639a2070e6 and h-15ab5ff6b3eaee04 on PR 75 and to one key h-011bc5c0e5b7b760 on master, and a child join no longer consumes the parent unread message. The regression is the other half of the same rung: the nick is now required material and the ladder has no way to supply it from the session it is trying to open. A fix has to resolve the nick before the key -- read the saved nick from a nick-free location, or key the file on the harness id and hold per-nick state inside it.",
+      "notes": "B271 (the defect this change fixes) is genuinely fixed by it: under one CLAUDE_CODE_SESSION_ID, --nick parent and --nick child resolve to h-80c958639a2070e6 and h-15ab5ff6b3eaee04 on PR 75 and to one key h-011bc5c0e5b7b760 on master, and a child join no longer consumes the parent unread message. The regression is the other half of the same rung: the nick is now required material and the ladder has no way to supply it from the session it is trying to open. A fix has to resolve the nick before the key -- read the saved nick from a nick-free location, or key the file on the harness id and hold per-nick state inside it. Found by t90-chat-mcp against PR 75 before it merged, which is the point of reviewing a branch rather than a release. chat/tests/test-chat.sh already covers this shape -- it sets a nick then uses send and show without one -- so the suite would have caught it; that test is currently failing on the branch for an unrelated reason (measured identically with the fix, without it, and with the pre-nick-keying client), which is the live-bus interference family B270 and B274.",
       "created_at": "2026-09-07T21:01:12Z",
-      "updated_at": "2026-09-07T21:01:27Z"
+      "updated_at": "2026-09-07T21:13:26Z"
     },
     {
       "id": "B33",
