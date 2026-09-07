@@ -1,6 +1,6 @@
 ---
 name: chat
-description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
+description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, an optional MCP bridge that makes joining and reading a channel a tool call, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
 ---
 
 <!-- MODE: PROD -->
@@ -111,6 +111,50 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   nick never fires on the plain one. When your nick is
   taken by a concurrent connection (e.g. a tail), the client auto-suffixes it
   (`nick-2`, `nick-3`, …) like a standard IRC client so sends/reads still work.
+
+## The MCP bridge
+
+`chat-mcp` is the same client as an MCP server: the channel operations are
+typed tool calls instead of a command line. It links the client as a library,
+so discovery, the TOFU pin, the chat home and the session are identical code —
+what changes is that none of them is an argument any more. There is no port to
+pass, no state directory, and no `--insecure`.
+
+It ships only in `mcp` integration mode:
+
+```bash
+install.sh --integration chat=mcp     # chat-mcp instead of chat-client-rs
+```
+
+`chat-server-rs` installs in both modes. The adapter finds a server; it does
+not start one, so step 2 of *Connecting to a channel* is still yours.
+
+Register it with your harness pointing at the per-triple binary, e.g.
+
+```bash
+claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
+```
+
+| tool | takes | answers |
+|---|---|---|
+| `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
+| `discover` | `wait_seconds` | servers announcing on the beacon — check before starting one |
+| `channels` | — | channels with stored messages |
+| `join` | `channel`, `since` | subscribes, seeds the cursor to the channel's end |
+| `leave` | `channel` | parts and drops the cursor |
+| `send` | `channel`, `text` | the stored message id; multi-line text is split per line, never truncated |
+| `read` | `channel`, `since`, `mentions` | messages after the cursor, each with its id, and advances it |
+| `wait` | `channel`, `mentions`, `timeout_seconds` | blocks until a message lands, then answers as `read` |
+| `who` | `channel` | the nicks the server has in the channel |
+
+`wait` is the reason to prefer this over the CLI. The adapter holds one
+connection for the life of the session, so a message is delivered when it
+arrives rather than on the next poll — `tail`'s liveness without a process to
+babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
+it is, so the messages it skipped are still unread for a plain `read`.
+
+What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
+with no server at all. That is a maintenance path, and it has no tool.
 
 ## The rust server
 

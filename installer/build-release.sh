@@ -218,6 +218,8 @@ case "$mode" in
                 || { printf '%s: cargo build chat-server-rs failed\n' "${0##*/}" >&2; exit 66; }
             ( cd "$repo_root" && cargo build --release --package chat-client-rs ) \
                 || { printf '%s: cargo build chat-client-rs failed\n' "${0##*/}" >&2; exit 66; }
+            ( cd "$repo_root" && cargo build --release --package chat-mcp ) \
+                || { printf '%s: cargo build chat-mcp failed\n' "${0##*/}" >&2; exit 66; }
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64) chat_dir=x86_64-unknown-linux-musl ;;
                 Linux:aarch64|Linux:arm64) chat_dir=aarch64-unknown-linux-musl ;;
@@ -229,10 +231,12 @@ case "$mode" in
             mkdir -p "$repo_root/chat/bin/$chat_dir"
             cp "$repo_root/target/release/chat-server-rs" "$repo_root/chat/bin/$chat_dir/chat-server-rs"
             cp "$repo_root/target/release/chat-client-rs" "$repo_root/chat/bin/$chat_dir/chat-client-rs"
+            cp "$repo_root/target/release/chat-mcp" "$repo_root/chat/bin/$chat_dir/chat-mcp"
         else
             # Prebuilt binaries must already be in place (CI build step).
             ls "$repo_root/chat/bin/"*/chat-server-rs >/dev/null 2>&1 \
-                && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 || {
+                && ls "$repo_root/chat/bin/"*/chat-client-rs >/dev/null 2>&1 \
+                && ls "$repo_root/chat/bin/"*/chat-mcp >/dev/null 2>&1 || {
                 printf '%s: cargo not found and chat/bin binaries absent\n' "${0##*/}" >&2
                 exit 66
             }
