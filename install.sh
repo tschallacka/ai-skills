@@ -3660,6 +3660,7 @@ tests/test-lib-document.sh
 tests/test-lib-progress.sh
 tests/test-lib-table.sh
 tests/test-limited-run-contract.sh
+tests/test-man-page-roff.sh
 tests/test-mermaid-accuracy.sh
 tests/test-obsolete-plan.sh
 tests/test-plan-overview.sh
