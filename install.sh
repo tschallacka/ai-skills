@@ -3728,6 +3728,7 @@ tests/test-ui-prohibition-scope.sh
 tests/test-validation-readiness-summary.sh
 tests/test-verifier-reach-memo.sh
 tests/test-voice-artifact-drift.sh
+tests/test-workspace-copy-excludes-build-trees.sh
 EOF
             ;;
         project-specificies)

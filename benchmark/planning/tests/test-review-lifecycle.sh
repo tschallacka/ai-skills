@@ -139,7 +139,11 @@ assert all(item["sha256"] and item["archive_path"] for item in provenance.values
 assert "provenance" in setup and "lifecycle_handoff" in setup
 print("Authority, schema, binding, and provenance fixtures passed.")
 PY
-tmp="$(mktemp -d /tmp/reviewer-lifecycle-goal03.XXXXXX)"
+# Honours TMPDIR: this tree holds a published benchmark workspace, which is data
+# rather than a socket, and it reached 5.5G on a machine with a warm Rust build
+# (B243). Hardcoding /tmp made that RAM on any host whose /tmp is tmpfs, and no
+# export could redirect it.
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/reviewer-lifecycle-goal03.XXXXXX")"
 trap 'rm -rf -- "$tmp"' EXIT
 fixture_root="$tmp/contract-fixture"
 mkdir -p "$fixture_root"

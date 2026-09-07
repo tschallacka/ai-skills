@@ -52,15 +52,36 @@ if [ -z "${T_TMPDIR:-}" ]; then
     #
     # The `t.` prefix is kept so a leaked root is still attributable; the CI leak
     # scan looks for it.
-    if [ -d /tmp ] && [ -w /tmp ]; then
-        T_TMPDIR="$(mktemp -d /tmp/t.XXXXX)"
-    else
-        T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")"
-    fi
+    # An operator-set TMPDIR wins, so a machine whose /tmp is tmpfs can move
+    # test DATA to real disk with one export. That is the whole point: a test
+    # tree is bytes on a filesystem and has no business being RAM.
+    #
+    # The socket-path limit above does not justify forcing /tmp on the data
+    # root, because only ONE thing in this suite actually needs a short path:
+    # chromium's --user-data-dir, where it opens a singleton socket. That now
+    # has its own short root below (T_SOCKET_TMPDIR), which is what lets this
+    # one honour TMPDIR. Sockets in /tmp, everything else on disk.
+    T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")"
     if [ -n "${AI_SKILLS_TEST_RUN_ID:-}" ]; then
         printf '%s\n' "$AI_SKILLS_TEST_RUN_ID" > "$T_TMPDIR/.ai-skills-test-run-id"
     fi
-    export T_TMPDIR
+
+    # Sockets only, and deliberately NOT under TMPDIR. A unix socket path is
+    # capped near 104 bytes and chromium (via mmdc) appends about 50 for its
+    # profile and singleton socket, so the room a caller has is small: nesting
+    # inside nix develop's TMPDIR *and* run-tests.sh's own scratch reached 75
+    # characters and crossed the limit, and test-mermaid-accuracy failed with
+    # "Socket path too long" on the bash 3.2 leg only. Measured -- 75 failed,
+    # 62 passed -- so /tmp/s.XXXXX at 12 characters stays far under rather than
+    # close to it. Nothing but a socket or a socket-bearing profile belongs
+    # here; it is tmpfs on a developer workstation.
+    if [ -d /tmp ] && [ -w /tmp ]; then
+        T_SOCKET_TMPDIR="$(mktemp -d /tmp/s.XXXXX)"
+    else
+        T_SOCKET_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/s.XXXXX")"
+    fi
+
+    export T_TMPDIR T_SOCKET_TMPDIR
     export TMPDIR="$T_TMPDIR"
     # Removed on any exit, including a failure: a test that leaves its root
     # behind turns a debugging session into a disk-space problem. `$$` guards
@@ -68,6 +89,9 @@ if [ -z "${T_TMPDIR:-}" ]; then
     t_tmpdir_owner=$$
     t_tmpdir_cleanup() {
         [ "$$" = "$t_tmpdir_owner" ] || return 0
+        if [ -n "${T_SOCKET_TMPDIR:-}" ]; then
+            case "$T_SOCKET_TMPDIR" in /tmp/*|/var/*) rm -rf -- "$T_SOCKET_TMPDIR" ;; esac
+        fi
         [ -n "${T_TMPDIR:-}" ] || return 0
         case "$T_TMPDIR" in /tmp/*|/var/*|"${TMPDIR%/*}"/*) rm -rf -- "$T_TMPDIR" ;; esac
     }
