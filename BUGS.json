@@ -2463,6 +2463,27 @@
       "updated_at": "2026-09-07T14:29:24Z"
     },
     {
+      "id": "B254",
+      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
+      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
+      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
+      "mechanism": "src/chat-client-rs/src/main.rs, the send path after the PRIVMSG: it FETCHes the channel from 0 to learn the id of the message it just stored, tracks the maximum id it sees, and saves that as the cursor. The maximum is the channel's newest id, not the sent message's, so every unread row in between is swallowed. The comment there says the intent - 'advance the channel cursor to the newest id' - which is the bug written down as a design.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:32:45Z",
+      "updated_at": "2026-09-07T14:32:45Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5011,9 +5032,9 @@
       "fix": "PR #74 b2729933 - tail --presence prints JOIN, PART and QUIT; opt-in so existing readers still receive PRIVMSG only",
       "verification": "Live: a --presence tail saw a peer's ':joiner!joiner@localhost JOIN #ai-skills' and its attributed ':joiner!joiner@localhost QUIT :connection closed', and saw only the message during a send. Unit: presence_is_off_unless_asked_for pins the default. Mutation: drop the o.presence branch and the tail shows nothing but PRIVMSG again.",
       "found_by": "noticed while confirming B244's fix was server-side only, 2026-09-07",
-      "notes": "CORRECTING THIS ENTRY'S OWN EXPECTATION, which was wrong when I filed it. It said 'read --local should show them too, since the log is the same stream'. It cannot: the channel log stores only MSG rows - Hub::append is the only writer and fetch() filters on f[0]==\"MSG\" - so presence is never persisted and a local read has no row to return. Presence is a live-stream capability, not a history one, and making it otherwise needs a log-format change plus ids, because local_read keys entirely off msg_line_id and an id-less line would be reprinted on every since-based poll. Found by a peer agent reading the storage path rather than trusting the entry; the fix is documented as live-only in chat/SKILL.md.\n\nTwo mechanism details worth keeping for anyone touching that filter: a QUIT carries NO channel parameter (the server relays it only to members of the channels the nick shared, so an unfiltered command is already scoped), and a JOIN arrives in TWO spellings - the channel in the trailing when echoed to the joining connection, in params[0] when relayed to others. A filter checking only params.first() drops a tail's view of its own join.",
+      "notes": "CORRECTING THIS ENTRY'S OWN EXPECTATION, which was wrong when I filed it. It said 'read --local should show them too, since the log is the same stream'. It cannot: the channel log stores only MSG rows - Hub::append is the only writer and fetch() filters on f[0]==\"MSG\" - so presence is never persisted and a local read has no row to return. Presence is a live-stream capability, not a history one, and making it otherwise needs a log-format change plus ids, because local_read keys entirely off msg_line_id and an id-less line would be reprinted on every since-based poll. Found by a peer agent reading the storage path rather than trusting the entry; the fix is documented as live-only in chat/SKILL.md.\n\nTwo mechanism details worth keeping for anyone touching that filter: a QUIT carries NO channel parameter (the server relays it only to members of the channels the nick shared, so an unfiltered command is already scoped), and a JOIN arrives in TWO spellings - the channel in the trailing when echoed to the joining connection, in params[0] when relayed to others. A filter checking only params.first() drops a tail's view of its own join. B254 is the same family seen from the other side: presence aside, a plain send silently advances the read cursor past another nick's unread messages, so the bus loses messages to its own bookkeeping rather than to the filter.",
       "created_at": "2026-09-07T13:12:06Z",
-      "updated_at": "2026-09-07T14:04:54Z"
+      "updated_at": "2026-09-07T14:32:45Z"
     },
     {
       "id": "B247",
