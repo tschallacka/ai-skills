@@ -50,4 +50,5 @@ pub mod revision;
 pub mod search;
 pub mod session;
 pub mod transport;
+pub mod verbosity;
 pub mod verbs;

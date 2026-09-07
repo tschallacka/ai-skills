@@ -144,6 +144,24 @@ and the same autostart and workspace-reconnection behavior above: pass
 `agent`/`session` argument) instead of an `endpoint`, and it resolves the
 same way the CLI does.
 
+## Response size
+
+Every verb takes `--verbosity 0|1|2|3` (MCP: `verbosity`), and **1 is the
+default**. Level 1 is what verification and the next step need — the revision,
+the three tab-state flags, the tab's mode, the span an edit resolved to,
+completeness, and a search's pager key and count. Level 2 adds navigation
+(cursors, byte windows, block paging, undo depths). Level 3 is everything.
+Level 0 is the answer and the tab that gave it, and nothing else.
+
+Three things the levels never do: drop the verb's own result (a `read` returns
+its text at every level), trim a refusal (a refused request's code, message and
+recovery choices are the answer), or apply to `capabilities` and `resources`,
+whose payload is metadata by definition.
+
+`--verbosity 0` cannot carry a revision, so a mutation cannot be guarded from a
+level-0 answer. Ask for level 1 or above before editing — which is what the
+default gives you.
+
 ## Capabilities
 
 1. Open isolated editor tabs with one server writer per tab.

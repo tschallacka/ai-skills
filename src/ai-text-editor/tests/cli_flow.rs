@@ -129,7 +129,26 @@ impl Harness {
     /// on the Windows runner a swallowed open failure turned into six
     /// cascading "no server discovered" panics that hid the real cause.
     fn open(&self, file: &std::path::Path) -> Output {
-        let opened = self.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+        self.open_at(file, &[])
+    }
+
+    /// An `open` asking for the whole payload (T99 level 3).
+    ///
+    /// For the tests that need the tab's *identity* rather than its content —
+    /// `server_pid` above all, which is tier 3 because an agent has no use for
+    /// the server's process id and a test of the plumbing does. Deliberately a
+    /// separate method rather than widening `open`: almost every test in this
+    /// file goes through `open`, so putting `--verbosity 3` there would mean
+    /// the default level is barely exercised by the suite that is supposed to
+    /// hold it.
+    fn open_verbose(&self, file: &std::path::Path) -> Output {
+        self.open_at(file, &["--verbosity", "3"])
+    }
+
+    fn open_at(&self, file: &std::path::Path, extra: &[&str]) -> Output {
+        let mut args = vec!["open", "-f", file.to_str().unwrap(), "-p", "structured"];
+        args.extend_from_slice(extra);
+        let opened = self.client(&args);
         assert!(
             opened.status.success(),
             "open of {} failed: {}{}",
@@ -293,11 +312,16 @@ fn revision_of(open_output: &Output) -> u64 {
         .unwrap()
 }
 
+/// The server's own process id, which is tier 3 (T99): an agent never needs
+/// it and a test of the plumbing does. Read it from `open_verbose`, not
+/// `open`, or there is nothing to read.
 fn server_pid(open_output: &Output) -> u32 {
     first_payload(open_output)
         .get("server_pid")
         .and_then(Value::as_u64)
-        .unwrap() as u32
+        .unwrap_or_else(|| {
+            panic!("no server_pid in the answer; it is tier 3, so open with `open_verbose`")
+        }) as u32
 }
 
 #[test]
@@ -479,7 +503,7 @@ fn a_request_naming_another_file_cannot_edit_the_routed_tab() {
 fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     let harness = Harness::new("killed");
     let file = harness.write("journal.txt", "alpha\nbeta\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     let pid = server_pid(&opened);
     let revision = revision_of(&opened).to_string();
     let edited = harness.client(&[
@@ -518,7 +542,7 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
         "the unsaved edit must replay into the replacement's buffer"
     );
     // `open` reports the replacement and the replayed revision explicitly.
-    let reopened = harness.open(&file);
+    let reopened = harness.open_verbose(&file);
     assert!(reopened.status.success(), "{}", stderr_text(&reopened));
     let payload = first_payload(&reopened);
     assert!(
@@ -549,10 +573,15 @@ fn text_reads_honor_a_byte_window_and_deletes_report_line_spans() {
         "2",
         "-L",
         "5",
+        "--verbosity",
+        "2",
     ]);
     let payload = first_payload(&window);
     assert_eq!(payload["text"], json!("23456"));
     assert_eq!(payload["offset"], json!(2));
+    // total_bytes is tier 2 (T99): "what this answer covers" is verification
+    // and sits at the default level, but "how big the whole document is" is
+    // navigation, so this window was asked for at level 2.
     assert_eq!(payload["total_bytes"], json!(20));
     assert_eq!(payload["eof"], json!(false));
     // Deleting across the line end must say so.
@@ -802,7 +831,7 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
     // server) and the reopened tab must say it replayed the journal.
     let harness = Harness::new("cacheheal");
     let file = harness.write("doc.txt", "one\ntwo\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     let revision = revision_of(&opened).to_string();
     let edited = harness.client(&[
         "insert",
@@ -850,7 +879,7 @@ fn a_dead_server_is_replaced_by_the_next_read_rather_than_refused() {
     // never surface a bare "Connection refused" either.
     let harness = Harness::new("cachehealdead");
     let file = harness.write("doc.txt", "one\ntwo\n");
-    let opened = harness.open(&file);
+    let opened = harness.open_verbose(&file);
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
     let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
@@ -1585,8 +1614,8 @@ fn a_replayed_tab_arms_the_external_change_guard() {
     // kept a stale buffer from saving over newer bytes.
     let harness = Harness::new("replayarm");
     let file = harness.write("doc.txt", "alpha\nbeta\n");
-    let opened = harness.open(&file);
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let opened = harness.open_verbose(&file);
+    let pid = server_pid(&opened);
     let inserted = harness.client(&[
         "insert",
         "-f",
@@ -1650,9 +1679,13 @@ fn an_ownerless_queued_job_does_not_pin_the_idle_watchdog() {
         file.to_str().unwrap(),
         "--idle-timeout-seconds",
         "2",
+        // server_pid is tier 3 (T99), and this test watches that pid to see
+        // whether the idle watchdog reaped it.
+        "--verbosity",
+        "3",
     ]);
     assert!(opened.status.success(), "{}", refusal_text(&opened));
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let pid = server_pid(&opened);
     let started = harness.client(&["job-start", "-f", file.to_str().unwrap(), "--owner", "drv"]);
     assert!(started.status.success(), "{}", refusal_text(&started));
     assert!(
@@ -1673,9 +1706,13 @@ fn a_detached_job_pins_the_watchdog_until_its_owner_releases_it() {
         file.to_str().unwrap(),
         "--idle-timeout-seconds",
         "2",
+        // server_pid is tier 3 (T99), and this test watches that pid to see
+        // whether the idle watchdog reaped it.
+        "--verbosity",
+        "3",
     ]);
     assert!(opened.status.success(), "{}", refusal_text(&opened));
-    let pid = first_payload(&opened)["server_pid"].as_u64().unwrap() as u32;
+    let pid = server_pid(&opened);
     let started = harness.client(&[
         "job-start",
         "-f",
@@ -2006,7 +2043,7 @@ fn a_dropped_harness_stops_a_server_no_record_names() {
     {
         let harness = Harness::new("noleak");
         let file = harness.write("noleak.txt", "alpha\n");
-        pid = server_pid(&harness.open(&file));
+        pid = server_pid(&harness.open_verbose(&file));
         assert!(
             process_is_alive(pid),
             "the autostarted server {pid} was not running to begin with"
@@ -2086,7 +2123,7 @@ fn endpoint_record(harness: &Harness, pid: u32) -> PathBuf {
 fn a_stale_endpoint_is_taken_over_only_when_the_client_says_so() {
     let harness = Harness::new("takeover");
     let file = harness.write("takeover.txt", "alpha\n");
-    let pid = server_pid(&harness.open(&file));
+    let pid = server_pid(&harness.open_verbose(&file));
     let record = endpoint_record(&harness, pid);
     terminate(pid);
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -2131,6 +2168,10 @@ fn a_stale_endpoint_is_taken_over_only_when_the_client_says_so() {
         "--takeover-stale-endpoint",
         "-p",
         "structured",
+        // server_pid below is tier 3, and a replacement having answered is
+        // exactly what this asserts.
+        "--verbosity",
+        "3",
     ]);
     assert!(
         taken.status.success(),
@@ -2304,7 +2345,7 @@ fn a_key_another_verb_reads_is_refused_by_name_not_dropped() {
 fn a_second_file_opens_in_its_own_mode_not_the_servers() {
     let harness = Harness::new("tabmode");
     let text = harness.write("plain.txt", "alpha\n");
-    let opened = harness.open(&text);
+    let opened = harness.open_verbose(&text);
     assert_eq!(first_payload(&opened)["mode"], json!("text_utf8"));
     let server = server_pid(&opened);
 
@@ -2317,6 +2358,10 @@ fn a_second_file_opens_in_its_own_mode_not_the_servers() {
         "hex_view",
         "-p",
         "structured",
+        // server_pid below is tier 3: this test's point is that ONE server
+        // answered both opens.
+        "--verbosity",
+        "3",
     ]);
     assert!(hex.status.success(), "{}", stderr_text(&hex));
     let payload = first_payload(&hex);
@@ -2432,8 +2477,8 @@ fn a_tab_id_is_addressing_enough_on_its_own() {
     let harness = Harness::new("tabid");
     let alpha = harness.write("alpha.txt", "in alpha\n");
     let beta = harness.write("beta.txt", "in beta\n");
-    let opened_alpha = harness.open(&alpha);
-    let opened_beta = harness.open(&beta);
+    let opened_alpha = harness.open_verbose(&alpha);
+    let opened_beta = harness.open_verbose(&beta);
     let id_alpha = tab_id_of(&opened_alpha);
     let id_beta = tab_id_of(&opened_beta);
     assert_ne!(id_alpha, id_beta, "two tabs must have two ids");
@@ -2874,4 +2919,212 @@ fn an_index_naming_action_is_refused_and_the_scan_still_works() {
     let payload = first_payload(&indexed);
     assert_eq!(payload["granularity"], json!(1));
     assert_eq!(payload["complete"], json!(true));
+}
+
+/// T99: the verbosity ladder, on the wire.
+///
+/// Michael measured the problem: `open` on a two-line file was 1199 bytes over
+/// 47 lines and a one-word `insert` 378 bytes whose entire actionable content
+/// was `revision` and `dirty`. The cost lands hardest on the MCP surface,
+/// where every response is context an agent pays for on every edit.
+///
+/// What this pins is the four properties the ladder has to have, because each
+/// one is a way the change could be wrong rather than merely verbose:
+///
+///  1. the default really is level 1, not level 3 — otherwise nothing improves
+///     for an agent that does not know the flag exists, which was the whole
+///     point;
+///  2. level 1 still carries the revision, because a mutation's guard requires
+///     one, which is why the default is 1 and not the specification's 0;
+///  3. every level names the tab and carries the verb's own result — a `read`
+///     whose text was a luxury would make the low levels useless rather than
+///     terse;
+///  4. level 3 is byte-for-byte what a caller used to get.
+#[test]
+fn the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard() {
+    let harness = Harness::new("verbosity");
+    let file = harness.write("verbosity.txt", "alpha\nbeta\n");
+
+    // (1) The default is level 1: an `open` with no flag must equal an `open`
+    // asking for 1, and must NOT equal one asking for 3.
+    let defaulted = first_payload(&harness.open(&file));
+    let explicit_one = first_payload(&harness.client(&[
+        "open",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "1",
+    ]));
+    assert_eq!(
+        defaulted, explicit_one,
+        "the default must BE level 1, not merely resemble it"
+    );
+    let full = first_payload(&harness.open_verbose(&file));
+    assert_ne!(
+        defaulted, full,
+        "if the default equals level 3 the ladder changes nothing for an agent that never learns the flag"
+    );
+
+    // (4) Level 3 is the whole payload: the fields the low levels drop are
+    // still there, so nothing regresses for a caller that wants it all.
+    for key in [
+        "resources",
+        "server_generation",
+        "server_pid",
+        "normalize_nfc",
+    ] {
+        assert!(
+            full.get(key).is_some(),
+            "level 3 must still carry {key}: {full}"
+        );
+        assert!(
+            defaulted.get(key).is_none(),
+            "level 1 must not carry {key}: {defaulted}"
+        );
+    }
+
+    // (2) and (3) on the default: the revision guard survives, the tab is
+    // named, and the coordinate space is stated (B238 made mode a per-tab
+    // choice, so a caller needs to know which one answered).
+    for key in ["revision", "dirty", "tab_id", "mode", "session_token"] {
+        assert!(
+            defaulted.get(key).is_some(),
+            "the default must carry {key}: {defaulted}"
+        );
+    }
+
+    // A mutation at the default reports what it did: B226 and B230 added the
+    // resolved span precisely because a caller could not see what its
+    // arithmetic had addressed, so those fields are verification-grade.
+    let revision = defaulted["revision"]
+        .as_u64()
+        .expect("a revision")
+        .to_string();
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "OMEGA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let payload = first_payload(&replaced);
+    for key in [
+        "revision",
+        "offset",
+        "delete_len",
+        "bytes_written",
+        "deleted",
+    ] {
+        assert!(
+            payload.get(key).is_some(),
+            "a mutation at the default must report {key}: {payload}"
+        );
+    }
+    assert!(
+        payload.get("cursors").is_none(),
+        "cursors are navigation, not verification: {payload}"
+    );
+
+    // (3) Level 0 keeps the answer and the tab, and nothing else. A read's
+    // text is the answer; a mutation has none, so the frame type is the status.
+    let bare = first_payload(&harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert_eq!(bare["text"], json!("OMEGA\nbeta\n"));
+    assert!(
+        bare.get("tab_id").is_some(),
+        "level 0 names the tab: {bare}"
+    );
+    assert!(
+        bare.get("revision").is_none() && bare.get("dirty").is_none(),
+        "level 0 is the answer and the tab, nothing else: {bare}"
+    );
+
+    // A level outside the range is a caller error, refused by name rather
+    // than clamped: a typo must not silently buy a different answer.
+    let refused = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "9",
+    ]);
+    assert!(!refused.status.success(), "verbosity 9 must be refused");
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("verbosity_invalid"));
+    assert!(
+        refusal["details"]["levels"].get("1").is_some(),
+        "the refusal must describe the levels: {refusal}"
+    );
+
+    // A refusal is never trimmed, at any level: its code, message and
+    // recovery choices are the answer.
+    let stale = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "1",
+        "-t",
+        "X",
+        "-r",
+        "999",
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]);
+    assert!(!stale.status.success());
+    let refusal = stdout_json(&stale)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("stale_revision"));
+    assert!(
+        refusal["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("999"),
+        "a refusal keeps its whole message even at level 0: {refusal}"
+    );
+
+    // And `capabilities` is exempt, because its payload is metadata by
+    // definition — trimming it would leave an empty discovery answer.
+    let caps = first_payload(&harness.client(&[
+        "capabilities",
+        "-f",
+        file.to_str().unwrap(),
+        "-p",
+        "structured",
+        "--verbosity",
+        "0",
+    ]));
+    assert!(
+        caps.get("protocol_version").is_some() && caps.get("document_modes").is_some(),
+        "capabilities must answer in full at every level: {caps}"
+    );
 }

@@ -113,6 +113,40 @@ The protocol frame ceiling is 8 MiB. Large raw reads default to and are capped
 at 4 MiB before base64/JSON framing; oversized result or index windows return
 `response_too_large` and must be requested as smaller pages.
 
+## Response verbosity
+
+Every method takes `verbosity` 0-3, and **1 is the default**:
+
+| level | what the payload carries |
+|---|---|
+| 0 | the method's own result and the `tab_id` that produced it, and nothing else |
+| 1 | level 0 plus what verification and the next step need: `revision`, `dirty`, `disk_diverged`, `external_change_pending`, the tab's `mode`, the resolved edit span (`offset`, `delete_len`, `bytes_written`, `deleted`), `complete`/`eof`, `start_line`/`end_line`, `returned_bytes`, a search's `pager_key` and `count`, and a zero-result search's `note` |
+| 2 | level 1 plus navigation: `cursors`, `total_bytes`, `start_byte`/`end_byte`, `result_id`, `limit`, index block paging, undo/redo depths |
+| 3 | everything, exactly the payload before the ladder existed |
+
+Three rules the levels do not bend:
+
+1. **Every level carries the method's own result and names its tab.** A `read`
+   returns its text at level 0; a search returns its matches. The ladder
+   governs *metadata*. `tab_id` is level 0 because addressing the wrong tab
+   silently is the failure the addressing design exists to prevent.
+2. **A refusal is never trimmed.** An error frame keeps its `code`, `message`
+   and recovery `choices` at every level, because for a refused request those
+   *are* the answer.
+3. **`capabilities` and `resources` ignore the level entirely**, their payload
+   being metadata by definition.
+
+A level outside 0-3 is refused with `verbosity_invalid` and a description of
+the levels, rather than clamped — a typo must not silently buy a different
+answer than the one asked for.
+
+The default is 1 and not 0 deliberately, and it is a documented deviation from
+the original specification. Level 0 cannot carry a `revision`, and every
+mutation's guard requires one, so a level-0 default would silently break the
+revision contract for any caller that then tried to edit. Level 0 stays
+reachable explicitly, for a caller that wants status only and accepts that it
+cannot mutate safely from that answer.
+
 An argument no handler for a method reads is refused with `unknown_argument`,
 naming the key, the method, and the keys that method does accept. The check is
 per method: a key belonging to a *different* method is refused too, which it

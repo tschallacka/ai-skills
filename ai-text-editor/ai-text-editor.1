@@ -90,6 +90,24 @@ impersonates a different server. Combined with \fB--file PATH\fR it may
 autostart a fresh server, as \fBopen\fR does, and that server registers itself
 under the named identity; identity resolution alone, with no file, starts
 nothing.
+.SH RESPONSE SIZE
+Every command takes \fB--verbosity 0|1|2|3\fR, and 1 is the default. Level 0 is
+the command's own result and the \fBtab_id\fR that produced it, and nothing
+else. Level 1 adds what verification and the next step need: \fBrevision\fR,
+\fBdirty\fR, \fBdisk_diverged\fR, \fBexternal_change_pending\fR, the tab's
+\fBmode\fR, the resolved edit span, completeness, and a search's pager key and
+count. Level 2 adds navigation: cursors, byte windows, index block paging and
+undo depths. Level 3 is everything.
+.PP
+Three rules the levels do not bend: every level carries the command's own
+result and names its tab; a refusal keeps its whole code, message and recovery
+choices at every level; and \fBcapabilities\fR and \fBresources\fR ignore the
+level, their payload being metadata by definition. A level outside 0-3 is
+refused with \fBverbosity_invalid\fR rather than clamped.
+.PP
+The default is 1 and not 0 by deliberate choice: level 0 cannot carry a
+revision, and every mutation's guard requires one, so a level-0 default would
+break the revision contract for any caller that then tried to edit.
 .SH ADDRESSING A TAB
 Every response reports a \fBtab_id\fR, and that id is addressing enough on its
 own for every command: \fB--tab-id ID\fR needs no \fB--file\fR and no
