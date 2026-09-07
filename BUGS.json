@@ -2211,6 +2211,27 @@
       "updated_at": "2026-09-07T09:10:43Z"
     },
     {
+      "id": "B225",
+      "title": "Every verb but open refuses a valid unopened path instead of opening it",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "With no tab open for the path, call any non-open verb on a readable file: mcp__ai-text-editor__search --file /home/mdibbets/www/sk-master/app/code/BigBridge/ShippingLogic/view/frontend/web/js/shipping-logic.js --mode regex_rust --query 'setShippingMethod' --limit 40",
+      "observed": "Error: no editor server is reachable for <path>; only `open` creates a tab, and every other verb routes to that file's own tab - run `open -f <path>` first (the discovery probe reported: No such file or directory (os error 2)). The path exists and is readable: -rw-rw-r-- 27128 bytes.",
+      "expected": "A verb naming a readable path it can act on opens the tab itself, exactly as open would, and answers the request. Autostart already exists and is already silent for open; withholding it from the other verbs makes the agent pay a round trip to learn something the client could have done. An agent's instinct is to name the file and ask a question about it.",
+      "mechanism": "resolve() gates autostart on the verb: src/ai-text-editor/src/client.rs:250 (Ok(_) if request.method != \"open\") and :255 (Err(error) if request.method != \"open\") both return Err, so the _ => arm at :259 that calls autostart_server() is unreachable for any verb other than open. Nothing about the refusal is about the path: the discovery probe's os error 2 is the missing endpoint file, not a missing document, which is also why the message reads as though the path were wrong.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "an unrelated agent on this machine calling search on a Magento source file; reported by Michael",
+      "notes": "B219 is the peer: it is the misleading wording of the same refusal (it says 'no server reachable' while the agent server is alive, and its 'discovery probe' suffix points at socket discovery rather than the document). This entry is the missing behaviour; B219 is the message.",
+      "created_at": "2026-09-07T10:12:46Z",
+      "updated_at": "2026-09-07T10:13:04Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -4475,9 +4496,9 @@
       "fix": null,
       "verification": null,
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
-      "notes": null,
+      "notes": "B225 is the missing behaviour behind the same string: the non-open arms of resolve() refuse rather than autostarting a tab for a readable path. Fixing B225 removes the common path to this message entirely, but not the message - it still fires for a genuinely unreadable path - so the wording here is fixed on its own terms.",
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T10:12:59Z"
     },
     {
       "id": "B220",
