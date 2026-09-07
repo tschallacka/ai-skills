@@ -2591,6 +2591,29 @@
       "updated_at": "2026-09-07T15:39:04Z"
     },
     {
+      "id": "B267",
+      "title": "insert silently clamps a negative offset to 0 and writes at the top of the file",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Open any multi-line file, then: insert --file F --expected-revision R --offset -1 --text placeholder",
+      "observed": "The call succeeded, reporting {\"offset\":0,\"bytes_written\":11}, and \"placeholder\" was inserted at byte 0 -- ahead of the first line. No warning, no error, and the response named offset 0 rather than the -1 that was passed.",
+      "expected": "A negative offset is refused as an argument error naming the offending value, the way a non-numeric offset would be. If \"end of document\" is wanted as a sentinel it has to be documented and tested, not arrived at by accident -- and it would then have to append, which is the opposite end from where the clamp lands.",
+      "mechanism": "The offset is accepted as a signed integer and clamped into range rather than validated, so any negative value collapses to 0. The response then reports the clamped value, so the caller's own log agrees with the wrong write.",
+      "surfaces": [
+        "src/ai-text-editor/src/verbs.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor-mcp/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, hit live while inserting helpers into chat-client-rs on 2026-09-07",
+      "notes": "Hit by hand: I passed --offset -1 intending \"append at end\", which the schema does not define, and the edit landed at byte 0 instead. Undo recovered it cleanly. The dangerous shape is that a clamp turns an out-of-range argument into a SUCCESSFUL write somewhere else in the file, and reports the clamped offset as though that is what was asked -- so nothing in the response distinguishes it from a correct call. An agent that did not re-read would not notice; I only did because the insert was visibly at the top of the file. Note the relation to the per-verb argument door: that door validates WHICH keys a verb accepts, not whether a value is in range, so this class of defect can exist behind a fully exhaustive door.",
+      "created_at": "2026-09-07T15:50:15Z",
+      "updated_at": "2026-09-07T15:50:22Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
