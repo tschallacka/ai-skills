@@ -952,7 +952,7 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                             continue;
                         }
                         match hub.append(&chan, &sess.nick, &text) {
-                            Ok(_) => {
+                            Ok((id, _)) => {
                                 let m = Message {
                                     prefix: Some(format!(
                                         "{}!{}@{}",
@@ -963,10 +963,33 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                                     trailing: Some(text.clone()),
                                 };
                                 let out = m.serialize();
-                                w(st, &out);
+                                // The sender is told NOTHING here, which is the
+                                // RFC 1459 flow: a PRIVMSG is relayed to the
+                                // other members, and a client renders its own
+                                // line locally. Echoing it made every message
+                                // appear twice in a standard client's own
+                                // window (B249) - Michael's diagnosis from the
+                                // Konversation log was exactly that, "once
+                                // conquerer printing itself, and once the
+                                // channel sending it".
+                                //
+                                // An unsolicited acknowledgement is no better.
+                                // A first attempt pushed `999 <nick> #chan
+                                // <id>` here, and a standard client rendered
+                                // the numeric verbatim: `[999] mdibbets
+                                // #ai-skills 59`. Trading a duplicate line for
+                                // a stray one is not a fix.
+                                //
+                                // So confirmation is SOLICITED instead: our own
+                                // client asks `LASTID #chan` after the PRIVMSG
+                                // and reads the 999 that already answers it. A
+                                // client that does not ask sees nothing extra,
+                                // and the id still proves the line was
+                                // persisted rather than merely reflected.
+                                let _ = id;
                                 // Broadcast to OTHER connections by queueing on
                                 // each peer's outbox rather than writing to
-                                // their sockets from this thread. Hub::announce
+                                // their sockets from this thread. Hub::relay
                                 // owns that fanout and the lock discipline it
                                 // depends on (B122); it is shared with JOIN and
                                 // PART so the three cannot drift apart.

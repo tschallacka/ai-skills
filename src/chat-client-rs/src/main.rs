@@ -650,6 +650,10 @@ struct Opts {
     no_session: bool,
     mentions: bool,
     mention_exit: bool,
+    // Show JOIN/PART/QUIT as well as messages. Off by default: every existing
+    // reader of `tail` receives PRIVMSG only, and widening that silently would
+    // change what they all see (B246).
+    presence: bool,
     local: bool,
 }
 
@@ -664,6 +668,7 @@ fn parse_opts(args: &[String]) -> Opts {
         no_session: false,
         mentions: false,
         mention_exit: false,
+        presence: false,
         local: false,
     };
     let mut i = 0;
@@ -698,6 +703,7 @@ fn parse_opts(args: &[String]) -> Opts {
             "--no-session" => o.no_session = true,
             "--mentions" => o.mentions = true,
             "--mention-exit" => o.mention_exit = true,
+            "--presence" => o.presence = true,
             "--local" => o.local = true,
             _ => {}
         }
@@ -1036,17 +1042,37 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     }
     // drain to registration complete
     let _ = wait_for_welcome(&mut tls, &nick);
-    let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
+    // No JOIN. A post does not imply presence, and the server's PRIVMSG handler
+    // never checked the SENDER's membership -- it appends and relays, and
+    // Peer::offer gates on the RECIPIENT being joined -- so this JOIN bought
+    // nothing and cost a join/quit pair per call. Harmless while nothing could
+    // see it; once membership was relayed (B244/B245) it made every send
+    // flicker the nick in every other client's list (B247).
     let _ = write_line(&mut tls, &format!("PRIVMSG {} :{}", o.chan, o.text));
-    // read the echo of the stored line
-    let mut out = String::new();
+    // ASK for the acknowledgement rather than expecting one to be pushed. The
+    // server sends the sender nothing after a PRIVMSG, deliberately: an echo
+    // rendered twice in a standard client (B249), and an unsolicited numeric
+    // rendered as a stray `[999] nick #chan 59` line, which is no better. 999
+    // is LASTID's own reply, so asking makes the confirmation invisible to any
+    // client that does not ask.
+    let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+    // Wait for the 999 acknowledgement, not an echo of the message.
+    //
+    // The server used to write the PRIVMSG back to its sender, which is not the
+    // RFC flow -- a client renders its own line locally -- so a standard client
+    // showed every message twice (B249). It confirms with `999 <nick> #chan
+    // <id>` now, which is a better signal anyway: it proves the line was
+    // PERSISTED and names the id, where an echo only proved it was reflected.
+    let mut acked = false;
     let deadline = SystemTime::now() + Duration::from_secs(4);
     while SystemTime::now() < deadline {
         match read_line(&mut tls) {
             Ok(l) => {
-                if l.contains("PRIVMSG") && l.contains(&o.chan) && l.contains(&o.text) {
-                    out = l;
-                    break;
+                if let Ok(m) = Message::parse(&l) {
+                    if m.command == "999" && m.params.iter().any(|p| p == &o.chan) {
+                        acked = true;
+                        break;
+                    }
                 }
             }
             Err(e) => {
@@ -1056,11 +1082,13 @@ fn send(args: &[String], state_dir: &std::path::Path) {
             }
         }
     }
-    if out.is_empty() {
-        eprintln!("chat-client-rs: no echo from server");
+    if !acked {
+        eprintln!("chat-client-rs: server did not acknowledge the message");
         std::process::exit(70);
     }
-    println!("{}", out);
+    // Printed locally, from what was sent: the server no longer echoes, and this
+    // keeps the command's output the same shape callers already parse.
+    println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, o.text);
     // Advance the channel cursor to the newest id. The echo line is the
     // IRC-prefix form (no id), so fetch history to learn the id of the message
     // just stored.
@@ -1610,6 +1638,26 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                     Ok(message) => message,
                     Err(_) => continue,
                 };
+                // Membership lines, when asked for. The server relays JOIN,
+                // PART and QUIT correctly (B244/B245), and this loop used to
+                // drop every one of them before the mention filter ran -- so a
+                // human with a standard client could see who was present and a
+                // tailing agent could not (B246). "Is that peer listening right
+                // now?" was unanswerable from the bus, which matters because
+                // agents coordinate handoffs through it.
+                //
+                // A QUIT carries no channel parameter: it goes to every channel
+                // the leaver shared, and the server only relays it to members of
+                // this one, so an unfiltered command is already scoped.
+                if o.presence && matches!(message.command.as_str(), "JOIN" | "PART" | "QUIT") {
+                    let in_this_chan = message.command == "QUIT"
+                        || message.params.iter().any(|p| p == &o.chan)
+                        || message.trailing.as_deref() == Some(o.chan.as_str());
+                    if in_this_chan {
+                        println!("{}", l);
+                    }
+                    continue;
+                }
                 if message.command != "PRIVMSG"
                     || message.params.first().map(String::as_str) != Some(o.chan.as_str())
                 {
@@ -2127,6 +2175,23 @@ mod tests {
         // A trailing --state with no value must not panic.
         let dir = client_state_dir(&["--state".into()]);
         assert_ne!(dir, PathBuf::from(""));
+    }
+
+    // B246: presence is opt-in. Every existing reader of `tail` receives PRIVMSG
+    // only, so turning membership on by default would change what all of them
+    // see. The flag is the whole contract, so the default is worth asserting.
+    #[test]
+    fn presence_is_off_unless_asked_for() {
+        let o = parse_opts(&["--chan".into(), "#ops".into(), "--nick".into(), "me".into()]);
+        assert!(!o.presence, "membership lines must not appear by default");
+        let p = parse_opts(&[
+            "--chan".into(),
+            "#ops".into(),
+            "--nick".into(),
+            "me".into(),
+            "--presence".into(),
+        ]);
+        assert!(p.presence, "--presence turns them on");
     }
 
     #[test]

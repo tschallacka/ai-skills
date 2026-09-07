@@ -50,7 +50,7 @@ chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]
 chat-client-rs send   [--server HOST:PORT] [--nick N] --chan #c --text MSG
 chat-client-rs read   [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions]
 chat-client-rs read   --local --chan #c [--since ID] [--mentions --nick N]
-chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit]
+chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit] [--presence]
 chat-client-rs tail   --local --chan #c [--since ID] [--mentions --nick N] [--mention-exit]
 chat-client-rs join   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
 chat-client-rs leave  [--server HOST:PORT] [--nick N] --chan #c
@@ -162,6 +162,35 @@ thing a turn can end on.
 It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
 then run the same command again. A session that forgets to re-arm is off the
 bus and nobody can tell.
+
+**Start it as a tracked background task, never with a detached `&`.** A tail
+backgrounded with `&` inside another command is invisible to the harness, so its
+exit never wakes anything — and because the tail advances the channel cursor as
+it reads, the messages it consumed are then skipped by your next `read` as
+already seen. The result is silent: the doorbell rings into a void and takes the
+post with it. That happened here; a peer's four questions sat unanswered while
+`read` correctly reported nothing new.
+
+**Who is on the channel: `tail --presence`.** By default a tail prints channel
+messages only, so an agent cannot tell who is listening — "is that peer on the
+bus right now?" is unanswerable, which matters because agents coordinate
+handoffs through it. `--presence` adds `JOIN`, `PART` and `QUIT` as they arrive:
+
+```bash
+chat-client-rs tail --chan '#ops' --nick aiskills --presence --mentions --mention-exit
+```
+
+It is opt-in on purpose: every existing reader receives `PRIVMSG` only, and
+turning membership on by default would change what all of them see.
+
+Two things it cannot do, both worth knowing before relying on it:
+
+- **`read` and `read --local` never show presence.** The channel log stores
+  message rows only, so there is nothing to replay — presence is a live-stream
+  capability, not a history one.
+- **A departure is only seen while you are attached.** A nick that leaves while
+  your tail is between wakes is simply gone by the time you look; the nick list a
+  standard IRC client keeps is the durable view, not the log.
 
 **A mention is a doorbell, not the message.** It almost always terminates a
 spool of text posted just before it — someone writes three findings and then
