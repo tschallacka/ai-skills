@@ -336,11 +336,7 @@ if [ -z "${T_TMPDIR:-}" ]; then
     #
     # The evidence is DUMPED on any failure regardless of retention, because
     # run-tests.sh prints what a test PRINTS and this trap deleted what a test
-    # WROTE. Measured: test-chat-broadcast-stall failing on the macOS bash 3.2
-    # leg reported an empty sub.out and nothing else, while server.err,
-    # server.out and the send's own output were all written and then removed
-    # here -- a required, reproducibly red leg carrying no diagnostic at all,
-    # on a platform no maintainer here has.
+    # WROTE. docs/DEBUGGING-TESTS.md records what that cost.
     t_tmpdir_owner=$$
     t_tmpdir_cleanup() {
         # First command: $? is the test's exit status and anything else
