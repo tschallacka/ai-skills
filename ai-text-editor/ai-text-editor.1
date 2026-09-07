@@ -9,18 +9,18 @@ ai-text-editor \- agent-oriented local text and byte editor
 The editor is a server-owned, revision-aware editor for agents. The server
 owns document state, journals, indexes, SQLite metadata, sessions, and jobs.
 One server may own multiple isolated file tabs; each tab has separate state,
-metadata, and authorization. The initial Bstart --file PATHR creates the
-shared endpoint, while Bopen --endpoint ENDPOINT --file PATHR opens or
+metadata, and authorization. The initial \fBstart --file PATH\fR creates the
+shared endpoint, while \fBopen --endpoint ENDPOINT --file PATH\fR opens or
 selects another tab. Closing one tab leaves the endpoint running until the
 last tab closes.
 The client opens a short-lived request connection and exits after completion.
-After BopenR, the server returns a tab-scoped Bsession_tokenR. Save it
-with B--save-session-token PATHR and reuse it with B--session-token PATHR;
+After \fBopen\fR, the server returns a tab-scoped \fBsession_token\fR. Save it
+with \fB--save-session-token PATH\fR and reuse it with \fB--session-token PATH\fR;
 requests without the current token are rejected before mutation.
 .PP
-Mutating commands BinsertR, BreplaceR, Blarge-editR, BrestoreR,
-BundoR, BredoR, and BsaveR require B--expected-revisionR. A
-missing or stale value is refused; read BopenR or BhistoryR again before
+Mutating commands \fBinsert\fR, \fBreplace\fR, \fBlarge-edit\fR, \fBrestore\fR,
+\fBundo\fR, \fBredo\fR, and \fBsave\fR require \fB--expected-revision\fR. A
+missing or stale value is refused; read \fBopen\fR or \fBhistory\fR again before
 retrying. The server has no project-root jail: the session token grants the
 server process's normal filesystem permissions, so keep the endpoint private
 and use operating-system isolation when stronger confinement is needed.
@@ -104,7 +104,7 @@ with a zero, which would be indistinguishable from absent text.
 and whose query contains HTML entities carries a note, and the count it would
 have found, when the same query unescaped does match.
 .PP
-BcapabilitiesR is read-only machine-readable discovery for these modes,
+\fBcapabilities\fR is read-only machine-readable discovery for these modes,
 coordinate units, defaults, resource limits, and transports. Use it before
 choosing behavior that is not already known to the agent.
 .PP
@@ -154,19 +154,19 @@ Files above 256 MiB use bounded file-backed reads and sparse index scans.
 The protocol caps frames at 8 MiB; large raw reads are capped at 4 MiB before
 base64 framing, and oversized result windows must be paged.
 Large searches persist matches incrementally in bounded SQLite chunks and keep
-only the preview in memory; use the returned pager key with BpageR to fetch
+only the preview in memory; use the returned pager key with \fBpage\fR to fetch
 bounded result slices.
 Startup records only a bounded prefix index for a large tab. Use the
 index operation for an explicit full scan and inspect the reported coverage.
-Index output returns four blocks by default; use B--offsetR and
-B--limitR to page the persisted block list. The response reports its total
+Index output returns four blocks by default; use \fB--offset\fR and
+\fB--limit\fR to page the persisted block list. The response reports its total
 block count and returned window.
 Use \fB--offset\fR and \fB--length\fR for reads. Ordinary mutations are
 refused; start a job and use \fBlarge-edit\fR with
 \fB--acknowledge-large-edit\fR to stream an explicitly accepted rewrite.
 Large edits retain file-backed before/after snapshots for undo and redo; clean
 the tab journal when those snapshots are no longer needed.
-Large-tab external backup streams the current file to an atomic B.backR
+Large-tab external backup streams the current file to an atomic \fB.back\fR
 copy, and reload refreshes metadata and lazy index coverage. Merge and
 force-save require an acknowledged bounded rewrite job.
 .PP
