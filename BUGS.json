@@ -223,6 +223,27 @@
       "updated_at": "2026-09-06T09:54:33Z"
     },
     {
+      "id": "B230",
+      "title": "replace never checks delete_len against what is actually at the offset, so a stale length silently corrupts the buffer",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Fault-injection round trip on one PHP token, reported by the sanitairkamer session: replace(offset, delete_len=35, '=== -1') then replace(offset, delete_len=35, '=== 0'). The second delete_len was correct for the ORIGINAL token, but the first replace had left a 36-character one at that offset.",
+      "observed": "The second replace deleted 35 of 36 bytes and left the orphan digit behind: the file silently became '(int) $quote->getItemsCount() === 01'. Valid PHP, wrong logic, no error, no warning, no refusal - only a subsequent read caught it. The response reported success and a new revision.",
+      "expected": "A mutation cannot silently destroy content because the caller's length is stale. Two cheap guards were proposed by the reporter, either of which would have caught this: (1) an optional expected_text on replace that the server verifies at the offset BEFORE deleting, refusing by name when it does not match - the same shape as the revision guard, but for content rather than sequence; (2) the response reports the bytes actually deleted, so a caller can see what went. Neither requires line-range addressing.",
+      "mechanism": "replace applies delete_len as an unchecked byte count at the given offset. The revision guard proves the DOCUMENT has not moved since the caller last read it, which is why this passed: the caller held a current revision and was still wrong, because its own previous mutation changed the length of the very text it was addressing. Nothing relates delete_len to the content at the offset, so a length that was right one revision ago truncates rather than refusing.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer session 2026-09-07, hit during its own fault-injection round trip; relayed on the chat bus",
+      "notes": "B226 is the addressing gap this arose from - having to recompute a byte length after every mutation is what made the stale length possible. The two are not the same fix and both are wanted: line-range or match-pair addressing removes the arithmetic, an expected_text guard catches a wrong span however it was computed.",
+      "created_at": "2026-09-07T10:43:22Z",
+      "updated_at": "2026-09-07T10:43:36Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
@@ -2248,9 +2269,9 @@
       "fix": null,
       "verification": null,
       "found_by": "sanitairkamer session driving the installed MCP editor on Magento PHP source, relayed by Michael 2026-09-07",
-      "notes": "B214 is the fixed adjacent half: text-search hits now carry absolute byte_start/byte_end. That gives one hit's bounds; this entry is the span across two hits or across whole lines, which is still composed by hand.",
+      "notes": "B214 is the fixed adjacent half: text-search hits now carry absolute byte_start/byte_end. That gives one hit's bounds; this entry is the span across two hits or across whole lines, which is still composed by hand. REAL CORRUPTION observed 2026-09-07 while this was open, which is the strongest argument for it: a fault-injection round trip did replace(offset, delete_len=35) twice, the second length being correct for the ORIGINAL token while the buffer held a 36-character one, so 35 of 36 bytes went and the file silently became '(int) $quote->getItemsCount() === 01'. Valid PHP, wrong logic, no warning. Filed separately as B230 (blocking) because the defect there is that delete_len is never checked against the content at the offset - a guard worth having even with line-range addressing in place. This entry stays the addressing gap; B230 is the missing verification.",
       "created_at": "2026-09-07T10:32:20Z",
-      "updated_at": "2026-09-07T10:32:56Z"
+      "updated_at": "2026-09-07T10:43:36Z"
     },
     {
       "id": "B228",
@@ -2290,9 +2311,9 @@
       "fix": null,
       "verification": null,
       "found_by": "sanitairkamer session 2026-09-07, relayed on the chat bus and reproduced here",
-      "notes": null,
+      "notes": "MICHAEL'S RESOLUTION, 2026-09-07, which supersedes the wording-only expectation above: the editor should CREATE THE PATH RECURSIVELY, after the agent has been explicitly asked to verify the path for typos. So the fix is two-step, not a better message: (1) open refuses with the missing parent named and asks the caller to confirm the path is not a typo, (2) an acknowledged retry creates the directory chain and opens the tab. The wording save already uses is the right text for step 1; the acknowledgement flag belongs with the other safety acknowledgements (--acknowledge-force-save, --acknowledge-large-edit), which is the established pattern for 'I meant this'. Silent mkdir -p is NOT wanted - a typo would then quietly build a directory tree nobody asked for, which is exactly what the verify step exists to prevent.",
       "created_at": "2026-09-07T10:40:43Z",
-      "updated_at": "2026-09-07T10:40:43Z"
+      "updated_at": "2026-09-07T10:43:36Z"
     },
     {
       "id": "B14",
