@@ -2332,9 +2332,9 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael 2026-09-07, asking whether the skill already specified the main-agent/subagent division; checking it surfaced this instead",
-      "notes": "Correcting the surfaces field, which was mistyped on filing: the file is git-worktrees/SKILL.md at the repository root (the skill is tracked here and installs to ~/.claude/skills/git-worktrees/). Verified present: /home/mdibbets/git/ai-skills/git-worktrees/SKILL.md. B232 and B233 are the other two gaps in the same file, kept separate because each has its own fix and closing one leaves the others: B232 is the missing main-agent/subagent division, B233 the session-wide pin hazard. This entry is the wrong location.",
+      "notes": "Correcting the surfaces field, which was mistyped on filing: the file is git-worktrees/SKILL.md at the repository root (the skill is tracked here and installs to ~/.claude/skills/git-worktrees/). Verified present: /home/mdibbets/git/ai-skills/git-worktrees/SKILL.md. B232 and B233 are the other two gaps in the same file, kept separate because each has its own fix and closing one leaves the others: B232 is the missing main-agent/subagent division, B233 the session-wide pin hazard. This entry is the wrong location. B234 depends on how this resolves: if worktrees are to live under the tsch-ai-skills config directory as this skill says, the installer has to create and permit that directory (it currently grants only the plans and planning-tmp paths, Read/Edit and no Write). If instead the in-repo .claude/worktrees/ location that EnterWorktree creates is blessed, B234 becomes unnecessary. Decide the location here first.",
       "created_at": "2026-09-07T10:53:20Z",
-      "updated_at": "2026-09-07T10:53:59Z"
+      "updated_at": "2026-09-07T10:55:32Z"
     },
     {
       "id": "B232",
@@ -2377,6 +2377,27 @@
       "notes": "B232 is the omission that made this reachable - nothing said the coordinator should stay in the main checkout. B231 is the third gap in the same file. All three want one editing pass over the skill's parallel-agents guidance.",
       "created_at": "2026-09-07T10:53:51Z",
       "updated_at": "2026-09-07T10:53:59Z"
+    },
+    {
+      "id": "B234",
+      "title": "the installer grants no permissions on the worktrees directory the git-worktrees skill tells agents to use, and grants Edit without Write anywhere",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Read what planning_permission_step actually grants: awk on install.sh for planning_permission_step and claude_permissions. Then compare with the location git-worktrees/SKILL.md prescribes.",
+      "observed": "The grant covers exactly three paths - ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans, ${TMPDIR:-/tmp}/planning-agent, and <root>/planning/scripts - and the rules written are 'Read(<plans>/**)', 'Edit(<plans>/**)', 'Bash(<scripts>/**:*)', 'Read(<scripts>/**)', 'Read(<tmp>/**)', 'Edit(<tmp>/**)'. So: nothing covers tsch-ai-skills/worktrees, which is where git-worktrees/SKILL.md tells every agent to put its checkout; there is no Write rule anywhere, only Edit, so CREATING a file in any granted directory still prompts; and the whole step runs only inside main's planning branch, so an install that does not select planning grants nothing at all.",
+      "expected": "If worktrees are to live under ${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/worktrees, the installer creates that directory and grants Read, Edit AND Write on it, independently of whether the planning skill was selected, so an agent can create and edit files in its own checkout without a prompt per file.",
+      "mechanism": "planning_permission_step (install.sh) hardcodes the three planning paths and is called only from main's planning branch; claude_permissions/opencode_permissions receive exactly those three and emit Read/Edit/Bash rules with no Write. Nothing in the installer knows about the worktrees location, because that location is documented in the git-worktrees skill rather than declared anywhere the installer reads.",
+      "surfaces": [
+        "install.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael 2026-09-07, asking whether the installer should be granting read/write on the tsch-ai-skills config directory so worktrees there are editable without prompts",
+      "notes": "SCOPE WARNING for whoever implements this: grant the worktrees subtree specifically, NOT tsch-ai-skills/**. That directory also holds the chat home (channel logs, server.crt/server.key), the editor's private metadata and session registry, and on a shared install the installed binaries. A blanket Write there would let any agent overwrite the server's TLS private key or the binaries it is itself running - so the rule set should name .../tsch-ai-skills/worktrees/** and nothing above it.\n\nBLOCKED ON B231, and should be implemented together with it. If B231 resolves the other way - worktrees stay under the repository at .claude/worktrees/, which is what EnterWorktree actually creates - then this grant is unnecessary, because the repository checkout is already the agent's working directory and already permitted. So the location decision comes first and this entry follows it. Filing it now so the permission half is not forgotten once the location is settled.",
+      "created_at": "2026-09-07T10:55:20Z",
+      "updated_at": "2026-09-07T10:55:32Z"
     },
     {
       "id": "B14",
