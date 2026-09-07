@@ -225,7 +225,7 @@
     {
       "id": "B230",
       "title": "replace never checks delete_len against what is actually at the offset, so a stale length silently corrupts the buffer",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -236,12 +236,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — replace takes expected_text (or expected_bytes_base64 for non-UTF-8), which expected_span_bytes() reads and the handler verifies against the bytes at the span BEFORE deleting anything, refusing expected_text_mismatch with both what was expected and what is actually there. When expected_text is the only thing naming a length, its own length IS the length, so the arithmetic that got this wrong is not performed at all; a delete_len that disagrees with it is expected_text_length_mismatch. Second half: every replace answer reports the bytes it actually deleted via byte_preview(), so the damage is visible without a read.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: expected_text_refuses_the_double_replace_that_corrupted_a_file replays the corruption exactly — a 35-byte comparison replaced by a 36-byte one, then the same delete_len 35 against 36 bytes with a CURRENT revision — and asserts the second call is refused naming expected_text and the buffer is byte-identical afterwards. It then runs the same call WITHOUT the guard as a control and asserts it still produces 'if (true0) {' with the deleted bytes reported as '(int) $quote->getItemsCount() === 1', so it is the guard that refuses and not some other check, and finally shows the intended edit succeeding with expected_text as the only length. Mutation: delete the 'if let Some(expected) = &expected' verification block and the refusal becomes a success, leaving the orphan digit — the test fails on both the exit status and the buffer.",
       "found_by": "sanitairkamer session 2026-09-07, hit during its own fault-injection round trip; relayed on the chat bus",
       "notes": "B226 is the addressing gap this arose from - having to recompute a byte length after every mutation is what made the stale length possible. The two are not the same fix and both are wanted: line-range or match-pair addressing removes the arithmetic, an expected_text guard catches a wrong span however it was computed.",
       "created_at": "2026-09-07T10:43:22Z",
-      "updated_at": "2026-09-07T10:43:36Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B33",
@@ -2187,7 +2187,7 @@
     {
       "id": "B217",
       "title": "the MCP open schema omits document_mode and normalize_nfc, so raw-byte, hex and NFC tabs are unreachable over MCP while the adapter honours both",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2200,17 +2200,17 @@
         "ai-text-editor/SKILL.md",
         "ai-text-editor/references/protocol.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — ADAPTER_ARGUMENTS in src/ai-text-editor-mcp/src/lib.rs is now both the list call_tool strips out of arguments and the list routing() declares on every tool, so document_mode, normalize_nfc, idle_timeout_seconds, auth_token, session_token and acknowledge_create_parents are advertised everywhere. adapter_argument is an exhaustive match, so a key added to the list with no description panics rather than shipping undeclared.",
+      "verification": "cargo test -p ai-text-editor-mcp: every_argument_the_adapter_consumes_is_declared_on_every_tool walks tools/list against the const for all 28 tools; open_declares_document_mode_and_normalize_nfc pins the headline. Mutation: add .filter(|key| **key != \"document_mode\") to routing()'s extend and both fail ('open does not declare document_mode, which call_tool strips from every request'). Confirmed on the real surface: tools/list now lists document_mode and normalize_nfc under open, and a cold MCP open with document_mode hex_view answers mode HexView.",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B218",
       "title": "a text-mode search whose query crosses a line boundary silently returns zero matches with complete true",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2224,17 +2224,17 @@
         "ai-text-editor/references/protocol.md",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — refused by name rather than answered, on B171's read_range_unsupported precedent. search() in ai-text-editor-server.rs rejects a query containing a newline for every mode but exact_bytes with search_query_crosses_lines, naming exact_bytes as the mode that matches the whole buffer. protocol.md, SKILL.md and the man page state the line scope as a rule.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: a_text_search_whose_query_crosses_a_line_is_refused_by_name refuses exact_text, regex_rust, wildcard and fuzzy_edit on 'alpha\\nbeta' and requires exact_bytes to be named in each refusal, then finds the same span through exact_bytes at bytes 0..10. Mutation: delete the guard block and all four modes answer count 0 with complete true again.",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": "Independently reproduced 2026-09-07 by a second agent session (sanitairkamer) on an unrelated file, with query '?>\\n<dt class=\"total label' where that two-line sequence is verbatim present at lines 46-47: count 0, complete true, while single-line substrings on those same lines matched. Its read of the danger matches this entry's: 'a clean count:0 is the dangerous part - it reads as not in the file'. Two independent reporters on different files argues for refusing by name rather than documenting a line-scoped limit.",
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T10:16:36Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B225",
       "title": "Every verb but open refuses a valid unopened path instead of opening it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2245,17 +2245,17 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — resolve() in src/ai-text-editor/src/client.rs no longer gates autostart on the method, so both the never-opened and the dead-server cases reach the autostart arm; execute() fetches the tab-scoped session token up front the way open does rather than sending a request it knows will be refused for want of one. The one refusal kept is a revision-guarded verb (crate::REVISION_GUARDED_METHODS, now one const with four readers) on a file with no tab at all, because that revision cannot have come from a tab that never existed.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: a_read_only_verb_opens_a_file_that_has_no_tab_yet covers a cold search and a routed history; a_dead_server_is_replaced_by_the_next_read_rather_than_refused and killed_server_is_replaced_by_the_next_open_and_the_journal_replays cover the dead-server case through the replayed buffer; a_revision_guarded_verb_still_refuses_a_file_with_no_tab keeps the exception and asserts the file is byte-identical. Mutation: restore either 'if request.method != \"open\"' arm and the first three fail. The reported call was replayed for real: search --mode regex_rust --query setShippingMethod against the unopened shipping-logic.js answered 6 hits, and the same search over MCP on an unopened file answered too.",
       "found_by": "an unrelated agent on this machine calling search on a Magento source file; reported by Michael",
       "notes": "B219 is the peer: it is the misleading wording of the same refusal (it says 'no server reachable' while the agent server is alive, and its 'discovery probe' suffix points at socket discovery rather than the document). This entry is the missing behaviour; B219 is the message.",
       "created_at": "2026-09-07T10:12:46Z",
-      "updated_at": "2026-09-07T10:13:04Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B226",
       "title": "no mutation addresses a line range or a pair of search hits, so deleting a multi-line construct is hand arithmetic",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2266,17 +2266,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — replace addresses a span three ways. edit_span() in ai-text-editor-server.rs resolves range_start_line/range_end_line (inclusive, 1-based, the last line's terminator included, via line_span()) and range_start_byte/range_end_byte (half-open, the shape a search hit reports) into the same (offset, delete_len) the byte spelling names, so the journal record, cursor adjustment and undo entry are untouched. Two addressings for one edit, half a pair, a range on insert, or an out-of-range span are each refused by name. The response now reports the resolved offset, delete_len, bytes_written and the deleted bytes, which is what removes the verify-read.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: a_replace_deletes_a_whole_line_range_without_byte_arithmetic deletes lines 2-4 of a five-line file and asserts the buffer is 'keep 1\\nkeep 2\\n' with no blank line left, plus offset 7 and delete_len 46 echoed back; a_replace_takes_a_pair_of_search_hit_bounds composes a span from two live search hits' byte_start and byte_end; a_range_and_an_offset_addressing_the_same_edit_are_refused covers three conflicting shapes and asserts the file is unchanged. Mutation: return Ok(None) unconditionally from edit_span() and the range keys are silently ignored again, placing the edit at the cursor — the first test then fails on both the buffer and the echoed offset. Also worse than the entry recorded and now fixed: the four range_* keys were already in KNOWN_PAYLOAD_KEYS for read's sake, so a replace naming them passed the door and was dropped.",
       "found_by": "sanitairkamer session driving the installed MCP editor on Magento PHP source, relayed by Michael 2026-09-07",
       "notes": "B214 is the fixed adjacent half: text-search hits now carry absolute byte_start/byte_end. That gives one hit's bounds; this entry is the span across two hits or across whole lines, which is still composed by hand. REAL CORRUPTION observed 2026-09-07 while this was open, which is the strongest argument for it: a fault-injection round trip did replace(offset, delete_len=35) twice, the second length being correct for the ORIGINAL token while the buffer held a 36-character one, so 35 of 36 bytes went and the file silently became '(int) $quote->getItemsCount() === 01'. Valid PHP, wrong logic, no warning. Filed separately as B230 (blocking) because the defect there is that delete_len is never checked against the content at the offset - a guard worth having even with line-range addressing in place. This entry stays the addressing gap; B230 is the missing verification.",
       "created_at": "2026-09-07T10:32:20Z",
-      "updated_at": "2026-09-07T10:43:36Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B228",
       "title": "the chat skill teaches plain tail as the listening mode, so an agent woken by a mention never reads the spool the mention was ringing for",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2287,17 +2287,17 @@
       "surfaces": [
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — chat/SKILL.md 'Connecting to a channel' step 1 now prescribes tail --mentions --mention-exit as the listening posture, states that it is one-shot and re-armed after every wake, and says plainly that a mention is a doorbell rather than the message: it terminates a spool posted just before it, so on waking the agent reads the channel from its cursor and never acts on the mention line alone. The two undocumented traps are recorded with it — join seeds the cursor at the channel's current end (read --since 0 for pre-existing history) and the mention filter is a plain contains of @<nick> against the REQUESTED nick, so a decorated nick never fires on the plain one. The flag-list entry points at step 1 instead of describing the flags in isolation.",
+      "verification": "planning/tests/test-npm-package.sh PASS with chat/SKILL.md's new byte size in npm-package-baseline.tsv; reverting the section makes the baseline row disagree with the tree. Documentation only, so that is the test the entry can have. The nick claim was verified in the source rather than taken from the report: src/chat-client-rs/src/main.rs:1324 (local read) and :1621 (socket tail) both build the needle with format!(\"@{}\", nick) from o.nick or the saved session nick, never from the server's auto-suffixed assignment.",
       "found_by": "Michael 2026-09-07, after this exact failure: 'usually when a mention comes, that is after a spool of text that would be relevant' and 'ensure the chat skill gets this correct too ... that tail with mention trigger is the default listening mode, with rebind afterwards'",
       "notes": null,
       "created_at": "2026-09-07T10:32:50Z",
-      "updated_at": "2026-09-07T10:32:50Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B229",
       "title": "open on a path whose parent directory is missing blames the server with failed-to-start instead of naming the absent directory",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2308,12 +2308,12 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — autostart_server() in src/ai-text-editor/src/client.rs checks the parent directory before spawning anything, so a path problem is never routed through the failed-to-start message. Two steps, per Michael's revised expectation: the refusal names the missing directory in the wording save already uses for the identical condition and creates nothing, and acknowledge_create_parents (CLI --acknowledge-create-parents, the --acknowledge-force-save family's shape, carried on ResolveRequest and declared in the MCP schema) creates the chain recursively and opens the tab.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: open_under_a_missing_parent_names_the_directory_not_the_server asserts the refusal names 'parent directory' and the directory itself and does NOT contain 'failed to start', then adds only the parent and drives the same open through an insert and a save to a written file — so the control proves the directory was the whole difference. Mutation: delete the parent check and the refusal reverts to 'server for <path> failed to start: ... cannot resolve <path>', failing both the positive and the negative assertion.",
       "found_by": "sanitairkamer session 2026-09-07, relayed on the chat bus and reproduced here",
       "notes": "MICHAEL'S RESOLUTION, 2026-09-07, which supersedes the wording-only expectation above: the editor should CREATE THE PATH RECURSIVELY, after the agent has been explicitly asked to verify the path for typos. So the fix is two-step, not a better message: (1) open refuses with the missing parent named and asks the caller to confirm the path is not a typo, (2) an acknowledged retry creates the directory chain and opens the tab. The wording save already uses is the right text for step 1; the acknowledgement flag belongs with the other safety acknowledgements (--acknowledge-force-save, --acknowledge-large-edit), which is the established pattern for 'I meant this'. Silent mkdir -p is NOT wanted - a typo would then quietly build a directory tree nobody asked for, which is exactly what the verify step exists to prevent.",
       "created_at": "2026-09-07T10:40:43Z",
-      "updated_at": "2026-09-07T10:43:36Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B231",
@@ -2492,7 +2492,7 @@
     {
       "id": "B224",
       "title": "bugs/todo update accept --title, ignore it, then refuse saying no field was named",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "high",
       "parent": null,
@@ -2506,12 +2506,12 @@
         "src/todo/src/main.rs",
         "src/todo/src/mutate.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — mutate::Change carries a title in both crates (src/bug-report/src/mutate.rs, src/todo/src/mutate.rs), is_empty() counts it, update() applies it, and main.rs passes args.flag(\"title\") through. A present-but-blank title is refused by name via Change::blank_title() rather than erasing the only line that says what the entry is; the usage text lists --title.",
+      "verification": "cargo test -p bug-report -p todo-register: a_title_alone_is_a_change_and_is_applied asserts !change.is_empty() and that the title lands; a_blank_title_is_refused_naming_the_flag pins the refusal. Mutations: drop 'self.title.is_none() &&' from is_empty() and the first assert fails; drop the 'if let Some(title) = change.title' arm in update() and the applied-title assert fails.",
       "found_by": "the fifth drive's register pass: B221's own title needed correcting and no shipped path could do it",
       "notes": null,
       "created_at": "2026-09-07T09:24:19Z",
-      "updated_at": "2026-09-07T09:24:19Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B1",
@@ -3132,6 +3132,51 @@
       "notes": "B236 is the cosmetic half found in the same output: the fallback's worked example is Claude Code settings.json syntax whatever agent it addresses. Separate entry because a codex writer removes the fallback for codex without fixing the example for openclaw, cline or a custom root.\n\nLive test result that bears on the priority: codex DID write and edit files in a worktree under the new root with no prompt - but only because the worktree was its own cwd, which workspace-write makes writable by definition. It was not the grant working; there was no grant. An agent whose cwd is elsewhere, writing into a worktree, is still outside writable_roots and would be refused. So this is filed major but not urgent: it bites the cross-worktree case rather than the common one. CONFIRMED with the test that actually isolates it, 2026-09-07, at Michael's direction. The first run was a false positive because the worktree was the agent's own cwd; this run put the cwd somewhere else entirely - a fresh 'git init' directory holding only the prompt file - and asked each agent to write into a worktree under the new root.\n\nCodex refused and asked, verbatim: 'Would you like to run the following command? ... Reason: May I create and update the requested file in /home/mdibbets/.config/tsch-ai-worktrees/perm-probe2, OUTSIDE THE WORKSPACE WRITE ROOTS?' The request was declined and no file was created, which is the failure this entry describes: the installer granted codex nothing, so the worktrees root is not in writable_roots and a cross-directory write stops for a human.\n\nThe same test passed with no prompt for the two agents that DID get a grant: opencode wrote, appended and read the file (its external_directory rule on the worktrees root is what permits writing outside the cwd, so that rule earns its place), and Claude Code completed in 21s with '0 awaiting input'. Both files verified on disk, and the blank cwd still held only PROMPT.md afterwards, so nothing leaked into it.\n\nOne prompt that is NOT this bug, for whoever reads this next: Claude Code asks a one-time workspace-trust question for any first-time directory ('Is this a project you created or one you trust?'). That is about the CWD, not the target, and no permission grant suppresses it.",
       "created_at": "2026-09-07T11:19:04Z",
       "updated_at": "2026-09-07T11:27:25Z"
+    },
+    {
+      "id": "B237",
+      "title": "the unknown-argument check is global rather than per-verb, so a key another verb reads is silently ignored",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Before B226: replace --range-start-line 2 --range-end-line 4 -t '' -r N. The four range_* keys are in KNOWN_PAYLOAD_KEYS because read takes them.",
+      "observed": "The request passed the door and the replace handler ignored all four, falling back to the cursor position — a silent misplaced edit. handle()'s check refuses only a key no handler ANYWHERE reads.",
+      "expected": "A key no handler for THIS verb reads is refused by name, which is what B180 and B187 set out to guarantee. The check is one list for the whole protocol, so it cannot see the difference.",
+      "mechanism": "src/ai-text-editor/src/bin/ai-text-editor-server.rs, handle(): the KNOWN_PAYLOAD_KEYS membership test is protocol-wide. Per-verb key sets exist only in the MCP adapter's tool schemas, which the CLI and hand-sent NDJSON do not consult.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "found while fixing B226: the range keys were accepted and dropped, which the entry had not recorded",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:16Z",
+      "updated_at": "2026-09-07T11:32:16Z"
+    },
+    {
+      "id": "B238",
+      "title": "a document mode is per-server, so a second file opened into a running workspace can never be a raw or hex tab",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP with a workspace already running for this agent: open a second file with document_mode hex_view.",
+      "observed": "The tab comes back mode TextUtf8. Verified after B217: a COLD open with document_mode hex_view answers HexView, but the same argument on a file added to an existing server is ignored, exactly as documented ('shapes only a server this call starts').",
+      "expected": "A mode is a property of a tab, not of a server, so a raw or hex tab is reachable whether or not a workspace is already running. As it stands SKILL.md capability 2 is reachable only on an agent's very first open, which in a long-lived session is almost never.",
+      "mechanism": "select_tab()'s open path passes state_guard.mode to open_additional_tab(), so an added tab inherits the server's startup mode; document_mode reaches only autostart_server()'s argv. B217 made the argument declarable and honoured on a cold start, which is as far as a schema fix can go.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/src/client.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "verifying B217 against the real MCP surface, fifth drive's fix batch",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:16Z",
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B6",
@@ -4670,7 +4715,7 @@
     {
       "id": "B219",
       "title": "a routed verb on a file with no tab reports \"no editor server is reachable\" while that agent server is alive and serving other tabs",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4682,17 +4727,17 @@
         "src/ai-text-editor/src/client.rs",
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — the 'no editor server is reachable' arm is gone with B225's fix, so the untrue headline and its 'discovery probe' suffix cannot be printed. file_mismatch (ai-text-editor-server.rs) names the verb instead of a CLI command line and says the tab is the one this session token addresses; it also has its own error code now via select_tab_error_code(), where it used to arrive as tab_open_failed. execute() recovers from file_mismatch by opening the named file's tab, except for a revision-guarded verb.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: a_read_only_verb_opens_a_file_that_has_no_tab_yet drives the exact routed case (a live workspace holding another file's tab) and requires it to succeed; a_revision_guarded_verb_still_refuses_a_file_with_no_tab asserts the surviving refusal does NOT contain 'no editor server is reachable'. Mutation: restore either method != \"open\" arm in resolve() and the first test fails; drop the negative assertion's subject by reinstating the old wording and the second fails.",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": "B225 is the missing behaviour behind the same string: the non-open arms of resolve() refuse rather than autostarting a tab for a readable path. Fixing B225 removes the common path to this message entirely, but not the message - it still fires for a genuinely unreadable path - so the wording here is fixed on its own terms.",
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T10:12:59Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B220",
       "title": "protocol.md defines none of dirty, disk_diverged or external_change_pending, so the only statement of what disk_diverged means is one clause in SKILL.md",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4706,17 +4751,17 @@
         "ai-text-editor/SKILL.md",
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — ai-text-editor/references/protocol.md gains a 'Tab state: dirty, disk_diverged, external_change_pending' section: what each flag compares against, why disk_diverged reads the file rather than hashing the buffer, that a large tab reports dirty false, what all four combinations mean, and that the observation runs before the handler so the call that first notices a divergence is the one refused. SKILL.md names the third flag and points at the section; the man page does the same.",
+      "verification": "planning/tests/test-npm-package.sh PASS with protocol.md's new byte size in npm-package-baseline.tsv. Mutation: revert the section and the baseline row disagrees with the tree, which is what the test measures. The prose itself was checked against the implementation rather than the old SKILL.md clause: tab_dirty, tab_disk_diverged and observe_external in ai-text-editor-server.rs, including a corrected first draft that claimed external_change_pending could lag by one call.",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B223",
       "title": "rustified register binaries print usage and error text naming the .sh scripts they replaced, which are no longer in the tree",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4729,17 +4774,17 @@
         "src/register-rebuild/src/main.rs",
         "planning/scripts/register-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — bug-add, bug-update, todo-add, todo-update, register-read, register-command and register-rebuild each declare const TOOL: &str = env!(\"CARGO_BIN_NAME\") and interpolate it, so usage and every die string name the binary that ran. bug-update's repair advice and register-lib.sh's both name the register-rebuild binary rather than register-rebuild.sh, which is MODE: DEV and absent from a prod install.",
+      "verification": "planning/tests/test-register-helpers.sh asserts, for all seven, that --help and a refusal each name the binary and contain no '.sh', and that neither bug-update's source nor register-lib.sh still advises register-rebuild.sh. Mutation: restore 'Usage: bug-update.sh <id>' and the test fails with 'bug-update --help names a .sh script: Usage: bug-update.sh <id> ...' (run and observed).",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B227",
       "title": "an exact_text query containing HTML entities returns a silent zero instead of noting the query looks escaped",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4750,12 +4795,78 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — unescaped_query_would_match() in ai-text-editor-server.rs re-runs the same matcher against the query with its HTML entities unescaped, and a zero result carries a note plus unescaped_query_matches only when that actually matches, so the note reports the count the caller would have got rather than a guess. exact_bytes and path_wildcard are excluded: neither has a document-encoding mismatch to diagnose.",
+      "verification": "cargo test -p ai-text-editor --test cli_flow: a_zero_result_says_when_the_query_looks_html_escaped searches '&lt;dt class=' against a file holding '<dt class=' and asserts count 0 with unescaped_query_matches 1 and the entity named in the note, then searches '&lt;table id=' — genuinely absent — and asserts NO note is present. Mutation: drop the 'if hits == 0 { return None }' guard and the second assertion fails, which is the point: the diagnostic must not explain away a real absence.",
       "found_by": "sanitairkamer session driving the installed MCP editor on Magento PHP source, relayed by Michael 2026-09-07",
       "notes": "B218 is the peer with the same symptom and a different cause: there a clean zero hides a matcher limitation on newlines, here it hides a query-encoding mistake. Both argue that exact_text's no-match answer carries too little information to act on.",
       "created_at": "2026-09-07T10:32:33Z",
-      "updated_at": "2026-09-07T10:32:56Z"
+      "updated_at": "2026-09-07T11:32:16Z"
+    },
+    {
+      "id": "B239",
+      "title": "the cli_flow harness leaks autostarted servers, so a full run leaves one process per tab behind",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cargo test -p ai-text-editor --test cli_flow, then pgrep -af 'ai-text-edito[r]-server'.",
+      "observed": "173 servers still running after a run of the 38-test file, every one pointing at a scratch directory the harness had already deleted. Killed by hand.",
+      "expected": "Harness::drop stops what its own tests started. It sweeps XDG_RUNTIME_DIR/tsch-ai-skills-editor for .endpoint records and kills the recorded pid, then removes the tree — but a server that has not yet announced, or whose record it cannot parse, survives, and once the tree is gone there is nothing left to find it by.",
+      "mechanism": "src/ai-text-editor/tests/cli_flow.rs, impl Drop for Harness: the sweep is best-effort and races the server's own announce; every test that autostarts more than one tab can leave the extras. Pre-existing, and more visible now that B218/B225/B226/B227/B229/B230 added six tests that autostart.",
+      "surfaces": [
+        "src/ai-text-editor/tests/cli_flow.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the fifth drive's fix batch, cleaning up after its own test runs",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:16Z",
+      "updated_at": "2026-09-07T11:32:16Z"
+    },
+    {
+      "id": "B241",
+      "title": "the explicit stale-endpoint takeover is unreachable from either client, because nothing forwards --takeover-stale-endpoint to the autostarted server",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Kill a server so its endpoint record goes stale but its socket file remains, then open the same file from the CLI or over MCP.",
+      "observed": "There is no client argument for it at all. autostart_server() spawns the server without the flag, and the server refuses a stale endpoint whose owner it cannot rule out - so the documented recovery cannot be performed by the tool that meets the condition.",
+      "expected": "Capability 12's explicit takeover is reachable from the surface that hits the refusal. B217 covered arguments the adapter forwards but does not declare; this one is not forwarded by anything, so it is a missing argument rather than an undeclared one and was deliberately left out of that fix.",
+      "mechanism": "src/ai-text-editor/src/client.rs, autostart_server(): builds argv from document_mode, normalize_nfc and idle_timeout_seconds only. The server's gate is the '--takeover-stale-endpoint' argv test in its startup path in ai-text-editor-server.rs.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor.rs",
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "scoping B217 in the fifth drive's fix batch; B217's own expected text names the capability",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:34Z",
+      "updated_at": "2026-09-07T11:32:34Z"
+    },
+    {
+      "id": "B242",
+      "title": "bugs and todo refuse any flag value that begins with two dashes, so a title or note naming a flag cannot be written",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bin/<triple>/bugs add --title '--takeover-stale-endpoint is unreachable' --reproduce r --observed o --expected e",
+      "observed": "Exit 64 with 'bugs: --title needs a value'. The value was supplied; it just starts with '--', which cli::parse reads as the next flag. Hit while filing B241, whose natural title starts with the flag it is about.",
+      "expected": "A value is a value. A register whose entries are about command-line flags cannot express half its own titles otherwise, and the refusal blames the caller for omitting something they passed - the same shape as B224. Either accept a value beginning with '--' after a flag that takes one, or support the '--' end-of-flags convention so the rest of the line is values.",
+      "mechanism": "src/bug-report/src/cli.rs and src/todo/src/cli.rs, parse(): a token after a value-taking flag is treated as that flag's value only when it does not itself look like a flag, so ParseError::MissingValue fires on a legitimate value. The workaround is to reword the title, which is how B241 was filed.",
+      "surfaces": [
+        "src/bug-report/src/cli.rs",
+        "src/todo/src/cli.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the fifth drive's fix batch, filing B241 during its own register pass",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:47Z",
+      "updated_at": "2026-09-07T11:32:47Z"
     },
     {
       "id": "B25",
@@ -4889,8 +5000,8 @@
     },
     {
       "id": "B221",
-      "title": "SKILL.md Start section explains that starting a server by hand is not a normal step any more",
-      "status": "confirmed",
+      "title": "the SKILL.md Start section is written as journey prose rather than the current contract",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -4901,12 +5012,12 @@
       "surfaces": [
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d616bd30 — the Start section is rewritten in contract voice: 'ai-text-editor-server start is how a server is pinned explicitly, and how --tcp and --large-threshold-bytes are reached.' The 'is not a normal step any more' clause is gone. The section now also leads with the rule B225 established and states its one exception.",
+      "verification": "planning/tests/test-npm-package.sh PASS with SKILL.md's new byte size in npm-package-baseline.tsv; reverting the section makes the baseline row disagree with the tree. The entry's own title was corrected here with bugs update --title, which B224 made work.",
       "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B236",
@@ -4928,6 +5039,27 @@
       "notes": null,
       "created_at": "2026-09-07T11:19:23Z",
       "updated_at": "2026-09-07T11:19:23Z"
+    },
+    {
+      "id": "B240",
+      "title": "the man page has a broken roff macro, so 'capabilities' renders as literal BcapabilitiesR",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "man -l ai-text-editor/ai-text-editor.1 and read the MODES section, or grep the file for BcapabilitiesR.",
+      "observed": "The line reads 'BcapabilitiesR is read-only machine-readable discovery for these modes'. The escapes of \\fBcapabilities\\fR were lost, so the bold markers became part of the word.",
+      "expected": "\\fBcapabilities\\fR, matching every other command name in the file.",
+      "mechanism": "ai-text-editor/ai-text-editor.1, MODES section: a single line whose \\f escapes were dropped, presumably by a substitution pass over the file. Nothing checks the man page's roff, so it renders wrong silently.",
+      "surfaces": [
+        "ai-text-editor/ai-text-editor.1"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the fifth drive's fix batch, while editing the same section for B218 and B220",
+      "notes": null,
+      "created_at": "2026-09-07T11:32:16Z",
+      "updated_at": "2026-09-07T11:32:16Z"
     },
     {
       "id": "B59",
