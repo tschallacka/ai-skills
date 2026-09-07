@@ -3522,6 +3522,27 @@
       "updated_at": "2026-09-07T15:01:18Z"
     },
     {
+      "id": "B270",
+      "title": "test-chat-resolution case 5 discovers whatever server is live on the machine, so it fails and writes to it",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With any chat server running on this machine and announcing on UDP 7780: bash chat/tests/test-chat-resolution.sh (on unmodified origin/master, a363c91f). By hand: start the case-5 server with AI_CHAT_HOME=$R/lh CHAT_ANNOUNCE=1 CHAT_BCAST=127.0.0.1 CHAT_ANNOUNCE_HOST=127.0.0.1, point a fresh client state dir at the dead 127.0.0.1:1, then send --chan \"#ladder\" --text \"resolve me\" and print session show.",
+      "observed": "FAIL: send did not resolve a dead session to the live server. By hand: send exits 70 with \"chat-client-rs: no echo from server\", and session show reports server=127.0.0.1:37251 -- a server this test never started, while its own server had bound 45769. The PRIVMSG is written before the echo wait, so the test posts \"resolve me\" into that unrelated server store.",
+      "expected": "The ladder resolves to the server the test started, on the port it recorded, and nothing the test does reaches a server it did not start. A suite result must not depend on what else is running on the machine.",
+      "mechanism": "Case 5 relies on real UDP discovery on the DEFAULT beacon port (7780), which is deliberate for the contract it pins, and discover_candidates returns every announcing server with LAN addresses before loopback. Any other server announcing on 7780 -- an agent chat on the developer machine, or a sibling worktree - is therefore a candidate, and it is dialled and written to before the test server is. The other cases in the file set CHAT_ANNOUNCE=0 for exactly this reason; case 5 cannot, because it needs a beacon, and it does not scope the one it needs to a private port.",
+      "surfaces": [
+        "chat/tests/test-chat-resolution.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T90: the scoped chat suite run failed here, and the same failure reproduced on an unmodified origin/master worktree as a control",
+      "notes": "AI_CHAT_BEACON_PORT is read by the client and CHAT_ANNOUNCE_PORT-equivalent handling exists on the server, so the fix is to give case 5 a private beacon port rather than to weaken the contract. src/chat-mcp/tests/mcp_flow.rs does this: its server announces on a port nothing listens to, and its session is pre-seeded so resolution never reaches discovery.",
+      "created_at": "2026-09-07T19:59:50Z",
+      "updated_at": "2026-09-07T19:59:50Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
