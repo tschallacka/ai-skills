@@ -2748,6 +2748,72 @@
       "updated_at": "2026-09-07T20:45:40Z"
     },
     {
+      "id": "B280",
+      "title": "chat/SKILL.md blesses a detached & for the presence tail while its own rule below forbids one",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Read chat/SKILL.md: the copyable line at :201 ends in a bare \"&\", :234 calls that \"the exception to the rule below\", and the rule below at :277 says \"Start it as a tracked background task, never with a detached &\".",
+      "observed": "The document gives an agent a copyable command that its own rule forbids, and then names it an exception without saying why the stated harm does not apply.",
+      "expected": "One instruction. The presence tail is started as a tracked background task like every other long-lived process, or the exception states plainly why the harm at :277 does not reach it.",
+      "mechanism": "The exception was written for the wrong reason: that the tail must outlive the turn. The harm :277 names is not about lifetime - a detached tail is invisible to the harness AND advances the channel cursor, so it consumes messages a later read then skips as already seen. :283 records that happening here. Both halves apply to a presence tail exactly as much as to any other.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing 8e67302a and f66a9199 in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:05Z",
+      "updated_at": "2026-09-07T21:18:05Z"
+    },
+    {
+      "id": "B281",
+      "title": "the nitpicker profile restates the chat posture chat/SKILL.md owns, and restates the wrong half",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Compare .agents/profiles/nitpicker.md:56-66 with chat/SKILL.md:196-236.",
+      "observed": "The profile teaches tail --mentions --mention-exit as THE wait for a pseudo-daemon whose whole job is staying visible in the channel. chat/SKILL.md:229-232 already says that form is the one-connection shorthand whose cost is that presence ends the moment it fires, to be kept for a short errand.",
+      "expected": "The profile references the mechanism rather than restating it, and where it must name a form it names the two-part one. MAINTAINER 1.2: shared facts live in exactly one place, docs reference and never duplicate.",
+      "mechanism": "Written in 8e67302a before chat/SKILL.md carried the two-part posture, and not revisited when f66a9199 added it. A second copy of a mechanism drifts from the first, and this one drifted immediately: it kept the half that costs presence for the agent that most needs presence.",
+      "surfaces": [
+        ".agents/profiles/nitpicker.md",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing its own profile in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:24Z",
+      "updated_at": "2026-09-07T21:18:24Z"
+    },
+    {
+      "id": "B283",
+      "title": "a presence tail makes every later send appear under a suffixed nick",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Hold the channel with a presence tail as nick N, then run: chat-client-rs send --chan \"#ai-skills\" --nick N --text hello",
+      "observed": "The message arrives from N-2. Measured in #ai-skills: aiskills messages arrived as aiskills-2 and t90-chat-mcp as t90-chat-mcp-2, in both cases while their presence tail held the plain nick.",
+      "expected": "A message sent under a nick is attributed to that nick. Who said a thing is the one piece of a chat message that cannot be reconstructed later.",
+      "mechanism": "send opens its own short-lived connection, and the server suffixes a nick already held by another connection (B263). The two-part posture chat/SKILL.md now teaches guarantees the collision on every send, because the presence tail is holding the plain nick by design. B263 recorded the suffixing; this is the consequence the posture makes unavoidable rather than incidental.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs",
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, noticing its own messages arriving as aiskills-2 while holding a presence tail",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:44Z",
+      "updated_at": "2026-09-07T21:18:44Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5664,6 +5730,28 @@
       "notes": null,
       "created_at": "2026-09-07T20:38:32Z",
       "updated_at": "2026-09-07T20:38:32Z"
+    },
+    {
+      "id": "B282",
+      "title": "a doc comment is orphaned when a new item is inserted between it and the item it described",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Read src/chat-client-rs/src/lib.rs:2336-2339, then :2393.",
+      "observed": "The comment explaining B271 (a subagent shares its parent process and CLAUDE_CODE_SESSION_ID, and wrote into the parent session file) now opens the doc comment of a_key_carries_the_nick_as_a_findable_suffix, which is a B278 test. The test it actually describes, a_subagent_under_one_harness_id_gets_its_own_session_per_nick, sits at :2393 with no doc comment at all.",
+      "expected": "A comment sits on the thing it describes. CODE-STYLE 11: a comment states a fact about the code it sits on.",
+      "mechanism": "Four tests were inserted between the comment and its test. The same edit shape produced the two findings already reported on installer/src/36-ui-render.sh, where iui_integration_offered was inserted between iui_info_actions and its docblock. Three instances of one pattern: a new item added directly after a comment, taking the comment with it.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "installer/src/36-ui-render.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker, reviewing 1267ac11 in #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-07T21:18:24Z",
+      "updated_at": "2026-09-07T21:18:24Z"
     },
     {
       "id": "B25",
