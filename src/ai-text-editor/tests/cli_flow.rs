@@ -2141,3 +2141,142 @@ fn a_stale_endpoint_is_taken_over_only_when_the_client_says_so() {
     let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\n");
 }
+
+/// B237: the unknown-argument door is per-verb, not protocol-wide.
+///
+/// B180 and B187 set out to refuse "an argument no handler for this verb
+/// reads". The check they produced was one list for the whole protocol, so a
+/// key belonging to a *different* verb passed and was silently dropped:
+/// `replace` naming `range_start_line` got through because `read` takes that
+/// key, and the replace handler then edited at the cursor instead — a
+/// misplaced edit reported as a success with a fresh revision.
+///
+/// This drives the real client against a real server, because the defect is in
+/// the door and nowhere else. A unit test on the key table would pass with the
+/// door still consulting a protocol-wide union, which is exactly the state
+/// being fixed: mutate `handle`'s lookup to `METHODS.iter().any(...)` and every
+/// assertion below goes silent again.
+#[test]
+fn a_key_another_verb_reads_is_refused_by_name_not_dropped() {
+    let harness = Harness::new("perverb");
+    let file = harness.write("perverb.txt", "alpha\nbeta\ngamma\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    // `delete_len` is a `replace` key. `insert` ignored it completely, so an
+    // insert carrying one was performed as a plain insert and answered as a
+    // success — the caller's stated intent to delete five bytes vanished.
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-d",
+        "5",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        refused.status.code(),
+        Some(1),
+        "an insert naming delete_len must be refused, not performed: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("delete_len"));
+    let message = refusal["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("delete_len") && message.contains("insert"),
+        "the refusal must name both the key and the verb: {message}"
+    );
+    // The accepted set travels with the refusal, so a caller that guessed
+    // wrong can see what this verb does take rather than guessing again.
+    let accepted = refusal["details"]["accepted_keys"]
+        .as_array()
+        .cloned()
+        .expect("the refusal carries the accepted key set");
+    assert!(
+        accepted.contains(&json!("offset")),
+        "accepted: {accepted:?}"
+    );
+    assert!(accepted.contains(&json!("text")), "accepted: {accepted:?}");
+    assert!(
+        !accepted.contains(&json!("delete_len")),
+        "delete_len must not be listed as acceptable to insert: {accepted:?}"
+    );
+    // Nothing was applied: the buffer and the revision are untouched.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nbeta\ngamma\n"
+    );
+
+    // A read key on a verb that reads nothing at all. `offset` is legal for
+    // read, insert, replace, index, page and search, which is precisely why
+    // the protocol-wide list let it through here.
+    let refused = harness.client(&[
+        "history",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "3",
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(refused.status.code(), Some(1), "history takes no offset");
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("offset"));
+
+    // And the door must not have become a blanket refusal: the keys each verb
+    // really does read still work, including the range spelling whose silent
+    // loss was the entry's own reproduction.
+    let windowed = harness.client(&[
+        "read",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-p",
+        "text",
+    ]);
+    assert!(windowed.status.success(), "{}", stderr_text(&windowed));
+    assert_eq!(String::from_utf8_lossy(&windowed.stdout), "beta\n");
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--range-start-line",
+        "2",
+        "--range-end-line",
+        "2",
+        "-t",
+        "BETA\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha\nBETA\ngamma\n",
+        "a range replace must still land where it says"
+    );
+}

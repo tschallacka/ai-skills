@@ -297,16 +297,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             file.display()
         )),
         _ => {
-            let autostart_auth = autostart_server(
-                file,
-                request.document_mode.as_deref(),
-                request.normalize_nfc,
-                request.idle_timeout_seconds.as_deref(),
-                request.explicit_identity.as_deref(),
-                &request.agent_env_var,
-                request.acknowledge_create_parents,
-                request.takeover_stale_endpoint,
-            )?;
+            let autostart_auth = autostart_server(request, file)?;
             let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
                     "server was started but never announced an endpoint for {}: {error}",
@@ -382,16 +373,32 @@ pub fn persist_cache(
 /// `agent_env_var` on just this child process (not the caller's own
 /// environment) closes that gap: the new server's own identity resolution
 /// then sees the same explicit value the client already resolved.
-pub fn autostart_server(
-    file: &Path,
-    document_mode: Option<&str>,
-    normalize_nfc: bool,
-    idle_timeout_seconds: Option<&str>,
-    explicit_identity: Option<&str>,
-    agent_env_var: &str,
-    acknowledge_create_parents: bool,
-    takeover_stale_endpoint: bool,
-) -> Result<Option<String>, String> {
+/// Takes the whole [`ResolveRequest`] rather than one parameter per startup
+/// argument: every argument here is already a field on it, the list had grown
+/// to eight, and each of B217, B229 and B241 was in part a startup argument
+/// that failed to reach this argv. One struct means adding the next one is an
+/// edit in two places (the field and the `command.arg`), not four.
+pub fn autostart_server(request: &ResolveRequest, file: &Path) -> Result<Option<String>, String> {
+    let ResolveRequest {
+        document_mode,
+        normalize_nfc,
+        idle_timeout_seconds,
+        explicit_identity,
+        agent_env_var,
+        acknowledge_create_parents,
+        takeover_stale_endpoint,
+        ..
+    } = request;
+    let (document_mode, idle_timeout_seconds, explicit_identity) = (
+        document_mode.as_deref(),
+        idle_timeout_seconds.as_deref(),
+        explicit_identity.as_deref(),
+    );
+    let (normalize_nfc, acknowledge_create_parents, takeover_stale_endpoint) = (
+        *normalize_nfc,
+        *acknowledge_create_parents,
+        *takeover_stale_endpoint,
+    );
     // B229: a path whose parent directory is missing used to be reported as
     // "server for <path> failed to start: ai-text-editor-server: cannot
     // resolve <path>: No such file or directory (os error 2)" — blaming the
