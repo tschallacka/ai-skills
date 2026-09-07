@@ -1631,6 +1631,32 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
     }
+    // The same door, for the VALUE rather than the name (B267). A count key
+    // present but not a non-negative integer is refused here, once, for every
+    // verb -- rather than reaching a reader that spells it
+    // `.and_then(Value::as_u64)` and cannot tell an out-of-range value from an
+    // absent one, and so applies its absent-case default.
+    //
+    // That is what made B267 dangerous rather than merely wrong: `insert
+    // --offset -1` reported `{"offset": 0, "bytes_written": 11}` and wrote at
+    // the top of the file, and the response was indistinguishable from a
+    // correct call. A refusal that names the key and echoes the value back is
+    // the only answer a caller can act on.
+    if let Some((key, value)) = envelope.payload.as_object().and_then(|map| {
+        map.iter()
+            .find(|(key, value)| {
+                ai_text_editor::verbs::is_count_key(key) && value.as_u64().is_none()
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+    }) {
+        frames.push(error_details(
+            &envelope.request_id,
+            "argument_out_of_range",
+            format!("{key} must be a non-negative whole number, not {value}"),
+            json!({"offending_key": key, "offending_value": value}),
+        ));
+        return frames;
+    }
     if envelope.method == "search" && envelope.payload.get("offset").is_some() {
         frames.push(error(
             &envelope.request_id,

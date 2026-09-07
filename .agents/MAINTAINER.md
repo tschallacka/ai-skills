@@ -139,6 +139,23 @@ this file holds what applies to the repository as a whole.
   or retry budget written for a Linux runner will be too tight there — the host
   is a shared, oversubscribed VPS that pauses for other tenants.
 
+### 1.12 A failing test must be diagnosable from its output
+- **`docs/DEBUGGING-TESTS.md` is the single source** for the evidence dump,
+  breakpoints, `t_dump` and scoped tracing. Everything lives in
+  `planning/tests/lib-test.sh`, needs no change to a test file, and is inert
+  unless asked for.
+- A failing test's temp root is **printed automatically**, and **kept in CI**
+  while a local run cleans it up. CI has no re-run and no machine to come back
+  to; locally you can just run it again.
+- **Do not delete evidence a failure has not yet reported.** `lib-test.sh` once
+  removed the root on any exit, failure included, and a required macOS leg
+  failed reproducibly with an empty file quoted and nothing else — while the
+  three files that held the answer were written and then deleted. Reproducing
+  it was impossible for want of that platform.
+- When a suite's result is surprising, read its raw output rather than its
+  summary. A skipped test still prints `PASS` (`BUGS.json` B268), so a green
+  summary does not by itself prove every test ran.
+
 ## 2. Change checklist (minimum, per change)
 
 1. Identify every consumer (parser/validator, other helpers, tests, manifest/map,
@@ -155,7 +172,8 @@ this file holds what applies to the repository as a whole.
 6. Register new files in `PACKAGE-MANIFEST.tsv`, `PACKAGE-MAP.tsv`, and
    `install.sh skill_files`; reflect benchmark-capsule dependencies in the
    capsule copy.
-7. Run `bash -n`, `git diff --check`, and the bounded test suite; run
+7. Run `bash -n`, `git diff --check`, and the bounded test suite (when one
+   fails, `docs/DEBUGGING-TESTS.md` covers the evidence dump and breakpoints); run
    skill-specific drift/shape tests for any registry, voice, or generated-format
    change. For every change under `src/`, also `cargo fmt --check` and
    `cargo test` on each touched crate before pushing: CI runs fmt first, so

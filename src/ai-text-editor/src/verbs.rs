@@ -233,9 +233,51 @@ pub fn payload_keys(method: &str) -> Option<Vec<&'static str>> {
     Some(keys)
 }
 
+/// The payload keys read as a non-negative integer — a byte offset, a length,
+/// a count, an id, a line number.
+///
+/// They share a failure mode worth one declaration rather than sixteen call
+/// sites. Every reader spells it `.get(key).and_then(Value::as_u64)`, and
+/// `as_u64()` answers `None` for a negative number, a fraction, a string or a
+/// bool — indistinguishable from the key being absent. The readers then apply
+/// their absent-case default, so an out-of-range value becomes a SUCCESSFUL
+/// operation somewhere else entirely.
+///
+/// B267: `insert --offset -1` was answered `{"offset": 0, "bytes_written": 11}`
+/// and wrote at the top of the file. Nothing in that response distinguishes it
+/// from a correct call, so a caller that does not re-read cannot notice.
+///
+/// The rule this restores is already the house rule elsewhere:
+/// `verbosity::requested` refuses a level outside 0..=3 rather than clamping,
+/// and its test asserts -1 must be "refused, not clamped". This is that rule
+/// applied to the arguments that address bytes.
+///
+/// `gradient` is deliberately absent: it is a float. `verbosity` too — it has
+/// its own refusal path and would otherwise be reported twice.
+pub fn is_count_key(key: &str) -> bool {
+    matches!(
+        key,
+        "offset"
+            | "delete_len"
+            | "cursor_id"
+            | "limit"
+            | "length"
+            | "line"
+            | "before"
+            | "after"
+            | "wrap_width"
+            | "idle_timeout_seconds"
+            | "range_start_line"
+            | "range_end_line"
+            | "range_start_byte"
+            | "range_end_byte"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn every_dispatched_method_declares_its_keys() {
@@ -273,6 +315,66 @@ mod tests {
         // `expected_text_unsupported`, which beats the door's message.
         assert!(reads_payload_key("insert", "expected_text"));
         assert!(!reads_payload_key("search", "pager_key"));
+    }
+
+    /// B267. `offset` is the one that bit, but the shape is shared by every
+    /// key that addresses bytes or counts, which is why the declaration is one
+    /// list rather than a check at each reader.
+    #[test]
+    fn every_key_that_addresses_bytes_or_counts_is_declared_as_one() {
+        for key in [
+            "offset",
+            "delete_len",
+            "cursor_id",
+            "limit",
+            "length",
+            "line",
+            "before",
+            "after",
+            "wrap_width",
+            "idle_timeout_seconds",
+            "range_start_line",
+            "range_end_line",
+            "range_start_byte",
+            "range_end_byte",
+        ] {
+            assert!(is_count_key(key), "{key} addresses bytes or counts");
+        }
+    }
+
+    /// A float and a key with its own refusal path stay out, or the door would
+    /// refuse a legal `gradient` and report `verbosity` twice.
+    #[test]
+    fn a_float_and_a_separately_refused_key_are_not_count_keys() {
+        assert!(!is_count_key("gradient"));
+        assert!(!is_count_key("verbosity"));
+        assert!(!is_count_key("text"));
+        assert!(!is_count_key("expected_revision"));
+    }
+
+    /// The values the door must refuse. `as_u64()` answers None for every one
+    /// of these, which is exactly what made them indistinguishable from an
+    /// absent key at the reader -- so each one silently became the reader's
+    /// default. -1 is B267's own reproduction: it wrote at byte 0.
+    #[test]
+    fn a_count_key_refuses_a_negative_a_fraction_a_string_and_a_bool() {
+        for bad in [
+            json!(-1),
+            json!(-4096),
+            json!(1.5),
+            json!("8"),
+            json!(true),
+            json!(null),
+        ] {
+            assert!(
+                bad.as_u64().is_none(),
+                "{bad} must not read as a count, or the door cannot catch it"
+            );
+        }
+        // And the legal ones still are, including the boundary.
+        for good in [json!(0), json!(1), json!(4096)] {
+            assert!(good.as_u64().is_some(), "{good} is a legal count");
+        }
     }
 
     #[test]
