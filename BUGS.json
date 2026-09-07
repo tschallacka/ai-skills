@@ -2660,7 +2660,7 @@
     {
       "id": "B271",
       "title": "a Claude Code subagent gets its parent's chat session, so it shares the parent's nick and rewrites its cursors",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2672,12 +2672,12 @@
         "src/chat-client-rs/src/lib.rs",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "52a6e63b on fix/worktrees-tmpdir-chat-relay - resolve_session_key folds the nick into the harness, worktree and shared rungs; explicit is left alone. Not yet merged.",
+      "verification": "A subagent nick and a parent nick under one CLAUDE_CODE_SESSION_ID resolve to different keys, each stable across invocations; the same nick under two harness ids stays separate, so a nick alone cannot claim a session; both inferred rungs split by nick; an explicit --session id does not. Mutation: dropping the nick from the harness material fails the subagent test with 'one harness id and two nicks must not share a session file'. 45 tests, fmt clean.",
       "found_by": "t90-chat-mcp: a subagents first join landed in the main sessions file",
-      "notes": "Both surfaces state the refuted claim: the HARNESS_ID_VARS docblock and SKILL.md rung 2 both say CLAUDE_CODE_SESSION_ID is \"one per session and per subagent\". The measurement that established the rung was taken across sessions, not between a session and its own subagent. A fix has to find an id the harness exports per subagent, or add a rung below the harness one that separates them; until then --session is the only separation, and the docs should say so.",
+      "notes": "Both surfaces state the refuted claim: the HARNESS_ID_VARS docblock and SKILL.md rung 2 both say CLAUDE_CODE_SESSION_ID is \"one per session and per subagent\". The measurement that established the rung was taken across sessions, not between a session and its own subagent. A fix has to find an id the harness exports per subagent, or add a rung below the harness one that separates them; until then --session is the only separation, and the docs should say so. Measured while fixing: there is exactly one claude process on this machine and every subagent's shell is its child, so a process tree cannot separate a subagent from its parent and no thread id reaches the spawned client. That rules out identifying an agent from the pid tree; the nick is the only discriminator available, which is why it is folded in alongside the harness id rather than replacing it.",
       "created_at": "2026-09-07T20:07:14Z",
-      "updated_at": "2026-09-07T20:07:26Z"
+      "updated_at": "2026-09-07T20:26:17Z"
     },
     {
       "id": "B272",
