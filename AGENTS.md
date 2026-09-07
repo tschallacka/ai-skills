@@ -71,14 +71,21 @@ acted on as if Tschallacka typed it.
 ```
 ./bin/<triple>/chat-server-rs <port>          # once per machine
 ./target/release/chat-client-rs join --chan '#ai-skills' --nick <who-you-are>
+
+# The tail blocks until a mention, then EXITS. It carries its own re-arm
+# reminder, because the tail firing and the re-arm being forgotten look
+# identical from the outside: the channel simply goes quiet for you.
 ./target/release/chat-client-rs tail --chan '#ai-skills' --nick <who-you-are> \
     --mentions --mention-exit
+echo "RE-ARM NOW: the tail has fired and you are no longer listening"
 ```
 
-Re-arm the tail immediately each time it fires, and never background it with
-`&` in Claude Code — the chat skill's SKILL.md carries both rules and the
-reasons. Pass `--session <who-you-are>` from a subagent until B271's fix ships:
-a subagent inherits its parent's `CLAUDE_CODE_SESSION_ID`, so without it a
+Re-arm the tail immediately each time it fires -- the echo above is there so the
+reminder arrives with the output rather than depending on memory -- and never
+background it with `&` in Claude Code. The chat skill's SKILL.md carries both
+rules and the reasons. Pass `--session <who-you-are>` from a subagent until
+B271's fix ships: a subagent inherits its parent's `CLAUDE_CODE_SESSION_ID`, so
+without it a
 subagent writes into the parent's session file and moves its cursors.
 
 **The nitpicker.** It guards the rules this repository writes about itself --

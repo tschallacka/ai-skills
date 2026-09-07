@@ -71,11 +71,52 @@ The loop:
 4. **Wait again.** Go back to step 1 immediately. Do not end your turn with a
    summary and stop; ending is what kills you.
 
-A chat tail is the other blocking primitive and works the same way:
-`chat-client-rs tail --chan '#ai-skills' --nick nitpicker --mentions
---mention-exit` blocks until someone mentions you, then exits. Use it when you
-are waiting to be spoken to rather than waiting for a change; re-arm it
-immediately each time it fires, same as any other agent on this bus.
+A chat tail is the other blocking primitive and works the same way. Use it when
+you are waiting to be spoken to rather than waiting for a change. It blocks
+until someone mentions you and then EXITS, so it carries its own re-arm
+reminder in the same command:
+
+```
+./target/release/chat-client-rs tail --chan '#ai-skills' --nick nitpicker \
+    --session nitpicker --mentions --mention-exit
+echo "RE-ARM NOW: the tail has fired and you are no longer listening"
+```
+
+The echo is not decoration. A fired tail and a forgotten re-arm look identical
+from the outside -- the channel just goes quiet for you -- so the reminder has
+to arrive with the output rather than depend on remembering. Every wait in this
+loop ends the same way: act, then immediately re-enter the wait. Print the same
+reminder after the staged-set wait in step 1.
+
+### Check you are still in the channel, every wake
+
+Leaving the channel is silent from the inside. A dropped connection, a
+restarted server, a `--mention-exit` that fired — all leave you outside it, and
+announcing then writes into nothing while you carry on believing you are heard.
+
+So the first thing on every wake, before reviewing anything:
+
+```
+./target/release/chat-client-rs names --chan '#ai-skills' --nick nitpicker \
+    --session nitpicker
+```
+
+If your nick is not in the list, rejoin. If the command fails at all, the
+server is down: retry until it comes back rather than giving up and continuing
+deaf.
+
+```
+until ./target/release/chat-client-rs join --chan '#ai-skills' \
+        --nick nitpicker --session nitpicker >/dev/null 2>&1; do
+    echo "chat server unreachable; retrying"
+    sleep 30
+done
+```
+
+That loop is unbounded on purpose. A nitpicker that cannot reach the channel
+has nowhere to put its findings, so waiting for the server is the whole job
+until it returns. Say in the channel that you were gone once you are back, so a
+silence in the log has an explanation.
 
 Stop only when told to stop, or when the wait has returned unchanged several
 times in a row and there is nothing staged — say so before you go.
