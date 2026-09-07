@@ -268,7 +268,7 @@
     {
       "id": "B288",
       "title": "send advances the channel cursor to the channel maximum, so it marks everyone else's unread messages as seen",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -283,9 +283,9 @@
       "fix": null,
       "verification": null,
       "found_by": "t90-chat-mcp: an instruction from Tschallacka went unread because this agent sent a message after it arrived",
-      "notes": "The loss is silent in both directions: the sender sees no gap, and the writer of the skipped message sees a delivered line. It is worse for an instruction with no @mention, which the mention guard also does not wake on, so nothing else compensates. A fix has to separate \"what I have seen\" from \"what exists\": either send leaves the cursor alone and read tolerates returning the senders own message, or send records only the ids it authored. B269 is the neighbouring cursor defect on the read side.",
+      "notes": "The loss is silent in both directions: the sender sees no gap, and the writer of the skipped message sees a delivered line. It is worse for an instruction with no @mention, which the mention guard also does not wake on, so nothing else compensates. A fix has to separate \"what I have seen\" from \"what exists\": either send leaves the cursor alone and read tolerates returning the senders own message, or send records only the ids it authored. B269 is the neighbouring cursor defect on the read side. Duplicate of B254, filed earlier the same day for the same defect. B254 carries the mechanism and now this entry's evidence and severity; keeping both would split one defect across two ids.",
       "created_at": "2026-09-07T22:00:29Z",
-      "updated_at": "2026-09-07T22:00:42Z"
+      "updated_at": "2026-09-07T22:04:38Z"
     },
     {
       "id": "B33",
@@ -417,6 +417,27 @@
       "notes": "This is an app-agnostic inference problem. Any fix must remain a heuristic and expose confidence rather than asserting mc semantics.",
       "created_at": "2026-09-01T18:00:00Z",
       "updated_at": "2026-09-01T18:20:00Z"
+    },
+    {
+      "id": "B254",
+      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
+      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
+      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
+      "mechanism": "send issues FETCH <chan> 0, takes the channel's HIGHEST id from the reply and saves that as this agent's cursor (src/chat-client-rs/src/lib.rs, the FETCH block at the end of send). The id it saves is the channel maximum, not the id of the message just sent, so every send marks everything any peer posted since the last read as already seen. src/chat-mcp copies the pattern, so the adapter loses messages the same way.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
+      "notes": "Rediscovered independently by t90-chat-mcp and filed as B288, now closed as a duplicate of this entry. Its evidence is stronger than the original and is the reason this is now blocking rather than major: an instruction from Tschallacka in #ai-skills was never read, because the agent sent a message after it arrived. The line sat in that agent's tail log the whole time and was permanently invisible to read.\n\nThe loss is silent in both directions -- the sender sees no gap and the writer sees a delivered line -- and it is worst for an instruction carrying no mention, which the wake guard also does not fire on. Two independent mechanisms have to fail for a message to be seen, and this defeats the one that was meant to be reliable.",
+      "created_at": "2026-09-07T14:32:45Z",
+      "updated_at": "2026-09-07T22:04:38Z"
     },
     {
       "id": "B283",
@@ -2528,27 +2549,6 @@
       "notes": null,
       "created_at": "2026-09-07T14:29:24Z",
       "updated_at": "2026-09-07T14:29:24Z"
-    },
-    {
-      "id": "B254",
-      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
-      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
-      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
-      "mechanism": "src/chat-client-rs/src/main.rs, the send path after the PRIVMSG: it FETCHes the channel from 0 to learn the id of the message it just stored, tracks the maximum id it sees, and saves that as the cursor. The maximum is the channel's newest id, not the sent message's, so every unread row in between is swallowed. The comment there says the intent - 'advance the channel cursor to the newest id' - which is the bug written down as a design.",
-      "surfaces": [
-        "src/chat-client-rs/src/main.rs"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
-      "notes": null,
-      "created_at": "2026-09-07T14:32:45Z",
-      "updated_at": "2026-09-07T14:32:45Z"
     },
     {
       "id": "B258",
