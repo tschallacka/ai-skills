@@ -2421,6 +2421,48 @@
       "updated_at": "2026-09-07T12:22:04Z"
     },
     {
+      "id": "B250",
+      "title": "insert accepts delete_len and ignores it, so an insert asked to delete first is answered as a success",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Over MCP or NDJSON: insert --file F --offset N --text T --delete-len 5 --expected-revision R",
+      "observed": "The delete_len is accepted by the protocol-wide key check, never read by the insert handler, and the call answers success with a new revision. A caller that asked for 'delete five bytes, then insert' got a plain insert and no way to tell the difference.",
+      "expected": "Refused by name, with accepted_keys, as B237's per-verb declaration now does. delete_len belongs to replace; on insert the span is empty, so the argument can only be a caller error - and answering success to a partially-performed instruction is the worst available outcome.",
+      "mechanism": "The unknown-argument check was one protocol-wide list (B237), so a key any verb reads passed for every verb. delete_len is read by replace's handler and simply absent from insert's, which made an accepted-and-ignored argument indistinguishable from an honoured one.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "surfaced by B237's fix: binding the per-verb key table to both the server door and the adapter schemas, editor-batch agent 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:06Z",
+      "updated_at": "2026-09-07T14:29:06Z"
+    },
+    {
+      "id": "B253",
+      "title": "endpoint_for_file abandons XDG_RUNTIME_DIR for a machine-global /tmp directory once the socket path passes 96 characters",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Set a long TMPDIR/XDG_RUNTIME_DIR - the length this repo now mandates for scratch is enough - then autostart an editor server and look for its .endpoint record.",
+      "observed": "The record lands in a machine-global /tmp/tsch-ai-skills-editor instead of the configured runtime dir. In the cli_flow suite EVERY endpoint record went there, so the suite escaped its own isolation and the harness sweep was reading an empty directory for all 38 tests - the larger half of the ~173 leaked servers swept by hand on this machine.",
+      "expected": "A configured runtime dir is honoured, or the fallback is loud rather than silent. Two agents on one box must not share an endpoint namespace, and on a multi-user machine a shared 0700 directory is one two users would fight over.",
+      "mechanism": "src/ai-text-editor/src/transport.rs endpoint_for_file(): when the path it would build reaches the 96-character sun_path limit it falls back to /tmp/tsch-ai-skills-editor. The mandate for a long scratch TMPDIR and this fallback are each reasonable alone and jointly broken - the longer the configured dir, the more certain the fallback fires.",
+      "surfaces": [
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-batch agent while writing B239's test, 2026-09-07; raised as its Q3",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:24Z",
+      "updated_at": "2026-09-07T14:29:24Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -3172,9 +3214,9 @@
       "fix": null,
       "verification": null,
       "found_by": "found while fixing B226: the range keys were accepted and dropped, which the entry had not recorded",
-      "notes": null,
+      "notes": "Binding the per-verb table to both surfaces surfaced three live instances of this class, now filed separately so each closes on its own evidence: B250 (insert accepts delete_len and answers success), B251 (search advertises pager_key and historical, which only page reads), B252 (index advertises an action it never reads). B253 is unrelated to this class but was found in the same pass - the endpoint_for_file /tmp fallback.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-07T14:29:46Z"
     },
     {
       "id": "B238",
@@ -3219,6 +3261,27 @@
       "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not. SECOND SYMPTOM, from sanitairkamer 2026-09-07, and it is worse than a stale list: the silent failure produced a WRONG INFERENCE. It read 'aiskills never appeared in my nick list all session' as 'that agent is not connected' rather than 'JOIN was never relayed to me', so it stopped addressing a peer that was present and answering. A presence bug that reads as absence is exactly the kind that makes agents stop coordinating with each other.",
       "created_at": "2026-09-07T12:44:52Z",
       "updated_at": "2026-09-07T13:31:43Z"
+    },
+    {
+      "id": "B251",
+      "title": "search advertises pager_key and historical, which only page reads, so a caller avoiding a rescan triggers one",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP: search --file F --mode exact_text --query Q --pager-key KEY (or --historical), following the tool schema that advertises both.",
+      "observed": "Both keys are accepted and ignored by search, so the search runs as a fresh scan. A caller passing them precisely to resume an existing result set instead paid for a full rescan, with nothing saying so.",
+      "expected": "Refused by name on search, naming page as the verb that reads them. The cost is the point: these two keys exist to AVOID a scan, so silently ignoring them inverts their purpose.",
+      "mechanism": "Same root as B237: the key check was protocol-wide, and pager_key/historical are read by the page handler. B186 already fixed the sibling case where search silently ignored --offset; these two were the same shape and were missed because the check could not distinguish verbs.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:06Z",
+      "updated_at": "2026-09-07T14:29:06Z"
     },
     {
       "id": "B6",
@@ -4861,9 +4924,9 @@
       "fix": null,
       "verification": null,
       "found_by": "the fifth drive's fix batch, cleaning up after its own test runs",
-      "notes": null,
+      "notes": "B253 is the larger half of the same leak: endpoint_for_file falls back to a machine-global /tmp dir once the socket path passes 96 characters, so under a long TMPDIR the harness sweep was reading an empty directory for all 38 tests. Fixing this entry's sweep without B253 leaves most of the leak in place.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-07T14:29:46Z"
     },
     {
       "id": "B241",
@@ -5014,6 +5077,27 @@
       "notes": "Both sides must change together, which is why this is one entry rather than two: the server stops echoing, and chat-client-rs's send stops waiting for an echo and instead prints the line it constructed once the write succeeds (or confirms with a cheap round trip such as LASTID). Handing it to whoever holds chat-client-rs, since B246 and B247 are already there and a split fix would leave send hanging.",
       "created_at": "2026-09-07T13:44:48Z",
       "updated_at": "2026-09-07T14:04:39Z"
+    },
+    {
+      "id": "B252",
+      "title": "index advertises an action argument it never reads, so every call is a full rebuild",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP: index --file F --action <anything>, following the tool schema that advertises action.",
+      "observed": "The argument is accepted and ignored; the call always performs a full rebuild. A caller selecting a cheaper action got the expensive one and a success answer.",
+      "expected": "Refused by name if index has no action to select, or read if it does. An advertised argument that changes nothing is worse than an absent one, because a caller reads the schema as a contract.",
+      "mechanism": "Same root as B237: the unknown-argument check was protocol-wide, so a key no index handler reads still passed. Unlike B250 and B251 the key is not read by any other verb either, which makes it a stale schema entry rather than a misrouted one - so the fix may be to remove it from the schema rather than to refuse it. Whoever closes this should decide which, and say so.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:23Z",
+      "updated_at": "2026-09-07T14:29:23Z"
     },
     {
       "id": "B25",
