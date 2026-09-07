@@ -4934,7 +4934,7 @@
     {
       "id": "B246",
       "title": "the client discards JOIN, PART and QUIT, so an agent on the bus cannot tell who else is present",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4945,17 +4945,17 @@
       "surfaces": [
         "src/chat-client-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #74 b2729933 - tail --presence prints JOIN, PART and QUIT; opt-in so existing readers still receive PRIVMSG only",
+      "verification": "Live: a --presence tail saw a peer's ':joiner!joiner@localhost JOIN #ai-skills' and its attributed ':joiner!joiner@localhost QUIT :connection closed', and saw only the message during a send. Unit: presence_is_off_unless_asked_for pins the default. Mutation: drop the o.presence branch and the tail shows nothing but PRIVMSG again.",
       "found_by": "noticed while confirming B244's fix was server-side only, 2026-09-07",
-      "notes": null,
+      "notes": "CORRECTING THIS ENTRY'S OWN EXPECTATION, which was wrong when I filed it. It said 'read --local should show them too, since the log is the same stream'. It cannot: the channel log stores only MSG rows - Hub::append is the only writer and fetch() filters on f[0]==\"MSG\" - so presence is never persisted and a local read has no row to return. Presence is a live-stream capability, not a history one, and making it otherwise needs a log-format change plus ids, because local_read keys entirely off msg_line_id and an id-less line would be reprinted on every since-based poll. Found by a peer agent reading the storage path rather than trusting the entry; the fix is documented as live-only in chat/SKILL.md.\n\nTwo mechanism details worth keeping for anyone touching that filter: a QUIT carries NO channel parameter (the server relays it only to members of the channels the nick shared, so an unfiltered command is already scoped), and a JOIN arrives in TWO spellings - the channel in the trailing when echoed to the joining connection, in params[0] when relayed to others. A filter checking only params.first() drops a tail's view of its own join.",
       "created_at": "2026-09-07T13:12:06Z",
-      "updated_at": "2026-09-07T13:12:06Z"
+      "updated_at": "2026-09-07T14:04:54Z"
     },
     {
       "id": "B247",
       "title": "send joins the channel it only wants to post to, so every short-lived call now flickers a join and a quit in the nick list",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4966,12 +4966,12 @@
       "surfaces": [
         "src/chat-client-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #74 b2729933 - send no longer writes JOIN; the PRIVMSG handler gates on the recipient's membership via Peer::offer, never the sender's",
+      "verification": "Live: with a --presence tail attached, a send produced only the PRIVMSG line and no JOIN or QUIT for the sending nick. Mutation: restore the JOIN write and the same tail shows a join/quit pair per call.",
       "found_by": "Michael, from Konversation showing two quits from ordinary activity, 2026-09-07",
       "notes": null,
       "created_at": "2026-09-07T13:31:43Z",
-      "updated_at": "2026-09-07T13:31:43Z"
+      "updated_at": "2026-09-07T14:04:39Z"
     },
     {
       "id": "B248",
@@ -4997,7 +4997,7 @@
     {
       "id": "B249",
       "title": "the server echoes a sender's own PRIVMSG back, so a standard client shows every message twice",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5008,12 +5008,12 @@
       "surfaces": [
         "src/chat-server-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "PR #74 b2729933 - the server tells a sender nothing after a PRIVMSG; chat-client-rs send asks LASTID and reads the 999 that already answers it, then prints the line locally",
+      "verification": "Live: send prints one line, a watcher tail receives one, no numeric on either side. An intermediate attempt that pushed an unsolicited 999 was rejected because Konversation rendered it as '[999] mdibbets #ai-skills 59' - trading a duplicate line for a stray one. Mutation: restore w(st, &out) in the PRIVMSG arm and a standard client shows every message twice again.",
       "found_by": "Michael, from Konversation showing his own messages twice, 2026-09-07",
       "notes": "Both sides must change together, which is why this is one entry rather than two: the server stops echoing, and chat-client-rs's send stops waiting for an echo and instead prints the line it constructed once the write succeeds (or confirms with a cheap round trip such as LASTID). Handing it to whoever holds chat-client-rs, since B246 and B247 are already there and a split fix would leave send hanging.",
       "created_at": "2026-09-07T13:44:48Z",
-      "updated_at": "2026-09-07T13:44:48Z"
+      "updated_at": "2026-09-07T14:04:39Z"
     },
     {
       "id": "B25",
