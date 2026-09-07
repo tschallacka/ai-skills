@@ -872,11 +872,7 @@ fn serve<S: std::io::Read + std::io::Write>(stream: S, state: Arc<Mutex<ServerSt
             Err(message) => (
                 vec![error(
                     &envelope.request_id,
-                    if message.starts_with("session_unauthorized:") {
-                        "session_unauthorized"
-                    } else {
-                        "tab_open_failed"
-                    },
+                    select_tab_error_code(&message),
                     message,
                 )],
                 default_tab.clone(),
@@ -985,11 +981,7 @@ fn serve_tcp(
                 Err(message) => (
                     vec![error(
                         &envelope.request_id,
-                        if message.starts_with("session_unauthorized:") {
-                            "session_unauthorized"
-                        } else {
-                            "tab_open_failed"
-                        },
+                        select_tab_error_code(&message),
                         message,
                     )],
                     default_tab.clone(),
@@ -1247,12 +1239,34 @@ fn ensure_tab_file(
         // here disagreed with the router and asked callers to open a second
         // tab for the file they were already holding.
         Some(path) if tab_key(&path) == tab_key(requested) => Ok(()),
+        // B219: the remedy used to be printed as a CLI command line, on a
+        // surface where an mcp-mode install ships no CLI client at all and the
+        // caller passes the file as an argument. B187 fixed that class in
+        // SKILL.md and the man page and left it live in the runtime strings.
+        // The verb's name is the remedy on both surfaces.
         Some(path) => Err(format!(
-            "file_mismatch: the request names {requested:?} but this tab holds {}; run `ai-text-editor open -f {}` to route to the named file",
-            path.display(),
-            requested.display()
+            "file_mismatch: the request names {requested:?} but the tab this session token addresses holds {}; `open` the named file to route to its own tab",
+            path.display()
         )),
         None => Err("tab_unavailable: the tab lock is poisoned".into()),
+    }
+}
+
+/// The error code for a `select_tab` refusal, taken from the prefix the
+/// message already carries.
+///
+/// B219: `file_mismatch` arrived under the code `tab_open_failed`, so the one
+/// routing refusal a client can recover from on its own — this agent's server
+/// is alive, the token just addresses another of its tabs — was
+/// indistinguishable by code from a tab that genuinely could not be opened.
+/// The message said `file_mismatch` and the code disagreed with it; a caller
+/// branching on the code, which is what a code is for, could not see it.
+fn select_tab_error_code(message: &str) -> &'static str {
+    match message.split(':').next().unwrap_or_default() {
+        "session_unauthorized" => "session_unauthorized",
+        "file_mismatch" => "file_mismatch",
+        "tab_unavailable" => "tab_unavailable",
+        _ => "tab_open_failed",
     }
 }
 
@@ -1353,7 +1367,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         frames.push(error(
             &envelope.request_id,
             "session_unauthorized",
-            "a valid server-issued session_token is required for this tab operation; if the server restarted, run `open` again (the journal replays)",
+            "a valid server-issued session_token is required for this tab operation; if the server restarted, `open` the file again for a current one (the journal replays)",
         ));
         return frames;
     }
@@ -1424,10 +1438,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             return frames;
         }
     }
-    if matches!(
-        envelope.method.as_str(),
-        "insert" | "replace" | "undo" | "redo" | "save" | "large_edit" | "restore"
-    ) {
+    if ai_text_editor::is_revision_guarded(&envelope.method) {
         if tab.large_file.is_some()
             && !matches!(envelope.method.as_str(), "large_edit" | "undo" | "redo")
         {
@@ -1483,7 +1494,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
             "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
             "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
-            "revision_required_methods": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"],
+            "revision_required_methods": ai_text_editor::REVISION_GUARDED_METHODS,
             "transports": ["unix_socket", "loopback_tcp"]
         }))),
         "resources" => frames.push(response(&envelope.request_id, json!(resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)))),
@@ -3282,6 +3293,28 @@ fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: 
         .get("query")
         .and_then(Value::as_str)
         .unwrap_or("");
+    // B218: every text mode is line-scoped. Both callers split the buffer on
+    // '\n' and hand the matcher a line with its terminator already stripped
+    // (ai-text-editor-server.rs, the split_inclusive loop below; large_file.rs
+    // read_until), so a query carrying a newline cannot match — the byte it
+    // needs is never in the haystack. That answered `count: 0, complete: true`,
+    // which is indistinguishable from "the text is not in this file": an agent
+    // locating an anchor by its own indented line concluded the anchor was
+    // absent and edited elsewhere.
+    //
+    // Refused by name rather than answered, on B171's `read_range_unsupported`
+    // precedent: a rule the caller cannot see must be stated, and the mode that
+    // can do the job is named in the same breath. `exact_bytes` runs
+    // `find_bytes` over the whole buffer and spans lines correctly.
+    if mode != SearchMode::ExactBytes && query.contains('\n') {
+        frames.push(error_details(
+            &envelope.request_id,
+            "search_query_crosses_lines",
+            "every text search mode matches within one line: the document is split on newlines and each line is matched without its terminator, so a query containing one can never match. Search with mode exact_bytes, whose query (or query_base64) is matched against the whole buffer and may span lines, or search for a single line of the anchor.",
+            json!({"mode": mode_name, "spanning_mode": "exact_bytes"}),
+        ));
+        return;
+    }
     let gradient = match envelope.payload.get("gradient") {
         None => None,
         Some(value) => match value.as_f64() {

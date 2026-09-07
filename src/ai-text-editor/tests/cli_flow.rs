@@ -421,17 +421,22 @@ fn killed_server_is_replaced_by_the_next_open_and_the_journal_replays() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\n");
     terminate(pid);
     std::thread::sleep(std::time::Duration::from_millis(200));
-    // A plain command must explain that its server is gone, not die on a
-    // bare connection error.
-    let blocked = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
-    assert!(!blocked.status.success());
+    // A plain command reclaims the dead endpoint itself and answers from the
+    // replayed buffer — it used to be refused with "has stopped; run
+    // `ai-text-editor open -f X`" (B225). Never a bare connection error
+    // either way.
+    let recovered = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert!(
-        stderr_text(&blocked).contains("has stopped"),
-        "stderr must point at open: {}",
-        stderr_text(&blocked)
+        recovered.status.success(),
+        "a read must start the replacement itself: {}",
+        stderr_text(&recovered)
     );
-    // `open` reclaims the dead endpoint, starts a replacement, and replays
-    // the unsaved edit into the buffer.
+    assert_eq!(
+        String::from_utf8_lossy(&recovered.stdout),
+        "BETA\nbeta\n",
+        "the unsaved edit must replay into the replacement's buffer"
+    );
+    // `open` reports the replacement and the replayed revision explicitly.
     let reopened = harness.open(&file);
     assert!(reopened.status.success(), "{}", stderr_text(&reopened));
     let payload = first_payload(&reopened);
@@ -732,9 +737,10 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
     assert!(edited.status.success(), "{}", refusal_text(&edited));
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
-    // The next plain `read` finds the socket dead and the journal replays
-    // through the autostart recovery path; open first (the verb allowed to
-    // autostart), which must both replay and say so.
+    // The next call finds the socket dead and the journal replays through the
+    // autostart recovery path. `open` is the one that reports the replay in
+    // its payload, so it goes first here — since B225 any verb would have
+    // started the replacement.
     let reopened = harness.client(&["open", "-f", file.to_str().unwrap()]);
     let payload = first_payload(&reopened);
     assert!(
@@ -755,25 +761,175 @@ fn a_restarted_server_reports_the_journal_replay_to_a_plain_read() {
 }
 
 #[test]
-fn a_dead_server_without_a_replacement_fails_with_guidance_not_a_raw_socket_error() {
-    // B179's other half: with no live server, non-open verbs must explain
-    // that the server stopped and name `open` as the fix, never surface a
-    // bare "Connection refused" the agent cannot act on.
+fn a_dead_server_is_replaced_by_the_next_read_rather_than_refused() {
+    // B179's other half, now answered rather than explained (B225): a read
+    // against a dead server used to be refused with "the editor server for X
+    // has stopped; run `ai-text-editor open -f X`". The client can do that
+    // itself — the journal replays, so the answer is lossless — and it must
+    // never surface a bare "Connection refused" either.
     let harness = Harness::new("cachehealdead");
     let file = harness.write("doc.txt", "one\ntwo\n");
     let opened = harness.open(&file);
     terminate(server_pid(&opened));
     std::thread::sleep(std::time::Duration::from_millis(200));
-    let read = harness.client(&["read", "-f", file.to_str().unwrap()]);
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert!(
-        !read.status.success(),
-        "read against a dead server must fail"
+        read.status.success(),
+        "a read after the server died must autostart a replacement, not refuse: {}",
+        refusal_text(&read)
     );
-    let refusal = refusal_text(&read);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "one\ntwo\n",
+        "the replayed buffer must come back through the replacement"
+    );
+}
+
+#[test]
+fn a_read_only_verb_opens_a_file_that_has_no_tab_yet() {
+    // B225: only `open` autostarted, so `search`/`read`/`history` naming a
+    // readable path were refused with "no editor server is reachable for X",
+    // and B219: that headline was untrue whenever this agent's server was
+    // alive and serving other tabs, which the routed case below is.
+    let harness = Harness::new("openonuse");
+    let second = harness.write("second.txt", "needle here\n");
+
+    // (a) Cold: nothing running at all, and the first call is a search.
+    let searched = harness.client(&[
+        "search",
+        "-f",
+        second.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "needle",
+        "-p",
+        "structured",
+    ]);
     assert!(
-        refusal.contains("open"),
-        "the failure must point at the recovery: {refusal}"
+        searched.status.success(),
+        "a cold search must open the file itself: {}",
+        refusal_text(&searched)
     );
+    assert_eq!(
+        first_payload(&searched)["count"],
+        json!(1),
+        "the search must answer, not just resolve"
+    );
+
+    // (b) Routed: a live workspace holding a different file's tab. This is
+    //     the case whose refusal claimed no server was reachable while one
+    //     was answering in the same second (B219).
+    let harness = Harness::new("openonuse2");
+    let first = harness.write("first.txt", "one\n");
+    let second = harness.write("second.txt", "needle here\n");
+    harness.open(&first);
+    let history = harness.client(&["history", "-f", second.to_str().unwrap()]);
+    assert!(
+        history.status.success(),
+        "a verb naming an unopened file in a live workspace must open it: {}",
+        refusal_text(&history)
+    );
+    // The first tab is untouched by the second's arrival.
+    let back = harness.client(&["read", "-f", first.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&back.stdout), "one\n");
+}
+
+#[test]
+fn a_revision_guarded_verb_still_refuses_a_file_with_no_tab() {
+    // The exception B225 keeps: a revision cannot have come from a tab that
+    // never existed, so opening one and applying the edit against a guessable
+    // revision 0 is the blind write the guard exists to stop. Refused by
+    // name, and the file is unchanged.
+    let harness = Harness::new("guardedcold");
+    let file = harness.write("doc.txt", "one\n");
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        "0",
+        "-p",
+        "text",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "a guarded verb on a file with no tab must refuse"
+    );
+    let refusal = refusal_text(&refused);
+    assert!(
+        refusal.contains("revision guard") && refusal.contains("open"),
+        "the refusal must name the guard and the remedy: {refusal}"
+    );
+    assert!(
+        !refusal.contains("no editor server is reachable"),
+        "and must not claim there is no server (B219): {refusal}"
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\n");
+}
+
+#[test]
+fn a_text_search_whose_query_crosses_a_line_is_refused_by_name() {
+    // B218: every text mode is line-scoped, because both callers strip the
+    // newline before the matcher sees it. A query carrying one answered
+    // `count: 0, complete: true` — indistinguishable from "not in this file",
+    // which is how an agent concludes an anchor is absent and edits the wrong
+    // place. exact_bytes spans lines and is named in the refusal.
+    let harness = Harness::new("crossline");
+    let file = harness.write("doc.txt", "alpha\nbeta\n");
+    harness.open(&file);
+    for mode in ["exact_text", "regex_rust", "wildcard", "fuzzy_edit"] {
+        let refused = harness.client(&[
+            "search",
+            "-f",
+            file.to_str().unwrap(),
+            "--mode",
+            mode,
+            "--query",
+            "alpha\nbeta",
+            "-p",
+            "structured",
+        ]);
+        assert!(
+            !refused.status.success(),
+            "{mode} answered a cross-line query instead of refusing"
+        );
+        let refusal = refusal_text(&refused);
+        assert!(
+            refusal.contains("search_query_crosses_lines") || refusal.contains("within one line"),
+            "{mode}'s refusal must name the rule: {refusal}"
+        );
+        assert!(
+            refusal.contains("exact_bytes"),
+            "{mode}'s refusal must name the mode that can span lines: {refusal}"
+        );
+    }
+    // exact_bytes is the escape hatch, and it finds the span the text modes
+    // cannot: "alpha\nbeta" as base64.
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_bytes",
+        "--query",
+        "YWxwaGEKYmV0YQ==",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        found.status.success(),
+        "exact_bytes must still answer: {}",
+        refusal_text(&found)
+    );
+    let payload = first_payload(&found);
+    assert_eq!(payload["count"], json!(1), "{payload}");
+    assert_eq!(payload["matches"][0]["byte_start"], json!(0), "{payload}");
+    assert_eq!(payload["matches"][0]["byte_end"], json!(10), "{payload}");
 }
 
 #[test]
@@ -1170,12 +1326,27 @@ fn an_unreachable_workspace_exits_66_not_usage() {
     // B213: a command line that was correct when typed meets the documented
     // idle-reap; the old exit blamed the caller's syntax (64) for a world
     // change, so retry logic keyed on usage-vs-runtime misfiled it.
+    //
+    // Since B225 a read simply opens the reaped file again, so the surviving
+    // refusal on a never-opened file is a revision-guarded verb — whose
+    // revision cannot have come from a tab that never existed. It is still a
+    // runtime condition, not a usage error.
     let harness = Harness::new("runtimexit");
     let file = harness.write("never-opened.txt", "x\n");
-    let refused = harness.client(&["read", "-f", file.to_str().unwrap()]);
-    assert_eq!(refused.status.code(), Some(66));
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "y",
+        "-r",
+        "0",
+    ]);
+    assert_eq!(refused.status.code(), Some(66), "{}", stderr_text(&refused));
     assert!(
-        stderr_text(&refused).contains("no editor server is reachable"),
+        stderr_text(&refused).contains("revision guard"),
         "{}",
         stderr_text(&refused)
     );

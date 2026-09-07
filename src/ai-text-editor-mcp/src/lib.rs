@@ -164,7 +164,7 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors. Opens the file if the workspace does not have it yet; starting a server when none runs. document_mode and normalize_nfc only shape an autostarted server - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", routing(), vec![]));
     tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", routing(), vec![]));
     tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", routing(), vec![]));
     tools.push((
@@ -486,7 +486,7 @@ fn tool_definitions() -> Vec<Value> {
             }
             json!({
                 "name": name,
-                "description": format!("{description} Either an endpoint, or a file (for open) plus an optional agent/session id to reconnect to that agent's already-running workspace, resolves the target; a new workspace-server is started automatically if `open` finds none. The server is authoritative and every mutation needs a current revision."),
+                "description": format!("{description} Either an endpoint, or a file plus an optional agent/session id to reconnect to that agent's already-running workspace, resolves the target. Naming a file opens that file's tab if the workspace does not have it yet, starting a server when none runs — on this tool as on open. The exception is the revision-guarded tools (insert, replace, large_edit, restore, undo, redo, save): on a file with no tab they are refused, because the revision they carry cannot have come from a tab that never existed. The server is authoritative and every mutation needs a current revision."),
                 "inputSchema": {
                     "type": "object",
                     "properties": Value::Object(properties),
@@ -639,9 +639,7 @@ fn parse_revision_argument(value: &Value) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        handle, mutating_required, parse_revision_argument, tool_definitions, ADAPTER_ARGUMENTS,
-    };
+    use super::{handle, mutating_required, parse_revision_argument, ADAPTER_ARGUMENTS};
     use serde_json::{json, Value};
 
     fn tools() -> Vec<Value> {

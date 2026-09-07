@@ -9,6 +9,31 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// published capabilities contract.
 pub const DEFAULT_LARGE_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
 
+/// The verbs that require an explicit revision guard. The server enforces it,
+/// `capabilities` advertises it as `revision_required_methods`, and the client
+/// reads it for one further reason: these are the verbs whose caller must
+/// already have read the tab, so they are the single exception to "naming a
+/// file opens it" — a revision cannot have come from a tab that does not exist
+/// (B225).
+///
+/// One list, three readers. The server used to spell it out in a `matches!`
+/// and again in the advertised payload, and the client not at all.
+pub const REVISION_GUARDED_METHODS: &[&str] = &[
+    "insert",
+    "replace",
+    "large_edit",
+    "restore",
+    "undo",
+    "redo",
+    "save",
+];
+
+/// Whether `method` carries a revision guard. See
+/// [`REVISION_GUARDED_METHODS`].
+pub fn is_revision_guarded(method: &str) -> bool {
+    REVISION_GUARDED_METHODS.contains(&method)
+}
+
 pub mod auth;
 pub mod client;
 pub mod document;

@@ -107,7 +107,14 @@ pub fn cache_path(identity: &str, file: Option<&Path>) -> PathBuf {
 }
 
 /// Resolve where a request should go, autostarting a server for `file` if
-/// nothing is discoverable yet and `request.method == "open"`.
+/// nothing is discoverable yet.
+///
+/// Naming a `file` means "act on that file's tab", and opening it is part of
+/// that — for every verb, not only `open` (B225). The one exception is a
+/// revision-guarded verb (see [`crate::REVISION_GUARDED_METHODS`]) on a file
+/// with no tab at all: the revision it carries cannot have come from a tab
+/// that never existed, so it is refused by name instead of applied against a
+/// guessable revision 0.
 ///
 /// Precedence: an explicit `--endpoint`/`arguments.endpoint` always wins. A
 /// local cache hit for `(identity, file)` reconnects to a previously-seen
@@ -247,14 +254,30 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
             session_token: None,
             cache_path,
         }),
-        Ok(_) if request.method != "open" => Err(format!(
-            "the editor server for {} has stopped; run `ai-text-editor open -f {}` to start a new one (the journal replays, but the tab is new — re-read to get a current revision and session token)",
-            file.display(),
-            file.display()
-        )),
-        Err(error) if request.method != "open" => Err(format!(
-            "no editor server is reachable for {}; only `open` creates a tab, and every other verb routes to that file's own tab - run `open -f {}` first (the discovery probe reported: {error})",
-            file.display(),
+        // B225: naming a file on a verb means "act on that file's tab", and
+        // opening it is part of that. Only `open` used to autostart, so every
+        // other verb refused a readable path it could have opened — and said
+        // "no editor server is reachable" while this agent's server was alive
+        // and answering other tabs, because what was actually missing was a
+        // per-file discovery record, not a server (B219). An agent's instinct
+        // is to name a file and ask a question about it; the client can answer
+        // that instead of charging a round trip for the news.
+        //
+        // Both the never-opened case (`Err`, no discovery record at all) and
+        // the stale-record case (`Ok` on an endpoint whose server has died)
+        // now fall through to the autostart arm. Revision safety is untouched:
+        // the guarded verbs below still require an explicit revision, and a
+        // fresh or journal-replayed tab refuses one that does not match with
+        // `stale_revision`, naming both numbers.
+        //
+        // The one exception is a revision-guarded verb on a file that has no
+        // tab at all: the revision it carries cannot have come from a tab that
+        // never existed, so opening one and applying the edit against a
+        // guessable revision 0 is exactly the blind cross-buffer write the
+        // guard exists to stop. That is refused by name — and only that.
+        Err(_) if crate::is_revision_guarded(&request.method) => Err(format!(
+            "{} carries a revision guard and {} has no tab in this workspace, so the revision it names cannot have come from one; `open` the file first and retry with the revision that open reports",
+            request.method,
             file.display()
         )),
         _ => {
@@ -504,11 +527,19 @@ where
             return Err(error);
         }
     };
-    // Non-open verbs deliberately do NOT autostart (see resolve's file path
-    // and the cli_flow policy test): when the server is gone, resolve has
-    // already produced a clear "run open" error rather than the raw
-    // "Connection refused" the unprobed cache used to hand back. So here we
-    // only ever talk to a resolution that came back live.
+    // Every verb but `open` needs a tab-scoped session_token, and a
+    // resolution that came from an autostart or from bare per-file discovery
+    // carries none. Get one the way `open` does, before the request rather
+    // than after the refusal: the round trip the server would spend saying
+    // `session_unauthorized` buys nothing, and the recovery below then stays
+    // for what it is actually for — a token that has gone stale mid-flight
+    // (B225).
+    let resolved =
+        if request.method != "open" && request.file.is_some() && resolved.session_token.is_none() {
+            refresh_token(request, &resolved).unwrap_or(resolved)
+        } else {
+            resolved
+        };
     let frames = request_send(&resolved, &build(&resolved))?;
     // B179's stale-token variant: a server RESTARTED on the same socket path
     // is live (so resolve did not error and the no-autostart policy is
@@ -517,11 +548,26 @@ where
     // server only re-routes to the file's tab and returns a fresh token — it
     // spawns nothing — so refreshing and retrying once here is in-bounds in a
     // way that autostarting a dead server is not.
+    //
+    // `file_mismatch` is recovered the same way and for the same reason: this
+    // agent's server is alive, the token on file addresses one of its other
+    // tabs, and the request named a different file. Opening the named file
+    // routes to its own tab, which is what the caller asked for (B219/B225).
+    // Not for a revision-guarded verb, though — a revision that came from
+    // another tab must never be applied to this one, which is the whole point
+    // of `ensure_tab_file`.
+    let recoverable = |code: &str| match code {
+        "session_unauthorized" => true,
+        "file_mismatch" => !crate::is_revision_guarded(&request.method),
+        _ => false,
+    };
     if request.file.is_some()
         && frames.iter().any(|frame| {
             frame.get("type").and_then(serde_json::Value::as_str) == Some("error")
-                && frame.get("code").and_then(serde_json::Value::as_str)
-                    == Some("session_unauthorized")
+                && frame
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(recoverable)
         })
     {
         if let Some(refreshed) = refresh_token(request, &resolved) {
@@ -617,7 +663,7 @@ pub fn cold_discovery_frames(method: &str) -> Vec<serde_json::Value> {
             "coordinates": {"text": {"line_base": 1, "column_base": 0, "column_unit": "unicode_scalar"}, "raw_bytes": {"line_base": 1, "column_base": 0, "column_unit": "byte"}, "hex_view": {"row_bytes": 16, "column_base": 0, "column_unit": "byte"}},
             "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
             "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
-            "revision_required_methods": ["insert", "replace", "large_edit", "restore", "undo", "redo", "save"],
+            "revision_required_methods": crate::REVISION_GUARDED_METHODS,
             "transports": ["unix_socket", "loopback_tcp"],
             "source": "client_default",
             "note": "no editor server is running; these are compiled-in defaults. open a file to query a live server."
