@@ -61,7 +61,7 @@ struct Tab {
     large_redo: Vec<LargeHistory>,
     /// Digest of the buffer as of the last save/load/reload. `dirty` means
     /// the buffer moved away from this; `disk_diverged` means the file on
-    /// disk moved away from what the tab last synced (B183's split).
+    /// disk moved away from what the tab last synced (B182's split).
     saved_digest: String,
     /// Journal edits replayed when this tab opened; reported by `open` so a
     /// recovered revision is never mistaken for fresh work (B196).
@@ -1990,11 +1990,16 @@ fn tab_dirty(tab: &Tab) -> bool {
 }
 
 /// Whether the file on disk differs from what the tab last synced with.
+/// The bytes compared are read from the file, never taken from the buffer:
+/// hashing the buffer here made every unsaved edit read as an external
+/// change, which is the one thing this field exists to keep separate from
+/// `dirty`. `observe_external` compares the same way, against the same
+/// stamp.
 fn tab_disk_diverged(tab: &Tab) -> bool {
     if let Some(large) = &tab.large_file {
         return disk_state(&tab.path, Some(large), &[]) != tab.disk_digest;
     }
-    disk_state(&tab.path, None, tab.document.bytes()) != tab.disk_digest
+    disk_state(&tab.path, None, &tab_base_bytes(&tab.path)) != tab.disk_digest
 }
 
 /// Every payload key any handler reads. Requests carrying anything outside
