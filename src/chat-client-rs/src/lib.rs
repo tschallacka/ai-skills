@@ -556,6 +556,23 @@ impl Session {
     pub fn cursor(&self, chan: &str) -> u64 {
         self.cursors.get(chan).copied().unwrap_or(0)
     }
+
+    /// The recorded cursor, separating "recorded as 0" from "not recorded"
+    /// (B269). `cursor` collapses both to 0.
+    ///
+    /// A recorded 0 is a real position, not a missing one: `join` seeds the
+    /// cursor from LASTID, so 0 means the channel was empty when this agent
+    /// joined and everything from id 1 is new to it. A reader that treats 0 as
+    /// "nothing recorded" skips to the channel's current end instead, and every
+    /// message posted after that join is lost to `read` for good.
+    ///
+    /// It does not open the history gate. Joining a channel that already holds
+    /// 500 messages records 500 and reads 501 onward; reading further back
+    /// stays an explicit `--since`, so a long-lived channel cannot flood a
+    /// context by accident.
+    pub fn cursor_recorded(&self, chan: &str) -> Option<u64> {
+        self.cursors.get(chan).copied()
+    }
 }
 
 // ---- server resolution ----------------------------------------------------
@@ -1664,8 +1681,11 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     // `--since 0` (or --history via session cursor 0) to read everything.
     let mut since = o.since.clone();
     if since.is_empty() && !o.no_session {
-        let cur = Session::load(state_dir).cursor(&o.chan);
-        if cur > 0 {
+        // A RECORDED cursor is used even when it is 0 (B269). 0 means this
+        // agent joined while the channel was empty, so id 1 onward is new to
+        // it; treating that as "no cursor" skipped to the current end and lost
+        // every message posted since the join.
+        if let Some(cur) = Session::load(state_dir).cursor_recorded(&o.chan) {
             since = cur.to_string();
         }
     }

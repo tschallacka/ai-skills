@@ -174,10 +174,30 @@ case "$sent2" in
     *':sessioner!sessioner@localhost PRIVMSG #sess :session message'*) : ;;
     *) t_fail "session-backed send failed: [$sent2]" ;;
 esac
-# send advances the channel cursor; a later no-arg send works too.
+# B254: a send does not move the read cursor. A cursor is a reader's position,
+# not a record of having spoken -- a message can be composed while others arrive
+# ahead of it, and advancing on send marks those as read without anyone seeing
+# them. This assertion used to require the opposite, which is how the defect
+# survived being tested.
 cli sess send --chan '#sess' --text 'second session' --insecure >/dev/null 2>&1 || true
 cursor="$(cli sess session show 2>/dev/null | grep 'cursor #sess' | awk '{print $NF}' || true)"
-[ "$cursor" = "2" ] || t_fail "session cursor did not advance to 2: [$cursor]"
+case "$cursor" in
+    ''|0) : ;;
+    *) t_fail "send moved the read cursor to [$cursor]; sending is not reading (B254)" ;;
+esac
+# The loss the old behaviour caused: a message that arrived BEFORE the send is
+# still unread afterwards. The join is what gives this reader a position at all:
+# without one, reading starts at the channel's current end, which is the rule
+# that keeps a long-lived channel from flooding a fresh agent.
+cli sess join --chan '#sess' --insecure >/dev/null 2>&1 || true
+cli other send --chan '#sess' --server 127.0.0.1:"$port" --nick othersender \
+    --text 'arrived before the send' --insecure >/dev/null 2>&1 || true
+cli sess send --chan '#sess' --text 'third session' --insecure >/dev/null 2>&1 || true
+still_unread="$(cli sess read --chan '#sess' --insecure 2>/dev/null || true)"
+case "$still_unread" in
+    *'arrived before the send'*) : ;;
+    *) t_fail "a message that arrived before the send was consumed by it: [$still_unread]" ;;
+esac
 # A malformed session file must recover (warning + empty session), not crash.
 # Ask the client which file it owns rather than assuming: session files are per
 # agent now, so the path carries the session key.
@@ -292,11 +312,17 @@ case "$b_sent" in
     *) t_fail "agent-b's bare send used the wrong nick: [$b_sent]" ;;
 esac
 
-# Cursors are separate: agent-a sends twice on a fresh channel, which advances
-# only agent-a's cursor. agent-b must still have no read position there, so
-# agent-b's unread messages were not consumed on its behalf.
+# Cursors are separate: two messages land on a fresh channel and agent-a READS
+# them, which advances only agent-a's cursor. agent-b must still have no read
+# position there, so agent-b's unread messages were not consumed on its behalf.
+#
+# agent-a JOINS rather than relying on its sends. Sending no longer moves a
+# cursor (B254) -- a cursor is a reader's position, not a record of having
+# spoken -- and a join is what gives an agent a position: it seeds from the
+# channel's current end, which after these two sends is 2.
 agent agent-a send --chan '#isoc' --text 'one' --insecure >/dev/null 2>&1 || true
 agent agent-a send --chan '#isoc' --text 'two' --insecure >/dev/null 2>&1 || true
+agent agent-a join --chan '#isoc' --insecure >/dev/null 2>&1 || true
 a_cursor="$(agent agent-a session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
 b_cursor="$(agent agent-b session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
 [ "$a_cursor" = "2" ] || t_fail "agent-a's #isoc cursor is [$a_cursor], want 2"

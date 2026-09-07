@@ -30,7 +30,7 @@ package/chat/requires.tsv	467
 package/chat/tests/test-chat-broadcast-stall.sh	12097
 package/chat/tests/test-chat-descriptor-leak.sh	9164
 package/chat/tests/test-chat-resolution.sh	7891
-package/chat/tests/test-chat.sh	30434
+package/chat/tests/test-chat.sh	31976
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
