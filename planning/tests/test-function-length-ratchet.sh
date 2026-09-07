@@ -30,16 +30,25 @@ over_cap_in() {
 }
 
 # `--files [--base REF] <path>...` applies the ratchet's SPIRIT to one change
-# rather than the tree: an over-cap function may not be added, and an already
-# over-cap one may not grow. It says nothing about the tree-wide count, which is
-# a global property no per-file run can evaluate; CI keeps that.
+# rather than the tree: a function that is NEWLY over the 40-line cap fails. It
+# says nothing about the tree-wide count, which is a global property no per-file
+# run can evaluate; CI keeps that.
 #
-# Comparing against the base matters, and the first draft of this got it wrong.
-# Flagging every over-cap function in a touched file would refuse any edit to a
-# file that already contains one -- 70-permissions.sh carries three from before
-# this mode existed -- which is how a gate teaches people to bypass it. What is
-# reported is what the change is responsible for: a function newly over cap, or
-# one that was over cap and is now longer.
+# Comparing against the base matters, and two drafts of this got it wrong in the
+# same direction -- too strict, which is how a gate teaches people to bypass it.
+#
+# The first flagged every over-cap function in a touched file, so it refused any
+# edit to a file that already contained one (70-permissions.sh carries three
+# from before this mode existed).
+#
+# The second also failed an already over-cap function that merely GREW, and that
+# fired immediately on a legitimate change: skill_files() is a 556-line
+# hand-maintained data list -- installer/src/50-manifest.sh says so, and the
+# duplication against PACKAGE-MANIFEST.tsv IS the cross-check -- so adding one
+# manifest row grew it by a line and failed the push. Growth of a function that
+# was already over cap is not this gate's business: the tree-wide ratchet
+# governs the COUNT, it may not grow, and a data table gaining a row does not
+# change it. Only crossing the cap is new debt, so only that is reported.
 #
 # With no --base (or an unknown ref) there is nothing to compare against, so
 # every over-cap function in the named files is reported and the caller decides.
@@ -84,11 +93,12 @@ if [ "${1:-}" = "--files" ]; then
             done <<BASE_EOF
 $base_lengths
 BASE_EOF
+            # Absent from the base's over-cap set means it crossed the cap in
+            # this change: either it is new, or it was under 40 lines and now is
+            # not. Both are new debt. A function already over cap is left alone
+            # even if it grew -- see the header for why that check had to go.
             if [ -z "$was" ]; then
-                scoped_over="$scoped_over  $arg: $name_() is $len lines (new, cap is 40)
-"
-            elif [ "$len" -gt "$was" ]; then
-                scoped_over="$scoped_over  $arg: $name_() grew $was -> $len lines (cap is 40)
+                scoped_over="$scoped_over  $arg: $name_() is $len lines, over the 40-line cap
 "
             fi
         done <<NOW_EOF
@@ -97,12 +107,12 @@ NOW_EOF
     done
 
     if [ -n "$scoped_over" ]; then
-        printf 'function-length-ratchet: this change adds or grows a function over the 40-line cap:\n' >&2
+        printf 'function-length-ratchet: this change puts a function over the 40-line cap:\n' >&2
         printf '%s' "$scoped_over" >&2
         printf 'function-length-ratchet: split it; CODE-STYLE.md caps a function at 40 lines\n' >&2
         exit 1
     fi
-    printf '%s\n' 'test-function-length-ratchet: PASS (changed files, nothing added or grown over the cap)'
+    printf '%s\n' 'test-function-length-ratchet: PASS (changed files, nothing newly over the cap)'
     exit 0
 fi
 

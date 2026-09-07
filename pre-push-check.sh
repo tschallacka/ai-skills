@@ -299,9 +299,9 @@ else
     if [ -x "$cap_test" ]; then
         # shellcheck disable=SC2086
         if cap_out="$("$cap_test" --files --base "$base" $changed_sh 2>&1)"; then
-            ok "no function added or grown over the 40-line cap"
+            ok "no function newly over the 40-line cap"
         else
-            bad "this change adds or grows a function over CODE-STYLE.md's 40-line cap"
+            bad "this change puts a function over CODE-STYLE.md's 40-line cap"
             printf '%s\n' "$cap_out" | sed -n '1,20p' >&2
         fi
     else
