@@ -2653,9 +2653,9 @@
       "fix": null,
       "verification": null,
       "found_by": "T90 (src/chat-mcp): the adapter inherited the same rule and its own regression test caught it",
-      "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty.",
+      "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty. chat/tests/test-chat.sh:308-310 already documents this behaviour and works around it -- \"a join to an EMPTY channel seeds the cursor to 0, which read cannot tell apart from having no cursor at all\" -- by seeding the channel with a message before the joins. The suite therefore tiptoes around the defect rather than covering it.",
       "created_at": "2026-09-07T19:58:19Z",
-      "updated_at": "2026-09-07T19:58:30Z"
+      "updated_at": "2026-09-07T20:11:35Z"
     },
     {
       "id": "B271",
@@ -2678,6 +2678,29 @@
       "notes": "Both surfaces state the refuted claim: the HARNESS_ID_VARS docblock and SKILL.md rung 2 both say CLAUDE_CODE_SESSION_ID is \"one per session and per subagent\". The measurement that established the rung was taken across sessions, not between a session and its own subagent. A fix has to find an id the harness exports per subagent, or add a rung below the harness one that separates them; until then --session is the only separation, and the docs should say so.",
       "created_at": "2026-09-07T20:07:14Z",
       "updated_at": "2026-09-07T20:07:26Z"
+    },
+    {
+      "id": "B272",
+      "title": "the chat suite's broadcast-delivery assertion needs openssl, which the dev flake deliberately does not declare",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "nix develop --command bash -c \"command -v openssl\"; then read flake.nix packages (no openssl entry, and a comment stating it is deliberately absent) against chat/tests/test-chat-broadcast-stall.sh:222 and chat/tests/test-chat.sh:66.",
+      "observed": "openssl resolves to /nix/store/d4vvjf2zix40pq13w778cz4hkyna90ii-openssl-3.6.3-bin/bin/openssl inside the dev shell, which declares no openssl: it is on PATH only through another package closure. flake.nix says openssl is excluded on purpose. With it gone, test-chat-broadcast-stall.sh prints \"SKIP chat broadcast stall: no openssl or mkfifo - broadcast delivery was not asserted\" and passes.",
+      "expected": "Every tool the chat suite needs is declared in the flake, so the assertions run because the shell provides them and not because an unrelated closure happens to. The flake is the source of dev tooling.",
+      "mechanism": "chat-client-rs consumes no broadcast -- it FETCH-polls and discards PRIVMSG -- so the only thing in the suite that proves a broadcast reaches a subscriber is an openssl s_client speaking the wire by hand. flake.nix omits openssl on the grounds that plan-crypt owns digests now, which is about openssl as a hashing fallback and does not cover its use as a TLS client. Nothing declares the second use, so it survives only while some other package propagates openssl-bin.",
+      "surfaces": [
+        "flake.nix",
+        "chat/tests/test-chat-broadcast-stall.sh",
+        "chat/tests/test-chat.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp, on Michael's report that the chat skill is not using the flake",
+      "notes": "Nothing shipped calls openssl any more: plan_sha256_hex.sh and plan-context-lib.sh both record it as removed from the digest chain, and the only remaining call site is lib-test.sh t_sha256, third behind sha256sum and shasum. So declaring it in the flake cannot mask a plan-crypt defect, which is what the exclusion was protecting. ps is a second undeclared tool the chat tests use (ps -o state=, ps -o time=), but it is in the base system on every platform the flake targets and nixpkgs procps is Linux-only, so it is not the same class and is left borrowed.",
+      "created_at": "2026-09-07T20:11:04Z",
+      "updated_at": "2026-09-07T20:11:20Z"
     },
     {
       "id": "B14",
@@ -3563,6 +3586,27 @@
       "notes": "AI_CHAT_BEACON_PORT is read by the client and CHAT_ANNOUNCE_PORT-equivalent handling exists on the server, so the fix is to give case 5 a private beacon port rather than to weaken the contract. src/chat-mcp/tests/mcp_flow.rs does this: its server announces on a port nothing listens to, and its session is pre-seeded so resolution never reaches discovery.",
       "created_at": "2026-09-07T19:59:50Z",
       "updated_at": "2026-09-07T19:59:50Z"
+    },
+    {
+      "id": "B273",
+      "title": "the TLS-only assertion in test-chat.sh cannot fail: both arms of its case are no-ops",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "read chat/tests/test-chat.sh lines 64-72.",
+      "observed": "The block runs openssl s_client, captures plainout, and matches it with `case` whose two arms are `*not a valid*|*alert*|\"\") : ;;` and `*) : ;;`. Every outcome is a no-op, so the block passes whatever the server does -- including a server that completed a plain handshake.",
+      "expected": "A plain, non-TLS connect does not complete a handshake, asserted so that a server which accepted one fails the test.",
+      "mechanism": "The case was written to accept several shapes of expected failure and the catch-all was left as a no-op rather than a t_fail, so the discrimination the block exists for was never wired. The comment above it states the contract the code does not check.",
+      "surfaces": [
+        "chat/tests/test-chat.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp, while auditing the chat suite's tool dependencies for B272",
+      "notes": "The probe it runs is also not the one the comment describes: openssl s_client speaks TLS, so it cannot show what a PLAIN connect does. Asserting the contract needs a plain socket write and no handshake in the reply. B272 covers the same block depending on an undeclared openssl.",
+      "created_at": "2026-09-07T20:11:20Z",
+      "updated_at": "2026-09-07T20:11:35Z"
     },
     {
       "id": "B6",
