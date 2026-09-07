@@ -61,12 +61,28 @@ for _ in $(seq 1 40); do
 done
 case "$port" in ''|*[!0-9]*) t_fail "server did not report a port"; t_end; exit 1 ;; esac
 
-# The server must be TLS-only: a plain (non-TLS) connect must not complete a
-# handshake. We assert the server is reachable and speaking TLS instead.
-if command -v openssl >/dev/null 2>&1; then
-    plainout="$(printf 'NICK x\r\n' | timeout 3 openssl s_client -verify_quiet -connect 127.0.0.1:"$port" -servername localhost -quiet 2>/dev/null | tr -d '\r' || true)"
-    case "$plainout" in
-        *'not a valid'*|*'alert'*|'') : ;;  # handshake failed as expected for a stale/plain probe
+# The server must be TLS-only: a plain, non-TLS registration must not complete.
+# The probe writes IRC straight to the socket with no handshake, so a TLS
+# listener reads it as a malformed record and closes; anything that answers with
+# a welcome numeric has registered a plaintext client.
+#
+# It runs in a subshell because a failed `exec` redirection exits a
+# non-interactive shell, and it uses /dev/tcp because that is the one plain
+# socket every supported shell has -- measured present in the bash 3.2 floor
+# build. An `openssl s_client` cannot stand in: it speaks TLS, so it can never
+# show what a plain connect does.
+plain_probe_rc=0
+plain_reply="$(
+    exec 9<>/dev/tcp/127.0.0.1/"$port" || exit 3
+    printf 'NICK plainprobe\r\nUSER plainprobe 0 * :plainprobe\r\n' >&9
+    timeout 3 head -c 256 <&9 2>/dev/null | tr -d '\000'
+)" 2>/dev/null || plain_probe_rc=$?
+if [ "$plain_probe_rc" -ne 0 ]; then
+    printf 'SKIP chat TLS-only: no /dev/tcp in this shell, so the plain-connect probe did not run\n' >&2
+else
+    case "$plain_reply" in
+        *' 001 '*|*Welcome*)
+            t_fail "the server registered a plain, non-TLS client: [$plain_reply]" ;;
         *) : ;;
     esac
 fi
