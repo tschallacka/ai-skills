@@ -155,6 +155,7 @@ add-ui-story	add-ui-story
 add-ui-story-links	add-ui-story-links
 add-work-unit	add-work-unit
 chat-client-rs	chat-client-rs
+chat-mcp	chat-mcp
 chat-server-rs	chat-server-rs
 configure-ui-story-cache	configure-ui-story-cache
 create-adversarial-review	create-adversarial-review

@@ -2421,6 +2421,222 @@
       "updated_at": "2026-09-07T12:22:04Z"
     },
     {
+      "id": "B250",
+      "title": "insert accepts delete_len and ignores it, so an insert asked to delete first is answered as a success",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Over MCP or NDJSON: insert --file F --offset N --text T --delete-len 5 --expected-revision R",
+      "observed": "The delete_len is accepted by the protocol-wide key check, never read by the insert handler, and the call answers success with a new revision. A caller that asked for 'delete five bytes, then insert' got a plain insert and no way to tell the difference.",
+      "expected": "Refused by name, with accepted_keys, as B237's per-verb declaration now does. delete_len belongs to replace; on insert the span is empty, so the argument can only be a caller error - and answering success to a partially-performed instruction is the worst available outcome.",
+      "mechanism": "The unknown-argument check was one protocol-wide list (B237), so a key any verb reads passed for every verb. delete_len is read by replace's handler and simply absent from insert's, which made an accepted-and-ignored argument indistinguishable from an honoured one.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "surfaced by B237's fix: binding the per-verb key table to both the server door and the adapter schemas, editor-batch agent 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:06Z",
+      "updated_at": "2026-09-07T14:29:06Z"
+    },
+    {
+      "id": "B253",
+      "title": "endpoint_for_file abandons XDG_RUNTIME_DIR for a machine-global /tmp directory once the socket path passes 96 characters",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Set a long TMPDIR/XDG_RUNTIME_DIR - the length this repo now mandates for scratch is enough - then autostart an editor server and look for its .endpoint record.",
+      "observed": "The record lands in a machine-global /tmp/tsch-ai-skills-editor instead of the configured runtime dir. In the cli_flow suite EVERY endpoint record went there, so the suite escaped its own isolation and the harness sweep was reading an empty directory for all 38 tests - the larger half of the ~173 leaked servers swept by hand on this machine.",
+      "expected": "A configured runtime dir is honoured, or the fallback is loud rather than silent. Two agents on one box must not share an endpoint namespace, and on a multi-user machine a shared 0700 directory is one two users would fight over.",
+      "mechanism": "src/ai-text-editor/src/transport.rs endpoint_for_file(): when the path it would build reaches the 96-character sun_path limit it falls back to /tmp/tsch-ai-skills-editor. The mandate for a long scratch TMPDIR and this fallback are each reasonable alone and jointly broken - the longer the configured dir, the more certain the fallback fires.",
+      "surfaces": [
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-batch agent while writing B239's test, 2026-09-07; raised as its Q3",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:24Z",
+      "updated_at": "2026-09-07T14:29:24Z"
+    },
+    {
+      "id": "B254",
+      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
+      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
+      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
+      "mechanism": "src/chat-client-rs/src/main.rs, the send path after the PRIVMSG: it FETCHes the channel from 0 to learn the id of the message it just stored, tracks the maximum id it sees, and saves that as the cursor. The maximum is the channel's newest id, not the sent message's, so every unread row in between is swallowed. The comment there says the intent - 'advance the channel cursor to the newest id' - which is the bug written down as a design.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:32:45Z",
+      "updated_at": "2026-09-07T14:32:45Z"
+    },
+    {
+      "id": "B258",
+      "title": "a response key with no verbosity tier panics the connection thread, and the caller sees only \"the server closed the connection without answering\"",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "On the T99 branch feat/t99-verbosity-ladder: ai-text-editor cursor -f FILE -a home -p structured, or any cursor command. In the suite it presents as cli_flow::unknown_options_are_refused_before_anything_is_sent failing.",
+      "observed": "ai-text-editor: the server at unix:/.../<key>.sock closed the connection without answering (endpoint unix:/.../<key>.sock). No error frame, no code, no message, nothing on the servers stderr the client keeps - the log is deleted on a successful start. Indistinguishable from a crashed or wedged server, and there is nothing in it that names a key, a verb, or verbosity.",
+      "expected": "A key nobody has classified is loud in a way that names itself. The debug_assert was put in deliberately as the safety net for exactly this - an unclassified key is kept at every level so production fails safe rather than silently dropping a field - but a debug_assert inside the request handler takes the connection thread down with it, and the assert text never reaches the caller. It should be caught before the handler runs, or reported as a refusal frame naming the key.",
+      "mechanism": "src/ai-text-editor/src/verbosity.rs, tier(): debug_assert!(false, \"response key `{key}` has no verbosity tier\") on the None arm. It is reached from handle() while a payload is being filtered, inside the per-connection thread that `serve` spawned, so the panic unwinds that thread and the socket closes with no frame written. The cursor verbs own response keys (line, column, visual, wrap_width, range) are the unclassified set that fires it: they are the ANSWER of the cursor verb, so line and column want tier 0 and the wrapped-view fields tier 2. Release builds do not assert at all, so the symptom exists only in debug - which is to say only in the test suite and only for whoever is developing it.",
+      "surfaces": [
+        "src/ai-text-editor/src/verbosity.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": "The cursor verbs own response keys are classified: `line` and `column` at tier 0, because a cursor position is the ANSWER of the cursor verb and not metadata about one - the same reason a reads `text` is tier 0 - and the wrapped-view fields `visual`, `wrap_width` and `range` at tier 2, being needed only when navigating a wrapped view. The fail-safe is deliberately unchanged: an unclassified key is still kept at every level and still trips the debug_assert, because a key that is merely more verbose than intended costs tokens while one that silently vanishes at the default level is a correctness bug in whatever depended on it.",
+      "verification": "The whole cli_flow file at the new default no longer produces the symptom; before the fix the search for \"no verbosity tier\" in a test run returned the cursor keys, and after it returns nothing. The classification itself is pinned by verbosity::a_verbs_own_result_survives_the_lowest_level and the end-to-end ladder test cli_flow::the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard. NOT closing the underlying shape: a debug_assert inside the request handler still takes the connection thread down with no frame written, so the next unclassified key will present the same way. That is recorded here rather than fixed, because moving the check out of the handler is a design change and this entry was about a specific unclassified set.",
+      "found_by": "the safety net firing for real while measuring T99s blast radius; filed on the coordinators instruction that the symptom be recorded prominently, because nobody debugging a closed connection blind would guess an unclassified response key",
+      "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on feat/t99-verbosity-ladder, commit 674f532a, which has not merged. Its fix and verification text stand as recorded. Close on merge.",
+      "created_at": "2026-09-07T14:57:12Z",
+      "updated_at": "2026-09-07T15:35:55Z"
+    },
+    {
+      "id": "B262",
+      "title": "an unmarked request was served by whichever tab a no-file call cached first, so a read after opening a second file could answer from the first",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In one agent workspace: open file A, then open file B, then issue a request with no file, endpoint or tab marker - a plain read.",
+      "observed": "The read is answered from A. The per-(identity,file) client cache had stored A's session token for the identity-only lookup, so a call naming nothing resolved to whichever tab happened to be cached first rather than the tab most recently opened. It answers successfully and reports A's content, so a caller has no signal that it read the wrong document.",
+      "expected": "An unmarked request resolves to a defined tab - the session's focused tab, which open sets - or is refused. Silently answering from a different document than the caller last opened is the failure mode a revision guard cannot catch, because the answer is internally consistent: A's content with A's revision.",
+      "mechanism": "Found while implementing T98 (a session carries a focused tab): the focus made the ambiguity visible because there was previously nothing that DEFINED which tab an unmarked request meant. The identity-only path in the client cache resolved to a first-cached token; with several tabs open in one workspace, 'first cached' and 'most recently opened' diverge. Fixed by T98's focus, which open now sets, and every response names the tab it answered so a caller can see it.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "editor-batch agent while implementing T98, 2026-09-07; reported in its final summary and unfiled until now",
+      "notes": "Filed by the coordinator from the agent's closing report rather than by the agent, so it exists independently of whether T98's branch lands. Related but distinct: B178 was cached endpoint reuse with no liveness or generation check - that was a dead endpoint being reused; this is a LIVE tab being the wrong one. Same cache, different failure.",
+      "created_at": "2026-09-07T15:23:22Z",
+      "updated_at": "2026-09-07T15:23:22Z"
+    },
+    {
+      "id": "B264",
+      "title": "the prescribed mention tail is one-shot, so every wake opens a window in which the agent is off the bus and a mention reaches nobody",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Hold the posture chat/SKILL.md prescribes: chat-client-rs tail --chan \"#c\" --nick worker --mentions --mention-exit --no-session. It exits on the first mention. Send a second mention before the agent has re-armed.",
+      "observed": "Nothing holds the nick between the exit and the re-arm, so the second mention wakes nobody. The agent is also absent from every other clients nick list for that window - B255 recurring on every single wake rather than once. And because the wake IS the only prompt to read, an agent that is idle rather than mid-task never learns the mention happened: there is no later signal that distinguishes \"no mentions\" from \"a mention arrived while I held no connection\".",
+      "expected": "An agent told to be reachable stays reachable. Either the tail keeps listening across a mention - the exit is what creates the hole - or something re-arms it without the agent having to remember, whether a supervised restart or a tail that reports the mention and continues.",
+      "mechanism": "src/chat-client-rs: --mention-exit terminates the tail on the first matching message by design, so a harness can treat the process exit as the wake signal. The re-arm is then left to the agent, and chat/SKILL.md prescribes appending a literal \"RE-ARM NOW\" reminder to the wake output precisely because that is unreliable - which is an admission that the posture is unsafe by default. --no-session mitigates the CONSEQUENCE (the cursor is untouched, so a read after waking still returns the spool) but not the cause: the wake itself is lost, and only an agent that happens to read anyway recovers it. Distinct from B263, where a HELD tail suffixes a later send, and from B255, where an agent holds no tail at all; this is the gap the prescribed remedy leaves open on every wake. Frequency is not hypothetical: aiskills reported forgetting to re-arm four times in one session and said the bus went silent each time with nothing to show it.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer, which noticed its own tail was momentarily down and pointed out this is a separate defect from the nick suffix; the two were entangled because the tail being down is what made B263s control possible",
+      "notes": "FOUND-BY CORRECTED: this entrys found_by credits sanitairkamer with pointing out the exit window, and sanitairkamer has since said plainly \"that is NOT what I meant... I never raised the exit window\". The defect is real and it confirmed as much, but the provenance was mine - I filed it after misreading its message, and it is the second of two things I read wrong there. Recording it rather than quietly editing the field, because a register that credits a peer with a claim it disclaimed is worse than one with an ugly note. PREMISE CORRECTED AGAIN, and this time it exonerates the entry rather than the provenance. B266 explains why I read sanitairkamers messages wrong three times: its sends were truncated at the first newline, so the halves of its messages I was guessing at had been silently discarded before they reached the channel. My guesses were at missing text, not ambiguous text. That does not make this entry wrong - sanitairkamer confirmed the exit window is real - but the found_by correction above stands, and the reason for the misreading is now known and filed.",
+      "created_at": "2026-09-07T15:29:38Z",
+      "updated_at": "2026-09-07T15:39:04Z"
+    },
+    {
+      "id": "B265",
+      "title": "the mention filter matches the nick as a substring, so a nick that is a prefix of another gets false wakes and the longer nick misses its own",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Hold chat-client-rs tail --chan \"#c\" --nick bob --mentions and have someone say \"@bobby ping\". Inverse: hold --nick editor-batch-2 and have someone say \"@editor-batch ping\".",
+      "observed": "The first wakes bobs tail, which was never addressed. The second wakes nothing, though @editor-batch is the prefix of the nick holding the tail. Live in #ai-skills: my tail holds `editor-batch` and every mention of `@editor-batch-2` (the nick B263 makes my own sends arrive under) wakes it.",
+      "expected": "A mention of @bobby is not a mention of @bob. The filter should match the nick as a whole token - bounded by the start of the text or a non-nick character on each side - so neither a prefix collision nor a suffixed sibling changes who is woken.",
+      "mechanism": "src/chat-client-rs/src/main.rs, both filter sites, each a bare substring test: line 1429 in local_read, `if !line.contains(&format!(\"@{}\", nick))`, and line 1746 in tail, `.map(|text| text.contains(&format!(\"@{}\", nick)))`. Neither checks what follows the nick, so \"@bob\" matches inside \"@bobby\", and neither checks the whole nick is present, so a tail for \"editor-batch-2\" does not match \"@editor-batch\".",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer, which named it as the other half of its controlled measurement after I twice read its message as something else; confirmed from the source rather than from the wire",
+      "notes": "TWO things that make this more than a filter tidy-up.\n\n(1) Its own test cannot see it. local_read_mention_filter_matches_only_the_named_nick (src/chat-client-rs/src/main.rs ~2457) asserts bob, carol and dave against \"@bob\"/\"@carol\" - three nicks where none is a prefix of another, so the substring behaviour is invisible to it. The test is named for the property it does not verify: add \"@bobby\" to its log and ask for \"bob\" and it would bite. This is the trap aiskills named earlier in the same session, a test asserting a weaker rule than its name claims.\n\n(2) It currently MASKS B263, so the order of the fixes matters. B263 makes an agents one-shot sends arrive as N-2 while its tail holds N, so peers naturally address @N-2 - and only this substring behaviour delivers those to the tail holding N. Fix the matcher first and cross-agent addressing breaks for every agent holding a tail, because @editor-batch-2 would stop waking editor-batch. B263 has to land first, or the two have to land together. LIVE EVIDENCE, and a third consequence: the filter has no SENDER check either, so an agent wakes on its own messages.\n\nObserved just now. My tail holds `editor-batch`. It woke on a PRIVMSG whose sender was `editor-batch-2` - my own send - because my prose about this very bug contained the literal string \"@editor-batch\". The tail is a separate connection from the send, so the server relays my own message to it correctly per RFC; nothing server-side is wrong and this is not B249, which is fixed and was about a standard client double-rendering its own lines.\n\nWhy it is not merely amusing: it burns a wake and a full re-arm cycle, and with B264 that cycle is a window in which a real mention reaches nobody. So a self-wake can cost a genuine message. B263 makes it worse rather than better - because the agents sends arrive under N-2, the tail cannot recognise them as its own even by comparing nicks.\n\nRecorded here rather than as its own entry because it is the same filter missing a second check: a mention is a message addressed to you BY SOMEONE ELSE, and the filter tests neither the token boundary nor the sender.",
+      "created_at": "2026-09-07T15:32:28Z",
+      "updated_at": "2026-09-07T15:34:30Z"
+    },
+    {
+      "id": "B266",
+      "title": "send silently truncates a multi-line message at the first newline while printing the whole of it locally, so the sender believes it arrived",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "chat-client-rs send --chan '#c' --nick n --text $'first paragraph\\n\\nsecond paragraph', then read the channel back with chat-client-rs read --local --chan '#c'.",
+      "observed": "The channel stored only \"first paragraph\". Everything from the first newline on is gone, and the sending client printed the COMPLETE text to its own stdout as its success line, so nothing about the call looks wrong. Measured by sanitairkamer across four of its own messages: msg 97 stored 415 characters of about 1900 sent, msg 108 stored 257 of about 1900, and 102 and 105 likewise - each cut exactly at its first paragraph break. My own msg 34 in the same channel is the same defect: I sent an intro plus two numbered questions in separate paragraphs and only the intro stored.",
+      "expected": "Either the newline is rejected with a named refusal - a PRIVMSG is one line by construction, so a multi-line text is a caller error the client can see before it writes anything - or the text is split into one PRIVMSG per line. What must not happen is the current behaviour: most of the message discarded, no error, and a local echo of the full text that tells the sender it succeeded.",
+      "mechanism": "src/chat-client-rs/src/main.rs:1053, `write_line(&mut tls, &format!(\"PRIVMSG {} :{}\", o.chan, o.text))`, with write_line appending CRLF and writing the lot. An embedded newline in o.text therefore terminates the IRC line early: the server reads \"PRIVMSG #c :first paragraph\" and then tries to parse the remainder as a command of its own, which it discards as unknown. o.text is never validated or escaped. Two things hide it: line 1093 prints the full o.text locally as the senders own echo, so the caller sees what it meant to send rather than what left; and the write result is discarded with `let _ =`, so nothing is reported even when the write itself fails.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer, which measured it across four of its own messages after five exchanges had been built on text I never received. I hit it MYSELF at the start of the same session - my msg 34 - noticed the symptom, worked around it by writing one line per send, and did not file it. Michaels standing rule is that a finding goes in the register when it is noticed, and this is the cost of not doing that: my three successive misreadings of sanitairkamers messages were guesses at text that had been silently discarded, not at anything ambiguous.",
+      "notes": "A LATENT SECOND LIMIT, not the cause here but adjacent: an IRC line caps around 512 bytes including the prefix and CRLF, and sanitairkamer was sending about 1900 characters. Its messages were cut at the paragraph break rather than at 512, so the newline is what bit first and the length limit has not yet been observed to bite - but a single-line message long enough would meet it, and the same discarded write result and full local echo would hide it exactly as well. Worth checking when this is fixed: splitting on newlines alone would turn one silent truncation into another.",
+      "created_at": "2026-09-07T15:38:51Z",
+      "updated_at": "2026-09-07T15:39:04Z"
+    },
+    {
+      "id": "B267",
+      "title": "insert silently clamps a negative offset to 0 and writes at the top of the file",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Open any multi-line file, then: insert --file F --expected-revision R --offset -1 --text placeholder",
+      "observed": "The call succeeded, reporting {\"offset\":0,\"bytes_written\":11}, and \"placeholder\" was inserted at byte 0 -- ahead of the first line. No warning, no error, and the response named offset 0 rather than the -1 that was passed.",
+      "expected": "A negative offset is refused as an argument error naming the offending value, the way a non-numeric offset would be. If \"end of document\" is wanted as a sentinel it has to be documented and tested, not arrived at by accident -- and it would then have to append, which is the opposite end from where the clamp lands.",
+      "mechanism": "The offset is accepted as a signed integer and clamped into range rather than validated, so any negative value collapses to 0. The response then reports the clamped value, so the caller's own log agrees with the wrong write.",
+      "surfaces": [
+        "src/ai-text-editor/src/verbs.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor-mcp/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, hit live while inserting helpers into chat-client-rs on 2026-09-07",
+      "notes": "Hit by hand: I passed --offset -1 intending \"append at end\", which the schema does not define, and the edit landed at byte 0 instead. Undo recovered it cleanly. The dangerous shape is that a clamp turns an out-of-range argument into a SUCCESSFUL write somewhere else in the file, and reports the clamped offset as though that is what was asked -- so nothing in the response distinguishes it from a correct call. An agent that did not re-read would not notice; I only did because the insert was visibly at the top of the file. Note the relation to the per-verb argument door: that door validates WHICH keys a verb accepts, not whether a value is in range, so this class of defect can exist behind a fully exhaustive door.",
+      "created_at": "2026-09-07T15:50:15Z",
+      "updated_at": "2026-09-07T15:50:22Z"
+    },
+    {
+      "id": "B268",
+      "title": "a skipped test is reported as PASS, so a suite can be green while running nothing",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Run a test whose preconditions are absent, e.g. on a host with no timeout(1): chat/tests/test-chat-broadcast-stall.sh; or via the runner: ./run-tests.sh and read the summary line for it.",
+      "observed": "The test prints \"SKIP chat broadcast stall: no timeout(1) ...\" to stderr, then calls t_end, which prints \"test-chat-broadcast-stall.sh: PASS\". run-tests.sh records it as PASS in the summary, identical to a test that ran every assertion.",
+      "expected": "A skip is its own outcome and is reported as one -- a SKIP column in the summary and a count in the epilogue -- so a green run states how many tests actually executed. A test that did not run must never be summarised with the word PASS.",
+      "mechanism": "The skip paths do `printf SKIP >&2; t_end; exit 0`, and t_end has exactly one success wording: it prints \"<test>: PASS\" whenever the findings count is zero. It cannot distinguish \"asserted everything and found nothing wrong\" from \"asserted nothing at all\", because a skip records no finding. run-tests.sh then judges by exit status alone, and a skip exits 0.",
+      "surfaces": [
+        "planning/tests/lib-test.sh",
+        "run-tests.sh",
+        "chat/tests/test-chat-broadcast-stall.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, while diagnosing why the macOS bash 3.2 leg failed test-chat-broadcast-stall while macos-latest passed it",
+      "notes": "Found while diagnosing a different failure, and it cost real time: macos-latest reported test-chat-broadcast-stall as PASS while the macOS bash 3.2 leg failed it, and \"PASS\" was consistent with two very different stories -- the test ran and passed, or the test skipped for want of timeout(1), which stock macOS does not ship. Ruling the second out needed the raw job log rather than the summary, because the summary cannot express the difference. Note the interaction with the skip being LOUD on stderr: the authors did the right thing at the test end (the comment in test-chat-broadcast-stall.sh calls it \"a loud SKIP, not a failure\"), and the runner then flattens it back to PASS, so the loudness is lost exactly where the decision is made. Related to the evidence gap fixed in lib-test.sh on fix/worktrees-tmpdir-chat-relay: both are cases of CI reporting less than it knows.",
+      "created_at": "2026-09-07T19:10:01Z",
+      "updated_at": "2026-09-07T19:10:11Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -3172,9 +3388,9 @@
       "fix": null,
       "verification": null,
       "found_by": "found while fixing B226: the range keys were accepted and dropped, which the entry had not recorded",
-      "notes": null,
+      "notes": "Binding the per-verb table to both surfaces surfaced three live instances of this class, now filed separately so each closes on its own evidence: B250 (insert accepts delete_len and answers success), B251 (search advertises pager_key and historical, which only page reads), B252 (index advertises an action it never reads). B253 is unrelated to this class but was found in the same pass - the endpoint_for_file /tmp fallback.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-07T14:29:46Z"
     },
     {
       "id": "B238",
@@ -3216,9 +3432,73 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael, from a Konversation nick list on 2026-09-07",
-      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not.",
+      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not. SECOND SYMPTOM, from sanitairkamer 2026-09-07, and it is worse than a stale list: the silent failure produced a WRONG INFERENCE. It read 'aiskills never appeared in my nick list all session' as 'that agent is not connected' rather than 'JOIN was never relayed to me', so it stopped addressing a peer that was present and answering. A presence bug that reads as absence is exactly the kind that makes agents stop coordinating with each other.",
       "created_at": "2026-09-07T12:44:52Z",
-      "updated_at": "2026-09-07T13:12:06Z"
+      "updated_at": "2026-09-07T13:31:43Z"
+    },
+    {
+      "id": "B251",
+      "title": "search advertises pager_key and historical, which only page reads, so a caller avoiding a rescan triggers one",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP: search --file F --mode exact_text --query Q --pager-key KEY (or --historical), following the tool schema that advertises both.",
+      "observed": "Both keys are accepted and ignored by search, so the search runs as a fresh scan. A caller passing them precisely to resume an existing result set instead paid for a full rescan, with nothing saying so.",
+      "expected": "Refused by name on search, naming page as the verb that reads them. The cost is the point: these two keys exist to AVOID a scan, so silently ignoring them inverts their purpose.",
+      "mechanism": "Same root as B237: the key check was protocol-wide, and pager_key/historical are read by the page handler. B186 already fixed the sibling case where search silently ignored --offset; these two were the same shape and were missed because the check could not distinguish verbs.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:29:06Z",
+      "updated_at": "2026-09-07T14:29:06Z"
+    },
+    {
+      "id": "B255",
+      "title": "a write-only agent is invisible and unreachable on the bus, with nothing saying so",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Have an agent participate using only one-shot chat-client-rs send calls, as editor-batch does. Watch the channel from a standard IRC client.",
+      "observed": "The nick never appears in the channel listing and cannot be woken by a mention. Michael noticed exactly this: 'editor-batch isn't in the channel listing?' - while that agent had posted six messages in the preceding half hour. pgrep confirms it holds no client process at all between sends.",
+      "expected": "An agent that participates in a channel is either visible and reachable, or is told it is neither. Reachability is the part that matters: a peer cannot hand it a decision, so coordination degrades to one-way reporting and the other side has to poll or guess. Visibility comes free once it holds a tail.",
+      "mechanism": "Two correct decisions colliding. B247 removed the JOIN from send, because a post does not imply presence and the sender's membership was never checked - so a write-only agent now holds no membership at any moment. chat/SKILL.md names the mention tail as the listening posture, but an agent that only reports has no obvious reason to arm one, and nothing states that the cost of skipping it is being unaddressable. Before B247 the join/quit churn per send was noise, but it was at least evidence the agent existed (B247's own observed section).",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, noticing editor-batch absent from the nick list while it was actively reporting, 2026-09-07",
+      "notes": "B256 is the discovery half and the cheaper one: the server has answered NAMES all along and no client verb asks. Adding one makes presence queryable on demand, which answers 'is that agent live?' without requiring every agent to hold a tail. It does not replace this entry - a queryable list still shows nothing for an agent that holds no connection, and unreachability is the part that actually costs coordination.",
+      "created_at": "2026-09-07T14:36:28Z",
+      "updated_at": "2026-09-07T14:37:44Z"
+    },
+    {
+      "id": "B260",
+      "title": "todo update cannot set refs, and --touching matches only refs, so an entry filed without them is permanently unfindable by area",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "todo list --touching verbosity, against a register whose T99 is titled \"Give editor responses a verbosity contract, so a two-line edit does not cost a screen of JSON\". Then: todo update T99 --refs src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+      "observed": "The list answers nothing at all, though the word is in the entrys title and throughout its detail. And the update is impossible: `todo update` takes --status, --priority, --detail, --blocked-on, --note and --append-note, and no --refs, so the omission cannot be corrected after filing. Measured on the same register: `todo list --touching session.rs` DOES return T98, and session.rs appears only in T98s refs and in no title - which pins the matcher to refs alone.",
+      "expected": "Either --touching searches the fields a human would expect it to (refs, title, detail), or `todo update` can set refs so an entry filed without them can be repaired. As it stands the two gaps combine: T99 is an ai-text-editor task that `todo list --touching ai-text-editor` does not return, and nothing shipped can fix that. The brief for this batch asked for exactly that repair, which is how it was found.",
+      "mechanism": "The `todo` crate: the --touching filter tests the refs array only, and the update subcommands argument table has no refs entry (the add subcommand does, via --refs a,b). So refs are write-once at creation. Two separate small gaps whose intersection is the defect - either one alone would be survivable.",
+      "surfaces": [
+        "src/todo",
+        "todo/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the editor batch brief asking me to add refs to T99 so `todo list --touching ai-text-editor` would stop missing it; the tool has no way to do it",
+      "notes": null,
+      "created_at": "2026-09-07T15:01:18Z",
+      "updated_at": "2026-09-07T15:01:18Z"
     },
     {
       "id": "B6",
@@ -4861,9 +5141,9 @@
       "fix": null,
       "verification": null,
       "found_by": "the fifth drive's fix batch, cleaning up after its own test runs",
-      "notes": null,
+      "notes": "B253 is the larger half of the same leak: endpoint_for_file falls back to a machine-global /tmp dir once the socket path passes 96 characters, so under a long TMPDIR the harness sweep was reading an empty directory for all 38 tests. Fixing this entry's sweep without B253 leaves most of the leak in place. Two more instances of this exact class turned up in files this entry does not name - mcp_flow.rs (six servers per run) and tcp_flow.rs (a stale record directory per run) - filed as the child B259 rather than folded in here, so this entrys 173-server measurement and its cli_flow reproduction stay exactly what they were. B253 is the larger half of the cause: fixing this sweep without it leaves most of the leak, because the records were never in the directory the sweep read.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-07T14:57:41Z"
     },
     {
       "id": "B241",
@@ -4934,7 +5214,7 @@
     {
       "id": "B246",
       "title": "the client discards JOIN, PART and QUIT, so an agent on the bus cannot tell who else is present",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4945,12 +5225,203 @@
       "surfaces": [
         "src/chat-client-rs/src/main.rs"
       ],
+      "fix": "PR #74 b2729933 - tail --presence prints JOIN, PART and QUIT; opt-in so existing readers still receive PRIVMSG only",
+      "verification": "Live: a --presence tail saw a peer's ':joiner!joiner@localhost JOIN #ai-skills' and its attributed ':joiner!joiner@localhost QUIT :connection closed', and saw only the message during a send. Unit: presence_is_off_unless_asked_for pins the default. Mutation: drop the o.presence branch and the tail shows nothing but PRIVMSG again.",
+      "found_by": "noticed while confirming B244's fix was server-side only, 2026-09-07",
+      "notes": "CORRECTING THIS ENTRY'S OWN EXPECTATION, which was wrong when I filed it. It said 'read --local should show them too, since the log is the same stream'. It cannot: the channel log stores only MSG rows - Hub::append is the only writer and fetch() filters on f[0]==\"MSG\" - so presence is never persisted and a local read has no row to return. Presence is a live-stream capability, not a history one, and making it otherwise needs a log-format change plus ids, because local_read keys entirely off msg_line_id and an id-less line would be reprinted on every since-based poll. Found by a peer agent reading the storage path rather than trusting the entry; the fix is documented as live-only in chat/SKILL.md.\n\nTwo mechanism details worth keeping for anyone touching that filter: a QUIT carries NO channel parameter (the server relays it only to members of the channels the nick shared, so an unfiltered command is already scoped), and a JOIN arrives in TWO spellings - the channel in the trailing when echoed to the joining connection, in params[0] when relayed to others. A filter checking only params.first() drops a tail's view of its own join. B254 is the same family seen from the other side: presence aside, a plain send silently advances the read cursor past another nick's unread messages, so the bus loses messages to its own bookkeeping rather than to the filter.",
+      "created_at": "2026-09-07T13:12:06Z",
+      "updated_at": "2026-09-07T14:32:45Z"
+    },
+    {
+      "id": "B247",
+      "title": "send joins the channel it only wants to post to, so every short-lived call now flickers a join and a quit in the nick list",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With a standard IRC client watching #ai-skills against a server carrying the B244/B245 relay: chat-client-rs send --chan '#ai-skills' --nick x --text hi",
+      "observed": "The nick appears and disappears for each call. Michael saw two '[quit] connection closed' lines at 15:11 from ordinary client activity. Before the relay landed this was invisible, so the churn is newly VISIBLE rather than newly caused.",
+      "expected": "A post does not imply presence. send should not JOIN at all: the server's PRIVMSG handler never checks the SENDER's membership - it appends and relays, and Peer::offer gates on the RECIPIENT being joined - so the JOIN buys nothing and costs a join/quit pair per call. join_channel legitimately joins (it is seeding a cursor) but exits immediately, so it flickers too; it should either linger or not announce.",
+      "mechanism": "src/chat-client-rs/src/main.rs: both join_channel() and the send path write 'JOIN <chan>' before their PRIVMSG/LASTID and then 'QUIT'. With membership now relayed (B244/B245) each pair reaches every other member. The sender-side JOIN was always unnecessary; nothing depended on it because nothing could see it.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": "PR #74 b2729933 - send no longer writes JOIN; the PRIVMSG handler gates on the recipient's membership via Peer::offer, never the sender's",
+      "verification": "Live: with a --presence tail attached, a send produced only the PRIVMSG line and no JOIN or QUIT for the sending nick. Mutation: restore the JOIN write and the same tail shows a join/quit pair per call.",
+      "found_by": "Michael, from Konversation showing two quits from ordinary activity, 2026-09-07",
+      "notes": "B255 is this fix's cost, and it is worth reading together with it: with the JOIN gone, an agent that only ever sends is now completely absent from the channel listing rather than flickering. The churn was noise, but it was evidence the agent existed. The answer is not to restore the JOIN - it is that an agent which participates should hold a mention tail, which makes it reachable and visible at once.",
+      "created_at": "2026-09-07T13:31:43Z",
+      "updated_at": "2026-09-07T14:36:28Z"
+    },
+    {
+      "id": "B248",
+      "title": "a ban-list query is treated as a mode change, so every join prints an operator error",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Join #ai-skills with a standard IRC client (Konversation). It sends MODE #ai-skills, then MODE #ai-skills b.",
+      "observed": "[14:54] --> You have joined the channel #ai-skills. / [14:55] *** Channel modes: / [14:55] [Error] You need to be a channel operator in #ai-skills to do that. The first MODE is answered correctly with 324; the second gets 482.",
+      "expected": "MODE #chan b is a QUERY for the ban list, not an attempt to set one - a mode CHANGE carries a + or - sign. The bus keeps no bans, so the answer is an empty list and its end-of-list numeric (368 for b, 349 for e, 347 for I). A routine join should print no error at all. An actual change (+b, -b) still refuses with 482, which is honest: there is no operator model here.",
+      "mechanism": "src/chat-server-rs/src/main.rs MODE arm: the branch keys on params.len() > 1 and, for anything that is not a valid umode set on the caller's own nick, answers 482 whenever the target is a channel. It never distinguishes a sign-less list letter from a signed change, so the ban-list query a standard client sends immediately after JOIN lands in the refusal path.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": "PR #74 - list_mode_query() separates a sign-less b/e/I query from a signed change, and empty_list_reply() answers each queried letter with its end-of-list numeric; a real +b/-b still refuses with 482",
+      "verification": "mode_query_tests in chat-server-rs: a_signless_list_letter_is_a_query, a_signed_change_is_not_a_query, only_the_list_letters_are_answered, each_list_query_ends_with_its_own_numeric. Mutation: drop the !flags.starts_with(['+','-']) test and a_signed_change_is_not_a_query fails, because +b would then be answered as an empty list instead of refused - which is the dangerous direction, a client believing its ban was accepted.",
+      "found_by": "Michael, from Konversation's join output on 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T13:39:05Z",
+      "updated_at": "2026-09-07T13:39:21Z"
+    },
+    {
+      "id": "B249",
+      "title": "the server echoes a sender's own PRIVMSG back, so a standard client shows every message twice",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Send a message from a standard IRC client (Konversation) joined to #ai-skills. Michael's paste shows each of his own lines rendered twice.",
+      "observed": "Every message the sender writes appears twice in its own window: once rendered locally by the client, once received back from the server. Michael's own diagnosis, which is correct: 'probably once conquerer printing itself, and once the channel sending it'.",
+      "expected": "RFC 1459 flow: a PRIVMSG is relayed to the OTHER members of the channel and never back to its sender, which renders its own line locally. So a sender sees one copy.",
+      "mechanism": "src/chat-server-rs/src/main.rs PRIVMSG arm: w(st, &out) writes the serialized message back to the sending connection before hub.relay(&chan, &out, idx) fans it out to the others. The echo is not incidental - src/chat-client-rs/src/main.rs's send path WAITS for it, matching on a line containing PRIVMSG, the channel and the text, and prints it as its success confirmation. So dropping the echo server-side without changing the client would make every send hang until timeout.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": "PR #74 b2729933 - the server tells a sender nothing after a PRIVMSG; chat-client-rs send asks LASTID and reads the 999 that already answers it, then prints the line locally",
+      "verification": "Live: send prints one line, a watcher tail receives one, no numeric on either side. An intermediate attempt that pushed an unsolicited 999 was rejected because Konversation rendered it as '[999] mdibbets #ai-skills 59' - trading a duplicate line for a stray one. Mutation: restore w(st, &out) in the PRIVMSG arm and a standard client shows every message twice again.",
+      "found_by": "Michael, from Konversation showing his own messages twice, 2026-09-07",
+      "notes": "Both sides must change together, which is why this is one entry rather than two: the server stops echoing, and chat-client-rs's send stops waiting for an echo and instead prints the line it constructed once the write succeeds (or confirms with a cheap round trip such as LASTID). Handing it to whoever holds chat-client-rs, since B246 and B247 are already there and a split fix would leave send hanging.",
+      "created_at": "2026-09-07T13:44:48Z",
+      "updated_at": "2026-09-07T14:04:39Z"
+    },
+    {
+      "id": "B252",
+      "title": "index advertises an action argument it never reads, so every call is a full rebuild",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP: index --file F --action <anything>, following the tool schema that advertises action.",
+      "observed": "The argument is accepted and ignored; the call always performs a full rebuild. A caller selecting a cheaper action got the expensive one and a success answer.",
+      "expected": "Refused by name if index has no action to select, or read if it does. An advertised argument that changes nothing is worse than an absent one, because a caller reads the schema as a contract.",
+      "mechanism": "Same root as B237: the unknown-argument check was protocol-wide, so a key no index handler reads still passed. Unlike B250 and B251 the key is not read by any other verb either, which makes it a stale schema entry rather than a misrouted one - so the fix may be to remove it from the schema rather than to refuse it. Whoever closes this should decide which, and say so.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
       "fix": null,
       "verification": null,
-      "found_by": "noticed while confirming B244's fix was server-side only, 2026-09-07",
+      "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
       "notes": null,
-      "created_at": "2026-09-07T13:12:06Z",
-      "updated_at": "2026-09-07T13:12:06Z"
+      "created_at": "2026-09-07T14:29:23Z",
+      "updated_at": "2026-09-07T14:29:23Z"
+    },
+    {
+      "id": "B256",
+      "title": "no client verb asks who is on a channel, though the server answers NAMES, WHO and LIST",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "chat-client-rs --help: the verbs are discover, send, read, tail, join, leave, session. None asks for channel membership.",
+      "observed": "An agent cannot find out who is on a channel. The server has handled NAMES since it was written (main.rs:917, answering 353 and 366), plus WHO (:1043) and LIST (:1229), so the capability exists on the wire and nothing exposes it. A standard IRC client gets the answer on join and keeps it live from the relayed JOIN/PART/QUIT; an agent has neither.",
+      "expected": "A verb that asks and prints the members, so 'who is listening right now?' is answerable without holding a connection or parsing a tail. That is also the cheap half of B255: presence becomes queryable on demand rather than requiring every agent to hold a tail to be seen.",
+      "mechanism": "src/chat-client-rs/src/main.rs's verb match covers discover, send, read, tail, join, leave and session. The three membership queries were implemented server-side for the benefit of standard IRC clients and never given a client-side caller.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael asking whether IRC has a way to request the joined members of a channel, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T14:37:44Z",
+      "updated_at": "2026-09-07T14:37:44Z"
+    },
+    {
+      "id": "B257",
+      "title": "the mode a response reports is spelled differently from the mode the protocol accepts, so a caller cannot compare them",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "ai-text-editor open -f FILE -M hex_view -p structured, and read the `mode` field of the answer.",
+      "observed": "The answer says \"HexView\". The request said hex_view, --mode says hex_view, and the document_modes list in `capabilities` says hex_view. Three snake_case spellings in, one CamelCase spelling out.",
+      "expected": "The mode a response reports is the same string the protocol accepts and advertises, so a caller can compare the mode it ASKED for against the mode it was GIVEN without knowing to translate. That comparison is the whole purpose of the field now that a mode is a per-tab property a caller chooses (B238) and every response names it.",
+      "mechanism": "src/ai-text-editor/src/document.rs: `enum DocumentMode` derives Serialize with no rename, so serde emits the Rust variant names TextUtf8/RawBytes/HexView. The input side never went through serde - the server parsed --mode by hand and matched the snake_case names - so the two spellings were never compared in one place. Nothing on disk depends on the serialized form: the tab metadata stores the mode as format!(\"{mode:?}\"), which is Debug, and nothing reads it back.",
+      "surfaces": [
+        "src/ai-text-editor/src/document.rs"
+      ],
+      "fix": "serde(rename_all = \"snake_case\") on DocumentMode, so the wire spelling is the one the protocol already accepts and capabilities already advertises.",
+      "verification": "cli_flow::a_second_file_opens_in_its_own_mode_not_the_servers asserts mode == \"text_utf8\" and \"hex_view\" and \"raw_bytes\" on the wire. Before the rename it failed with left String(\"TextUtf8\") right String(\"text_utf8\") - that failure is what found this. Landed in the B238 commit because B238 is not usable without it.",
+      "found_by": "fixing B238, and forced by T99: the coordinator decision was that a response must name the tabs mode at verbosity level 1 so a caller knows which coordinate space it is in, which made the spelling mismatch load-bearing rather than cosmetic",
+      "notes": "STATUS CORRECTED from fixed back to confirmed, by me, because I had closed it while its code sat on an unmerged branch. The fix is real and its verification stands (both are recorded on this entry) but it is on fix/editor-batch-b237-t99, tip bf33d117, which has not merged. Closing it while B237-B241 and B250-B253 - fixed by the SAME branch - were deliberately left open made the register answer \"is it all fixed?\" wrongly in both directions: three falsely closed, and no way to see the other eleven were complete but unmerged. Close on merge, with the other thirteen.",
+      "created_at": "2026-09-07T14:56:53Z",
+      "updated_at": "2026-09-07T15:35:55Z"
+    },
+    {
+      "id": "B259",
+      "title": "the mcp and tcp flow harnesses leak the same way cli_flow did, in files B239 does not name",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": "B239",
+      "reproduce": "cargo test -p ai-text-editor-mcp, then pgrep -af \"ai-text-edito[r]-server\". Separately: cargo test -p ai-text-editor --test tcp_flow, then ls -d /tmp/tsch-ai-skills-editor*.",
+      "observed": "Six servers still running after a run of mcp_flow.rs, every one pointing at a scratch directory the harness had already deleted - measured, and they were killed by hand. tcp_flow.rs leaves no servers but one stale endpoint-record directory per run, outside the scratch tree it does remove.",
+      "expected": "Every flow harness stops what it started and removes what it wrote. B239 is the same defect and its entry names only cli_flow.rs, so fixing that one alone left two thirds of the class open - and the two files were never going to be found by re-reading B239.",
+      "mechanism": "src/ai-text-editor-mcp/tests/mcp_flow.rs, impl Drop for Harness: found servers only by reading the pid out of an .endpoint record under the scratch runtime dir, which misses a server that has not announced yet and every server at all once B253s length fallback put the records outside that tree. src/ai-text-editor/tests/tcp_flow.rs, impl Drop for TcpHarness: removes self.scratch and nothing else, and the length fallback is outside it by construction.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/tests/mcp_flow.rs",
+        "src/ai-text-editor/tests/tcp_flow.rs"
+      ],
+      "fix": "mcp_flow spawns its adapter into a session of its own (setsid in pre_exec) and killpgs it on drop, so every server the adapter autostarted goes with it whether a record ever named it - the same fix B239 took. Both harnesses now sweep BOTH endpoint roots via transport::endpoint_roots and remove their own length-fallback directory, which is keyed to their runtime dir so it deletes nothing another test owns.",
+      "verification": "Measured before and after on the same branch: a full run of both crates left 6 servers and 3 stray directories, and now leaves 0 and 0. Landed with B239 and B253 because the three are one cause seen from three files; the shared mechanism is pinned by cli_flow::a_dropped_harness_stops_a_server_no_record_names and transport::the_long_path_fallback_is_per_root_and_per_user, whose mutations are recorded on those entries.",
+      "found_by": "counting leftover servers after each crates suite while verifying B239, then finding six that cli_flow could not account for",
+      "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on fix/editor-batch-b237-t99, tip bf33d117, unmerged. Its fix and verification text stand as recorded, including the 6-servers-and-3-directories-to-0 measurement. Close on merge, with its parent B239.",
+      "created_at": "2026-09-07T14:57:31Z",
+      "updated_at": "2026-09-07T15:35:55Z"
+    },
+    {
+      "id": "B261",
+      "title": "a newly installed adapter's arguments are invisible to an already-running agent, and nothing says the schema is stale",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Install a build of ai-text-editor-mcp that adds an argument (tab_id and tab_path, T96/T97) while an agent session is connected. Then have that session address a tab by id.",
+      "observed": "The agent keeps passing file on every call and never uses the shorthand, because the tool definitions it holds were fetched before the install and carry no tab_id or tab_path. Michael noticed exactly this - 'you're not using the tab shorthands' - while the answers coming back already carried tab_id. Passing one would be refused by the CLIENT against its cached schema, so the capability is unreachable rather than merely undiscovered.",
+      "expected": "Either the agent learns the new schema without a restart, or something states plainly that the installed adapter is newer than the schema in hand. The uncomfortable half is that the responses advertise the handle - every answer carries tab_id - so an agent is invited to use an argument its own tool definition rejects.",
+      "mechanism": "Not an editor defect: the installed adapter accepts both keys and describes them well (ADAPTER_ARGUMENTS plus the exhaustive adapter_argument match, from B237's binding). The gap is deployment - an MCP client fetches tools/list once per session, so a swap under a live session leaves the agent holding older definitions with no version to compare. It is the B217/B237 'advertised versus actual' family inverted: there the schema promised what the server ignored, here the server accepts what the schema never mentions.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, noticing the tab shorthands going unused right after the dev install, 2026-09-07",
+      "notes": "The capability itself is T96 and T97 (tab addressing by id, and by filename or partial path with a candidate set on ambiguity), implemented on the editor batch's branch and not yet merged - so this entry is NOT that work outstanding. It is the deployment gap sitting on top of it: the adapter accepts tab_id and tab_path today, and a session that connected before the swap cannot pass either, because it validates against the tools/list it fetched at startup.\n\nPractical consequence while it stands: after installing a new adapter, the tab shorthands are unavailable to every already-running agent until it restarts, and the only symptom is that agents keep passing file - which is what Michael spotted. Worth stating in ai-text-editor/SKILL.md next to the addressing contract, so the first thing an agent reads about tab_id also tells it why its own tooling may not offer it yet.",
+      "created_at": "2026-09-07T15:12:38Z",
+      "updated_at": "2026-09-07T15:13:10Z"
+    },
+    {
+      "id": "B263",
+      "title": "holding a mention tail makes every later send from the same agent arrive under a suffixed nick, so one worker appears as two identities",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "chat-client-rs tail --chan \"#ai-skills\" --nick worker --mentions --mention-exit --no-session (held as a background task, which is the posture B255 prescribes), then from the same agent: chat-client-rs send --chan \"#ai-skills\" --nick worker --text hello",
+      "observed": "The message arrives attributed to worker-2. Observed live in #ai-skills: msgs 91-99 are from editor-batch-2 while the same agents tail holds editor-batch, so the channel log shows two identities for one worker and neither is obviously the same one. A reader following the thread cannot tell that the handoff at 94-96 and the tail that answers a mention are the same agent.",
+      "expected": "One agent is one nick in the log. Either a send reuses the connection the tail already holds, or it registers under the same nick without the server having to rename it. Cosmetic in that mentions still reach the agent - the tail owns the real nick, so @worker wakes it - but it makes the channel unattributable, which is most of what the log is for.",
+      "mechanism": "src/chat-client-rs: `send` opens its own connection and registers its own nick rather than reusing a held one, so the server sees a second registration for a nick already in use and applies its collision suffix. The two paths are independent by design - send is a one-shot, tail is long-lived - and nothing coordinates the nick between them.\n\nMEASURED from both sides, with a control sanitairkamer ran rather than inferred from one side: its msg 97 arrived as `sanitairkamer-2` while its tail held `sanitairkamer`; msg 100, sent with the tail DOWN and nothing else changed, arrived as plain `sanitairkamer`. So it is the held registration that causes the suffix, not anything about the send path itself.\n\nSurfaced by B255s own remedy: before agents held tails there was never a first registration to collide with, so fixing write-only agents is what created this. Two agents hit it independently within minutes of adopting the posture.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "following B255s prescribed posture during the editor batch, then reading my own messages back in the channel log and finding them under a nick I had not chosen",
+      "notes": "B265 currently masks this one, and that decides the order: peers address the suffixed @N-2 nick, and only B265s substring matching delivers those to the tail holding N. Fixing B265 alone would break cross-agent addressing for every agent holding a tail. This entry lands first, or both land together.",
+      "created_at": "2026-09-07T15:25:02Z",
+      "updated_at": "2026-09-07T15:32:42Z"
     },
     {
       "id": "B25",
