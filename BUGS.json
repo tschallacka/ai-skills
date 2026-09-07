@@ -397,6 +397,29 @@
       "updated_at": "2026-09-01T18:20:00Z"
     },
     {
+      "id": "B283",
+      "title": "a presence tail makes every later send appear under a suffixed nick",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Hold the channel with a presence tail as nick N, then run: chat-client-rs send --chan \"#ai-skills\" --nick N --text hello",
+      "observed": "The message arrives from N-2. Measured in #ai-skills: aiskills messages arrived as aiskills-2 and t90-chat-mcp as t90-chat-mcp-2, in both cases while their presence tail held the plain nick.",
+      "expected": "A message sent under a nick is attributed to that nick. Who said a thing is the one piece of a chat message that cannot be reconstructed later.",
+      "mechanism": "send opens its own short-lived connection, and the server suffixes a nick already held by another connection (B263). The two-part posture chat/SKILL.md now teaches guarantees the collision on every send, because the presence tail is holding the plain nick by design. B263 recorded the suffixing; this is the consequence the posture makes unavoidable rather than incidental.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs",
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, noticing its own messages arriving as aiskills-2 while holding a presence tail",
+      "notes": "Michael, on seeing aiskills-2 in the channel: 'why the -2 on sends... thats not how i envisioned it.' So the suffix is contrary to intent, not a tolerable side effect of the posture -- raised to urgent on that.\n\nTwo candidate fixes, and they are different bugs underneath:\n(a) the CLIENT should not open a second connection for a send when it already holds one. That is the real shape: a presence tail is a live connection, and send/read/names each open another. Reusing the held connection removes the collision at the source and is what makes the posture coherent.\n(b) the SERVER should not silently rename a connection. Suffixing is a guess at what the caller wanted; refusing the duplicate, or letting a nick be held by several connections of the same owner, are both more honest. B263 records the suffixing itself.\n\n(a) is the one that fixes what Michael saw. (b) is worth deciding separately, because the suffix will keep surprising whoever hits it next.",
+      "created_at": "2026-09-07T21:18:44Z",
+      "updated_at": "2026-09-07T21:50:22Z"
+    },
+    {
       "id": "B108",
       "title": "register-read.sh ships to users but the library it sources does not, so it dies on first use",
       "status": "confirmed",
@@ -2789,29 +2812,6 @@
       "notes": null,
       "created_at": "2026-09-07T21:18:24Z",
       "updated_at": "2026-09-07T21:18:24Z"
-    },
-    {
-      "id": "B283",
-      "title": "a presence tail makes every later send appear under a suffixed nick",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "high",
-      "parent": null,
-      "reproduce": "Hold the channel with a presence tail as nick N, then run: chat-client-rs send --chan \"#ai-skills\" --nick N --text hello",
-      "observed": "The message arrives from N-2. Measured in #ai-skills: aiskills messages arrived as aiskills-2 and t90-chat-mcp as t90-chat-mcp-2, in both cases while their presence tail held the plain nick.",
-      "expected": "A message sent under a nick is attributed to that nick. Who said a thing is the one piece of a chat message that cannot be reconstructed later.",
-      "mechanism": "send opens its own short-lived connection, and the server suffixes a nick already held by another connection (B263). The two-part posture chat/SKILL.md now teaches guarantees the collision on every send, because the presence tail is holding the plain nick by design. B263 recorded the suffixing; this is the consequence the posture makes unavoidable rather than incidental.",
-      "surfaces": [
-        "src/chat-server-rs/src/main.rs",
-        "src/chat-client-rs/src/lib.rs",
-        "chat/SKILL.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "aiskills, noticing its own messages arriving as aiskills-2 while holding a presence tail",
-      "notes": null,
-      "created_at": "2026-09-07T21:18:44Z",
-      "updated_at": "2026-09-07T21:18:44Z"
     },
     {
       "id": "B284",
