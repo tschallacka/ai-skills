@@ -5,10 +5,15 @@ use serde_json::{Map, Value};
 use std::env;
 use std::path::PathBuf;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    println!("Usage: todo-add.sh --id T45 --title \"text\" [--parent T44] [--priority high]");
+    println!("Usage: {TOOL} --id T45 --title \"text\" [--parent T44] [--priority high]");
     println!("               [--status open] [--blocked-on X] [--detail \"text\"] [--ref path]...");
-    println!("       todo-add.sh --help");
+    println!("       {TOOL} --help");
     std::process::exit(code);
 }
 fn die(message: impl AsRef<str>, code: i32) -> ! {
@@ -26,11 +31,11 @@ fn main() {
         .unwrap_or_else(|_| PathBuf::from("TODO.json"));
     if !path.is_file() {
         die(
-            format!("todo-add.sh: register not found: {}", path.display()),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         );
     }
-    require_rjq().unwrap_or_else(|e| die(format!("todo-add.sh: {e}"), 69));
+    require_rjq().unwrap_or_else(|e| die(format!("{TOOL}: {e}"), 69));
     let mut id = "".to_string();
     let mut title = "".to_string();
     let mut parent: Value = Value::Null;
@@ -80,12 +85,12 @@ fn main() {
                 i += 1;
                 refs.push(Value::String(args.get(i).cloned().unwrap_or_default()));
             }
-            _ => die(format!("todo-add.sh: unknown argument: {}", args[i]), 64),
+            _ => die(format!("{TOOL}: unknown argument: {}", args[i]), 64),
         }
         i += 1;
     }
     if id.is_empty() || title.is_empty() {
-        die("todo-add.sh: --id and --title are required", 64);
+        die(format!("{TOOL}: --id and --title are required"), 64);
     }
     let stamp = now();
     let mut root = read(&path).unwrap_or_else(|e| die(e, 66));
@@ -96,7 +101,7 @@ fn main() {
         .flatten()
         .any(|v| text(v.as_object().unwrap(), "id") == id)
     {
-        die("todo-add.sh: duplicate ids", 65);
+        die(format!("{TOOL}: duplicate ids"), 65);
     }
     let mut entry = Map::new();
     for (k, v) in [
@@ -116,11 +121,11 @@ fn main() {
     }
     root.get_mut("tasks")
         .and_then(Value::as_array_mut)
-        .unwrap_or_else(|| die("todo-add.sh: register has no .tasks array", 66))
+        .unwrap_or_else(|| die(format!("{TOOL}: register has no .tasks array"), 66))
         .push(Value::Object(entry));
     sort(&mut root, "tasks", false);
     if !findings(&root, "tasks", false).is_empty() {
-        die("todo-add.sh: entry refused; nothing was written", 65);
+        die(format!("{TOOL}: entry refused; nothing was written"), 65);
     }
     write(&path, &root).unwrap_or_else(|e| die(e, 66));
     let next = next_id(&root, "tasks", 'T');

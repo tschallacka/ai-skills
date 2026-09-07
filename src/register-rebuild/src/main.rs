@@ -7,8 +7,13 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    eprintln!("usage: register-rebuild.sh bugs|todo [file]");
+    eprintln!("usage: {TOOL} bugs|todo [file]");
     std::process::exit(code);
 }
 
@@ -19,16 +24,21 @@ fn die(message: impl AsRef<str>, code: i32) -> ! {
 
 fn main() {
     if env::args().any(|arg| arg == "--help" || arg == "-h") {
-        println!("register-rebuild.sh — repair a damaged register mechanically: stamp missing timestamps, drop nothing, reorder worst-first, and report every change.");
+        println!("{TOOL} — repair a damaged register mechanically: stamp missing timestamps, drop nothing, reorder worst-first, and report every change.");
         println!();
         println!("Usage:");
-        println!("  register-rebuild.sh bugs [file]");
-        println!("  register-rebuild.sh todo [file]");
-        println!("  register-rebuild.sh --help");
+        println!("  {TOOL} bugs [file]");
+        println!("  {TOOL} todo [file]");
+        println!("  {TOOL} --help");
         return;
     }
     if Command::new("rjq").arg("--version").output().is_err() {
-        die("register-rebuild.sh: rjq is required (it assembles the JSON state); install rjq and re-run", 69);
+        die(
+            format!(
+                "{TOOL}: rjq is required (it assembles the JSON state); install rjq and re-run"
+            ),
+            69,
+        );
     }
     let args: Vec<_> = env::args().skip(1).collect();
     let kind = args
@@ -50,10 +60,7 @@ fn main() {
     });
     if !path.is_file() {
         die(
-            format!(
-                "register-rebuild.sh: register not found: {}",
-                path.display()
-            ),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         );
     }
@@ -68,7 +75,7 @@ fn main() {
         .unwrap_or_else(|| {
             die(
                 format!(
-                    "register-rebuild.sh: register has no .{array_key} array: {}",
+                    "{TOOL}: register has no .{array_key} array: {}",
                     path.display()
                 ),
                 66,
@@ -108,7 +115,13 @@ fn main() {
         for finding in findings {
             eprintln!("{finding}");
         }
-        die(format!("register-rebuild.sh: {} still unsound after rebuild — these need human decisions, not stamps", path.display()), 65);
+        die(
+            format!(
+                "{TOOL}: {} still unsound after rebuild — these need human decisions, not stamps",
+                path.display()
+            ),
+            65,
+        );
     }
     if kind == "bugs" {
         let object = root.as_object_mut().unwrap();

@@ -102,7 +102,7 @@ reg_write() {
     findings="$(reg_findings "$kind" "$file")"
     if [ -n "$findings" ]; then
         printf '%s\n' "$findings" >&2
-        printf '%s: %s is not sound; run register-rebuild.sh %s "%s" first\n' \
+        printf '%s: %s is not sound; run register-rebuild %s "%s" first\n' \
             "${0##*/}" "$file" "$kind" "$file" >&2
         exit 65
     fi

@@ -7,12 +7,19 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    println!("Usage: register-read.sh <bug|todo> show <ID>");
-    println!("       register-read.sh <bug|todo> list [--status S] [--priority P] [--surface TEXT] [--parent ID]");
-    println!("       register-read.sh <bug|todo> report [--since ISO8601]");
-    println!("       register-read.sh <bug|todo> count [--status S]");
-    println!("       register-read.sh <bug|todo> next-id");
+    println!("Usage: {TOOL} <bug|todo> show <ID>");
+    println!(
+        "       {TOOL} <bug|todo> list [--status S] [--priority P] [--surface TEXT] [--parent ID]"
+    );
+    println!("       {TOOL} <bug|todo> report [--since ISO8601]");
+    println!("       {TOOL} <bug|todo> count [--status S]");
+    println!("       {TOOL} <bug|todo> next-id");
     println!();
     println!("  --file PATH   read this register instead of BUGS_JSON / TODO_JSON");
     std::process::exit(code);
@@ -106,7 +113,7 @@ fn main() {
     });
     if !path.is_file() {
         die(
-            format!("register-read.sh: register not found: {}", path.display()),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         );
     }
@@ -123,10 +130,7 @@ fn main() {
     let key = if kind == "bug" { "bugs" } else { "tasks" };
     let items = root.get(key).and_then(Value::as_array).unwrap_or_else(|| {
         die(
-            format!(
-                "register-read.sh: register has no .{key} array: {}",
-                path.display()
-            ),
+            format!("{TOOL}: register has no .{key} array: {}", path.display()),
             66,
         )
     });
@@ -138,7 +142,7 @@ fn main() {
                 .find(|item| item.get("id").and_then(Value::as_str) == Some(wanted))
                 .unwrap_or_else(|| {
                     eprintln!(
-                        "register-read.sh: no {kind} entry with id {wanted} in {}",
+                        "{TOOL}: no {kind} entry with id {wanted} in {}",
                         path.display()
                     );
                     std::process::exit(1);

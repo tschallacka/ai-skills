@@ -5,12 +5,17 @@ use serde_json::{Map, Value};
 use std::env;
 use std::path::PathBuf;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    println!("Usage: bug-add.sh --title \"text\" --reproduce \"cmd\" --observed \"text\"");
+    println!("Usage: {TOOL} --title \"text\" --reproduce \"cmd\" --observed \"text\"");
     println!("               --expected \"text\" [--severity major] [--priority normal]");
     println!("               [--status reported|confirmed] [--mechanism \"text\"] [--parent B37]");
     println!("               [--found-by \"who\"] [--surfaces f1,f2]");
-    println!("       bug-add.sh --help");
+    println!("       {TOOL} --help");
     std::process::exit(code);
 }
 fn die(message: impl AsRef<str>, code: i32) -> ! {
@@ -28,11 +33,11 @@ fn main() {
         .unwrap_or_else(|_| PathBuf::from("BUGS.json"));
     if !path.is_file() {
         die(
-            format!("bug-add.sh: register not found: {}", path.display()),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         );
     }
-    require_rjq().unwrap_or_else(|e| die(format!("bug-add.sh: {e}"), 69));
+    require_rjq().unwrap_or_else(|e| die(format!("{TOOL}: {e}"), 69));
     let mut title = "".into();
     let mut reproduce = "".into();
     let mut observed = "".into();
@@ -97,12 +102,12 @@ fn main() {
                     .collect();
                 i += 1
             }
-            _ => die(format!("bug-add.sh: unknown argument: {key}"), 64),
+            _ => die(format!("{TOOL}: unknown argument: {key}"), 64),
         }
     }
     if title.is_empty() || reproduce.is_empty() || observed.is_empty() || expected.is_empty() {
         die(
-            "bug-add.sh: --title --reproduce --observed --expected are required",
+            format!("{TOOL}: --title --reproduce --observed --expected are required"),
             64,
         );
     }
@@ -133,14 +138,14 @@ fn main() {
     }
     root.get_mut("bugs")
         .and_then(Value::as_array_mut)
-        .unwrap_or_else(|| die("bug-add.sh: register has no .bugs array", 66))
+        .unwrap_or_else(|| die(format!("{TOOL}: register has no .bugs array"), 66))
         .push(Value::Object(entry));
     let issues = findings(&root, "bugs", true);
     if !issues.is_empty() {
         for issue in issues {
             eprintln!("{issue}");
         }
-        die("bug-add.sh: entry refused; nothing was written", 65);
+        die(format!("{TOOL}: entry refused; nothing was written"), 65);
     }
     write(&path, &root).unwrap_or_else(|e| die(e, 66));
     println!("Filed {id}: {title}");

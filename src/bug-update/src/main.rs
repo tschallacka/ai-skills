@@ -5,8 +5,13 @@ use serde_json::Value;
 use std::env;
 use std::path::PathBuf;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    println!("Usage: bug-update.sh <id> [--status S] [--fix F] [--verification V]");
+    println!("Usage: {TOOL} <id> [--status S] [--fix F] [--verification V]");
     println!("       [--reason R] [--priority P] [--mechanism M] [--append-note N]");
     std::process::exit(code);
 }
@@ -29,11 +34,11 @@ fn main() {
         .unwrap_or_else(|_| PathBuf::from("BUGS.json"));
     if !path.is_file() {
         die(
-            format!("bug-update.sh: register not found: {}", path.display()),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         )
     }
-    require_rjq().unwrap_or_else(|e| die(format!("bug-update.sh: {e}"), 69));
+    require_rjq().unwrap_or_else(|e| die(format!("{TOOL}: {e}"), 69));
     let mut status = None;
     let mut fix = None;
     let mut ver = None;
@@ -54,7 +59,7 @@ fn main() {
             "--priority" => priority = Some(v),
             "--mechanism" => mechanism = Some(v),
             "--append-note" => note = Some(v),
-            _ => die(format!("bug-update.sh: unknown argument: {key}"), 64),
+            _ => die(format!("{TOOL}: unknown argument: {key}"), 64),
         }
         i += 1;
     }
@@ -66,7 +71,7 @@ fn main() {
         && mechanism.is_none()
         && note.is_none()
     {
-        die("bug-update.sh: nothing to set", 64)
+        die(format!("{TOOL}: nothing to set"), 64)
     }
     let mut root = read(&path).unwrap_or_else(|e| die(e, 66));
     let item = root
@@ -76,22 +81,25 @@ fn main() {
             xs.iter_mut()
                 .find(|x| x.get("id").and_then(Value::as_str) == Some(&id))
         })
-        .unwrap_or_else(|| die(format!("bug-update.sh: no defect {id}"), 66));
+        .unwrap_or_else(|| die(format!("{TOOL}: no defect {id}"), 66));
     let object = item.as_object_mut().unwrap();
     if let Some(s) = status.as_deref() {
         match s {
             "fixed" => {
                 if fix.as_deref().unwrap_or("").is_empty() {
-                    die("bug-update.sh: --status fixed requires --fix", 64)
+                    die(format!("{TOOL}: --status fixed requires --fix"), 64)
                 }
                 if ver.as_deref().unwrap_or("").is_empty() {
-                    die("bug-update.sh: --status fixed requires --verification", 64)
+                    die(
+                        format!("{TOOL}: --status fixed requires --verification"),
+                        64,
+                    )
                 }
             }
             "wont-fix" | "not-a-defect" | "obsolete"
                 if reason.as_deref().unwrap_or("").is_empty() =>
             {
-                die(format!("bug-update.sh: --status {s} requires --reason"), 64)
+                die(format!("{TOOL}: --status {s} requires --reason"), 64)
             }
             _ => {}
         }
@@ -129,7 +137,7 @@ fn main() {
         }
         die(
             format!(
-                "bug-update.sh: {} is not sound; run register-rebuild.sh bug \"{}\" first",
+                "{TOOL}: {} is not sound; run register-rebuild bug \"{}\" first",
                 path.display(),
                 path.display()
             ),

@@ -5,8 +5,15 @@ use serde_json::Value;
 use std::env;
 use std::path::PathBuf;
 
+/// This binary's own name, so its usage text and refusals name the tool the
+/// caller actually ran. They used to name the `.sh` scripts these replaced,
+/// several of which are no longer in the tree at all (B223).
+const TOOL: &str = env!("CARGO_BIN_NAME");
+
 fn usage(code: i32) -> ! {
-    eprintln!("usage: todo-update.sh <id> [--status S] [--priority P] [--note N] [--detail D] [--blocked-on X]");
+    eprintln!(
+        "usage: {TOOL} <id> [--status S] [--priority P] [--note N] [--detail D] [--blocked-on X]"
+    );
     std::process::exit(code);
 }
 fn die(message: impl AsRef<str>, code: i32) -> ! {
@@ -28,11 +35,11 @@ fn main() {
         .unwrap_or_else(|_| PathBuf::from("TODO.json"));
     if !path.is_file() {
         die(
-            format!("todo-update.sh: register not found: {}", path.display()),
+            format!("{TOOL}: register not found: {}", path.display()),
             66,
         );
     }
-    require_rjq().unwrap_or_else(|e| die(format!("todo-update.sh: {e}"), 69));
+    require_rjq().unwrap_or_else(|e| die(format!("{TOOL}: {e}"), 69));
     let mut status = None;
     let mut priority = None;
     let mut note = None;
@@ -61,7 +68,7 @@ fn main() {
                 i += 1;
                 blocked = Some(args.get(i).cloned().unwrap_or_default());
             }
-            _ => die(format!("todo-update.sh: unknown argument: {}", args[i]), 64),
+            _ => die(format!("{TOOL}: unknown argument: {}", args[i]), 64),
         }
         i += 1;
     }
@@ -71,17 +78,17 @@ fn main() {
         && detail.is_none()
         && blocked.is_none()
     {
-        die("todo-update.sh: nothing to set", 64);
+        die(format!("{TOOL}: nothing to set"), 64);
     }
     let mut root = read(&path).unwrap_or_else(|e| die(e, 66));
     let items = root
         .get_mut("tasks")
         .and_then(Value::as_array_mut)
-        .unwrap_or_else(|| die("todo-update.sh: register has no .tasks array", 66));
+        .unwrap_or_else(|| die(format!("{TOOL}: register has no .tasks array"), 66));
     let item = items
         .iter_mut()
         .find(|v| v.get("id").and_then(Value::as_str) == Some(&id))
-        .unwrap_or_else(|| die(format!("todo-update.sh: no task {id}"), 66));
+        .unwrap_or_else(|| die(format!("{TOOL}: no task {id}"), 66));
     let object = item.as_object_mut().unwrap();
     object.insert("updated_at".into(), Value::String(now()));
     if let Some(v) = status {
@@ -104,7 +111,7 @@ fn main() {
         for issue in issues {
             eprintln!("{issue}");
         }
-        die("todo-update.sh: update refused; nothing was written", 65);
+        die(format!("{TOOL}: update refused; nothing was written"), 65);
     }
     write(&path, &root).unwrap_or_else(|e| die(e, 66));
     println!("Updated {id}");
