@@ -2232,6 +2232,48 @@
       "updated_at": "2026-09-07T10:13:04Z"
     },
     {
+      "id": "B226",
+      "title": "no mutation addresses a line range or a pair of search hits, so deleting a multi-line construct is hand arithmetic",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Over MCP, delete a PHP method together with its docblock: search to find both ends, then compute a byte range spanning those lines to pass to replace --offset/--length. There is no line-range delete and no way to hand replace a start match and an end match.",
+      "observed": "Off by one twice while hand-counting line lengths. The working loop became search -> read a window -> verify -> replace -> read again to confirm, for EVERY edit. Reported as: 'it works, but it is arithmetic-by-hand where a diff tool would just apply a patch.'",
+      "expected": "A mutation can address a line range (start line to end line), or accept a pair of search matches as its bounds, so a multi-line construct is deleted or replaced without the agent computing byte spans. The verify-read after every edit exists only because the arithmetic is untrustworthy; correct addressing removes the loop, not just the keystrokes.",
+      "mechanism": "insert/replace/large_edit take byte offsets only. B214 fixed the adjacent half - text-search hits now carry absolute byte_start/byte_end - but that gives one hit's bounds, not a span across two hits or across whole lines, so composing a range is still agent-side arithmetic over line lengths in bytes.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer session driving the installed MCP editor on Magento PHP source, relayed by Michael 2026-09-07",
+      "notes": "B214 is the fixed adjacent half: text-search hits now carry absolute byte_start/byte_end. That gives one hit's bounds; this entry is the span across two hits or across whole lines, which is still composed by hand.",
+      "created_at": "2026-09-07T10:32:20Z",
+      "updated_at": "2026-09-07T10:32:56Z"
+    },
+    {
+      "id": "B228",
+      "title": "the chat skill teaches plain tail as the listening mode, so an agent woken by a mention never reads the spool the mention was ringing for",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Follow SKILL.md 'Connecting to a channel' step 1 verbatim: it prescribes 'chat-client-rs join' then 'chat-client-rs tail --chan #c --nick <role>' - a plain streaming tail. Nothing states that the listening posture is --mentions --mention-exit, that it must be re-armed after each wake, or what to do on waking.",
+      "observed": "A joined agent posted three usability findings across message ids 12-17 and then a bare '@aiskills' at id 18 to get attention. The listener woke on the mention, read only the one mention line its tail printed, and reported back having missed the entire instruction. Two further traps are undocumented: join seeds the cursor at the channel's CURRENT end, so a plain read never shows history posted before joining; and the mention filter is text.contains(\"@<nick>\") against the REQUESTED nick (src/chat-client-rs/src/main.rs:1621), so tailing under a decorated nick such as 'aiskills-tail' never fires on '@aiskills'.",
+      "expected": "SKILL.md prescribes 'tail --mentions --mention-exit' as the DEFAULT listening mode, states that it is one-shot and is re-armed after every wake, and says plainly that a mention is a doorbell rather than the message: a mention usually terminates a spool of text posted just before it, so on waking the agent reads the channel from its cursor and never acts on the mention line alone. It also warns that join seeds the cursor at the current end (use read --since 0 for pre-existing history) and that the tail must run under the exact nick people type, at the cost of the agent's own sends auto-suffixing to <nick>-2.",
+      "mechanism": "Documentation. ~/.claude/skills/chat/SKILL.md 'Connecting to a channel' step 1 recommends a plain tail and describes --mentions/--mention-exit only later, as an aside under the client's flag list ('a notification for an agent to act on'), never as the posture to adopt or with a read-the-spool instruction. The client behaves correctly throughout; the guidance is what fails.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael 2026-09-07, after this exact failure: 'usually when a mention comes, that is after a spool of text that would be relevant' and 'ensure the chat skill gets this correct too ... that tail with mention trigger is the default listening mode, with rebind afterwards'",
+      "notes": null,
+      "created_at": "2026-09-07T10:32:50Z",
+      "updated_at": "2026-09-07T10:32:50Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -4546,6 +4588,27 @@
       "notes": null,
       "created_at": "2026-09-07T09:10:43Z",
       "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B227",
+      "title": "an exact_text query containing HTML entities returns a silent zero instead of noting the query looks escaped",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Over MCP, search a PHP or XML file with an exact_text query whose angle brackets are HTML-escaped, e.g. query '&lt;dt class=' against a file containing '<dt class='.",
+      "observed": "count 0, complete true - the same clean zero a genuinely absent string returns. Happened twice in one session, and the agent nearly concluded the text was not in the file.",
+      "expected": "The zero result carries a note that the query contains HTML entities (&lt; &gt; &amp; &quot;) while the document contains their unescaped forms, so the query is probably escaped source rather than absent text. Reported as: 'partly my fault, but a mode that never matches &lt; in a PHP/XML file could plausibly say so.'",
+      "mechanism": "search answers a no-match with count 0 and no diagnostic; nothing inspects the query for a likely encoding mistake. Same underlying shape as B218 - a clean zero is indistinguishable from absence - but a different cause: B218 is a matcher limitation on newlines, this is an unremarked query-encoding mismatch.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer session driving the installed MCP editor on Magento PHP source, relayed by Michael 2026-09-07",
+      "notes": "B218 is the peer with the same symptom and a different cause: there a clean zero hides a matcher limitation on newlines, here it hides a query-encoding mistake. Both argue that exact_text's no-match answer carries too little information to act on.",
+      "created_at": "2026-09-07T10:32:33Z",
+      "updated_at": "2026-09-07T10:32:56Z"
     },
     {
       "id": "B25",
