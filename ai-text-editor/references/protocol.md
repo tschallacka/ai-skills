@@ -11,6 +11,23 @@ path or creates a new isolated tab in that server. Each tab receives a distinct
 session token and metadata database; a token for one tab cannot authorize
 another. Closing one tab leaves the endpoint alive while other tabs remain.
 
+Naming a `file` on a request means "act on that file's tab", and opening it is
+part of that. Every method does it, not only `open`: a client that discovers no
+tab for the named file opens one and starts a server if none is running, then
+serves the request. The single exception is the revision-guarded methods
+(`insert`, `replace`, `large_edit`, `restore`, `undo`, `redo`, `save`) on a file
+that has no tab at all — the revision they carry cannot have come from a tab
+that never existed, so applying the edit against a guessable revision 0 is
+refused by name. When a tab did exist and its server has since died, they do
+start a replacement: the journal replays and the server's own `stale_revision`
+check decides, by number, whether the revision they hold still means anything.
+
+A path whose parent directory does not exist is refused with that directory
+named; nothing is created. Retry with `acknowledge_create_parents` (CLI
+`--acknowledge-create-parents`) to create the directory chain and open the tab.
+The confirmation is deliberate: a silent recursive create would build a
+directory tree out of a typo.
+
 Unix sockets are preferred. Loopback TCP is the Windows fallback; the server
 requires `--auth-token` and performs a per-connection challenge/proof exchange.
 The client sends the secret only to its local process: the TCP request after
@@ -116,6 +133,49 @@ revision as last-write-wins. Read `open` or `history` again after either error.
 `save_as`, `close`, and `resolve_external` have their own target or recovery
 decisions and are not covered by this list.
 
+### Addressing a span, and verifying it
+
+`insert` places bytes at a point: `offset`, or the position of `cursor_id` when
+`offset` is omitted. `replace` changes a span, and addresses it three ways —
+exactly one of them per request:
+
+1. `offset` plus `delete_len`, in bytes.
+2. `range_start_line` and `range_end_line`: inclusive, one-based, whole lines.
+   The last line's terminator is part of the span, so a `replace` with no text
+   deletes those lines outright rather than leaving a blank one behind. Text
+   tabs only; on a raw or hex tab lines are not the coordinate.
+3. `range_start_byte` and `range_end_byte`: half-open — the same shape a search
+   hit reports as `byte_start`/`byte_end`. A span across two hits is therefore
+   the start of one and the end of the other, copied across, with no arithmetic
+   and no question of whether a bound is inclusive.
+
+Naming two of the three, or half of a pair, is refused with `edit_range_conflict`
+or `edit_range_incomplete`; a range on `insert` is refused with
+`edit_range_unsupported`. A range whose end precedes its start, or that runs
+past the buffer, is `edit_range_invalid` and names the limit.
+
+`replace` also takes `expected_text` (or `expected_bytes_base64` for bytes that
+are not UTF-8): the bytes the caller believes are at the span. The server
+verifies them **before** deleting anything and refuses `expected_text_mismatch`
+otherwise, quoting both what was expected and what is actually there. When
+`expected_text` is the only thing naming a length, its own length is the length,
+so `delete_len` need not be computed at all; supplying both with different
+lengths is `expected_text_length_mismatch`.
+
+This is not the revision guard, and it catches what the revision guard cannot.
+A revision proves the *document* has not moved since the caller last read it. It
+says nothing about whether `delete_len` still matches the text at `offset` — so
+a caller whose own earlier mutation changed the length of the very text it is
+addressing holds a perfectly current revision and is still wrong. That is how a
+`replace` deleted 35 bytes of a 36-byte token, left the orphan digit, and
+reported success.
+
+Every applied `insert`/`replace` reports the `offset` and `delete_len` it
+resolved, `bytes_written`, and — when it deleted anything — `deleted`, the bytes
+that went, as `text` when they are UTF-8 and `base64` otherwise, with their
+`bytes` length and a `truncated` flag past 256 bytes. A caller can therefore
+verify an edit from its own answer instead of reading the file back.
+
 The server intentionally has no project-root jail. A valid session token grants
 the server user the same path access as the server process. Keep endpoints
 private and use OS-level isolation when a client must not access other files.
@@ -131,6 +191,23 @@ the coordinates `insert` and `replace` consume, so a hit is editable without
 manual line/column-to-byte arithmetic. `exact_bytes` decodes its query as
 base64-encoded bytes whether it arrives in `query` or `query_base64`; an
 undecodable `query` is refused by `invalid_base64` naming the rule.
+
+**Every text mode matches within one line.** The document is split on newlines
+and each line is matched without its terminator, so a query containing a newline
+can never match — that is a property of the scope, not of the query. Such a
+query is refused with `search_query_crosses_lines` rather than answered with a
+zero, because a zero there is indistinguishable from "the text is not in this
+file" and an agent acting on it concludes an anchor is absent and edits
+elsewhere. `exact_bytes` is the mode that spans lines: it matches its decoded
+bytes, newlines included, against the whole buffer. A regular expression that
+would match a newline (`\n`, `[\s\S]`) is subject to the same line scope even
+though its query text carries no newline byte for the refusal to catch.
+
+A text search that finds nothing and whose query contains HTML entities
+(`&lt;` `&gt;` `&amp;` `&quot;` `&apos;` `&#39;` `&nbsp;`) carries a `note` and
+`unescaped_query_matches` when the same query unescaped *does* match — the count
+it would have found. This fires only on an actual match, so a genuine absence
+answers a plain zero and is never explained away.
 
 `path_wildcard` matches canonical absolute document paths under an explicit
 search root; it does not search line contents and returns null line/columns.
@@ -162,6 +239,42 @@ an invalid same-line column range.
 is `--historical`) to read a complete persisted result from its original
 revision. Such a response includes `source_revision` and `stale: true`; it is
 read-only and must not be used as current edit coordinates.
+
+## Tab state: dirty, disk_diverged, external_change_pending
+
+Every reading and mutating response carries these three, and callers must
+branch on them. They answer three different questions and no two of them are
+the same fact:
+
+- **`dirty`** — the tab's buffer differs from what this tab last wrote to or
+  read from the file. It is *your own unsaved work*: it becomes true on an edit
+  and false again on a successful `save`. It is compared against the tab's
+  saved digest, never against the file, so an external change cannot make it
+  true. A large tab reports `false`, since it holds no whole buffer to compare.
+- **`disk_diverged`** — the file on disk differs from what this tab last synced
+  with. That is *someone else's* change: another process wrote the file under
+  the tab. The bytes compared are read from the file, never taken from the
+  buffer — hashing the buffer here made every unsaved edit read as an external
+  change, which is the one thing this field exists to keep separate from
+  `dirty`.
+- **`external_change_pending`** — a divergence has been *observed and not yet
+  resolved*. Observing one arms the guard: mutating methods are then refused
+  with `external_change` until `resolve_external` chooses `reload`, `merge`,
+  `keep`, `backup`, or an acknowledged `force_save`. Reads keep answering from
+  the editor's buffer throughout.
+
+The four combinations are all reachable and all mean something. Both false is a
+clean tab. `dirty` alone is ordinary unsaved work. `disk_diverged` alone is a
+file that moved under a tab you have not edited — a `reload` is lossless.
+`dirty` and `disk_diverged` together is the conflict: two sets of changes, and
+`merge` or an explicit choice is required.
+
+The observation happens at the start of every request except `resolve_external`
+and `save_as`, before the handler runs — so the very call that first notices a
+divergence is the one that reports `external_change_pending: true`, and a
+mutating call is refused in that same answer rather than one later. Once armed,
+the flag stays armed until `resolve_external` clears it; a second external write
+while a resolution is pending does not re-arm it, because it is already armed.
 
 ## External changes and saves
 

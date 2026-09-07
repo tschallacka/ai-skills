@@ -103,8 +103,12 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
 - **Mentions.** `read` with `--mentions` asks the server to filter rows to those
   mentioning your nick (`@<nick>` in the text). A socket `tail` receives the
   pushed IRC stream and applies the same `@<nick>` rule locally. `tail
-  --mention-exit` exits as soon as a mention arrives (a notification for an agent
-  to act on). When your nick is
+  --mentions --mention-exit` exits as soon as a mention arrives, and is the
+  default listening posture — see "Connecting to a channel" step 1 for how to
+  use it: it is one-shot, re-armed after every wake, and the mention is a
+  doorbell rather than the message, so read the channel from your cursor on
+  waking. The filter matches against the nick you **requested**, so a decorated
+  nick never fires on the plain one. When your nick is
   taken by a concurrent connection (e.g. a tail), the client auto-suffixes it
   (`nick-2`, `nick-3`, …) like a standard IRC client so sends/reads still work.
 
@@ -141,12 +145,49 @@ log files — do not route secrets through it.
 When told to connect to a channel, work down these three steps. Do not ask
 first: connect, then report where you landed.
 
-### 1. Reach for a running server with the tail reader, `--server` omitted
+### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
 ```bash
-chat-client-rs join --chan '#ops' --nick <your-role>   # seed the cursor at the current end
-chat-client-rs tail --chan '#ops' --nick <your-role>
+chat-client-rs join --chan '#ops' --nick aiskills    # seeds the cursor at the CURRENT end
+chat-client-rs read --chan '#ops' --nick aiskills --since 0   # the history join skipped
+chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit
 ```
+
+**`tail --mentions --mention-exit` is the listening posture.** Not a plain
+streaming `tail`: that one prints every line as it arrives and leaves you
+watching a socket, which is not something an agent between turns can do. The
+mention tail blocks until someone types your nick and then exits, which is a
+thing a turn can end on.
+
+It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
+then run the same command again. A session that forgets to re-arm is off the
+bus and nobody can tell.
+
+**A mention is a doorbell, not the message.** It almost always terminates a
+spool of text posted just before it — someone writes three findings and then
+`@yournick` to get your attention. So on waking, **read the channel from your
+cursor** and act on that:
+
+```bash
+chat-client-rs read --chan '#ops' --nick aiskills     # everything since last read
+```
+
+Acting on the mention line alone is how a session reports back having missed
+the entire instruction it was rung for. That has happened: a spool at message
+ids 12–17 followed by a bare `@aiskills` at 18, and the listener read only
+line 18.
+
+Two traps that cost time to rediscover:
+
+- **`join` seeds the cursor at the channel's current end.** A plain `read` after
+  joining shows nothing that was posted before you arrived. Use `--since 0`
+  once, as above, to pick up the history.
+- **The mention filter matches `@<nick>` against the nick you *requested*.**
+  Tail under the exact nick people type. A decorated nick like `aiskills-tail`
+  never fires on `@aiskills` — the filter is a plain `text.contains` against the
+  requested nick, so the decoration is part of what it looks for. The cost of
+  tailing under the plain nick is that your own `send` auto-suffixes to
+  `<nick>-2` because the tail holds the name; accept that, it is cosmetic.
 
 Omitting `--server` is the point, not an oversight. Every connecting
 subcommand (`send`, `read`, `tail`, `join`, `leave`) runs one resolution ladder

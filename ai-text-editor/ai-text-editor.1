@@ -30,17 +30,49 @@ Start an editor server and print endpoint/session discovery information.
 .IP "open --file PATH"
 Open a tab for PATH, starting the server itself when none is running yet.
 A PATH that does not exist opens an empty new tab; the file is created at
-its path by the first successful \fBsave\fR.
+its path by the first successful \fBsave\fR. A PATH whose parent directory
+does not exist is refused with that directory named and nothing created;
+\fB--acknowledge-create-parents\fR creates the chain and opens the tab.
 .IP "help"
 Print the complete capability and option reference. This file is colocated
 with the skill and is available with \fBman -l\fR when binaries are not on PATH.
 .PP
-Edits change the tab's buffer and journal, never the file: mutating and
-reading responses carry a \fBdirty\fR flag, and the bytes reach disk only
-when \fBsave\fR succeeds. Refused operations are named on stderr in every
+Naming \fB--file PATH\fR on any command means "act on that file's tab", and
+opening it is part of that: every command opens the tab and starts a server if
+none is running, not only \fBopen\fR. The exception is the revision-guarded
+commands \fBinsert\fR, \fBreplace\fR, \fBlarge-edit\fR, \fBrestore\fR,
+\fBundo\fR, \fBredo\fR and \fBsave\fR on a file with no tab: the revision they
+carry cannot have come from a tab that never existed, so they are refused by
+name and \fBopen\fR (or any read) comes first.
+.PP
+Edits change the tab's buffer and journal, never the file, and the bytes reach
+disk only when \fBsave\fR succeeds. Mutating and reading responses carry three
+state flags, defined in full in \fBreferences/protocol.md\fR: \fBdirty\fR (this
+tab's own unsaved edits), \fBdisk_diverged\fR (the file on disk differs from
+what this tab last synced with \(em someone else's change) and
+\fBexternal_change_pending\fR (a divergence observed and not yet resolved, so
+mutations are blocked until \fBresolve-external\fR chooses). An applied edit
+also reports the \fBoffset\fR and \fBdelete_len\fR it resolved and the
+\fBdeleted\fR bytes, so an edit can be verified from its own answer.
+.PP
+Refused operations are named on stderr in every
 presentation with a code, a message, and recovery choices where they exist;
 a \fBfile_mismatch\fR refusal means the request was routed to the tab of a
-different file and \fBopen\fR of the named file is the fix.
+different file, and opening the named file is the fix.
+.PP
+A \fBreplace\fR addresses its span three ways, exactly one per call:
+\fB--offset\fR with \fB--delete-len\fR in bytes;
+\fB--range-start-line\fR with \fB--range-end-line\fR, inclusive and one-based,
+the last line's newline included, so a replace with no text deletes the lines
+outright; or \fB--range-start-byte\fR with \fB--range-end-byte\fR, half-open \(em
+exactly what a search hit reports as \fBbyte_start\fR/\fBbyte_end\fR, so a span
+across two hits is those two numbers copied across. \fB--expected-text\fR (or
+\fB--expected-bytes-base64\fR) states the bytes the caller believes are at the
+span; the server verifies them before deleting anything and refuses
+\fBexpected_text_mismatch\fR otherwise. This is not the revision guard and
+catches what it cannot: a revision proves the document has not moved since you
+read it, not that your length still matches the text there. With
+\fB--expected-text\fR and no \fB--delete-len\fR, its own length is the length.
 .PP
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
@@ -63,6 +95,14 @@ query arrives in \fB--query\fR or \fB--query-base64\fR; plain text belongs in
 \fBexact_text\fR. Text-mode search results carry line/column coordinates
 and the absolute \fBbyte_start\fR/\fBbyte_end\fR offsets that
 \fBinsert\fR and \fBreplace\fR consume.
+.PP
+Every text mode matches within one line: the document is split on newlines and
+each line is matched without its terminator. A query containing a newline is
+therefore refused with \fBsearch_query_crosses_lines\fR rather than answered
+with a zero, which would be indistinguishable from absent text.
+\fBexact_bytes\fR is the mode that spans lines. A text search that finds nothing
+and whose query contains HTML entities carries a note, and the count it would
+have found, when the same query unescaped does match.
 .PP
 BcapabilitiesR is read-only machine-readable discovery for these modes,
 coordinate units, defaults, resource limits, and transports. Use it before

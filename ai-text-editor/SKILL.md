@@ -14,17 +14,30 @@ metadata.
 
 ## Start
 
-Just open the file. The server is not this skill's concern — `open` starts
-one itself when none is running yet, and a server left idle stops itself
-later (its journal replays on the next `open`, so nothing is lost):
+Name the file and ask. Every verb opens the file's tab if the workspace does
+not have it yet, and starts a server if none is running — `read`, `search` and
+`history` as much as `open`. A server left idle stops itself later; its journal
+replays on the next call, so nothing is lost:
 
 ```text
-ai-text-editor open -f /path/to/file
+ai-text-editor search -f /path/to/file --mode exact_text --query needle
 ```
+
+The exception is the seven verbs that carry a revision guard — `insert`,
+`replace`, `large_edit`, `restore`, `undo`, `redo`, `save`. On a file with no
+tab they are refused, because the revision they carry cannot have come from a
+tab that never existed. `open` (or any read) first, then edit with the revision
+it reports.
 
 Opening a path that does not exist yet is how you create a file: the tab
 starts empty and the file appears on disk only when the first `save`
-succeeds. Opening a second, unrelated file the same way does not start a second,
+succeeds. A path whose *parent directory* does not exist is refused with that
+directory named, and nothing is created; retry with
+`--acknowledge-create-parents` to create the chain and open the tab. The
+confirmation is the point — a silent recursive create would build a directory
+tree out of a typo.
+
+Opening a second, unrelated file does not start a second,
 unrelated server: this agent's already-running workspace is found again
 automatically, and the file is added to it as a new tab — the way opening a
 file in an already-running IDE reconnects to that window rather than
@@ -33,9 +46,9 @@ its existing tab. This works with no flags at all inside a coding harness
 (Claude Code, codex, opencode all export a session id this skill reads to
 tell agents apart); across other kinds of callers, name a shared identity
 explicitly with `--session ID` or `--agent ID` on every call, or pin one
-server directly with `--endpoint ENDPOINT` (`ai-text-editor-server start
---file PATH` still exists for that, and for advanced options such as `--tcp`
-or `--large-threshold-bytes`, but is not a normal step any more).
+server directly with `--endpoint ENDPOINT`. `ai-text-editor-server start
+--file PATH` is how a server is pinned explicitly, and how `--tcp` and
+`--large-threshold-bytes` are reached.
 On Windows, where no usable Unix socket exists, the same plain `open`
 autostarts a loopback-TCP server on an ephemeral port with a per-start
 private token and discovers it exactly the way the socket is discovered —
@@ -50,10 +63,26 @@ install: call the tool of the same name instead of the CLI line.
 
 Edits are journal-and-buffer operations: a successful `insert`/`replace`
 returns a new revision but changes nothing on disk until a `save` succeeds.
-Every mutating and reading response carries a `dirty` flag (the buffer has
-unsaved edits of its own) and a `disk_diverged` flag (the file on disk moved
-under the tab — an external change, not your unsaved work); finish an editing
+Every mutating and reading response carries three flags you must branch on:
+`dirty` (this tab's buffer has unsaved edits of its own), `disk_diverged` (the
+file on disk differs from what this tab last synced with — someone else's
+change, not your unsaved work) and `external_change_pending` (a divergence has
+been observed and not yet resolved, so mutations are blocked until
+`resolve_external` chooses). All four combinations mean something; the exact
+contract for each is in `references/protocol.md`, "Tab state". Finish an editing
 session with `save` and a fresh `read` (or `open`) showing `dirty: false`.
+
+Address a `replace` by span rather than by arithmetic: `--range-start-line N
+--range-end-line N` deletes or replaces whole lines including the last one's
+newline, and `--range-start-byte N --range-end-byte N` takes exactly the
+`byte_start`/`byte_end` a search hit reports, so a span across two hits is those
+two numbers copied across. Pass `--expected-text` and the server checks the
+bytes at the span *before* deleting them, refusing by name on a mismatch — the
+guard the revision guard cannot be, because a revision proves the document has
+not moved, not that your length still matches the text there. With
+`--expected-text` and no `--delete-len`, its own length is the length. Every
+applied edit reports the `offset`, `delete_len` and `deleted` bytes it resolved,
+so verifying an edit does not need a read-back.
 On a tab opened with NFC normalization, byte offsets address the ORIGINAL
 bytes, not the normalized view a read shows; a refused edit says so. Every
 job verb needs the `resume_token` `job_start` issued, and it is never shown to
@@ -101,10 +130,20 @@ same way the CLI does.
 5. Create any number of numeric cursors; move home/end, by word, line, page,
    context, or explicit wrapped visual coordinates.
 6. Insert, replace, delete, transact, restore normalized text when lossless,
-   undo, redo, inspect history, and replay.
+   undo, redo, inspect history, and replay. A `replace` addresses its span by
+   byte offset and length, by inclusive line range (the last line's newline
+   included, so a replace with no text deletes the lines outright), or by a
+   half-open byte range — the shape a search hit reports, so a span across two
+   hits needs no arithmetic. `--expected-text` has the server verify the bytes
+   at the span before deleting them, and supplies the length when nothing else
+   does.
 7. Search with explicit exact-text, exact-byte, wildcard, shell-wildcard,
    path-wildcard, Rust-regex, PCRE2-regex, and six fuzzy modes; all text modes
-   are available on bounded large-file ranges.
+   are available on bounded large-file ranges. Every text mode matches within
+   one line: a query carrying a newline is refused by name rather than answered
+   with a zero, and `exact_bytes` is the mode that spans lines. A text search
+   that finds nothing says so plainly, and adds a note when its query looks
+   like HTML-escaped source that would have matched unescaped.
 8. Request counts, pager keys, first-four defaults, context lines, line/byte ranges,
    ordering, completeness, result generations, stale-page detection, and
    explicit historical reads.
