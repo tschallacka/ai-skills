@@ -2637,6 +2637,27 @@
       "updated_at": "2026-09-07T19:10:11Z"
     },
     {
+      "id": "B269",
+      "title": "read returns nothing forever once a channel cursor is 0, because 0 is read as no cursor",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "H=$(mktemp -d); mkdir -p \"$H/channels\"; P=44311; AI_CHAT_HOME=\"$H\" AI_CHAT_BEACON_PORT=$((P+1)) AI_CHAT_BIND=127.0.0.1 chat-server-rs \"$P\" & sleep 1; AI_CHAT_HOME=\"$H\" CHAT_SESSION_ID=reader chat-client-rs join --server 127.0.0.1:$P --nick reader --chan \"#newchan\"; AI_CHAT_HOME=\"$H\" CHAT_SESSION_ID=poster chat-client-rs send --server 127.0.0.1:$P --nick poster --chan \"#newchan\" --text \"first thing said here\"; AI_CHAT_HOME=\"$H\" CHAT_SESSION_ID=reader chat-client-rs read --server 127.0.0.1:$P --nick reader --chan \"#newchan\"; echo \"rc=$?\"; AI_CHAT_HOME=\"$H\" CHAT_SESSION_ID=reader chat-client-rs session cursor \"#newchan\"; cat \"$H/channels/#newchan.log\"",
+      "observed": "join prints \"joined #newchan (resuming after id 0)\" and the cursor is 0. read prints nothing and exits 0, the cursor is still 0, and the log holds \"MSG #newchan 1 1788810945 poster :first thing said here\". Every later read repeats it, so the message is never returned by read at all.",
+      "expected": "read prints the stored MSG line and advances the cursor to 1. A cursor of 0 recorded by join means \"seen nothing yet\", so the delta is the whole channel.",
+      "mechanism": "read_delta reads the cursor through Session::cursor(), which returns 0 both for a recorded 0 and for a channel with no entry, and only uses it when cur > 0. At 0 it leaves --since empty, asks LASTID for the channel end and fetches after that, so everything already stored is skipped. Nothing is printed, so max_id stays 0 and no cursor is written back: the state that caused the skip survives, and the next read skips again. join on an empty channel is what records the 0.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T90 (src/chat-mcp): the adapter inherited the same rule and its own regression test caught it",
+      "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty.",
+      "created_at": "2026-09-07T19:58:19Z",
+      "updated_at": "2026-09-07T19:58:30Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
