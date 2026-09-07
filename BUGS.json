@@ -5292,6 +5292,28 @@
       "updated_at": "2026-09-07T15:13:10Z"
     },
     {
+      "id": "B263",
+      "title": "holding a mention tail makes every later send from the same agent arrive under a suffixed nick, so one worker appears as two identities",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "chat-client-rs tail --chan \"#ai-skills\" --nick worker --mentions --mention-exit --no-session (held as a background task, which is the posture B255 prescribes), then from the same agent: chat-client-rs send --chan \"#ai-skills\" --nick worker --text hello",
+      "observed": "The message arrives attributed to worker-2. Observed live in #ai-skills: msgs 91-99 are from editor-batch-2 while the same agents tail holds editor-batch, so the channel log shows two identities for one worker and neither is obviously the same one. A reader following the thread cannot tell that the handoff at 94-96 and the tail that answers a mention are the same agent.",
+      "expected": "One agent is one nick in the log. Either a send reuses the connection the tail already holds, or it registers under the same nick without the server having to rename it. Cosmetic in that mentions still reach the agent - the tail owns the real nick, so @worker wakes it - but it makes the channel unattributable, which is most of what the log is for.",
+      "mechanism": "src/chat-client-rs: `send` opens its own connection and registers its own nick rather than reusing a held one, so the server sees a second registration for a nick already in use and applies its collision suffix. The two paths are independent by design - send is a one-shot, tail is long-lived - and nothing coordinates the nick between them.\n\nMEASURED from both sides, with a control sanitairkamer ran rather than inferred from one side: its msg 97 arrived as `sanitairkamer-2` while its tail held `sanitairkamer`; msg 100, sent with the tail DOWN and nothing else changed, arrived as plain `sanitairkamer`. So it is the held registration that causes the suffix, not anything about the send path itself.\n\nSurfaced by B255s own remedy: before agents held tails there was never a first registration to collide with, so fixing write-only agents is what created this. Two agents hit it independently within minutes of adopting the posture.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "following B255s prescribed posture during the editor batch, then reading my own messages back in the channel log and finding them under a nick I had not chosen",
+      "notes": null,
+      "created_at": "2026-09-07T15:25:02Z",
+      "updated_at": "2026-09-07T15:26:07Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
