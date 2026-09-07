@@ -2549,6 +2549,27 @@
       "updated_at": "2026-09-07T15:29:38Z"
     },
     {
+      "id": "B265",
+      "title": "the mention filter matches the nick as a substring, so a nick that is a prefix of another gets false wakes and the longer nick misses its own",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Hold chat-client-rs tail --chan \"#c\" --nick bob --mentions and have someone say \"@bobby ping\". Inverse: hold --nick editor-batch-2 and have someone say \"@editor-batch ping\".",
+      "observed": "The first wakes bobs tail, which was never addressed. The second wakes nothing, though @editor-batch is the prefix of the nick holding the tail. Live in #ai-skills: my tail holds `editor-batch` and every mention of `@editor-batch-2` (the nick B263 makes my own sends arrive under) wakes it.",
+      "expected": "A mention of @bobby is not a mention of @bob. The filter should match the nick as a whole token - bounded by the start of the text or a non-nick character on each side - so neither a prefix collision nor a suffixed sibling changes who is woken.",
+      "mechanism": "src/chat-client-rs/src/main.rs, both filter sites, each a bare substring test: line 1429 in local_read, `if !line.contains(&format!(\"@{}\", nick))`, and line 1746 in tail, `.map(|text| text.contains(&format!(\"@{}\", nick)))`. Neither checks what follows the nick, so \"@bob\" matches inside \"@bobby\", and neither checks the whole nick is present, so a tail for \"editor-batch-2\" does not match \"@editor-batch\".",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "sanitairkamer, which named it as the other half of its controlled measurement after I twice read its message as something else; confirmed from the source rather than from the wire",
+      "notes": "TWO things that make this more than a filter tidy-up.\n\n(1) Its own test cannot see it. local_read_mention_filter_matches_only_the_named_nick (src/chat-client-rs/src/main.rs ~2457) asserts bob, carol and dave against \"@bob\"/\"@carol\" - three nicks where none is a prefix of another, so the substring behaviour is invisible to it. The test is named for the property it does not verify: add \"@bobby\" to its log and ask for \"bob\" and it would bite. This is the trap aiskills named earlier in the same session, a test asserting a weaker rule than its name claims.\n\n(2) It currently MASKS B263, so the order of the fixes matters. B263 makes an agents one-shot sends arrive as N-2 while its tail holds N, so peers naturally address @N-2 - and only this substring behaviour delivers those to the tail holding N. Fix the matcher first and cross-agent addressing breaks for every agent holding a tail, because @editor-batch-2 would stop waking editor-batch. B263 has to land first, or the two have to land together.",
+      "created_at": "2026-09-07T15:32:28Z",
+      "updated_at": "2026-09-07T15:32:42Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5331,9 +5352,9 @@
       "fix": null,
       "verification": null,
       "found_by": "following B255s prescribed posture during the editor batch, then reading my own messages back in the channel log and finding them under a nick I had not chosen",
-      "notes": null,
+      "notes": "B265 currently masks this one, and that decides the order: peers address the suffixed @N-2 nick, and only B265s substring matching delivers those to the tail holding N. Fixing B265 alone would break cross-agent addressing for every agent holding a tail. This entry lands first, or both land together.",
       "created_at": "2026-09-07T15:25:02Z",
-      "updated_at": "2026-09-07T15:26:07Z"
+      "updated_at": "2026-09-07T15:32:42Z"
     },
     {
       "id": "B25",
