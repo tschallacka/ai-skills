@@ -2486,7 +2486,7 @@
     {
       "id": "B258",
       "title": "a response key with no verbosity tier panics the connection thread, and the caller sees only \"the server closed the connection without answering\"",
-      "status": "fixed",
+      "status": "confirmed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2501,9 +2501,9 @@
       "fix": "The cursor verbs own response keys are classified: `line` and `column` at tier 0, because a cursor position is the ANSWER of the cursor verb and not metadata about one - the same reason a reads `text` is tier 0 - and the wrapped-view fields `visual`, `wrap_width` and `range` at tier 2, being needed only when navigating a wrapped view. The fail-safe is deliberately unchanged: an unclassified key is still kept at every level and still trips the debug_assert, because a key that is merely more verbose than intended costs tokens while one that silently vanishes at the default level is a correctness bug in whatever depended on it.",
       "verification": "The whole cli_flow file at the new default no longer produces the symptom; before the fix the search for \"no verbosity tier\" in a test run returned the cursor keys, and after it returns nothing. The classification itself is pinned by verbosity::a_verbs_own_result_survives_the_lowest_level and the end-to-end ladder test cli_flow::the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard. NOT closing the underlying shape: a debug_assert inside the request handler still takes the connection thread down with no frame written, so the next unclassified key will present the same way. That is recorded here rather than fixed, because moving the check out of the handler is a design change and this entry was about a specific unclassified set.",
       "found_by": "the safety net firing for real while measuring T99s blast radius; filed on the coordinators instruction that the symptom be recorded prominently, because nobody debugging a closed connection blind would guess an unclassified response key",
-      "notes": null,
+      "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on feat/t99-verbosity-ladder, commit 674f532a, which has not merged. Its fix and verification text stand as recorded. Close on merge.",
       "created_at": "2026-09-07T14:57:12Z",
-      "updated_at": "2026-09-07T15:17:03Z"
+      "updated_at": "2026-09-07T15:35:55Z"
     },
     {
       "id": "B262",
@@ -2544,9 +2544,9 @@
       "fix": null,
       "verification": null,
       "found_by": "sanitairkamer, which noticed its own tail was momentarily down and pointed out this is a separate defect from the nick suffix; the two were entangled because the tail being down is what made B263s control possible",
-      "notes": null,
+      "notes": "FOUND-BY CORRECTED: this entrys found_by credits sanitairkamer with pointing out the exit window, and sanitairkamer has since said plainly \"that is NOT what I meant... I never raised the exit window\". The defect is real and it confirmed as much, but the provenance was mine - I filed it after misreading its message, and it is the second of two things I read wrong there. Recording it rather than quietly editing the field, because a register that credits a peer with a claim it disclaimed is worse than one with an ugly note.",
       "created_at": "2026-09-07T15:29:38Z",
-      "updated_at": "2026-09-07T15:29:38Z"
+      "updated_at": "2026-09-07T15:35:55Z"
     },
     {
       "id": "B265",
@@ -2565,9 +2565,9 @@
       "fix": null,
       "verification": null,
       "found_by": "sanitairkamer, which named it as the other half of its controlled measurement after I twice read its message as something else; confirmed from the source rather than from the wire",
-      "notes": "TWO things that make this more than a filter tidy-up.\n\n(1) Its own test cannot see it. local_read_mention_filter_matches_only_the_named_nick (src/chat-client-rs/src/main.rs ~2457) asserts bob, carol and dave against \"@bob\"/\"@carol\" - three nicks where none is a prefix of another, so the substring behaviour is invisible to it. The test is named for the property it does not verify: add \"@bobby\" to its log and ask for \"bob\" and it would bite. This is the trap aiskills named earlier in the same session, a test asserting a weaker rule than its name claims.\n\n(2) It currently MASKS B263, so the order of the fixes matters. B263 makes an agents one-shot sends arrive as N-2 while its tail holds N, so peers naturally address @N-2 - and only this substring behaviour delivers those to the tail holding N. Fix the matcher first and cross-agent addressing breaks for every agent holding a tail, because @editor-batch-2 would stop waking editor-batch. B263 has to land first, or the two have to land together.",
+      "notes": "TWO things that make this more than a filter tidy-up.\n\n(1) Its own test cannot see it. local_read_mention_filter_matches_only_the_named_nick (src/chat-client-rs/src/main.rs ~2457) asserts bob, carol and dave against \"@bob\"/\"@carol\" - three nicks where none is a prefix of another, so the substring behaviour is invisible to it. The test is named for the property it does not verify: add \"@bobby\" to its log and ask for \"bob\" and it would bite. This is the trap aiskills named earlier in the same session, a test asserting a weaker rule than its name claims.\n\n(2) It currently MASKS B263, so the order of the fixes matters. B263 makes an agents one-shot sends arrive as N-2 while its tail holds N, so peers naturally address @N-2 - and only this substring behaviour delivers those to the tail holding N. Fix the matcher first and cross-agent addressing breaks for every agent holding a tail, because @editor-batch-2 would stop waking editor-batch. B263 has to land first, or the two have to land together. LIVE EVIDENCE, and a third consequence: the filter has no SENDER check either, so an agent wakes on its own messages.\n\nObserved just now. My tail holds `editor-batch`. It woke on a PRIVMSG whose sender was `editor-batch-2` - my own send - because my prose about this very bug contained the literal string \"@editor-batch\". The tail is a separate connection from the send, so the server relays my own message to it correctly per RFC; nothing server-side is wrong and this is not B249, which is fixed and was about a standard client double-rendering its own lines.\n\nWhy it is not merely amusing: it burns a wake and a full re-arm cycle, and with B264 that cycle is a window in which a real mention reaches nobody. So a self-wake can cost a genuine message. B263 makes it worse rather than better - because the agents sends arrive under N-2, the tail cannot recognise them as its own even by comparing nicks.\n\nRecorded here rather than as its own entry because it is the same filter missing a second check: a mention is a message addressed to you BY SOMEONE ELSE, and the filter tests neither the token boundary nor the sender.",
       "created_at": "2026-09-07T15:32:28Z",
-      "updated_at": "2026-09-07T15:32:42Z"
+      "updated_at": "2026-09-07T15:34:30Z"
     },
     {
       "id": "B14",
@@ -5273,7 +5273,7 @@
     {
       "id": "B257",
       "title": "the mode a response reports is spelled differently from the mode the protocol accepts, so a caller cannot compare them",
-      "status": "fixed",
+      "status": "confirmed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5287,14 +5287,14 @@
       "fix": "serde(rename_all = \"snake_case\") on DocumentMode, so the wire spelling is the one the protocol already accepts and capabilities already advertises.",
       "verification": "cli_flow::a_second_file_opens_in_its_own_mode_not_the_servers asserts mode == \"text_utf8\" and \"hex_view\" and \"raw_bytes\" on the wire. Before the rename it failed with left String(\"TextUtf8\") right String(\"text_utf8\") - that failure is what found this. Landed in the B238 commit because B238 is not usable without it.",
       "found_by": "fixing B238, and forced by T99: the coordinator decision was that a response must name the tabs mode at verbosity level 1 so a caller knows which coordinate space it is in, which made the spelling mismatch load-bearing rather than cosmetic",
-      "notes": null,
+      "notes": "STATUS CORRECTED from fixed back to confirmed, by me, because I had closed it while its code sat on an unmerged branch. The fix is real and its verification stands (both are recorded on this entry) but it is on fix/editor-batch-b237-t99, tip bf33d117, which has not merged. Closing it while B237-B241 and B250-B253 - fixed by the SAME branch - were deliberately left open made the register answer \"is it all fixed?\" wrongly in both directions: three falsely closed, and no way to see the other eleven were complete but unmerged. Close on merge, with the other thirteen.",
       "created_at": "2026-09-07T14:56:53Z",
-      "updated_at": "2026-09-07T14:56:53Z"
+      "updated_at": "2026-09-07T15:35:55Z"
     },
     {
       "id": "B259",
       "title": "the mcp and tcp flow harnesses leak the same way cli_flow did, in files B239 does not name",
-      "status": "fixed",
+      "status": "confirmed",
       "severity": "minor",
       "priority": "normal",
       "parent": "B239",
@@ -5309,9 +5309,9 @@
       "fix": "mcp_flow spawns its adapter into a session of its own (setsid in pre_exec) and killpgs it on drop, so every server the adapter autostarted goes with it whether a record ever named it - the same fix B239 took. Both harnesses now sweep BOTH endpoint roots via transport::endpoint_roots and remove their own length-fallback directory, which is keyed to their runtime dir so it deletes nothing another test owns.",
       "verification": "Measured before and after on the same branch: a full run of both crates left 6 servers and 3 stray directories, and now leaves 0 and 0. Landed with B239 and B253 because the three are one cause seen from three files; the shared mechanism is pinned by cli_flow::a_dropped_harness_stops_a_server_no_record_names and transport::the_long_path_fallback_is_per_root_and_per_user, whose mutations are recorded on those entries.",
       "found_by": "counting leftover servers after each crates suite while verifying B239, then finding six that cli_flow could not account for",
-      "notes": null,
+      "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on fix/editor-batch-b237-t99, tip bf33d117, unmerged. Its fix and verification text stand as recorded, including the 6-servers-and-3-directories-to-0 measurement. Close on merge, with its parent B239.",
       "created_at": "2026-09-07T14:57:31Z",
-      "updated_at": "2026-09-07T14:57:31Z"
+      "updated_at": "2026-09-07T15:35:55Z"
     },
     {
       "id": "B261",
