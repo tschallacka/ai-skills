@@ -87,7 +87,14 @@ pub const METHODS: &[&str] = &[
 /// not be reported as a bad argument.
 pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
     let keys: &[&str] = match method {
-        "open" | "capabilities" | "resources" | "history" => &[],
+        // B238: `document_mode` shapes the TAB this open creates, not the
+        // server hosting it, so it has to reach the server in the payload and
+        // not only as the startup argv of a server this call happens to
+        // start. It is also an adapter argument (a cold start still needs it
+        // on the command line), which is why `call_tool` keeps it in the
+        // payload for this one verb after stripping it for every other.
+        "open" => &["document_mode"],
+        "capabilities" | "resources" | "history" => &[],
         "begin_transaction" | "end_transaction" | "restore" | "undo" | "redo" | "save" => &[],
         "read" => &[
             "cursor_id",

@@ -4,7 +4,20 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 
+/// The wire spelling is the one the protocol *accepts* and `capabilities`
+/// advertises: `text_utf8`, `raw_bytes`, `hex_view`.
+///
+/// Found while fixing B238. Without the rename every response reported
+/// `"TextUtf8"` while `document_mode`, `--mode` and the `document_modes` list
+/// in `capabilities` all named `text_utf8`, so a caller could not compare the
+/// mode it asked for against the mode it was given without knowing to
+/// translate. Now that a mode is a per-tab property a caller chooses (B238)
+/// and every response names it, that comparison is the point of the field.
+///
+/// Safe to rename: the tab metadata stores this as `format!("{mode:?}")`,
+/// which is `Debug` and untouched by serde, and nothing reads it back.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum DocumentMode {
     TextUtf8,
     RawBytes,
