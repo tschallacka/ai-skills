@@ -58,7 +58,8 @@ impl Harness {
             let _ = std::fs::remove_dir_all(&scratch);
             return None;
         }
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-mcp"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ai-text-editor-mcp"));
+        command
             .env("HOME", &scratch)
             .env("XDG_RUNTIME_DIR", scratch.join("runtime"))
             .env("TSCH_AI_EDITOR_METADATA_DIR", scratch.join("meta"))
@@ -69,9 +70,22 @@ impl Harness {
             .env_remove("OPENCODE_PID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the adapter binary must run");
+            .stderr(Stdio::null());
+        // B239's shape, on this harness too: the adapter autostarts a server
+        // that outlives it, and `Drop` used to find it only by reading the pid
+        // out of an `.endpoint` record. A record that has not been written yet,
+        // or that landed in the length fallback outside this scratch tree, left
+        // the server running — six survived one run of this file. A session of
+        // its own is inherited by the adapter's own children, so one `killpg`
+        // stops the lot whether a record ever named them or not.
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().expect("the adapter binary must run");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Some(Self {
@@ -151,11 +165,20 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        // The server the adapter autostarted is its child; when a test
-        // panicked before its close, stop it by the recorded pid rather
-        // than leaving it for the idle watchdog.
-        let endpoint_root = self.scratch.join("runtime").join("tsch-ai-skills-editor");
-        if let Ok(entries) = std::fs::read_dir(&endpoint_root) {
+        // The adapter and every server it autostarted share one session, so
+        // this stops them all without needing a record that names them. The
+        // record sweep below stays as a backstop, and now reads both roots -
+        // it knew only the configured one, and a long TMPDIR puts every record
+        // in the other.
+        unsafe {
+            libc::killpg(self.child.id() as libc::c_int, libc::SIGKILL);
+        }
+        for endpoint_root in
+            ai_text_editor::transport::endpoint_roots(&self.scratch.join("runtime"))
+        {
+            let Ok(entries) = std::fs::read_dir(&endpoint_root) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !name.ends_with(".endpoint") {
@@ -173,6 +196,11 @@ impl Drop for Harness {
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // Outside the scratch tree by construction, and keyed to this
+        // harness's own runtime directory, so this removes nothing else.
+        let [_, fallback] =
+            ai_text_editor::transport::endpoint_roots(&self.scratch.join("runtime"));
+        let _ = std::fs::remove_dir_all(fallback);
         let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }

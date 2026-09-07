@@ -104,6 +104,12 @@ impl Harness {
         }
     }
 
+    /// The two directories an endpoint record for this harness can be in.
+    /// Asked of the library, not spelled out here — see `Drop`.
+    fn endpoint_roots(&self) -> [PathBuf; 2] {
+        ai_text_editor::transport::endpoint_roots(&self.scratch.join("runtime"))
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.scratch.join(name)
     }
@@ -217,14 +223,18 @@ impl Drop for Harness {
                 libc::killpg(*session as libc::c_int, libc::SIGKILL);
             }
         }
-        // Autostarted servers outlive their short-lived client; stop the
-        // ones this test left behind before removing the tree they run in.
-        // The records live under the endpoint directory nested inside the
-        // runtime root (XDG_RUNTIME_DIR/tsch-ai-skills-editor/), so a sweep
-        // of the runtime root itself finds nothing and leaks every server
-        // an autostarted flow started.
-        let endpoint_root = self.scratch.join("runtime").join("tsch-ai-skills-editor");
-        if let Ok(entries) = std::fs::read_dir(endpoint_root) {
+        // Autostarted servers outlive their short-lived client; stop the ones
+        // this test left behind before removing the tree they run in.
+        //
+        // Both roots, taken from the library's own answer rather than a path
+        // spelled out here: a record whose configured root was too long to
+        // hold a socket beside it lives in the length fallback instead, and
+        // this sweep used to know only the configured one. `endpoint_roots` is
+        // where that rule lives now, so the two cannot disagree again.
+        for root in self.endpoint_roots() {
+            let Ok(entries) = std::fs::read_dir(&root) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !name.ends_with(".endpoint") {
@@ -246,6 +256,11 @@ impl Drop for Harness {
                 }
             }
         }
+        // The fallback root is outside the scratch tree by construction, so
+        // removing the tree does not remove it. It is keyed to this harness's
+        // own runtime directory, so this deletes nothing another test owns.
+        let [_, fallback] = self.endpoint_roots();
+        let _ = std::fs::remove_dir_all(fallback);
         let _ = std::fs::remove_dir_all(&self.scratch);
     }
 }
@@ -2022,24 +2037,13 @@ fn a_dropped_harness_stops_a_server_no_record_names() {
 
 /// The discovery record a given server announced, wherever it landed.
 ///
-/// Neither the directory nor the file name is predictable from here, and the
-/// pid is the only handle that is. `endpoint_for_file` abandons the configured
-/// XDG_RUNTIME_DIR for a machine-global `/tmp/tsch-ai-skills-editor` as soon
-/// as the path it would build reaches 96 characters, so which of the two
-/// directories holds the record depends on how long this test process's TMPDIR
-/// happens to be — and the socket sits next to the record, so the endpoint it
-/// names cannot tell one harness's records from another's in the shared
-/// directory either. Matching the recorded pid against a pid this test was
-/// handed leaves no ambiguity even with the whole file running in parallel.
+/// The file name is not predictable from here and the pid is the only handle
+/// that is, so both of this harness's roots are searched for a record naming
+/// the server in question. Which of the two holds it depends on whether the
+/// configured root was short enough to keep a socket beside the record, which
+/// depends in turn on how long this test process's TMPDIR happens to be.
 fn endpoint_record(harness: &Harness, pid: u32) -> PathBuf {
-    let roots = [
-        harness
-            .scratch
-            .join("runtime")
-            .join("tsch-ai-skills-editor"),
-        PathBuf::from("/tmp/tsch-ai-skills-editor"),
-    ];
-    for root in roots {
+    for root in harness.endpoint_roots() {
         let Ok(entries) = std::fs::read_dir(&root) else {
             continue;
         };
