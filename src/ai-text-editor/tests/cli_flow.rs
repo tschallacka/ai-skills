@@ -778,7 +778,7 @@ fn a_dead_server_without_a_replacement_fails_with_guidance_not_a_raw_socket_erro
 
 #[test]
 fn a_dirty_tab_and_a_diverged_disk_are_two_different_facts() {
-    // B183: an external change used to read as the agent's own unsaved work.
+    // B182: an external change used to read as the agent's own unsaved work.
     let harness = Harness::new("dirtysplit");
     let file = harness.write("doc.txt", "mine\n");
     harness.open(&file);
@@ -793,6 +793,56 @@ fn a_dirty_tab_and_a_diverged_disk_are_two_different_facts() {
         "an external change is not my unsaved work"
     );
     assert_eq!(payload["disk_diverged"], json!(true));
+}
+
+#[test]
+fn my_own_unsaved_edit_is_not_a_diverged_disk() {
+    // The other half of B182's split, which nothing pinned: `dirty` was
+    // taught not to report an external change, but `disk_diverged` was
+    // still computed by hashing the in-memory buffer as though it were the
+    // file. Every tab with an unsaved edit therefore answered
+    // `disk_diverged: true` with nothing having touched the disk, so the
+    // one flag an agent has for "somebody else moved this file" was true
+    // on every dirty tab and carried no information.
+    let harness = Harness::new("dirtynotdiverged");
+    let file = harness.write("doc.txt", "mine\n");
+    harness.open(&file);
+    let inserted = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "5",
+        "-t",
+        "ours\n",
+        "-r",
+        "0",
+    ]);
+    assert!(inserted.status.success(), "{}", refusal_text(&inserted));
+    let payload = first_payload(&inserted);
+    assert_eq!(
+        payload["dirty"],
+        json!(true),
+        "the buffer holds unsaved work: {payload}"
+    );
+    assert_eq!(
+        payload["disk_diverged"],
+        json!(false),
+        "nothing external touched the file: {payload}"
+    );
+    // The same pair on a read, which is where an agent actually looks.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap()]);
+    let payload = first_payload(&read);
+    assert_eq!(payload["text"], json!("mine\nours\n"), "{payload}");
+    assert_eq!(payload["dirty"], json!(true), "{payload}");
+    assert_eq!(payload["disk_diverged"], json!(false), "{payload}");
+    // And once saved, neither fact is true any more.
+    let saved = harness.client(&["save", "-f", file.to_str().unwrap(), "-r", "1"]);
+    assert!(saved.status.success(), "{}", refusal_text(&saved));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap()]);
+    let payload = first_payload(&read);
+    assert_eq!(payload["dirty"], json!(false), "{payload}");
+    assert_eq!(payload["disk_diverged"], json!(false), "{payload}");
 }
 
 #[test]
@@ -885,7 +935,11 @@ fn a_replayed_tab_arms_the_external_change_guard() {
         payload["journal_replay"]["edits"].is_number(),
         "expected a replayed tab: {payload}"
     );
-    assert_eq!(payload["disk_diverged"], json!(true), "{payload}");
+    // The tab synced with the file as it is now, at this open, so the disk
+    // has not moved away from the tab — `disk_diverged` is false and the
+    // stale *buffer* is what needs resolving. That is the fact below, and
+    // keeping the two apart is the whole point of B182's split.
+    assert_eq!(payload["disk_diverged"], json!(false), "{payload}");
     assert_eq!(
         payload["external_change_pending"],
         json!(true),
@@ -895,6 +949,17 @@ fn a_replayed_tab_arms_the_external_change_guard() {
     assert!(resolved.status.success(), "{}", refusal_text(&resolved));
     let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert_eq!(String::from_utf8_lossy(&read.stdout), "external\n");
+    // Resolution clears both facts: the buffer now holds the file's bytes
+    // and the tab is synced with them.
+    let after = harness.client(&["open", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    let payload = first_payload(&after);
+    assert_eq!(payload["dirty"], json!(false), "{payload}");
+    assert_eq!(payload["disk_diverged"], json!(false), "{payload}");
+    assert_eq!(
+        payload["external_change_pending"],
+        json!(false),
+        "{payload}"
+    );
 }
 
 #[test]
