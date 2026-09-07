@@ -221,7 +221,6 @@
               echo "  shellcheck       $(shellcheck --version | awk '/^version:/ { print $2 }')"
               echo "  mmdc             $(mmdc --version 2>/dev/null || echo unavailable)  (renders the mermaid diagrams)"
               echo "  cargo            $(cargo --version | cut -d' ' -f2)  (builds the crates under src/)"
-              echo "  cargo186         $(cargo186 --version | cut -d' ' -f2)  (plan-overview's declared floor)"
               echo "  ./setup-dev-env.sh  build the crates into this tree so the skills use them"
               echo
               echo "Portability checks:"
