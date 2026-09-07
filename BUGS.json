@@ -2301,6 +2301,30 @@
       "updated_at": "2026-08-26T20:16:45Z"
     },
     {
+      "id": "B224",
+      "title": "bugs/todo update accept --title, ignore it, then refuse saying no field was named",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "bin/<triple>/bugs update B221 --title 'a corrected title'",
+      "observed": "Exit 64 with 'bugs: nothing to set for B221; name at least one field to change'. The title is unchanged, and the refusal states no field was named when --title was.",
+      "expected": "Either the title is corrected, or the refusal names --title as a field update does not accept. A caller who named a field is never told they named none.",
+      "mechanism": "FLAGS in src/bug-report/src/main.rs lists 'title' for every command, so cli::parse accepts --title on update and stores it. update() then builds mutate::Change from status, priority, fix, verification, mechanism, reason and append-note only; mutate::Change has no title member, so the value is dropped. Change::is_empty() is consequently true and produces the 'nothing to set' refusal. src/todo/src/main.rs and src/todo/src/mutate.rs have the identical shape for a task title.",
+      "surfaces": [
+        "src/bug-report/src/main.rs",
+        "src/bug-report/src/mutate.rs",
+        "src/todo/src/main.rs",
+        "src/todo/src/mutate.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the fifth drive's register pass: B221's own title needed correcting and no shipped path could do it",
+      "notes": null,
+      "created_at": "2026-09-07T09:24:19Z",
+      "updated_at": "2026-09-07T09:24:19Z"
+    },
+    {
       "id": "B1",
       "title": "A second --skill silently discards the first, so the installer installs something other than what was asked",
       "status": "fixed",
