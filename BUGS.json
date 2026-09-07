@@ -2815,7 +2815,7 @@
     },
     {
       "id": "B284",
-      "title": "an mcp-mode install copies the bridge binary and registers it with no agent, so nothing can call it",
+      "title": "an mcp-mode install copies the adapter binary but registers it with no agent",
       "status": "confirmed",
       "severity": "major",
       "priority": "high",
@@ -2823,7 +2823,7 @@
       "reproduce": "Read the generated install.sh for any MCP registration: awk on install.sh and installer/src/*.sh for mcpServers, \"mcp add\", mcp_servers or .mcp.json returns nothing. Then read ai-text-editor/SKILL.md for a registration instruction: none. install.sh --skill ai-text-editor --integration mcp and install.sh --skill chat --integration chat=mcp both take the same path.",
       "observed": "No installer part writes an MCP server entry to any agent configuration, and no SKILL.md tells the user to. The mode copies ai-text-editor-mcp or chat-mcp into the skill directory and stops there. test-installer-integration-mode.sh asserts which binaries land and nothing about reachability.",
       "expected": "After an mcp-mode install the bridge is callable: either the installer registers it in each agent configuration it already edits, or the install prints the exact per-agent registration step. A mode whose artifact nothing is configured to run is not installed.",
-      "mechanism": "integration.tsv and the generated integration_binary_mode/integration_modes decide which FILES are copied, and that is the whole feature. Permission granting already edits ~/.claude/settings.json and opencode.json through rjq, so the machinery to edit an agent config exists and was never extended to MCP registration. codex is the awkward one: its MCP servers live in ~/.codex/config.toml, which rjq cannot write.",
+      "mechanism": "install.sh chooses WHICH binary to copy by mode (integration_file_allowed) and removes the other mode's binary on a switch (remove_stale_integration_binaries) -- that half works. What is missing is the step after: nothing writes an MCP server entry into any agent config, so the adapter lands on disk and no agent knows it exists. 70-permissions.sh already edits ~/.claude settings and opencode.json through rjq, so the machinery is there and was never extended; codex needs TOML, which rjq cannot write.",
       "surfaces": [
         "installer/src/60-install.sh",
         "installer/src/70-permissions.sh",
@@ -2833,9 +2833,9 @@
       "fix": null,
       "verification": null,
       "found_by": "t90-chat-mcp, starting the chat MCP harness wiring; the premise that the editor bridge already registers itself does not hold",
-      "notes": "Three config shapes, not one: Claude Code takes mcpServers in ~/.claude.json or a project .mcp.json, opencode takes an mcp block in opencode.json, and codex takes [mcp_servers.<name>] in ~/.codex/config.toml. The first two are JSON the installer already edits with rjq; the third is TOML and needs either a writer or a printed snippet.",
+      "notes": "Three config shapes, not one: Claude Code takes mcpServers in ~/.claude.json or a project .mcp.json, opencode takes an mcp block in opencode.json, and codex takes [mcp_servers.<name>] in ~/.codex/config.toml. The first two are JSON the installer already edits with rjq; the third is TOML and needs either a writer or a printed snippet. SCOPE CORRECTED. The entry first read as though --integration only picked a binary and did nothing else. It also cleans up: measured on a real target, --integration skill installs chat-client-rs and chat-server-rs, then --integration mcp leaves chat-mcp and chat-server-rs with chat-client-rs removed. Michael's toggle-with-mutual-cleanup was implemented and is not what is missing; registration is. aiskills endorsed the wider claim without checking it, having asserted the opposite in the same conversation.",
       "created_at": "2026-09-07T21:32:43Z",
-      "updated_at": "2026-09-07T21:32:54Z"
+      "updated_at": "2026-09-07T21:40:54Z"
     },
     {
       "id": "B14",
