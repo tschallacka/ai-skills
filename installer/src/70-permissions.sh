@@ -273,6 +273,187 @@ not grant broad or all-tools access.
 PROMPT
 }
 
+# The worktrees root is granted on its own, and unconditionally. Two reasons it
+# is not folded into planning_permission_step: an agent takes a worktree
+# whatever skills were selected, so gating it on planning left every
+# non-planning install with no grant at all; and the paths have nothing to do
+# with each other.
+#
+# Read, Edit AND Write, all three. Edit alone covers changing a file that
+# already exists, so CREATING one still prompted — which is most of what working
+# in a fresh checkout consists of. Bash joins them because a checkout carries
+# its own scripts (./pre-push-check.sh, ./run-tests.sh) that an agent has to
+# run, the same reasoning the planning temp dir already gets.
+#
+# The rules name the worktrees root and nothing above it, deliberately. The
+# obvious-looking home for this was under tsch-ai-skills/, beside bin/ — but
+# that tree also holds the chat server's server.key, the editor's private
+# session registry and, on a shared install, the installed binaries. A
+# directory an agent may freely write must not be the one holding a private key
+# and the binaries the agent is running, so tsch-ai-worktrees is a sibling.
+claude_worktrees_permissions() {
+    local worktrees="$1"
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    local doc added tmpfile program
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions claude "$worktrees"
+        return 0
+    fi
+    worktrees="$(strip_trailing_slashes "$worktrees")"
+    backup_file "$cfg"
+
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program='
+def objectify: if type == "object" then . else {} end;
+def entries: [
+    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)",
+    "Write(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
+];
+def allowed: objectify | .permissions | objectify | .allow
+    | if type == "array" then . else [] end;
+'
+    added="$(printf '%s' "$doc" | rjq -r \
+        --arg worktrees "$worktrees" \
+        "$program"'(entries - allowed)[]')"
+
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq \
+        --arg worktrees "$worktrees" \
+        "$program"'
+        objectify
+        | (.permissions | objectify) as $perm
+        | ($perm.allow | if type == "array" then . else [] end) as $allow
+        | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ -n "$added" ]; then
+        printf '  claude-code: added to permissions.allow:\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  claude-code: worktree permissions already present\n'
+    fi
+}
+
+opencode_worktrees_permissions() {
+    local worktrees="$1"
+    local cfg doc added tmpfile program created=0
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" \
+            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    worktrees="$(strip_trailing_slashes "$worktrees")"
+    # Same reasoning as opencode_permissions: a config strict rjq cannot parse
+    # carries comments or trailing commas that a rewrite would strip, so print
+    # instructions rather than rebuild it.
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
+        print_manual_worktrees_permissions opencode "$worktrees"
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    program='
+def objectify: if type == "object" then . else {} end;
+def wanted: [
+    ["read",               ["\($worktrees)/**"]],
+    ["edit",               ["\($worktrees)/**"]],
+    ["write",              ["\($worktrees)/**"]],
+    ["bash",               ["\($worktrees)/**"]],
+    ["external_directory", ["\($worktrees)/**"]]
+];
+def rules: if type == "object" then . elif type == "string" then {"*": .} else {} end;
+def base:
+    objectify
+    | .permission as $p
+    | (if ($p | type) == "string"
+       then reduce wanted[] as $w ({}; .[$w[0]] = {"*": $p})
+       else ($p | objectify) end)
+    | del(.allow, .deny, .ask);
+'
+    added="$(printf '%s' "$doc" | rjq -r \
+        --arg worktrees "$worktrees" \
+        "$program"'
+        [ wanted[] as $w
+          | ($w[0]) as $tool
+          | (base[$tool] | rules) as $rule
+          | $w[1][] as $pattern
+          | select($rule[$pattern] != "allow")
+          | "\($tool): \($pattern)" ][]')"
+
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq \
+        --arg worktrees "$worktrees" \
+        "$program"'
+        (if type == "object" then . else {} end) as $data
+        | (reduce wanted[] as $w (base;
+              .[$w[0]] = (reduce $w[1][] as $pattern ((.[$w[0]] | rules); .[$pattern] = "allow"))
+          )) as $perm
+        | $data | .permission = $perm' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ -n "$added" ]; then
+        printf '  opencode: allowed\n'
+        printf '%s\n' "$added" | sed 's|^|    - |'
+    else
+        printf '  opencode: worktree permissions already present\n'
+    fi
+}
+
+print_manual_worktrees_permissions() {
+    local kind="$1" worktrees="$2"
+    echo "  $kind: no safe auto-editable permission file was modified." >&2
+    echo "    - grant $kind read, write and execute under $worktrees" >&2
+    echo "    - example (Claude Code settings.json permissions.allow):" >&2
+    echo "        Read($worktrees/**), Edit($worktrees/**), Write($worktrees/**), Bash($worktrees/**:*)" >&2
+}
+
+# Runs for every install, not only a planning one: any agent may be asked to
+# take a worktree. See git-worktrees/SKILL.md for why this root sits beside
+# tsch-ai-skills rather than inside it.
+worktrees_permission_step() {
+    local worktrees="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees" root kind
+    echo >&2
+    echo "== Agent worktree permissions ==" >&2
+    if confirm "Create $worktrees as the agent worktree root?"; then
+        mkdir -p "$worktrees" && echo "  Created $worktrees" >&2
+    fi
+    if confirm "Grant the selected agents read/write/execute on $worktrees, so a worktree there needs no prompt per file? (Each edited config is backed up beside itself, unless git already tracks it)"; then
+        for root in "${SELECTED_TARGET_PATHS[@]}"; do
+            kind="$(agent_kind_for_root "$root")"
+            case "$kind" in
+                claude)   claude_worktrees_permissions "$worktrees" ;;
+                opencode) opencode_worktrees_permissions "$worktrees" ;;
+                *)        print_manual_worktrees_permissions "$kind" "$worktrees" ;;
+            esac
+        done
+    fi
+}
+
 planning_permission_step() {
     local plans="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans" agent_tmp="${TMPDIR:-/tmp}/planning-agent" root kind scripts
     echo >&2
