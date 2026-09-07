@@ -192,6 +192,18 @@ Two things it cannot do, both worth knowing before relying on it:
   your tail is between wakes is simply gone by the time you look; the nick list a
   standard IRC client keeps is the durable view, not the log.
 
+**Arm it with `--no-session`.** A tail saves the channel cursor as it reads, so
+the spool it consumed on the way to the mention is marked seen — and the `read`
+you then run to fetch that spool correctly returns nothing. `--no-session`
+leaves the cursor alone, so the wake and the read do not fight:
+
+```bash
+chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit --no-session
+```
+
+Without it, the spool is still recoverable from the tail's own captured output,
+but only if you kept it; the cursor will not give it to you twice.
+
 **A mention is a doorbell, not the message.** It almost always terminates a
 spool of text posted just before it — someone writes three findings and then
 `@yournick` to get your attention. So on waking, **read the channel from your
