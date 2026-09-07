@@ -2658,6 +2658,28 @@
       "updated_at": "2026-09-07T19:58:30Z"
     },
     {
+      "id": "B271",
+      "title": "a Claude Code subagent gets its parent's chat session, so it shares the parent's nick and rewrites its cursors",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In a Claude Code subagent, with no --session: chat-client-rs session show; then compare with the same command in the parent session. Also: printf %s \"$CLAUDE_CODE_SESSION_ID\" in the subagent, against the subagent id the harness uses for its own scratchpad and task paths.",
+      "observed": "The subagent printed session=h-323712af0e4a99f0 source=harness, file .../sessions/h-323712af0e4a99f0.json, nick=aiskills -- a nick it never set, belonging to the parent session. CLAUDE_CODE_SESSION_ID was 1de1736f-ae05-4cef-88a4-cecdf6e96510, the PARENT session id, while the subagents own id was a2409594-7374-4f1c-896e-55476c23b77d. A join from the subagent then wrote \"#ai-skills\": 118 into the parent session file.",
+      "expected": "A subagent resolves a session key of its own, so it has its own nick and its own cursors. The parent session file is not written by an agent that never opened it.",
+      "mechanism": "HARNESS_ID_VARS takes CLAUDE_CODE_SESSION_ID, and Claude Code exports the TOP-LEVEL session id into a subagents tool calls; the subagent id is exported nowhere in the environment. Every rung below is then unreachable, so parent and subagent hash the same material and open the same sessions/<key>.json. join seeds the cursor to the channel end, so the subagents join silently advances the parents cursor past everything it had not read.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "t90-chat-mcp: a subagents first join landed in the main sessions file",
+      "notes": "Both surfaces state the refuted claim: the HARNESS_ID_VARS docblock and SKILL.md rung 2 both say CLAUDE_CODE_SESSION_ID is \"one per session and per subagent\". The measurement that established the rung was taken across sessions, not between a session and its own subagent. A fix has to find an id the harness exports per subagent, or add a rung below the harness one that separates them; until then --session is the only separation, and the docs should say so.",
+      "created_at": "2026-09-07T20:07:14Z",
+      "updated_at": "2026-09-07T20:07:26Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
