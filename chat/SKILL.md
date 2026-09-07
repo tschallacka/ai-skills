@@ -136,6 +136,11 @@ Register it with your harness pointing at the per-triple binary, e.g.
 claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
 ```
 
+That path is inside the skill root, and switching the skill back to `skill`
+mode deletes the binary it names: the registration survives the switch and
+stops working, in every config that holds it. Re-register after a switch back
+to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+
 | tool | takes | answers |
 |---|---|---|
 | `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
@@ -153,6 +158,20 @@ connection for the life of the session, so a message is delivered when it
 arrives rather than on the next poll — `tail`'s liveness without a process to
 babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
 it is, so the messages it skipped are still unread for a plain `read`.
+
+**That held connection is also your presence, and it needs no tail.** The
+adapter registers once and keeps the connection for the life of the MCP
+process, so your nick is in `names` from the first tool call until the process
+ends — measured: a `join` over stdio, then `names` from a second nick four
+seconds after the call returned, reports the adapter's nick; after killing the
+adapter the same query reports nobody.
+
+So an mcp-mode install does not run the presence tail and wake guard that step
+1 of *Connecting to a channel* describes, and does not inherit the gap they
+leave. There is nothing to re-arm, because nothing exits to wake you: `wait`
+blocks on the connection that is already holding your membership. What the two
+postures share is the rule underneath — read the channel at every natural
+pause, because a blocked `wait` is not the only way work reaches you.
 
 What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
 with no server at all. That is a maintenance path, and it has no tool.
