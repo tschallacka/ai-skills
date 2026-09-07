@@ -53,6 +53,14 @@ pub struct ResolveRequest {
     /// for, which is exactly what the verify step exists to prevent. Same
     /// shape as `--acknowledge-force-save` and `--acknowledge-large-edit`.
     pub acknowledge_create_parents: bool,
+    /// B241: "I have verified the recorded owner is gone; replace it." The
+    /// server refuses to bind over a stale Unix endpoint whose recorded owner
+    /// it cannot rule out, and its refusal names `--takeover-stale-endpoint`
+    /// as the way past — a flag no client had, so the one documented recovery
+    /// for capability 12 could not be performed by the tool that meets the
+    /// condition. Forwarded to a server this call starts, like the other
+    /// startup arguments above; it does nothing when a server is already live.
+    pub takeover_stale_endpoint: bool,
     /// Skip every cached or registered session token (the endpoint may still
     /// be reused). `execute` sets it on its recovery pass, when the token on
     /// file belongs to a server generation that is gone (B179).
@@ -297,6 +305,7 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
                 request.explicit_identity.as_deref(),
                 &request.agent_env_var,
                 request.acknowledge_create_parents,
+                request.takeover_stale_endpoint,
             )?;
             let endpoint = read_endpoint(&discovery).map_err(|error| {
                 format!(
@@ -381,6 +390,7 @@ pub fn autostart_server(
     explicit_identity: Option<&str>,
     agent_env_var: &str,
     acknowledge_create_parents: bool,
+    takeover_stale_endpoint: bool,
 ) -> Result<Option<String>, String> {
     // B229: a path whose parent directory is missing used to be reported as
     // "server for <path> failed to start: ai-text-editor-server: cannot
@@ -476,6 +486,12 @@ pub fn autostart_server(
     }
     if let Some(timeout) = idle_timeout_seconds {
         command.arg("--idle-timeout-seconds").arg(timeout);
+    }
+    // B241: the server's own gate. Without this argument reaching it, a
+    // server that refuses a stale endpoint whose owner it cannot rule out
+    // names a recovery the caller has no way to perform.
+    if takeover_stale_endpoint {
+        command.arg("--takeover-stale-endpoint");
     }
     command
         .stdin(Stdio::null())
