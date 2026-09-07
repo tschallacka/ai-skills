@@ -347,9 +347,20 @@ pub fn resolve_session_key(
         }
     }
 
-    // 2. Whatever identity the harness already knows about itself, plus the
-    //    nick, because that identity is shared by a session and every subagent
-    //    it runs.
+    // The nick is a visible SUFFIX on an identity that does not include it,
+    // never hashed in with it. Hashing the two together (B278) left no way to
+    // find a session without already knowing its nick, so `session set --nick
+    // solo` wrote one file and a later `send` with no --nick opened a
+    // different, empty one -- destroying the one thing a saved session is for.
+    // With the identity stable, session_key() can look for the sibling.
+    let suffix = match safe_key(nick) {
+        n if n.is_empty() => String::new(),
+        n => format!("-{n}"),
+    };
+
+    // 2. Whatever identity the harness already knows about itself. It is shared
+    //    by a session and every subagent it runs, which is why the nick has to
+    //    be on the end of it.
     let mut material = String::new();
     for name in HARNESS_ID_VARS.iter() {
         if let Some(v) = env(name).filter(|v| !v.is_empty()) {
@@ -360,26 +371,21 @@ pub fn resolve_session_key(
         }
     }
     if !material.is_empty() {
-        material.push_str("nick=");
-        material.push_str(nick);
         return (
-            format!("h-{:016x}", fnv1a64(material.as_bytes())),
+            format!("h-{:016x}{suffix}", fnv1a64(material.as_bytes())),
             KeySource::Harness,
         );
     }
 
-    // 3. The worktree root, plus the nick. Agents on one project in separate
-    //    worktrees are the case this skill exists for, and the root is already
-    //    unique per checkout on a machine, so the shared repository directory
-    //    would add nothing to distinctness -- two checkouts of one repo have
-    //    different roots, and sibling worktrees must NOT share a session. Two
-    //    agents in ONE worktree are separated by the nick and nothing else.
+    // 3. The worktree root. Agents on one project in separate worktrees are the
+    //    case this skill exists for, and the root is already unique per
+    //    checkout on a machine, so the shared repository directory would add
+    //    nothing to distinctness -- two checkouts of one repo have different
+    //    roots, and sibling worktrees must NOT share a session. Two agents in
+    //    ONE worktree are separated by the nick and nothing else.
     if let Some(root) = worktree_root.filter(|r| !r.is_empty()) {
         return (
-            format!(
-                "w-{:016x}",
-                fnv1a64(format!("{root}\u{1f}nick={nick}").as_bytes())
-            ),
+            format!("w-{:016x}{suffix}", fnv1a64(root.as_bytes())),
             KeySource::Worktree,
         );
     }
@@ -387,11 +393,7 @@ pub fn resolve_session_key(
     // 4. Nothing to go on -- outside a repository, with no harness and no
     //    explicit id. One shared session per nick, which is the behaviour that
     //    predates this ladder for a single agent, under a name that says so.
-    let key = match safe_key(nick) {
-        n if n.is_empty() => "shared".to_string(),
-        n => format!("shared-{n}"),
-    };
-    (key, KeySource::Shared)
+    (format!("shared{suffix}"), KeySource::Shared)
 }
 
 /// The session this process owns, resolved once. Reading `--session` and
@@ -407,13 +409,61 @@ pub fn session_key() -> &'static (String, KeySource) {
         let args: Vec<String> = std::env::args().collect();
         let explicit = parse_flag(&args, "--session");
         let nick = parse_flag(&args, "--nick");
-        resolve_session_key(
+        let (key, source) = resolve_session_key(
             explicit.as_deref(),
             &|name| std::env::var(name).ok(),
             git_worktree_root().as_deref(),
             nick.as_deref(),
-        )
+        );
+        if nick.is_some() {
+            return (key, source);
+        }
+        // No --nick on this call, so the key carries no nick suffix. A saved
+        // session exists to spare the caller repeating --nick, so look for the
+        // one this identity owns before answering with an empty session (B278).
+        match adopt_sibling_session(&key) {
+            Some(sibling) => (sibling, source),
+            None => (key, source),
+        }
     })
+}
+
+/// The single `<key>-<nick>` session belonging to `key`, when there is exactly
+/// one.
+///
+/// Ambiguity is left alone rather than guessed at: two nicks under one identity
+/// is a parent and its subagent, and picking either would reintroduce the
+/// cross-writing B271 fixed. The caller passes --nick and says which it means.
+fn adopt_sibling_session(key: &str) -> Option<String> {
+    // The same argv slice run() hands client_state_dir, so `--state` is
+    // honoured here too; reading the default root would look in the wrong
+    // place for every caller that names one.
+    let args: Vec<String> = std::env::args().collect();
+    sibling_session_in(&client_state_dir(args.get(2..).unwrap_or(&[])), key)
+}
+
+/// The directory half, taking the state root so it can be tested without argv.
+fn sibling_session_in(state_dir: &std::path::Path, key: &str) -> Option<String> {
+    let directory = state_dir.join("sessions");
+    if directory.join(format!("{key}.json")).is_file() {
+        return None;
+    }
+    let prefix = format!("{key}-");
+    let mut found: Option<String> = None;
+    for entry in fs::read_dir(&directory).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if !stem.starts_with(&prefix) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(stem.to_string());
+    }
+    found
 }
 
 /// The current worktree root, or None outside a git repository (or where git is
@@ -2287,6 +2337,59 @@ mod tests {
     /// CLAUDE_CODE_SESSION_ID, so the harness rung alone hands both the same
     /// key: measured, a subagent joined as itself and wrote into the parent's
     /// session file, moving the parent's cursors past unread messages.
+    /// B278. The nick is a suffix on an identity that does not include it, so
+    /// a call with no --nick can still find the session it owns. Hashing the
+    /// two together made that impossible and broke the one thing a saved
+    /// session is for.
+    #[test]
+    fn a_key_carries_the_nick_as_a_findable_suffix() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one")]);
+        let bare = resolve_session_key(None, &env, None, None).0;
+        let named = resolve_session_key(None, &env, None, Some("solo")).0;
+        assert_eq!(
+            named,
+            format!("{bare}-solo"),
+            "the nick must be a suffix on the nick-free key, not hashed into it"
+        );
+    }
+
+    /// The nick-less call adopts the one session its identity owns.
+    #[test]
+    fn a_call_with_no_nick_finds_the_single_session_for_its_identity() {
+        let dir = tmp_state("a_call_with_no_nick_finds_the_single_session");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc-solo.json"), "{}").unwrap();
+        assert_eq!(
+            sibling_session_in(&dir, "h-abc"),
+            Some("h-abc-solo".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two nicks under one identity is a parent and its subagent. Picking
+    /// either would put one agent back in the other's file, which is B271.
+    #[test]
+    fn an_ambiguous_identity_is_not_guessed_at() {
+        let dir = tmp_state("an_ambiguous_identity_is_not_guessed_at");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc-parent.json"), "{}").unwrap();
+        fs::write(sessions.join("h-abc-child.json"), "{}").unwrap();
+        assert_eq!(sibling_session_in(&dir, "h-abc"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A nick-free session that already exists is the caller's own file and
+    /// wins over any suffixed sibling.
+    #[test]
+    fn an_existing_nick_free_session_is_not_redirected() {
+        let dir = tmp_state("an_existing_nick_free_session_is_not_redirected");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc.json"), "{}").unwrap();
+        fs::write(sessions.join("h-abc-solo.json"), "{}").unwrap();
+        assert_eq!(sibling_session_in(&dir, "h-abc"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_subagent_under_one_harness_id_gets_its_own_session_per_nick() {
         let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
