@@ -4974,6 +4974,27 @@
       "updated_at": "2026-09-07T13:31:43Z"
     },
     {
+      "id": "B248",
+      "title": "a ban-list query is treated as a mode change, so every join prints an operator error",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Join #ai-skills with a standard IRC client (Konversation). It sends MODE #ai-skills, then MODE #ai-skills b.",
+      "observed": "[14:54] --> You have joined the channel #ai-skills. / [14:55] *** Channel modes: / [14:55] [Error] You need to be a channel operator in #ai-skills to do that. The first MODE is answered correctly with 324; the second gets 482.",
+      "expected": "MODE #chan b is a QUERY for the ban list, not an attempt to set one - a mode CHANGE carries a + or - sign. The bus keeps no bans, so the answer is an empty list and its end-of-list numeric (368 for b, 349 for e, 347 for I). A routine join should print no error at all. An actual change (+b, -b) still refuses with 482, which is honest: there is no operator model here.",
+      "mechanism": "src/chat-server-rs/src/main.rs MODE arm: the branch keys on params.len() > 1 and, for anything that is not a valid umode set on the caller's own nick, answers 482 whenever the target is a channel. It never distinguishes a sign-less list letter from a signed change, so the ban-list query a standard client sends immediately after JOIN lands in the refusal path.",
+      "surfaces": [
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": "PR #74 - list_mode_query() separates a sign-less b/e/I query from a signed change, and empty_list_reply() answers each queried letter with its end-of-list numeric; a real +b/-b still refuses with 482",
+      "verification": "mode_query_tests in chat-server-rs: a_signless_list_letter_is_a_query, a_signed_change_is_not_a_query, only_the_list_letters_are_answered, each_list_query_ends_with_its_own_numeric. Mutation: drop the !flags.starts_with(['+','-']) test and a_signed_change_is_not_a_query fails, because +b would then be answered as an empty list instead of refused - which is the dangerous direction, a client believing its ban was accepted.",
+      "found_by": "Michael, from Konversation's join output on 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T13:39:05Z",
+      "updated_at": "2026-09-07T13:39:21Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
