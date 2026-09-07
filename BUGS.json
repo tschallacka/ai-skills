@@ -376,9 +376,9 @@
       "fix": null,
       "verification": null,
       "found_by": "T81 work, maintainer session 2026-09-01",
-      "notes": "Re-confirmed on master at f4e7239 on 2026-09-02, still unfixed, and it is live on this machine rather than theoretical: /home/mdibbets/ai/agents/skills/planning/scripts/register-read.sh --help dies with \"line 32: .../scripts/register-lib.sh: No such file or directory\", and register-lib.sh is absent from the installed tree. Found again independently during an adversarial review round, which means it will bite the next helper call any agent makes. Confirmed with the repository's own manifest function, which is the authoritative split: `bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod'` lists scripts/register-command.sh and scripts/register-read.sh and NOT scripts/register-lib.sh, while the dev arm lists register-lib.sh and register-rebuild.sh. Master's register-read.sh still sources the library unconditionally at line 32, so a prod install cannot work. NEW SURFACE not in the list above: planning/PACKAGE-MANIFEST.tsv holds exactly two register rows - register-command.sh and register-read.sh - and omits register-lib.sh AND register-rebuild.sh entirely. So the pair is inconsistent in three places, not two, and CODE-STYLE.md section 3's rule that the four places move together is broken. That also means tests/test-skill-files-manifest.sh and tests/test-installer-manifest.sh should be failing on this pair and are not, which is a second defect worth checking while fixing this one. Installing the newest planning helper from the repository does NOT resolve it, since master reproduces the arms exactly as described.",
+      "notes": "Re-confirmed on master at f4e7239 on 2026-09-02, still unfixed, and it is live on this machine rather than theoretical: /home/mdibbets/ai/agents/skills/planning/scripts/register-read.sh --help dies with \"line 32: .../scripts/register-lib.sh: No such file or directory\", and register-lib.sh is absent from the installed tree. Found again independently during an adversarial review round, which means it will bite the next helper call any agent makes. Confirmed with the repository's own manifest function, which is the authoritative split: `bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod'` lists scripts/register-command.sh and scripts/register-read.sh and NOT scripts/register-lib.sh, while the dev arm lists register-lib.sh and register-rebuild.sh. Master's register-read.sh still sources the library unconditionally at line 32, so a prod install cannot work. NEW SURFACE not in the list above: planning/PACKAGE-MANIFEST.tsv holds exactly two register rows - register-command.sh and register-read.sh - and omits register-lib.sh AND register-rebuild.sh entirely. So the pair is inconsistent in three places, not two, and CODE-STYLE.md section 3's rule that the four places move together is broken. That also means tests/test-skill-files-manifest.sh and tests/test-installer-manifest.sh should be failing on this pair and are not, which is a second defect worth checking while fixing this one. Installing the newest planning helper from the repository does NOT resolve it, since master reproduces the arms exactly as described. Re-confirmed on master d29b62ca, 2026-09-07, unchanged. The manifest still splits the pair: `skill_files planning prod` lists scripts/register-command.sh, scripts/register-read.sh, scripts/register-command and scripts/register-read, and NOT scripts/register-lib.sh, which appears only in the dev arm; planning/scripts/register-read.sh:31-32 still sources it unconditionally. Copying the prod arm into an empty tree and running the shipped reader reproduces the filed output verbatim: \"/tmp/drive5-prod/scripts/register-read.sh: line 32: /tmp/drive5-prod/scripts/register-lib.sh: No such file or directory\", exit 1. New evidence bearing on which arm to take: the prod arm now ALSO ships the Rust scripts/register-read binary beside the broken shell script, and planning/SKILL.md mentions register-command only, never telling anyone to run register-read.sh - so the second arm (stop shipping register-read.sh) breaks no documented interface, while the first arm (promote register-lib.sh to PROD) matches the sibling register-command.sh, which sources the already-shipped plan-document-lib.sh. Which arm wins is Tschallacka's call, not a drive's.",
       "created_at": "2026-09-01T19:02:00Z",
-      "updated_at": "2026-09-02T12:54:57Z"
+      "updated_at": "2026-09-07T09:10:43Z"
     },
     {
       "id": "B114",
@@ -1509,7 +1509,7 @@
     {
       "id": "B109",
       "title": "A refused bug-update still writes, leaving BUGS.json unsound",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1523,9 +1523,9 @@
       "fix": null,
       "verification": null,
       "found_by": "T81 work, maintainer session 2026-09-01",
-      "notes": null,
+      "notes": "Does not reproduce on master d29b62ca. B109 named planning/scripts/bug-update.sh, which no longer exists: the register writers became Rust crates (src/bug-update, src/bug-report) in the rustification merge. Reproduced the filed recipe against the shipped bugs binary: `cp BUGS.json /tmp/upd.json; bugs --file /tmp/upd.json update B96 --priority bogus` refuses with `bugs: --priority \"bogus\" is not one of: urgent, high, normal, low, someday`, exits 64, leaves B96 reading priority normal, and `bugs --file /tmp/upd.json check` reports \"215 entries, sound\". The mv-then-validate ordering the entry pinned went with the script; validation now precedes the write. Re-checked by the fifth ai-text-editor test drive, 2026-09-07.",
       "created_at": "2026-09-01T19:11:22Z",
-      "updated_at": "2026-09-01T19:11:22Z"
+      "updated_at": "2026-09-07T09:10:43Z"
     },
     {
       "id": "B110",
@@ -2139,6 +2139,76 @@
       "notes": null,
       "created_at": "2026-09-06T09:54:33Z",
       "updated_at": "2026-09-06T11:03:24Z"
+    },
+    {
+      "id": "B216",
+      "title": "disk_diverged is computed from the buffer, so every unsaved edit reports an external change",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Over MCP: open a new /tmp/x.txt, insert \"alpha\\n\" at offset 0, save, then insert \"beta\\n\" at offset 6. The insert answers dirty true AND disk_diverged true, and a following read repeats it, with nothing but this session having written the file.",
+      "observed": "{\"cursors\":{\"0\":{\"column\":0,\"line\":1}},\"dirty\":true,\"disk_diverged\":true,\"revision\":2} on the second insert, and {\"complete\":true,\"dirty\":true,\"disk_diverged\":true,\"revision\":2,\"text\":\"alpha\\nbeta\\n\"} on the read. external_change_pending stayed false, correctly.",
+      "expected": "disk_diverged false. SKILL.md defines it as \"the file on disk moved under the tab - an external change, not your unsaved work\"; the disk_digest field comment says the same; tab_dirty comments that \"an external change must never read as the agent's unsaved work\". On a dirty tab the flag was true unconditionally and carried no information.",
+      "mechanism": "ai-text-editor-server.rs:1997 called disk_state(&tab.path, None, tab.document.bytes()), and disk_state returns metadata_state(path):blake3(bytes) - so passing the buffer embeds the buffer digest in the value compared against the disk stamp. observe_external (same file:1942) compares the same stamp against a fresh fs::read of the file, which is why external_change_pending was right while disk_diverged was wrong. The large-file arm was already correct: metadata only.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/tests/cli_flow.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": "PR #71, commit 14f821cf - tab_disk_diverged reads the file through the existing tab_base_bytes() helper instead of hashing the buffer",
+      "verification": "cli_flow my_own_unsaved_edit_is_not_a_diverged_disk. Mutation: restore disk_state(&tab.path, None, tab.document.bytes()) != tab.disk_digest at ai-text-editor-server.rs:2002 and the test fails on the insert response, disk_diverged true against false. B204 a_replayed_tab_arms_the_external_change_guard had frozen the old semantics as an assertion; it now asserts the corrected meaning and gained the post-resolution triple, so it pins more than before.",
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B217",
+      "title": "the MCP open schema omits document_mode and normalize_nfc, so raw-byte, hex and NFC tabs are unreachable over MCP while the adapter honours both",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "printf %s\\\\n {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"} | ai-text-editor-mcp - open inputSchema properties are exactly agent, endpoint, file, session. Then send tools/call open with \"document_mode\":\"hex_view\" anyway: the tab comes back \"mode\":\"HexView\". Same with \"normalize_nfc\":true: \"normalize_nfc\":true.",
+      "observed": "open declares four properties and no others, and no tool among the 28 declares document_mode, normalize_nfc, auth_token, takeover_stale_endpoint or idle_timeout_seconds. The adapter forwards document_mode and normalize_nfc when hand-sent. open's own description names them (\"document_mode and normalize_nfc only shape an autostarted server\"), so it documents arguments the schema does not offer.",
+      "expected": "A schema-following MCP client can reach every capability the surface has. Today it cannot: SKILL.md capability 2 (raw bytes, 16-byte hex rows) and capability 4 (opt into NFC normalization) are unreachable from MCP, every tab is TextUtf8, and restore ships as a tool whose only possible answer on that surface is not_normalized. Capability 12 --takeover-stale-endpoint is unreachable too.",
+      "mechanism": "The adapter advertises tool schemas that omit properties its request builder forwards. Same shape as B195 (empty inputSchemas), B197 (dropped expected_revision) and B211 (page historical omitted) - a recurrence of that closed class on open.",
+      "surfaces": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "ai-text-editor/SKILL.md",
+        "ai-text-editor/references/protocol.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B218",
+      "title": "a text-mode search whose query crosses a line boundary silently returns zero matches with complete true",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "A tab holding \"alpha\\nbeta\\n\". search --mode exact_text --query \"alpha\\nbeta\" (a real newline in the query) answers count 0. search --mode exact_bytes --query YWxwaGEKYmV0YQ== finds the same span, bytes 0..10, line 1, end_line 2. regex_rust with alpha\\nbeta and wildcard with alpha*beta both answer 0.",
+      "observed": "{\"complete\":true,\"count\":0,\"matches\":[]} - no error, no warning, complete true, indistinguishable from \"the text is not in this file\". Hit while locating a source line by its indented text: exact_text for the full line including its leading spaces and trailing newline found nothing in a file that contains it, while the same query trimmed of both found it at line 1997.",
+      "expected": "Either the match - matches_with_gradient takes a &str haystack and can span lines perfectly well - or a refusal naming the rule. A silent zero on a query the caller can see in the file is the worst of the three: an agent concludes the anchor is absent and edits the wrong place.",
+      "mechanism": "The callers impose the line scope, not the matcher. Small tabs: ai-text-editor-server.rs:3515-3517 splits with split_inclusive(\\x27\\\\n\\x27), strips the newline with strip_suffix, and calls matches_with_gradient on the stripped line, so the newline is not present in the haystack at all. Large tabs: large_file.rs:298-309, identical shape. exact_bytes takes find_bytes over the whole buffer and is therefore correct - an asymmetry nothing documents.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/src/large_file.rs",
+        "ai-text-editor/references/protocol.md",
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
     },
     {
       "id": "B14",
@@ -4364,6 +4434,75 @@
       "updated_at": "2026-09-06T15:21:44Z"
     },
     {
+      "id": "B219",
+      "title": "a routed verb on a file with no tab reports \"no editor server is reachable\" while that agent server is alive and serving other tabs",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Open file A in a workspace, then call history or search naming file B, which has no tab.",
+      "observed": "no editor server is reachable for /.../AGENTS.md; only `open` creates a tab, and every other verb routes to that file own tab - run `open -f /.../AGENTS.md` first (the discovery probe reported: No such file or directory (os error 2)). The server was alive at that instant: server_pid 68148, server_generation 8f19bc45..., answering reads on other tabs in the same second, and the next open reconnected to that same pid and generation rather than starting anything.",
+      "expected": "The headline names the real condition, which the body already states correctly - this file has no tab in your workspace. Two further problems in one string: the \"discovery probe reported: No such file or directory\" suffix points at socket discovery, which is not what failed; and the remedy is printed as a CLI command line on the MCP surface, where an mcp-mode install ships no CLI client and the caller passes a file argument. B187 fixed that class in SKILL.md and the man page; it is still live in the runtime error strings, including file_mismatch at ai-text-editor-server.rs:1251.",
+      "mechanism": "client.rs:255-259. Resolution falls through the per-agent identity lookup to per-file discovery (endpoint_for_file); a file that never had a tab has no per-file discovery record, so read_endpoint returns ENOENT and the non-open arm reports it as an unreachable server. Discovery is per file, the workspace is per agent and holds many tabs, and the message describes the former as though it were the latter.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B220",
+      "title": "protocol.md defines none of dirty, disk_diverged or external_change_pending, so the only statement of what disk_diverged means is one clause in SKILL.md",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Search ai-text-editor/references/protocol.md for dirty, diverg and external_change: zero matches for all three. The man page matches dirty once (line 39) and neither of the others.",
+      "observed": "protocol.md is the file SKILL.md points at \"for exact schemas, coordinates, stream framing, search formulas, backup rules, and errors\", and it never names three flags every mutating and reading response carries. The only definition anywhere is SKILL.md \"(the file on disk moved under the tab - an external change, not your unsaved work)\" - and that clause is the one the implementation contradicted.",
+      "expected": "A reader can learn from the documentation what each flag asserts and how the two differ. Settling it took reading ai-text-editor-server.rs: the disk_digest field comment at 62-64, tab_dirty and tab_disk_diverged at 1981-1998, observe_external at 1933. That scan is the reproduction.",
+      "mechanism": "The behaviour lives in tab_dirty/tab_disk_diverged (ai-text-editor-server.rs:1981-1998) and observe_external (:1933); no packaged file states their contract.",
+      "surfaces": [
+        "ai-text-editor/references/protocol.md",
+        "ai-text-editor/ai-text-editor.1",
+        "ai-text-editor/SKILL.md",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
+      "id": "B223",
+      "title": "rustified register binaries print usage and error text naming the .sh scripts they replaced, which are no longer in the tree",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "bin/x86_64-unknown-linux-musl/bug-update --help",
+      "observed": "\"Usage: bug-update.sh <id> [--status S] [--fix F] [--verification V] ...\" from a Rust binary, while ls planning/scripts/bug-update.sh reports no such file. register-rebuild main.rs:31 and :54 do the same, dying with \"register-rebuild.sh: rjq is required ...\" and \"register-rebuild.sh: register not found: ...\". reg_write in register-lib.sh:105-106 also advises \"run register-rebuild.sh\".",
+      "expected": "A tool names itself. An agent told to run bug-update.sh looks for a file that does not exist, and the advice to run register-rebuild.sh names a script the prod arm does not ship either.",
+      "mechanism": "Usage and die strings carry the pre-rustification names: src/bug-update/src/main.rs usage, src/register-rebuild/src/main.rs:31 and :54, planning/scripts/register-lib.sh:105-106.",
+      "surfaces": [
+        "src/bug-update/src/main.rs",
+        "src/register-rebuild/src/main.rs",
+        "planning/scripts/register-lib.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -4492,6 +4631,27 @@
       "notes": null,
       "created_at": "2026-09-05T18:43:31Z",
       "updated_at": "2026-09-05T20:51:42Z"
+    },
+    {
+      "id": "B221",
+      "title": "SKILL.md Start section explains that starting a server by hand is not a normal step any more",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Read ai-text-editor/SKILL.md, the Start section.",
+      "observed": "\"(ai-text-editor-server start --file PATH still exists for that, and for advanced options such as --tcp or --large-threshold-bytes, but is not a normal step any more)\".",
+      "expected": "Help, man page, SKILL.md and protocol.md state the current contract and never how it got that way. In contract voice: ai-text-editor-server start is how a server is pinned explicitly, and how --tcp and --large-threshold-bytes are reached. Whether it used to be mandatory is not the reader business.",
+      "mechanism": "Prose only; ai-text-editor/SKILL.md, Start section.",
+      "surfaces": [
+        "ai-text-editor/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
     },
     {
       "id": "B59",
@@ -4643,6 +4803,28 @@
       "notes": null,
       "created_at": "2026-09-06T09:54:09Z",
       "updated_at": "2026-09-06T11:03:24Z"
+    },
+    {
+      "id": "B222",
+      "title": "two source comments credit the dirty/disk_diverged split to B183, which is the out-of-range-versus-hex-parity entry",
+      "status": "fixed",
+      "severity": "cosmetic",
+      "priority": "low",
+      "parent": null,
+      "reproduce": "Read the disk_digest field comment at ai-text-editor-server.rs:62-64 and the header of cli_flow a_dirty_tab_and_a_diverged_disk_are_two_different_facts; both say B183. bugs show B183 is \"an out-of-range edit on a text tab reports the hex-parity error\".",
+      "observed": "\"disk_diverged means the file on disk moved away from what the tab last synced (B183 split)\" and \"// B183: an external change used to read as the agent own unsaved work.\"",
+      "expected": "B182, \"dirty conflates unsaved own edits with an external change under the tab\", the entry that created the split. A wrong id sends the next reader to an unrelated defect.",
+      "mechanism": "Comment text only.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/tests/cli_flow.rs"
+      ],
+      "fix": "PR #71, commit 14f821cf - both comments corrected to B182",
+      "verification": "Read back at ai-text-editor-server.rs:64 and cli_flow.rs:781; no B183 reference remains in either file. A comment id admits no mutation test and none is claimed.",
+      "found_by": "fifth ai-text-editor test drive 2026-09-07, review .Ai-EDITOR-BRUTAL-REVIEW-5.md",
+      "notes": null,
+      "created_at": "2026-09-07T09:10:43Z",
+      "updated_at": "2026-09-07T09:10:43Z"
     },
     {
       "id": "B93",
