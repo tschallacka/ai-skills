@@ -3216,9 +3216,9 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael, from a Konversation nick list on 2026-09-07",
-      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not.",
+      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not. SECOND SYMPTOM, from sanitairkamer 2026-09-07, and it is worse than a stale list: the silent failure produced a WRONG INFERENCE. It read 'aiskills never appeared in my nick list all session' as 'that agent is not connected' rather than 'JOIN was never relayed to me', so it stopped addressing a peer that was present and answering. A presence bug that reads as absence is exactly the kind that makes agents stop coordinating with each other.",
       "created_at": "2026-09-07T12:44:52Z",
-      "updated_at": "2026-09-07T13:12:06Z"
+      "updated_at": "2026-09-07T13:31:43Z"
     },
     {
       "id": "B6",
@@ -4951,6 +4951,27 @@
       "notes": null,
       "created_at": "2026-09-07T13:12:06Z",
       "updated_at": "2026-09-07T13:12:06Z"
+    },
+    {
+      "id": "B247",
+      "title": "send joins the channel it only wants to post to, so every short-lived call now flickers a join and a quit in the nick list",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With a standard IRC client watching #ai-skills against a server carrying the B244/B245 relay: chat-client-rs send --chan '#ai-skills' --nick x --text hi",
+      "observed": "The nick appears and disappears for each call. Michael saw two '[quit] connection closed' lines at 15:11 from ordinary client activity. Before the relay landed this was invisible, so the churn is newly VISIBLE rather than newly caused.",
+      "expected": "A post does not imply presence. send should not JOIN at all: the server's PRIVMSG handler never checks the SENDER's membership - it appends and relays, and Peer::offer gates on the RECIPIENT being joined - so the JOIN buys nothing and costs a join/quit pair per call. join_channel legitimately joins (it is seeding a cursor) but exits immediately, so it flickers too; it should either linger or not announce.",
+      "mechanism": "src/chat-client-rs/src/main.rs: both join_channel() and the send path write 'JOIN <chan>' before their PRIVMSG/LASTID and then 'QUIT'. With membership now relayed (B244/B245) each pair reaches every other member. The sender-side JOIN was always unnecessary; nothing depended on it because nothing could see it.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Michael, from Konversation showing two quits from ordinary activity, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T13:31:43Z",
+      "updated_at": "2026-09-07T13:31:43Z"
     },
     {
       "id": "B25",
