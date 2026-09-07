@@ -2593,7 +2593,7 @@
     {
       "id": "B267",
       "title": "insert silently clamps a negative offset to 0 and writes at the top of the file",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2606,12 +2606,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "src/ai-text-editor-mcp/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "24ca6c4c on fix/worktrees-tmpdir-chat-relay - verbs::is_count_key() declares the keys read as a non-negative integer, and the server refuses any present-and-invalid one at the door, beside B237's unknown-argument door. Not yet merged.",
+      "verification": "On the MCP surface that produced it: offset -1 answers argument_out_of_range naming offset and -1, isError true, and the file is unchanged; a legal offset 9 still inserts there; 50 lib tests, fmt and clippy clean. Mutation: disabling the door restores {\"offset\":0,\"bytes_written\":11} and the silent write at byte 0, the defect's observed behaviour verbatim.",
       "found_by": "aiskills, hit live while inserting helpers into chat-client-rs on 2026-09-07",
-      "notes": "Hit by hand: I passed --offset -1 intending \"append at end\", which the schema does not define, and the edit landed at byte 0 instead. Undo recovered it cleanly. The dangerous shape is that a clamp turns an out-of-range argument into a SUCCESSFUL write somewhere else in the file, and reports the clamped offset as though that is what was asked -- so nothing in the response distinguishes it from a correct call. An agent that did not re-read would not notice; I only did because the insert was visibly at the top of the file. Note the relation to the per-verb argument door: that door validates WHICH keys a verb accepts, not whether a value is in range, so this class of defect can exist behind a fully exhaustive door.",
+      "notes": "Hit by hand: I passed --offset -1 intending \"append at end\", which the schema does not define, and the edit landed at byte 0 instead. Undo recovered it cleanly. The dangerous shape is that a clamp turns an out-of-range argument into a SUCCESSFUL write somewhere else in the file, and reports the clamped offset as though that is what was asked -- so nothing in the response distinguishes it from a correct call. An agent that did not re-read would not notice; I only did because the insert was visibly at the top of the file. Note the relation to the per-verb argument door: that door validates WHICH keys a verb accepts, not whether a value is in range, so this class of defect can exist behind a fully exhaustive door. The CLI was never affected - it already refused --offset -1 in argument parsing, which is why this only ever showed up through MCP, where the JSON reaches the server untouched. Worth knowing before reproducing it: the obvious CLI repro does not reproduce it. The fix covers all fourteen count keys rather than offset alone, since every reader shares the .and_then(Value::as_u64) shape that cannot tell an out-of-range value from an absent one.",
       "created_at": "2026-09-07T15:50:15Z",
-      "updated_at": "2026-09-07T15:50:22Z"
+      "updated_at": "2026-09-07T19:35:25Z"
     },
     {
       "id": "B268",
