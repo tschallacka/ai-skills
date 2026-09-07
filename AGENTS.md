@@ -91,8 +91,16 @@ subagent writes into the parent's session file and moves its cursors.
 **The nitpicker.** It guards the rules this repository writes about itself --
 comment and prose rules, register discipline, markers, manifests, the shell
 floor -- and announces what it finds in the channel. Its profile is
-`.agents/profiles/nitpicker.md`, and it runs as a pseudo-daemon: it blocks on
-the staged file set, reviews what changed, announces, and blocks again.
+`.agents/profiles/nitpicker.md`, and it runs as a pseudo-daemon: it blocks on a
+mention tail, and on each wake reads the channel, reviews the work in flight,
+announces, and re-arms.
+
+The tail is not only how an agent is woken, it is how it is PRESENT. `send`,
+`read` and `names` open a connection and close it again, so they make an agent
+a member of nothing; only a running tail holds the connection that keeps a nick
+in the channel list. An agent with no tail is not in the channel, cannot be
+seen, and cannot be addressed -- which is why re-arming after a tail fires is
+urgent rather than tidy.
 
 It reports; it does not fix. Treat a finding as a correction to apply, not a
 suggestion to weigh, unless it says "this is taste, not a rule".

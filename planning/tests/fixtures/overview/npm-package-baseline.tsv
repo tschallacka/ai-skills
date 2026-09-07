@@ -1,7 +1,6 @@
 package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11435
-package/.agents/profiles/nitpicker.md	11411
 package/LICENSE	1068
 package/README.md	15683
 package/ai-text-editor/SKILL.md	18394
@@ -50,7 +49,7 @@ package/interactive-shell/tests/test-interactive-shell.sh	7638
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	1814
+package/package.json	1842
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	18452
 package/planning/REVIEWER.md	22954
