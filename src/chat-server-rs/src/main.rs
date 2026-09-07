@@ -210,7 +210,7 @@ impl Hub {
     /// server, so the SECOND agent on a machine could never register that nick
     /// again. The nick is only surrendered when the registry still points at
     /// THIS connection index; a later connection that took it over keeps it.
-    fn deregister(&self, nick: &str, idx: usize, chans: &[String]) {
+    fn deregister(&self, nick: &str, prefix: &str, idx: usize, chans: &[String]) {
         if !nick.is_empty() {
             if let Ok(mut nicks) = self.nicks.lock() {
                 if nicks.get(nick).copied() == Some(idx as u64) {
@@ -230,14 +230,21 @@ impl Hub {
         // leaves on every mention - sends no PART, so without this the nick
         // stayed in every other client's list until they reconnected.
         //
-        // Announced after the memberships are dropped and outside that lock:
-        // `announce` takes `writers`, and taking it while holding `channels`
-        // would put two locks in one place, which is the shape B122 came from.
-        // The nick is named without a user@host prefix because a deregister can
-        // run for a connection that never completed registration.
+        // Relayed after the memberships are dropped and outside that lock:
+        // `relay` takes `writers`, and taking it while holding `channels` would
+        // put two locks in one place, which is the shape B122 came from.
+        //
+        // The prefix is the full `nick!user@host`, not a bare nick. A first
+        // version sent `:nick QUIT` on the reasoning that a deregister can run
+        // for a connection that never registered - but a bare-nick prefix is
+        // what Konversation rendered as "[quit] connection closed" with nobody
+        // named, so the announcement did not say who left, which is the whole
+        // point of sending it. The caller passes the prefix it already has, and
+        // the empty-nick guard below still covers the unregistered case.
         if !nick.is_empty() {
+            let from = if prefix.is_empty() { nick } else { prefix };
             for chan in chans {
-                self.relay(chan, &format!(":{} QUIT :connection closed", nick), idx);
+                self.relay(chan, &format!(":{} QUIT :connection closed", from), idx);
             }
         }
         // The peer itself stays in `writers` so live connections keep their
@@ -1222,13 +1229,21 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         let _ = st.tcp.shutdown(std::net::Shutdown::Both);
         let leaving_nick = st.nick.clone();
         let leaving_chans = sess.joined.clone();
+        // The prefix a QUIT is attributed by. Built here because the session
+        // still holds user and host, and a bare nick is what left Konversation
+        // rendering "[quit] connection closed" with nobody named.
+        let leaving_prefix = if leaving_nick.is_empty() {
+            String::new()
+        } else {
+            format!("{}!{}@{}", leaving_nick, sess.user, sess.host)
+        };
         // Drop the ConnState so the socket closes rather than lingering in
         // CLOSE-WAIT, then release the slot guard BEFORE taking any hub lock:
         // holding a slot while acquiring `writers` is the ABBA deadlock the
         // Hub comments warn about.
         *guard = None;
         drop(guard);
-        hub.deregister(&leaving_nick, idx, &leaving_chans);
+        hub.deregister(&leaving_nick, &leaving_prefix, idx, &leaving_chans);
         break;
     }
 }
@@ -1773,16 +1788,21 @@ mod membership_relay_tests {
         watcher.set_joined(&["#ops".to_string(), "#dev".to_string()]);
         let hub = hub_with(vec![Arc::clone(&leaving), Arc::clone(&watcher)]);
 
-        hub.deregister("gone", 0, &["#ops".to_string(), "#dev".to_string()]);
+        hub.deregister(
+            "gone",
+            "gone!u@h",
+            0,
+            &["#ops".to_string(), "#dev".to_string()],
+        );
 
         let (lines, _) = watcher.drain();
         assert_eq!(
             lines,
             vec![
-                ":gone QUIT :connection closed".to_string(),
-                ":gone QUIT :connection closed".to_string()
+                ":gone!u@h QUIT :connection closed".to_string(),
+                ":gone!u@h QUIT :connection closed".to_string()
             ],
-            "each channel the nick held must hear that it went"
+            "each channel the nick held must hear that it went, ATTRIBUTED: a bare-nick prefix rendered as \"[quit] connection closed\" with nobody named"
         );
     }
 
@@ -1843,7 +1863,7 @@ mod membership_relay_tests {
         watcher.set_joined(&["#ops".to_string()]);
         let hub = hub_with(vec![Arc::new(Peer::new()), Arc::clone(&watcher)]);
 
-        hub.deregister("", 0, &["#ops".to_string()]);
+        hub.deregister("", "", 0, &["#ops".to_string()]);
 
         let (lines, _) = watcher.drain();
         assert!(
