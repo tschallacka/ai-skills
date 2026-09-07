@@ -90,7 +90,13 @@ start_server() { # <tag> <fd-limit> -> echoes the port, empty on no-start
     local port=""
     mkdir -p "$home"
     ( ulimit -n "$limit" 2>/dev/null || exit 70
-      exec env AI_CHAT_HOME="$home" "$SERVER" 0 \
+      # The beacon goes to a port nothing listens on: these servers are killed
+      # with the test, and announcing them on the default 7780 offers them to
+      # every agent on the machine (B274). CHAT_BEACON_PORT rather than
+      # CHAT_ANNOUNCE=0 because this test measures descriptors -- silencing the
+      # beacon would remove a socket and quietly widen the ceiling it asserts
+      # against.
+      exec env AI_CHAT_HOME="$home" CHAT_BEACON_PORT=47993 "$SERVER" 0 \
           >"$work/$tag.out" 2>"$work/$tag.err" ) &
     printf '%s' "$!" >"$work/$tag.pid"
     local i=0

@@ -84,7 +84,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-AI_CHAT_HOME="$home" "$SERVER" 0 >"$work/server.out" 2>"$work/server.err" &
+# The beacon goes to a port nothing listens on. This server exists for one
+# test and is killed at the end of it, so announcing it on the default 7780
+# offers it to every agent on the machine as a server to discover (B274).
+# CHAT_BEACON_PORT rather than CHAT_ANNOUNCE=0: the announce thread and its
+# socket stay exactly as they are, and only the destination changes.
+AI_CHAT_HOME="$home" CHAT_BEACON_PORT=47992 \
+    "$SERVER" 0 >"$work/server.out" 2>"$work/server.err" &
 server_pid=$!
 port=""
 for _ in $(seq 1 40); do
