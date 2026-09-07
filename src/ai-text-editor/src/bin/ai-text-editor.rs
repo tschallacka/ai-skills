@@ -79,6 +79,14 @@ fn main() {
             Value::String(file.to_string_lossy().into_owned()),
         );
     }
+    // T99: the response verbosity ladder. Every verb takes it, and the
+    // server refuses a level outside 0..=3 by name rather than clamping.
+    if let Some(value) = option(&args, &["--verbosity"]) {
+        payload.insert(
+            "verbosity".into(),
+            json!(parse_number(&value, "--verbosity")),
+        );
+    }
     // T96/T97: the server routes on these, so they travel in the payload the
     // way `file` does rather than being consumed by the client alone.
     if let Some(value) = &tab_id {
@@ -469,6 +477,7 @@ fn help() {
     println!(
         "         job-start job-poll job-progress job-complete job-cancel job-transfer job-release"
     );
+    println!("Response size: --verbosity 0|1|2|3 (default 1). 0 is the answer and the tab that gave it, nothing else. 1 adds what verification and the next step need - revision, dirty, the tab mode, the resolved edit span, completeness, and a searchs pager key and count. 2 adds navigation - cursors, byte windows, block paging, undo depths. 3 is everything. capabilities and resources are exempt (their payload IS metadata), and a refusal always carries its full code, message and choices whatever the level.");
     println!("Addressing a tab: every response reports a tab_id, and -T/--tab-id ID addresses that tab for any command with no --file and no --endpoint. --tab-path FRAGMENT names a tab by filename or by a trailing run of path components (component boundaries, not substrings) and is the recovery when the id is lost; several matches are refused with tab_ambiguous AND the candidates with their ids, none with tab_unmatched and the open tabs. A command naming nothing runs on the focused tab - the tab the last successful call was served by, which open sets and a refusal never moves.");
     println!("Common flags (long / short): --file -f, --tab-id -T, --tab-path, --endpoint -e, --line -l, --column -c, --action -a, --text -t, --query -q, --mode -m (search only), --expected-revision -r, --offset -o, --length -L, --delete-len -d, --limit -n, --cursor-id -C (edit anchor), --id (which numbered cursor a navigation command moves; default 0), --job-id -j, --presentation -p, --before -b, --after -B, --gradient -g, --wrap-width -w, --session -s, --agent -A.");
     println!("Navigation: --id N routes a cursor command to numbered cursor N (every cursor is created by its first move); home and end move to the first and last column of the CURRENT line, not the document's start or end; next_word/previous_word step words; page_up/page_down move --page-lines N lines (default 40).");

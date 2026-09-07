@@ -47,7 +47,7 @@
 /// the original spelling. `presentation` is here because the CLI puts it on
 /// every payload it builds, and `verbosity` because the response ladder
 /// applies to every answer (T99).
-pub const UNIVERSAL_KEYS: &[&str] = &["file", "tab_id", "tab_path", "presentation"];
+pub const UNIVERSAL_KEYS: &[&str] = &["file", "tab_id", "tab_path", "presentation", "verbosity"];
 
 /// Every method the server dispatches, in the order `handle` matches them.
 /// Used by the tests that prove this table and the dispatch cover the same

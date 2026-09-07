@@ -187,6 +187,15 @@ fn tool_definitions() -> Vec<Value> {
                     "The tab_id a previous answer reported, and addressing enough on its own: with it, no file or endpoint is needed for any verb. Wins over file and tab_path, and is refused by name (tab_unknown) rather than falling back to some other tab if it names none.",
                 ),
             ),
+            // T99: on every tool, because the ladder applies to every
+            // answer. Not an ADAPTER_ARGUMENTS entry: the server consumes it,
+            // so it stays in the payload like `file` and `tab_id`.
+            (
+                "verbosity",
+                int(
+                    "How much of the answer to return: 0 the result and the tab that gave it and nothing else, 1 (default) adds what verification and the next step need - revision, dirty, the tab's mode, the resolved edit span, completeness, and a search's pager key and count, 2 adds navigation - cursors, byte windows, block paging, undo depths, 3 everything. A level outside 0-3 is refused by name rather than clamped. capabilities and resources ignore it, their payload being metadata by definition, and a refusal always carries its full code, message and recovery choices whatever the level.",
+                ),
+            ),
             // T97: the recovery for an agent that lost the id.
             (
                 "tab_path",

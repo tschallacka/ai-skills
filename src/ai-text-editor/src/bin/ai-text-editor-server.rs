@@ -2211,6 +2211,36 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
         "job_release" => job_release(&envelope, &mut tab, &mut frames),
         _ => frames.push(error(&envelope.request_id, "unknown_method", format!("unsupported method {}", envelope.method))),
     }
+    // T99: the ladder, applied once here rather than at each of the ~forty
+    // places a payload is built. A level outside the range is a caller error
+    // and is refused by name rather than clamped, so a typo does not silently
+    // buy a different answer than the one asked for.
+    let level = match ai_text_editor::verbosity::requested(&envelope.payload) {
+        Some(level) => level,
+        None => {
+            return vec![error_details(
+                &envelope.request_id,
+                "verbosity_invalid",
+                format!(
+                    "verbosity must be an integer from 0 through {}; 1 is the default",
+                    ai_text_editor::verbosity::MAX_VERBOSITY
+                ),
+                json!({"levels": {"0": "status and the answer only", "1": "revision, dirty, mode and the resolved edit span (default)", "2": "adds cursors, coordinates, completeness and paging keys", "3": "everything"}}),
+            )];
+        }
+    };
+    if !ai_text_editor::verbosity::verb_is_exempt(&envelope.method) {
+        for frame in &mut frames {
+            // Never an error frame: a refusal's code, message and recovery
+            // choices are the answer, at every level.
+            if frame.get("type").and_then(Value::as_str) != Some("data") {
+                continue;
+            }
+            if let Some(payload) = frame.get_mut("payload").and_then(Value::as_object_mut) {
+                ai_text_editor::verbosity::apply(payload, level);
+            }
+        }
+    }
     // T98: every response names the tab it answered, at every verbosity
     // level, because addressing the wrong tab silently is the failure the
     // whole T96-T98 design exists to prevent. One name for the handle - the
