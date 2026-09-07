@@ -2614,6 +2614,29 @@
       "updated_at": "2026-09-07T15:50:22Z"
     },
     {
+      "id": "B268",
+      "title": "a skipped test is reported as PASS, so a suite can be green while running nothing",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Run a test whose preconditions are absent, e.g. on a host with no timeout(1): chat/tests/test-chat-broadcast-stall.sh; or via the runner: ./run-tests.sh and read the summary line for it.",
+      "observed": "The test prints \"SKIP chat broadcast stall: no timeout(1) ...\" to stderr, then calls t_end, which prints \"test-chat-broadcast-stall.sh: PASS\". run-tests.sh records it as PASS in the summary, identical to a test that ran every assertion.",
+      "expected": "A skip is its own outcome and is reported as one -- a SKIP column in the summary and a count in the epilogue -- so a green run states how many tests actually executed. A test that did not run must never be summarised with the word PASS.",
+      "mechanism": "The skip paths do `printf SKIP >&2; t_end; exit 0`, and t_end has exactly one success wording: it prints \"<test>: PASS\" whenever the findings count is zero. It cannot distinguish \"asserted everything and found nothing wrong\" from \"asserted nothing at all\", because a skip records no finding. run-tests.sh then judges by exit status alone, and a skip exits 0.",
+      "surfaces": [
+        "planning/tests/lib-test.sh",
+        "run-tests.sh",
+        "chat/tests/test-chat-broadcast-stall.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, while diagnosing why the macOS bash 3.2 leg failed test-chat-broadcast-stall while macos-latest passed it",
+      "notes": "Found while diagnosing a different failure, and it cost real time: macos-latest reported test-chat-broadcast-stall as PASS while the macOS bash 3.2 leg failed it, and \"PASS\" was consistent with two very different stories -- the test ran and passed, or the test skipped for want of timeout(1), which stock macOS does not ship. Ruling the second out needed the raw job log rather than the summary, because the summary cannot express the difference. Note the interaction with the skip being LOUD on stderr: the authors did the right thing at the test end (the comment in test-chat-broadcast-stall.sh calls it \"a loud SKIP, not a failure\"), and the runner then flattens it back to PASS, so the loudness is lost exactly where the decision is made. Related to the evidence gap fixed in lib-test.sh on fix/worktrees-tmpdir-chat-relay: both are cases of CI reporting less than it knows.",
+      "created_at": "2026-09-07T19:10:01Z",
+      "updated_at": "2026-09-07T19:10:11Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
