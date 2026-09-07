@@ -3216,9 +3216,9 @@
       "fix": null,
       "verification": null,
       "found_by": "Michael, from a Konversation nick list on 2026-09-07",
-      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately.",
+      "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not.",
       "created_at": "2026-09-07T12:44:52Z",
-      "updated_at": "2026-09-07T12:45:07Z"
+      "updated_at": "2026-09-07T13:12:06Z"
     },
     {
       "id": "B6",
@@ -4930,6 +4930,27 @@
       "notes": "B244 is the arrival half and the reported symptom; this one was found by reading the same handler region.",
       "created_at": "2026-09-07T12:45:07Z",
       "updated_at": "2026-09-07T12:45:07Z"
+    },
+    {
+      "id": "B246",
+      "title": "the client discards JOIN, PART and QUIT, so an agent on the bus cannot tell who else is present",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "chat-client-rs tail --chan '#ai-skills' --nick watcher, then have a second nick join, part, or let a tail exit. Nothing is printed for any of it.",
+      "observed": "Only channel messages appear. A tailing agent sees traffic from a nick without ever learning that the nick is there, and learns nothing when it goes. Asking 'is sanitairkamer listening right now?' is unanswerable from the bus.",
+      "expected": "A tailing agent can see presence, so coordination through the channel can depend on it. Behind a flag rather than on by default: an agent parsing the stream today receives PRIVMSG lines only, and widening that silently would change what every existing reader sees. read --local should show them too, since the log is the same stream.",
+      "mechanism": "src/chat-client-rs/src/main.rs:1613-1617 - the tail loop drops every message whose command is not PRIVMSG, before the mention filter runs. The server now relays membership correctly (B244, B245 fixed server-side, verified by a standard IRC client's nick list), so the information reaches the socket and the client throws it away.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "noticed while confirming B244's fix was server-side only, 2026-09-07",
+      "notes": null,
+      "created_at": "2026-09-07T13:12:06Z",
+      "updated_at": "2026-09-07T13:12:06Z"
     },
     {
       "id": "B25",
