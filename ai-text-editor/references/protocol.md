@@ -171,10 +171,12 @@ addressing holds a perfectly current revision and is still wrong. That is how a
 reported success.
 
 Every applied `insert`/`replace` reports the `offset` and `delete_len` it
-resolved, `bytes_written`, and — when it deleted anything — `deleted`, the bytes
-that went, as `text` when they are UTF-8 and `base64` otherwise, with their
-`bytes` length and a `truncated` flag past 256 bytes. A caller can therefore
-verify an edit from its own answer instead of reading the file back.
+resolved, `bytes_written`, and — when it deleted anything — `deleted`, the bytes that
+went. `deleted.bytes` is always the span's full length and `deleted.truncated`
+says whether anything was left out of the quoted content, which is capped at
+256 bytes and carried as `text` when it is UTF-8 and `base64` when it is not.
+A caller can therefore verify an edit from its own answer instead of reading
+the file back.
 
 The server intentionally has no project-root jail. A valid session token grants
 the server user the same path access as the server process. Keep endpoints

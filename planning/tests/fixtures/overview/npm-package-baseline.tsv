@@ -9,7 +9,7 @@ package/ai-text-editor/ai-text-editor.1	13120
 package/ai-text-editor/binaries.tsv	500
 package/ai-text-editor/docs/README.md	1307
 package/ai-text-editor/integration.tsv	1638
-package/ai-text-editor/references/protocol.md	21140
+package/ai-text-editor/references/protocol.md	21249
 package/ai-text-editor/requires.tsv	190
 package/ai-text-editor/schemas/capabilities.v1.json	2086
 package/ai-text-editor/schemas/protocol.v1.json	764

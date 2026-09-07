@@ -2159,19 +2159,24 @@ const KNOWN_PAYLOAD_KEYS: &[&str] = &[
 /// not become the edit.
 const BYTE_PREVIEW_LIMIT: usize = 256;
 
-/// A span of bytes as something a caller can read: the text when it is UTF-8,
-/// base64 when it is not, truncated at [`BYTE_PREVIEW_LIMIT`] with the full
-/// length always reported.
+/// A span of bytes as something a caller can read: `text` when the shown
+/// prefix is UTF-8, `base64` when it is not. `bytes` is always the span's full
+/// length and `truncated` says whether anything was left out, so the two
+/// numbers stay trustworthy however the content is rendered.
 fn byte_preview(bytes: &[u8]) -> Value {
     let shown = bytes.len().min(BYTE_PREVIEW_LIMIT);
-    // Never cut a multi-byte character in half: back off to a boundary.
+    // Never cut a multi-byte character in half: back off to a boundary. A
+    // span that is UTF-8 but longer than the limit is still reported as text
+    // (short by up to three bytes, with `truncated` set) rather than falling
+    // back to base64 — the point of the field is that a caller can read what
+    // it deleted.
     let mut end = shown;
     while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
         end -= 1;
     }
-    let mut preview = json!({"bytes": bytes.len(), "truncated": bytes.len() > shown});
+    let mut preview = json!({"bytes": bytes.len(), "truncated": end < bytes.len()});
     match std::str::from_utf8(&bytes[..end]) {
-        Ok(text) if end == shown => preview["text"] = json!(text),
+        Ok(text) if !text.is_empty() || bytes.is_empty() => preview["text"] = json!(text),
         _ => {
             preview["base64"] = json!(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
