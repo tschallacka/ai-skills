@@ -500,6 +500,21 @@
       "updated_at": "2026-09-07T19:43:53Z"
     },
     {
+      "id": "T101",
+      "title": "split chat-client-rs/src/lib.rs into modules",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "lib.rs is 2776 lines: the CLI entry point, the CLI verbs, the resolution ladder, the TLS connect and TOFU pin, the session, the local log reader and an in-file test module, in one file. It reached that size as one file because it was main.rs; T90 made it a library without splitting it, deliberately, so an in-flight B266 change on another branch would merge as a rename rather than fight a mass code move. Once feat/t90-chat-mcp and fix/worktrees-tmpdir-chat-relay are both merged that reason is spent. Split by concern, one docblock each: net (resolve, connect, client_config, the TOFU pin, line I/O, wait_for_welcome), discovery (the beacon, the cache, resolve_server), session (the key ladder, Session, cursors), wire (wire_segments, split_at_budget, msg_line_id), local (the channel log reader), and the CLI verbs behind run(). The public surface is already the split: what the MCP adapter imports is exactly the first four groups.",
+      "blocked_on": null,
+      "refs": [
+        "T90"
+      ],
+      "note": null,
+      "created_at": "2026-09-07T20:07:58Z",
+      "updated_at": "2026-09-07T20:07:58Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
