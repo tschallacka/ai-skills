@@ -3348,6 +3348,28 @@
       "updated_at": "2026-09-07T14:37:44Z"
     },
     {
+      "id": "B260",
+      "title": "todo update cannot set refs, and --touching matches only refs, so an entry filed without them is permanently unfindable by area",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "todo list --touching verbosity, against a register whose T99 is titled \"Give editor responses a verbosity contract, so a two-line edit does not cost a screen of JSON\". Then: todo update T99 --refs src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+      "observed": "The list answers nothing at all, though the word is in the entrys title and throughout its detail. And the update is impossible: `todo update` takes --status, --priority, --detail, --blocked-on, --note and --append-note, and no --refs, so the omission cannot be corrected after filing. Measured on the same register: `todo list --touching session.rs` DOES return T98, and session.rs appears only in T98s refs and in no title - which pins the matcher to refs alone.",
+      "expected": "Either --touching searches the fields a human would expect it to (refs, title, detail), or `todo update` can set refs so an entry filed without them can be repaired. As it stands the two gaps combine: T99 is an ai-text-editor task that `todo list --touching ai-text-editor` does not return, and nothing shipped can fix that. The brief for this batch asked for exactly that repair, which is how it was found.",
+      "mechanism": "The `todo` crate: the --touching filter tests the refs array only, and the update subcommands argument table has no refs entry (the add subcommand does, via --refs a,b). So refs are write-once at creation. Two separate small gaps whose intersection is the defect - either one alone would be survivable.",
+      "surfaces": [
+        "src/todo",
+        "todo/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "the editor batch brief asking me to add refs to T99 so `todo list --touching ai-text-editor` would stop missing it; the tool has no way to do it",
+      "notes": null,
+      "created_at": "2026-09-07T15:01:18Z",
+      "updated_at": "2026-09-07T15:01:18Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
