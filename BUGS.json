@@ -2486,7 +2486,7 @@
     {
       "id": "B258",
       "title": "a response key with no verbosity tier panics the connection thread, and the caller sees only \"the server closed the connection without answering\"",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2498,12 +2498,12 @@
         "src/ai-text-editor/src/verbosity.rs",
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The cursor verbs own response keys are classified: `line` and `column` at tier 0, because a cursor position is the ANSWER of the cursor verb and not metadata about one - the same reason a reads `text` is tier 0 - and the wrapped-view fields `visual`, `wrap_width` and `range` at tier 2, being needed only when navigating a wrapped view. The fail-safe is deliberately unchanged: an unclassified key is still kept at every level and still trips the debug_assert, because a key that is merely more verbose than intended costs tokens while one that silently vanishes at the default level is a correctness bug in whatever depended on it.",
+      "verification": "The whole cli_flow file at the new default no longer produces the symptom; before the fix the search for \"no verbosity tier\" in a test run returned the cursor keys, and after it returns nothing. The classification itself is pinned by verbosity::a_verbs_own_result_survives_the_lowest_level and the end-to-end ladder test cli_flow::the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard. NOT closing the underlying shape: a debug_assert inside the request handler still takes the connection thread down with no frame written, so the next unclassified key will present the same way. That is recorded here rather than fixed, because moving the check out of the handler is a design change and this entry was about a specific unclassified set.",
       "found_by": "the safety net firing for real while measuring T99s blast radius; filed on the coordinators instruction that the symptom be recorded prominently, because nobody debugging a closed connection blind would guess an unclassified response key",
       "notes": null,
       "created_at": "2026-09-07T14:57:12Z",
-      "updated_at": "2026-09-07T14:57:12Z"
+      "updated_at": "2026-09-07T15:17:03Z"
     },
     {
       "id": "B14",
