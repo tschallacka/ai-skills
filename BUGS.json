@@ -2703,6 +2703,29 @@
       "updated_at": "2026-09-07T20:16:17Z"
     },
     {
+      "id": "B276",
+      "title": "the membership guard cannot pass: names lists open connections, join creates none",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "From the main checkout: ./target/release/chat-client-rs join --chan '#ai-skills' --nick nitpick-probe --session nitpick-probe, then ./target/release/chat-client-rs names --chan '#ai-skills' --nick nitpicker --session nitpicker. Control: start 'tail --chan #ai-skills --nick nitpicker --session nitpicker' in the background, wait 3s, run names again.",
+      "observed": "join prints 'joined #ai-skills (resuming after id 164)' and exits 0, and names does not list the nick, on that run or any later one. The nick appears in names within 3s of a tail starting and disappears when the tail ends. send works throughout, so messages land while the nick is absent from names.",
+      "expected": "Either names lists a nick that has joined regardless of whether a connection is currently open, or the membership check the profile prescribes is written against something that a short-lived client can satisfy.",
+      "mechanism": "names reports the connections the server currently holds, not the channel's joined set. Every chat-client-rs invocation except tail is short-lived, so it holds a connection only for the length of the call. The guard added to .agents/profiles/nitpicker.md in f66a9199 says 'if your nick is not in the list, rejoin' and 'if the command fails at all, the server is down'. For an agent that is not blocked inside a tail the first condition is permanently true and join cannot clear it, so the until-loop spins against a command that always exits 0; the second condition never fires because names succeeds. The guard therefore reports a healthy, reachable agent as absent, and its recovery path cannot terminate.",
+      "surfaces": [
+        "src/chat-client-rs",
+        ".agents/profiles/nitpicker.md",
+        "AGENTS.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T20:45:40Z",
+      "updated_at": "2026-09-07T20:45:40Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -5554,6 +5577,29 @@
       "updated_at": "2026-09-07T15:32:42Z"
     },
     {
+      "id": "B275",
+      "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "npm pack --dry-run 2>&1 | awk '/agents/'",
+      "observed": "package/.agents/profiles/nitpicker.md is listed in the packed contents, and planning/tests/fixtures/overview/npm-package-baseline.tsv carries a row for it at 9847 bytes. The file's own header declares <!-- MODE: DEV -->, which CODE-CONTRACTS.md contract 10a defines as 'only a maintainer needs it'.",
+      "expected": "No MODE: DEV file reaches an end user. Every other maintainer-only path under .agents/ is excluded by name in package.json files -- '!.agents/knowledge/**', '!.agents/skill-loading-experiment/**', '!.agents/skill-loading-findings.md' -- so the file list already encodes the rule and profiles/ is the one omission.",
+      "mechanism": "Two artifacts, one marker vocabulary, and only one of them is checked against it. The release tarball is built from skill_files(), which is marker-derived, and tests/test-release-package.sh asserts no MODE: DEV file reaches it -- that gate passes. The npm package is a second artifact whose contents come from package.json's hand-maintained 'files' array, which includes '.agents' wholesale and then subtracts DEV paths one at a time. Nothing cross-checks that array against the MODE markers, so a new DEV path under an included directory ships silently. .gitignore's allowlist gained .agents/profiles/ in the same commit (d6a19cf9) and the npm baseline TSV was updated to accept the new row, which recorded the leak as the expected size rather than surfacing it.",
+      "surfaces": [
+        "package.json",
+        "planning/tests/fixtures/overview/npm-package-baseline.tsv",
+        ".agents/profiles/nitpicker.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T20:38:32Z",
+      "updated_at": "2026-09-07T20:38:32Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
@@ -5942,29 +5988,6 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
-    },
-    {
-      "id": "B275",
-      "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
-      "status": "confirmed",
-      "severity": "minor",
-      "priority": "normal",
-      "parent": null,
-      "reproduce": "npm pack --dry-run 2>&1 | awk '/agents/'",
-      "observed": "package/.agents/profiles/nitpicker.md is listed in the packed contents, and planning/tests/fixtures/overview/npm-package-baseline.tsv carries a row for it at 9847 bytes. The file's own header declares <!-- MODE: DEV -->, which CODE-CONTRACTS.md contract 10a defines as 'only a maintainer needs it'.",
-      "expected": "No MODE: DEV file reaches an end user. Every other maintainer-only path under .agents/ is excluded by name in package.json files -- '!.agents/knowledge/**', '!.agents/skill-loading-experiment/**', '!.agents/skill-loading-findings.md' -- so the file list already encodes the rule and profiles/ is the one omission.",
-      "mechanism": "Two artifacts, one marker vocabulary, and only one of them is checked against it. The release tarball is built from skill_files(), which is marker-derived, and tests/test-release-package.sh asserts no MODE: DEV file reaches it -- that gate passes. The npm package is a second artifact whose contents come from package.json's hand-maintained 'files' array, which includes '.agents' wholesale and then subtracts DEV paths one at a time. Nothing cross-checks that array against the MODE markers, so a new DEV path under an included directory ships silently. .gitignore's allowlist gained .agents/profiles/ in the same commit (d6a19cf9) and the npm baseline TSV was updated to accept the new row, which recorded the leak as the expected size rather than surfacing it.",
-      "surfaces": [
-        "package.json",
-        "planning/tests/fixtures/overview/npm-package-baseline.tsv",
-        ".agents/profiles/nitpicker.md"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "nitpicker",
-      "notes": null,
-      "created_at": "2026-09-07T20:38:32Z",
-      "updated_at": "2026-09-07T20:38:32Z"
     }
   ]
 }
