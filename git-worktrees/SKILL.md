@@ -16,22 +16,84 @@ and expensive to rediscover.
 
 ## Where worktrees live
 
-**Agent worktrees go under `~/.config/tsch-ai-skills/worktrees/`, one named
-directory each** (`.../worktrees/<branch-or-task>/`), created with `mkdir -p`
-if missing. Never `/tmp`: a checkout there dies with the machine's sweep — one
-agent lost real work exactly that way — and a worktree under the repository
-itself confuses the repo's own filesystem scans and cleanup tools. The central
-location matches the shared install layout (`~/.config/tsch-ai-skills/bin`),
-survives reboots and tmp sweeps, and keeps every agent's checkout findable in
-one listing (`git worktree list` from anywhere). Throwaway verification
-checkouts that a script creates, uses and sweeps itself within one run may
-still use `TMPDIR` — the rule covers work an agent expects to find later.
+**Agent worktrees go under `${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees/`,
+one named directory each** (`.../tsch-ai-worktrees/<branch-or-task>/`), created
+with `mkdir -p` if missing. The installer creates that directory and grants the
+agents read, edit and write on it, so a checkout there costs no permission
+prompt per file.
+
+Three locations are wrong, each for its own reason:
+
+- **Never `/tmp`.** A checkout there dies with the machine's sweep — one agent
+  lost real work exactly that way. Where `/tmp` is tmpfs, a build tree in it is
+  also resident memory competing with the compiler that fills it.
+- **Never inside the repository**, including the `.claude/worktrees/` path a
+  harness may create by default. A worktree under the repo confuses the repo's
+  own filesystem scans and cleanup tools, and in practice it caused enough
+  trouble to be ruled out.
+- **Never under `tsch-ai-skills/`.** It looks like the tidy neighbour of
+  `tsch-ai-skills/bin`, but that tree also holds the chat server's
+  `server.key`, the editor's private session registry, and on a shared install
+  the installed binaries. A directory an agent may freely write cannot also be
+  the one holding a private key and the binaries the agent is running, so the
+  worktrees root is a **sibling** of `tsch-ai-skills`, never a child of it.
+
+What the chosen location buys: it survives reboots and tmp sweeps, keeps every
+agent's checkout findable in one listing (`git worktree list` from anywhere),
+and can be granted read/write as a whole without widening access to anything
+else.
+
+Throwaway verification checkouts that a script creates, uses and sweeps itself
+within one run may still use `TMPDIR` — the rule covers work an agent expects
+to find later.
+
+**Creating one when the harness wants to put it elsewhere.** A harness tool
+that makes worktrees for you (Claude Code's `EnterWorktree` with a `name`)
+places them inside the repository, which the rule above rules out. Make the
+worktree yourself, then step into it:
+
+```bash
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees"
+git worktree add "${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-worktrees/<task>" \
+    -b <task-branch> "origin/<base>"
+```
+
+Then enter it by `path` rather than by `name`: `EnterWorktree` accepts an
+existing worktree's path, and on first entry it asks only that the path appear
+in `git worktree list` for this repository — which the command above satisfies.
 
 ## Several agents at once
+
+**Worktrees are for the subagents. The coordinator works in the main checkout.**
+The agent handing out the work does not take a worktree of its own: it branches
+in the repository checkout and stays there. This is not a style preference — see
+the pin rule below for what happens when it does isolate — and it also keeps the
+one tree that is always present as the place to read shared state from.
 
 **One worktree per agent, one branch per worktree.** Two agents in one checkout
 overwrite each other's edits with no error and no conflict marker — git sees a single
 working tree and the later write simply wins.
+
+**The isolation pin is session-wide, not per-agent.** A subagent shares its
+parent's session, so the guard that decides which worktree a command may run in
+resolves **one** pin for all of them. The consequences are worth stating plainly,
+because none of them announce themselves:
+
+- The coordinator entering a worktree revokes every running subagent's access to
+  its own. Their commands are refused with "this session is isolated in the
+  worktree `<the coordinator's>`", naming a directory they never asked for.
+- A stranded subagent cannot recover alone. Re-entering its own path appears to
+  succeed while its commands keep being refused, and exiting answers "cannot be
+  called from a subagent with a cwd override".
+- Worse quietly: a pre-push gate run from a stolen pin measures the **wrong**
+  working tree, so it reports PASS for a branch it never examined. Treat such a
+  PASS as no result at all and re-run it.
+
+Recovery is one step, and it belongs to the coordinator: leave the worktree
+(keeping it on disk), which releases the pin, then tell each stranded subagent to
+re-enter its own path. A stranded subagent must **not** unblock itself by
+repointing another agent's worktree at its branch — that breaks whoever is
+working there, to fix something the coordinator can undo in one call.
 
 **Give each agent a disjoint file scope, and say so explicitly.** Overlapping scopes
 produce conflicts that are tedious rather than informative. When an agent finds it
