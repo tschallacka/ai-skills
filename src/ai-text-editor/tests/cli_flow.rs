@@ -2284,3 +2284,124 @@ fn a_key_another_verb_reads_is_refused_by_name_not_dropped() {
         "a range replace must still land where it says"
     );
 }
+
+/// B238: a document mode is a property of a tab, so a file added to an
+/// already-running workspace can be a raw or hex tab.
+///
+/// It used to be a property of the SERVER: `select_tab`'s open path passed
+/// `state_guard.mode` — the mode the server was started with — to
+/// `open_additional_tab`, and `document_mode` reached only the autostart argv.
+/// So an agent's very first `open` decided the mode of every tab it would ever
+/// open. Since B225 made every verb autostart and reconnect, a cold open is
+/// rare, which left SKILL.md capability 2 effectively unreachable in a long
+/// session.
+///
+/// The first open here is deliberately a plain text one, so the workspace is
+/// already running with `mode: text_utf8` when the second file asks for hex —
+/// the exact condition the entry reproduces, and the one a cold-open test
+/// cannot reach.
+#[test]
+fn a_second_file_opens_in_its_own_mode_not_the_servers() {
+    let harness = Harness::new("tabmode");
+    let text = harness.write("plain.txt", "alpha\n");
+    let opened = harness.open(&text);
+    assert_eq!(first_payload(&opened)["mode"], json!("text_utf8"));
+    let server = server_pid(&opened);
+
+    let binary = harness.write("bytes.bin", "\u{feff}alpha\n");
+    let hex = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "hex_view",
+        "-p",
+        "structured",
+    ]);
+    assert!(hex.status.success(), "{}", stderr_text(&hex));
+    let payload = first_payload(&hex);
+    assert_eq!(
+        payload["mode"],
+        json!("hex_view"),
+        "a file added to a running workspace must open in the mode it asked for"
+    );
+    assert_eq!(
+        server_pid(&hex), server,
+        "the point is that this is the SAME workspace: a second server would make the mode a startup argument again and prove nothing"
+    );
+    // The first tab is untouched by the second tab's mode.
+    let reopened = harness.open(&text);
+    assert_eq!(first_payload(&reopened)["mode"], json!("text_utf8"));
+
+    // A raw tab in the same workspace too, so the answer is the requested
+    // mode rather than merely "not the server's".
+    let raw = harness.write("raw.bin", "beta\n");
+    let raw_opened = harness.client(&[
+        "open",
+        "-f",
+        raw.to_str().unwrap(),
+        "-M",
+        "raw_bytes",
+        "-p",
+        "structured",
+    ]);
+    assert!(raw_opened.status.success(), "{}", stderr_text(&raw_opened));
+    assert_eq!(first_payload(&raw_opened)["mode"], json!("raw_bytes"));
+
+    // A tab's mode is fixed for its lifetime: its buffer, index and every
+    // coordinate committed to one reading of the bytes. Reopening under a
+    // different mode is refused by name rather than answered with a mode the
+    // caller did not ask for, which is the shape of the bug being fixed.
+    let conflict = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "text_utf8",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !conflict.status.success(),
+        "reopening a hex tab as text must be refused: {}",
+        String::from_utf8_lossy(&conflict.stdout)
+    );
+    let refusal = stdout_json(&conflict)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("document_mode_conflict"));
+    assert!(
+        refusal["message"].as_str().unwrap_or("").contains("close"),
+        "the refusal must name the way out: {}",
+        refusal["message"]
+    );
+    // Reopening in the mode it already holds is not a conflict.
+    let same = harness.client(&[
+        "open",
+        "-f",
+        binary.to_str().unwrap(),
+        "-M",
+        "hex_view",
+        "-p",
+        "structured",
+    ]);
+    assert!(same.status.success(), "{}", stderr_text(&same));
+
+    // An unknown mode name is refused by name, not silently ignored.
+    let bad = harness.client(&[
+        "open",
+        "-f",
+        harness.path("other.txt").to_str().unwrap(),
+        "-M",
+        "ebcdic",
+        "-p",
+        "structured",
+    ]);
+    assert!(!bad.status.success(), "an unknown mode must be refused");
+    let refusal = stdout_json(&bad)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("document_mode_invalid"));
+}

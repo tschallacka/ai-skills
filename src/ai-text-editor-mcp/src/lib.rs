@@ -184,7 +184,14 @@ fn tool_definitions() -> Vec<Value> {
         properties
     };
     let mut tools: Vec<ToolSpec> = Vec::new();
-    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs. document_mode and normalize_nfc shape only a server this call starts - when a workspace already runs, the tab reports what it actually is.", Vec::new(), vec![]));
+    tools.push(("open", "Inspect the tab path, document mode, revision, size, and cursors, and get the revision a mutation must carry. Opens the file if the workspace does not have it yet, starting a server when none runs, and document_mode chooses the mode of the tab it opens whether or not a workspace is already running.", Vec::from([
+        // B238: this description is the whole point of the fix. The mode used
+        // to be a property of the SERVER, so the honest schema had to say it
+        // "shapes only a newly started server" — and since B225 made every
+        // verb autostart and reconnect, that made a raw or hex tab reachable
+        // only on an agent's very first open.
+        ("document_mode", string("Mode of the tab this call opens: text_utf8 (default), raw_bytes, or hex_view (16-byte rows). A property of the tab, not of the workspace, so it applies to a file added to an already-running workspace as much as to the first one. Reopening a tab that already exists under a DIFFERENT mode is refused with document_mode_conflict: a tab's mode is fixed for its lifetime because its buffer, index and coordinates all committed to one reading of the bytes - close it and open it again.")),
+    ]), vec![]));
     tools.push(("capabilities", "Inspect the machine-readable protocol modes, coordinate rules, defaults, resource limits, and transports. Answers from the running server when one is reachable, from compiled-in defaults (marked source: client_default) otherwise.", Vec::new(), vec![]));
     tools.push(("resources", "Inspect available memory, server overhead, working-set recommendation, and large-file threshold.", Vec::new(), vec![]));
     tools.push((
@@ -633,8 +640,21 @@ fn call_tool(id: Value, params: Value) -> Value {
     // One sweep from the same const `tool_definitions` declares, so an
     // argument the adapter consumes and an argument a client is allowed to
     // send cannot come apart again (B217).
+    let tab_mode = payload.get("document_mode").cloned();
     for key in ADAPTER_ARGUMENTS {
         payload.remove(*key);
+    }
+    // B238: `document_mode` is consumed twice on `open` and once everywhere
+    // else. As an adapter argument it becomes the argv of a server this call
+    // may start; as an `open` payload key it is the mode of the tab being
+    // opened, which is the half that was missing — a second file added to a
+    // running workspace inherited the server's startup mode and could never
+    // be a raw or hex tab. Put back for `open` alone, so on any other verb the
+    // server still refuses it as an argument that verb does not read.
+    if method == "open" {
+        if let Some(mode) = tab_mode {
+            payload.insert("document_mode".into(), mode);
+        }
     }
     // B175, made honest: accept both the envelope's wire name (`revision`)
     // and the documented `expected_revision`, and honour the schema the

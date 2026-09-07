@@ -151,12 +151,8 @@ fn main() {
         }
     };
     let mode = match option(&args, "--mode").as_deref() {
-        None | Some("text_utf8") => DocumentMode::TextUtf8,
-        Some("raw_bytes") => DocumentMode::RawBytes,
-        Some("hex_view") => DocumentMode::HexView,
-        Some(value) => die(&format!(
-            "unknown mode {value}; use text_utf8, raw_bytes, or hex_view"
-        )),
+        None => DocumentMode::TextUtf8,
+        Some(value) => parse_document_mode(value).unwrap_or_else(|error| die(&error)),
     };
     let mut document = match Document::new(bytes, mode) {
         Ok(document) => document,
@@ -785,6 +781,20 @@ fn open_additional_tab(
     Ok(tab)
 }
 
+/// One spelling of the mode names, for the startup argument and for the
+/// per-tab `document_mode` an `open` carries (B238). Two copies of this match
+/// is how the two would come to accept different sets.
+fn parse_document_mode(value: &str) -> Result<DocumentMode, String> {
+    match value {
+        "text_utf8" => Ok(DocumentMode::TextUtf8),
+        "raw_bytes" => Ok(DocumentMode::RawBytes),
+        "hex_view" => Ok(DocumentMode::HexView),
+        other => Err(format!(
+            "unknown mode {other}; use text_utf8, raw_bytes, or hex_view"
+        )),
+    }
+}
+
 fn option(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .find(|pair| pair[0] == name)
@@ -1266,6 +1276,10 @@ fn select_tab_error_code(message: &str) -> &'static str {
         "session_unauthorized" => "session_unauthorized",
         "file_mismatch" => "file_mismatch",
         "tab_unavailable" => "tab_unavailable",
+        // B238's two refusals: a mode name the server does not know, and a
+        // mode that disagrees with the tab already holding this file.
+        "document_mode_invalid" => "document_mode_invalid",
+        "document_mode_conflict" => "document_mode_conflict",
         _ => "tab_open_failed",
     }
 }
@@ -1294,11 +1308,49 @@ fn select_tab(
     }
     if envelope.method == "open" {
         if let Some(path) = requested.as_ref() {
+            // B238: a mode is a property of a TAB, not of the server hosting
+            // it. This used to pass `state_guard.mode` — the mode the server
+            // was started with — so a second file added to a running workspace
+            // could never be a raw or hex tab, whatever it asked for. Since
+            // B225 made every verb autostart and reconnect, a cold open is
+            // rare, which left SKILL.md capability 2 effectively unreachable
+            // in a long session: an agent's first open decided the mode of
+            // every tab it would ever open. B217 made the argument declarable
+            // and honoured on a cold start, which is as far as a schema fix
+            // can go.
+            let requested_mode = match envelope
+                .payload
+                .get("document_mode")
+                .and_then(Value::as_str)
+            {
+                None => None,
+                Some(value) => Some(
+                    parse_document_mode(value)
+                        .map_err(|error| format!("document_mode_invalid: {error}"))?,
+                ),
+            };
             let key = tab_key(path);
             if let Some(tab) = state_guard.tabs.get(&key) {
+                // Reopening an existing tab in a different mode is not a mode
+                // change: the buffer, the index, the journal and every
+                // coordinate already committed to one interpretation of the
+                // bytes. Refused by name rather than answered with a mode the
+                // caller did not ask for, which is the shape of the bug this
+                // fixes.
+                if let Some(wanted) = requested_mode {
+                    let held = tab.lock().ok().map(|tab| tab.document.mode);
+                    if held.is_some_and(|held| held != wanted) {
+                        return Err(format!(
+                            "document_mode_conflict: {} is already open as {:?} and a tab's mode is fixed for its lifetime; `close` it and open it again to read it as {:?}",
+                            path.display(),
+                            held.unwrap_or(DocumentMode::TextUtf8),
+                            wanted
+                        ));
+                    }
+                }
                 return Ok(tab.clone());
             }
-            let mode = state_guard.mode;
+            let mode = requested_mode.unwrap_or(state_guard.mode);
             let normalize_nfc = state_guard.normalize_nfc;
             let auth_token = state_guard.auth_token.clone();
             let generation = state_guard.server_generation.clone();

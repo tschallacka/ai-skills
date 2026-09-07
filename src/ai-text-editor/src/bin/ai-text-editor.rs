@@ -75,6 +75,15 @@ fn main() {
             Value::String(file.to_string_lossy().into_owned()),
         );
     }
+    // B238: on `open`, -M/--document-mode is the mode of the TAB being
+    // opened, so it travels in the payload as well as into the autostart
+    // argv. On every other verb it shapes only a server this call starts,
+    // and the server refuses it as an argument that verb does not read.
+    if method == "open" {
+        if let Some(value) = option(&args, &["--document-mode", "-M"]) {
+            payload.insert("document_mode".into(), Value::String(value));
+        }
+    }
     if let Some(value) = option(&args, &["--bytes-base64"]) {
         payload.insert("bytes_base64".into(), Value::String(value));
     }
