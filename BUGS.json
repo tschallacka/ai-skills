@@ -5942,6 +5942,29 @@
       "notes": "Rename deliberately deferred. The 2026-08-30 change moved the deviation notes out of the skill directory to ~/.config/tsch-ai-skills/, so a later rename no longer walks user data.",
       "created_at": "2026-08-30T21:50:11Z",
       "updated_at": "2026-08-30T21:50:11Z"
+    },
+    {
+      "id": "B275",
+      "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "npm pack --dry-run 2>&1 | awk '/agents/'",
+      "observed": "package/.agents/profiles/nitpicker.md is listed in the packed contents, and planning/tests/fixtures/overview/npm-package-baseline.tsv carries a row for it at 9847 bytes. The file's own header declares <!-- MODE: DEV -->, which CODE-CONTRACTS.md contract 10a defines as 'only a maintainer needs it'.",
+      "expected": "No MODE: DEV file reaches an end user. Every other maintainer-only path under .agents/ is excluded by name in package.json files -- '!.agents/knowledge/**', '!.agents/skill-loading-experiment/**', '!.agents/skill-loading-findings.md' -- so the file list already encodes the rule and profiles/ is the one omission.",
+      "mechanism": "Two artifacts, one marker vocabulary, and only one of them is checked against it. The release tarball is built from skill_files(), which is marker-derived, and tests/test-release-package.sh asserts no MODE: DEV file reaches it -- that gate passes. The npm package is a second artifact whose contents come from package.json's hand-maintained 'files' array, which includes '.agents' wholesale and then subtracts DEV paths one at a time. Nothing cross-checks that array against the MODE markers, so a new DEV path under an included directory ships silently. .gitignore's allowlist gained .agents/profiles/ in the same commit (d6a19cf9) and the npm baseline TSV was updated to accept the new row, which recorded the leak as the expected size rather than surfacing it.",
+      "surfaces": [
+        "package.json",
+        "planning/tests/fixtures/overview/npm-package-baseline.tsv",
+        ".agents/profiles/nitpicker.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "nitpicker",
+      "notes": null,
+      "created_at": "2026-09-07T20:38:32Z",
+      "updated_at": "2026-09-07T20:38:32Z"
     }
   ]
 }
