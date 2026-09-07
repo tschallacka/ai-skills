@@ -61,7 +61,21 @@ if [ -z "${T_TMPDIR:-}" ]; then
     # chromium's --user-data-dir, where it opens a singleton socket. That now
     # has its own short root below (T_SOCKET_TMPDIR), which is what lets this
     # one honour TMPDIR. Sockets in /tmp, everything else on disk.
-    T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")"
+    # macOS forces /tmp; only Linux honours TMPDIR here.
+    #
+    # The reason for honouring it at all is that /tmp is tmpfs on the Linux
+    # workstation this is developed on, so a test tree there is RAM. macOS has no
+    # such problem, and its own TMPDIR is actively hostile: it points at
+    # /var/folders/<...>, and /var is a symlink to /private/var, so a fixture git
+    # repo created there has two names and anything comparing paths disagrees
+    # with itself. test-atomicity-flow failed on BOTH macOS legs the moment this
+    # honoured TMPDIR, while every Linux leg stayed green - a fixture repo whose
+    # uncommitted edit git reported under one path and the flow looked for under
+    # the other.
+    case "$(uname -s)" in
+        Darwin) T_TMPDIR="$(mktemp -d /tmp/t.XXXXX)" ;;
+        *)      T_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/t.XXXXX")" ;;
+    esac
     if [ -n "${AI_SKILLS_TEST_RUN_ID:-}" ]; then
         printf '%s\n' "$AI_SKILLS_TEST_RUN_ID" > "$T_TMPDIR/.ai-skills-test-run-id"
     fi

@@ -38,6 +38,7 @@ fn usage() {
          \x20 chat-client-rs tail  --local --chan #c [--mentions] [--mention-exit] [--nick N]\n\
          \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
          \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
+         \x20 chat-client-rs names [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options (after the subcommand, unless noted):\n\
          \x20 --state DIR     client state dir, beats $AI_CHAT_HOME (default: $AI_CHAT_HOME\n\
@@ -86,6 +87,7 @@ fn main() {
         "read" => read_delta(&args[2..], &state_dir),
         "tail" => tail(&args[2..], &state_dir),
         "join" => join_channel(&args[2..], &state_dir),
+        "names" => names(&args[2..], &state_dir),
         "leave" => leave_channel(&args[2..], &state_dir),
         "session" => session_cmd(&args[2..], &state_dir),
         other => {
@@ -1157,6 +1159,81 @@ fn read_last_id(
 
 /// Join a channel without reading its history: seed the session cursor to the
 /// channel's current end so later read/tail resume from "now".
+// `names --chan #c` asks who is on a channel and prints them, one per line.
+//
+// The server has answered NAMES since it was written and nothing on the client
+// ever asked (B256), so "is that peer listening right now?" was answered by
+// guessing. A standard IRC client gets the list on join and keeps it live from
+// the relayed JOIN/PART/QUIT; an agent has neither, and this gives it the same
+// answer on demand.
+//
+// It deliberately does NOT join: NAMES reads the channel map and needs no
+// membership, so asking who is present does not make the asker present. Same
+// reasoning that took the JOIN out of `send` (B247) - a query is not a presence
+// claim.
+fn names(args: &[String], state_dir: &std::path::Path) {
+    let o = parse_opts(args);
+    let (mut server, nick, used_session) =
+        apply_session(&o.server, &o.nick, state_dir, o.no_session);
+    let from_session = server.clone();
+    server = resolve_server(&o.server, &from_session, state_dir, o.no_session);
+    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+        eprintln!("chat-client-rs: names needs --server --nick --chan (or a saved session)");
+        std::process::exit(64);
+    }
+    let session_current = used_session && server == from_session;
+    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("chat-client-rs: {}", e);
+            std::process::exit(70);
+        }
+    };
+    if !session_current {
+        save_session(state_dir, &server, &nick);
+    }
+    let _ = wait_for_welcome(&mut tls, &nick);
+    let _ = write_line(&mut tls, &format!("NAMES {}", o.chan));
+
+    // 353 carries the members, 366 ends the list. Read until the end numeric, so
+    // a server splitting 353 over several lines is handled.
+    let mut members: Vec<String> = Vec::new();
+    let deadline = SystemTime::now() + Duration::from_secs(4);
+    let mut ended = false;
+    while SystemTime::now() < deadline && !ended {
+        match read_line(&mut tls) {
+            Ok(l) => {
+                if let Ok(m) = Message::parse(&l) {
+                    match m.command.as_str() {
+                        "353" => {
+                            if let Some(list) = m.trailing.as_deref() {
+                                members.extend(list.split_whitespace().map(|n| n.to_string()));
+                            }
+                        }
+                        "366" => ended = true,
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = write_line(&mut tls, "QUIT");
+    if !ended {
+        eprintln!("chat-client-rs: no end-of-names from server");
+        std::process::exit(70);
+    }
+    // An empty channel prints nothing and exits 0: "nobody is here" is an
+    // answer, not a failure, and a caller distinguishes it by the empty output.
+    for m in members {
+        println!("{m}");
+    }
+}
+
 fn join_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
     let (mut server, nick, used_session) =

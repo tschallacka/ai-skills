@@ -10,7 +10,16 @@ t_begin
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scripts="$root/planning/scripts"
-tmp=$(mktemp -d)
+# Canonicalized at creation, because this fixture is a git repo and the flow
+# below compares the paths git reports against repo-relative text. macOS hands
+# back /var/folders/... for a temp dir whose physical path is
+# /private/var/folders/..., so a diff computed against a differently-spelled
+# root yields paths that never match `src/other.txt` - which failed both macOS
+# legs on PR #74 the moment test roots stopped being forced into /tmp: the
+# exact-match case gained a VIOLATION it should not have, and the extra-path
+# case lost the annotation it should have had. One cause, two assertions.
+# tcp_flow.rs's harness canonicalizes its scratch for exactly this reason.
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 
 # ---- fixture: a git repo holding one mini plan ---------------------------

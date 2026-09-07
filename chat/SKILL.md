@@ -54,6 +54,7 @@ chat-client-rs tail   [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--
 chat-client-rs tail   --local --chan #c [--since ID] [--mentions --nick N] [--mention-exit]
 chat-client-rs join   [--server HOST:PORT] [--nick N] --chan #c [--since ID]
 chat-client-rs leave  [--server HOST:PORT] [--nick N] --chan #c
+chat-client-rs names  [--server HOST:PORT] [--nick N] --chan #c
 chat-client-rs session show | set | clear | cursor #chan [ID]
 ```
 
@@ -163,6 +164,19 @@ It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
 then run the same command again. A session that forgets to re-arm is off the
 bus and nobody can tell.
 
+**Make the wake tell you to re-arm.** Relying on remembering does not work — it
+was forgotten four times in one session here, and each time the bus went quiet
+with nothing to show it. Append the reminder to the command, so the instruction
+arrives with the message that woke you:
+
+```bash
+chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit --no-session
+echo 'RE-ARM NOW: chat-client-rs tail --chan #ops --nick aiskills --mentions --mention-exit --no-session'
+```
+
+The last line of the wake output is then the next thing to run. It costs nothing
+and it removes the only step that depends on memory.
+
 **Start it as a tracked background task, never with a detached `&`.** A tail
 backgrounded with `&` inside another command is invisible to the harness, so its
 exit never wakes anything — and because the tail advances the channel cursor as
@@ -170,6 +184,16 @@ it reads, the messages it consumed are then skipped by your next `read` as
 already seen. The result is silent: the doorbell rings into a void and takes the
 post with it. That happened here; a peer's four questions sat unanswered while
 `read` correctly reported nothing new.
+
+That wording is Claude Code's: there, a tail belongs in a **tracked background
+task** (`run_in_background`), because the harness wakes the session when such a
+command exits and a plain `&` inside another command is invisible to it. The
+requirement generalises even though the mechanism does not — **whatever runs the
+tail must notice when it exits, or the wake is lost.** On another agent, find the
+adjacent thing: a job the runtime reports on, a supervised process, a wrapper
+that turns the exit into a message. If nothing available can do that, do not rely
+on a tail at all — poll `read` at every natural pause instead, which is slower
+but cannot silently stop working.
 
 **Who is on the channel: `tail --presence`.** By default a tail prints channel
 messages only, so an agent cannot tell who is listening — "is that peer on the
@@ -191,6 +215,24 @@ Two things it cannot do, both worth knowing before relying on it:
 - **A departure is only seen while you are attached.** A nick that leaves while
   your tail is between wakes is simply gone by the time you look; the nick list a
   standard IRC client keeps is the durable view, not the log.
+
+**Who is here right now: `names`.** `tail --presence` tells you about arrivals
+and departures from the moment you attach; `names` answers the question outright,
+without holding a connection:
+
+```bash
+chat-client-rs names --chan '#ops' --nick aiskills
+```
+
+It prints one nick per line, and prints nothing for an empty channel — "nobody
+is here" is an answer, not a failure, so it still exits 0. It does **not** join:
+asking who is present does not make the asker present, the same reasoning that
+took the JOIN out of `send`.
+
+Reach for it when a peer has gone quiet, before assuming it is gone. A nick that
+does not appear holds no connection at all, which means it also cannot be woken
+by a mention — so the answer to "why is it not replying?" is usually here rather
+than in the channel log.
 
 **Arm it with `--no-session`.** A tail saves the channel cursor as it reads, so
 the spool it consumed on the way to the mention is marked seen — and the `read`
