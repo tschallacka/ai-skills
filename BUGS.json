@@ -3654,6 +3654,29 @@
       "updated_at": "2026-09-07T20:14:59Z"
     },
     {
+      "id": "B277",
+      "title": "a failed install leaves a half-written skill directory and reports it as a raw cp error",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "git archive origin/master | tar -x -C /tmp/fresh; cd /tmp/fresh; bash install.sh --skill bug-report --target /tmp/installed --yes; echo \"exit=$?\"; ls /tmp/installed/bug-report",
+      "observed": "exit=1, with the only diagnosis being \"cp: cannot stat '/tmp/fresh/bug-report/bin/x86_64-unknown-linux-musl/bugs': No such file or directory\". /tmp/installed/bug-report exists and holds SKILL.md, both schemas, docs/, binaries.tsv and requires.tsv -- everything except the binary and .version, which is written after the copies and so never runs.",
+      "expected": "Either nothing is written when a declared artifact is missing, or the partial state is removed on the way out. And the message names the cause and the way forward -- the crates are not built in this tree, run ./setup-dev-env.sh -- rather than a cp error naming a path the reader has to work backwards from.",
+      "mechanism": "install_skill copies the manifest files in order and writes the .version marker last (installer/src/60-install.sh, version_marker_content > \"$destination/.version\"). A missing binary fails a cp partway through, so the copies already made stay and the marker is never written. Nothing unwinds the destination, and the cp error is the only thing printed.",
+      "surfaces": [
+        "installer/src/60-install.sh",
+        "install.sh",
+        "tests/test-register-schemas.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, reproducing the fresh-worktree failure t90-chat-mcp asked about",
+      "notes": "Reproduced while answering whether tests/test-register-schemas.sh failing 4x in a fresh worktree was MAINTAINER 1.9 or a defect. It is both: the 1.9 hypothesis is confirmed -- a fresh checkout has no bin/<triple>/ -- and this is what 1.9 looks like from inside a test. Not a sed defect: the test reads .version with sed -n and gets an empty string because the file is absent, and version_marker_content would have written package_version=unknown rather than an empty value had it run at all.",
+      "created_at": "2026-09-07T20:56:00Z",
+      "updated_at": "2026-09-07T20:56:12Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
