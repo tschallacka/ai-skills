@@ -902,6 +902,54 @@ mod tests {
         assert!(found >= 7, "expected the mutating tools, found {found}");
     }
 
+    /// B251 and B252, the schema half. The server refusing these by name is
+    /// pinned in cli_flow; this pins that the schema no longer OFFERS them,
+    /// which is the half that matters to a schema-following client — it would
+    /// otherwise be told to send an argument the server now rejects, and the
+    /// fix would read as a regression.
+    ///
+    /// Not spelled out per tool by hand: `tool_definitions` builds every
+    /// property list from `ai_text_editor::verbs`, and advertising a key that
+    /// table does not carry panics at build time. So this asserts the
+    /// consequence for the three keys the entries name, and the binding itself
+    /// is what keeps the rest honest.
+    #[test]
+    fn no_tool_advertises_an_argument_its_verb_does_not_read() {
+        let tools = tools();
+        let named = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+                .unwrap_or_else(|| panic!("{name} is advertised"))
+        };
+        // B251: both are `page` keys, and search reads neither. Advertising
+        // them inverted their purpose — they exist to avoid a rescan.
+        let search = properties(named("search"));
+        for key in ["pager_key", "historical"] {
+            assert!(
+                !search.contains_key(key),
+                "search must not advertise {key}, which only page reads"
+            );
+        }
+        // They are real arguments, on the verb that does read them.
+        let page = properties(named("page"));
+        assert!(page.contains_key("pager_key") && page.contains_key("historical"));
+        // B252: no verb reads this one at all, so it is deleted rather than
+        // relocated.
+        assert!(
+            !properties(named("index")).contains_key("action"),
+            "index must not advertise an action it never reads"
+        );
+        // The verbs that DO take an action still advertise it, so the deletion
+        // was of a stale entry and not of the concept.
+        for name in ["cursor", "resolve"] {
+            assert!(
+                properties(named(name)).contains_key("action"),
+                "{name} reads action and must still advertise it"
+            );
+        }
+    }
+
     #[test]
     fn a_string_revision_satisfies_the_guard() {
         // The advertised schema types expected_revision as a string; a

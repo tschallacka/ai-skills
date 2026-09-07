@@ -2634,3 +2634,244 @@ fn an_unmarked_request_runs_on_the_focused_tab_and_the_answer_names_it() {
         "the focus must follow the last tab a call was served by"
     );
 }
+
+/// B250: an `insert` naming `delete_len` is refused, not answered as a
+/// success.
+///
+/// `delete_len` is a `replace` key. The shared insert/replace handler reads it
+/// for `replace` and ignores it for `insert`, and the protocol-wide door let it
+/// through, so an insert stating "delete five bytes first" was performed as a
+/// plain insert and answered with a fresh revision and `bytes_written`. That is
+/// the worst available outcome: the instruction was partially performed and the
+/// answer was indistinguishable from a complete one, so nothing downstream
+/// could tell.
+///
+/// The assertion is therefore on the REFUSAL and on the buffer being untouched,
+/// not on a value. The old behaviour had no wrong value to catch.
+#[test]
+fn an_insert_naming_delete_len_is_refused_rather_than_half_performed() {
+    let harness = Harness::new("insdel");
+    let file = harness.write("insdel.txt", "alpha\nbeta\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-d",
+        "5",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert_eq!(
+        refused.status.code(),
+        Some(1),
+        "an insert naming delete_len must be refused, not performed: {}{}",
+        stderr_text(&refused),
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("delete_len"));
+    let message = refusal["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("delete_len") && message.contains("insert"),
+        "the refusal must name both the key and the verb: {message}"
+    );
+    // What the old behaviour looked like, and what must not be there now: a
+    // success payload reporting bytes written.
+    assert!(
+        stdout_json(&refused)
+            .iter()
+            .all(|frame| frame.pointer("/payload/bytes_written").is_none()),
+        "the refused insert must not report an applied edit: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    // And the accepted set says what insert does take, so the caller's next
+    // attempt is informed rather than another guess.
+    let accepted = refusal["details"]["accepted_keys"]
+        .as_array()
+        .cloned()
+        .expect("the refusal carries the accepted key set");
+    assert!(accepted.contains(&json!("text")), "accepted: {accepted:?}");
+    assert!(
+        !accepted.contains(&json!("delete_len")),
+        "delete_len must not be listed as acceptable to insert: {accepted:?}"
+    );
+
+    // Nothing was applied, and the revision did not move.
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha\nbeta\n");
+    let history = harness.client(&["history", "-f", file.to_str().unwrap(), "-p", "structured"]);
+    assert_eq!(
+        first_payload(&history)["revision"]
+            .as_u64()
+            .map(|r| r.to_string()),
+        Some(revision.clone()),
+        "a refused edit must not spend a revision"
+    );
+
+    // The same argument on `replace`, which does read it, still works — the
+    // point is per-verb routing, not a blanket refusal of the key.
+    let replaced = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-d",
+        "5",
+        "-t",
+        "OMEGA",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr_text(&replaced));
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "OMEGA\nbeta\n");
+}
+
+/// B251: `search` refuses `pager_key`, which only `page` reads.
+///
+/// The MCP schema advertised `pager_key` ("existing result set to re-page
+/// instead of rescanning") and `historical` ("replay the stored result set for
+/// this query rather than rescanning") on `search`, and the search handler
+/// reads neither. Both are `page`'s. This inverts the arguments' whole
+/// purpose: a caller passed them precisely to AVOID a rescan, and the call
+/// rescanned and built a brand-new result set with nothing saying the argument
+/// had been dropped. Sibling of B186, where `search` silently ignored
+/// `--offset` — that one is refused by name already, and this is the same
+/// class arriving through the schema instead.
+#[test]
+fn a_search_naming_a_page_argument_is_refused_and_points_at_page() {
+    let harness = Harness::new("searchpager");
+    let file = harness.write("searchpager.txt", "needle\nhay\nneedle\n");
+    harness.open(&file);
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_text",
+        "-q",
+        "needle",
+        "-p",
+        "structured",
+    ]);
+    assert!(found.status.success(), "{}", stderr_text(&found));
+    let pager_key = first_payload(&found)["pager_key"]
+        .as_str()
+        .expect("a search answers with a pager key")
+        .to_owned();
+
+    let refused = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "-m",
+        "exact_text",
+        "-q",
+        "needle",
+        "--pager-key",
+        &pager_key,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "a search naming a pager key must be refused rather than rescanning: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("pager_key"));
+    // The key really does work on `page`, which is what makes refusing it on
+    // `search` a routing fix rather than a removal of capability.
+    let paged = harness.client(&[
+        "page",
+        "-f",
+        file.to_str().unwrap(),
+        "--pager-key",
+        &pager_key,
+        "-o",
+        "0",
+        "-p",
+        "structured",
+    ]);
+    assert!(paged.status.success(), "{}", stderr_text(&paged));
+    assert_eq!(first_payload(&paged)["pager_key"], json!(pager_key));
+}
+
+/// B252: `index` refuses `action`, which no verb reads at all.
+///
+/// A different kind from B250 and B251: those keys belong to a sibling verb and
+/// were misrouted. `action` on `index` belonged to nothing — the schema
+/// advertised "build or inspect" and the handler always performs the complete
+/// scan and then pages the blocks, so a caller asking to inspect got a full
+/// rebuild.
+///
+/// Both halves of the fix are asserted here, because either alone leaves the
+/// defect half-open: the schema no longer offers the argument (so a
+/// schema-following client cannot be misled into sending it) AND the server
+/// refuses it by name (so a CLI or hand-sent caller that learned it from the
+/// old schema is told, rather than silently getting a rebuild). Deleting it
+/// from the schema alone would have left every existing caller's behaviour
+/// unchanged and unexplained.
+#[test]
+fn an_index_naming_action_is_refused_and_the_scan_still_works() {
+    let harness = Harness::new("indexaction");
+    let file = harness.write("indexaction.txt", "one\ntwo\nthree\n");
+    harness.open(&file);
+
+    let refused = harness.client(&[
+        "index",
+        "-f",
+        file.to_str().unwrap(),
+        "-a",
+        "inspect",
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !refused.status.success(),
+        "an index naming action must be refused rather than silently rebuilding: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let refusal = stdout_json(&refused)
+        .into_iter()
+        .find(|frame| frame.get("type").and_then(Value::as_str) == Some("error"))
+        .expect("an error frame");
+    assert_eq!(refusal["code"], json!("unknown_argument"));
+    assert_eq!(refusal["details"]["offending_key"], json!("action"));
+
+    // And what index does read still works, so this is the argument removed
+    // and not the verb.
+    let indexed = harness.client(&[
+        "index",
+        "-f",
+        file.to_str().unwrap(),
+        "--granularity",
+        "1",
+        "-p",
+        "structured",
+    ]);
+    assert!(indexed.status.success(), "{}", stderr_text(&indexed));
+    let payload = first_payload(&indexed);
+    assert_eq!(payload["granularity"], json!(1));
+    assert_eq!(payload["complete"], json!(true));
+}
