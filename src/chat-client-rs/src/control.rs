@@ -44,6 +44,13 @@
 //! monitor side, including the wait for the reply, and that wait has a deadline:
 //! when it expires the monitor answers "owner busy" itself, because an
 //! unanswered send must never look delivered.
+// On a non-unix build everything below the wire types is unreachable: `imp`
+// answers None for serve and ask, so the queue, the deadline and the record
+// are dead code there. Allowed rather than split behind another cfg, so the
+// two arms stay one program and T111 has a single place to add the loopback
+// transport Windows needs.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
