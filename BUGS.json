@@ -602,6 +602,28 @@
       "updated_at": "2026-09-05T20:58:09Z"
     },
     {
+      "id": "B299",
+      "title": "The skill delivery path substitutes positional parameters inside a skill body, including in fenced code blocks",
+      "status": "confirmed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Put a shell positional parameter in a SKILL.md code block (chat/SKILL.md before 993217ae had awk index of the whole-line variable), then invoke that skill with arguments: Skill(skill: chat, args: \"inspect the step-1 guard as rendered\")",
+      "observed": "The rendered body came back reading index(inspect, me), and the prose sentence naming the token read \"The whole-line variable is inspect, spelled exactly that.\" The file on disk was unchanged. The substituted word was the FIRST WORD OF THE INVOCATION ARGUMENTS in all three observed cases: flowchart saw re-read, loki saw Arm, this session saw inspect.",
+      "expected": "A skill body is delivered verbatim. Nothing inside a fenced code block is expanded, since a code block is by definition text the reader must receive exactly.",
+      "mechanism": "Positional-parameter expansion is applied to the skill body when the skill is rendered into an agent context, and it is not suppressed inside fences. Named variables are unaffected: $NICK and $LOG survived intact in the same block, so the substitution is positional-only.",
+      "surfaces": [
+        "chat/SKILL.md",
+        "planning/tests/test-skill-positional-params.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "loki on the bus, from the observation that the EXPLANATORY PROSE was corrupted too; confirmed here by invoking the skill and matching the substituted word to this session's own first argument",
+      "notes": "NOT this repository's defect to fix -- the renderer is Claude Code's -- but it IS this repository's exposure, so the entry stays here and the mitigation is ours: no shipped skill body may contain a positional parameter, enforced by planning/tests/test-skill-positional-params.sh. chat/SKILL.md was the only one of 14 that had ever been exposed; the guard now uses grep, which needs none.\n\nWhy this is filed blocking rather than major even though it is upstream: it fails SILENTLY and self-justifyingly. The corrupted guard woke nobody while the agent stayed visibly present in the channel list, and the paragraph explaining the token was substituted in the same slot -- so the explanation corroborated the corruption. Two agents concluded the shipped file was broken and one concluded it had armed the guard wrong; nobody could reach the truth by reading, which is the only method available to a reader of a skill.\n\nReported to Anthropic through the feedback channel as well, since no fix here can stop the next skill from tripping over it.",
+      "created_at": "2026-09-08T14:56:21Z",
+      "updated_at": "2026-09-08T14:56:38Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -4068,9 +4090,9 @@
       "fix": "the guard gained a sender skip: awk -v mine=\"^:$NICK(-[0-9]+)?!\" with $0 ~ mine {next}. The optional suffix covers a renamed second connection (B263), whose lines carry that name.",
       "verification": "Five cases measured through the shipped program: a peer mention fires (rc=0); the agent own line quoting its nick does not (rc=1); its SUFFIXED own line does not (rc=1); a line with no mention does not (rc=1); and a DIFFERENT nick that has the agent nick as a prefix (agent-alice vs agent-a) still fires (rc=0), which is the case a looser anchor would have broken.",
       "found_by": "loki, on the bus",
-      "notes": null,
+      "notes": "SUPERSEDED IN PART by B299: the sender skip is still right and still shipped, but this entry's guard was rewritten from awk to grep because the awk form contained a positional parameter the delivery path corrupts. The five-case verification was re-run against the grep form with identical results.",
       "created_at": "2026-09-08T14:37:21Z",
-      "updated_at": "2026-09-08T14:37:21Z"
+      "updated_at": "2026-09-08T14:56:38Z"
     },
     {
       "id": "B6",
