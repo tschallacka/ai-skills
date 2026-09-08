@@ -2907,6 +2907,29 @@
       "updated_at": "2026-09-07T22:11:45Z"
     },
     {
+      "id": "B290",
+      "title": "test-chat-broadcast-stall fails on the macOS bash 3.2 leg without a change that could explain it",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Open a PR based on master at d641acf2 and read the 'Test suite passes on macOS system bash 3.2 (portability floor)' leg. Seen on PR #77 run 34216364984 job 102028941573. Locally: nix develop --command bash32-run chat/tests/test-chat-broadcast-stall.sh",
+      "observed": "test-chat-broadcast-stall FAIL (exit 1), 'the subscriber never received a message, so it was not a connection the server was servicing:' with sub.out empty. The arming wait is 60 iterations of sleep 0.5, so the subscriber produced nothing for 30 seconds.",
+      "expected": "The subscriber tail prints the opener's 'subscriber-armed' message within the 30 second wait, or the failure names something the change under test could have caused.",
+      "mechanism": null,
+      "surfaces": [
+        "chat/tests/test-chat-broadcast-stall.sh",
+        "src/chat-client-rs/src/lib.rs",
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "CI on PR #77, whose diff touches only the portability scanner, tony-the-pony and one test -- nothing that reaches chat",
+      "notes": "Two live hypotheses, neither confirmed. (1) A timing flake: the same test passed on PR #76's macOS 3.2 leg from the same base d641acf2, and the arming wait is a fixed 30s poll on a shared runner. (2) An interaction with the B269 tail change merged in #75: the subscriber IS a tail, the test's own comment says it receives the message through tail's poll of the channel log, and 6986dd3e changed where tail starts -- a recorded cursor is now honoured whatever its value. That makes the test's dependence on tail's starting id load-bearing, which it was not when the test was written. Do not close this as a flake without re-running it several times on that leg, and check hypothesis 2 first because it is the one that would also be wrong in production. A re-run of job 102028941573 was queued 2026-09-08 and its result is the next evidence.",
+      "created_at": "2026-09-08T11:20:48Z",
+      "updated_at": "2026-09-08T11:21:04Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
