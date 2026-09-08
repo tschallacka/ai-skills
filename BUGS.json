@@ -624,6 +624,28 @@
       "updated_at": "2026-09-08T14:56:38Z"
     },
     {
+      "id": "B301",
+      "title": "A test that waits on a process it has just reported as stuck hangs instead of failing",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Make tail --mentions --mention-exit not fire (e.g. run chat/tests/test-chat.sh against a client where the mention never arrives). The test detects it, calls t_fail, and then reaches: wait \"$ment_pid\"",
+      "observed": "The failure is printed and the script then blocks forever on the wait. Under CI this consumed three test-suite legs for over three hours each on one pull request, with no output, no exit code and no test name to identify it -- the only symptom was the absence of a result.",
+      "expected": "A detected failure exits as a failure. A test may wait on a process it has killed; it must not wait on one it has just declared stuck.",
+      "mechanism": "The guard and the wait disagree: the loop above bounds how long it waits for the tail to exit and reports if it did not, but the unconditional `wait` that follows has no bound and no preceding kill, so the reported-stuck process is waited on anyway. A hang is strictly worse than the failure it replaces, because the failure names itself and the hang does not.",
+      "surfaces": [
+        "chat/tests/test-chat.sh",
+        "chat/tests/test-chat-owner-socket.sh"
+      ],
+      "fix": "both waits now kill first: chat/tests/test-chat.sh (the mention tail) and chat/tests/test-chat-owner-socket.sh (the leave-stops-the-tail assertion, which had the same shape)",
+      "verification": "test-chat.sh reached the failing assertion and exited 1 in seconds instead of hanging; with the accompanying B302 fix it exits 0. Every other wait in the chat suite was audited and each is already preceded by a kill (lines 174, 480, 646).",
+      "found_by": "tracing the three-hour CI hang on PR 78 to its last executed line, which was the wait",
+      "notes": "Cross-reference: B302 is the reason the mention failed; this entry is the reason the failure became a hang. Fixing either alone leaves the other -- with only B302 fixed the landmine stays armed for the next stuck process, and with only B301 fixed the test fails honestly but still fails.",
+      "created_at": "2026-09-08T19:40:30Z",
+      "updated_at": "2026-09-08T19:40:45Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
@@ -3059,6 +3081,27 @@
       "notes": null,
       "created_at": "2026-09-08T18:19:19Z",
       "updated_at": "2026-09-08T18:19:19Z"
+    },
+    {
+      "id": "B302",
+      "title": "test-chat.sh used the nick-suffix bug as its mention fixture, so fixing that bug broke the test",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Run chat/tests/test-chat.sh with a client where one session owns one connection (T107), on a host whose TMPDIR is short enough for the control socket to bind",
+      "observed": "FAIL: mention was not surfaced: []. The tail --mentions --mention-exit never saw the message and never exited.",
+      "expected": "A mention from another agent wakes a tailing agent. That is the feature, and it does not depend on how the sender is connected.",
+      "mechanism": "The test sent the mention from the WATCHERS OWN state dir, and its comment said so: \"the sender auto-suffixes on nick-in-use\". It worked only because the send opened a SECOND connection that the server renamed (B283) -- the message therefore arrived as another party. T107 gives one session one connection, the send is performed on the tail own connection, and the server deliberately does not echo a PRIVMSG to its sender (B249), so the tail never saw it.",
+      "surfaces": [
+        "chat/tests/test-chat.sh"
+      ],
+      "fix": "the mention now comes from a separate peer state dir and nick, which is what the feature actually promises and holds on both sides of T107",
+      "verification": "test-chat.sh exits 0 and the mention assertion passes. The fixture no longer depends on the owner socket being active, so it cannot regress with the socket path length again.",
+      "found_by": "the hang investigation: the last trace line before the wait was the mention assertion failing",
+      "notes": "Cross-reference: B301 is why this presented as a three-hour hang rather than a two-minute failure.\n\nWHY IT WAS INVISIBLE LOCALLY, which is the part worth keeping: the owner socket only binds when its path fits the unix address limit. A CI runner TMPDIR is short (~/work/_temp), so the socket bound, forwarding was active, and the mention never arrived. This workstation TMPDIR is long, so serve() declined to own, every verb opened its own connection exactly as before T107, and the test passed. The same commit therefore passed here and hung on all three CI legs, and the difference was a path length. Moving the socket to XDG_RUNTIME_DIR (short by construction, and what interactive-shell and ai-text-editor already use) is what made it reproduce locally within a minute.",
+      "created_at": "2026-09-08T19:40:30Z",
+      "updated_at": "2026-09-08T19:40:45Z"
     },
     {
       "id": "B14",
