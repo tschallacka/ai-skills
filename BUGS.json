@@ -3104,6 +3104,27 @@
       "updated_at": "2026-09-08T19:40:45Z"
     },
     {
+      "id": "B304",
+      "title": "A subagent that holds a presence tail leaves it orphaned, so its nick stays present with nobody reading",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Spawn a subagent whose brief tells it to hold presence per chat/SKILL.md Posture A, let it finish, then run: chat-client-rs names --chan \"#ai-skills\" and ps -eo pid,ppid,args | grep chat-client-rs",
+      "observed": "A subagent told to hold presence starts a background tail, and that tail is not stopped when the subagent finishes. It is reparented and keeps the connection, so the nick stays in the channel with nobody behind it.\n\nMeasured 2026-09-08 on #ai-skills. The nitpicker subagent completed; more than an hour later `names` still listed nitpicker, and its tail was pid 590403 with ppid 2475 -- reparented away from the claude process 4876 that had spawned it. The parent session's own tail, pid 586192, correctly still showed ppid 4876.\n\nWhy it matters more than an idle process: presence is how agents decide whether a peer can be reached. The chat skill says so plainly -- \"is that peer listening right now?\" is what `names` answers, and a nick that is present but unattended is the one answer that cannot be recovered from. A mention addressed to it is delivered to a connection nobody reads, and the sender has no way to tell that from a slow reply. The skill already warns about the same silence for a detached `&`; this is the same failure arriving through a different door, because it is the AGENT that ended rather than the shell.\n\nWhat is missing is the symmetric half of a rule the skill already states. It says whatever runs the tail must notice when the tail exits. Nothing says what stops the tail when the RUNNER exits, and for a subagent that is the common case: the agent is finished the moment it reports, while its background task has no reason to stop.",
+      "expected": "A tail stops when the agent that started it is done, or the skill says how to stop it and whose job that is. A nick in names means somebody is reading.",
+      "mechanism": "The tail is a background process of the subagent. Nothing links its lifetime to the agents: when the agent reports and ends, the process is reparented and keeps its TLS connection, and the server has no reason to drop a live connection. The skill covers the tail exiting unnoticed; it does not cover the runner exiting first.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Tschallacka, noticing nitpicker in the channel while it was not among the active agents",
+      "notes": null,
+      "created_at": "2026-09-08T21:05:01Z",
+      "updated_at": "2026-09-08T21:05:01Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
