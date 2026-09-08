@@ -646,6 +646,27 @@
       "updated_at": "2026-09-08T19:40:45Z"
     },
     {
+      "id": "B305",
+      "title": "run_cargo_one interpolated an empty wrapper, so CI ran no Rust test at all",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "GITHUB_ACTIONS=1 ./run-tests.sh   (any host; the wrapper skip fires only when that variable is set)",
+      "observed": "run_one was changed to build its command as a list so that an absent layer contributes no word, because the CI skip sets wrapper to the empty string. Its sibling run_cargo_one, which runs each discovered crate, was left interpolating \"$wrapper\" directly and so passed an empty word as the command name.\n\nMeasured on PR 78: every one of the 86 discovered crates failed identically on all three legs, before cargo was reached.\n\n    cargo-add-adversarial-finding    FAIL (exit 127)\n        ./run-tests.sh: line 368: : command not found\n\nThe shape of the evidence is what makes it a code defect rather than an environment one: GITHUB_ACTIONS is set the same on every hosted runner, the entire shell half passed before the cargo block began, and the failing count was identical on ubuntu, macOS and the bash 3.2 floor.\n\nTwo things kept it invisible until CI. The wrapper is only dropped when GITHUB_ACTIONS is set, so no local run reaches the branch; and pre-push-check runs cargo directly rather than through run-tests.sh, so the gate that would have caught it never executes that line.\n\nWorth recording beyond the fix: the defect was introduced by a change whose whole purpose was to make a hang report itself, and it was found in minutes precisely because the run failed loudly with a named test instead of hanging. The same commit that carried the bug carried the thing that surfaced it.",
+      "expected": "Each crate runs its tests. An optional layer that is switched off contributes no word to the command.",
+      "mechanism": "With wrapper empty, \"$wrapper\" 2G 400 -- cargo test expands to an empty first word, which the shell attempts to execute and reports as command not found, exit 127. run_one had already been converted to an argv array for exactly this reason; run_cargo_one had not.",
+      "surfaces": [
+        "run-tests.sh"
+      ],
+      "fix": "ed1f0e8e - run_cargo_one builds the same argv list as run_one, and reports through report_one so an overrunning cargo test is a TIMEOUT rather than a FAIL",
+      "verification": "Both forms exercised locally with wrapper empty: the old interpolation exits 127, which is the CI failure exactly, and the list form exits 0. shellcheck and bash -n pass, and the guarded line is present in the shipped function.",
+      "found_by": "a sonnet subagent reading the CI job logs, asked to name the failing step and quote the error verbatim",
+      "notes": null,
+      "created_at": "2026-09-08T21:07:41Z",
+      "updated_at": "2026-09-08T21:07:41Z"
+    },
+    {
       "id": "B3",
       "title": "BSD awk rejects a newline inside a string, so a table cell breaks plan-content on macOS",
       "status": "fixed",
