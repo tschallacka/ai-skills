@@ -2930,6 +2930,50 @@
       "updated_at": "2026-09-08T11:21:04Z"
     },
     {
+      "id": "B291",
+      "title": "setup-dev-env.sh never builds the interactive-shell binaries, so a dev-tree install ships the skill with none",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "cd <repo>; ./setup-dev-env.sh; ls interactive-shell/bin/x86_64-unknown-linux-musl/; ./install.sh --skill interactive-shell --target $HOME/.claude/skills --yes; ls $HOME/.claude/skills/interactive-shell/bin/",
+      "observed": "setup-dev-env reports 65 binaries built and interactive-shell is not among them; interactive-shell/bin/<triple>/ stays empty; the install succeeds and the installed skill has no bin/ directory at all, so the wrapper and its input client are absent and every documented command fails.",
+      "expected": "Either setup-dev-env builds the two binaries binaries.tsv declares, or the install refuses to place a skill whose declared binaries are missing and says which.",
+      "mechanism": "setup-dev-env builds a fixed list of crates and interactive-shell is not in it. install.sh copies from <skill>/bin/<triple>/ per binaries.tsv, and a row whose artifact is absent is skipped silently -- the notice path (bundled_bin_row_missing) is scoped to planning's rjq rows only.",
+      "surfaces": [
+        "setup-dev-env.sh",
+        "installer/src/60-install.sh",
+        "interactive-shell/binaries.tsv"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "installing the newest skills on 2026-09-08: the wrapper was missing from the installed skill",
+      "notes": null,
+      "created_at": "2026-09-08T12:22:17Z",
+      "updated_at": "2026-09-08T12:22:17Z"
+    },
+    {
+      "id": "B292",
+      "title": "install.sh copies binaries with cp, so an update aborts when the shipped binary is running",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start a shipped binary from an installed skill (e.g. chat-server-rs or ai-text-editor-server), then run ./install.sh --skill chat --target $HOME/.claude/skills --yes",
+      "observed": "cp: cannot create regular file '.../chat/bin/x86_64-unknown-linux-musl/chat-server-rs': Text file busy, and install.sh exits 1 partway through the skill list -- every skill after the failing one is left uninstalled with no summary line saying so.",
+      "expected": "The binary is replaced even while an older copy runs, the way every config write in this installer already does it: write beside the target, then rename over it. A rename replaces the directory entry and the running process keeps its own inode, so ETXTBSY cannot arise.",
+      "mechanism": "install_skill copies each file with cp. Writing to a path currently being executed is refused with ETXTBSY on Linux. The installer already uses mktemp-beside-the-target plus mv for settings.json and opencode.json, so the pattern is present in the same file.",
+      "surfaces": [
+        "installer/src/60-install.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "installing the newest skills on 2026-09-08 while another agent's chat server and this session's editor server were running",
+      "notes": null,
+      "created_at": "2026-09-08T12:22:36Z",
+      "updated_at": "2026-09-08T12:22:36Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",

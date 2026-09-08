@@ -246,6 +246,23 @@
       "updated_at": "2026-09-08T11:17:37Z"
     },
     {
+      "id": "T108",
+      "title": "install.sh needs a dev mode that installs the dev build dir, not the day-old shipped binaries",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka: 'maybe add a dev mode, that respects the dev build dir, I think it didn't get updated.' He was right. There are two binary locations and the installer knows only one. setup-dev-env.sh builds this host's crates into the repo-root bin/<triple>/, which is where the skills look at runtime in a dev tree. install.sh copies from <skill>/bin/<triple>/, which only CI and a release populate. So running ./install.sh inside the repo -- which does NOT download, because download_source prefers a local tree when the script sits beside planning/SKILL.md -- silently installs whatever those shipped directories happen to hold. On 2026-09-08 that was a day-old ai-text-editor: the install downgraded a working editor to a build that predates expected_text on replace, mid-session, and the only symptom was a guard quietly no longer being accepted.\\n\\nWanted: a --dev flag (and a matching line in the summary saying which source each binary came from) that prefers bin/<triple>/<binary> over <skill>/bin/<triple>/<binary> when installing from a local tree, and refuses rather than silently skipping when neither exists. The summary must name the source, because 'installed' meaning two different things depending on an invisible directory is what made this cost an hour. Pairs with B291 (interactive-shell has no dev build at all) and B292 (cp cannot replace a running binary).",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/45-source.sh",
+        "installer/src/60-install.sh",
+        "setup-dev-env.sh"
+      ],
+      "note": "Also worth deciding whether setup-dev-env should populate <skill>/bin/<triple>/ directly instead, which would make one location serve both paths. That is the smaller change but it blurs 'shipped artifact' and 'local build', which is the distinction the release gates rely on.",
+      "created_at": "2026-09-08T12:22:59Z",
+      "updated_at": "2026-09-08T12:22:59Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
