@@ -35,9 +35,21 @@ env_value() { # <cfg> <key>
 }
 
 seed_claude_home() { # <home> [settings-json]
-    local home="$1" settings="${2:-{\}}"
+    local home="$1" settings="${2:-}"
+    # Spelled out rather than as a `${2:-{\}}` default: brace-in-expansion
+    # quoting is not the same on the bash 3.2 floor, and there it seeded invalid
+    # JSON. rjq then printed nothing and the assertion compared against an empty
+    # string instead of the value it named -- a fixture bug wearing the costume
+    # of a behaviour bug, on the two macOS legs only.
+    [ -n "$settings" ] || settings='{}'
     mkdir -p "$home/.claude"
     printf '%s\n' "$settings" >"$home/.claude/settings.json"
+    # A fixture that is not valid JSON must fail here, saying so, rather than
+    # downstream as an empty reading.
+    rjq -e '.' "$home/.claude/settings.json" >/dev/null 2>&1 || {
+        t_record "seeded settings.json is not valid JSON: $settings"
+        t_end
+    }
 }
 
 # ── the accepted offer writes the key, and only that key ────────────────────
