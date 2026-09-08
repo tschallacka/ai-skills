@@ -54,7 +54,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -147,19 +147,74 @@ pub struct OwnerRecord {
     pub chan: String,
 }
 
-/// The directory holding one socket and one record per session key. Its own
-/// directory rather than the state root: it is 0700, and a socket is not
-/// something to mix in with the JSON a person may want to read.
+/// Where the RECORD lives: beside the session state, in its own 0700
+/// directory. It has to be somewhere a borrower can find from nothing but its
+/// own arguments, and the state dir is the only such place -- so the record is
+/// the fixed point, and it NAMES the socket rather than the socket's location
+/// being re-derived by every caller.
 pub fn owner_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("owners")
 }
 
-pub fn socket_path(state_dir: &Path, key: &str) -> PathBuf {
-    owner_dir(state_dir).join(format!("{}.sock", key))
-}
-
 pub fn record_path(state_dir: &Path, key: &str) -> PathBuf {
     owner_dir(state_dir).join(format!("{}.json", key))
+}
+
+/// Where the SOCKET lives: the user's runtime directory when there is one.
+///
+/// This is what `XDG_RUNTIME_DIR` exists for, and both of this repository's
+/// other socket owners already use it -- `interactive-shell` for its input
+/// socket and `ai-text-editor` for its endpoint. The chat owner was the odd
+/// one out, binding under the state directory, and it paid for it: the state
+/// path is long, so the 100-byte guard below fired and a tail simply declined
+/// to own the socket. That is a silent loss of the feature, and it is how the
+/// crate's own tests came to depend on a short TMPDIR.
+///
+/// Three things come free with the runtime directory: it is short, it is
+/// already 0700 and owned by this user, and the session's end clears it -- so a
+/// socket left behind by a killed tail cannot outlive the login and be
+/// mistaken for a live owner. The state directory stays the fallback for where
+/// the variable is unset, which includes macOS.
+pub fn socket_dir(state_dir: &Path) -> PathBuf {
+    socket_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), state_dir)
+}
+
+/// The same decision without reading the environment, so a test can exercise
+/// both branches without mutating a process-global variable that its siblings
+/// are reading in parallel.
+fn socket_dir_from(runtime: Option<&std::ffi::OsStr>, state_dir: &Path) -> PathBuf {
+    match runtime {
+        Some(runtime) if !runtime.is_empty() && Path::new(runtime).is_dir() => {
+            PathBuf::from(runtime).join("tsch-ai-skills-chat")
+        }
+        _ => owner_dir(state_dir),
+    }
+}
+
+/// A short tag distinguishing one state directory from another.
+///
+/// Moving the socket into a SHARED runtime directory removed the thing that
+/// used to keep two owners apart: the state directory was part of the path, so
+/// one session key under two different `--state` roots gave two sockets. In a
+/// shared directory the key alone collides -- two agents deliberately isolated
+/// by separate state dirs would fight over one socket, and each would read the
+/// other as its own live owner and decline to serve. The tag restores that
+/// distinction without restoring the long path.
+///
+/// FNV-1a, the same non-cryptographic hash the session-key ladder already uses
+/// for the same job. A collision here costs a declined takeover, not a
+/// security property.
+fn state_tag(state_dir: &Path) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in state_dir.as_os_str().as_encoded_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{:08x}", (hash >> 32) as u32)
+}
+
+pub fn socket_path(state_dir: &Path, key: &str) -> PathBuf {
+    socket_dir(state_dir).join(format!("{}-{}.sock", key, state_tag(state_dir)))
 }
 
 /// A unix socket address is a fixed-size buffer in the kernel -- 104 bytes on
@@ -198,6 +253,16 @@ struct Inner {
     /// locking, so an idle loop pays one atomic load per iteration.
     waiting: AtomicBool,
     shutdown: AtomicBool,
+    /// Requests the monitor has accepted and not yet finished answering.
+    ///
+    /// The owner must not leave while one is outstanding. A `leave` that takes
+    /// the last channel is answered by the tail loop and then stops it, and
+    /// without this the process could exit while the monitor thread was still
+    /// writing that answer -- the client then read EOF and reported the request
+    /// as one that "may or may not" have been performed, for an action that had
+    /// definitely succeeded. Measured on the bash 3.2 leg, where the timing
+    /// differs enough to lose the race that this machine usually won.
+    in_flight: AtomicUsize,
 }
 
 /// The owner's handle on its socket: hold it for as long as the connection is
@@ -271,6 +336,7 @@ fn new_inner() -> Arc<Inner> {
         queue: Mutex::new(VecDeque::new()),
         waiting: AtomicBool::new(false),
         shutdown: AtomicBool::new(false),
+        in_flight: AtomicUsize::new(0),
     })
 }
 
@@ -290,11 +356,16 @@ mod imp {
     /// cannot be made private, the bind fails. A tail that cannot own the
     /// socket still tails.
     pub fn serve(state_dir: &Path, key: &str, record: OwnerRecord) -> Option<Control> {
-        let dir = owner_dir(state_dir);
+        // Both directories, and 0700 on each before anything is placed in
+        // them: the socket carries the right to speak as this agent, so the
+        // directory is the outer guard, exactly as interactive-shell does for
+        // its input socket. They are usually two different places now -- the
+        // record beside the session state, the socket in the runtime dir.
+        let record_dir = owner_dir(state_dir);
+        fs::create_dir_all(&record_dir).ok()?;
+        fs::set_permissions(&record_dir, fs::Permissions::from_mode(0o700)).ok()?;
+        let dir = socket_dir(state_dir);
         fs::create_dir_all(&dir).ok()?;
-        // 0700 before anything is placed in it: the socket carries the right to
-        // speak as this agent, so the directory is the outer guard, exactly as
-        // interactive-shell does for its input socket.
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ok()?;
         let socket = socket_path(state_dir, key);
         if !path_fits(&socket) {
@@ -362,6 +433,15 @@ mod imp {
     /// Read one request, queue it, and write back whatever the tail loop
     /// answers -- or the busy answer when the deadline passes first.
     fn handle(inner: &Arc<Inner>, stream: UnixStream) {
+        // Counted for the whole exchange, released only once the answer has
+        // been written. `stop` waits on this, so an owner cannot exit between
+        // deciding a reply and delivering it.
+        inner.in_flight.fetch_add(1, Ordering::AcqRel);
+        serve_connection(inner, stream);
+        inner.in_flight.fetch_sub(1, Ordering::AcqRel);
+    }
+
+    fn serve_connection(inner: &Arc<Inner>, stream: UnixStream) {
         let _ = stream.set_read_timeout(Some(CLIENT_TIMEOUT));
         let _ = stream.set_write_timeout(Some(CLIENT_TIMEOUT));
         let mut reader = BufReader::new(match stream.try_clone() {
@@ -404,6 +484,18 @@ mod imp {
 
     pub fn stop(control: &Control) {
         control.inner.shutdown.store(true, Ordering::Release);
+        // An answer already decided must still be delivered. `leave` on the
+        // last channel is answered by the tail loop and then stops it, so
+        // without this wait the process could exit while the monitor was
+        // mid-write: the client read EOF and reported an action that HAD
+        // succeeded as one that may not have been performed. Bounded, because
+        // a client that has stopped reading must not keep the owner alive --
+        // and the deadline is the client's own timeout, after which its answer
+        // is worthless anyway.
+        let deadline = SystemTime::now() + CLIENT_TIMEOUT;
+        while control.inner.in_flight.load(Ordering::Acquire) > 0 && SystemTime::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
         // accept() is blocking, so the thread has to be woken to see the flag.
         // Its own socket is the wake-up: one connect, no reply expected.
         let _ = UnixStream::connect(&control.socket);
@@ -422,7 +514,18 @@ mod imp {
         if !identity_matches(&record, request) {
             return None;
         }
-        let socket = socket_path(state_dir, key);
+        // The RECORD names the socket. Re-deriving the path here would make
+        // every borrower agree with the owner only by coincidence: the owner
+        // may have bound in the runtime directory while this process has no
+        // XDG_RUNTIME_DIR (a cron job, a different login), and the two would
+        // then compute different paths and the socket would look absent.
+        // Falling back to the derived path covers a record from a build that
+        // did not write one.
+        let socket = if record.socket.is_empty() {
+            socket_path(state_dir, key)
+        } else {
+            PathBuf::from(&record.socket)
+        };
         let mut stream = UnixStream::connect(&socket).ok()?;
         stream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok()?;
         stream.set_write_timeout(Some(CLIENT_TIMEOUT)).ok()?;
@@ -500,9 +603,33 @@ pub fn ask(state_dir: &Path, key: &str, request: &Request) -> Option<Reply> {
 mod tests {
     use super::*;
 
-    fn tmp_dir(name: &str) -> PathBuf {
-        let base = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
-        let dir = PathBuf::from(base).join(format!("chat-control-{}", name));
+    /// A SHORT scratch directory, because everything under test here binds a
+    /// unix socket and a socket address is a fixed-size buffer.
+    ///
+    /// It must not simply follow TMPDIR. Under the suite runner TMPDIR is a
+    /// deep per-test root, and these three tests then asked `serve` to bind a
+    /// path over its own 100-byte guard: it correctly answered None, and the
+    /// tests panicked on the `expect`. They passed when run by hand -- where
+    /// TMPDIR is short -- and failed only inside the full suite, which is the
+    /// worst place for a difference to live. `T_SOCKET_TMPDIR` is the runner's
+    /// own answer to this (`/tmp/s.XXXXX`, twelve characters, deliberately not
+    /// nested inside TMPDIR); honour it when it is there, and fall back to
+    /// /tmp, which is the one directory guaranteed short enough. A socket file
+    /// is zero bytes, so this does not put test DATA on a tmpfs.
+    fn tmp_dir(tag: &str) -> PathBuf {
+        // XDG_RUNTIME_DIR before /tmp: a runtime socket is exactly what that
+        // directory is for. It is short, it is already 0700 and owned by this
+        // user, and it is cleared when the session ends -- so a socket left by
+        // a killed test does not outlive the login. /tmp is the fallback for
+        // where it is unset, which includes macOS and most CI runners.
+        let base = ["T_SOCKET_TMPDIR", "XDG_RUNTIME_DIR"]
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|value| !value.is_empty() && Path::new(value).is_dir())
+            .unwrap_or_else(|| "/tmp".to_string());
+        // Short and unique: the pid keeps two concurrent cargo runs apart
+        // without spending the bytes a descriptive name would.
+        let dir = PathBuf::from(base).join(format!("cc{}-{}", std::process::id(), tag));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -556,11 +683,51 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_over_long_socket_path_is_declined_rather_than_truncated() {
-        let dir = tmp_dir("long-path");
+        // Asserted against the FALLBACK branch, where the socket sits under
+        // the state directory: that is the only branch a long path can reach,
+        // since a runtime directory is short by construction. Driven through
+        // socket_dir_from rather than by clearing XDG_RUNTIME_DIR, because
+        // cargo runs these tests as parallel threads in one process and an env
+        // write would land under a sibling's feet.
+        let dir = tmp_dir("longpath");
         let deep = dir.join("x".repeat(120));
-        assert!(!path_fits(&socket_path(&deep, "key")));
-        assert!(serve(&deep, "key", OwnerRecord::default()).is_none());
+        let fallback = socket_dir_from(None, &deep).join("key.sock");
+        assert!(
+            !path_fits(&fallback),
+            "a 120-character state path must exceed the address limit: {}",
+            fallback.display()
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_socket_follows_the_runtime_directory_and_stays_unique_per_state_dir() {
+        // Both halves of the relocation, and the second is the one that bit:
+        // a shared runtime directory means the key alone no longer identifies
+        // an owner, so two state dirs must still give two sockets.
+        let runtime = tmp_dir("rt");
+        let a = tmp_dir("sa");
+        let b = tmp_dir("sb");
+        let chosen = socket_dir_from(Some(runtime.as_os_str()), &a);
+        assert!(
+            chosen.starts_with(&runtime),
+            "a runtime directory must win over the state dir: {}",
+            chosen.display()
+        );
+        assert_eq!(
+            socket_dir_from(None, &a),
+            owner_dir(&a),
+            "with no runtime directory the socket stays beside the state"
+        );
+        assert_ne!(
+            socket_path(&a, "same-key"),
+            socket_path(&b, "same-key"),
+            "one key under two state dirs must not collide on one socket"
+        );
+        for dir in [&runtime, &a, &b] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[cfg(unix)]

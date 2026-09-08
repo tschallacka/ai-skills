@@ -29,6 +29,47 @@ set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 wrapper="$repo_root/resource-limited-testing/scripts/limited-run.sh"
+
+# The resource cap exists to protect a DEVELOPER'S machine, where the suite
+# competes with a browser, an IDE, language servers and a database for one pool
+# of memory -- and where /tmp is a tmpfs, so a runaway test eats RAM. A CI
+# runner has none of that: it is disposable, runs this job and nothing else, and
+# the platform already kills it.
+#
+# On CI the wrapper does not just fail to help, it changes behaviour. Measured
+# 2026-09-08 and recorded in this repository's own workflow comments: on both
+# macOS runners memlimit cannot enforce anything (no Intel build published; on
+# arm64 SIP strips DYLD_INSERT_LIBRARIES and its hook is arm64 against an
+# arm64e system), so the cap is already absent there. On Linux it is either a
+# transient systemd scope or a fallback `ulimit -v`, an ADDRESS-SPACE limit that
+# the skill's own documentation says must not be described as RAM protection.
+# And a systemd scope does not return until every process in its cgroup exits,
+# so one leaked background process turns a visible leak into an unbounded hang.
+#
+# AI_SKILLS_RESOURCE_LIMIT forces the decision either way, so a developer can
+# reproduce a CI run exactly (=0) or cap a local run that CI would not (=1).
+case "${AI_SKILLS_RESOURCE_LIMIT:-}" in
+    0) wrapper="" ;;
+    1) ;;
+    *) [ -n "${GITHUB_ACTIONS:-}" ] && wrapper="" ;;
+esac
+
+# No test may run unbounded. Without this a single hang consumes the whole leg
+# and the only symptom is the absence of a result: measured 2026-09-08, three
+# CI legs sat for over three hours on one pull request while every other job had
+# long since passed, and nothing said which test was responsible. A timeout
+# turns that into one named failure in minutes.
+#
+# Reported separately from a failure, because "it never finished" and "it
+# answered wrongly" call for different next steps.
+test_timeout_seconds="${AI_SKILLS_TEST_TIMEOUT:-600}"
+timeout_cmd=""
+if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=timeout
+else
+    printf '%s: no timeout(1) here, so a hanging test will not be bounded\n' \
+        "${0##*/}" >&2
+fi
 verbose=false
 [ "${1:-}" = "--verbose" ] && verbose=true
 
@@ -254,8 +295,35 @@ unconfigured=0
 declare -a failed_names=()
 declare -a unconfigured_names=()
 
+# How one test's outcome is reported and counted. Split out of run_one to keep
+# both inside CODE-STYLE.md's 40-line cap, and because "how a result is shown"
+# is a different concern from "how the test is launched".
+report_one() { # <label> <exit-code>
+    local label="$1" code="$2"
+    if [ "$code" -eq 0 ]; then
+        passed=$((passed + 1))
+        printf '  %-52s PASS\n' "$label"
+        [ "$verbose" = true ] && sed 's/^/      /' "$test_output"
+        return 0
+    fi
+    failed=$((failed + 1))
+    failed_names+=("$label")
+    # 124 is timeout(1)'s own code for "the deadline passed", and it is reported
+    # as its own outcome. A test that never finished and a test that answered
+    # wrongly need different next steps, and a summary calling them both FAIL
+    # sends the reader looking for an assertion that does not exist.
+    if [ "$code" -eq 124 ]; then
+        printf '  %-52s TIMEOUT (%ss)\n' "$label" "$test_timeout_seconds"
+    else
+        printf '  %-52s FAIL (exit %s)\n' "$label" "$code"
+    fi
+    # Always the whole output, --verbose or not. On a timeout this is what the
+    # test had printed before it stopped, which is what says where.
+    sed 's/^/      /' "$test_output"
+}
+
 run_one() {
-    local t="$1" label mem cpu
+    local t="$1" label mem cpu code=0
     label="$(sed 's#^.*/tests/##; s#\.sh$##' <<<"$t")"
     # benchmark tests spin up worker/reviewer-like processes; give them headroom.
     case "$t" in
@@ -271,20 +339,16 @@ run_one() {
     fi
 
     total=$((total + 1))
-    if "$wrapper" "$mem" "$cpu" -- "$BASH" "$t" >"$test_output" 2>&1; then
-        passed=$((passed + 1))
-        printf '  %-52s PASS\n' "$label"
-        if [ "$verbose" = true ]; then
-            sed 's/^/      /' "$test_output"
-        fi
-    else
-        code=$?
-        failed=$((failed + 1))
-        failed_names+=("$label")
-        printf '  %-52s FAIL (exit %s)\n' "$label" "$code"
-        # Always the whole output, --verbose or not.
-        sed 's/^/      /' "$test_output"
-    fi
+    # Built as a list because both layers are optional: the wrapper is dropped
+    # on CI and the timeout where timeout(1) is missing. The array is never
+    # empty, so `set -u` needs no guard here.
+    local -a argv=()
+    [ -n "$timeout_cmd" ] && argv+=("$timeout_cmd" "$test_timeout_seconds")
+    [ -n "$wrapper" ] && argv+=("$wrapper" "$mem" "$cpu" --)
+    argv+=("$BASH" "$t")
+
+    "${argv[@]}" >"$test_output" 2>&1 || code=$?
+    report_one "$label" "$code"
     rm -f "$test_output"
 }
 

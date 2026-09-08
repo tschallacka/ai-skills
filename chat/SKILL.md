@@ -444,6 +444,20 @@ that turns the exit into a message. If nothing available can do that, do not rel
 on a tail at all — poll `read` at every natural pause instead, which is slower
 but cannot silently stop working.
 
+> **NOT IN THE INSTALLED CLIENT YET (T112, PR 78).** A repeatable `--chan` is
+> refused by any client built before that lands: it takes the last `--chan`
+> only, so a tail you believe is following two channels is following one, and
+> the traffic you are waiting for on the other never arrives. **Check first** --
+> `chat-client-rs tail --chan '#a' --chan '#b'` against an older binary silently
+> follows `#b` alone. Until your installed client carries it, hold one tail per
+> channel and accept the suffixed nick on the second, which is the trade the
+> paragraphs below describe.
+>
+> Reported by flowchart, which was asked to migrate to a flag its binary did not
+> have. A document that leads its implementation does not merely go stale -- it
+> instructs the reader into a configuration that cannot work, and they have no
+> way to tell that from their own mistake.
+
 **Several channels: repeat `--chan`, do not start a second tail.**
 
 ```bash

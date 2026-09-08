@@ -69,17 +69,31 @@ mkdir -p "$home"
 chan='#owned'
 nick='owner'
 key='t107'
-socket="$home/owners/$key.sock"
-
-# Measured on the address that will actually be bound, not on its parent: the
-# owner's own limit is on the whole path, and a guard on the directory either
-# skips runs that would have worked or admits ones that cannot bind.
-if [ "${#socket}" -ge 100 ]; then
-    printf 'SKIP chat owner socket: %s is too long for a socket address (%s chars)\n' \
-        "$socket" "${#socket}" >&2
-    t_end
-    exit 0
-fi
+# The RECORD is at a path this test can derive; the SOCKET is not, and must not
+# be guessed. The owner puts the socket in the user's runtime directory when
+# there is one and beside the state otherwise, and it writes the path it chose
+# into the record. Reading it from there is both the robust thing and the
+# contract under test: a borrower finds the socket the same way.
+record="$home/owners/$key.json"
+owner_socket() {
+    [ -f "$record" ] || return 0
+    rjq -r '.socket // empty' "$record" 2>/dev/null
+}
+# Wait for a bound socket, and return its path. Empty means the owner never
+# came up, which each caller judges for itself.
+await_socket() {
+    local waited=0 path=""
+    while [ "$waited" -lt 50 ]; do
+        path="$(owner_socket)"
+        if [ -n "$path" ] && [ -S "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+        waited=$((waited + 1))
+        sleep 0.2
+    done
+    printf '%s\n' "$path"
+}
 
 AI_CHAT_HOME="$home" CHAT_ANNOUNCE=0 \
     "$SERVER" 0 >"$temporary_root/server.out" 2>"$temporary_root/server.err" &
@@ -122,16 +136,20 @@ client join --chan "$chan" >/dev/null
 client tail --chan "$chan" --presence >"$temporary_root/tail.out" 2>"$temporary_root/tail.err" &
 tail_pid=$!
 
-for _ in $(seq 1 50); do
-    [ -S "$socket" ] && break
-    sleep 0.2
-done
-[ -S "$socket" ] || t_fail "the tail did not bind a control socket at $socket: $(cat "$temporary_root/tail.err")"
+socket="$(await_socket)"
+[ -n "$socket" ] && [ -S "$socket" ] \
+    || t_fail "the tail bound no control socket (record: $(cat "$record" 2>/dev/null)): $(cat "$temporary_root/tail.err")"
 
-t_assert_eq 'the owner directory is private' \
+t_assert_eq 'the record directory is private' \
     "$(ls -ld "$home/owners" | cut -c2-10)" 'rwx------'
+t_assert_eq 'the socket directory is private' \
+    "$(ls -ld "$(dirname "$socket")" | cut -c2-10)" 'rwx------'
 t_assert_eq 'the socket is owner-only' \
     "$(ls -l "$socket" | cut -c2-10)" 'rw-------'
+# The socket must be somewhere short by construction. A path near the address
+# limit is how a tail silently declines to own anything at all.
+t_assert_eq 'the socket path is well inside the address limit' \
+    "$([ "${#socket}" -lt 100 ] && echo inside || echo "over:${#socket}")" 'inside'
 
 # ── a forwarded send is not suffixed, which is B283 ─────────────────────────
 client send --chan "$chan" --text 'through the owner' >"$temporary_root/send.out" 2>&1 \
@@ -214,6 +232,12 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 t_assert_eq 'and the tail actually exits' "$stopped" '1'
+# Killed before it is waited on, even though the assertion above has already
+# reported a tail that would not stop. Waiting on a live process after saying
+# so turns a FAILING test into a HANGING one, and a hang carries no output, no
+# exit code and no test name -- which is how three CI legs sat for three hours
+# on the same shape in test-chat.sh.
+kill "$tail_pid" 2>/dev/null || true
 wait "$tail_pid" 2>/dev/null || true
 t_assert_eq 'and its control socket is gone, so callers fall back' \
     "$([ -S "$socket" ] && echo present || echo gone)" 'gone'
