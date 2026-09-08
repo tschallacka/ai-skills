@@ -2976,7 +2976,7 @@
     {
       "id": "B296",
       "title": "A forwarded join makes the owner a member of a channel its tail never prints",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2987,12 +2987,12 @@
       "surfaces": [
         "src/chat-client-rs/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "d7c12ec5 (T112) -- a tail follows a SET of channels and serve_join adds to it, so a channel the owner is a member of is a channel the tail prints. Membership and listening are now one decision in one place instead of two in two.",
+      "verification": "chat/tests/test-chat-owner-socket.sh asserts on the TAIL'S OWN OUTPUT, the only place that distinguishes following from merely joining: a forwarded join, then a peer posting into that channel, then the message appearing in the tail's log. The send must come from a PEER because the server deliberately does not echo a PRIVMSG to its sender (B249), so a test that posted to itself would assert on traffic that is never pushed -- that mistake was made first and caught by the test failing. Mutation: disabling the push in serve_join fails three assertions, including this one.",
       "found_by": "aiskills, writing serve_join for T107 -- noted in the code and in conversation and NOT filed at the time, which is the process failure this entry also records",
       "notes": null,
       "created_at": "2026-09-08T14:18:47Z",
-      "updated_at": "2026-09-08T14:18:47Z"
+      "updated_at": "2026-09-08T14:38:49Z"
     },
     {
       "id": "B297",

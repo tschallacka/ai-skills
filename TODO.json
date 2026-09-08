@@ -280,23 +280,6 @@
       "updated_at": "2026-09-08T13:56:30Z"
     },
     {
-      "id": "T112",
-      "title": "leave stops the tail on that channel, and a tail follows a set of channels",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka's ruling, 2026-09-08: a leave on a channel must STOP the tail on that channel, not refuse. T107 shipped the refusal -- serve_leave answered 64 with 'stop the tail to leave it' -- which is the wrong end of the choice: the caller asked to leave and should be obeyed.\n\nThe two halves are one change. 'The tail on that channel' cannot mean one tail per channel: there is one owner per session and only one tail holds the control socket, so a leave aimed at a second channel could never reach a second tail. So a tail follows a SET of channels: --chan is repeatable, each channel keeps its own cursor (the session already holds a map), the loop prints any followed channel, and the LASTID resync walks the set one channel per tick so bookkeeping does not grow with the count.\n\nleave then means: PART the channel, drop its cursor, drop it from the set -- and if the set is now empty the tail stops, because a tail following nothing would otherwise hold a connection subscribed to nothing while still answering as the session's owner.\n\nThis also closes B296 by construction: a forwarded join ADDS to the set, so a channel the owner is a member of is a channel the tail prints. Membership and listening stop being able to diverge.",
-      "blocked_on": null,
-      "refs": [
-        "src/chat-client-rs/src/lib.rs",
-        "chat/SKILL.md",
-        "chat/tests/test-chat-owner-socket.sh"
-      ],
-      "note": "Raised as a question about whether a tail can follow several channels; the answer was no, and the ruling makes it yes because the leave semantics require it.",
-      "created_at": "2026-09-08T14:18:47Z",
-      "updated_at": "2026-09-08T14:18:47Z"
-    },
-    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
@@ -846,6 +829,23 @@
       "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor. Landed on unix 2026-09-08 (commit 8e4b52e0, PR 78): control.rs holds the socket, the monitor thread and the client-side forwarder; lib.rs gained the serve_* verbs, the owner setup in tail, and forward_or_fall_back in send/read/names/join/leave. Ten unit tests plus chat/tests/test-chat-owner-socket.sh, whose --no-session control is the permanent mutation proving the unsuffixed assertion is not vacuous. Windows is NOT covered and is now T111; there the cfg(not(unix)) arm returns None so every verb keeps its pre-T107 behaviour. Two register entries came out of the work: B294 (insert refuses a line number read accepts) and B295 (the remote read arm saves a mention cursor), and B295 is why serve_read copies the remote behaviour rather than the better local one.",
       "created_at": "2026-09-08T11:12:48Z",
       "updated_at": "2026-09-08T13:58:10Z"
+    },
+    {
+      "id": "T112",
+      "title": "leave stops the tail on that channel, and a tail follows a set of channels",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling, 2026-09-08: a leave on a channel must STOP the tail on that channel, not refuse. T107 shipped the refusal -- serve_leave answered 64 with 'stop the tail to leave it' -- which is the wrong end of the choice: the caller asked to leave and should be obeyed.\n\nThe two halves are one change. 'The tail on that channel' cannot mean one tail per channel: there is one owner per session and only one tail holds the control socket, so a leave aimed at a second channel could never reach a second tail. So a tail follows a SET of channels: --chan is repeatable, each channel keeps its own cursor (the session already holds a map), the loop prints any followed channel, and the LASTID resync walks the set one channel per tick so bookkeeping does not grow with the count.\n\nleave then means: PART the channel, drop its cursor, drop it from the set -- and if the set is now empty the tail stops, because a tail following nothing would otherwise hold a connection subscribed to nothing while still answering as the session's owner.\n\nThis also closes B296 by construction: a forwarded join ADDS to the set, so a channel the owner is a member of is a channel the tail prints. Membership and listening stop being able to diverge.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md",
+        "chat/tests/test-chat-owner-socket.sh"
+      ],
+      "note": "Raised as a question about whether a tail can follow several channels; the answer was no, and the ruling makes it yes because the leave semantics require it. Landed d7c12ec5 on PR 78. --chan is repeatable; each channel keeps its own cursor; the loop prints any followed channel; the LASTID resync walks the set one channel per tick so bookkeeping does not grow with the count; tail --local refuses a second --chan rather than quietly following the first. leave parts a channel, drops its cursor and drops it from the set, and stops the tail when the set empties. Closed B296 by construction. Documented in chat/SKILL.md (d6e54af8) including why a second tail is the thing to avoid -- flowchart measured nick/nick-2 across two tails on the bus.",
+      "created_at": "2026-09-08T14:18:47Z",
+      "updated_at": "2026-09-08T14:38:49Z"
     },
     {
       "id": "T1",
