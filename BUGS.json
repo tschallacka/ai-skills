@@ -5956,6 +5956,27 @@
       "updated_at": "2026-09-07T22:44:04Z"
     },
     {
+      "id": "B293",
+      "title": "interactive-shell/bin is not gitignored, so built binaries there are stageable",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd <repo>; for d in chat/bin ai-text-editor/bin interactive-shell/bin; do printf '%s ' $d; git check-ignore -q $d/ && echo ignored || echo NOT; done",
+      "observed": "chat/bin and ai-text-editor/bin are ignored; interactive-shell/bin is NOT. After placing the wrapper's two binaries there, git status lists 'interactive-shell/bin/' as untracked, so a broad add would commit multi-megabyte artifacts.",
+      "expected": "interactive-shell/bin/*/ is ignored alongside the other two, since .gitignore already states these binaries are never committed and CI places them.",
+      "mechanism": ".gitignore names chat/bin/*/ and ai-text-editor/bin/*/ explicitly rather than a pattern covering every skill, and interactive-shell was not added when its binaries.tsv was.",
+      "surfaces": [
+        ".gitignore"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "checking the tree before ending the 2026-09-08 session, after placing the binaries B291 describes as missing",
+      "notes": null,
+      "created_at": "2026-09-08T12:30:33Z",
+      "updated_at": "2026-09-08T12:30:33Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
