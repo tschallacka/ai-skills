@@ -2974,6 +2974,27 @@
       "updated_at": "2026-09-08T12:22:36Z"
     },
     {
+      "id": "B296",
+      "title": "A forwarded join makes the owner a member of a channel its tail never prints",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "With a tail owning the session on #a: chat-client-rs join --chan \"#b\"   (forwarded to the owner), then have a peer post in #b",
+      "observed": "The owner sends JOIN #b on its connection, so the server counts it as present in #b and relays #b traffic to it. The tail loop filters PRIVMSG on its single --chan, so every #b line is read off the stream and dropped. The agent is in the member list of a channel it cannot hear, and its #b cursor never moves.",
+      "expected": "Either the join is followed -- its messages printed and its cursor kept -- or it is refused. Being a silent member is the one outcome that misleads the peers who can see the nick in NAMES.",
+      "mechanism": "serve_join (T107) writes JOIN on the owner connection, but the tail loop was written for exactly one channel and compares against o.chan. Membership therefore became a property of the connection while listening stayed a property of the loop, and the two diverged the moment join could be forwarded.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "aiskills, writing serve_join for T107 -- noted in the code and in conversation and NOT filed at the time, which is the process failure this entry also records",
+      "notes": null,
+      "created_at": "2026-09-08T14:18:47Z",
+      "updated_at": "2026-09-08T14:18:47Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",

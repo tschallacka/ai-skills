@@ -280,6 +280,23 @@
       "updated_at": "2026-09-08T13:56:30Z"
     },
     {
+      "id": "T112",
+      "title": "leave stops the tail on that channel, and a tail follows a set of channels",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling, 2026-09-08: a leave on a channel must STOP the tail on that channel, not refuse. T107 shipped the refusal -- serve_leave answered 64 with 'stop the tail to leave it' -- which is the wrong end of the choice: the caller asked to leave and should be obeyed.\n\nThe two halves are one change. 'The tail on that channel' cannot mean one tail per channel: there is one owner per session and only one tail holds the control socket, so a leave aimed at a second channel could never reach a second tail. So a tail follows a SET of channels: --chan is repeatable, each channel keeps its own cursor (the session already holds a map), the loop prints any followed channel, and the LASTID resync walks the set one channel per tick so bookkeeping does not grow with the count.\n\nleave then means: PART the channel, drop its cursor, drop it from the set -- and if the set is now empty the tail stops, because a tail following nothing would otherwise hold a connection subscribed to nothing while still answering as the session's owner.\n\nThis also closes B296 by construction: a forwarded join ADDS to the set, so a channel the owner is a member of is a channel the tail prints. Membership and listening stop being able to diverge.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/lib.rs",
+        "chat/SKILL.md",
+        "chat/tests/test-chat-owner-socket.sh"
+      ],
+      "note": "Raised as a question about whether a tail can follow several channels; the answer was no, and the ruling makes it yes because the leave semantics require it.",
+      "created_at": "2026-09-08T14:18:47Z",
+      "updated_at": "2026-09-08T14:18:47Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
