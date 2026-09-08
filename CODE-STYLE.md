@@ -1,15 +1,30 @@
-# Shell code style and structure
+# Code style and structure
 
-The contract every shell file in this repository conforms to. `DEVELOPMENT.md`
-covers the release workflow, `AGENTS.md` covers how to operate in the repo, and
-`planning/MAINTAINER-STYLE-CONTRACT.md` covers the *content* of generated plan
-documents, and `CODE-CONTRACTS.md` covers how a script must behave toward what
-other scripts and other runs depend on. This file covers the *code*.
+The contract every source file in this repository conforms to, **in every
+language**. `DEVELOPMENT.md` covers the release workflow, `AGENTS.md` covers how
+to operate in the repo, and `planning/MAINTAINER-STYLE-CONTRACT.md` covers the
+*content* of generated plan documents, and `CODE-CONTRACTS.md` covers how a
+script must behave toward what other scripts and other runs depend on. This file
+covers the *code*.
 
-Two audiences read these scripts: a developer on an unknown machine, and a
-maintainer AI agent that has to locate one behaviour in a tree of ~90 scripts.
-Both are served by the same thing — small files with a predictable skeleton, one
-way of doing each job, and no platform surprises.
+**Every language, not only shell.** This repository began as shell and grew a
+Rust workspace to get past what shell could not do -- so the rules were written
+saying "shell file" when shell was all there was. That was never a judgement
+that Rust deserved fewer rules, and reading it that way has already been used to
+argue a Rust file is ungoverned. It is not: these rules are held globally, and
+where a rule is inherently shell-specific (the `set -euo pipefail` line, the
+bash 3.2 floor, `local`) it simply has no counterpart to apply in another
+language rather than exempting that language from the rest.
+
+Naming follows each language's own convention rather than shell's: a Rust file
+is `snake_case.rs` with the crate layout Cargo expects, and a doc comment is
+`///` or `//!`. What does not change is everything the rules are actually about
+-- size, decomposition, what a comment may say, and what a reader is owed.
+
+Two audiences read this code: a developer on an unknown machine, and a
+maintainer AI agent that has to locate one behaviour in a tree of ~90 scripts
+and ~86 crates. Both are served by the same thing — small files with a
+predictable skeleton, one way of doing each job, and no platform surprises.
 
 - [1. Portability contract](#1-portability-contract)
 - [2. File skeleton](#2-file-skeleton)
@@ -604,7 +619,7 @@ which one applies before you write a comment:
 | Code | Rule |
 |---|---|
 | Code a skill **produces in a user's project** under a plan | `planning/references/comment-discipline-contract.md` — self-documenting by default, **three-line hard limit**, genuine non-evident specifics only, no why-prose, no history, no cross-file relationship notes |
-| **This repository's own source** | this section |
+| **This repository's own source, in every language** | this section |
 
 They differ because the audiences differ: produced code sits in a repo whose
 owner has the full context, while these scripts ship to strangers' machines and
@@ -626,6 +641,20 @@ mawk/BSD-awk parity) are the model. What does *not* belong in a comment:
   they duplicate what symbol search already answers and drift when the other
   file moves. A `# TODO`-style marker naming a concrete follow-up is the one
   exception, and it should be a single line.
+
+**In Rust this governs `//`, `///` and `//!` alike.** A doc comment is a
+comment: it may say what a caller cannot work out from the signature, and it
+may not carry benchmark numbers, the story of a past decision, or a pointer to
+another file. Rustdoc prose describing the API is the thing `///` is for and is
+not "why-prose"; an account of how the function came to look this way is, and
+belongs in the commit message.
+
+The three-line limit above is written for **in-body** comments and a doc
+comment on an item is not one, so an item's leading block is not capped at
+three lines -- but every content rule still binds it. Do not read the absent
+cap as permission to narrate. (Whether a leading block should be capped at all
+is open as T105; until that is settled, the content rules are the constraint
+that matters.)
 
 ### Quoting verbatim material in a comment
 
