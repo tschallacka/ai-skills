@@ -1547,7 +1547,7 @@
     {
       "id": "B97",
       "title": "validate-plan reports adversarially approved=no for an approved plan",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1559,12 +1559,12 @@
         "planning/scripts/validate-plan-docs-lib.sh",
         "planning/scripts/validate-plan.sh"
       ],
-      "fix": "Working-tree fix: initialize review_approved=true before the Verdict grep in plan_validate_plan_docs so the only assignment left is the failure path; aligns the gate with the docs pass own unset-means-approved semantics. (Recorded as B94 locally before PR #7 landed; master's B94-B96 were unknown then, so it renumbered to B97 at the rebase.)",
-      "verification": "Re-run validate-plan.sh on .plans/untrack-generated-files: gates must read structurally valid=yes, adversarially approved=yes.",
+      "fix": "review_approved=true initialized before the Verdict grep in plan_validate_plan_docs (planning/scripts/validate-plan-docs-lib.sh), landed in commit 0ed87a3b (2026-08-31) bundled with an unrelated change; the register entry was never closed and the scenario had no regression test.",
+      "verification": "planning/tests/test-validate-gates.sh case 5 (added 2026-09-09): builds a plan whose adversarial-review.md carries the approved verdict and whose plan-description.md mirrors it, asserts the gates line reads adversarially approved=yes. Passes.",
       "found_by": "T72 plan readiness pass, maintainer session 2026-08-31",
       "notes": null,
       "created_at": "2026-08-31T14:05:48Z",
-      "updated_at": "2026-08-31T15:20:00Z"
+      "updated_at": "2026-09-08T23:53:10Z"
     },
     {
       "id": "B100",
