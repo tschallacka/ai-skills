@@ -255,17 +255,23 @@ esac
 cli sess leave --chan '#old' --insecure >/dev/null 2>&1 || true
 cleft="$(cli sess session show 2>/dev/null | grep 'cursor #old' || true)"
 [ -z "$cleft" ] || t_fail "leave did not drop the #old cursor: [$cleft]"
-# mention-notify: a tail --mentions --mention-exit exits when a concurrent
-# send mentions @<session nick> (the sender auto-suffixes on nick-in-use).
+# mention-notify: a tail --mentions --mention-exit exits when SOMEBODY ELSE
+# mentions @<session nick>.
+#
+# The sender must be a separate agent. One session owns one connection, and the
+# server does not echo a PRIVMSG to its sender, so a self-send never reaches
+# the tail -- and a peer send holds whether or not the owner socket is active.
 mhome="$temporary_root/ment"
-mkdir -p "$mhome"
+mpeer="$temporary_root/ment-peer"
+mkdir -p "$mhome" "$mpeer"
 AI_CHAT_HOME="$mhome" "$CLIENT" session set --server 127.0.0.1:"$port" --nick mwatcher >/dev/null 2>&1 || true
+AI_CHAT_HOME="$mpeer" "$CLIENT" session set --server 127.0.0.1:"$port" --nick mpeer >/dev/null 2>&1 || true
 AI_CHAT_HOME="$mhome" "$CLIENT" join --chan '#ment' --insecure >/dev/null 2>&1 || true
 AI_CHAT_HOME="$mhome" "$CLIENT" tail --chan '#ment' --mentions --mention-exit --insecure \
     >>"$temporary_root/ment.log" 2>>"$temporary_root/ment.err" &
 ment_pid=$!
 sleep 5
-AI_CHAT_HOME="$mhome" "$CLIENT" send --chan '#ment' --text 'ping @mwatcher now' --insecure \
+AI_CHAT_HOME="$mpeer" "$CLIENT" send --chan '#ment' --text 'ping @mwatcher now' --insecure \
     >/dev/null 2>>"$temporary_root/ment-send.err" || t_fail "mention send failed: $(cat "$temporary_root/ment-send.err")"
 for i in $(seq 1 6); do
     kill -0 "$ment_pid" 2>/dev/null || break
@@ -276,8 +282,10 @@ if kill -0 "$ment_pid" 2>/dev/null; then
 fi
 grep -q '!! MENTION !!' "$temporary_root/ment.log" \
     || t_fail "mention was not surfaced: [$(cat "$temporary_root/ment.log")]"
+# Killed before it is waited on: waiting on a process already reported as stuck
+# turns a failing test into a hanging one, and a hang carries no name.
+kill "$ment_pid" 2>/dev/null || true
 wait "$ment_pid" 2>/dev/null || true
-
 # ---- B116: two agents, ONE AI_CHAT_HOME, separate sessions ----------------
 # This is the shape the defect was measured in: both agents leave AI_CHAT_HOME
 # at one shared path. Each must keep its own nick and its own per-channel

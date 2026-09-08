@@ -3785,6 +3785,7 @@ tests/test-plan-snapshot.sh
 tests/test-planning-context-contract.sh
 tests/test-portability-contract.sh
 tests/test-portability-redaction.sh
+tests/test-skill-positional-params.sh
 tests/test-portable-helpers.sh
 tests/test-progress-bar-shape.sh
 tests/test-progress-derivation.sh
@@ -3965,6 +3966,7 @@ tests/test-chat.sh
 tests/test-chat-resolution.sh
 tests/test-chat-broadcast-stall.sh
 tests/test-chat-descriptor-leak.sh
+tests/test-chat-owner-socket.sh
 CHATEOF
             ;;
         interactive-shell)

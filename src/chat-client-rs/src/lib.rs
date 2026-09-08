@@ -19,7 +19,11 @@
 //! connects require an exact match (fail closed). `--insecure` bypasses this
 //! for testing.
 
-use std::collections::VecDeque;
+/// The tail-owned control socket, over which the other verbs borrow the one
+/// connection instead of opening a second one under the same nick (T107).
+pub mod control;
+
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{self, BufRead, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -753,7 +757,12 @@ pub fn apply_session(
 struct Opts {
     server: String,
     nick: String,
+    /// The first `--chan`. Every single-channel verb reads this, so they are
+    /// unaffected by the flag becoming repeatable.
     chan: String,
+    /// Every `--chan`, in the order given. Only `tail` reads this, because it
+    /// is the only verb that follows channels rather than acting on one.
+    chans: Vec<String>,
     text: String,
     since: String,
     insecure: bool,
@@ -772,6 +781,7 @@ fn parse_opts(args: &[String]) -> Opts {
         server: String::new(),
         nick: String::new(),
         chan: String::new(),
+        chans: Vec::new(),
         text: String::new(),
         since: String::new(),
         insecure: false,
@@ -792,9 +802,19 @@ fn parse_opts(args: &[String]) -> Opts {
                 i += 1;
                 o.nick = args.get(i).cloned().unwrap_or_default();
             }
+            // Repeatable, for `tail`, which follows a set (T112). `chan` keeps
+            // the FIRST one so every single-channel verb reads what it always
+            // did; a second `--chan` to one of those is ignored rather than
+            // silently changing which channel it acts on.
             "--chan" | "-c" => {
                 i += 1;
-                o.chan = args.get(i).cloned().unwrap_or_default();
+                let name = args.get(i).cloned().unwrap_or_default();
+                if o.chan.is_empty() {
+                    o.chan = name.clone();
+                }
+                if !name.is_empty() && !o.chans.iter().any(|c| c == &name) {
+                    o.chans.push(name);
+                }
             }
             "--text" => {
                 i += 1;
@@ -1195,6 +1215,11 @@ pub fn json_field(s: &str, key: &str) -> Option<String> {
 
 fn send(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    // Send on the tail's connection when this session has one (T107). That is
+    // what stops the server seeing a second registration under this nick and
+    // suffixing it, which is how an agent's own messages arrived from
+    // `<nick>-2` (B283).
+    forward_or_fall_back(&o, state_dir, "send");
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1340,6 +1365,7 @@ pub fn read_last_id(
 // claim.
 fn names(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    forward_or_fall_back(&o, state_dir, "names");
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1403,6 +1429,7 @@ fn names(args: &[String], state_dir: &std::path::Path) {
 
 fn join_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    forward_or_fall_back(&o, state_dir, "join");
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1452,6 +1479,7 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
 /// Leave a channel: send PART and drop the channel cursor from the session.
 fn leave_channel(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    forward_or_fall_back(&o, state_dir, "leave");
     let (mut server, nick, used_session) =
         apply_session(&o.server, &o.nick, state_dir, o.no_session);
     let from_session = server.clone();
@@ -1607,6 +1635,10 @@ fn local_read(home: &std::path::Path, chan: &str, since: u64, mentions_for: Opti
 
 fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
+    // If this session's tail holds the connection, read on it (T107). Returns
+    // here when nothing is holding one, and the rest of the function is then
+    // exactly what it always was.
+    forward_or_fall_back(&o, state_dir, "read");
     if o.local {
         if o.chan.is_empty() {
             eprintln!("chat-client-rs: read --local needs --chan #c");
@@ -1747,6 +1779,320 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     let _ = write_line(&mut tls, "QUIT");
 }
 
+// ---- serving a borrowed verb (T107) ---------------------------------------
+// The owning tail performs these on ITS connection, from its own loop, so no
+// second registration ever happens under the session's nick. Each one is the
+// same wire exchange the standalone verb performs -- deliberately, because a
+// caller cannot tell whether it was forwarded or fell back, and two paths that
+// answer differently would make that difference visible as a bug.
+
+/// What to do with a line read while collecting an answer.
+enum Take {
+    /// Part of the answer being collected.
+    Keep,
+    /// Not part of it: hand it back to the tail loop.
+    Park,
+    /// The answer is complete.
+    Done,
+}
+
+/// Read until `classify` says the answer is complete, keeping what it selects
+/// and parking everything else for the tail loop.
+///
+/// Parking is not tidiness. This is the tail's stream: a pushed PRIVMSG that
+/// lands in the middle of a borrowed FETCH would otherwise be read here and
+/// dropped -- the tail would never print it, and the cursor would still move
+/// past it, so the message would be gone rather than late.
+fn collect_answer(
+    tls: &mut Client,
+    pending: &mut VecDeque<String>,
+    seconds: u64,
+    mut classify: impl FnMut(&str) -> Take,
+) -> (Vec<String>, bool) {
+    let mut kept = Vec::new();
+    let deadline = SystemTime::now() + Duration::from_secs(seconds);
+    while SystemTime::now() < deadline {
+        match read_line(tls) {
+            Ok(line) => match classify(&line) {
+                Take::Keep => kept.push(line),
+                Take::Park => pending.push_back(line),
+                Take::Done => return (kept, true),
+            },
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    break;
+                }
+            }
+        }
+    }
+    (kept, false)
+}
+
+/// Perform one borrowed verb and answer it.
+/// The channels this tail follows, and whether it should stop.
+///
+/// Owned by the tail loop and handed to a borrowed verb by mutable reference:
+/// `join` adds to it, `leave` removes from it, and emptying it stops the tail.
+/// No lock, because serving happens on the tail's own thread -- the monitor
+/// thread only queues the request.
+struct Following {
+    chans: Vec<String>,
+    stop: bool,
+}
+
+/// Perform one borrowed verb and answer it.
+fn serve_request(
+    request: &control::Request,
+    tls: &mut Client,
+    nick: &str,
+    following: &mut Following,
+    state_dir: &std::path::Path,
+    pending: &mut VecDeque<String>,
+) -> control::Reply {
+    if !request.chan.is_empty() && !valid_chan(&request.chan) {
+        return control::Reply::fail(
+            64,
+            format!("chat-client-rs: not a channel name: {}", request.chan),
+        );
+    }
+    match request.verb.as_str() {
+        "send" => serve_send(request, tls, nick, pending),
+        "read" => serve_read(request, tls, state_dir, pending),
+        "names" => serve_names(request, tls, pending),
+        "join" => serve_join(request, tls, following, state_dir, pending),
+        "leave" => serve_leave(request, tls, following, state_dir),
+        other => control::Reply::fail(
+            64,
+            format!("chat-client-rs: the session owner cannot serve {}", other),
+        ),
+    }
+}
+
+fn serve_send(
+    request: &control::Request,
+    tls: &mut Client,
+    nick: &str,
+    pending: &mut VecDeque<String>,
+) -> control::Reply {
+    let segments = wire_segments(nick, &request.chan, &request.text);
+    for segment in &segments {
+        if let Err(e) = write_line(tls, &format!("PRIVMSG {} :{}", request.chan, segment)) {
+            return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+        }
+    }
+    if let Err(e) = write_line(tls, &format!("LASTID {}", request.chan)) {
+        return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+    }
+    // The 999 acknowledgement proves the line was PERSISTED. Nothing is
+    // reported as sent without it: a send that only reached a socket buffer
+    // reporting success is how B266 stayed invisible for as long as it did.
+    if read_last_id(tls, &request.chan, pending) == 0 {
+        return control::Reply::fail(70, "chat-client-rs: server did not acknowledge the message");
+    }
+    // Built from the segments that went to the wire, not from the text
+    // argument, for the same reason the standalone path is (B266).
+    //
+    // The cursor is NOT advanced: sending is not reading (B254), and with one
+    // owner there is now exactly one process that could have advanced it.
+    control::Reply::ok(
+        segments
+            .iter()
+            .map(|segment| {
+                format!(
+                    ":{nick}!{nick}@localhost PRIVMSG {} :{}",
+                    request.chan, segment
+                )
+            })
+            .collect(),
+    )
+}
+
+fn serve_read(
+    request: &control::Request,
+    tls: &mut Client,
+    state_dir: &std::path::Path,
+    pending: &mut VecDeque<String>,
+) -> control::Reply {
+    let mut since = request.since.clone();
+    if since.is_empty() {
+        // A RECORDED cursor counts even at 0 (B269).
+        if let Some(cursor) = Session::load(state_dir).cursor_recorded(&request.chan) {
+            since = cursor.to_string();
+        }
+    }
+    if since.is_empty() {
+        if let Err(e) = write_line(tls, &format!("LASTID {}", request.chan)) {
+            return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+        }
+        since = read_last_id(tls, &request.chan, pending).to_string();
+    }
+    let suffix = if request.mentions { " mentions" } else { "" };
+    if let Err(e) = write_line(tls, &format!("FETCH {} {}{}", request.chan, since, suffix)) {
+        return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+    }
+    let (lines, _) = collect_answer(tls, pending, 5, |line| {
+        if line.starts_with(":server 000 end-of-history") {
+            Take::Done
+        } else if line.starts_with("MSG ") {
+            Take::Keep
+        } else {
+            Take::Park
+        }
+    });
+    let max_id = lines.iter().filter_map(|line| msg_line_id(line)).max();
+    // Saved for a mention-filtered read too, because the standalone remote read
+    // saves there as well. That is very likely wrong -- the local arm guards it
+    // and says at length why saving a mention read's id marks the messages it
+    // skipped as seen -- but the two paths must not disagree, or forwarding
+    // becomes observable. Filed rather than fixed here.
+    if let Some(id) = max_id {
+        save_cursor(state_dir, &request.chan, id, false);
+    }
+    control::Reply::ok(lines)
+}
+
+fn serve_names(
+    request: &control::Request,
+    tls: &mut Client,
+    pending: &mut VecDeque<String>,
+) -> control::Reply {
+    if let Err(e) = write_line(tls, &format!("NAMES {}", request.chan)) {
+        return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+    }
+    let (lines, ended) = collect_answer(tls, pending, 4, |line| {
+        match Message::parse(line).map(|m| m.command) {
+            Ok(command) if command == "353" => Take::Keep,
+            Ok(command) if command == "366" => Take::Done,
+            _ => Take::Park,
+        }
+    });
+    if !ended {
+        return control::Reply::fail(70, "chat-client-rs: no end-of-names from server");
+    }
+    let members = lines
+        .iter()
+        .filter_map(|line| Message::parse(line).ok())
+        .filter_map(|message| message.trailing)
+        .flat_map(|list| {
+            list.split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<String>>()
+        })
+        .collect();
+    control::Reply::ok(members)
+}
+
+fn serve_join(
+    request: &control::Request,
+    tls: &mut Client,
+    following: &mut Following,
+    state_dir: &std::path::Path,
+    pending: &mut VecDeque<String>,
+) -> control::Reply {
+    if let Err(e) = write_line(tls, &format!("JOIN {}", request.chan))
+        .and_then(|_| write_line(tls, &format!("LASTID {}", request.chan)))
+    {
+        return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+    }
+    let current = read_last_id(tls, &request.chan, pending);
+    let seed = if request.since.is_empty() {
+        current
+    } else {
+        request.since.parse::<u64>().unwrap_or(current)
+    };
+    let mut session = Session::load(state_dir);
+    session.cursors.insert(request.chan.clone(), seed);
+    let _ = session.save(state_dir);
+    // The JOIN above made this connection a MEMBER of the channel, so the
+    // server will now relay its traffic here. Following it is not optional: a
+    // tail that stayed on its original channel would read those lines off the
+    // stream and drop them, leaving the agent in a member list it cannot hear
+    // and a cursor that never moves (B296). Membership and listening are the
+    // same decision, so they are made in the same place.
+    if !following.chans.iter().any(|c| c == &request.chan) {
+        following.chans.push(request.chan.clone());
+    }
+    control::Reply::ok(vec![format!(
+        "joined {} (resuming after id {}); following {}",
+        request.chan,
+        seed,
+        following.chans.join(", ")
+    )])
+}
+
+fn serve_leave(
+    request: &control::Request,
+    tls: &mut Client,
+    following: &mut Following,
+    state_dir: &std::path::Path,
+) -> control::Reply {
+    if let Err(e) = write_line(tls, &format!("PART {}", request.chan)) {
+        return control::Reply::fail(70, format!("chat-client-rs: {}", e));
+    }
+    let mut session = Session::load(state_dir);
+    session.cursors.remove(&request.chan);
+    let _ = session.save(state_dir);
+    // Leaving a channel this tail follows stops FOLLOWING it. An earlier
+    // version refused the request when the channel was the tailed one and told
+    // the caller to stop the tail instead -- which is the wrong end of the
+    // choice, because the caller asked to leave and there is nothing ambiguous
+    // about that (T112).
+    let was_following = following.chans.iter().any(|c| c == &request.chan);
+    following.chans.retain(|c| c != &request.chan);
+    let mut out = vec![format!("left {}", request.chan)];
+    if was_following && following.chans.is_empty() {
+        // Nothing left to follow. A tail that kept running here would hold a
+        // connection subscribed to no channel while still answering as the
+        // session's owner: present nowhere, waking on nothing, and looking
+        // alive to anything reading the socket.
+        following.stop = true;
+        out.push("no channels left to follow; the tail is stopping".to_string());
+    } else if was_following {
+        out.push(format!("still following {}", following.chans.join(", ")));
+    }
+    control::Reply::ok(out)
+}
+
+/// Ask the session's owner to perform this verb, and finish the process with
+/// what it reports.
+///
+/// It RETURNS when there is no owner to ask, and the caller then opens its own
+/// connection exactly as it did before T107. Every reason for having no owner
+/// is one of those: no tail running, a tail that could not bind, a socket left
+/// by a dead one, or an owner whose identity does not match an explicit
+/// `--nick`/`--server`.
+///
+/// `--no-session` means "touch no shared state", so it never forwards: the
+/// owner's connection and cursor file are precisely that shared state.
+fn forward_or_fall_back(o: &Opts, state_dir: &std::path::Path, verb: &str) {
+    if o.no_session || o.local || o.chan.is_empty() {
+        return;
+    }
+    if verb == "send" && o.text.is_empty() {
+        return;
+    }
+    let request = control::Request {
+        verb: verb.to_string(),
+        chan: o.chan.clone(),
+        text: o.text.clone(),
+        since: o.since.clone(),
+        mentions: o.mentions,
+        nick: o.nick.clone(),
+        server: o.server.clone(),
+    };
+    let reply = match control::ask(state_dir, &session_key().0, &request) {
+        Some(reply) => reply,
+        None => return,
+    };
+    for line in &reply.out {
+        println!("{}", line);
+    }
+    if !reply.err.is_empty() {
+        eprintln!("{}", reply.err);
+    }
+    std::process::exit(reply.code);
+}
+
 fn tail(args: &[String], state_dir: &std::path::Path) {
     let o = parse_opts(args);
     // `--mention-exit` means "stop once a message mentions me", which needs the
@@ -1762,6 +2108,17 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
         std::process::exit(64);
     }
     if o.local {
+        // A local tail walks ONE log file, so it follows one channel. Refused
+        // rather than quietly following the first of several: a caller that
+        // passed three names and got one channel's traffic has no way to tell
+        // that from a quiet bus.
+        if o.chans.len() > 1 {
+            eprintln!(
+                "chat-client-rs: tail --local follows one channel; got {}",
+                o.chans.join(", ")
+            );
+            std::process::exit(64);
+        }
         if o.chan.is_empty() {
             eprintln!("chat-client-rs: tail --local needs --chan #c");
             std::process::exit(64);
@@ -1839,9 +2196,18 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
         std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
-    if server.is_empty() || nick.is_empty() || o.chan.is_empty() {
+    if server.is_empty() || nick.is_empty() || o.chans.is_empty() {
         eprintln!("chat-client-rs: tail needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
+    }
+    // One tail follows a SET of channels: `--chan` is repeatable. Every name is
+    // checked before anything is joined, so a typo in the third does not leave
+    // the first two half-followed.
+    for chan in &o.chans {
+        if !valid_chan(chan) {
+            eprintln!("chat-client-rs: tail: not a channel name: {}", chan);
+            std::process::exit(64);
+        }
     }
     let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
@@ -1854,7 +2220,6 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
         save_session(state_dir, &server, &nick);
     }
     let _ = wait_for_welcome(&mut tls, &nick);
-    let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
     // Resume from the session cursor; with NO cursor recorded, default to the
     // channel's CURRENT end (LASTID) so tailing an old channel does not dump
     // its whole history — only new messages are shown from now on.
@@ -1862,23 +2227,105 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     // A recorded 0 is a position, not an absence (B269): it means this agent
     // joined while the channel was empty. `read` was fixed and this was not,
     // which left the collapse in the path every agent actually sits in.
+    //
+    // Per channel, because the cursor always was per channel -- the session
+    // holds a map. One tail following three channels is three watermarks, and
+    // they move independently.
     let mut pending = VecDeque::new();
-    let mut last_id: u64 = if o.no_session {
-        0
-    } else {
-        match Session::load(state_dir).cursor_recorded(&o.chan) {
-            Some(cur) => cur,
-            None => {
-                let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-                read_last_id(&mut tls, &o.chan, &mut pending)
+    let mut cursors: HashMap<String, u64> = HashMap::new();
+    for chan in &o.chans {
+        let _ = write_line(&mut tls, &format!("JOIN {}", chan));
+        let seed = if o.no_session {
+            0
+        } else {
+            match Session::load(state_dir).cursor_recorded(chan) {
+                Some(cur) => cur,
+                None => {
+                    let _ = write_line(&mut tls, &format!("LASTID {}", chan));
+                    read_last_id(&mut tls, chan, &mut pending)
+                }
             }
-        }
-    };
+        };
+        cursors.insert(chan.clone(), seed);
+    }
     // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
     // stream.  FETCH is intentionally not used here: it is a backfill
     // operation for read/reconnect, not a steady-state transport.
+    //
+    // The set is owned by the loop rather than read from `o`, because a
+    // borrowed `join` or `leave` changes it while the tail runs.
+    let mut following = Following {
+        chans: o.chans.clone(),
+        stop: false,
+    };
+    // One session, one connection (T107). From here this process OWNS the
+    // session: send, read, names, join and leave forward their request over a
+    // socket in the state dir and print what this connection reports, instead
+    // of registering a second time under the same nick -- which is what the
+    // server suffixed (B283), and what left two processes writing one cursor
+    // (B254, B269).
+    //
+    // `--no-session` owns nothing. It means "touch no shared state", and the
+    // socket plus the cursor file is exactly that shared state.
+    //
+    // A tail that cannot bind -- a second tail in the same session, a `--state`
+    // path too long for a socket address, a state dir it cannot write -- simply
+    // does not own the socket. It still tails, and every other verb still works
+    // the way it did before any of this existed.
+    let owner = if o.no_session {
+        None
+    } else {
+        control::serve(
+            state_dir,
+            &session_key().0,
+            control::OwnerRecord {
+                server: server.clone(),
+                nick: nick.clone(),
+                chan: following.chans.join(","),
+                ..control::OwnerRecord::default()
+            },
+        )
+    };
+    if let Some(owner) = &owner {
+        // Owning the socket shortens this loop's own read deadline. The loop
+        // only comes back around to take queued work when a read returns, so
+        // at the 5s connect default a forwarded send waited up to five seconds
+        // for a wire exchange that takes milliseconds. A shorter deadline costs
+        // an idle tail one wakeup a second and nothing else: the server writes
+        // each line in a single write, so a line is not split across a timeout.
+        let _ = tls.sock.set_read_timeout(Some(Duration::from_secs(1)));
+        eprintln!(
+            "chat-client-rs: this session's verbs are served on {}",
+            owner.socket().display()
+        );
+    }
     let mut last_sync = Instant::now();
+    let mut sync_next = 0usize;
     loop {
+        // Borrowed work first, and before blocking on a read: one atomic load
+        // when there is nothing waiting, which is the overwhelming majority of
+        // iterations. Each request is answered from this connection, so its
+        // caller sees what the wire said rather than what it asked for.
+        if let Some(owner) = &owner {
+            for job in owner.take_pending() {
+                let reply = serve_request(
+                    &job.request,
+                    &mut tls,
+                    &nick,
+                    &mut following,
+                    state_dir,
+                    &mut pending,
+                );
+                job.answer(reply);
+            }
+        }
+        // A borrowed `leave` that took the last channel leaves this tail with
+        // nothing to follow, and it stops. Staying up would hold a connection
+        // subscribed to nothing while still answering as the session's owner --
+        // present in no channel, waking on nothing, and looking alive.
+        if following.stop {
+            break;
+        }
         match pending
             .pop_front()
             .map(Ok)
@@ -1901,16 +2348,24 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 // the leaver shared, and the server only relays it to members of
                 // this one, so an unfiltered command is already scoped.
                 if o.presence && matches!(message.command.as_str(), "JOIN" | "PART" | "QUIT") {
-                    let in_this_chan = message.command == "QUIT"
-                        || message.params.iter().any(|p| p == &o.chan)
-                        || message.trailing.as_deref() == Some(o.chan.as_str());
-                    if in_this_chan {
+                    let in_a_followed_chan = message.command == "QUIT"
+                        || message
+                            .params
+                            .iter()
+                            .any(|p| following.chans.iter().any(|c| c == p))
+                        || message
+                            .trailing
+                            .as_deref()
+                            .map(|t| following.chans.iter().any(|c| c == t))
+                            .unwrap_or(false);
+                    if in_a_followed_chan {
                         println!("{}", l);
                     }
                     continue;
                 }
+                let addressed_to = message.params.first().map(String::as_str).unwrap_or("");
                 if message.command != "PRIVMSG"
-                    || message.params.first().map(String::as_str) != Some(o.chan.as_str())
+                    || !following.chans.iter().any(|c| c == addressed_to)
                 {
                     continue;
                 }
@@ -1926,6 +2381,14 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                         println!("{}", l);
                     }
                     if o.mention_exit && is_mention {
+                        // Stop serving before leaving: the socket outlives the
+                        // process otherwise, and a client that connects to it
+                        // in the gap waits out its whole deadline for an owner
+                        // that is gone. Removing it sends that client back to
+                        // its own connection immediately.
+                        if let Some(owner) = &owner {
+                            control::stop(owner);
+                        }
                         let _ = write_line(&mut tls, "QUIT");
                         std::process::exit(0);
                     }
@@ -1933,13 +2396,24 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 // A pushed IRC line has no history-row id. Resynchronize at a
                 // bounded cadence from the server's authoritative maximum,
                 // rather than guessing from the number of pushes received.
-                if last_sync.elapsed() >= Duration::from_secs(1) {
-                    let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-                    let authoritative_id = read_last_id(&mut tls, &o.chan, &mut pending);
-                    if authoritative_id > last_id {
-                        last_id = authoritative_id;
+                if last_sync.elapsed() >= Duration::from_secs(1) && !following.chans.is_empty() {
+                    // ONE channel per tick, round-robin. The cost of staying
+                    // synchronized must not grow with the number of channels
+                    // followed -- a tail on five channels would otherwise spend
+                    // five round trips a second on bookkeeping -- and a cursor
+                    // is a watermark that only moves forward, so reaching each
+                    // channel every few seconds instead of every second loses
+                    // nothing.
+                    sync_next %= following.chans.len();
+                    let chan = following.chans[sync_next].clone();
+                    sync_next += 1;
+                    let _ = write_line(&mut tls, &format!("LASTID {}", chan));
+                    let authoritative_id = read_last_id(&mut tls, &chan, &mut pending);
+                    let recorded = cursors.entry(chan.clone()).or_insert(0);
+                    if authoritative_id > *recorded {
+                        *recorded = authoritative_id;
                     }
-                    save_cursor(state_dir, &o.chan, last_id, o.no_session);
+                    save_cursor(state_dir, &chan, *recorded, o.no_session);
                     last_sync = Instant::now();
                 }
             }
@@ -1949,6 +2423,18 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 }
             }
         }
+    }
+    // QUIT so the server sees a departure rather than a dropped socket: a tail
+    // that stopped because it was told to leave should look like it left. On a
+    // broken stream this write fails and is ignored, which is the same outcome
+    // as not attempting it.
+    let _ = write_line(&mut tls, "QUIT");
+    // The stream is gone, so nothing can be served on it any more. Taking the
+    // socket down now is what lets the next verb fall back to its own
+    // connection immediately, rather than wait out a deadline against an owner
+    // that no longer has one.
+    if let Some(owner) = &owner {
+        control::stop(owner);
     }
 }
 
