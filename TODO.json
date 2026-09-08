@@ -330,9 +330,28 @@
         "chat/SKILL.md",
         "src/agent-session-key/src/lib.rs"
       ],
-      "note": "Supersedes the \"spawner must inject it\" plan in B303: the harness will do it, and the harness is the only party that always knows. Probe hook and settings entry were removed after measuring; nothing was left in the live config.",
+      "note": "Supersedes the \"spawner must inject it\" plan in B303: the harness will do it, and the harness is the only party that always knows. Probe hook and settings entry were removed after measuring; nothing was left in the live config. Tschallacka ruled the plugin a MUST for any session-dependent skill or MCP, wired into the installer as a hard requirement rather than an offer. That is T123, which is blocked on this entry.",
       "created_at": "2026-09-08T20:56:13Z",
-      "updated_at": "2026-09-08T20:56:13Z"
+      "updated_at": "2026-09-08T20:58:54Z"
+    },
+    {
+      "id": "T123",
+      "title": "The identity plugin installs with any session-dependent skill, as a hard requirement",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling: the SubagentStart identity plugin (T122) is not optional\nwhere it is needed. A skill whose correctness depends on knowing WHICH agent is\ncalling must not install without it, because installing such a skill without it\nproduces the silent failure it exists to prevent -- two agents sharing one\nsession and neither able to tell.\n\nWHICH SKILLS. The fact belongs to the skill rather than to a list in the\ninstaller, matching how this repository registers everything else: the directory\nis the registration. requires.tsv already declares \"what this skill needs on the\ntarget machine at runtime, and how badly\", and a per-agent identity is exactly a\nruntime need -- so it is a row there, and the existing unmet-requirement\nmachinery reports it. \"MUST\" is then expressible in the vocabulary already\npresent: the requirement is hard, not soft.\n\nSession-dependent as measured today: chat (its session key decides the nick and\nthe per-channel cursors), ai-text-editor (session ownership of tabs, once T118\nlands), interactive-shell (the session id names the socket). Confirm each\nagainst its own code rather than inheriting this list.\n\nTHE STEP. Same shape as interactive_shell_permission_step and\neditor_steering_step in installer/src/70-permissions.sh, which already know how\nto touch settings.json safely: back the file up beside itself unless git tracks\nit, read defensively with rjq, write through a mktemp and rename. It installs\nthe hook script into the agent root and registers the SubagentStart entry,\nreports \"already in place\" on a second run rather than duplicating, and fires\nonly when a session-dependent skill is among those selected.\n\nDECLINING IT MUST SAY WHAT IT COSTS, the way the editor steering warning does:\nwithout the hook, every subagent shares its parent's session, so two agents will\nwrite one cursor and hold one set of tabs, and neither will be told. That is a\nsilent wrong answer rather than a visible failure, which is the whole reason\nthis is a hard requirement.\n\nNOT EVERY AGENT CAN HAVE IT. SubagentStart is Claude Code's hook. For an\nopencode or codex root the step prints the manual equivalent and says plainly\nthat the guarantee is absent there, exactly as print_manual_interactive_shell_permissions\ndoes -- rather than pretending the install is equivalent.\n\nORDER: T122 builds the plugin, this wires it into the installer. Doing this\nfirst would register a hook that does not exist.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/70-permissions.sh",
+        "installer/src/75-main.sh",
+        "chat/requires.tsv",
+        "ai-text-editor/requires.tsv",
+        "interactive-shell/requires.tsv"
+      ],
+      "note": "Blocked on T122: wiring the installer to register a hook that does not exist yet would place a broken entry in settings.json.",
+      "created_at": "2026-09-08T20:58:54Z",
+      "updated_at": "2026-09-08T20:58:54Z"
     },
     {
       "id": "T71",
