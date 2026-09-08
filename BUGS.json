@@ -4160,6 +4160,28 @@
       "updated_at": "2026-09-08T14:56:38Z"
     },
     {
+      "id": "B303",
+      "title": "chat/SKILL.md claims the harness gives each subagent its own session id, and it does not",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Capture the identifying environment in a main agent and in a subagent it spawns, then diff: env | awk -F= \"/CLAUDE|AI_AGENT/{print}\" | sort",
+      "observed": "Identical on every identifying variable. CLAUDE_CODE_SESSION_ID, CLAUDE_PID, CLAUDE_JOB_DIR, CLAUDE_CODE_MESSAGING_SOCKET and CLAUDE_CODE_MESSAGING_TOKEN are all the same value in both, and ppid is 4876 in both. The only difference was CLAUDE_EFFORT, present in the parent and absent in the child, which is a setting rather than an identity and would not separate two subagents from each other. CLAUDE_CODE_AGENT read \"claude\" in a subagent whose type was code-researcher, so it does not carry the agent type either.",
+      "expected": "Either the documented behaviour -- a distinct id per subagent -- or documentation that says the harness cannot distinguish them, since the whole session-key ladder is built on that claim.",
+      "mechanism": "The doc records a measurement that no longer holds, or never did. resolve_session_keys harness rung hashes every set HARNESS_ID_VARS value together, so identical inputs give an identical key: a main agent and all of its subagents resolve to ONE session. That is why the chat client had to append the nick, and the nick is not a workaround but the only available answer.",
+      "surfaces": [
+        "chat/SKILL.md",
+        "src/agent-session-key/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "measuring it while designing per-agent sessions for the editor, after Tschallacka said the claim was wrong",
+      "notes": null,
+      "created_at": "2026-09-08T20:45:10Z",
+      "updated_at": "2026-09-08T20:45:10Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",
