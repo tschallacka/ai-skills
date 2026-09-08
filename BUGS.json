@@ -3967,6 +3967,48 @@
       "updated_at": "2026-09-07T21:55:14Z"
     },
     {
+      "id": "B294",
+      "title": "insert refuses a valid --range-start-line that read accepts on the same tab",
+      "status": "reported",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Open a tab, then: insert --range-start-line 1754 --text X   (same tab, same revision, immediately followed by: read --range-start-line 1752 --range-end-line 1755, which succeeds)",
+      "observed": "insert returned {\"code\":\"argument_out_of_range\",\"details\":{\"offending_key\":\"range_start_line\",\"offending_value\":\"1754\"},\"message\":\"range_start_line must be a non-negative whole number, not \\\"1754\\\"\"}. The value is QUOTED in its own error, and 1754 is a non-negative whole number. The identical value on read, same tab and revision, returned the lines.",
+      "expected": "insert accepts the line number, or refuses it for a stated reason that is true. Two verbs on one tab must not disagree about whether 1754 is a whole number.",
+      "mechanism": null,
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "writing T107 through the editor: the insert was refused, a read at the same coordinates was not",
+      "notes": "Worked around with --offset, which insert accepted. The quoting in the message suggests the value reaches the validator as a JSON string on this path while read coerces it, so the likely site is insert's own argument parsing rather than the shared numeric validator -- read proves the shared one is sound. Not yet reproduced against a freshly built server: this host runs an installed binary, so confirm the version before ruling on it.",
+      "created_at": "2026-09-08T13:57:14Z",
+      "updated_at": "2026-09-08T13:57:23Z"
+    },
+    {
+      "id": "B295",
+      "title": "A remote mention-filtered read saves the channel cursor, marking skipped messages as seen",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "With unread plain messages below a mention: chat-client-rs read --chan #c --mentions   (the remote arm, no --local), then chat-client-rs read --chan #c",
+      "observed": "The mentions read saves the highest id it PRINTED as the cursor, so the plain read that follows returns nothing: the non-mention messages under that id were never printed by anything and are now behind the watermark.",
+      "expected": "A mention-filtered read leaves the cursor alone, as the --local arm already does. The cursor means \"the last message I have SEEN in this channel\", and a mentions read has seen only the mentions.",
+      "mechanism": "read_delta has two arms. The --local arm guards the save with `if mentions_for.is_none()` and carries a long comment explaining exactly this failure. The remote arm saves on `if max_id > 0` with no mention guard at all, so the defect the local arm documents is live in the path that talks to a server.",
+      "surfaces": [
+        "src/chat-client-rs/src/lib.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "T107: the owner-side serve_read had to choose which of the two arms to copy",
+      "notes": "serve_read (T107) deliberately reproduces the REMOTE behaviour, guard and all, because a forwarded verb and a fallback verb must not differ -- that difference would be observable as its own bug. So fixing this means fixing both arms together, and the comment at serve_read says so and points here.",
+      "created_at": "2026-09-08T13:57:14Z",
+      "updated_at": "2026-09-08T13:57:23Z"
+    },
+    {
       "id": "B6",
       "title": "A benchmark test calls timeout, which macOS does not have",
       "status": "fixed",

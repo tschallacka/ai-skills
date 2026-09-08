@@ -282,6 +282,21 @@
       "updated_at": "2026-09-08T12:54:52Z"
     },
     {
+      "id": "T110",
+      "title": "The revision guard must be advertised as the preferred edit guard, above expected_text",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's point, 2026-09-08: re-sending expected_text on every replace is OUTPUT tokens, while re-reading a span to learn it is INPUT tokens, and input is the cheaper half by a wide margin. The revision guard already proves the property that matters for a span located at the current revision -- the document has not moved since the read the line numbers came from -- so for that case expected_text is duplicated generation with no added safety.\n\nThe two guards answer different questions and both must stay: revision proves the DOCUMENT is unchanged, expected_text proves the BYTES AT THIS SPAN are the ones meant. The second earns its cost only when the span's coordinates could be stale or computed -- a line number carried across the agent's own edits, a search result from an earlier revision, an offset derived by arithmetic. It is not the default.\n\nWhat to change: SKILL.md and references/protocol.md currently present expected_text as the content guard without ranking the two or naming the cost, so an agent reaches for it by default and pays output tokens per edit. State the preference explicitly -- read, then guard by revision; add expected_text only when the coordinates did not come from a read at that same revision -- and say why in the token terms above, since that is the reason and an agent that does not know it will keep paying. The capabilities command should carry the same ordering, since that is what an agent queries rather than the prose.",
+      "blocked_on": null,
+      "refs": [
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": "Raised while T107 was being written through the editor: five one-line replaces each re-sent their expected_text, which Tschallacka read as 'not much different from a patch edit'. The replace reply already echoes deleted.text, so the verification a caller wants is available AFTER the fact for free -- that is worth saying too, because it is what makes revision-only safe to recommend.",
+      "created_at": "2026-09-08T13:56:30Z",
+      "updated_at": "2026-09-08T13:56:30Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
