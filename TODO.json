@@ -708,6 +708,21 @@
       "updated_at": "2026-09-08T20:22:37Z"
     },
     {
+      "id": "T121",
+      "title": "Make a mangled shell argument suggest the editor, the way in-place writes already do",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Tschallacka's idea: backticks and command substitution inside a prose-bearing\nshell argument should trigger the same nudge the editor gate already gives for\nin-place stream editing and heredocs.\n\nThe gate already owns exactly this judgement. It intercepts a Bash command,\ndecides the shell is the wrong tool for it, and names the right one. What it\nwatches for today is writing to a path. What it does not watch for is prose\nbeing passed THROUGH a shell, which fails differently: not refused, not\nerrored, just quietly altered.\n\nDetect a quoted argument carrying a backtick or a dollar-paren where the\ncommand is a register writer, and answer the way the gate already answers:\nsay what will happen to the text, and name the editor plus a file as the route\nthat cannot damage it. That route needs T120's file input to exist first, or\nthe nudge points nowhere.\n\nWorth a rule of its own because the failure is SILENT. A refused command\nteaches immediately; a command that succeeds with a word missing teaches\nnothing, and the entry it wrote looks complete.\n\nEvidence for the whole idea, from filing this very entry: the first attempt was\nREFUSED by the gate because the detail text mentioned the in-place editor by\nname in prose. So the gate already reads argument text -- it simply reads it\nfor the wrong thing, matching a tool name where it should be matching a\nsubstitution that will alter the argument. The two changes belong together:\nstop firing on prose that merely names a tool, start firing on prose that the\nshell is about to rewrite.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/70-permissions.sh"
+      ],
+      "note": "The hook lives outside this repository, in the user hooks directory, so this entry is the design and the argument rather than the patch. Pairs with T120: the nudge is only honest once there is somewhere to nudge towards. Also strengthens the prose false positive already reported under B297.",
+      "created_at": "2026-09-08T20:25:16Z",
+      "updated_at": "2026-09-08T20:25:16Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
