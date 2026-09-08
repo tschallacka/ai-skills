@@ -52,17 +52,9 @@ else
         || t_fail "cargo build chat-client-rs failed"
 fi
 
-# A unix socket address is a fixed-size buffer -- 104 bytes on macOS -- and the
-# owner declines to bind a path over that rather than binding a truncated one.
-# A long path would therefore make every assertion below test the FALLBACK path
-# while claiming to test the socket.
-#
-# So the state home goes under lib-test.sh's T_SOCKET_TMPDIR, which exists for
-# exactly this: /tmp/s.XXXXX, twelve characters, deliberately not nested inside
-# TMPDIR. Measured here -- under `bash32-run`, where nix's TMPDIR and the
-# suite's own scratch nest, $TMPDIR reached 103 characters and this test skipped
-# itself while reporting PASS. Only the socket-bearing home lives there; the
-# server's output and the logs this test reads stay under TMPDIR.
+# A unix socket address is a fixed-size buffer, so the state home goes under
+# T_SOCKET_TMPDIR -- /tmp/s.XXXXX, deliberately not nested inside TMPDIR. Only
+# the socket-bearing home lives there; logs and server output stay in TMPDIR.
 home="${T_SOCKET_TMPDIR:-$temporary_root}/h"
 mkdir -p "$home"
 
@@ -232,12 +224,8 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 t_assert_eq 'and the tail actually exits' "$stopped" '1'
-# Killed before it is waited on, even though the assertion above has already
-# reported a tail that would not stop. Waiting on a live process after saying
-# so turns a FAILING test into a HANGING one, and a hang carries no output, no
-# exit code and no test name -- which is how three CI legs sat for three hours
-# on the same shape in test-chat.sh.
-kill "$tail_pid" 2>/dev/null || true
+# Killed before it is waited on: waiting on a process already reported as stuck
+# turns a failing test into a hanging one, and a hang carries no name.
 wait "$tail_pid" 2>/dev/null || true
 t_assert_eq 'and its control socket is gone, so callers fall back' \
     "$([ -S "$socket" ] && echo present || echo gone)" 'gone'

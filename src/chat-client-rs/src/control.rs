@@ -3,19 +3,14 @@
 //! The control socket: one client session owns the connection, and the rest of
 //! the verbs borrow it.
 //!
-//! A `tail` holds a TLS connection open for as long as it runs. Every other
-//! verb -- `send`, `read`, `names`, `join`, `leave` -- opened a SECOND
-//! connection under the same nick, and the server, doing the RFC-correct thing
-//! with a nick collision, suffixed it: an agent tailing as `aiskills` had its
-//! own messages arrive from `aiskills-2` (B283). Worse, two processes then both
-//! wrote the channel cursor, so the reader's watermark and the sender's
-//! disagreed (B254, B269).
+//! A `tail` holds a TLS connection for as long as it runs. A second connection
+//! under the same nick is renamed by the server, so any other verb opening its
+//! own would speak as `<nick>-2` and write the channel cursor in parallel with
+//! the tail.
 //!
-//! So the tail becomes the session's owner. It binds a socket in the session
-//! state directory and serves the other verbs over it; they look for that
-//! socket first and forward the request when it answers. One connection, one
-//! cursor writer, and the collision cannot happen because there is never a
-//! second registration to collide with.
+//! So the tail is the session's owner. It binds a socket, and the other verbs
+//! look there first and forward the request when it answers. One connection and
+//! one cursor writer: there is never a second registration to collide with.
 //!
 //! **Nothing regresses where no tail runs.** An absent or unanswered socket is
 //! not an error: the verb opens its own connection exactly as before. That is
@@ -86,9 +81,8 @@ pub struct Request {
     #[serde(default)]
     pub mentions: bool,
     /// What the caller believed the session's nick and server were. The owner
-    /// compares rather than trusts: a request aimed at a different identity is
-    /// refused, so a stale caller falls back instead of speaking as someone
-    /// else.
+    /// compares rather than trusts, so a stale caller falls back instead of
+    /// speaking as someone else.
     #[serde(default)]
     pub nick: String,
     #[serde(default)]
@@ -147,11 +141,8 @@ pub struct OwnerRecord {
     pub chan: String,
 }
 
-/// Where the RECORD lives: beside the session state, in its own 0700
-/// directory. It has to be somewhere a borrower can find from nothing but its
-/// own arguments, and the state dir is the only such place -- so the record is
-/// the fixed point, and it NAMES the socket rather than the socket's location
-/// being re-derived by every caller.
+/// Where the record lives. A borrower can derive this from its own arguments
+/// alone, which is why the record is the fixed point and names the socket.
 pub fn owner_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("owners")
 }
@@ -160,28 +151,15 @@ pub fn record_path(state_dir: &Path, key: &str) -> PathBuf {
     owner_dir(state_dir).join(format!("{}.json", key))
 }
 
-/// Where the SOCKET lives: the user's runtime directory when there is one.
-///
-/// This is what `XDG_RUNTIME_DIR` exists for, and both of this repository's
-/// other socket owners already use it -- `interactive-shell` for its input
-/// socket and `ai-text-editor` for its endpoint. The chat owner was the odd
-/// one out, binding under the state directory, and it paid for it: the state
-/// path is long, so the 100-byte guard below fired and a tail simply declined
-/// to own the socket. That is a silent loss of the feature, and it is how the
-/// crate's own tests came to depend on a short TMPDIR.
-///
-/// Three things come free with the runtime directory: it is short, it is
-/// already 0700 and owned by this user, and the session's end clears it -- so a
-/// socket left behind by a killed tail cannot outlive the login and be
-/// mistaken for a live owner. The state directory stays the fallback for where
-/// the variable is unset, which includes macOS.
+/// Where the socket lives: the runtime directory when there is one, which is
+/// short, already 0700, and cleared when the session ends. The state directory
+/// is the fallback for where `XDG_RUNTIME_DIR` is unset, which includes macOS.
 pub fn socket_dir(state_dir: &Path) -> PathBuf {
     socket_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), state_dir)
 }
 
-/// The same decision without reading the environment, so a test can exercise
-/// both branches without mutating a process-global variable that its siblings
-/// are reading in parallel.
+/// The same decision without reading the environment: these tests run as
+/// parallel threads in one process, where an env write lands under a sibling.
 fn socket_dir_from(runtime: Option<&std::ffi::OsStr>, state_dir: &Path) -> PathBuf {
     match runtime {
         Some(runtime) if !runtime.is_empty() && Path::new(runtime).is_dir() => {
@@ -191,20 +169,12 @@ fn socket_dir_from(runtime: Option<&std::ffi::OsStr>, state_dir: &Path) -> PathB
     }
 }
 
-/// A short tag distinguishing one state directory from another.
-///
-/// Moving the socket into a SHARED runtime directory removed the thing that
-/// used to keep two owners apart: the state directory was part of the path, so
-/// one session key under two different `--state` roots gave two sockets. In a
-/// shared directory the key alone collides -- two agents deliberately isolated
-/// by separate state dirs would fight over one socket, and each would read the
-/// other as its own live owner and decline to serve. The tag restores that
-/// distinction without restoring the long path.
-///
-/// FNV-1a, the same non-cryptographic hash the session-key ladder already uses
-/// for the same job. A collision here costs a declined takeover, not a
-/// security property.
+/// Distinguishes one state directory from another in a SHARED runtime
+/// directory, where the session key alone would collide and two deliberately
+/// isolated agents would each read the other as their own live owner.
 fn state_tag(state_dir: &Path) -> String {
+    // FNV-1a, as the session-key ladder uses for the same job: a collision
+    // costs a declined takeover, not a security property.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in state_dir.as_os_str().as_encoded_bytes() {
         hash ^= u64::from(*byte);
@@ -217,11 +187,9 @@ pub fn socket_path(state_dir: &Path, key: &str) -> PathBuf {
     socket_dir(state_dir).join(format!("{}-{}.sock", key, state_tag(state_dir)))
 }
 
-/// A unix socket address is a fixed-size buffer in the kernel -- 104 bytes on
-/// macOS, 108 on Linux -- and a path over that limit is TRUNCATED rather than
-/// refused, so binding appears to work and every connect goes somewhere else.
-/// A long `--state` path is therefore a reason to skip owning the socket, not a
-/// reason to fail: the caller keeps today's behaviour.
+/// A unix socket address is a fixed-size buffer -- 104 bytes on macOS, 108 on
+/// Linux -- and an over-long path is TRUNCATED rather than refused, so binding
+/// appears to work while every connect goes somewhere else.
 pub fn path_fits(path: &Path) -> bool {
     path.as_os_str().len() < 100
 }
@@ -253,15 +221,9 @@ struct Inner {
     /// locking, so an idle loop pays one atomic load per iteration.
     waiting: AtomicBool,
     shutdown: AtomicBool,
-    /// Requests the monitor has accepted and not yet finished answering.
-    ///
-    /// The owner must not leave while one is outstanding. A `leave` that takes
-    /// the last channel is answered by the tail loop and then stops it, and
-    /// without this the process could exit while the monitor thread was still
-    /// writing that answer -- the client then read EOF and reported the request
-    /// as one that "may or may not" have been performed, for an action that had
-    /// definitely succeeded. Measured on the bash 3.2 leg, where the timing
-    /// differs enough to lose the race that this machine usually won.
+    /// Requests accepted and not yet answered. The owner must not exit while
+    /// one is outstanding, or the client reads EOF and reports an action that
+    /// succeeded as one that may not have been performed.
     in_flight: AtomicUsize,
 }
 
@@ -301,13 +263,8 @@ impl Control {
 }
 
 /// Queue a request and block -- on the caller's thread, which is always the
-/// monitor's -- until the tail loop answers or `timeout` passes.
-///
-/// The deadline is the whole point: a tail busy on a long wire read, or one
-/// whose loop has stopped taking work, must still leave the client with an
-/// answer. That answer says the request may not have been performed, because a
-/// send reported as delivered when it was not is the one outcome nothing can
-/// recover from.
+/// monitor's -- until the tail loop answers or `timeout` passes. The deadline
+/// answer says the request MAY have been performed, never that it was not.
 fn await_reply(inner: &Arc<Inner>, request: Request, timeout: Duration) -> Reply {
     let (reply_tx, reply_rx): (Sender<Reply>, Receiver<Reply>) = mpsc::channel();
     {
@@ -348,19 +305,13 @@ mod imp {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
 
-    /// Bind the socket and serve it from a new thread, or return None and leave
-    /// the caller with today's behaviour.
-    ///
-    /// None is returned for every reason that is not an error: the path does not
-    /// fit an address, another owner already answers on it, the directory
-    /// cannot be made private, the bind fails. A tail that cannot own the
-    /// socket still tails.
+    /// Bind the socket and serve it from a new thread. None is not an error --
+    /// an unfittable path, a live owner, an unwritable directory, a failed bind
+    /// -- and a tail that cannot own the socket still tails.
     pub fn serve(state_dir: &Path, key: &str, record: OwnerRecord) -> Option<Control> {
-        // Both directories, and 0700 on each before anything is placed in
-        // them: the socket carries the right to speak as this agent, so the
-        // directory is the outer guard, exactly as interactive-shell does for
-        // its input socket. They are usually two different places now -- the
-        // record beside the session state, the socket in the runtime dir.
+        // Two places now -- record beside the state, socket in the runtime dir
+        // -- and 0700 on each before anything is placed in it, since the socket
+        // carries the right to speak as this agent.
         let record_dir = owner_dir(state_dir);
         fs::create_dir_all(&record_dir).ok()?;
         fs::set_permissions(&record_dir, fs::Permissions::from_mode(0o700)).ok()?;
@@ -407,12 +358,8 @@ mod imp {
     }
 
     /// The monitor thread: accept, queue, wait, answer. One connection at a
-    /// time and in arrival order, so a slow client delays the queue behind it
-    /// but never the tail loop.
-    ///
-    /// If it ends -- a panic, a listener that stops accepting -- the socket is
-    /// REMOVED. A path that no longer answers sends every client back to its own
-    /// connection; a path that answers and never replies would hang them all.
+    /// time, so a slow client delays the queue but never the tail loop. If it
+    /// ends the socket is REMOVED, since one that never replies hangs clients.
     fn spawn_monitor(listener: UnixListener, inner: Arc<Inner>, socket: PathBuf, inode: u64) {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -484,14 +431,9 @@ mod imp {
 
     pub fn stop(control: &Control) {
         control.inner.shutdown.store(true, Ordering::Release);
-        // An answer already decided must still be delivered. `leave` on the
-        // last channel is answered by the tail loop and then stops it, so
-        // without this wait the process could exit while the monitor was
-        // mid-write: the client read EOF and reported an action that HAD
-        // succeeded as one that may not have been performed. Bounded, because
-        // a client that has stopped reading must not keep the owner alive --
-        // and the deadline is the client's own timeout, after which its answer
-        // is worthless anyway.
+        // An answer already decided must still be delivered, or the client
+        // reads EOF. Bounded by the client's own timeout: past that its answer
+        // is worthless, and a client that stopped reading must not hold us.
         let deadline = SystemTime::now() + CLIENT_TIMEOUT;
         while control.inner.in_flight.load(Ordering::Acquire) > 0 && SystemTime::now() < deadline {
             std::thread::sleep(Duration::from_millis(2));
@@ -503,24 +445,18 @@ mod imp {
         let _ = fs::remove_file(&control.record);
     }
 
-    /// Forward one request to the session's owner, if there is one that answers.
-    ///
-    /// None means "no owner": no record, no socket, nothing listening, or an
-    /// owner whose identity does not match what the caller was told to use. In
-    /// every one of those the caller opens its own connection as before.
+    /// Forward one request to the session's owner. None means "no owner" -- no
+    /// record, no socket, nothing listening, or an identity that does not match
+    /// -- and the caller then opens its own connection as before.
     pub fn ask(state_dir: &Path, key: &str, request: &Request) -> Option<Reply> {
         let record: OwnerRecord =
             serde_json::from_str(&fs::read_to_string(record_path(state_dir, key)).ok()?).ok()?;
         if !identity_matches(&record, request) {
             return None;
         }
-        // The RECORD names the socket. Re-deriving the path here would make
-        // every borrower agree with the owner only by coincidence: the owner
-        // may have bound in the runtime directory while this process has no
-        // XDG_RUNTIME_DIR (a cron job, a different login), and the two would
-        // then compute different paths and the socket would look absent.
-        // Falling back to the derived path covers a record from a build that
-        // did not write one.
+        // The RECORD names the socket: owner and borrower can disagree about
+        // XDG_RUNTIME_DIR, so a re-derived path would match only by
+        // coincidence. The fallback covers a record that carries no path.
         let socket = if record.socket.is_empty() {
             socket_path(state_dir, key)
         } else {
@@ -534,10 +470,8 @@ mod imp {
         stream.write_all(&json).ok()?;
         stream.flush().ok()?;
         let mut line = String::new();
-        // A connection that accepted the request and then gave no answer is NOT
-        // a fallback case: the owner may have sent it. Saying so is the only
-        // honest outcome, because retrying on our own connection could double
-        // the message.
+        // Accepted then unanswered is NOT a fallback case: the owner may have
+        // sent it, and retrying on our own connection could double the message.
         if BufReader::new(&stream).read_line(&mut line).is_err() || line.trim().is_empty() {
             return Some(Reply::fail(
                 EX_BUSY,
@@ -547,10 +481,9 @@ mod imp {
         serde_json::from_str(line.trim()).ok()
     }
 
-    /// An explicit `--nick` or `--server` that disagrees with the owner is a
-    /// request to be someone else, and borrowing the owner's connection cannot
-    /// honour it. An empty field means "whatever the session says", which the
-    /// owner already is.
+    /// An explicit `--nick` or `--server` that disagrees with the owner asks to
+    /// be someone else, which borrowing the owner's connection cannot honour.
+    /// Empty means "whatever the session says", which the owner already is.
     fn identity_matches(record: &OwnerRecord, request: &Request) -> bool {
         if !request.nick.is_empty() && request.nick != record.nick {
             return false;
@@ -603,25 +536,13 @@ pub fn ask(state_dir: &Path, key: &str, request: &Request) -> Option<Reply> {
 mod tests {
     use super::*;
 
-    /// A SHORT scratch directory, because everything under test here binds a
-    /// unix socket and a socket address is a fixed-size buffer.
-    ///
-    /// It must not simply follow TMPDIR. Under the suite runner TMPDIR is a
-    /// deep per-test root, and these three tests then asked `serve` to bind a
-    /// path over its own 100-byte guard: it correctly answered None, and the
-    /// tests panicked on the `expect`. They passed when run by hand -- where
-    /// TMPDIR is short -- and failed only inside the full suite, which is the
-    /// worst place for a difference to live. `T_SOCKET_TMPDIR` is the runner's
-    /// own answer to this (`/tmp/s.XXXXX`, twelve characters, deliberately not
-    /// nested inside TMPDIR); honour it when it is there, and fall back to
-    /// /tmp, which is the one directory guaranteed short enough. A socket file
-    /// is zero bytes, so this does not put test DATA on a tmpfs.
+    /// A SHORT scratch directory: everything under test here binds a unix
+    /// socket, so following a deep TMPDIR would push the path past its own
+    /// guard and `serve` would answer None to a test expecting a socket.
     fn tmp_dir(tag: &str) -> PathBuf {
-        // XDG_RUNTIME_DIR before /tmp: a runtime socket is exactly what that
-        // directory is for. It is short, it is already 0700 and owned by this
-        // user, and it is cleared when the session ends -- so a socket left by
-        // a killed test does not outlive the login. /tmp is the fallback for
-        // where it is unset, which includes macOS and most CI runners.
+        // A runtime directory is short, 0700, and cleared at session end, so a
+        // socket left by a killed test cannot outlive the login. /tmp is the
+        // fallback where it is unset, which includes macOS and most CI runners.
         let base = ["T_SOCKET_TMPDIR", "XDG_RUNTIME_DIR"]
             .iter()
             .filter_map(|name| std::env::var(name).ok())
@@ -683,12 +604,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_over_long_socket_path_is_declined_rather_than_truncated() {
-        // Asserted against the FALLBACK branch, where the socket sits under
-        // the state directory: that is the only branch a long path can reach,
-        // since a runtime directory is short by construction. Driven through
-        // socket_dir_from rather than by clearing XDG_RUNTIME_DIR, because
-        // cargo runs these tests as parallel threads in one process and an env
-        // write would land under a sibling's feet.
+        // The FALLBACK branch is the only one a long path can reach, since a
+        // runtime directory is short by construction. Driven through
+        // socket_dir_from because these tests share one process's environment.
         let dir = tmp_dir("longpath");
         let deep = dir.join("x".repeat(120));
         let fallback = socket_dir_from(None, &deep).join("key.sock");
@@ -837,16 +755,9 @@ mod tests {
 
     #[test]
     fn an_owner_that_never_answers_reports_busy_rather_than_success() {
-        // No tail loop: nothing ever calls take_pending, which is what a tail
-        // blocked on a long wire read looks like from here. The deadline must
-        // produce the answer, and it must NOT be a success -- a send that was
-        // never performed reporting 0 is the one outcome nothing downstream can
-        // recover from.
-        //
-        // Driven through await_reply with a short timeout rather than through
-        // the socket with REPLY_TIMEOUT: the property under test is the
-        // deadline, and a test that proves it by waiting 20 seconds is a test
-        // that gets deleted.
+        // No tail loop, which is what a tail blocked on a long read looks like
+        // from here. Driven through await_reply with a short timeout: the
+        // property is the deadline, not how long a caller is willing to wait.
         let inner = new_inner();
         let reply = await_reply(&inner, Request::default(), Duration::from_millis(20));
         assert_eq!(reply.code, EX_BUSY);

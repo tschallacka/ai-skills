@@ -627,11 +627,30 @@ are read by agents that cannot see this conversation. The shipped contract is
 the stricter one, and it is the one users' agents are held to — so do not let
 this section be quoted as a licence to ignore it.
 
-**In-body comments here follow the three-line limit too.** One block, three
-lines, recording a constraint a reader would otherwise undo:
-`add-goal.sh:44-46` ("emitted empty — a placeholder is valid to write and
+**The length a comment may be is set by what it is attached to, and there are
+two answers.**
+
+**A FILE or a CLASS gets a leading block as long as it needs to be**, because
+that block is the README for the unit: what this file is, what it owns, the
+shape a reader needs before the first line of code makes sense. A shell file's
+docblock, a Rust `//!` module header, the `///` on a struct or an impl — all
+of these. Length is not the constraint here; **content is.** It says what the
+unit is and how it fits, and it does not tell the story of how it came to be.
+No dev journey, no what-we-tried-first, no incident report.
+
+**A FUNCTION gets three lines, and three is usually too many.** One block,
+three lines at the outside, recording a constraint a reader would otherwise
+undo: `add-goal.sh:44-46` ("emitted empty — a placeholder is valid to write and
 invalid to keep") and `create-step-testing.sh:61-63` (single-char `RS` for
-mawk/BSD-awk parity) are the model. What does *not* belong in a comment:
+mawk/BSD-awk parity) are the model. Treat three as a ceiling you have to
+justify reaching, not a budget to fill — most functions want one line, and a
+well-named function with clear parameters usually wants none. If three lines
+are not enough, the function is doing too much or the explanation belongs in
+the file's leading block.
+
+In-body comments follow the function rule: three lines, same critical eye.
+
+What does *not* belong in a comment, at any position and in any language:
 
 - **Measurements and benchmark numbers.** They rot and they are history.
 - **Justification of a past decision.** That is what `ARCHITECTURE.md`,
@@ -649,13 +668,9 @@ another file. Rustdoc prose describing the API is the thing `///` is for and is
 not "why-prose"; an account of how the function came to look this way is, and
 belongs in the commit message.
 
-The three-line limit above is written for **in-body** comments and a doc
-comment on an item is not one, so an item's leading block is not capped at
-three lines -- but every content rule still binds it. Do not read the absent
-cap as permission to narrate. (Whether a leading block should be capped at all
-is open as T105; until that is settled, the content rules are the constraint
-that matters.)
-
+The two lengths map cleanly: a `//!` module header and the `///` on a struct or
+an impl are the unit's README and take the length they need; the `///` on a
+function is a function comment and takes three lines at the outside.
 ### Quoting verbatim material in a comment
 
 Prose and quoted material are different things and must look different. When a

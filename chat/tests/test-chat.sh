@@ -258,20 +258,9 @@ cleft="$(cli sess session show 2>/dev/null | grep 'cursor #old' || true)"
 # mention-notify: a tail --mentions --mention-exit exits when SOMEBODY ELSE
 # mentions @<session nick>.
 #
-# The mention must come from a separate agent, and that is the point rather
-# than an incidental detail. This test used to send it from the watcher's own
-# state dir and relied on the sender auto-suffixing, because a second
-# connection under one nick was renamed by the server -- so the message came
-# back as another party's and woke the tail. That was B283 being used as a
-# test fixture, and T107 removed it: one session now owns one connection, a
-# send is performed on the tail's own connection, and the server does not echo
-# a PRIVMSG to its sender (B249). The tail therefore never saw its own message
-# and never exited, and the unbounded `wait` below turned that into a hang
-# rather than a failure -- three CI legs sat for over three hours on it.
-#
-# A peer sender is what the feature actually promises, and it holds whether or
-# not the owner socket is in play, so this no longer depends on which side of
-# T107 the client is.
+# The sender must be a separate agent. One session owns one connection, and the
+# server does not echo a PRIVMSG to its sender, so a self-send never reaches
+# the tail -- and a peer send holds whether or not the owner socket is active.
 mhome="$temporary_root/ment"
 mpeer="$temporary_root/ment-peer"
 mkdir -p "$mhome" "$mpeer"
@@ -293,10 +282,8 @@ if kill -0 "$ment_pid" 2>/dev/null; then
 fi
 grep -q '!! MENTION !!' "$temporary_root/ment.log" \
     || t_fail "mention was not surfaced: [$(cat "$temporary_root/ment.log")]"
-# Killed before it is waited on. The checks above already report a tail that
-# refused to exit, and waiting on it after saying so converts a FAILING test
-# into a HANGING one -- strictly worse, because a hang has no output, no exit
-# code and no test name attached to it.
+# Killed before it is waited on: waiting on a process already reported as stuck
+# turns a failing test into a hanging one, and a hang carries no name.
 kill "$ment_pid" 2>/dev/null || true
 wait "$ment_pid" 2>/dev/null || true
 # ---- B116: two agents, ONE AI_CHAT_HOME, separate sessions ----------------

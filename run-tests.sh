@@ -30,38 +30,26 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 wrapper="$repo_root/resource-limited-testing/scripts/limited-run.sh"
 
-# The resource cap exists to protect a DEVELOPER'S machine, where the suite
-# competes with a browser, an IDE, language servers and a database for one pool
-# of memory -- and where /tmp is a tmpfs, so a runaway test eats RAM. A CI
-# runner has none of that: it is disposable, runs this job and nothing else, and
-# the platform already kills it.
-#
-# On CI the wrapper does not just fail to help, it changes behaviour. Measured
-# 2026-09-08 and recorded in this repository's own workflow comments: on both
-# macOS runners memlimit cannot enforce anything (no Intel build published; on
-# arm64 SIP strips DYLD_INSERT_LIBRARIES and its hook is arm64 against an
-# arm64e system), so the cap is already absent there. On Linux it is either a
-# transient systemd scope or a fallback `ulimit -v`, an ADDRESS-SPACE limit that
-# the skill's own documentation says must not be described as RAM protection.
-# And a systemd scope does not return until every process in its cgroup exits,
-# so one leaked background process turns a visible leak into an unbounded hang.
-#
-# AI_SKILLS_RESOURCE_LIMIT forces the decision either way, so a developer can
-# reproduce a CI run exactly (=0) or cap a local run that CI would not (=1).
+# The cap protects a developer's machine, which a disposable single-job runner
+# is not. It also enforces nothing on either macOS runner, and on Linux a
+# systemd scope does not return until every process in its cgroup exits, so a
+# leaked process becomes a hang. AI_SKILLS_RESOURCE_LIMIT forces either way.
 case "${AI_SKILLS_RESOURCE_LIMIT:-}" in
     0) wrapper="" ;;
     1) ;;
     *) [ -n "${GITHUB_ACTIONS:-}" ] && wrapper="" ;;
 esac
 
-# No test may run unbounded. Without this a single hang consumes the whole leg
-# and the only symptom is the absence of a result: measured 2026-09-08, three
-# CI legs sat for over three hours on one pull request while every other job had
-# long since passed, and nothing said which test was responsible. A timeout
-# turns that into one named failure in minutes.
-#
-# Reported separately from a failure, because "it never finished" and "it
-# answered wrongly" call for different next steps.
+# No test may run unbounded: without this a hang consumes the whole leg and the
+# only symptom is a missing result, with no name attached to it.
+test_timeout_seconds="${AI_SKILLS_TEST_TIMEOUT:-600}"
+timeout_cmd=""
+if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=timeout
+else
+    printf '%s: no timeout(1) here, so a hanging test will not be bounded\n' \
+        "${0##*/}" >&2
+fi
 test_timeout_seconds="${AI_SKILLS_TEST_TIMEOUT:-600}"
 timeout_cmd=""
 if command -v timeout >/dev/null 2>&1; then
