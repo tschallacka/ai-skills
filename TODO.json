@@ -280,6 +280,39 @@
       "updated_at": "2026-09-08T14:45:31Z"
     },
     {
+      "id": "T115",
+      "title": "Give run-tests.sh a per-test timeout and the CI jobs a timeout-minutes",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "There is no timeout anywhere: run_one has none, and ci.yml declares no timeout-minutes on any job, so every job inherits GitHub 6-hour default. Measured 2026-09-08: three test-suite legs sat in_progress for over three hours on one PR while every build leg had long since passed, and the only signal was the absence of a result.\n\nTwo changes. run_one wraps each test in the timeout(1) utility, so a hang FAILS AS ITSELF and names the test rather than silently consuming the leg -- report it distinctly (exit 124) so a timeout is never mistaken for an assertion failure. And each suite job gets a timeout-minutes as the backstop for a hang outside a test.\n\nThe per-test timeout is the one that matters: it converts \"the leg never finished\" into \"test-X timed out after N seconds\", which is the difference between a three-hour mystery and a two-minute diagnosis.",
+      "blocked_on": null,
+      "refs": [
+        "run-tests.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "note": "Portability: macOS runners have timeout available (test-chat.sh already relies on it), but detect it and degrade to no timeout with a printed notice rather than failing the runner where it is absent. The first version of this entry lost a word: a backtick-quoted timeout inside a double-quoted shell argument was executed as a command substitution, so the tool name vanished from the detail. Backticks in register text are command substitution, not markup.",
+      "created_at": "2026-09-08T18:19:19Z",
+      "updated_at": "2026-09-08T18:19:44Z"
+    },
+    {
+      "id": "T116",
+      "title": "Select and shard the shell suite, so CI does not run 138 tests on 3 platforms for every commit",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Two independent axes, and they compose. Numbers measured 2026-09-08: 138 shell tests, of which 116 (84%) are planning/tests, plus 86 crates.\n\nSELECT. ci-scope.sh scopes CRATES only; the shell suite always runs in full. Extending the same idea to tests is the bigger win, and the pattern is already proven here. Shape: each test declares what it covers (a header marker), and a test whose covered paths do not intersect the change set is skipped. The invariant is the one ci-scope already states in its own docblock -- the default is always full, and every error path and every undeclared test runs. A selector that narrows when confused is worse than none, because the green tick then means 'we did not look' while reading as 'we looked'.\n\nSHARD. Split what remains across runners with a deterministic --shard i/N over the sorted test list, matrixed in CI. It must be per-TEST, not per-suite: a suite-per-runner matrix would put 84% of the work on one leg. Deterministic assignment by sorted index keeps a test in the same shard so a CI failure is reproducible locally with the same flag. A required aggregate job depends on the shards so branch protection has one check to require.\n\nNote the interaction with the machine-wide lock: shards are for CI, where each runner is its own machine. Locally the lock still serialises, which is correct -- see the one-verification-at-a-time hazard where a second concurrent run deletes the first's worktree.",
+      "blocked_on": null,
+      "refs": [
+        "run-tests.sh",
+        ".github/workflows/ci.yml",
+        ".github/ci-scope.sh"
+      ],
+      "note": "Raised by Tschallacka: 'ci takes a long long time. and the more tests come, the longer it will take' and 'the entire suite tests everytime, even on binaries/paths that arent affected by the commit'. Sharding alone does not fix the second complaint; selection does. Sharding fixes the first and keeps fixing it as tests are added.",
+      "created_at": "2026-09-08T18:19:19Z",
+      "updated_at": "2026-09-08T18:19:19Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
