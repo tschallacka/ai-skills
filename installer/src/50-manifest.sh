@@ -438,6 +438,7 @@ tests/test-plan-root.sh
 tests/test-plan-snapshot.sh
 tests/test-planning-context-contract.sh
 tests/test-portability-contract.sh
+tests/test-portability-redaction.sh
 tests/test-portable-helpers.sh
 tests/test-progress-bar-shape.sh
 tests/test-progress-derivation.sh

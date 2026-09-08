@@ -223,6 +223,13 @@ jobs:
           cp "$GITHUB_WORKSPACE/target/release/plan-crypt" planning/.ci-bin/plan-crypt
           echo "PLAN_CRYPT_BIN=$PWD/planning/.ci-bin/plan-crypt" >> "$GITHUB_ENV"
 
+      - name: Build tony-the-pony, which classifies code against prose
+        # test-portability-contract.sh redacts comments, strings and heredoc
+        # bodies through this binary before applying a rule, so without it the
+        # construct scan would read prose as code. The test builds it when it is
+        # missing; building here keeps that off the suite's clock.
+        run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
+
       - name: Run the full deterministic test suite
         run: ./run-tests.sh
 
@@ -387,6 +394,11 @@ jobs:
           mkdir -p "bug-report/bin/$dir" "todo/bin/$dir"
           cp "$GITHUB_WORKSPACE/target/release/bugs" "bug-report/bin/$dir/bugs"
           cp "$GITHUB_WORKSPACE/target/release/todo" "todo/bin/$dir/todo"
+
+      - name: Build tony-the-pony, which classifies code against prose
+        # Its own step on this leg for the same reason the register binaries
+        # have one: a build in the other job does not reach this runner.
+        run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
       - name: Run the full deterministic test suite under /bin/bash
         run: /bin/bash ./run-tests.sh
