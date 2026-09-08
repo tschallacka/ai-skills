@@ -171,12 +171,13 @@ jobs:
 
       - name: Place the compiled chat rung
         run: |
-          # Build the chat crates natively and place the two binaries under
+          # Build the chat crates natively and place the three binaries under
           # the chat/bin/<triple>/ dir skill_files() resolves for this host, so
           # the manifest and shipped-binaries tests see them. The dedicated
           # chat-binary job builds the cross/static artifacts for release.
           cargo build --release --manifest-path src/chat-server-rs/Cargo.toml
           cargo build --release --manifest-path src/chat-client-rs/Cargo.toml
+          cargo build --release --manifest-path src/chat-mcp/Cargo.toml
           case "$(uname -s):$(uname -m)" in
             Linux:x86_64|Linux:amd64) dir=x86_64-unknown-linux-musl ;;
             Linux:aarch64|Linux:arm64) dir=aarch64-unknown-linux-musl ;;
@@ -188,6 +189,7 @@ jobs:
           mkdir -p "chat/bin/$dir"
           cp "$GITHUB_WORKSPACE/target/release/chat-server-rs" "chat/bin/$dir/chat-server-rs"
           cp "$GITHUB_WORKSPACE/target/release/chat-client-rs" "chat/bin/$dir/chat-client-rs"
+          cp "$GITHUB_WORKSPACE/target/release/chat-mcp" "chat/bin/$dir/chat-mcp"
 
       - name: Place the compiled register rungs
         run: |
@@ -678,12 +680,12 @@ jobs:
           if-no-files-found: warn
 
       # ---- chat ------------------------------------------------------------
-      - name: Build the chat server and client
+      - name: Build the chat server, client and MCP adapter
         if: needs.scope.outputs.chat == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          for crate in src/chat-server-rs src/chat-client-rs; do
+          for crate in src/chat-server-rs src/chat-client-rs src/chat-mcp; do
             printf '==> %s\n' "$crate"
             cargo build --manifest-path "$crate/Cargo.toml" --release --target "${{ matrix.target }}"
           done
@@ -698,6 +700,8 @@ jobs:
             target/${{ matrix.target }}/release/chat-server-rs.exe
             target/${{ matrix.target }}/release/chat-client-rs
             target/${{ matrix.target }}/release/chat-client-rs.exe
+            target/${{ matrix.target }}/release/chat-mcp
+            target/${{ matrix.target }}/release/chat-mcp.exe
           if-no-files-found: error
 
       # ---- interactive-shell -----------------------------------------------

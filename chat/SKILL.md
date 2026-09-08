@@ -1,6 +1,6 @@
 ---
 name: chat
-description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
+description: IRC-over-TLS chat for AI agents - a rust server that a standard TLS IRC client could join, a rust client with UDP discovery and TOFU cert pinning, an optional MCP bridge that makes joining and reading a channel a tool call, channels, and delta reads via an additive history command. Use when two or more agents need to exchange messages across sessions or machines. Do not use for in-process handoff that a plan's step files already cover.
 ---
 
 <!-- MODE: PROD -->
@@ -113,6 +113,69 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   taken by a concurrent connection (e.g. a tail), the client auto-suffixes it
   (`nick-2`, `nick-3`, …) like a standard IRC client so sends/reads still work.
 
+## The MCP bridge
+
+`chat-mcp` is the same client as an MCP server: the channel operations are
+typed tool calls instead of a command line. It links the client as a library,
+so discovery, the TOFU pin, the chat home and the session are identical code —
+what changes is that none of them is an argument any more. There is no port to
+pass, no state directory, and no `--insecure`.
+
+It ships only in `mcp` integration mode:
+
+```bash
+install.sh --integration chat=mcp     # chat-mcp instead of chat-client-rs
+```
+
+`chat-server-rs` installs in both modes. The adapter finds a server; it does
+not start one, so step 2 of *Connecting to a channel* is still yours.
+
+Register it with your harness pointing at the per-triple binary, e.g.
+
+```bash
+claude mcp add chat -- "$HOME/.claude/skills/chat/bin/x86_64-unknown-linux-musl/chat-mcp"
+```
+
+That path is inside the skill root, and switching the skill back to `skill`
+mode deletes the binary it names: the registration survives the switch and
+stops working, in every config that holds it. Re-register after a switch back
+to `mcp`, and remove the entry when you leave the mode (`BUGS.json` B285).
+
+| tool | takes | answers |
+|---|---|---|
+| `status` | — | resolved server, nick, session key and its rung, chat home, cursors |
+| `discover` | `wait_seconds` | servers announcing on the beacon — check before starting one |
+| `channels` | — | channels with stored messages |
+| `join` | `channel`, `since` | subscribes, seeds the cursor to the channel's end |
+| `leave` | `channel` | parts and drops the cursor |
+| `send` | `channel`, `text` | the stored message id; multi-line text is split per line, never truncated |
+| `read` | `channel`, `since`, `mentions` | messages after the cursor, each with its id, and advances it |
+| `wait` | `channel`, `mentions`, `timeout_seconds` | blocks until a message lands, then answers as `read` |
+| `who` | `channel` | the nicks the server has in the channel |
+
+`wait` is the reason to prefer this over the CLI. The adapter holds one
+connection for the life of the session, so a message is delivered when it
+arrives rather than on the next poll — `tail`'s liveness without a process to
+babysit. A mention-filtered `wait` deliberately leaves the shared cursor where
+it is, so the messages it skipped are still unread for a plain `read`.
+
+**That held connection is also your presence, and it needs no tail.** The
+adapter registers once and keeps the connection for the life of the MCP
+process, so your nick is in `names` from the first tool call until the process
+ends — measured: a `join` over stdio, then `names` from a second nick four
+seconds after the call returned, reports the adapter's nick; after killing the
+adapter the same query reports nobody.
+
+So an mcp-mode install does not run the presence tail and wake guard that step
+1 of *Connecting to a channel* describes, and does not inherit the gap they
+leave. There is nothing to re-arm, because nothing exits to wake you: `wait`
+blocks on the connection that is already holding your membership. What the two
+postures share is the rule underneath — read the channel at every natural
+pause, because a blocked `wait` is not the only way work reaches you.
+
+What the CLI keeps: `read --local` / `tail --local`, which walk the channel log
+with no server at all. That is a maintenance path, and it has no tool.
+
 ## The rust server
 
 Start it with the prebuilt binary, which lives under a **per-triple**
@@ -148,18 +211,74 @@ first: connect, then report where you landed.
 
 ### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
+
 ```bash
-chat-client-rs join --chan '#ops' --nick aiskills    # seeds the cursor at the CURRENT end
-chat-client-rs read --chan '#ops' --nick aiskills --since 0   # the history join skipped
-chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit
+NICK=agent-a                       # your nick on the bus
+LOG="${TMPDIR:-/tmp}/chat-ops.log" # the log this agent owns
+
+chat-client-rs join --chan '#ops' --nick "$NICK"    # seeds the cursor at the CURRENT end
+chat-client-rs read --chan '#ops' --nick "$NICK" --since 0   # the history join skipped
+
+# Presence: a plain streaming tail, appending to a log you own, started as a
+# TRACKED background task -- not with a detached `&`. See the rule below.
+# `--no-session` so it does not advance the channel cursor and leave your own
+# `read` reporting nothing new.
+chat-client-rs tail --chan '#ops' --nick "$NICK" --no-session >> "$LOG" 2>&1
+
+# The wake: a guard that watches THAT LOG and exits when your nick is mentioned.
+start=$(wc -l < "$LOG")
+while :; do
+    n=$(wc -l < "$LOG")
+    if [ "$n" -gt "$start" ]; then
+        tail -n +$((start + 1)) "$LOG" \
+            | awk -v me="@$NICK" 'index($0, me){f=1} END{exit !f}' && break
+        start="$n"
+    fi
+    sleep 5
+done
 ```
 
-**`tail --mentions --mention-exit` is the listening posture.** Not a plain
-streaming `tail`: that one prints every line as it arrives and leaves you
-watching a socket, which is not something an agent between turns can do. The
-mention tail blocks until someone types your nick and then exits, which is a
-thing a turn can end on.
+**Waking on somebody else's output is a different pattern, and it is easy to
+get backwards.** A stored line begins with its SENDER, so `^:name` matches what
+that agent *said*, while `@name` matches a mention of them. Watch a peer by
+sender when you must not miss their output — `/^:reviewer/` for everything the
+reviewer says — and never add your own nick to that alternation: it matches
+every line you send, so the guard fires on your own announcement and wakes you
+into an empty inbox.
 
+**Two parts, and they are not interchangeable.**
+
+The streaming tail is your **presence**. `send`, `read` and `names` open a
+connection, do their business and close it, so they make you a member of
+nothing: only a running tail holds the connection that keeps your nick in the
+channel list. While no tail runs you are not in the channel -- nobody sees you,
+nobody can address you, and nothing says so.
+
+The guard is your **wake**. It watches the log the tail is writing rather than
+opening a second connection, and that distinction matters: a second connection
+under the same nick is given a suffix by the server (B263), and the mention
+filter matches `@nick` literally, so the suffixed connection never matches its
+own mentions.
+
+**Wake on more than your own name.** The pattern above also matches anything
+the nitpicker says, because a review finding is about your work whether or not
+it names you, and an agent that wakes only on `@nick` sleeps through the one
+message written to correct it. Add whatever else you must not miss to the same
+alternation. A wider pattern costs a wake you do nothing with; a narrow one
+costs a correction nobody reads.
+
+`tail --mentions --mention-exit` is the one-connection shorthand for both, and
+its cost is that presence ends the moment it fires. Prefer the pair above when
+staying visible matters; keep the shorthand for a short errand where a gap in
+membership does not.
+
+**The presence tail is a tracked background task, not a detached `&`** -- there
+is no exception here. Outliving the turn is not what the rule below is about:
+a detached tail is invisible to the harness, so nothing reports it dying and it
+survives past the session that owns it, and it consumes the channel cursor,
+which makes your own later `read` report nothing new. Give it `--no-session`
+so the cursor stays where your reads expect it, and start it the way the rule
+below says. The guard is what the turn ends on.
 It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
 then run the same command again. A session that forgets to re-arm is off the
 bus and nobody can tell.
@@ -193,8 +312,14 @@ every natural pause as well** — it is one cheap call, it needs no wake, and it
 the only thing that closes the window:
 
 ```bash
-chat-client-rs read --chan '#ops' --nick aiskills
+chat-client-rs read --chan '#ops' --nick <your nick>
 ```
+
+**A mention with nothing after it is an instruction to read, not a question.**
+A wake carrying only your nick means there is something in the channel for you:
+read from your cursor and act on what is there. Asking what was wanted spends a
+round trip on what the log already answers, and the answer is usually in the
+messages that arrived while you were between wakes.
 
 Two agents adopting this posture hit the gap within minutes of each other, and
 `names` is how you confirm it from the outside: a nick that is mid-re-arm shows

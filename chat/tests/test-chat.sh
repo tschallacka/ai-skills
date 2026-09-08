@@ -61,12 +61,28 @@ for _ in $(seq 1 40); do
 done
 case "$port" in ''|*[!0-9]*) t_fail "server did not report a port"; t_end; exit 1 ;; esac
 
-# The server must be TLS-only: a plain (non-TLS) connect must not complete a
-# handshake. We assert the server is reachable and speaking TLS instead.
-if command -v openssl >/dev/null 2>&1; then
-    plainout="$(printf 'NICK x\r\n' | timeout 3 openssl s_client -verify_quiet -connect 127.0.0.1:"$port" -servername localhost -quiet 2>/dev/null | tr -d '\r' || true)"
-    case "$plainout" in
-        *'not a valid'*|*'alert'*|'') : ;;  # handshake failed as expected for a stale/plain probe
+# The server must be TLS-only: a plain, non-TLS registration must not complete.
+# The probe writes IRC straight to the socket with no handshake, so a TLS
+# listener reads it as a malformed record and closes; anything that answers with
+# a welcome numeric has registered a plaintext client.
+#
+# It runs in a subshell because a failed `exec` redirection exits a
+# non-interactive shell, and it uses /dev/tcp because that is the one plain
+# socket every supported shell has -- measured present in the bash 3.2 floor
+# build. An `openssl s_client` cannot stand in: it speaks TLS, so it can never
+# show what a plain connect does.
+plain_probe_rc=0
+plain_reply="$(
+    exec 9<>/dev/tcp/127.0.0.1/"$port" || exit 3
+    printf 'NICK plainprobe\r\nUSER plainprobe 0 * :plainprobe\r\n' >&9
+    timeout 3 head -c 256 <&9 2>/dev/null | tr -d '\000'
+)" 2>/dev/null || plain_probe_rc=$?
+if [ "$plain_probe_rc" -ne 0 ]; then
+    printf 'SKIP chat TLS-only: no /dev/tcp in this shell, so the plain-connect probe did not run\n' >&2
+else
+    case "$plain_reply" in
+        *' 001 '*|*Welcome*)
+            t_fail "the server registered a plain, non-TLS client: [$plain_reply]" ;;
         *) : ;;
     esac
 fi
@@ -174,10 +190,30 @@ case "$sent2" in
     *':sessioner!sessioner@localhost PRIVMSG #sess :session message'*) : ;;
     *) t_fail "session-backed send failed: [$sent2]" ;;
 esac
-# send advances the channel cursor; a later no-arg send works too.
+# B254: a send does not move the read cursor. A cursor is a reader's position,
+# not a record of having spoken -- a message can be composed while others arrive
+# ahead of it, and advancing on send marks those as read without anyone seeing
+# them. This assertion used to require the opposite, which is how the defect
+# survived being tested.
 cli sess send --chan '#sess' --text 'second session' --insecure >/dev/null 2>&1 || true
 cursor="$(cli sess session show 2>/dev/null | grep 'cursor #sess' | awk '{print $NF}' || true)"
-[ "$cursor" = "2" ] || t_fail "session cursor did not advance to 2: [$cursor]"
+case "$cursor" in
+    ''|0) : ;;
+    *) t_fail "send moved the read cursor to [$cursor]; sending is not reading (B254)" ;;
+esac
+# The loss the old behaviour caused: a message that arrived BEFORE the send is
+# still unread afterwards. The join is what gives this reader a position at all:
+# without one, reading starts at the channel's current end, which is the rule
+# that keeps a long-lived channel from flooding a fresh agent.
+cli sess join --chan '#sess' --insecure >/dev/null 2>&1 || true
+cli other send --chan '#sess' --server 127.0.0.1:"$port" --nick othersender \
+    --text 'arrived before the send' --insecure >/dev/null 2>&1 || true
+cli sess send --chan '#sess' --text 'third session' --insecure >/dev/null 2>&1 || true
+still_unread="$(cli sess read --chan '#sess' --insecure 2>/dev/null || true)"
+case "$still_unread" in
+    *'arrived before the send'*) : ;;
+    *) t_fail "a message that arrived before the send was consumed by it: [$still_unread]" ;;
+esac
 # A malformed session file must recover (warning + empty session), not crash.
 # Ask the client which file it owns rather than assuming: session files are per
 # agent now, so the path carries the session key.
@@ -292,11 +328,17 @@ case "$b_sent" in
     *) t_fail "agent-b's bare send used the wrong nick: [$b_sent]" ;;
 esac
 
-# Cursors are separate: agent-a sends twice on a fresh channel, which advances
-# only agent-a's cursor. agent-b must still have no read position there, so
-# agent-b's unread messages were not consumed on its behalf.
+# Cursors are separate: two messages land on a fresh channel and agent-a READS
+# them, which advances only agent-a's cursor. agent-b must still have no read
+# position there, so agent-b's unread messages were not consumed on its behalf.
+#
+# agent-a JOINS rather than relying on its sends. Sending no longer moves a
+# cursor (B254) -- a cursor is a reader's position, not a record of having
+# spoken -- and a join is what gives an agent a position: it seeds from the
+# channel's current end, which after these two sends is 2.
 agent agent-a send --chan '#isoc' --text 'one' --insecure >/dev/null 2>&1 || true
 agent agent-a send --chan '#isoc' --text 'two' --insecure >/dev/null 2>&1 || true
+agent agent-a join --chan '#isoc' --insecure >/dev/null 2>&1 || true
 a_cursor="$(agent agent-a session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
 b_cursor="$(agent agent-b session show 2>/dev/null | sed -n 's/^cursor #isoc //p')"
 [ "$a_cursor" = "2" ] || t_fail "agent-a's #isoc cursor is [$a_cursor], want 2"

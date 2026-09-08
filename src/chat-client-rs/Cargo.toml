@@ -7,6 +7,14 @@ edition = "2021"
 description = "The TLS chat client: discovers, connects (TOFU), sends, reads deltas, and tails an IRC-grammar chat server"
 license = "MIT"
 
+[lib]
+name = "chat_client_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chat-client-rs"
+path = "src/bin/chat-client-rs.rs"
+
 [dependencies]
 chat-proto = { path = "../chat-proto" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

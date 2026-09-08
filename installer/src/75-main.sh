@@ -58,6 +58,10 @@ else
     # worktree, whatever skills this install selected.
     worktrees_permission_step
 
+    # After the install loop, because it registers the adapter this run placed
+    # and takes away the registration for a mode this run switched away from.
+    mcp_registration_step
+
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi

@@ -193,12 +193,25 @@
               # The installer's fetch path (curl | bash), declared so the shell
               # owns it rather than borrowing the machine's.
               pkgs.curl
+              # The chat suite's TLS client. chat-client-rs consumes no
+              # broadcast -- it FETCH-polls and discards PRIVMSG -- so an
+              # `openssl s_client` speaking the wire by hand is the only thing
+              # in the repository that proves a broadcast reaches a subscriber
+              # (chat/tests/test-chat-broadcast-stall.sh). Undeclared, that
+              # assertion ran only while some other package's closure happened
+              # to put openssl on PATH, and skipped silently otherwise (B272).
+              #
+              # This does not reopen the digest chain it was once excluded for:
+              # plan-crypt owns digests, and no shipped script calls openssl any
+              # more -- plan_sha256_hex.sh and plan-context-lib.sh both record
+              # its removal.
+              pkgs.openssl
               # The pre-rjq filter tool is deliberately ABSENT: rjq is the
               # mandated register runtime, and the older one on PATH can mask a
-              # defect in it -- T85 tracks rjq's missing IN/1. openssl likewise,
-              # since plan-crypt owns digests now. Named obliquely because
-              # test-rjq-active-references treats the bare word as a call site
-              # anywhere but column zero (B154, filed against that gate).
+              # defect in it -- T85 tracks rjq's missing IN/1. Named obliquely
+              # because test-rjq-active-references treats the bare word as a
+              # call site anywhere but column zero (B154, filed against that
+              # gate).
             ] ++ pkgs.lib.optional (muslCross != null) muslCross;
             shellHook = ''
               ${pkgs.lib.optionalString (muslCross != null) ''

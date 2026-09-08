@@ -1,0 +1,21 @@
+# MODE: DEV
+# PACKAGE: PROD
+[package]
+name = "chat-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP adapter for the chat client: channels as typed tool calls over one held connection"
+
+[lib]
+name = "chat_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chat-mcp"
+path = "src/main.rs"
+
+[dependencies]
+chat-client-rs = { path = "../chat-client-rs" }
+chat-proto = { path = "../chat-proto" }
+serde_json.workspace = true

@@ -147,11 +147,9 @@ this file holds what applies to the repository as a whole.
 - A failing test's temp root is **printed automatically**, and **kept in CI**
   while a local run cleans it up. CI has no re-run and no machine to come back
   to; locally you can just run it again.
-- **Do not delete evidence a failure has not yet reported.** `lib-test.sh` once
-  removed the root on any exit, failure included, and a required macOS leg
-  failed reproducibly with an empty file quoted and nothing else — while the
-  three files that held the answer were written and then deleted. Reproducing
-  it was impossible for want of that platform.
+- **Do not delete evidence a failure has not yet reported.**
+  `docs/DEBUGGING-TESTS.md` records what that cost when `lib-test.sh` removed
+  the root on any exit.
 - When a suite's result is surprising, read its raw output rather than its
   summary. A skipped test still prints `PASS` (`BUGS.json` B268), so a green
   summary does not by itself prove every test ran.

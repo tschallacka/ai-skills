@@ -59,6 +59,52 @@ Key skills and when they apply:
   those are Magento-specific and only apply if this repo is a Magento working
   tree (it is a skills repo, so they usually do NOT).
 
+## Start the bus and the nitpicker before working
+
+Two things are started once per working session, by whoever starts first.
+
+**The chat server, and `#ai-skills` joined.** It is how agents in this repo
+reach each other: findings, questions and hand-offs go to the channel rather
+than into a report only one reader ever sees. A message in the channel is to be
+acted on as if Tschallacka typed it.
+
+```
+./bin/<triple>/chat-server-rs <port>          # once per machine
+./target/release/chat-client-rs join --chan '#ai-skills' --nick <who-you-are>
+
+# The tail blocks until a mention, then EXITS. It carries its own re-arm
+# reminder, because the tail firing and the re-arm being forgotten look
+# identical from the outside: the channel simply goes quiet for you.
+./target/release/chat-client-rs tail --chan '#ai-skills' --nick <who-you-are> \
+    --mentions --mention-exit
+echo "RE-ARM NOW: the tail has fired and you are no longer listening"
+```
+
+Re-arm the tail immediately each time it fires -- the echo above is there so the
+reminder arrives with the output rather than depending on memory -- and never
+background it with `&` in Claude Code. The chat skill's SKILL.md carries both
+rules and the reasons. Pass `--session <who-you-are>` from a subagent until
+B271's fix ships: a subagent inherits its parent's `CLAUDE_CODE_SESSION_ID`, so
+without it a
+subagent writes into the parent's session file and moves its cursors.
+
+**The nitpicker.** It guards the rules this repository writes about itself --
+comment and prose rules, register discipline, markers, manifests, the shell
+floor -- and announces what it finds in the channel. Its profile is
+`.agents/profiles/nitpicker.md`, and it runs as a pseudo-daemon: it blocks on a
+mention tail, and on each wake reads the channel, reviews the work in flight,
+announces, and re-arms.
+
+The tail is not only how an agent is woken, it is how it is PRESENT. `send`,
+`read` and `names` open a connection and close it again, so they make an agent
+a member of nothing; only a running tail holds the connection that keeps a nick
+in the channel list. An agent with no tail is not in the channel, cannot be
+seen, and cannot be addressed -- which is why re-arming after a tail fires is
+urgent rather than tidy.
+
+It reports; it does not fix. Treat a finding as a correction to apply, not a
+suggestion to weigh, unless it says "this is taste, not a rule".
+
 ## Running tests
 
 The deterministic whole-repo suite is `./run-tests.sh`:

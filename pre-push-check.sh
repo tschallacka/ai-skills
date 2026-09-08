@@ -269,17 +269,11 @@ else
 fi
 
 # ---- 3b. the two static shell gates CI fails on, over the same changed set --
-# Both of these are pure static checks over shell source, both are CI-fatal, and
-# neither ran here before: they live in the suite, so the default gate printed
-# "the whole deterministic suite is ./run-tests.sh" and pushed anyway. That note
-# is not a substitute for the check. This is the same gap the workspace clippy
-# leg closed for Rust, and the same one section 6 closed for skill declarations
-# after a CI-only failure -- three separate times the cheap half of a suite test
-# belonged in the default gate.
+# Both are pure static checks over shell source and both are CI-fatal, so the
+# cheap half of each belongs in the default gate rather than only in the suite.
 #
 # Scoped to $changed_sh, the list section 3 already built, so the cost is
-# proportional to the change: measured whole-tree, the cap check is ~1s and the
-# portability scan ~11s, and per-file they are a fraction of that.
+# proportional to the change.
 #
 # What each scoped form does and does NOT prove:
 #   - the cap check reports what THIS change is responsible for: a function

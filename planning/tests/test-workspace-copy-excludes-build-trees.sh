@@ -4,12 +4,10 @@
 # copy leaves build artifacts behind, and honours TMPDIR for its scratch.
 #
 # B243: copy_workspace_for_publication() excluded only .env, so it copied the
-# Rust `target/` tree. On a workspace with a warm debug build the destination
-# grew from 276 KB to 5,479,476 KB in about eight seconds — two 51M rjq binaries
-# among them — and because /tmp is tmpfs on a developer workstation that was 6G
-# of RAM, enough to take the host down. It was invisible in CI because a fresh
-# checkout has nothing built to copy, which is exactly why it needs a test that
-# builds the condition rather than waiting to meet it.
+# Rust `target/` tree — gigabytes, into what is tmpfs on a Linux workstation,
+# and enough to take the host down. CI cannot see it: a fresh checkout has
+# nothing built to copy, so this test builds the condition rather than waiting
+# to meet it.
 #
 # Both spellings matter. The Rust workspace has a top-level `target/` and seven
 # more under `src/*/`, so an anchored pattern alone would miss the nested ones —

@@ -1,6 +1,12 @@
 // MODE: DEV
 // PACKAGE: PROD
-//! The TLS chat client.
+//! The TLS chat client, as a library plus its CLI entry point (`run`).
+//!
+//! The plumbing every front end needs is public: discovery and the resolution
+//! ladder, the TLS connect with its TOFU pin, registration, the line I/O, and
+//! the per-agent session with its channel cursors. The CLI verbs are private —
+//! they are one front end's argument handling, not the client's interface.
+//! `chat-mcp` is the second front end (T90).
 //!
 //! Finds a chat server (UDP announce beacon), connects over TLS, pins the
 //! server certificate on first connect (TOFU), and then either sends a message,
@@ -24,7 +30,7 @@ use std::time::{Duration, Instant, SystemTime};
 use chat_proto::Message;
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
-const DEFAULT_BEACON_PORT: u16 = 7780;
+pub const DEFAULT_BEACON_PORT: u16 = 7780;
 
 fn usage() {
     eprintln!(
@@ -69,7 +75,7 @@ fn usage() {
     std::process::exit(64);
 }
 
-fn main() {
+pub fn run() {
     let mut args: Vec<String> = std::env::args().collect();
     // --session is a global option, so it is accepted before the subcommand as
     // well as after it. session_key() reads it straight out of argv either way;
@@ -183,7 +189,7 @@ fn session_cmd(args: &[String], state_dir: &std::path::Path) {
 // while its caller believed it was isolated. Given that a shared state
 // directory is what makes two agents share a nick and a cursor (B116), a flag
 // that pretends to separate them and does not is the wrong failure.
-fn client_state_dir(args: &[String]) -> PathBuf {
+pub fn client_state_dir(args: &[String]) -> PathBuf {
     if let Some(dir) = parse_flag(args, "--state") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir);
@@ -196,7 +202,7 @@ fn client_state_dir(args: &[String]) -> PathBuf {
 
 // The central state home everything global shares: the XDG config home's
 // tsch-ai-skills directory, beside the shared bin/ and the global plans.
-fn chat_default_home() -> PathBuf {
+pub fn chat_default_home() -> PathBuf {
     match std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.is_empty())
@@ -218,7 +224,7 @@ fn dirs_home() -> PathBuf {
 /// Where the session key came from, so `session show` can say which rung of the
 /// ladder decided and an agent can tell a shared key from its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum KeySource {
+pub enum KeySource {
     /// `--session ID` or `$CHAT_SESSION_ID`.
     Explicit,
     /// A session id the coding harness itself exports.
@@ -231,7 +237,7 @@ enum KeySource {
 }
 
 impl KeySource {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             KeySource::Explicit => "explicit",
             KeySource::Harness => "harness",
@@ -307,11 +313,28 @@ fn safe_key(raw: &str) -> String {
 /// cursors the session exists to keep. Inside codex's sandbox they are worse
 /// than unstable: they are pinned at 3/2/1 for every session on the machine, so
 /// they are stable and identical, which would merge every codex agent into one.
-fn resolve_session_key(
+/// `nick` joins the inferred rungs, and only the inferred ones.
+///
+/// A Claude Code subagent is not a separate process: measured, every subagent
+/// of one session shares that session's pid and its CLAUDE_CODE_SESSION_ID, so
+/// the harness rung alone gives them one key. A subagent joining under its own
+/// nick then wrote into the parent's session file and moved the parent's
+/// cursors, which is unread messages lost with nothing to see.
+///
+/// The nick is what actually distinguishes two agents on this bus, so it is
+/// folded in alongside the harness identity rather than replacing it: identity
+/// alone collides between a session and its children, and nick alone would let
+/// an unrelated process on the machine claim a session by picking the name.
+///
+/// Explicit is deliberately left alone. `--session ID` is a caller naming a
+/// session, and two callers naming the same one mean to share it.
+pub fn resolve_session_key(
     explicit: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
     worktree_root: Option<&str>,
+    nick: Option<&str>,
 ) -> (String, KeySource) {
+    let nick = nick.unwrap_or("").trim();
     // 1. What Tschallacka asked for by name always wins; no inference.
     let chosen = explicit
         .map(|s| s.to_string())
@@ -324,7 +347,20 @@ fn resolve_session_key(
         }
     }
 
-    // 2. Whatever identity the harness already knows about itself.
+    // The nick is a visible SUFFIX on an identity that does not include it,
+    // never hashed in with it. Hashing the two together (B278) left no way to
+    // find a session without already knowing its nick, so `session set --nick
+    // solo` wrote one file and a later `send` with no --nick opened a
+    // different, empty one -- destroying the one thing a saved session is for.
+    // With the identity stable, session_key() can look for the sibling.
+    let suffix = match safe_key(nick) {
+        n if n.is_empty() => String::new(),
+        n => format!("-{n}"),
+    };
+
+    // 2. Whatever identity the harness already knows about itself. It is shared
+    //    by a session and every subagent it runs, which is why the nick has to
+    //    be on the end of it.
     let mut material = String::new();
     for name in HARNESS_ID_VARS.iter() {
         if let Some(v) = env(name).filter(|v| !v.is_empty()) {
@@ -336,7 +372,7 @@ fn resolve_session_key(
     }
     if !material.is_empty() {
         return (
-            format!("h-{:016x}", fnv1a64(material.as_bytes())),
+            format!("h-{:016x}{suffix}", fnv1a64(material.as_bytes())),
             KeySource::Harness,
         );
     }
@@ -345,34 +381,89 @@ fn resolve_session_key(
     //    case this skill exists for, and the root is already unique per
     //    checkout on a machine, so the shared repository directory would add
     //    nothing to distinctness -- two checkouts of one repo have different
-    //    roots, and sibling worktrees must NOT share a session.
+    //    roots, and sibling worktrees must NOT share a session. Two agents in
+    //    ONE worktree are separated by the nick and nothing else.
     if let Some(root) = worktree_root.filter(|r| !r.is_empty()) {
         return (
-            format!("w-{:016x}", fnv1a64(root.as_bytes())),
+            format!("w-{:016x}{suffix}", fnv1a64(root.as_bytes())),
             KeySource::Worktree,
         );
     }
 
     // 4. Nothing to go on -- outside a repository, with no harness and no
-    //    explicit id. One shared session, which is the behaviour that predates
-    //    this ladder, under a name that says so.
-    ("shared".to_string(), KeySource::Shared)
+    //    explicit id. One shared session per nick, which is the behaviour that
+    //    predates this ladder for a single agent, under a name that says so.
+    (format!("shared{suffix}"), KeySource::Shared)
 }
 
-/// The session this process owns, resolved once. Reading `--session` straight
-/// out of argv keeps every existing call site unchanged: the session key is a
-/// property of the invocation, like argv itself.
-fn session_key() -> &'static (String, KeySource) {
+/// The session this process owns, resolved once. Reading `--session` and
+/// `--nick` straight out of argv keeps every existing call site unchanged: the
+/// session key is a property of the invocation, like argv itself.
+///
+/// A subcommand carrying no `--nick` (`session show`) resolves the no-nick key,
+/// which is the key a nick-less invocation would have written. That is the
+/// honest answer rather than a guess at which agent is asking.
+pub fn session_key() -> &'static (String, KeySource) {
     static KEY: std::sync::OnceLock<(String, KeySource)> = std::sync::OnceLock::new();
     KEY.get_or_init(|| {
         let args: Vec<String> = std::env::args().collect();
         let explicit = parse_flag(&args, "--session");
-        resolve_session_key(
+        let nick = parse_flag(&args, "--nick");
+        let (key, source) = resolve_session_key(
             explicit.as_deref(),
             &|name| std::env::var(name).ok(),
             git_worktree_root().as_deref(),
-        )
+            nick.as_deref(),
+        );
+        if nick.is_some() {
+            return (key, source);
+        }
+        // No --nick on this call, so the key carries no nick suffix. A saved
+        // session exists to spare the caller repeating --nick, so look for the
+        // one this identity owns before answering with an empty session (B278).
+        match adopt_sibling_session(&key) {
+            Some(sibling) => (sibling, source),
+            None => (key, source),
+        }
     })
+}
+
+/// The single `<key>-<nick>` session belonging to `key`, when there is exactly
+/// one.
+///
+/// Ambiguity is left alone rather than guessed at: two nicks under one identity
+/// is a parent and its subagent, and picking either would reintroduce the
+/// cross-writing B271 fixed. The caller passes --nick and says which it means.
+fn adopt_sibling_session(key: &str) -> Option<String> {
+    // The same argv slice run() hands client_state_dir, so `--state` is
+    // honoured here too; reading the default root would look in the wrong
+    // place for every caller that names one.
+    let args: Vec<String> = std::env::args().collect();
+    sibling_session_in(&client_state_dir(args.get(2..).unwrap_or(&[])), key)
+}
+
+/// The directory half, taking the state root so it can be tested without argv.
+fn sibling_session_in(state_dir: &std::path::Path, key: &str) -> Option<String> {
+    let directory = state_dir.join("sessions");
+    if directory.join(format!("{key}.json")).is_file() {
+        return None;
+    }
+    let prefix = format!("{key}-");
+    let mut found: Option<String> = None;
+    for entry in fs::read_dir(&directory).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if !stem.starts_with(&prefix) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(stem.to_string());
+    }
+    found
 }
 
 /// The current worktree root, or None outside a git repository (or where git is
@@ -399,15 +490,15 @@ fn git_worktree_root() -> Option<String> {
 /// per agent, so agents sharing an `AI_CHAT_HOME` do not share a nick or a
 /// cursor.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
-struct Session {
-    server: String,
-    nick: String,
+pub struct Session {
+    pub server: String,
+    pub nick: String,
     #[serde(default)]
-    cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
+    pub cursors: std::collections::HashMap<String, u64>, // #chan -> last seen id
 }
 
 impl Session {
-    fn path(state_dir: &std::path::Path) -> PathBuf {
+    pub fn path(state_dir: &std::path::Path) -> PathBuf {
         Session::path_for(state_dir, &session_key().0)
     }
 
@@ -429,7 +520,7 @@ impl Session {
     /// drop the nick and cursors an agent was already using. The shared file is
     /// only read, never moved or rewritten: every agent still holding state in
     /// it needs it to stay put, and each writes to its own file from then on.
-    fn load(state_dir: &std::path::Path) -> Session {
+    pub fn load(state_dir: &std::path::Path) -> Session {
         let mut path = Session::path(state_dir);
         if !path.exists() {
             let legacy = Session::legacy_path(state_dir);
@@ -453,7 +544,7 @@ impl Session {
         }
     }
 
-    fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
+    pub fn save(&self, state_dir: &std::path::Path) -> std::io::Result<()> {
         let path = Session::path(state_dir);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -462,8 +553,25 @@ impl Session {
         fs::write(path, json)
     }
 
-    fn cursor(&self, chan: &str) -> u64 {
+    pub fn cursor(&self, chan: &str) -> u64 {
         self.cursors.get(chan).copied().unwrap_or(0)
+    }
+
+    /// The recorded cursor, separating "recorded as 0" from "not recorded"
+    /// (B269). `cursor` collapses both to 0.
+    ///
+    /// A recorded 0 is a real position, not a missing one: `join` seeds the
+    /// cursor from LASTID, so 0 means the channel was empty when this agent
+    /// joined and everything from id 1 is new to it. A reader that treats 0 as
+    /// "nothing recorded" skips to the channel's current end instead, and every
+    /// message posted after that join is lost to `read` for good.
+    ///
+    /// It does not open the history gate. Joining a channel that already holds
+    /// 500 messages records 500 and reads 501 onward; reading further back
+    /// stays an explicit `--since`, so a long-lived channel cannot flood a
+    /// context by accident.
+    pub fn cursor_recorded(&self, chan: &str) -> Option<u64> {
+        self.cursors.get(chan).copied()
     }
 }
 
@@ -517,7 +625,7 @@ fn cache_record(state_dir: &std::path::Path, server: &str) {
 // Listen for beacons and return candidate servers, LAN addresses before
 // loopback ones: a beacon whose host (or sender) is 127.0.0.1 is only
 // interesting when nothing routable announces.
-fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
+pub fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
     let sock = match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, beacon_port)) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -561,7 +669,7 @@ fn discover_candidates(beacon_port: u16, wait_s: u64) -> Vec<String> {
 }
 
 // The resolution ladder; returns the server to dial.
-fn resolve_server(
+pub fn resolve_server(
     arg_server: &str,
     sess_server: &str,
     state_dir: &std::path::Path,
@@ -618,7 +726,7 @@ fn resolve_server(
 /// Fill missing command options from the session (if a session is active).
 /// Returns (server, nick) with the session's values where the caller left them
 /// empty, and whether the session was consulted.
-fn apply_session(
+pub fn apply_session(
     server: &str,
     nick: &str,
     state_dir: &std::path::Path,
@@ -715,7 +823,7 @@ fn parse_opts(args: &[String]) -> Opts {
 }
 
 /// Record a sent/received message id as the channel cursor in the session.
-fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
+pub fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: bool) {
     if no_session {
         return;
     }
@@ -727,7 +835,7 @@ fn save_cursor(state_dir: &std::path::Path, chan: &str, id: u64, no_session: boo
 }
 
 /// Remember the server+nick for later calls.
-fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
+pub fn save_session(state_dir: &std::path::Path, server: &str, nick: &str) {
     let mut s = Session::load(state_dir);
     if !server.is_empty() {
         s.server = server.to_string();
@@ -749,9 +857,9 @@ fn parse_flag(args: &[String], name: &str) -> Option<String> {
     None
 }
 
-type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+pub type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-fn connect(
+pub fn connect(
     server: &str,
     nick: &str,
     state_dir: &std::path::Path,
@@ -855,7 +963,7 @@ fn server_safe(server: &str) -> String {
 /// otherwise a trailing numeric port removed at the LAST colon -- so the host
 /// this returns is the host the connect resolves to. IPv4 and hostnames carry
 /// at most one colon, so they take the same path they always did.
-fn server_host(server: &str) -> String {
+pub fn server_host(server: &str) -> String {
     let s = server.trim();
     if let Ok(sa) = s.parse::<SocketAddr>() {
         return sa.ip().to_string();
@@ -895,17 +1003,21 @@ fn resolve(server: &str) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("no address for {}", server))
 }
 
-/// The wire segments one `--text` becomes: never more than one IRC line each,
+/// The wire segments one message becomes: never more than one IRC line each,
 /// and never a line carrying an embedded newline.
 ///
-/// B266. Splitting on newlines ALONE would have traded one silent truncation
-/// for another, because a single paragraph can exceed the line limit on its
-/// own: RFC 1459 caps a message at 512 bytes including the prefix the server
-/// prepends and the CRLF, so the room the text actually has is what is left
-/// after `:nick!nick@localhost PRIVMSG #chan :`. Both cuts are therefore made
-/// here, and the caller sends one PRIVMSG per segment.
-fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
-    let overhead = format!(":{nick}!{nick}@localhost PRIVMSG {chan} :").len() + 2;
+/// Both cuts are made here because either one, left out, is a silent loss. A
+/// newline inside a PRIVMSG trailing is a second line terminator, so a
+/// multi-line message reaches the server as its first line alone (B266); and
+/// RFC 1459 caps a message at 512 bytes including the prefix the server
+/// prepends and the CRLF, so one long paragraph overruns on its own. The room
+/// the text has is what is left after `:nick!nick@localhost PRIVMSG #chan :`,
+/// and the caller sends one PRIVMSG per segment.
+///
+/// In the library rather than a front end because both front ends need it and
+/// neither may disagree about it.
+pub fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
+    let overhead = format!(":{}!{}@localhost PRIVMSG {} :", nick, nick, chan).len() + 2;
     let budget = 512usize.saturating_sub(overhead).max(1);
     let mut out = Vec::new();
     for line in text.split('\n') {
@@ -929,39 +1041,39 @@ fn wire_segments(nick: &str, chan: &str, text: &str) -> Vec<String> {
     out
 }
 
-/// Split one over-long line at the budget, preferring a word boundary, always
-/// on a UTF-8 boundary. Never returns an empty head, or the caller loops.
+/// Split a line at no more than `budget` bytes, on a word boundary where there
+/// is one and always on a character boundary. The head is never empty, so a
+/// caller looping on the tail terminates.
 fn split_at_budget(line: &str, budget: usize) -> (&str, &str) {
     if line.len() <= budget {
         return (line, "");
     }
-    let mut end = budget;
-    while end > 0 && !line.is_char_boundary(end) {
-        end -= 1;
+    // The last byte index that is both within budget and a char boundary.
+    let mut cut = budget;
+    while cut > 0 && !line.is_char_boundary(cut) {
+        cut -= 1;
     }
-    if end == 0 {
-        // One character wider than the whole budget. Emit it anyway: a segment
-        // one char over beats an infinite loop, and this needs a 4-byte char
-        // under a 3-byte budget to reach.
-        end = line
-            .char_indices()
-            .nth(1)
-            .map(|(i, _)| i)
-            .unwrap_or(line.len());
-        return (&line[..end], &line[end..]);
-    }
-    // Prefer breaking at a space, but do not give back more than a quarter of
-    // the window chasing one -- a long unbroken token would otherwise be cut
-    // far short of the limit.
-    if let Some(space) = line[..end].rfind(' ') {
-        if space >= budget * 3 / 4 {
-            return (&line[..space], line[space + 1..].trim_start());
+    // Prefer the last space inside the budget, so a cut lands between words
+    // rather than inside one. A single word longer than the budget has none,
+    // and is cut where it is.
+    if let Some(space) = line[..cut].rfind(' ') {
+        if space > 0 {
+            return (&line[..space], line[space + 1..].trim_start_matches(' '));
         }
     }
-    (&line[..end], &line[end..])
+    if cut == 0 {
+        // A single character wider than the budget: emit it rather than loop.
+        let one = line
+            .char_indices()
+            .nth(1)
+            .map(|(index, _)| index)
+            .unwrap_or(line.len());
+        return (&line[..one], &line[one..]);
+    }
+    (&line[..cut], &line[cut..])
 }
 
-fn write_line(
+pub fn write_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     line: &str,
 ) -> Result<(), String> {
@@ -971,7 +1083,7 @@ fn write_line(
     Ok(())
 }
 
-fn read_line(
+pub fn read_line(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
 ) -> io::Result<String> {
     let mut buf = Vec::new();
@@ -1064,7 +1176,7 @@ fn discover(args: &[String]) {
     }
 }
 
-fn json_field(s: &str, key: &str) -> Option<String> {
+pub fn json_field(s: &str, key: &str) -> Option<String> {
     let marker = format!("\"{}\":", key);
     let idx = s.find(&marker)?;
     let rest = &s[idx + marker.len()..];
@@ -1176,45 +1288,15 @@ fn send(args: &[String], state_dir: &std::path::Path) {
     for segment in &segments {
         println!(":{nick}!{nick}@localhost PRIVMSG {} :{}", o.chan, segment);
     }
-    // Advance the channel cursor to the newest id. The echo line is the
-    // IRC-prefix form (no id), so fetch history to learn the id of the message
-    // just stored.
-    let _ = write_line(&mut tls, &format!("FETCH {} {}", o.chan, 0));
-    let deadline = SystemTime::now() + Duration::from_secs(3);
-    let mut max_id: u64 = Session::load(state_dir).cursor(&o.chan);
-    while SystemTime::now() < deadline {
-        match read_line(&mut tls) {
-            Ok(l) => {
-                if l.starts_with(":server 000 end-of-history") {
-                    break;
-                }
-                if l.starts_with("MSG ") {
-                    if let Some(id) = l
-                        .split_whitespace()
-                        .nth(2)
-                        .and_then(|s| s.parse::<u64>().ok())
-                    {
-                        if id > max_id {
-                            max_id = id;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
-                    break;
-                }
-            }
-        }
-    }
-    if max_id > 0 {
-        save_cursor(state_dir, &o.chan, max_id, o.no_session);
-    }
+    // The cursor is NOT advanced here: sending is not reading (B254). A cursor
+    // is one watermark over a shared channel, and no id skips only your own --
+    // other agents' ids interleave with yours -- so advancing it past your own
+    // message marks theirs as seen too.
     let _ = write_line(&mut tls, "QUIT");
 }
 
 /// Read the server's `:server 999 <nick> #chan <id>` reply (current max id).
-fn read_last_id(
+pub fn read_last_id(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     chan: &str,
     pending: &mut VecDeque<String>,
@@ -1424,7 +1506,7 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
 /// Kept character-for-character identical to the server's rule rather than
 /// merely "safe": a name the server would refuse must not be readable by going
 /// around it, or the two disagree about what a channel is.
-fn valid_chan(c: &str) -> bool {
+pub fn valid_chan(c: &str) -> bool {
     c.len() > 1
         && c.len() <= 33
         && c.starts_with('#')
@@ -1433,7 +1515,7 @@ fn valid_chan(c: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
 }
 
-fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
+pub fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
     home.join("channels").join(format!("{}.log", chan))
 }
 
@@ -1444,14 +1526,14 @@ fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
 /// must still read the channels everyone shares, so a local read resolves the
 /// home from `$AI_CHAT_HOME` (or the XDG default) exactly as the server does,
 /// and ignores `--state`.
-fn channels_home() -> PathBuf {
+pub fn channels_home() -> PathBuf {
     std::env::var("AI_CHAT_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| chat_default_home())
 }
 
 /// One stored `MSG #chan <id> ...` line's id, or None for anything else.
-fn msg_line_id(line: &str) -> Option<u64> {
+pub fn msg_line_id(line: &str) -> Option<u64> {
     if !line.starts_with("MSG ") {
         return None;
     }
@@ -1462,7 +1544,7 @@ fn msg_line_id(line: &str) -> Option<u64> {
 ///
 /// Taken from the maximum over all rows rather than the last line: a truncated
 /// or interleaved final write must not make the cursor go backwards.
-fn local_last_id(home: &std::path::Path, chan: &str) -> u64 {
+pub fn local_last_id(home: &std::path::Path, chan: &str) -> u64 {
     let path = local_chan_log(home, chan);
     let file = match fs::File::open(&path) {
         Ok(f) => f,
@@ -1599,8 +1681,11 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
     // `--since 0` (or --history via session cursor 0) to read everything.
     let mut since = o.since.clone();
     if since.is_empty() && !o.no_session {
-        let cur = Session::load(state_dir).cursor(&o.chan);
-        if cur > 0 {
+        // A RECORDED cursor is used even when it is 0 (B269). 0 means this
+        // agent joined while the channel was empty, so id 1 onward is new to
+        // it; treating that as "no cursor" skipped to the current end and lost
+        // every message posted since the join.
+        if let Some(cur) = Session::load(state_dir).cursor_recorded(&o.chan) {
             since = cur.to_string();
         }
     }
@@ -1770,19 +1855,23 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     }
     let _ = wait_for_welcome(&mut tls, &nick);
     let _ = write_line(&mut tls, &format!("JOIN {}", o.chan));
-    // Resume from the session cursor; with no cursor yet, default to the
+    // Resume from the session cursor; with NO cursor recorded, default to the
     // channel's CURRENT end (LASTID) so tailing an old channel does not dump
     // its whole history — only new messages are shown from now on.
+    //
+    // A recorded 0 is a position, not an absence (B269): it means this agent
+    // joined while the channel was empty. `read` was fixed and this was not,
+    // which left the collapse in the path every agent actually sits in.
     let mut pending = VecDeque::new();
     let mut last_id: u64 = if o.no_session {
         0
     } else {
-        let cur = Session::load(state_dir).cursor(&o.chan);
-        if cur > 0 {
-            cur
-        } else {
-            let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
-            read_last_id(&mut tls, &o.chan, &mut pending)
+        match Session::load(state_dir).cursor_recorded(&o.chan) {
+            Some(cur) => cur,
+            None => {
+                let _ = write_line(&mut tls, &format!("LASTID {}", o.chan));
+                read_last_id(&mut tls, &o.chan, &mut pending)
+            }
         }
     };
     // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
@@ -1863,7 +1952,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     }
 }
 
-fn wait_for_welcome(
+pub fn wait_for_welcome(
     tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
     base_nick: &str,
 ) -> Result<(), String> {
@@ -2155,7 +2244,7 @@ mod tests {
             ("CHAT_SESSION_ID", "from-env"),
             ("CLAUDE_CODE_SESSION_ID", "claude-1"),
         ]);
-        let (key, src) = resolve_session_key(Some("agent-b"), &env, Some("/repo"));
+        let (key, src) = resolve_session_key(Some("agent-b"), &env, Some("/repo"), None);
         assert_eq!(key, "agent-b");
         assert_eq!(src, KeySource::Explicit);
     }
@@ -2166,7 +2255,7 @@ mod tests {
             ("CHAT_SESSION_ID", "from-env"),
             ("CLAUDE_CODE_SESSION_ID", "claude-1"),
         ]);
-        let (key, src) = resolve_session_key(None, &env, Some("/repo"));
+        let (key, src) = resolve_session_key(None, &env, Some("/repo"), None);
         assert_eq!(key, "from-env");
         assert_eq!(src, KeySource::Explicit);
     }
@@ -2174,7 +2263,7 @@ mod tests {
     #[test]
     fn explicit_id_is_reduced_to_a_safe_filename() {
         let env = env_of(&[]);
-        let (key, src) = resolve_session_key(Some("../../etc/passwd"), &env, None);
+        let (key, src) = resolve_session_key(Some("../../etc/passwd"), &env, None, None);
         assert_eq!(src, KeySource::Explicit);
         assert!(!key.contains('/'), "key must not contain a path separator");
         // What matters is where the key resolves: one file directly inside
@@ -2193,49 +2282,183 @@ mod tests {
     #[test]
     fn an_all_dots_explicit_id_falls_through_rather_than_naming_a_directory() {
         let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "claude-1")]);
-        let (key, src) = resolve_session_key(Some(".."), &env, Some("/repo"));
+        let (key, src) = resolve_session_key(Some(".."), &env, Some("/repo"), None);
         assert_eq!(src, KeySource::Harness, "got key {}", key);
     }
 
     #[test]
     fn each_harness_session_id_gives_a_distinct_key() {
-        let a = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
-        let b = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]), None);
+        let a = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            None,
+        );
+        let b = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]),
+            None,
+            None,
+        );
         assert_eq!(a.1, KeySource::Harness);
         assert_ne!(a.0, b.0, "two Claude Code sessions must not share a key");
 
-        let c = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "c")]), None);
-        let d = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "d")]), None);
+        let c = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "c")]), None, None);
+        let d = resolve_session_key(None, &env_of(&[("CODEX_SESSION_ID", "d")]), None, None);
         assert_eq!(c.1, KeySource::Harness);
         assert_ne!(c.0, d.0, "two codex sessions must not share a key");
 
-        let e = resolve_session_key(None, &env_of(&[("OPENCODE_PID", "111")]), None);
+        let e = resolve_session_key(None, &env_of(&[("OPENCODE_PID", "111")]), None, None);
         assert_eq!(e.1, KeySource::Harness);
         assert_ne!(
             e.0,
-            resolve_session_key(None, &env_of(&[("OPENCODE_PID", "222")]), None).0
+            resolve_session_key(None, &env_of(&[("OPENCODE_PID", "222")]), None, None).0
         );
     }
 
     #[test]
     fn a_harness_key_is_stable_for_the_same_ids() {
         let pairs = [("CODEX_SESSION_ID", "same"), ("OPENCODE_PID", "9")];
-        let first = resolve_session_key(None, &env_of(&pairs), Some("/a"));
-        let again = resolve_session_key(None, &env_of(&pairs), Some("/b"));
+        let first = resolve_session_key(None, &env_of(&pairs), Some("/a"), None);
+        let again = resolve_session_key(None, &env_of(&pairs), Some("/b"), None);
         assert_eq!(
             first.0, again.0,
             "the harness rung must not depend on the worktree"
         );
     }
 
+    /// B278. The nick is a suffix on an identity that does not include it, so
+    /// a call with no --nick can still find the session it owns. Hashing the
+    /// two together made that impossible and broke the one thing a saved
+    /// session is for.
+    #[test]
+    fn a_key_carries_the_nick_as_a_findable_suffix() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one")]);
+        let bare = resolve_session_key(None, &env, None, None).0;
+        let named = resolve_session_key(None, &env, None, Some("solo")).0;
+        assert_eq!(
+            named,
+            format!("{bare}-solo"),
+            "the nick must be a suffix on the nick-free key, not hashed into it"
+        );
+    }
+
+    /// The nick-less call adopts the one session its identity owns.
+    #[test]
+    fn a_call_with_no_nick_finds_the_single_session_for_its_identity() {
+        let dir = tmp_state("a_call_with_no_nick_finds_the_single_session");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc-solo.json"), "{}").unwrap();
+        assert_eq!(
+            sibling_session_in(&dir, "h-abc"),
+            Some("h-abc-solo".to_string())
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two nicks under one identity is a parent and its subagent. Picking
+    /// either would put one agent back in the other's file, which is B271.
+    #[test]
+    fn an_ambiguous_identity_is_not_guessed_at() {
+        let dir = tmp_state("an_ambiguous_identity_is_not_guessed_at");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc-parent.json"), "{}").unwrap();
+        fs::write(sessions.join("h-abc-child.json"), "{}").unwrap();
+        assert_eq!(sibling_session_in(&dir, "h-abc"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A nick-free session that already exists is the caller's own file and
+    /// wins over any suffixed sibling.
+    #[test]
+    fn an_existing_nick_free_session_is_not_redirected() {
+        let dir = tmp_state("an_existing_nick_free_session_is_not_redirected");
+        let sessions = dir.join("sessions");
+        fs::write(sessions.join("h-abc.json"), "{}").unwrap();
+        fs::write(sessions.join("h-abc-solo.json"), "{}").unwrap();
+        assert_eq!(sibling_session_in(&dir, "h-abc"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A Claude Code subagent shares its parent's process and its
+    /// CLAUDE_CODE_SESSION_ID, so the harness rung alone hands both the same
+    /// key: measured, a subagent joined as itself and wrote into the parent's
+    /// session file, moving the parent's cursors past unread messages.
+    #[test]
+    fn a_subagent_under_one_harness_id_gets_its_own_session_per_nick() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
+        let parent = resolve_session_key(None, &env, None, Some("aiskills"));
+        let child = resolve_session_key(None, &env, None, Some("t90-chat-mcp"));
+        assert_eq!(parent.1, KeySource::Harness);
+        assert_ne!(
+            parent.0, child.0,
+            "one harness id and two nicks must not share a session file"
+        );
+        // Same nick, same key: a session has to survive the next invocation.
+        assert_eq!(
+            parent.0,
+            resolve_session_key(None, &env, None, Some("aiskills")).0
+        );
+    }
+
+    /// The nick alone must not name a session, or any process on the machine
+    /// could claim another's by choosing the name.
+    #[test]
+    fn the_same_nick_under_a_different_harness_id_is_a_different_session() {
+        let a = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            Some("aiskills"),
+        );
+        let b = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "b")]),
+            None,
+            Some("aiskills"),
+        );
+        assert_ne!(a.0, b.0, "the harness id must still separate two sessions");
+    }
+
+    /// Two agents in ONE worktree have nothing but the nick to tell them apart.
+    #[test]
+    fn two_nicks_in_one_worktree_do_not_share_a_session() {
+        let env = env_of(&[]);
+        let a = resolve_session_key(None, &env, Some("/repo"), Some("one"));
+        let b = resolve_session_key(None, &env, Some("/repo"), Some("two"));
+        assert_eq!(a.1, KeySource::Worktree);
+        assert_ne!(a.0, b.0);
+        let c = resolve_session_key(None, &env, None, Some("one"));
+        let d = resolve_session_key(None, &env, None, Some("two"));
+        assert_eq!(c.1, KeySource::Shared);
+        assert_ne!(c.0, d.0, "the shared rung is per nick too");
+    }
+
+    /// `--session ID` is a caller naming a session, so two callers naming the
+    /// same one mean to share it. Folding the nick in would break that.
+    #[test]
+    fn an_explicit_session_id_is_not_split_by_nick() {
+        let env = env_of(&[("CLAUDE_CODE_SESSION_ID", "one-session")]);
+        let a = resolve_session_key(Some("shared-desk"), &env, None, Some("one"));
+        let b = resolve_session_key(Some("shared-desk"), &env, None, Some("two"));
+        assert_eq!(a.1, KeySource::Explicit);
+        assert_eq!(a.0, b.0, "an explicitly named session is shared on purpose");
+    }
+
     #[test]
     fn a_nested_harness_does_not_inherit_the_outer_agents_session() {
         // Measured: a codex launched from a Claude Code agent keeps that
         // agent's CLAUDE_CODE_SESSION_ID and adds its own CODEX_SESSION_ID.
-        let outer = resolve_session_key(None, &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]), None);
+        let outer = resolve_session_key(
+            None,
+            &env_of(&[("CLAUDE_CODE_SESSION_ID", "a")]),
+            None,
+            None,
+        );
         let inner = resolve_session_key(
             None,
             &env_of(&[("CLAUDE_CODE_SESSION_ID", "a"), ("CODEX_SESSION_ID", "z")]),
+            None,
             None,
         );
         assert_ne!(
@@ -2247,20 +2470,20 @@ mod tests {
     #[test]
     fn the_worktree_rung_separates_worktrees_and_only_applies_without_a_harness() {
         let env = env_of(&[]);
-        let a = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"));
-        let b = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/two"));
+        let a = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"), None);
+        let b = resolve_session_key(None, &env, Some("/repo/.claude/worktrees/two"), None);
         assert_eq!(a.1, KeySource::Worktree);
         assert_ne!(a.0, b.0, "sibling worktrees must not share a session");
         // Same root, twice: the same key.
         assert_eq!(
             a.0,
-            resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one")).0
+            resolve_session_key(None, &env, Some("/repo/.claude/worktrees/one"), None).0
         );
     }
 
     #[test]
     fn outside_a_repository_with_no_harness_one_shared_session_is_named_as_such() {
-        let (key, src) = resolve_session_key(None, &env_of(&[]), None);
+        let (key, src) = resolve_session_key(None, &env_of(&[]), None, None);
         assert_eq!(key, "shared");
         assert_eq!(src, KeySource::Shared);
     }
@@ -2352,6 +2575,62 @@ mod tests {
         assert_eq!(s.nick, "n");
         assert_eq!(s.cursor("#x"), 0);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    // ---- wire_segments ---------------------------------------------------
+
+    #[test]
+    fn a_multi_line_message_becomes_one_segment_per_line() {
+        let out = wire_segments("me", "#c", "alpha\nbeta\ngamma");
+        assert_eq!(out, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn a_crlf_line_carries_no_stray_carriage_return() {
+        let out = wire_segments("me", "#c", "alpha\r\nbeta");
+        assert_eq!(out, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn a_blank_line_stays_a_paragraph_break() {
+        let out = wire_segments("me", "#c", "alpha\n\nbeta");
+        assert_eq!(out, vec!["alpha", " ", "beta"]);
+    }
+
+    #[test]
+    fn a_paragraph_longer_than_the_line_limit_is_split_not_truncated() {
+        let word = "word ".repeat(200); // 1000 bytes on one line
+        let out = wire_segments("me", "#c", word.trim_end());
+        assert!(
+            out.len() > 1,
+            "one line was not split: {} segments",
+            out.len()
+        );
+        let overhead = ":me!me@localhost PRIVMSG #c :".len() + 2;
+        for segment in &out {
+            assert!(
+                segment.len() + overhead <= 512,
+                "a segment overruns the 512-byte message: {} bytes",
+                segment.len()
+            );
+        }
+        // Nothing is lost: the words come back in order and in full.
+        assert_eq!(out.join(" ").split_whitespace().count(), 200);
+    }
+
+    #[test]
+    fn a_single_word_wider_than_the_budget_still_terminates() {
+        let out = wire_segments("me", "#c", &"x".repeat(2000));
+        assert!(out.len() >= 5, "{} segments", out.len());
+        assert_eq!(out.concat().len(), 2000, "no bytes were dropped");
+    }
+
+    #[test]
+    fn a_split_never_lands_inside_a_character() {
+        // Multi-byte characters only, so a byte-indexed cut would panic or
+        // produce mojibake rather than a shorter line.
+        let out = wire_segments("me", "#c", &"é".repeat(600));
+        assert_eq!(out.concat().chars().count(), 600);
     }
 
     #[test]
