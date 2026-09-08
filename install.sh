@@ -3965,6 +3965,7 @@ tests/test-chat.sh
 tests/test-chat-resolution.sh
 tests/test-chat-broadcast-stall.sh
 tests/test-chat-descriptor-leak.sh
+tests/test-chat-owner-socket.sh
 CHATEOF
             ;;
         interactive-shell)
