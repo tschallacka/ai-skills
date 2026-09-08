@@ -228,9 +228,9 @@
         "installer/src/60-install.sh",
         "setup-dev-env.sh"
       ],
-      "note": "Also worth deciding whether setup-dev-env should populate <skill>/bin/<triple>/ directly instead, which would make one location serve both paths. That is the smaller change but it blurs 'shipped artifact' and 'local build', which is the distinction the release gates rely on.",
+      "note": "Also worth deciding whether setup-dev-env should populate <skill>/bin/<triple>/ directly instead, which would make one location serve both paths. That is the smaller change but it blurs 'shipped artifact' and 'local build', which is the distinction the release gates rely on. Reproduced concretely 2026-09-09: the day-old shipped binaries problem is not just stale content, it silently breaks the MCP protocol. ai-text-editor-mcp built 2026-09-04 vs source at 2026-09-07 advertised every tool with inputSchema {\"additionalProperties\":true,\"type\":\"object\"} (no properties, no required) -- 3 days of schema evolution (tab_id/tab_path/verbosity/expected_revision as named properties) missing entirely. Every mutating call (insert/replace/...) failed with revision_required no matter what was passed, with no indication the binary was stale -- the servers own staleness_notice/adapter_replaced() mechanism only fires on an in-session replacement, not on an adapter that was ALREADY stale when the session started. Confirms this needs either: install.sh dev mode using the freshly-built tree directly (this TODOs ask), or the MCP adapter checking its own build timestamp against the source it was compiled from and refusing/warning at initialize.",
       "created_at": "2026-09-08T12:22:59Z",
-      "updated_at": "2026-09-08T12:22:59Z"
+      "updated_at": "2026-09-08T23:47:33Z"
     },
     {
       "id": "T109",
