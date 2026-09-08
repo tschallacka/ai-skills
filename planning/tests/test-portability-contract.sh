@@ -24,6 +24,7 @@ export LC_ALL=C
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 rules="$repo_root/portability-rules.json"
 generator="$repo_root/generate-portability.sh"
+redactor="$repo_root/target/release/tony-the-pony"
 
 note_fail() { printf 'portability: %s\n' "$1" >&2; t_record "$1"; }
 
@@ -33,6 +34,18 @@ command -v rjq >/dev/null 2>&1 || {
 }
 [ -f "$rules" ] || { note_fail "missing $rules"; exit 1; }
 [ -x "$generator" ] || { note_fail "missing or non-executable $generator"; exit 1; }
+# The redactor decides what counts as an instruction, so without it the scan
+# would read prose as code again -- its absence is a failure, never a quietly
+# degraded run. It is built here when missing rather than assumed: CI builds the
+# crates the suite needs, and a developer who has not built one should get the
+# check rather than a skip.
+if [ ! -x "$redactor" ] && command -v cargo >/dev/null 2>&1; then
+    (cd "$repo_root" && cargo build --release -p tony-the-pony) >/dev/null 2>&1 || true
+fi
+[ -x "$redactor" ] || {
+    note_fail "missing $redactor (cargo build --release -p tony-the-pony)"
+    exit 1
+}
 
 # Files that legitimately contain a pattern: the registry names every construct,
 # the catalogue publishes them, and plan-map-lib.sh is the replacement for one.
@@ -184,14 +197,24 @@ while IFS= read -r file; do
     done < <(awk '/# PORTABILITY:/ { print FNR }' "$repo_root/$file")
 done < <(script_list)
 
-# 4. No new banned constructs. Comments are stripped first, so prose that names a
-# construct (a marker, a docblock) is not mistaken for a use of it.
+# 4. No new banned constructs. Everything that is not an instruction is redacted
+# first -- comments, quoted strings and heredoc bodies -- so prose that names a
+# construct is not mistaken for a use of it. src/tony-the-pony owns that
+# classification: it is the lexer the grep gate already decides command position
+# with, so there is one implementation of "is this text an instruction" rather
+# than a second copy here that would drift from it.
 #
-# Each file is stripped once into a mirror tree, then each rule greps that tree
-# in a single pass. The obvious shape -- strip and grep per rule per file -- runs
-# sed and grep 23x246 times and cost 15.6s of a 164s suite; this is about 270
-# processes instead of 11,000. Substitution keeps the line count, so a line
-# number in the mirror is the line number in the source.
+# A line-oriented comment strip was wrong in both directions here: it reported
+# the installer's own warning text about an in-place rewrite as a use of one,
+# and it truncated a line at a `#` inside a string, which hides a real violation
+# written after it.
+#
+# Each file is redacted once into a mirror tree, then each rule greps that tree
+# in a single pass. The obvious shape -- redact and grep per rule per file --
+# runs 23x246 times and cost 15.6s of a 164s suite; this is about 270 processes
+# instead of 11,000. Redaction replaces characters with spaces rather than
+# removing them, so a line and column in the mirror is the same position in the
+# source.
 stripped_root="$(mktemp -d "${TMPDIR:-/tmp}/portability-stripped.XXXXXX")"
 scan_files="$(mktemp "${TMPDIR:-/tmp}/portability-files.XXXXXX")"
 script_list > "$scan_files"
@@ -203,7 +226,7 @@ sed 's|/[^/]*$||' "$scan_files" | sort -u \
     | while IFS= read -r dir; do printf '%s\0' "$stripped_root/$dir"; done \
     | xargs -0 mkdir -p
 while IFS= read -r file; do
-    sed 's/[[:space:]]*#.*$//' "$repo_root/$file" > "$stripped_root/$file"
+    "$redactor" --redact "$repo_root/$file" > "$stripped_root/$file"
 done < "$scan_files"
 
 # One grep per rule over the whole mirror. No -q and no -m1: either would close

@@ -121,6 +121,23 @@ fn main() {
         Some("--version") => {
             println!("tony-the-pony {}", env!("CARGO_PKG_VERSION"));
         }
+        // Reads a shell script and writes it back with everything that is not
+        // an instruction blanked, for a scanner that must not read prose as
+        // code. Line numbers and byte offsets survive the pass.
+        Some("--redact") => {
+            let mut source = String::new();
+            let read = match args.get(1) {
+                Some(path) if path != "-" => std::fs::read_to_string(path).map(|text| {
+                    source = text;
+                }),
+                _ => std::io::stdin().read_to_string(&mut source).map(|_| ()),
+            };
+            if let Err(error) = read {
+                eprintln!("tony-the-pony: {error}");
+                std::process::exit(66);
+            }
+            print!("{}", lexer::redact(&source));
+        }
         Some("--check") => {
             let command = args.get(1).map(String::as_str).unwrap_or("");
             match lexer::inspect(command) {
