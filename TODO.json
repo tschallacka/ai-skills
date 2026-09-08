@@ -229,23 +229,6 @@
       "updated_at": "2026-09-07T22:22:06Z"
     },
     {
-      "id": "T107",
-      "title": "One client session owns the connection: the tail serves send/read over a control socket",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka's ruling on B283: reading and sending must use the same client session. The tail becomes the session's owner -- it holds the single TLS connection and is the only cursor writer -- and serves send, read, names, join and leave over a control socket in the session state dir. Those verbs look for that socket first: if it answers they forward the request, block for the reply, and print what the owner reports from the wire; if it is absent or stale they behave as they do today and open their own connection, so nothing regresses where no tail runs.\n\nCONCURRENCY (Tschallacka's ruling): the socket gets its OWN monitor thread. It owns the listener, accepts a connection, reads the request, and pings the main process atomically that an action is waiting -- the tail loop is never blocked by socket I/O, and a slow or dead client cannot stall the bus. Shape, std only, no new crates: a Mutex<VecDeque<Request>> for the queue plus an AtomicBool set with Release on push and read with Acquire in the loop, so the main thread pays one atomic load per iteration and takes the lock only when there is something to take. Each Request carries an mpsc::Sender for its reply; the monitor thread blocks on recv and writes the answer back to the client, so the blocking is always on the monitor side. A recv timeout makes the monitor answer 'owner busy, retry' itself rather than leaving a client hanging -- an unanswered send must never look delivered.\n\nLifecycle: the monitor thread watches a shutdown AtomicBool so QUIT ends it, and only the socket inode this process created is unlinked. If the monitor thread dies the tail keeps tailing and the socket is removed, so clients fall back to their own connection instead of hanging on a dead socket. Requests are served in arrival order and a send is written between whole lines, never interleaved into a partial one.\n\nThe precedent is in this repo twice: interactive-shell is a long-lived process owning a PTY with a short-lived input client over a 0600 socket in a 0700 directory, and ai-text-editor is a server owning document state with a short-lived client, whose SessionRecord (endpoint, pid, start_time_ns, server_generation, session_token) is already the stale-owner design this needs -- a pid alone is reused, so it is paired with the start time and a takeover is explicit. Windows has no unix socket, so it takes loopback TCP with a token, as ai-text-editor does. --no-session must bypass the socket entirely, since it means do not touch shared state. Message splitting stays in the owner, where wire_segments already lives.",
-      "blocked_on": null,
-      "refs": [
-        "src/chat-client-rs/src/lib.rs",
-        "src/interactive-shell/src/lib.rs",
-        "src/ai-text-editor/src/session.rs"
-      ],
-      "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor.",
-      "created_at": "2026-09-08T11:12:48Z",
-      "updated_at": "2026-09-08T11:17:37Z"
-    },
-    {
       "id": "T108",
       "title": "install.sh needs a dev mode that installs the dev build dir, not the day-old shipped binaries",
       "status": "open",
@@ -652,6 +635,22 @@
       "updated_at": "2026-09-08T10:48:24Z"
     },
     {
+      "id": "T111",
+      "title": "The session owner needs a Windows transport: loopback TCP with a token",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "T107 landed the owner on unix sockets. Windows has no unix socket, so control.rs carries a cfg(not(unix)) arm where serve() and ask() both return None -- every verb there keeps exactly the behaviour it had before T107, including the B283 suffix when a tail is running.\n\nThe shape it needs is the one ai-text-editor already uses: bind loopback TCP on an ephemeral port, put the port and a secret in the owner record, and prove the secret per connection rather than sending it in the request. The record already carries pid and started_at_ns for owner identity; what it gains is the endpoint form and the token. src/ai-text-editor/src/transport.rs is the reference, including why the token is not in the envelope.\n\nTwo things must hold that the unix path gets for free: the record file's permissions are the only guard on a loopback port (there is no 0700 directory doing it), and liveness is still decided by connecting, not by the pid. A port that nothing answers is a stale record, same as a socket that refuses.\n\nNot shipped with T107 deliberately: an untested socket transport on a platform nobody here can run is worse than an honest fallback, and the fallback is correct -- just without the fix.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/control.rs",
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "note": "chat/binaries.tsv does ship chat-client-rs.exe for x86_64-pc-windows-msvc, so this is a real supported target and not a hypothetical one.",
+      "created_at": "2026-09-08T13:58:10Z",
+      "updated_at": "2026-09-08T13:58:10Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
@@ -813,6 +812,23 @@
       "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T107",
+      "title": "One client session owns the connection: the tail serves send/read over a control socket",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling on B283: reading and sending must use the same client session. The tail becomes the session's owner -- it holds the single TLS connection and is the only cursor writer -- and serves send, read, names, join and leave over a control socket in the session state dir. Those verbs look for that socket first: if it answers they forward the request, block for the reply, and print what the owner reports from the wire; if it is absent or stale they behave as they do today and open their own connection, so nothing regresses where no tail runs.\n\nCONCURRENCY (Tschallacka's ruling): the socket gets its OWN monitor thread. It owns the listener, accepts a connection, reads the request, and pings the main process atomically that an action is waiting -- the tail loop is never blocked by socket I/O, and a slow or dead client cannot stall the bus. Shape, std only, no new crates: a Mutex<VecDeque<Request>> for the queue plus an AtomicBool set with Release on push and read with Acquire in the loop, so the main thread pays one atomic load per iteration and takes the lock only when there is something to take. Each Request carries an mpsc::Sender for its reply; the monitor thread blocks on recv and writes the answer back to the client, so the blocking is always on the monitor side. A recv timeout makes the monitor answer 'owner busy, retry' itself rather than leaving a client hanging -- an unanswered send must never look delivered.\n\nLifecycle: the monitor thread watches a shutdown AtomicBool so QUIT ends it, and only the socket inode this process created is unlinked. If the monitor thread dies the tail keeps tailing and the socket is removed, so clients fall back to their own connection instead of hanging on a dead socket. Requests are served in arrival order and a send is written between whole lines, never interleaved into a partial one.\n\nThe precedent is in this repo twice: interactive-shell is a long-lived process owning a PTY with a short-lived input client over a 0600 socket in a 0700 directory, and ai-text-editor is a server owning document state with a short-lived client, whose SessionRecord (endpoint, pid, start_time_ns, server_generation, session_token) is already the stale-owner design this needs -- a pid alone is reused, so it is paired with the start time and a takeover is explicit. Windows has no unix socket, so it takes loopback TCP with a token, as ai-text-editor does. --no-session must bypass the socket entirely, since it means do not touch shared state. Message splitting stays in the owner, where wire_segments already lives.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/lib.rs",
+        "src/interactive-shell/src/lib.rs",
+        "src/ai-text-editor/src/session.rs"
+      ],
+      "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor. Landed on unix 2026-09-08 (commit 8e4b52e0, PR 78): control.rs holds the socket, the monitor thread and the client-side forwarder; lib.rs gained the serve_* verbs, the owner setup in tail, and forward_or_fall_back in send/read/names/join/leave. Ten unit tests plus chat/tests/test-chat-owner-socket.sh, whose --no-session control is the permanent mutation proving the unsuffixed assertion is not vacuous. Windows is NOT covered and is now T111; there the cfg(not(unix)) arm returns None so every verb keeps its pre-T107 behaviour. Two register entries came out of the work: B294 (insert refuses a line number read accepts) and B295 (the remote read arm saves a mention cursor), and B295 is why serve_read copies the remote behaviour rather than the better local one.",
+      "created_at": "2026-09-08T11:12:48Z",
+      "updated_at": "2026-09-08T13:58:10Z"
     },
     {
       "id": "T1",
