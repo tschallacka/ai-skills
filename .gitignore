@@ -70,6 +70,13 @@ chat/bin/*/
 # The editor's release artifacts are built by CI and are never committed.
 ai-text-editor/bin/*/
 
+# The PTY wrapper and its input client, on the same terms. Listed late because
+# the skill gained binaries after the two rules above were written, and nothing
+# generalised them -- so a local build left multi-megabyte artifacts stageable
+# (B293), which is the other half of interactive-shell being missed by the
+# per-skill plumbing (B291).
+interactive-shell/bin/*/
+
 # A local `cargo build` drop of the plan-crypt helper, the same developer
 # convenience as chat/runtime/chat-server-rs above. Per-target compiled
 # artifacts are CI-delivered and never tracked (planning/MAINTAINER.md
