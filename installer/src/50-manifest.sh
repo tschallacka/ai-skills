@@ -400,7 +400,9 @@ tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-editor-steering.sh
 tests/test-installer-integration-mode.sh
+tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
 tests/test-installer-mcp-registration.sh
 tests/test-installer-noninteractive.sh
