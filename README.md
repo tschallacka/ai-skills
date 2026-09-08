@@ -40,6 +40,10 @@ user explicitly requests it. Each skill documents when not to activate.
 (Claude Code, Codex, OpenCode, OpenClaw, Cline). Operating-system support is
 separate and stated here:
 
+Those tools do not identify the calling agent the same way, which matters to
+every per-agent feature here. `src/agent-session-key/HARNESS-IDENTITY.md`
+records what each one provides, how it was measured, and the procedure for
+contributing a harness that is not yet listed.
 | | Supported |
 |---|---|
 | Linux | any distribution, bash 4 or 5, GNU userland |
