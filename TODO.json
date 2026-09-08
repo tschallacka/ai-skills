@@ -318,6 +318,23 @@
       "updated_at": "2026-09-08T20:24:39Z"
     },
     {
+      "id": "T122",
+      "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka asked whether a plugin could expose the per-subagent id. It can, and the whole chain was measured on 2026-09-08 rather than reasoned about.\n\nWHAT WAS PROVEN, in order:\n\n1. A SubagentStart hook exists and fires per subagent. It took effect immediately on being written to settings.json, with no session restart.\n\n2. Its payload carries the identity nothing else does: agent_id, agent_type, plus session_id, prompt_id, cwd, scratchpad_dir and transcript_path. The agent_id matched, character for character, the id the Agent tool returned to the spawner -- a4631ac048e789cbb for the last probe.\n\n3. hookSpecificOutput.additionalContext reaches the subagent's own context. A subagent asked to report its injected identity answered AGENT_ID=a4631ac048e789cbb TYPE=code-researcher having called no tools, so it read it from context rather than deriving it.\n\nWHAT TO BUILD: a plugin shipping one SubagentStart hook that injects the agent's own id and type, and instructs it to pass that id as the session on every editor and chat call. The spawner needs to remember nothing and the subagent cannot be confused about who it is.\n\nTHE HONEST LIMIT: this is context injection, not an environment variable. The hook cannot set env for the subagent, because the subagent is not a new process -- so a CLI call from a subagent's bash still needs the id passed explicitly, and the subagent now knows it well enough to do that. Being context, it is also SOFT: the model has to use what it was told.\n\nWHICH IS WHY IT PAIRS WITH THE REFUSAL. Soft supply plus a hard requirement is what makes it reliable: the hook guarantees every subagent HAS an id, and an editor that refuses an undeclared caller guarantees every subagent USES it. Neither half is sufficient alone -- injection without refusal is advisory, refusal without injection is an obstacle.",
+      "blocked_on": null,
+      "refs": [
+        "ai-text-editor/SKILL.md",
+        "chat/SKILL.md",
+        "src/agent-session-key/src/lib.rs"
+      ],
+      "note": "Supersedes the \"spawner must inject it\" plan in B303: the harness will do it, and the harness is the only party that always knows. Probe hook and settings entry were removed after measuring; nothing was left in the live config.",
+      "created_at": "2026-09-08T20:56:13Z",
+      "updated_at": "2026-09-08T20:56:13Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
