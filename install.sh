@@ -3746,7 +3746,9 @@ tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-editor-steering.sh
 tests/test-installer-integration-mode.sh
+tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
 tests/test-installer-mcp-registration.sh
 tests/test-installer-noninteractive.sh
@@ -5007,6 +5009,150 @@ planning_permission_step() {
     print_agent_permission_prompt "$plans" "$agent_tmp" "${SELECTED_TARGET_PATHS[@]}"
 }
 
+
+# ---------------------------------------------------------------
+# 13a. Step 3: interactive-shell execution permission
+# ---------------------------------------------------------------
+# A denied Bash call does not read as "ask for permission" to an agent; it reads
+# as "this tool does not work", after which the agent falls back to a headless
+# invocation that cannot observe the program at all. That is the failure this
+# grant prevents, so it is offered on every install that places the skill.
+
+print_manual_interactive_shell_permissions() {
+    local kind="$1" bins="$2"
+    echo "  $kind: no safe auto-editable permission file was modified." >&2
+    echo "    - allow $kind to execute the wrapper and its input client under $bins" >&2
+    echo "    - example (Claude Code settings.json permissions.allow):" >&2
+    echo "        Bash($bins/**:*)" >&2
+}
+
+claude_interactive_shell_permissions() {
+    local bins="$1"
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
+        print_manual_interactive_shell_permissions claude "$bins"
+        return 0
+    fi
+    bins="$(strip_trailing_slashes "$bins")"
+    backup_file "$cfg"
+    # Distinct from the planning and worktree wordings because
+    # test-installer-opencode-permissions counts those phrases and expects
+    # exactly one of each.
+    claude_merge_allow 'def entries: [
+    "Bash(\($bins)/**:*)"
+];' 'interactive-shell grant already in place' --arg bins "$bins"
+}
+
+interactive_shell_permission_step() {
+    local root kind bins
+    echo >&2
+    echo "== Step 3: interactive-shell execution permission ==" >&2
+    if ! confirm "Allow the selected agents to execute the interactive-shell binaries, so driving a terminal program needs no prompt per call? (Each edited config is backed up beside itself, unless git already tracks it)"; then
+        echo "  Left unchanged. A refused wrapper call reads as a broken tool, so" >&2
+        echo "  expect the skill to be skipped in favour of a headless command." >&2
+        return 0
+    fi
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        bins="${root%/}/interactive-shell/bin"
+        case "$kind" in
+            claude) claude_interactive_shell_permissions "$bins" ;;
+            *)      print_manual_interactive_shell_permissions "$kind" "$bins" ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------
+# 13b. Step 4: ai-text-editor tool steering
+# ---------------------------------------------------------------
+# Claude Code injects a "bash-first" instruction telling the agent to edit files
+# with sed and heredocs rather than an editor. It is a prompt-size experiment,
+# switched on per account by a remote cohort assignment, and while it is active
+# the editor this install just placed is usually bypassed. Two documented
+# environment settings turn it down; both are Claude Code's own, so no other
+# agent kind is offered them.
+
+# Written whether or not the offer is taken, because declining has a cost that is
+# invisible from the outside: a shell rewrite that matched nothing looks exactly
+# like one that worked.
+print_editor_steering_warning() {
+    cat >&2 <<'WARNING'
+  Claude Code may instruct the agent to make file changes with sed, heredocs
+  or short scripts instead of an editor. While that instruction is active the
+  ai-text-editor MCP is usually skipped, and these are what it costs:
+    - an in-place sed rewrites the file and exits 0 whether or not the
+      pattern matched, so a mistype is indistinguishable from success
+    - a script heredoc stacks the shell's escaping on top of the language's
+      on top of the target file's syntax
+    - neither verifies what it replaces, while the editor's expected_text
+      refuses on mismatch and its journal survives a git checkout
+  Two settings turn it down, and either is enough:
+    CLAUDE_CODE_THRIFTY_SONIC=false  the instruction is not injected at all
+    CLAUDE_CODE_COZY_TEAPOT=relaxed  softer wording that leaves the choice to
+                                     the agent, so the editor still competes
+WARNING
+}
+
+# One env key merged into Claude's settings.json, same write discipline as the
+# permission editors above: backup, defensive read, atomic rename.
+claude_env_setting() {
+    local key="$1" value="$2"
+    local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}"
+    local doc present tmpfile
+    [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  claude-code: rjq is not installed; set env.$key to \"$value\" in $cfg by hand." >&2
+        return 0
+    fi
+    backup_file "$cfg"
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    present="$(printf '%s' "$doc" | rjq -r --arg key "$key" --arg value "$value" '
+        (if type == "object" then . else {} end) | .env
+        | (if type == "object" then . else {} end)
+        | if .[$key] == $value then "yes" else "no" end')"
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq --arg key "$key" --arg value "$value" '
+        (if type == "object" then . else {} end)
+        | (.env | if type == "object" then . else {} end) as $env
+        | .env = ($env | .[$key] = $value)' > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+    if [ "$present" = yes ]; then
+        printf '  claude-code: env.%s is already "%s"\n' "$key" "$value"
+    else
+        printf '  claude-code: set env.%s to "%s"\n' "$key" "$value"
+    fi
+}
+
+editor_steering_step() {
+    local root kind claude_seen=0
+    echo >&2
+    echo "== Step 4: ai-text-editor tool steering ==" >&2
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        [ "$kind" = claude ] && claude_seen=1
+    done
+    if [ "$claude_seen" -eq 0 ]; then
+        echo "  No Claude Code root selected; these settings are Claude Code's own." >&2
+        return 0
+    fi
+    print_editor_steering_warning
+    if confirm "Turn the instruction off (env CLAUDE_CODE_THRIFTY_SONIC=false)?"; then
+        claude_env_setting CLAUDE_CODE_THRIFTY_SONIC false
+        return 0
+    fi
+    if confirm "Soften it instead (env CLAUDE_CODE_COZY_TEAPOT=relaxed)?"; then
+        claude_env_setting CLAUDE_CODE_COZY_TEAPOT relaxed
+        return 0
+    fi
+    echo "  Left unchanged. Expect the editor to be bypassed for sed and heredocs." >&2
+}
 # ---------------------------------------------------------------
 # 7b. MCP registration
 # ---------------------------------------------------------------
@@ -5268,6 +5414,16 @@ else
     # After the install loop, because it registers the adapter this run placed
     # and takes away the registration for a mode this run switched away from.
     mcp_registration_step
+
+    # Both are about a skill this run placed being reachable at all rather than
+    # about where it may write, so they follow the registration.
+    if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
+        interactive_shell_permission_step
+    fi
+
+    if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
+        editor_steering_step
+    fi
 
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2

@@ -62,6 +62,16 @@ else
     # and takes away the registration for a mode this run switched away from.
     mcp_registration_step
 
+    # Both are about a skill this run placed being reachable at all rather than
+    # about where it may write, so they follow the registration.
+    if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
+        interactive_shell_permission_step
+    fi
+
+    if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
+        editor_steering_step
+    fi
+
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi

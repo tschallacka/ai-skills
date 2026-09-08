@@ -38,8 +38,8 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7039
-package/install.sh	224950
-package/interactive-shell/SKILL.md	8627
+package/install.sh	232165
+package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	5713

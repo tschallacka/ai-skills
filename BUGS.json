@@ -458,9 +458,9 @@
       "fix": null,
       "verification": null,
       "found_by": "aiskills, noticing its own messages arriving as aiskills-2 while holding a presence tail",
-      "notes": "Michael, on seeing aiskills-2 in the channel: 'why the -2 on sends... thats not how i envisioned it.' So the suffix is contrary to intent, not a tolerable side effect of the posture -- raised to urgent on that.\n\nTwo candidate fixes, and they are different bugs underneath:\n(a) the CLIENT should not open a second connection for a send when it already holds one. That is the real shape: a presence tail is a live connection, and send/read/names each open another. Reusing the held connection removes the collision at the source and is what makes the posture coherent.\n(b) the SERVER should not silently rename a connection. Suffixing is a guess at what the caller wanted; refusing the duplicate, or letting a nick be held by several connections of the same owner, are both more honest. B263 records the suffixing itself.\n\n(a) is the one that fixes what Michael saw. (b) is worth deciding separately, because the suffix will keep surprising whoever hits it next. Michael, sharpening it: 'it also makes the guard hard as the send is targetted and not the tail.' The suffix SPLITS one agent's identity across two names. The presence tail holds the plain nick, which is the name a mention has to use for the guard to fire; the sends carry the suffixed nick, which is the name a peer reads and naturally replies to. So a reply addressed to what someone actually saw in the channel goes to a nick nobody is listening on, and the guard never fires.\n\nThat is worse than misattribution and is why this is now blocking rather than major: the channel looks like it is working from both ends while a reply can be silently unreachable. It also means a wider guard alternation cannot rescue it -- matching the suffixed form too would make an agent wake on its own sends, which is the self-wake fault t90 found in the step-1 example. SEVERITY: this entry should read blocking, not major, for the same reason as B254 -- `bugs update --severity` reported success and changed nothing (B289). Read it as blocking.",
+      "notes": "Michael, on seeing aiskills-2 in the channel: 'why the -2 on sends... thats not how i envisioned it.' So the suffix is contrary to intent, not a tolerable side effect of the posture -- raised to urgent on that.\n\nTwo candidate fixes, and they are different bugs underneath:\n(a) the CLIENT should not open a second connection for a send when it already holds one. That is the real shape: a presence tail is a live connection, and send/read/names each open another. Reusing the held connection removes the collision at the source and is what makes the posture coherent.\n(b) the SERVER should not silently rename a connection. Suffixing is a guess at what the caller wanted; refusing the duplicate, or letting a nick be held by several connections of the same owner, are both more honest. B263 records the suffixing itself.\n\n(a) is the one that fixes what Michael saw. (b) is worth deciding separately, because the suffix will keep surprising whoever hits it next. Michael, sharpening it: 'it also makes the guard hard as the send is targetted and not the tail.' The suffix SPLITS one agent's identity across two names. The presence tail holds the plain nick, which is the name a mention has to use for the guard to fire; the sends carry the suffixed nick, which is the name a peer reads and naturally replies to. So a reply addressed to what someone actually saw in the channel goes to a nick nobody is listening on, and the guard never fires.\n\nThat is worse than misattribution and is why this is now blocking rather than major: the channel looks like it is working from both ends while a reply can be silently unreachable. It also means a wider guard alternation cannot rescue it -- matching the suffixed form too would make an agent wake on its own sends, which is the self-wake fault t90 found in the step-1 example. SEVERITY: this entry should read blocking, not major, for the same reason as B254 -- `bugs update --severity` reported success and changed nothing (B289). Read it as blocking. RULING (Tschallacka, 2026-09-08): reading and sending use the same client session. The client routes a send through the live tail when one is open, and the tail replies with what the wire said. Fixed at the client, not by asking the server to stop renaming -- one owner means the server never sees the second connection that triggers the suffix. Design and in-repo precedents in T107.",
       "created_at": "2026-09-07T21:18:44Z",
-      "updated_at": "2026-09-07T22:11:45Z"
+      "updated_at": "2026-09-08T11:13:21Z"
     },
     {
       "id": "B108",
@@ -2720,9 +2720,9 @@
       "fix": null,
       "verification": null,
       "found_by": "T90 (src/chat-mcp): the adapter inherited the same rule and its own regression test caught it",
-      "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty. chat/tests/test-chat.sh:308-310 already documents this behaviour and works around it -- \"a join to an EMPTY channel seeds the cursor to 0, which read cannot tell apart from having no cursor at all\" -- by seeding the channel with a message before the joins. The suite therefore tiptoes around the defect rather than covering it.",
+      "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty. chat/tests/test-chat.sh:308-310 already documents this behaviour and works around it -- \"a join to an EMPTY channel seeds the cursor to 0, which read cannot tell apart from having no cursor at all\" -- by seeding the channel with a message before the joins. The suite therefore tiptoes around the defect rather than covering it. RULING (Tschallacka, 2026-09-08): yes -- tail backfills from a RECORDED cursor. A recorded position is replayed; only an absent one starts at the channel's current end, so the history gate that stops an old channel dumping its whole log is unchanged. The tail change in 6986dd3e is therefore necessary but not sufficient: it made tail read cursor_recorded, and tail never FETCHes, so a message posted between join and the tail starting is still lost. Verified by reproduction on 2026-09-08 -- join an empty channel, post one message, tail prints nothing. Stays confirmed until tail replays. T107 makes it structural.",
       "created_at": "2026-09-07T19:58:19Z",
-      "updated_at": "2026-09-07T20:11:35Z"
+      "updated_at": "2026-09-08T11:13:21Z"
     },
     {
       "id": "B271",
@@ -2905,6 +2905,73 @@
       "notes": "Consequence beyond the tool: aiskills reported B254 and B283 to Tschallacka as blocking, twice, on the strength of an \"Updated\" that had changed nothing. Both still read major. A register is read by severity at triage, so a silently dropped severity is a defect being triaged at the wrong level for as long as nobody re-reads the entry.\n\nUntil this is fixed, a severity is only settable at `bugs add` time, which means correcting one requires filing a new entry or editing BUGS.json by hand -- and a hand edit is exactly what `bugs check` exists to catch.",
       "created_at": "2026-09-07T22:11:29Z",
       "updated_at": "2026-09-07T22:11:45Z"
+    },
+    {
+      "id": "B290",
+      "title": "test-chat-broadcast-stall fails on the macOS bash 3.2 leg without a change that could explain it",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Open a PR based on master at d641acf2 and read the 'Test suite passes on macOS system bash 3.2 (portability floor)' leg. Seen on PR #77 run 34216364984 job 102028941573. Locally: nix develop --command bash32-run chat/tests/test-chat-broadcast-stall.sh",
+      "observed": "test-chat-broadcast-stall FAIL (exit 1), 'the subscriber never received a message, so it was not a connection the server was servicing:' with sub.out empty. The arming wait is 60 iterations of sleep 0.5, so the subscriber produced nothing for 30 seconds.",
+      "expected": "The subscriber tail prints the opener's 'subscriber-armed' message within the 30 second wait, or the failure names something the change under test could have caused.",
+      "mechanism": null,
+      "surfaces": [
+        "chat/tests/test-chat-broadcast-stall.sh",
+        "src/chat-client-rs/src/lib.rs",
+        "src/chat-server-rs/src/main.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "CI on PR #77, whose diff touches only the portability scanner, tony-the-pony and one test -- nothing that reaches chat",
+      "notes": "Two live hypotheses, neither confirmed. (1) A timing flake: the same test passed on PR #76's macOS 3.2 leg from the same base d641acf2, and the arming wait is a fixed 30s poll on a shared runner. (2) An interaction with the B269 tail change merged in #75: the subscriber IS a tail, the test's own comment says it receives the message through tail's poll of the channel log, and 6986dd3e changed where tail starts -- a recorded cursor is now honoured whatever its value. That makes the test's dependence on tail's starting id load-bearing, which it was not when the test was written. Do not close this as a flake without re-running it several times on that leg, and check hypothesis 2 first because it is the one that would also be wrong in production. A re-run of job 102028941573 was queued 2026-09-08 and its result is the next evidence.",
+      "created_at": "2026-09-08T11:20:48Z",
+      "updated_at": "2026-09-08T11:21:04Z"
+    },
+    {
+      "id": "B291",
+      "title": "setup-dev-env.sh never builds the interactive-shell binaries, so a dev-tree install ships the skill with none",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "cd <repo>; ./setup-dev-env.sh; ls interactive-shell/bin/x86_64-unknown-linux-musl/; ./install.sh --skill interactive-shell --target $HOME/.claude/skills --yes; ls $HOME/.claude/skills/interactive-shell/bin/",
+      "observed": "setup-dev-env reports 65 binaries built and interactive-shell is not among them; interactive-shell/bin/<triple>/ stays empty; the install succeeds and the installed skill has no bin/ directory at all, so the wrapper and its input client are absent and every documented command fails.",
+      "expected": "Either setup-dev-env builds the two binaries binaries.tsv declares, or the install refuses to place a skill whose declared binaries are missing and says which.",
+      "mechanism": "setup-dev-env builds a fixed list of crates and interactive-shell is not in it. install.sh copies from <skill>/bin/<triple>/ per binaries.tsv, and a row whose artifact is absent is skipped silently -- the notice path (bundled_bin_row_missing) is scoped to planning's rjq rows only.",
+      "surfaces": [
+        "setup-dev-env.sh",
+        "installer/src/60-install.sh",
+        "interactive-shell/binaries.tsv"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "installing the newest skills on 2026-09-08: the wrapper was missing from the installed skill",
+      "notes": null,
+      "created_at": "2026-09-08T12:22:17Z",
+      "updated_at": "2026-09-08T12:22:17Z"
+    },
+    {
+      "id": "B292",
+      "title": "install.sh copies binaries with cp, so an update aborts when the shipped binary is running",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Start a shipped binary from an installed skill (e.g. chat-server-rs or ai-text-editor-server), then run ./install.sh --skill chat --target $HOME/.claude/skills --yes",
+      "observed": "cp: cannot create regular file '.../chat/bin/x86_64-unknown-linux-musl/chat-server-rs': Text file busy, and install.sh exits 1 partway through the skill list -- every skill after the failing one is left uninstalled with no summary line saying so.",
+      "expected": "The binary is replaced even while an older copy runs, the way every config write in this installer already does it: write beside the target, then rename over it. A rename replaces the directory entry and the running process keeps its own inode, so ETXTBSY cannot arise.",
+      "mechanism": "install_skill copies each file with cp. Writing to a path currently being executed is refused with ETXTBSY on Linux. The installer already uses mktemp-beside-the-target plus mv for settings.json and opencode.json, so the pattern is present in the same file.",
+      "surfaces": [
+        "installer/src/60-install.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "installing the newest skills on 2026-09-08 while another agent's chat server and this session's editor server were running",
+      "notes": null,
+      "created_at": "2026-09-08T12:22:36Z",
+      "updated_at": "2026-09-08T12:22:36Z"
     },
     {
       "id": "B14",
@@ -5884,9 +5951,30 @@
       "fix": null,
       "verification": null,
       "found_by": "nitpicker",
-      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock. The note above about npm pack --pack-destination came from aiskills, appended here by mistake while filing the duplicate B287 -- it belongs on this entry anyway, so it stays rather than being moved. aiskills also measured the same failure three times independently: a tar EOF reads as a broken package rather than a broken test run, so the honest first response is to go looking at packaging.",
+      "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock. The note above about npm pack --pack-destination came from aiskills, appended here by mistake while filing the duplicate B287 -- it belongs on this entry anyway, so it stays rather than being moved. aiskills also measured the same failure three times independently: a tar EOF reads as a broken package rather than a broken test run, so the honest first response is to go looking at packaging. Second live occurrence, 2026-09-08 on feat/chat-mcp-and-session-keys at 3856ccc9: the same 'gzip: stdin: unexpected end of file' / 'tar: Unexpected EOF in archive' pair while verifying the test-chat.sh baseline row, and PASS on an immediate re-run of the identical tree. Two occurrences in one evening on one checkout with three agents on it, so the rate is not negligible - and both times the failure presents as a baseline problem rather than as a collision, which is the part that costs time. Physical evidence, 2026-09-08 00:43: tschallacka-ai-skills-2.0.0-alpha.1.tgz (19011609 bytes) left untracked in the repository root after the second collision - the survivor of two runs whose EXIT traps target one path. Two consequences beyond the flaky verdict: the artifact is not cleaned up at all when a trap deletes the sibling's file instead of its own, and it is not gitignored (git check-ignore reports no match; .gitignore carries no tgz rule), so it appears as untracked and a git add -A would commit 19 MB. A fix that packs into the randomised scratch dir removes both, and a *.tgz ignore rule is worth having regardless.",
       "created_at": "2026-09-07T21:54:17Z",
-      "updated_at": "2026-09-07T21:55:14Z"
+      "updated_at": "2026-09-07T22:44:04Z"
+    },
+    {
+      "id": "B293",
+      "title": "interactive-shell/bin is not gitignored, so built binaries there are stageable",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "cd <repo>; for d in chat/bin ai-text-editor/bin interactive-shell/bin; do printf '%s ' $d; git check-ignore -q $d/ && echo ignored || echo NOT; done",
+      "observed": "chat/bin and ai-text-editor/bin are ignored; interactive-shell/bin is NOT. After placing the wrapper's two binaries there, git status lists 'interactive-shell/bin/' as untracked, so a broad add would commit multi-megabyte artifacts.",
+      "expected": "interactive-shell/bin/*/ is ignored alongside the other two, since .gitignore already states these binaries are never committed and CI places them.",
+      "mechanism": ".gitignore names chat/bin/*/ and ai-text-editor/bin/*/ explicitly rather than a pattern covering every skill, and interactive-shell was not added when its binaries.tsv was.",
+      "surfaces": [
+        ".gitignore"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "checking the tree before ending the 2026-09-08 session, after placing the binaries B291 describes as missing",
+      "notes": null,
+      "created_at": "2026-09-08T12:30:33Z",
+      "updated_at": "2026-09-08T12:30:33Z"
     },
     {
       "id": "B25",
