@@ -2837,7 +2837,7 @@
     {
       "id": "B276",
       "title": "the membership guard cannot pass: names lists open connections, join creates none",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2850,12 +2850,12 @@
         ".agents/profiles/nitpicker.md",
         "AGENTS.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The guard was in the wrong document, not the server: .agents/profiles/nitpicker.md prescribed \"join, then check names; rejoin if absent\" as the liveness check, but join/names/read/send all close their connection before the reply is read, so a nick can never appear in names from a one-shot call -- only a held tail connection does (AGENTS.md: \"only a running tail holds the connection that keeps a nick in the channel list\"). Corrected the step-1 guard and the wake-loop guard in nitpicker.md to check pgrep -x chat-client-rs, and replaced the unreachable-server retry (a join loop that always exits 0, so it could never detect anything) with chat-client-rs discover --wait 3.",
+      "verification": "Manual: pgrep -x chat-client-rs correctly reflects whether a tail is running, unlike names (confirmed live in this session -- a nick vanished from names within seconds of its tail ending, matching the reproduction). No server-side change; the previous behavior (names reflects open connections only) is correct per AGENTS.md and left untouched.",
       "found_by": "nitpicker",
       "notes": null,
       "created_at": "2026-09-07T20:45:40Z",
-      "updated_at": "2026-09-07T20:45:40Z"
+      "updated_at": "2026-09-08T23:58:50Z"
     },
     {
       "id": "B280",
