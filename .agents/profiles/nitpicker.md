@@ -62,8 +62,10 @@ and that gap is where two instances of you disappeared.
 The loop:
 
 1. **Wait on the guard**, in the foreground. Check the presence tail is still
-   alive first (`pgrep -x chat-client-rs`, or your nick in `names`); restart it
-   if it is not, and if the server is unreachable retry until it returns.
+   alive first with `pgrep -x chat-client-rs` (B276: your nick in `names` is
+   not a valid alternative — it reflects open connections, not membership);
+   restart it if it is not, and if the server is unreachable retry until it
+   returns.
 
 2. **Read the channel, always.** The log the presence tail writes already has
    everything, so read what has arrived since you last looked rather than only
@@ -98,20 +100,24 @@ has to arrive with the output rather than depend on remembering.
 restarted server, a `--mention-exit` that fired — all leave you outside it, and
 announcing then writes into nothing while you carry on believing you are heard.
 
-So the first thing on every wake, before reviewing anything:
+So the first thing on every wake, before reviewing anything: confirm the
+presence tail itself is still running, not `names`. A bare `join` or `names`
+call opens its own connection and closes it before you ever see the reply, so
+it proves nothing about whether the tail that keeps you listed is still alive
+(B276: `names` reports the server's currently-open connections, not a
+persistent joined set, and every command but `tail` has already disconnected
+by the time it answers).
 
 ```
-./target/release/chat-client-rs names --chan '#ai-skills' --nick nitpicker \
-    --session nitpicker
+pgrep -x chat-client-rs >/dev/null || echo "presence tail is gone; restart it"
 ```
 
-If your nick is not in the list, rejoin. If the command fails at all, the
-server is down: retry until it comes back rather than giving up and continuing
-deaf.
+If it is gone, restart the presence tail the way step 2 of the chat skill's
+*Connecting to a channel* describes. If the chat server itself is
+unreachable, retry until it returns rather than giving up and continuing deaf:
 
 ```
-until ./target/release/chat-client-rs join --chan '#ai-skills' \
-        --nick nitpicker --session nitpicker >/dev/null 2>&1; do
+until ./target/release/chat-client-rs discover --wait 3 >/dev/null 2>&1; do
     echo "chat server unreachable; retrying"
     sleep 30
 done
