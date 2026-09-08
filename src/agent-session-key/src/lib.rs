@@ -5,6 +5,10 @@
 //! (`ai-text-editor`) can key its own per-agent session state the same way,
 //! without either depending on the other.
 //!
+//! `HARNESS-IDENTITY.md`, beside this crate, records what each coding harness
+//! provides on the wire and in its hooks, how that was measured, and the
+//! procedure for adding one that is not listed. Read it before changing
+//! `HARNESS_ID_VARS`.//!
 //! Deliberately absent: anything read out of the process tree. `pid`, `ppid`
 //! and `getsid` were all measured to change between two invocations by the
 //! same agent (a runner such as `timeout` or `env`, or the harness re-execing,
@@ -46,8 +50,10 @@ impl KeySource {
 /// invocations of one agent (including through `env`, `timeout` and a shell
 /// function wrapper) and to differ between genuinely different agents:
 ///
-/// - `CLAUDE_CODE_SESSION_ID` -- Claude Code, one per session and per subagent.
-/// - `CODEX_SESSION_ID` -- codex; `CODEX_THREAD_ID` was measured equal to it,
+/// - `CLAUDE_CODE_SESSION_ID` -- Claude Code, one per session. A subagent
+///   shares its parent's (B303), so this rung separates sessions and not
+///   agents; per-agent identity there comes from the PreToolUse register
+///   described in `HARNESS-IDENTITY.md`./// - `CODEX_SESSION_ID` -- codex; `CODEX_THREAD_ID` was measured equal to it,
 ///   so it adds nothing.
 /// - `OPENCODE_PID` -- opencode exports no session id, only the pid of the
 ///   opencode process. That is instance granularity, not session granularity:
