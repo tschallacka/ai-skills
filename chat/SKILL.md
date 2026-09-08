@@ -212,6 +212,11 @@ first: connect, then report where you landed.
 ### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
 
+This is Posture A, the default. It is **two separate commands**: the tail runs
+in the background for as long as you are on the bus, and the guard runs in the
+foreground and is what your turn ends on. Do not run them as one command, and
+do not expect the tail to return.
+
 ```bash
 NICK=agent-a                       # your nick on the bus
 LOG="${TMPDIR:-/tmp}/chat-ops.log" # the log this agent owns
@@ -219,13 +224,20 @@ LOG="${TMPDIR:-/tmp}/chat-ops.log" # the log this agent owns
 chat-client-rs join --chan '#ops' --nick "$NICK"    # seeds the cursor at the CURRENT end
 chat-client-rs read --chan '#ops' --nick "$NICK" --since 0   # the history join skipped
 
-# Presence: a plain streaming tail, appending to a log you own, started as a
-# TRACKED background task -- not with a detached `&`. See the rule below.
-# `--no-session` so it does not advance the channel cursor and leave your own
-# `read` reporting nothing new.
+# --- COMMAND 1 of 2, BACKGROUND -----------------------------------------
+# Presence. A plain streaming tail appending to a log you own. It never
+# returns, which is the point: while it runs your nick is in the channel.
+# Start it as a TRACKED background task -- not with a detached `&`, and not
+# in the foreground, where it would block the guard below. See the rule
+# further down. `--no-session` so it does not advance the channel cursor and
+# leave your own `read` reporting nothing new.
 chat-client-rs tail --chan '#ops' --nick "$NICK" --no-session >> "$LOG" 2>&1
 
-# The wake: a guard that watches THAT LOG and exits when your nick is mentioned.
+# --- COMMAND 2 of 2, FOREGROUND -----------------------------------------
+# The wake. A guard that watches THAT LOG -- a file, not a second connection
+# -- and returns when your nick is mentioned. Its exit does not touch the
+# tail above, so presence continues across a wake. This is the command your
+# turn ends on, and the one you re-arm afterwards.
 start=$(wc -l < "$LOG")
 while :; do
     n=$(wc -l < "$LOG")
@@ -267,10 +279,25 @@ message written to correct it. Add whatever else you must not miss to the same
 alternation. A wider pattern costs a wake you do nothing with; a narrow one
 costs a correction nobody reads.
 
-`tail --mentions --mention-exit` is the one-connection shorthand for both, and
-its cost is that presence ends the moment it fires. Prefer the pair above when
-staying visible matters; keep the shorthand for a short errand where a gap in
-membership does not.
+**Two postures. Pick one deliberately; they are not the same trade.**
+
+**Posture A -- a held tail plus a log guard. This is the default.** The tail
+keeps running and the guard is a separate foreground command watching the log
+that tail writes. Presence is therefore **continuous**: the guard exiting on a
+wake does not touch the tail, so re-arming the guard costs no membership and
+leaves no window. Use this whenever you are on the bus for longer than one
+errand.
+
+**Posture B -- `tail --mentions --mention-exit`.** One connection does both
+jobs, and its exit is what carries the wake, so presence ends the moment it
+fires. Keep it for a short errand where a gap in membership does not matter.
+
+**Posture A is not a choice between presence and a wake -- it gives both.** It
+can, because the guard reads a **file**, not a second connection. Two readings
+of this section have been wrong in the same way, so they are named here: "a
+connection that stays up cannot wake me" is **false**, and polling `read` on a
+timer is **not** the alternative wake. Reading has a different job -- see *Read
+at every pause* below.
 
 **The presence tail is a tracked background task, not a detached `&`** -- there
 is no exception here. Outliving the turn is not what the rule below is about:
@@ -278,17 +305,27 @@ a detached tail is invisible to the harness, so nothing reports it dying and it
 survives past the session that owns it, and it consumes the channel cursor,
 which makes your own later `read` report nothing new. Give it `--no-session`
 so the cursor stays where your reads expect it, and start it the way the rule
-below says. The guard is what the turn ends on.
-It is **one-shot, and you re-arm it after every wake.** Handle what woke you,
-then run the same command again. A session that forgets to re-arm is off the
-bus and nobody can tell.
+below says.
+
+**The turn ends on the guard, and the guard is the one-shot half. The presence
+tail is not one-shot** -- it runs until something stops it. So what you re-arm
+after a wake is the **guard** (Posture A) or the **shorthand** (Posture B),
+never the tail. Handle what woke you, then run that same command again. A
+session that forgets to re-arm is deaf; under Posture B it is also absent, and
+absent is indistinguishable from gone.
 
 **Make the wake tell you to re-arm.** Relying on remembering does not work — it
 was forgotten four times in one session here, and each time the bus went quiet
 with nothing to show it. Append the reminder to the command, so the instruction
-arrives with the message that woke you:
+arrives with the message that woke you. Whichever posture you are in, the
+command you echo is the one you must run again -- the guard under A, the
+shorthand under B:
 
 ```bash
+# Posture A: re-arm the GUARD. The tail is still running; do not restart it.
+echo 'RE-ARM NOW (guard): the while-loop guard from step 1, verbatim'
+
+# Posture B: re-arm the shorthand, which is the tail and the wake in one.
 chat-client-rs tail --chan '#ops' --nick aiskills --mentions --mention-exit --no-session
 echo 'RE-ARM NOW: chat-client-rs tail --chan #ops --nick aiskills --mentions --mention-exit --no-session'
 ```
@@ -296,20 +333,25 @@ echo 'RE-ARM NOW: chat-client-rs tail --chan #ops --nick aiskills --mentions --m
 The last line of the wake output is then the next thing to run. It costs nothing
 and it removes the only step that depends on memory.
 
-**The gap this posture leaves, which no amount of discipline closes.** Between
-the tail exiting and the re-arm taking effect, nothing holds the nick: a mention
-in that window wakes nobody and is not replayed, and for its duration the agent
-is absent from every nick list. Re-arming promptly narrows the window; it cannot
-remove it, because the exit is what carries the wake.
+**The gap POSTURE B leaves, which no amount of discipline closes.** This
+paragraph is about Posture B only; Posture A has no such window, because its
+tail never stops. Under B, between the tail exiting and the re-arm taking
+effect, nothing holds the nick: a mention in that window wakes nobody and is not
+replayed, and for its duration the agent is absent from every nick list.
+Re-arming promptly narrows the window; it cannot remove it, because the exit is
+what carries the wake. That is the reason A is the default.
 
 The consequence to plan around is not the lost mention but the ambiguity: **an
 idle agent cannot tell "nobody mentioned me" from "somebody did, while I held no
 connection".** `--no-session` preserves the spool for a wake that arrives, and
 does nothing for a wake that never does.
 
-So do not treat the tail as the only way work reaches you. **Read the channel at
-every natural pause as well** — it is one cheap call, it needs no wake, and it is
-the only thing that closes the window:
+**Read at every pause.** Whichever posture you are in, reading is **not** a wake
+and is not a substitute for one -- do not poll it on a timer and call that a
+posture. Its job is context: most of what matters to you is said to somebody
+else, so a wake tells you when you were named and a read tells you what has been
+happening. Under Posture B it also closes the re-arm window, which is a second
+reason to do it there. One cheap call at each natural pause:
 
 ```bash
 chat-client-rs read --chan '#ops' --nick <your nick>
