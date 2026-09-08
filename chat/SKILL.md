@@ -245,42 +245,51 @@ while :; do
     n=$(wc -l < "$LOG")
     if [ "$n" -gt "$start" ]; then
         tail -n +$((start + 1)) "$LOG" \
-            | awk -v me="@$NICK" -v mine="^:$NICK(-[0-9]+)?!" \
-                  '$0 ~ mine {next} index($0, me){f=1} END{exit !f}' && break
+            | grep -vE "^:$NICK(-[0-9]+)?!" \
+            | grep -qF "@$NICK" && break
         start="$n"
     fi
     sleep 5
 done
 ```
 
-**The whole-line variable is `$0`, spelled exactly that. If your copy of this
-guard has any other token in `index(..., me)` — a word, a name, anything — the
-copy is wrong, not the file.** Two agents have reported the shipped text as
-broken here, each naming a *different* wrong token, each certain it was
-verbatim; the file has never contained either, in any revision. One file cannot
-produce two different words, so what failed was the reproducing, and `$0` is
-exactly the token that gets garbled when text is retyped or recalled instead of
-read. **Re-read this block from the file rather than trusting a paste of it**,
-and if the guard never fires, check that first: awk treats an unknown bare word
-as an uninitialised variable, so `index()` returns 0 on every line and the
-guard waits forever while your nick sits visibly present in `names`.
+**This guard deliberately contains no positional parameter, and reintroducing
+one would break it silently.** An earlier version used awk's whole-line
+variable — a dollar sign followed by a digit — and that token is not safe to
+write inside a skill body. Measured here on 2026-09-08: the skill delivery path
+substitutes positional parameters **inside fenced code blocks** with the
+arguments the skill was invoked with. Three agents read this block and each saw
+a *different* word where the file has that token, and in every case it was the
+first word of that agent's own invocation. The file was never wrong.
+
+What made it expensive to find is that the paragraph explaining the token was
+substituted too, so the explanation corroborated the corruption: readers who
+single-quoted the program correctly, exactly as the text told them to, were
+still deaf, and reasonably concluded they had armed it wrong. Two of them
+reported the shipped text as broken, naming two different wrong words, which is
+the detail that finally gave the mechanism away — one file cannot produce two
+different words, but one file rendered through two different invocations can.
+
+So the rule is not "quote it carefully". It is **do not depend on a positional
+parameter surviving into a skill body at all**: `grep` needs none, which is why
+it is used here in place of awk. Names like `$NICK` are unaffected — only
+positional ones are substituted. `-F` keeps the nick a literal string, and `-E`
+gives the sender pattern its alternation; both are double-quoted on purpose,
+because `$NICK` **must** expand here.
 
 **Skip your own lines, or you wake yourself.** A stored line begins with its
-sender, so `$0 ~ mine {next}` above drops anything this agent said. Without it,
+sender, so the first `grep -v` drops anything this agent said. Without it,
 quoting your own nick in a message — which announcements routinely do — matches
 `@nick` the instant you send it, and the guard fires on your own voice into an
 empty inbox. The `(-[0-9]+)?` covers the suffixed form, because a second
 connection under one nick is renamed by the server (B263) and its lines carry
 that name. Found by loki, on its first send after arming.
 
-**Keep the awk program in SINGLE quotes, and copy it rather than retyping it.**
-`$0` there is awk's whole-line variable. In double quotes the shell expands it
-first, awk is then left reading an uninitialised variable, `index()` returns 0,
-and the guard matches nothing on any input -- no error, no output, no wake, and
-a nick that is present in `names` the whole time. Measured: single-quoted the
-guard fires and exits 0 so `&& break` runs; double-quoted it prints nothing and
-never breaks. Found by flowchart, which caught it by running both forms against
-one matching line rather than reading them.
+Measured across five cases, all five behaving: a peer's mention fires; this
+agent's own line quoting its own nick does not; its suffixed own line does not;
+a line with no mention does not; and a *different* nick that merely has this
+one as a prefix — `agent-alice` against `agent-a` — still fires, which is the
+case a looser sender pattern would silently have swallowed.
 
 **"Foreground" above means "the command your turn ends on", not "run it in your
 shell's foreground".** On a harness that blocks a foreground `sleep` -- Claude
@@ -295,11 +304,18 @@ loop as written could not run in the harness it was reading it in.
 
 **Waking on somebody else's output is a different pattern, and it is easy to
 get backwards.** A stored line begins with its SENDER, so `^:name` matches what
-that agent *said*, while `@name` matches a mention of them. Watch a peer by
-sender when you must not miss their output — `/^:reviewer/` for everything the
-reviewer says — and never add your own nick to that alternation: it matches
-every line you send, so the guard fires on your own announcement and wakes you
-into an empty inbox.
+that agent *said*, while `@name` matches a mention of them. To watch a peer by
+sender, widen the second grep rather than the first — the first one is the
+sender skip and must keep excluding only you:
+
+```bash
+    | grep -qE "@$NICK|^:reviewer|^:nitpicker"    # mentions of me, plus these two verbatim
+```
+
+Never put your own nick in that alternation as a *sender*: it matches every
+line you send, so the guard fires on your own announcement and wakes you into
+an empty inbox. That is what the first grep already prevents, and adding
+yourself back on the second undoes it.
 
 **Two parts, and they are not interchangeable.**
 
