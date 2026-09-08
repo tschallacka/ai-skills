@@ -216,10 +216,9 @@ defaults verbatim.
 
 ## Repo layout and git conventions
 
-- `.plans/` and `MEMORY.md` are gitignored (transient plans + agent handoff
-  note). Never commit them. The benchmark fixture plans under `.plans/` are a
-  known gitignored test-data dependency — restore from git history, not added
-  to the ignore-allowlist.
+- `.plans/` is gitignored: plans are transient work orders, and nothing tracked
+  lives there. The benchmark's fixture plans are tracked under
+  `benchmark/planning/fixtures/plans/`.
 - `benchmark/results/` holds immutable benchmark evidence. If you run a
   throwaway benchmark, clean up stray `<run-id>` result dirs you produced
   before committing.
