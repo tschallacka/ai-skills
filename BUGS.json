@@ -2995,6 +2995,28 @@
       "updated_at": "2026-09-08T14:18:47Z"
     },
     {
+      "id": "B297",
+      "title": "The interactive-shell grant does not cover an availability probe, so checking for the wrapper prompts",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "With the installer grants in place (PR #76 section 13a), have an agent check whether the wrapper exists: command -v interactive-shell interactive-shell-input",
+      "observed": "A permission prompt: \"Do you want to proceed?\" with \"Ask rule Bash(bimport:*) overrides auto mode for this command.\" The probe is not covered by the installed grant, so an agent asking \"is this tool here?\" is interrupted before it can find out.",
+      "expected": "An availability probe of a binary the installer just granted runs without a prompt. Whether a tool EXISTS is not a privileged question, and the grant already permits executing it.",
+      "mechanism": "installer/src/70-permissions.sh grants Bash(<root>/interactive-shell/bin/**:*) -- the wrapper by PATH. A `command -v interactive-shell` is not that string, so no allow rule matches and the decision falls through to whatever ask rule does. The grant covers running the tool and not asking after it.",
+      "surfaces": [
+        "installer/src/70-permissions.sh",
+        "install.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Tschallacka, screenshot of the prompt during an availability check",
+      "notes": "SECOND HALF, and the sharper one: the prompt in the screenshot fired on an ask rule for bimport, which was one of THREE names in a single command -v. So a compound probe is gated by the strictest rule among its arguments -- batching availability checks converts a permitted probe into a prompt, and the denial names a rule for a binary that was not the one being looked for, which is what makes it hard to read. That is Claude Code's matching, not this repo's, but it decides how the grant must be written: grant the probe SHAPE, and probe one binary per command rather than batching, so one unrelated ask rule cannot gate the rest.\n\nWhy it matters beyond the annoyance: a prompt on an availability check is precisely how a tool gets skipped rather than used, which is the failure PR #76's grant exists to prevent (see the interactive-shell description work and headless-is-not-a-smaller-interactive). A blocked probe reads to an agent as 'not available'.",
+      "created_at": "2026-09-08T14:37:03Z",
+      "updated_at": "2026-09-08T14:37:03Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
@@ -4028,6 +4050,27 @@
       "notes": "serve_read (T107) deliberately reproduces the REMOTE behaviour, guard and all, because a forwarded verb and a fallback verb must not differ -- that difference would be observable as its own bug. So fixing this means fixing both arms together, and the comment at serve_read says so and points here.",
       "created_at": "2026-09-08T13:57:14Z",
       "updated_at": "2026-09-08T13:57:23Z"
+    },
+    {
+      "id": "B298",
+      "title": "The documented wake guard fires on the agent's own message when it quotes its own nick",
+      "status": "fixed",
+      "severity": "major",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Arm the Posture A guard from chat/SKILL.md step 1, then send a message containing your own nick: chat-client-rs send --chan \"#c\" --text \"I am @agent-a signing on\"",
+      "observed": "The guard matched the agent own stored line -- a line begins with its sender, and index($0, \"@nick\") does not care which -- so it returned immediately and the agent woke on its own voice with nothing to read. Reported happening on loki first send after arming.",
+      "expected": "A wake means somebody else addressed me. An agent own line must not satisfy its own guard.",
+      "mechanism": "The published guard filtered only on the mention text. Announcements routinely quote the sender own nick, so the very first send after arming matched.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": "the guard gained a sender skip: awk -v mine=\"^:$NICK(-[0-9]+)?!\" with $0 ~ mine {next}. The optional suffix covers a renamed second connection (B263), whose lines carry that name.",
+      "verification": "Five cases measured through the shipped program: a peer mention fires (rc=0); the agent own line quoting its nick does not (rc=1); its SUFFIXED own line does not (rc=1); a line with no mention does not (rc=1); and a DIFFERENT nick that has the agent nick as a prefix (agent-alice vs agent-a) still fires (rc=0), which is the case a looser anchor would have broken.",
+      "found_by": "loki, on the bus",
+      "notes": null,
+      "created_at": "2026-09-08T14:37:21Z",
+      "updated_at": "2026-09-08T14:37:21Z"
     },
     {
       "id": "B6",
