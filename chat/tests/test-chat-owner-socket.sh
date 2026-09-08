@@ -104,6 +104,17 @@ case "$port" in ''|*[!0-9]*) t_fail "server did not report a port"; t_end; exit 
 
 client() { AI_CHAT_HOME="$home" "$CLIENT" --session "$key" "$@" --insecure; }
 
+# A DIFFERENT agent posting into a channel. Needed wherever an assertion reads
+# the tail's own output: the server deliberately does not echo a PRIVMSG back
+# to its sender (B249 -- an echo rendered every message twice in a standard
+# client), so the owner never sees its own posts and a test that sent them to
+# itself would be asserting on traffic that is never pushed. `--no-session` so
+# it bypasses the control socket, and its own nick so it cannot collide.
+peer_send() { # <chan> <text>
+    AI_CHAT_HOME="$home" "$CLIENT" send --server 127.0.0.1:"$port" --nick peer \
+        --chan "$1" --text "$2" --no-session --insecure
+}
+
 client session set --server 127.0.0.1:"$port" --nick "$nick" >/dev/null
 client join --chan "$chan" >/dev/null
 
@@ -154,40 +165,107 @@ t_assert_eq 'names served by the owner lists the tailing nick exactly once' \
 t_assert_eq 'read served by the owner returns the persisted messages' \
     "$(client read --chan "$chan" --since 0 2>&1 | awk '/through the owner|around the owner/' | wc -l | tr -d ' ')" '2'
 
-# ── leaving the channel the tail holds is refused, not half-done ──────────
-# Parting it would leave the tail running and deaf while still holding the
-# connection every other verb borrows.
-rc=0
-client leave --chan "$chan" >"$temporary_root/leave.out" 2>&1 || rc=$?
-t_assert_eq 'leave on the tailed channel is refused' "$rc" '64'
-t_assert_eq 'and it says stopping the tail is what to do' \
-    "$(awk '/stop the tail/ {found=1} END {print found+0}' "$temporary_root/leave.out")" '1'
+# ── a forwarded join is FOLLOWED, not just joined (B296) ──────────────────
+# The JOIN goes out on the owner's connection, so the server counts it as a
+# member and relays that channel's traffic here. Before T112 the tail filtered
+# on its single channel and dropped every one of those lines: the agent sat in
+# a member list it could not hear. So the assertion is on the TAIL'S OWN
+# OUTPUT -- the only place that distinguishes following from merely joining.
+second='#alsoowned'
+client join --chan "$second" >"$temporary_root/join2.out" 2>&1 \
+    || t_fail "a forwarded join failed: $(cat "$temporary_root/join2.out")"
+t_assert_eq 'a forwarded join reports the whole followed set' \
+    "$(awk '/following .*'"${chan#\#}"'.*'"${second#\#}"'/ {found=1} END {print found+0}' "$temporary_root/join2.out")" '1'
 
-# ── the socket goes away with the tail, so callers fall back ──────────────
-kill "$tail_pid" 2>/dev/null || true
+peer_send "$second" 'into the joined channel' >/dev/null 2>&1 \
+    || t_fail "a peer send to the newly joined channel failed"
+followed=0
+for _ in $(seq 1 30); do
+    if awk '/into the joined channel/ {found=1} END {exit !found}' "$temporary_root/tail.out"; then
+        followed=1
+        break
+    fi
+    sleep 0.2
+done
+t_assert_eq 'the tail prints traffic from a channel joined after it started' \
+    "$followed" '1'
+
+# ── leave drops one channel and keeps the tail on the rest ────────────────
+client leave --chan "$second" >"$temporary_root/leave2.out" 2>&1 \
+    || t_fail "leave on a followed channel failed: $(cat "$temporary_root/leave2.out")"
+t_assert_eq 'leave says what is still followed' \
+    "$(awk '/still following/ {found=1} END {print found+0}' "$temporary_root/leave2.out")" '1'
+kill -0 "$tail_pid" 2>/dev/null \
+    || t_fail "leaving one of two channels stopped the tail"
+[ -S "$socket" ] || t_fail "leaving one of two channels took the control socket down"
+
+# ── leaving the LAST channel stops the tail ───────────────────────────────
+# Tschallacka's ruling (T112): a leave means leave. A tail following nothing
+# would otherwise hold a connection subscribed to no channel while still
+# answering as the session's owner -- present nowhere, waking on nothing, and
+# looking alive to anything that reads the socket.
+client leave --chan "$chan" >"$temporary_root/leave.out" 2>&1 \
+    || t_fail "leave on the last channel failed: $(cat "$temporary_root/leave.out")"
+t_assert_eq 'leave on the last channel says the tail is stopping' \
+    "$(awk '/the tail is stopping/ {found=1} END {print found+0}' "$temporary_root/leave.out")" '1'
+stopped=0
+for _ in $(seq 1 40); do
+    kill -0 "$tail_pid" 2>/dev/null || { stopped=1; break; }
+    sleep 0.25
+done
+t_assert_eq 'and the tail actually exits' "$stopped" '1'
 wait "$tail_pid" 2>/dev/null || true
-tail_pid=""
+t_assert_eq 'and its control socket is gone, so callers fall back' \
+    "$([ -S "$socket" ] && echo present || echo gone)" 'gone'
 
-# A killed owner cannot unlink anything, so the path may outlive it. What must
-# hold is that a verb finding it does NOT hang: it reconnects on its own. This
-# is the fallback contract, and it is the half that keeps a crash from taking
-# the session's other verbs down with it.
+# ── with no owner at all, every verb works as it did before T107 ─────────
+tail_pid=""
 client send --chan "$chan" --text 'after the owner' >"$temporary_root/after.out" 2>&1 \
-    || t_fail "a send after the owner died failed: $(cat "$temporary_root/after.out")"
-t_assert_eq 'a send after the owner is gone still reaches the channel' \
+    || t_fail "a send with no owner failed: $(cat "$temporary_root/after.out")"
+t_assert_eq 'a send with no owner running still reaches the channel' \
     "$(sender_of 'after the owner')" "$nick"
 
-# And the next tail reclaims the path rather than being locked out by it.
-client tail --chan "$chan" >"$temporary_root/tail2.out" 2>"$temporary_root/tail2.err" &
+# ── a tail can be started on several channels at once ────────────────────
+# `--chan` is repeatable. Asserted from the tail's own output again, one
+# message per channel: a tail that silently followed only the first would
+# still bind the socket and still answer every verb, so nothing else here
+# would notice.
+client tail --chan "$chan" --chan "$second" \
+    >"$temporary_root/tail2.out" 2>"$temporary_root/tail2.err" &
 tail_pid=$!
 for _ in $(seq 1 50); do
     [ -S "$socket" ] && break
     sleep 0.2
 done
-t_assert_eq 'a second tail reclaims the socket a dead owner left' \
+t_assert_eq 'a later tail takes the socket the stopped one released' \
     "$([ -S "$socket" ] && echo yes || echo no)" 'yes'
+
+peer_send "$chan" 'first of two' >/dev/null 2>&1 \
+    || t_fail "a peer send to the first followed channel failed"
+peer_send "$second" 'second of two' >/dev/null 2>&1 \
+    || t_fail "a peer send to the second followed channel failed"
+both=0
+for _ in $(seq 1 40); do
+    if awk '/first of two/ {a=1} /second of two/ {b=1} END {exit !(a && b)}' \
+        "$temporary_root/tail2.out"; then
+        both=1
+        break
+    fi
+    sleep 0.25
+done
+t_assert_eq 'a tail started with two --chan prints traffic from both' "$both" '1'
+
+# ── a CRASHED owner leaves its socket, and callers still fall back ───────
+# Killed rather than asked to leave, so nothing runs to unlink the path and the
+# next verb finds a socket with nobody behind it. It must reconnect on its own
+# instead of waiting out a deadline: this is the half that keeps one crash from
+# taking the session's other verbs down with it.
 kill "$tail_pid" 2>/dev/null || true
 wait "$tail_pid" 2>/dev/null || true
 tail_pid=""
+client send --chan "$chan" --text 'after the crash' >"$temporary_root/crash.out" 2>&1 \
+    || t_fail "a send after the owner was killed failed: $(cat "$temporary_root/crash.out")"
+t_assert_eq 'a send after a crashed owner still reaches the channel' \
+    "$(sender_of 'after the crash')" "$nick"
 
 t_end
