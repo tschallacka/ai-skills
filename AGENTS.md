@@ -216,9 +216,13 @@ defaults verbatim.
 
 ## Repo layout and git conventions
 
-- `.plans/` is gitignored: plans are transient work orders, and nothing tracked
-  lives there. The benchmark's fixture plans are tracked under
-  `benchmark/planning/fixtures/plans/`.
+- Plan *contents* are gitignored as `.plans/*`, deliberately not `.plans/`, so
+  the directory stays reachable and one plan under audit can be pinned by
+  negation. `.gitignore` says not to narrow it; see `planning/MAINTAINER.md`
+  §1. `.plans/` itself is also a separate git repository, which is why it shows
+  as untracked and why `git add -A` would stage it as a gitlink — add paths
+  explicitly. The benchmark's fixture plans are unrelated and tracked normally
+  under `benchmark/planning/fixtures/plans/`.
 - `benchmark/results/` holds immutable benchmark evidence. If you run a
   throwaway benchmark, clean up stray `<run-id>` result dirs you produced
   before committing.

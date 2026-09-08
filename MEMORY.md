@@ -181,6 +181,29 @@ otherwise. Two refinements from the same day: aim the mutation at the exact line
 stayed green), and give each refused class its own fixture — a value carrying
 several metacharacters hides a dropped rule behind the others that still fire.
 
+**A documented git claim is enforced by nothing, so it rots silently.** On
+2026-09-09 `AGENTS.md` still said `MEMORY.md` is gitignored and must never be
+committed (it is tracked, and always was on that day) and that the benchmark's
+fixture plans were a gitignored dependency under `.plans/` (181 of them are
+tracked under `benchmark/planning/fixtures/plans/`). Both had been wrong long
+enough to be believed. The correction then went wrong the same way, by writing
+"`.plans/` is gitignored" — the pattern is `.plans/*` *deliberately*, so the
+directory stays reachable for a negation pin, and `.gitignore` carries a "do not
+narrow" warning against exactly that edit. **Settle it with `git check-ignore -v`
+and `git ls-files --error-unmatch` before writing the sentence**; both take a
+second and neither is fooled by what the last doc said.
+
+**`./run-tests.sh <word>` is not a filter.** An unrecognised argument is not
+rejected — it runs the entire suite, about ten minutes. `./run-tests.sh markers`
+looks like a targeted marker check and is not one. Run the specific test file.
+
+**The npm baseline pins the byte size of every packaged file.** Editing a
+packaged document — `README.md`, `AGENTS.md` — fails `pre-push-check` with
+"npm package baseline drift" until the row in
+`planning/tests/fixtures/overview/npm-package-baseline.tsv` is refreshed and
+`planning/tests/test-npm-package.sh` passes. This is a feature: it is what
+catches a packaged file changing without anyone noticing.
+
 ## Verified only on this machine
 
 The bash 3.2 floor is real (the flake builds 3.2.57) but **BSD userland is
