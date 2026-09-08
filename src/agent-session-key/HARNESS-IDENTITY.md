@@ -39,8 +39,7 @@ of one call were captured independently. "Wire" means `params._meta` of the
 | Harness | Env var | Wire identity | Hook identity | Can a hook inject? |
 |---|---|---|---|---|
 | Claude Code | `CLAUDE_CODE_SESSION_ID` — session only, **shared with subagents** | `claudecode/toolUseId` (a call id, not an agent id) | PreToolUse: `agent_id`, `agent_type`, `tool_use_id` | No |
-| codex | `CODEX_SESSION_ID` (`CODEX_THREAD_ID` measured equal to it) | `x-codex-turn-metadata.thread_id` — a real per-agent id | PreToolUse: `tool_use_id`, plus `agent_id`/`agent_type` **only on a subagent's call** | Not tested |
-| opencode | `OPENCODE_PID` — process granularity, not session | nothing but `progressToken` | plugin `tool.execute.before`: `sessionID`, `callID` | **Yes** — mutate `output.args` |
+| codex | `CODEX_SESSION_ID` (`CODEX_THREAD_ID` measured equal to it) | `x-codex-turn-metadata.thread_id` — a real per-agent id | PreToolUse: `tool_use_id`, plus `agent_id`/`agent_type` **only on a subagent's call** | **Yes** — `updatedInput` with `permissionDecision: "allow"` || opencode | `OPENCODE_PID` — process granularity, not session | nothing but `progressToken` | plugin `tool.execute.before`: `sessionID`, `callID` | **Yes** — mutate `output.args` |
 
 Three different shapes, so three different mechanisms:
 
@@ -85,6 +84,56 @@ the wire, and a subagent's call carried a **different** sessionID
 (`ses_f7cf12523ffeBhKlWX1E2oVB6P`), so the granularity is per agent and not per
 process. This is strictly better than `OPENCODE_PID`, which is the opencode
 *process* and merges every session inside it.
+
+## The skill side: a binary invoked from a shell command
+
+A skill does not get an MCP request. It runs a binary, and that binary receives
+exactly two things: its argv, chosen by the model, and its environment,
+inherited from the harness. There is no `_meta` and no call id, so there is
+nothing for a register to key on — the hook and the binary share no value. (A
+join on the literal command text via `/proc/self/cmdline` collides as soon as
+two agents run the same command, which is exactly when it is needed.)
+
+So the shell side needs **env injection**, and it was measured the same way: a
+probe recording its own `/proc/self/environ` and argv, run once by a main agent
+and once by a subagent, on each harness.
+
+| Harness | Env differs per agent? | Injection route | Skill side |
+|---|---|---|---|
+| Claude Code | **No** | none found | **unsolved** |
+| codex | No (`CODEX_SESSION_ID` shared) | PreToolUse `updatedInput` | solved |
+| opencode | No (`OPENCODE_PID` shared) | plugin `shell.env` | solved |
+
+**Claude Code hands a subagent a byte-identical environment.** Comparing a
+parent's environ with a `code-researcher` subagent's, the only variable that
+differed at all was `CLAUDE_EFFORT` (a model setting). `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_PID`, `CLAUDE_CODE_MESSAGING_TOKEN`, `AI_AGENT` and
+`CLAUDE_CODE_CHILD_SESSION` were identical, and `CLAUDE_CODE_AGENT` read
+`claude` for the subagent as well as the parent — so it names the harness, not
+the agent. With no injection route either (`updatedInput` is refused for command
+hooks), a Claude Code skill binary cannot learn which agent invoked it. The
+identity has to come from the model, which costs tokens on every call.
+
+**codex rewrites the command.** Its PreToolUse hook accepts `updatedInput`, but
+only alongside `permissionDecision: "allow"` — without it the run fails with
+`PreToolUse hook returned updatedInput without permissionDecision:allow`, which
+is the error Claude Code never emits because it never reads the field. With
+both, the rewrite lands: a hook prefixing `CODEX_AGENT_SESSION=<agent>` produced
+a command that actually ran as
+`CODEX_AGENT_SESSION=01a08321-381d-… /path/to/probe`, and the probe read the
+variable. The parent's call carries `agent_id: null` (fall back to
+`session_id`); the subagent's carries its own thread id, so parent and subagent
+came out distinct.
+
+**opencode supplies the environment directly.** The plugin hook `shell.env`
+receives `{cwd, sessionID, callID}` and its `output.env` is merged into the
+command's environment. A plugin setting `OC_AGENT_SESSION = input.sessionID`
+gave the parent `ses_f7ce6206affe…` and the subagent `ses_f7ce460e0ffe…`, while
+`OPENCODE_PID` was identical for both — so this is per-agent granularity where
+the env var is only per-process.
+
+Both working routes cost the agent nothing: no argument to pass, no token spent
+per call, and nothing for the model to remember or get wrong.
 
 ## The resolution ladder
 
@@ -176,16 +225,24 @@ whether two agents inside one process come out distinct.
 - If none of the three, the harness falls back to the ladder, and the honest
   answer is the env rung plus whatever granularity it actually has.
 
-### 5. Report the granularity, not the variable
+### 5. Measure the shell side too
 
+The same two prompts, but running a probe binary that dumps its own
+`/proc/self/environ` and argv. Diff the parent's environment against the
+subagent's: if nothing but a model setting differs, the harness carries no
+per-agent identity in the environment, and the question becomes whether a hook
+can inject one. Try the harness's own rewrite or env hook and check the value
+reached the probe — a hook that returns a rewrite the harness ignores looks
+identical to one that works until you read the environment on the far side.
+
+### 6. Report the granularity, not the variable
 A row in the table needs to say whether the identity separates *agents* or only
 *processes*. `OPENCODE_PID` is exported, stable, and looks like an identity; it
 merges every session in one opencode instance. State which of the two a new
 variable is, and say what was measured, so the next reader does not have to
 re-derive it.
 
-### 6. Remove the probe
-
+### 7. Remove the probe
 Restore the backed-up config, delete the hook or plugin file and the shim, and
 check that the harness's config no longer names the probe. A left-behind
 passthrough silently logs every later call.
@@ -202,8 +259,11 @@ passthrough silently logs every later call.
   not an authorization boundary. Where enforcement matters, the Claude Code hook
   route is the stronger one, because the hook is out of band from the model and
   a declared session that disagrees with the recorded agent is detectable.
-- codex's hook trust gate is global and content-keyed, not per session: trusting
-  writes `[hooks.state."<file>:<event>:<index>"] trusted_hash = "sha256:…"` into
-  `~/.codex/config.toml`. It survives every later session, and editing the hook
-  command re-prompts because the hash stops matching. Tool approval is a
-  separate, also-persistent record.
+- codex's hook trust gate is global, not per session: trusting writes
+  `[hooks.state."<file>:<event>:<index>"] trusted_hash = "sha256:…"` into
+  `~/.codex/config.toml`, and it survives every later session. The hash covers
+  the **registration**, not the script: rewriting the hook script's contents at
+  the same path did not re-prompt, while adding a second registered event did.
+  So a trusted registration keeps trusting whatever that path later contains.
+  Tool approval is a separate, also-persistent record, and it is per tool — the
+  parent's "always allow" did not cover a subagent's first call.
