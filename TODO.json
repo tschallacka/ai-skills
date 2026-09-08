@@ -229,6 +229,23 @@
       "updated_at": "2026-09-07T22:22:06Z"
     },
     {
+      "id": "T107",
+      "title": "One client session owns the connection: the tail serves send/read over a control socket",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's ruling on B283: reading and sending must use the same client session. The tail becomes the session's owner -- it holds the single TLS connection and the only cursor writer -- and binds a control socket in the session state dir. send, read, names, join and leave first look for that socket: if it answers they forward the request, block for the reply, and print what the owner reports from the wire; if it is absent or stale they behave as they do today and open their own connection. The precedent is in this repo twice: interactive-shell is a long-lived process owning a PTY with a short-lived input client over a 0600 socket in a 0700 directory, and ai-text-editor is a server owning document state with a short-lived client, whose SessionRecord (endpoint, pid, start_time_ns, server_generation, session_token) is already the stale-owner design this needs. No threads are required: the tail's read loop is already non-blocking and handles WouldBlock, so a non-blocking listener is polled in the same loop. Windows has no unix socket, so it takes loopback TCP with a token, as ai-text-editor does. --no-session must bypass the socket entirely, since it means do not touch shared state.",
+      "blocked_on": null,
+      "refs": [
+        "src/chat-client-rs/src/lib.rs",
+        "src/interactive-shell/src/lib.rs",
+        "src/ai-text-editor/src/session.rs"
+      ],
+      "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor.",
+      "created_at": "2026-09-08T11:12:48Z",
+      "updated_at": "2026-09-08T11:12:48Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
