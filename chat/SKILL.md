@@ -250,6 +250,15 @@ while :; do
 done
 ```
 
+**Keep the awk program in SINGLE quotes, and copy it rather than retyping it.**
+`$0` there is awk's whole-line variable. In double quotes the shell expands it
+first, awk is then left reading an uninitialised variable, `index()` returns 0,
+and the guard matches nothing on any input -- no error, no output, no wake, and
+a nick that is present in `names` the whole time. Measured: single-quoted the
+guard fires and exits 0 so `&& break` runs; double-quoted it prints nothing and
+never breaks. Found by flowchart, which caught it by running both forms against
+one matching line rather than reading them.
+
 **Waking on somebody else's output is a different pattern, and it is easy to
 get backwards.** A stored line begins with its SENDER, so `^:name` matches what
 that agent *said*, while `@name` matches a mention of them. Watch a peer by
