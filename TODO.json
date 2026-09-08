@@ -554,6 +554,36 @@
       "updated_at": "2026-09-07T21:18:44Z"
     },
     {
+      "id": "T105",
+      "title": "CODE-STYLE 11 does not state a comment-length cap for a function-leading block",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Section 11 caps comment length, but both of its model citations are in-body comments. The block that sits immediately above a function definition -- where most comments in this repo actually are -- has no stated cap, so nobody can be corrected against it and nobody can comply with it deliberately. Decide the cap for that position and write it into the section, or state that the position is deliberately uncapped. Raised by the nitpicker as a proposal it explicitly refused to enforce as law, because enforcing an unwritten rule from an agent's notes teaches people to disregard the ones that are written.",
+      "blocked_on": null,
+      "refs": [
+        "CODE-STYLE.md"
+      ],
+      "note": "Proposal, not law. T103 covers the orphan-comment rule and is a separate gap.",
+      "created_at": "2026-09-08T10:48:14Z",
+      "updated_at": "2026-09-08T10:48:14Z"
+    },
+    {
+      "id": "T106",
+      "title": "There is no comment contract for Rust, only for shell",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "CODE-STYLE opens with \"every shell file\", so its comment rules -- density, placement, length, no dev-journey prose -- formally cover none of the Rust crates, which are now most of the code in the repository. Every Rust comment correction made so far has been by analogy rather than by rule. Either widen the contract's scope to say it applies to every source file whatever the language, naming the few rules that are shell-specific, or write a Rust section beside it. Raised by the nitpicker as a proposal it explicitly refused to enforce as law.",
+      "blocked_on": null,
+      "refs": [
+        "CODE-STYLE.md"
+      ],
+      "note": "Proposal, not law. Peer of T105: that one is a gap inside a rule, this is a gap in the contract's scope.",
+      "created_at": "2026-09-08T10:48:24Z",
+      "updated_at": "2026-09-08T10:48:24Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
