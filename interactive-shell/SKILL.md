@@ -1,6 +1,6 @@
 ---
 name: interactive-shell
-description: Operate unknown full-screen and interactive terminal programs through a PTY-backed wrapper, compact screen observations, and a local Unix-socket input client.
+description: Drive any program that only works in a real terminal, through a PTY-backed wrapper with compact screen observations and a Unix-socket input client. Use it for a full-screen or curses program (nano, mc, lynx, a pager, a terminal menu), for an interactive prompt or installer that asks questions, and for driving ANOTHER CLI or AI agent interactively. Reach for it whenever a headless, --print or piped invocation cannot answer the question -- because the program draws to a terminal, or because the behaviour under test only exists in an interactive session. A headless run is not a smaller version of an interactive one; it is a different program with different output, and treating it as a substitute silently answers a question you did not ask.
 ---
 
 <!-- MODE: PROD -->
@@ -12,6 +12,16 @@ interactive program such as nano, Midnight Commander, Lynx, a pager, a shell,
 or a terminal menu. This is an agent-driven interface: never replace the
 interaction with a replayed shell script or assume that a program has the
 shortcuts used in an example.
+
+It also covers driving another CLI, installer or AI agent that expects a
+terminal, and any question a headless invocation cannot answer. A program's
+`--print`, `-p` or piped mode is a different program: it takes a different
+prompt, renders no screen, and may omit the very behaviour being tested. So a
+headless run that disagrees with expectation is not evidence about the
+interactive one, and a headless run that cannot even reproduce the phenomenon
+proves nothing at all -- it needs a real terminal, which is what the wrapper
+allocates. Prefer this over a headless probe whenever the interactive path is
+the one that matters.
 
 Read [docs/README.md](docs/README.md) for the command reference and an end-to-end
 workflow. Start
