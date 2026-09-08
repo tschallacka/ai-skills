@@ -50,14 +50,6 @@ else
     printf '%s: no timeout(1) here, so a hanging test will not be bounded\n' \
         "${0##*/}" >&2
 fi
-test_timeout_seconds="${AI_SKILLS_TEST_TIMEOUT:-600}"
-timeout_cmd=""
-if command -v timeout >/dev/null 2>&1; then
-    timeout_cmd=timeout
-else
-    printf '%s: no timeout(1) here, so a hanging test will not be bounded\n' \
-        "${0##*/}" >&2
-fi
 verbose=false
 [ "${1:-}" = "--verbose" ] && verbose=true
 
@@ -365,18 +357,17 @@ run_cargo_one() {
         return
     fi
     total=$((total + 1))
-    if "$wrapper" 2G 400 -- cargo test --manifest-path "$repo_root/$crate/Cargo.toml" >"$test_output" 2>&1; then
-        passed=$((passed + 1))
-        printf '  %-52s PASS\n' "$label"
-        [ "$verbose" = true ] && sed 's/^/      /' "$test_output"
-    else
-        code=$?
-        failed=$((failed + 1))
-        failed_names+=("$label")
-        printf '  %-52s FAIL (exit %s)\n' "$label" "$code"
-        sed 's/^/      /' "$test_output"
-    fi
-    rm -f "$test_output"
+    # Same optional layers as run_one, and for the same reason: with the
+    # wrapper dropped on CI an unguarded "$wrapper" expands to an empty word,
+    # which the shell tries to execute and reports as a command not found.
+    local -a argv=()
+    [ -n "$timeout_cmd" ] && argv+=("$timeout_cmd" "$test_timeout_seconds")
+    [ -n "$wrapper" ] && argv+=("$wrapper" 2G 400 --)
+    argv+=(cargo test --manifest-path "$repo_root/$crate/Cargo.toml")
+
+    local code=0
+    "${argv[@]}" >"$test_output" 2>&1 || code=$?
+    report_one "$label" "$code"
 }
 
 while IFS= read -r crate; do
