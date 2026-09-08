@@ -300,6 +300,24 @@
       "updated_at": "2026-09-08T18:19:19Z"
     },
     {
+      "id": "T120",
+      "title": "Let todo and bugs read note and detail text from a file, so prose never crosses shell quoting",
+      "status": "open",
+      "priority": "high",
+      "parent": null,
+      "detail": "Register prose can only reach the binaries through argv today. --file names the REGISTER, not the text, so every note and detail is a shell argument -- and a shell argument is where prose gets damaged.\n\nMeasured twice in one session, both silent: a note containing backticks ran them as command substitution, so one word became empty in T115 and another was replaced by the output of the file(1) utility in T119. Neither errored. Both wrote a register entry with a word missing, which is worse than a failure because the entry looks finished.\n\nThe workaround is single quotes, and the workaround is itself the evidence that the interface is wrong: prose in single quotes cannot contain an apostrophe, so the repaired T119 note had to be reworded around every possessive it wanted to use. Register prose should not be written around the shell.\n\nWanted: --note-file PATH and --detail-file PATH, and the same on bugs for --reproduce, --observed, --expected, --mechanism, --fix and --verification. Then the composition is the right one: the ai-text-editor writes the prose to a file, the binary reads the bytes verbatim, and nothing in between interprets them. A single dash meaning stdin serves the same purpose in a pipeline.\n\nThe register must still be WRITTEN by the binary, which owns the schema, stamps skill_version, and has a check() whose whole job is catching entries that did not come from the tools. This is about how the text reaches it, not about who writes the file.",
+      "blocked_on": null,
+      "refs": [
+        "src/todo/src/main.rs",
+        "src/bug-report/src/main.rs",
+        "todo/SKILL.md",
+        "bug-report/SKILL.md"
+      ],
+      "note": "Raised by Tschallacka after the second mangling: \"why not using ai editor?\" The register file must go through the binary, but the TEXT should not go through a shell, and there is currently no way to arrange that.",
+      "created_at": "2026-09-08T20:24:39Z",
+      "updated_at": "2026-09-08T20:24:39Z"
+    },
+    {
       "id": "T71",
       "title": "Split planning/SKILL.md into phase docs with a short dispatcher",
       "status": "open",
