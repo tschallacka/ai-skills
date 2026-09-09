@@ -33,9 +33,9 @@
       "refs": [
         ".plans/plan-overview-rebuild/adversarial-review.md"
       ],
-      "note": null,
+      "note": "BLOCKED, needs discussion: .plans/plan-overview-rebuild/adversarial-review.md (and the whole plan directory) does not exist anywhere I can find -- not in the working tree, not in .plans/'s own nested snapshot git history (which holds chat-irc-rust-migration and untrack-generated-files instead), not in any other worktree, and there is no trace of it in the main repo's git log. Its findings (AR-03 through AR-11) only survive as free-text quotes inside BUGS.json entries that were filed while resolving some of them. QUESTION FOR TOMORROW: is there a backup of this plan directory somewhere (another machine, an archive), or is it gone -- in which case is this TODO obsolete (the plan it gates may already be superseded / abandoned) or does it need to be redone from scratch against the current plan-overview code? I have not closed this out; picking up other high-priority items in the meantime.",
       "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-08-27T12:37:03Z"
+      "updated_at": "2026-09-09T21:32:02Z"
     },
     {
       "id": "T72",
