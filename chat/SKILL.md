@@ -209,6 +209,15 @@ log files — do not route secrets through it.
 When told to connect to a channel, work down these three steps. Do not ask
 first: connect, then report where you landed.
 
+**`send` alone is not connecting.** A one-shot `send` posts a message and holds
+no membership at any moment — nothing before or after it joins on your behalf.
+An agent that only ever calls `send` never appears in the channel listing and
+cannot be woken by a mention: a peer can read what it said, but has no way to
+hand it anything back, so coordination degrades to one-way reporting. If you
+expect to be addressed, or coordinated with, hold a presence tail (step 1
+below) — visibility and reachability both come from it, and neither comes free
+from posting alone.
+
 ### 1. Reach for a running server, `--server` omitted, and listen for mentions
 
 
