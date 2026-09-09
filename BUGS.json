@@ -398,7 +398,7 @@
     {
       "id": "B127",
       "title": "interactive-shell screen observations do not expose mc pane focus or selection changes reliably",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "urgent",
       "parent": null,
@@ -410,12 +410,12 @@
         "src/interactive-shell/src/lib.rs",
         "src/interactive-shell/src/bin/interactive-shell-input.rs"
       ],
-      "fix": "Working tree change — expose reverse-video selection as highlighted=true on observed text hints",
-      "verification": "Screen elements now distinguish verified actionability from reverse-video highlight state; unit coverage verifies a highlighted text run. Active-pane semantics remain intentionally heuristic.",
+      "fix": "src/interactive-shell/src/lib.rs: screen elements now carry highlighted=true for reverse-video and row-level color-outlier text runs (element.highlighted = reverse || color_outlier), with highlight_source distinguishing the two heuristics. Unit tests assert highlighted on a reverse-video run.",
+      "verification": "Merged to master (b8b8f799, ancestor of current HEAD via bug/b127-lost-sends). Active-pane semantics remain intentionally heuristic per the original fix note; the highlight hint is the scoped improvement this bug tracked.",
       "found_by": "fresh agent protocol run, subworker Godel",
       "notes": "This is specifically an unknown-TUI navigation defect; the new highlight hint improves selection discovery, but the generic model still cannot prove application focus.",
       "created_at": "2026-09-01T12:40:00Z",
-      "updated_at": "2026-09-01T12:40:00Z"
+      "updated_at": "2026-09-09T18:16:51Z"
     },
     {
       "id": "B141",
