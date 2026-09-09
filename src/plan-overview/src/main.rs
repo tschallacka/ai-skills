@@ -7,16 +7,13 @@ use plan_overview::render::router::{route, Route};
 use plan_overview::render::shell::render_shell;
 use std::path::PathBuf;
 
-const USAGE: &str =
-    "usage: plan-overview --plan-dir DIR [--out FILE] [--refresh N] [--watch] [--serve] [--port N]";
+const USAGE: &str = "usage: plan-overview --plan-dir DIR [--out FILE] [--serve] [--port N]";
 
 #[derive(Debug, Default)]
 struct Args {
     help: bool,
     plan_dir: PathBuf,
     out: Option<PathBuf>,
-    refresh: Option<u32>,
-    watch: bool,
     serve: bool,
     port: Option<u16>,
 }
@@ -31,15 +28,22 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
                 args.plan_dir = PathBuf::from(it.next().ok_or("--plan-dir needs a value")?)
             }
             "--out" => args.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
+            // B99: neither flag drove any behaviour -- run() never read them,
+            // so a caller who passed --watch believed live updates were on
+            // when the render was a single snapshot. Refused by name rather
+            // than silently accepted until watch.rs and StateStream are
+            // actually wired into run() (see T130).
             "--refresh" => {
-                args.refresh = Some(
-                    it.next()
-                        .ok_or("--refresh needs a value")?
-                        .parse()
-                        .map_err(|_| "--refresh is not a number".to_string())?,
+                it.next().ok_or("--refresh needs a value")?;
+                return Err(
+                    "--refresh is not implemented yet; the render is a single snapshot".into(),
+                );
+            }
+            "--watch" => {
+                return Err(
+                    "--watch is not implemented yet; the render is a single snapshot".into(),
                 )
             }
-            "--watch" => args.watch = true,
             "--serve" => args.serve = true,
             "--port" => {
                 args.port = Some(
@@ -121,5 +125,33 @@ fn main() {
             eprintln!("plan-overview: {error}");
             std::process::exit(64);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|p| p.to_string()).collect()
+    }
+
+    /// B99: --watch and --refresh were accepted and silently ignored. Neither
+    /// drives any behaviour yet, so both are refused by name.
+    #[test]
+    fn watch_and_refresh_are_refused_rather_than_silently_ignored() {
+        let error = parse_args(argv(&["--plan-dir", "p", "--watch"])).unwrap_err();
+        assert!(error.contains("--watch"), "{error}");
+        assert!(error.contains("not implemented"), "{error}");
+
+        let error = parse_args(argv(&["--plan-dir", "p", "--refresh", "5"])).unwrap_err();
+        assert!(error.contains("--refresh"), "{error}");
+        assert!(error.contains("not implemented"), "{error}");
+    }
+
+    #[test]
+    fn a_refresh_missing_its_value_is_still_refused_naming_the_value() {
+        let error = parse_args(argv(&["--plan-dir", "p", "--refresh"])).unwrap_err();
+        assert!(error.contains("--refresh needs a value"), "{error}");
     }
 }
