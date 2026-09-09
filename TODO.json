@@ -529,53 +529,6 @@
       "updated_at": "2026-09-07T20:00:00Z"
     },
     {
-      "id": "T96",
-      "title": "Every ai-text-editor action must be invokable on a tab id",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Verbs route today by file/endpoint/identity; the tab uuid is the stable handle the server already issues in every open answer. Every verb - read, search, insert, replace, save, close, cursor, the job verbs - should accept the tab id as the whole of its addressing, so a caller that holds an id never needs a path.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
-        "src/ai-text-editor/src/client.rs"
-      ],
-      "note": "B261 records why this is not usable immediately after an install: an already-running agent validates calls against the tools/list it fetched at startup, so tab_id and tab_path are invisible to it until it restarts. Closing this does not make the shorthand reachable for sessions already connected.",
-      "created_at": "2026-09-06T17:57:12Z",
-      "updated_at": "2026-09-07T15:13:10Z"
-    },
-    {
-      "id": "T97",
-      "title": "Tabs addressable by filename or partial workspace-root path; ambiguity returns a result set",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "The recovery for an AI that forgot the tab id: pass a filename, or a partial path from the workspace root, and the resolver answers the single matching tab - or, when several tabs match, a result set of candidates with their tab ids rather than a guess or an error. Sequels naturally after T96, which gives the candidates their handle.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
-      ],
-      "note": null,
-      "created_at": "2026-09-06T17:57:28Z",
-      "updated_at": "2026-09-06T17:57:28Z"
-    },
-    {
-      "id": "T98",
-      "title": "A session carries a focused tab id; unmarked actions run on it",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Every session/identity tracks a focused tab. Any request with no file, endpoint, or tab marker is performed on the focused tab; open sets the focus, and every response names the tab it answered so a caller never writes to the wrong tab quietly. Builds on T96: the focus is a tab id, and the named-tab forms stay the escape hatch.",
-      "blocked_on": null,
-      "refs": [
-        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
-        "src/ai-text-editor/src/session.rs"
-      ],
-      "note": null,
-      "created_at": "2026-09-06T17:57:28Z",
-      "updated_at": "2026-09-06T17:57:28Z"
-    },
-    {
       "id": "T100",
       "title": "jump points: on open, derive a file's outbound references from CodeGraph so a tab can be navigated, not just searched",
       "status": "open",
@@ -1061,6 +1014,53 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
+    },
+    {
+      "id": "T96",
+      "title": "Every ai-text-editor action must be invokable on a tab id",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Verbs route today by file/endpoint/identity; the tab uuid is the stable handle the server already issues in every open answer. Every verb - read, search, insert, replace, save, close, cursor, the job verbs - should accept the tab id as the whole of its addressing, so a caller that holds an id never needs a path.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/src/client.rs"
+      ],
+      "note": "Already done - implemented directly by the maintainer in cde4138 ('ai-text-editor: address any tab by id or path, and carry a focused tab'), on master. Verified live against the real binary 2026-09-09: read AND a mutating verb (insert) both work addressed by --tab-id alone, no file/endpoint needed. Per the entry's own note, B261 (a live already-connected MCP agent can't see the new tab_id/tab_path schema until it restarts) is a separate, still-open concern about reachability for existing sessions, not about whether the feature itself works.",
+      "created_at": "2026-09-06T17:57:12Z",
+      "updated_at": "2026-09-09T08:10:52Z"
+    },
+    {
+      "id": "T97",
+      "title": "Tabs addressable by filename or partial workspace-root path; ambiguity returns a result set",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "The recovery for an AI that forgot the tab id: pass a filename, or a partial path from the workspace root, and the resolver answers the single matching tab - or, when several tabs match, a result set of candidates with their tab ids rather than a guess or an error. Sequels naturally after T96, which gives the candidates their handle.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "note": "Already done - same commit as T96 (cde4138). Verified live: --tab-path with a bare filename resolves the single matching tab; with two tabs sharing that filename, the request is refused tab_ambiguous naming both candidates with their tab_ids rather than guessing.",
+      "created_at": "2026-09-06T17:57:28Z",
+      "updated_at": "2026-09-09T08:10:52Z"
+    },
+    {
+      "id": "T98",
+      "title": "A session carries a focused tab id; unmarked actions run on it",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Every session/identity tracks a focused tab. Any request with no file, endpoint, or tab marker is performed on the focused tab; open sets the focus, and every response names the tab it answered so a caller never writes to the wrong tab quietly. Builds on T96: the focus is a tab id, and the named-tab forms stay the escape hatch.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
+        "src/ai-text-editor/src/session.rs"
+      ],
+      "note": "Already done - same commit as T96 (cde4138). Verified live: a read with no --file, --tab-id, --tab-path or --endpoint at all is served by the most recently opened tab (the focus open sets), and the response still names the tab_id it answered.",
+      "created_at": "2026-09-06T17:57:28Z",
+      "updated_at": "2026-09-09T08:10:52Z"
     },
     {
       "id": "T106",
