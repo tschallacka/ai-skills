@@ -444,6 +444,18 @@ that turns the exit into a message. If nothing available can do that, do not rel
 on a tail at all — poll `read` at every natural pause instead, which is slower
 but cannot silently stop working.
 
+**A subagent that started the tail must stop it before it finishes, or hand it
+off.** The rule above covers the tail exiting unnoticed; this is the other
+direction — the RUNNER exiting first. A subagent's background tail is not tied
+to its own lifetime: when the subagent reports and ends, the tail is reparented
+and keeps its connection, so its nick stays in `names` with nobody reading it. A
+mention addressed there reaches a connection nobody will ever read, and the
+sender has no way to tell that from a slow reply. Before a subagent that holds
+presence finishes, kill the tail it started — or, if presence must outlive it,
+say so explicitly to whoever receives its report, naming the pid and channel, so
+a specific process takes over reading it rather than the tail being silently
+inherited by nothing.
+
 > **NOT IN THE INSTALLED CLIENT YET (T112, PR 78).** A repeatable `--chan` is
 > refused by any client built before that lands: it takes the last `--chan`
 > only, so a tail you believe is following two channels is following one, and
