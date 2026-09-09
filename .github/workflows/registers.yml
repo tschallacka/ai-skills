@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the register branch with master alongside it
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           # The guard diffs against master, so a shallow clone is not enough.
           fetch-depth: 0
