@@ -6364,6 +6364,27 @@
       "updated_at": "2026-09-09T08:53:35Z"
     },
     {
+      "id": "B313",
+      "title": "chat skill's own Posture A example: a sender-based guard combined with tail --presence fires on nothing",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Follow the chat skill's own docs: arm a guard watching a sender pattern (e.g. grep -qE '@$NICK|^:reviewer') per the wake-on-more-than-your-own-name advice, and separately run tail with --presence per the who-is-on-the-channel advice. Have the watched peer JOIN or PART/QUIT any channel while the guard is armed.",
+      "observed": "The guard fires immediately on the JOIN/PART/QUIT line, because that line also carries the watched sender's :sender! prefix and the guard's grep has no PRIVMSG requirement. The turn ends, and the follow-up read reports no new messages on either channel - reading as an instruction was missed or read itself is broken, when neither is true.",
+      "expected": "A sender-scoped guard combined with --presence should only wake on that sender's actual messages (PRIVMSG lines), not on their channel membership changes. The skill's own shipped guard example should require PRIVMSG in the match condition whenever presence is also in play.",
+      "mechanism": "The guard's grep/awk condition matches on the stored line's :sender! prefix alone (e.g. index($0, '@nick') or /^:reviewer/). With --presence enabled, JOIN/PART/QUIT lines are written to the same tail log and carry that identical sender prefix, so they satisfy the sender-only condition despite not being messages at all.",
+      "surfaces": [
+        "chat/SKILL.md"
+      ],
+      "fix": "chat/SKILL.md's --presence section now documents the interaction and the fix: require PRIVMSG in the same grep/awk condition alongside the sender pattern.",
+      "verification": "Doc-only fix; partslist independently verified their own corrected guard (adding PRIVMSG to the match) stopped the false wakes.",
+      "found_by": "partslist, 2026-09-09, measured live on the bus - guard fired on ':mdibbets!mdibbets@localhost JOIN #sanitairkamer', follow-up read reported nothing new; second occurrence for that agent",
+      "notes": null,
+      "created_at": "2026-09-09T14:57:34Z",
+      "updated_at": "2026-09-09T14:57:34Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
