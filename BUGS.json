@@ -4057,7 +4057,7 @@
     {
       "id": "B270",
       "title": "test-chat-resolution case 5 discovers whatever server is live on the machine, so it fails and writes to it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4068,12 +4068,12 @@
       "surfaces": [
         "chat/tests/test-chat-resolution.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat: isolate test-chat-resolution.sh case 5 to a private beacon port instead of the shared default; fix bash-3.2 negative array index in stop_server call",
+      "verification": "PR #124 merged 77c106f9, all CI legs green (ubuntu, macos-latest, macOS bash 3.2, all 5 platform builds)",
       "found_by": "T90: the scoped chat suite run failed here, and the same failure reproduced on an unmodified origin/master worktree as a control",
       "notes": "AI_CHAT_BEACON_PORT is read by the client and CHAT_ANNOUNCE_PORT-equivalent handling exists on the server, so the fix is to give case 5 a private beacon port rather than to weaken the contract. src/chat-mcp/tests/mcp_flow.rs does this: its server announces on a port nothing listens to, and its session is pre-seeded so resolution never reaches discovery.",
       "created_at": "2026-09-07T19:59:50Z",
-      "updated_at": "2026-09-07T19:59:50Z"
+      "updated_at": "2026-09-09T21:23:41Z"
     },
     {
       "id": "B273",
