@@ -6602,7 +6602,7 @@
     {
       "id": "B306",
       "title": "The MODE:/PACKAGE: marker leaks into --help on ~11 more scripts than B98 named",
-      "status": "reported",
+      "status": "fixed",
       "severity": "cosmetic",
       "priority": "low",
       "parent": null,
@@ -6624,12 +6624,12 @@
         "planning/scripts/supervision-frame.sh",
         "planning/tests/test-comment-format.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "All 11 named scripts fixed on fix/b306-help-mode-marker-sweep (built on fix/b98-help-mode-marker): each usage() awk (two variants: NR>1 and NR==1{next}) now also excludes a MODE:/PACKAGE: marker line, and register-rebuild.sh's sed range starts at line 3 instead of 2. Added a general regression assertion to planning/tests/test-comment-format.sh (case \"$help_out\" in MODE:*|PACKAGE:*) ...), mutation-tested. npm package baseline refreshed for the 5 shipped files whose byte size changed.",
+      "verification": "bash \"$f\" --help first line checked for all 11 files: none start with MODE:/PACKAGE:. bash -n and shellcheck --severity=warning clean on all 11. test-comment-format.sh PASSes with the new assertion in place, and was confirmed to fail when the guard was removed from bootstrap.sh (mutation test), then restored. test-npm-package.sh PASSes against the refreshed baseline.",
       "found_by": "claude-coordinator, while fixing B98 2026-09-09: the generalized regression assertion I wrote for B98 (a case \"$help_out\" in MODE:*|PACKAGE:*) check) was not committed because it fails on these 11 pre-existing files, which are out of B98's original scope",
       "notes": null,
       "created_at": "2026-09-09T00:16:01Z",
-      "updated_at": "2026-09-09T00:16:01Z"
+      "updated_at": "2026-09-09T00:39:31Z"
     },
     {
       "id": "B93",
