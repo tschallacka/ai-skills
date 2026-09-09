@@ -1543,6 +1543,28 @@ pub fn valid_chan(c: &str) -> bool {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-')
 }
 
+/// Whether `text` mentions `nick` as a bounded "@nick", not merely a
+/// substring (B265): the character right after the match, if any, must not
+/// itself be a nick character, or "@bob" matches inside "@bobby" and a
+/// shorter nick wakes on a longer one that only starts the same way.
+pub fn mentions(text: &str, nick: &str) -> bool {
+    let needle = format!("@{nick}");
+    let mut start = 0;
+    while let Some(found) = text[start..].find(&needle) {
+        let pos = start + found;
+        let after = pos + needle.len();
+        let bounded = text[after..]
+            .chars()
+            .next()
+            .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'));
+        if bounded {
+            return true;
+        }
+        start = after;
+    }
+    false
+}
+
 pub fn local_chan_log(home: &std::path::Path, chan: &str) -> PathBuf {
     home.join("channels").join(format!("{}.log", chan))
 }
@@ -1621,7 +1643,7 @@ fn local_read(home: &std::path::Path, chan: &str, since: u64, mentions_for: Opti
             continue;
         }
         if let Some(nick) = mentions_for {
-            if !line.contains(&format!("@{}", nick)) {
+            if !mentions(&line, nick) {
                 continue;
             }
         }
@@ -2372,7 +2394,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 let is_mention = message
                     .trailing
                     .as_deref()
-                    .map(|text| text.contains(&format!("@{}", nick)))
+                    .map(|text| mentions(text, &nick))
                     .unwrap_or(false);
                 if !o.mentions || is_mention {
                     if o.mentions {
@@ -2698,6 +2720,27 @@ mod tests {
         // sequence could not round-trip as the same string.
         assert_eq!(segments.concat(), multibyte);
     }
+
+    /// B265: a plain substring match let "@bob" match inside "@bobby" (a
+    /// false wake for the shorter nick) and, symmetrically, let a shorter
+    /// nick claim a mention meant for a longer one that only starts the
+    /// same way.
+    #[test]
+    fn mentions_does_not_match_a_nick_that_is_only_a_prefix() {
+        assert!(!mentions("hey @bob check this", "bobby"));
+        assert!(!mentions("hey @bobby check this", "bob"));
+        assert!(mentions("hey @bob check this", "bob"));
+        assert!(mentions("hey @bobby check this", "bobby"));
+    }
+
+    #[test]
+    fn mentions_respects_punctuation_and_hyphenated_nicks() {
+        assert!(mentions("ping @editor-batch-2!", "editor-batch-2"));
+        assert!(!mentions("ping @editor-batch-2!", "editor-batch"));
+        assert!(mentions("@bob, are you there", "bob"));
+        assert!(!mentions("no mention here", "bob"));
+    }
+
     use super::*;
     use std::fs;
 
