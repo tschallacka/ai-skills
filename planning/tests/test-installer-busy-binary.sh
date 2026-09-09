@@ -34,10 +34,14 @@ esac
 shared_bin="$repo_root/bin/$triple/chat-server-rs"
 if [ ! -x "$shared_bin" ]; then
     if command -v cargo >/dev/null 2>&1; then
-        ( cd "$repo_root/src/chat-server-rs" && cargo build --release --target "$triple" >/dev/null 2>&1 ) \
+        # No --target: this repo's own tests (e.g. chat/tests/test-chat.sh)
+        # build the host's native target this way, into target/release/. A
+        # cross target here would need the toolchain's extra target installed,
+        # which a plain `cargo build --release` never requires.
+        ( cd "$repo_root/src/chat-server-rs" && cargo build --release >/dev/null 2>&1 ) \
             || t_fail 'cargo build chat-server-rs failed'
         mkdir -p "$repo_root/bin/$triple"
-        cp "$repo_root/target/$triple/release/chat-server-rs" "$shared_bin"
+        cp "$repo_root/target/release/chat-server-rs" "$shared_bin"
         chmod +x "$shared_bin"
     else
         t_skip 'chat-server-rs is not built and no cargo is on PATH'
