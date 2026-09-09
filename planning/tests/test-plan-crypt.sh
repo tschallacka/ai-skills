@@ -221,6 +221,29 @@ case "$(uname -s)" in
         ;;
 esac
 
+# B94: uname -s never reports the bare "Windows_NT" a POSIX shell would read
+# from the environment -- Git Bash, MSYS2 and Cygwin each print their own
+# MINGW*_NT/MSYS_NT/CYGWIN_NT form. A stub uname exercises all four spellings
+# without needing to run on an actual Windows host.
+uname_stub="$work/uname-stub"
+mkdir -p "$uname_stub"
+for fake_os in Windows_NT MINGW64_NT-10.0-19045 MSYS_NT-10.0-19045 CYGWIN_NT-10.0-19045; do
+    cat > "$uname_stub/uname" <<STUB
+#!/usr/bin/env bash
+case "\$1" in
+    -s) printf '%s\n' '$fake_os' ;;
+    -m) printf '%s\n' 'x86_64' ;;
+esac
+STUB
+    chmod +x "$uname_stub/uname"
+    fake_triple="$(PATH="$uname_stub:$PATH" bash -c '
+        source "'"$scripts"'/plan-crypt-lib.sh"
+        plan_crypt_target_triple
+    ' || printf '')"
+    [ "$fake_triple" = x86_64-pc-windows-msvc ] || \
+        t_fail "plan_crypt_target_triple returned '$fake_triple' for uname -s='$fake_os', want x86_64-pc-windows-msvc"
+done
+
 # ---- 8. refusal, not improvisation -----------------------------------------
 # With no rung at all both scripts must exit 69 rather than mint or report a
 # key they cannot derive. The stub PATH holds everything the scripts need

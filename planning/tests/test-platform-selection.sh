@@ -23,6 +23,12 @@ assert_target Linux aarch64 aarch64-unknown-linux-musl
 assert_target Darwin x86_64 x86_64-apple-darwin
 assert_target Darwin arm64 aarch64-apple-darwin
 assert_target Windows_NT AMD64 x86_64-pc-windows-msvc
+# B94: uname -s never reports the bare "Windows_NT" a POSIX shell would read
+# from the environment -- it prints MINGW64_NT-..., MSYS_NT-... or
+# CYGWIN_NT-... depending on which of the three ships the bash that ran it.
+assert_target MINGW64_NT-10.0-19045 x86_64 x86_64-pc-windows-msvc
+assert_target MSYS_NT-10.0-19045 x86_64 x86_64-pc-windows-msvc
+assert_target CYGWIN_NT-10.0-19045 x86_64 x86_64-pc-windows-msvc
 
 selected="$(PLAN_OVERVIEW_TEST_MODE=1 PLAN_OVERVIEW_TEST_OS=Windows_NT \
     PLAN_OVERVIEW_TEST_ARCH=AMD64 plan_overview_selected_artifact)"

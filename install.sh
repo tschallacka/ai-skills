@@ -847,7 +847,16 @@ normalize_platform() {
         Linux:aarch64|Linux:arm64) printf '%s\n' aarch64-unknown-linux-musl ;;
         Darwin:x86_64|Darwin:amd64) printf '%s\n' x86_64-apple-darwin ;;
         Darwin:arm64|Darwin:aarch64) printf '%s\n' aarch64-apple-darwin ;;
-        Windows_NT:AMD64|Windows_NT:x86_64) printf '%s\n' x86_64-pc-windows-msvc ;;
+        # B94: uname -s prints MINGW64_NT-... under Git Bash, MSYS_NT-... under
+        # MSYS2 and CYGWIN_NT-... under Cygwin, never the bare Windows_NT that
+        # only a non-POSIX shell (cmd, PowerShell) would report -- matched
+        # anyway since bundled_rjq_artifact and skill_files() below already
+        # accept it and this function should refuse no host they serve.
+        Windows_NT:AMD64|Windows_NT:x86_64| \
+        MINGW*:AMD64|MINGW*:x86_64|MINGW*:amd64| \
+        MSYS*:AMD64|MSYS*:x86_64|MSYS*:amd64| \
+        CYGWIN*:AMD64|CYGWIN*:x86_64|CYGWIN*:amd64)
+            printf '%s\n' x86_64-pc-windows-msvc ;;
         *) return 1 ;;
     esac
 }
