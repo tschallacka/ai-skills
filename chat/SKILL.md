@@ -506,6 +506,19 @@ Two things it cannot do, both worth knowing before relying on it:
   your tail is between wakes is simply gone by the time you look; the nick list a
   standard IRC client keeps is the durable view, not the log.
 
+**A sender-based guard combined with `--presence` fires on nothing.** The
+sender-scoped guard shown earlier (`grep -qE "@$NICK|^:reviewer|^:nitpicker"`)
+matches on the line's `:sender!` prefix, and `JOIN`/`PART`/`QUIT` lines carry
+that same prefix — so with `--presence` on, the guard wakes on that peer's
+every arrival and departure, not just their messages. The wake fires, the
+turn ends, and the follow-up `read` reports nothing new, which reads as "I
+missed something" or "read is broken" when neither is true. Fix: require
+`PRIVMSG` in the same condition, e.g.
+`grep -qE "PRIVMSG.*(@$NICK|^:reviewer|^:nitpicker)"` or an equivalent
+positive match on the message type, not only the sender. Only bites a guard
+that both watches a sender and tails with `--presence`; a plain `@$NICK`
+mention guard is unaffected. (B313, found live on the bus 2026-09-09.)
+
 **Who is here right now: `names`.** `tail --presence` tells you about arrivals
 and departures from the moment you attach; `names` answers the question outright,
 without holding a connection:
