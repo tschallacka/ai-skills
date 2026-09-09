@@ -136,45 +136,6 @@
       "updated_at": "2026-09-04T08:04:31Z"
     },
     {
-      "id": "T90",
-      "title": "expose the chat client as an MCP server, so joining a channel is a tool call rather than CLI archaeology",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Today an agent talks to the chat bus by shelling out to chat-client-rs, and that is where it goes wrong: it has to know the binary's path for its platform, the chat home, whether a server is already running, and which subcommand carries which flag. Observed repeatedly on 2026-09-04 -- an agent started a rival server on a second port and split the channel, another reached for --insecure and defeated the cert pinning, and both had to be told the port by hand. That is filed as B124; an MCP is the structural answer to it, where B124's own fix is only better affordance in the CLI.\n\nAs an MCP the operations become named tools with typed arguments -- join, send, read since a cursor, list channels, who is here -- and the server resolves discovery, the chat home and the cert itself, so there is no port for a model to guess and no --insecure to reach for. Follow src/ai-text-editor-mcp, which already does this in this repo for the editor: same crate layout, same packaging, same per-skill binary placement, rather than inventing a second pattern.\n\nThe liveness point is the reason this is HIGH and not a nicety. Michael's requirement is that the chat stays up and clients stay attached, because a held connection is what makes answers quick -- an agent learns of a message when it arrives instead of on its next poll. A one-shot CLI cannot hold anything: every invocation connects, does one thing and exits, so there is no presence and no push. An in-process MCP server can hold the connection for the life of the session and surface an incoming message as it lands. Note the two things that must be true first: the broadcast path has to be reliable (B122, fixed on PR #43 -- before it, holding a subscriber wedged the whole server), and chat-client-rs today never consumes a broadcast at all, it FETCH-polls and discards PRIVMSG (measured by chat-b122 on #43), so the MCP has to consume broadcasts properly rather than wrap the existing polling.\n\nRequested by Tschallacka on 2026-09-04.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:20:48Z",
-      "updated_at": "2026-09-04T08:20:48Z"
-    },
-    {
-      "id": "T91",
-      "title": "the socket is the only interface to the chat bus: nothing outside the server may touch the channel log",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Architectural rule set by Tschallacka on 2026-09-04: everything goes over the socket, and nothing interfaces the log. The channel log is the SERVER's private storage format, not an API. Two things follow, and both are violations present today.\n\n(1) No client may read the log file. chat-client-rs has 'read --local' and 'tail --local' which walk $AI_CHAT_HOME/channels/<chan>.log directly with no server, and the docs advertise it. That has to go, or survive only as an explicitly-labelled maintenance escape hatch that no agent instruction ever recommends. pr-master's own coordination poller was reading the log this way as a workaround for B122 -- a live tail wedged the server -- which is exactly the shortcut this rule forbids, and it must move to a socket tail once B122 lands.\n\n(2) Steady-state delivery is a PUSH over the socket, not a poll. Today 'tail' is a loop issuing FETCH <chan> <last_id>, and the client discards broadcast PRIVMSG lines except to confirm its own send echoed -- measured by chat-b122 on PR #43. So the server's whole fan-out path serves stock IRC clients only, while our own client polls. Invert it: the client consumes PRIVMSG as it arrives, so a message reaches an agent when it is sent rather than on the next poll interval. This is the liveness requirement behind wanting the chat up at all -- a held connection is what makes answers quick.\n\nWhere FETCH legitimately stays: backfill. On join or reconnect a client asks for what it missed since its cursor, over the SOCKET, and then follows the push stream. That is not log interfacing and not steady-state polling.\n\nDepends on B122 (PR #43): before it, a held subscriber wedged the server, which is why polling was tolerated. Related: B124 (connect affordance) and T90 (chat client as an MCP) -- an MCP is the natural home for a held socket that consumes pushes.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "2026-09-04: pr-master's coordination poller no longer touches the log. It now uses 'read --chan #ai-skills --since N' over the socket, which is a short-lived connection -- so it holds no subscriber (safe even before B122) and reads no file. Tschallacka pointed out that --since was the right tool all along; it had been ruled out by over-generalising from one wedged-server observation where both send and read failed, and never retested once the server was healthy. This closes the log-interfacing half of the violation for pr-master. What remains is the poll itself, which is T91a's push subscription.",
-      "created_at": "2026-09-04T08:29:41Z",
-      "updated_at": "2026-09-04T08:31:12Z"
-    },
-    {
-      "id": "T91a",
-      "title": "chat-client-rs consumes broadcast PRIVMSG as it arrives, instead of looping on FETCH",
-      "status": "open",
-      "priority": "high",
-      "parent": "T91",
-      "detail": "tail is currently a FETCH poll loop (src/chat-client-rs/src/main.rs around line 1594) and PRIVMSG is only inspected to confirm a send echoed (line 1041). Make the client a real subscriber: after backfilling from its cursor, follow the pushed stream and surface each message on arrival. Keep the cursor updated from pushed ids so a reconnect backfills correctly. Prove it with a test that a message reaches an attached client without any FETCH being issued after the join.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:29:54Z",
-      "updated_at": "2026-09-04T08:29:54Z"
-    },
-    {
       "id": "T94",
       "title": "Turn ci-failures.sh into a pipeline-failure-retrieval skill, with glab alongside gh",
       "status": "open",
@@ -1068,6 +1029,45 @@
       "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T90",
+      "title": "expose the chat client as an MCP server, so joining a channel is a tool call rather than CLI archaeology",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Today an agent talks to the chat bus by shelling out to chat-client-rs, and that is where it goes wrong: it has to know the binary's path for its platform, the chat home, whether a server is already running, and which subcommand carries which flag. Observed repeatedly on 2026-09-04 -- an agent started a rival server on a second port and split the channel, another reached for --insecure and defeated the cert pinning, and both had to be told the port by hand. That is filed as B124; an MCP is the structural answer to it, where B124's own fix is only better affordance in the CLI.\n\nAs an MCP the operations become named tools with typed arguments -- join, send, read since a cursor, list channels, who is here -- and the server resolves discovery, the chat home and the cert itself, so there is no port for a model to guess and no --insecure to reach for. Follow src/ai-text-editor-mcp, which already does this in this repo for the editor: same crate layout, same packaging, same per-skill binary placement, rather than inventing a second pattern.\n\nThe liveness point is the reason this is HIGH and not a nicety. Michael's requirement is that the chat stays up and clients stay attached, because a held connection is what makes answers quick -- an agent learns of a message when it arrives instead of on its next poll. A one-shot CLI cannot hold anything: every invocation connects, does one thing and exits, so there is no presence and no push. An in-process MCP server can hold the connection for the life of the session and surface an incoming message as it lands. Note the two things that must be true first: the broadcast path has to be reliable (B122, fixed on PR #43 -- before it, holding a subscriber wedged the whole server), and chat-client-rs today never consumes a broadcast at all, it FETCH-polls and discards PRIVMSG (measured by chat-b122 on #43), so the MCP has to consume broadcasts properly rather than wrap the existing polling.\n\nRequested by Tschallacka on 2026-09-04.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Already implemented: src/chat-mcp (crate exists, follows src/ai-text-editor-mcp's pattern) ships as chat-mcp for all 5 platforms (chat/binaries.tsv), with tests (cargo-chat-mcp passes in ./run-tests.sh). Named tools resolve discovery/chat-home/cert internally, matching the ask exactly.",
+      "created_at": "2026-09-04T08:20:48Z",
+      "updated_at": "2026-09-09T22:18:14Z"
+    },
+    {
+      "id": "T91",
+      "title": "the socket is the only interface to the chat bus: nothing outside the server may touch the channel log",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Architectural rule set by Tschallacka on 2026-09-04: everything goes over the socket, and nothing interfaces the log. The channel log is the SERVER's private storage format, not an API. Two things follow, and both are violations present today.\n\n(1) No client may read the log file. chat-client-rs has 'read --local' and 'tail --local' which walk $AI_CHAT_HOME/channels/<chan>.log directly with no server, and the docs advertise it. That has to go, or survive only as an explicitly-labelled maintenance escape hatch that no agent instruction ever recommends. pr-master's own coordination poller was reading the log this way as a workaround for B122 -- a live tail wedged the server -- which is exactly the shortcut this rule forbids, and it must move to a socket tail once B122 lands.\n\n(2) Steady-state delivery is a PUSH over the socket, not a poll. Today 'tail' is a loop issuing FETCH <chan> <last_id>, and the client discards broadcast PRIVMSG lines except to confirm its own send echoed -- measured by chat-b122 on PR #43. So the server's whole fan-out path serves stock IRC clients only, while our own client polls. Invert it: the client consumes PRIVMSG as it arrives, so a message reaches an agent when it is sent rather than on the next poll interval. This is the liveness requirement behind wanting the chat up at all -- a held connection is what makes answers quick.\n\nWhere FETCH legitimately stays: backfill. On join or reconnect a client asks for what it missed since its cursor, over the SOCKET, and then follows the push stream. That is not log interfacing and not steady-state polling.\n\nDepends on B122 (PR #43): before it, a held subscriber wedged the server, which is why polling was tolerated. Related: B124 (connect affordance) and T90 (chat client as an MCP) -- an MCP is the natural home for a held socket that consumes pushes.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Both sub-requirements already met. (1) --local is now an explicitly-labelled 'maintenance escape hatch: read/tail the shared log' (src/chat-client-rs/src/lib.rs:63), not a recommended path. (2) Steady-state delivery is push, not poll -- see T91a's closure. The socket is the only interface agents are steered toward.",
+      "created_at": "2026-09-04T08:29:41Z",
+      "updated_at": "2026-09-09T22:18:14Z"
+    },
+    {
+      "id": "T91a",
+      "title": "chat-client-rs consumes broadcast PRIVMSG as it arrives, instead of looping on FETCH",
+      "status": "done",
+      "priority": "high",
+      "parent": "T91",
+      "detail": "tail is currently a FETCH poll loop (src/chat-client-rs/src/main.rs around line 1594) and PRIVMSG is only inspected to confirm a send echoed (line 1041). Make the client a real subscriber: after backfilling from its cursor, follow the pushed stream and surface each message on arrival. Keep the cursor updated from pushed ids so a reconnect backfills correctly. Prove it with a test that a message reaches an attached client without any FETCH being issued after the join.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Already implemented: chat-client-rs's tail (src/chat-client-rs/src/lib.rs ~2121-2460) backfills once via FETCH at startup, then JOIN subscribes the connection and the loop consumes pushed PRIVMSG lines directly on arrival (no FETCH polling after join) -- filtering by followed channel and mentions. Cursor durability is handled by a bounded once-per-second round-robin LASTID resync per channel (a deliberate, commented design choice) rather than tracking pushed ids per-message, but achieves the same 'reconnect backfills correctly' guarantee. chat/tests/test-chat.sh exercises exactly the requested proof ('sleep 2 # allow the attached tail to receive the pushed message', and the idle-tail-wakes-on-push case).",
+      "created_at": "2026-09-04T08:29:54Z",
+      "updated_at": "2026-09-09T22:18:14Z"
     },
     {
       "id": "T99",
