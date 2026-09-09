@@ -3127,7 +3127,7 @@
     {
       "id": "B304",
       "title": "A subagent that holds a presence tail leaves it orphaned, so its nick stays present with nobody reading",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3138,12 +3138,12 @@
       "surfaces": [
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat/SKILL.md's presence-posture section gained the symmetric rule (the tail's runner must notice when the RUNNER exits, not only when the tail does), and the nitpicker profile (the subagent this was measured on) gained a concrete last-action instruction: kill the tail before actually exiting, or say who takes it over",
+      "verification": "PR #114, merged as 1dc3cda. Documentation-only fix per the bug's own stated surface (chat/SKILL.md); test-mode-markers.sh and test-skill-positional-params.sh unaffected and passing.",
       "found_by": "Tschallacka, noticing nitpicker in the channel while it was not among the active agents",
       "notes": null,
       "created_at": "2026-09-08T21:05:01Z",
-      "updated_at": "2026-09-08T21:05:01Z"
+      "updated_at": "2026-09-09T16:32:28Z"
     },
     {
       "id": "B308",
