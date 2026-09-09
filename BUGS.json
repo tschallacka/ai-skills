@@ -6194,7 +6194,7 @@
     {
       "id": "B286",
       "title": "two concurrent test-npm-package runs fight over one tarball in the repo root",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6205,12 +6205,12 @@
       "surfaces": [
         "planning/tests/test-npm-package.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/tests/test-npm-package.sh now packs with `npm pack --silent --pack-destination \"$tmp\"`, and every reference to the tarball path was updated from $repo_root/$tarball to $tmp/$tarball; cleanup no longer needs a separate rm for the repo-root copy since it lives inside the already-removed scratch dir. (fix/b286-npm-pack-scratch-dir, commit a721786)",
+      "verification": "Two test-npm-package.sh runs launched at once both PASS (exit 0), and the repo root is left with no stray *.tgz afterward -- the original reproduction (concurrent runs fighting over one shared tarball path) no longer occurs.",
       "found_by": "nitpicker",
       "notes": "Cost beyond the noise: a tar EOF reads as a broken package rather than a broken test run, so the honest response is to go looking at packaging. The fix is small -- pack into the test own temp directory (npm pack --pack-destination \"$tmp\") so the artifact path is unique per run -- and it removes the shared path rather than adding a second lock. The note above about npm pack --pack-destination came from aiskills, appended here by mistake while filing the duplicate B287 -- it belongs on this entry anyway, so it stays rather than being moved. aiskills also measured the same failure three times independently: a tar EOF reads as a broken package rather than a broken test run, so the honest first response is to go looking at packaging. Second live occurrence, 2026-09-08 on feat/chat-mcp-and-session-keys at 3856ccc9: the same 'gzip: stdin: unexpected end of file' / 'tar: Unexpected EOF in archive' pair while verifying the test-chat.sh baseline row, and PASS on an immediate re-run of the identical tree. Two occurrences in one evening on one checkout with three agents on it, so the rate is not negligible - and both times the failure presents as a baseline problem rather than as a collision, which is the part that costs time. Physical evidence, 2026-09-08 00:43: tschallacka-ai-skills-2.0.0-alpha.1.tgz (19011609 bytes) left untracked in the repository root after the second collision - the survivor of two runs whose EXIT traps target one path. Two consequences beyond the flaky verdict: the artifact is not cleaned up at all when a trap deletes the sibling's file instead of its own, and it is not gitignored (git check-ignore reports no match; .gitignore carries no tgz rule), so it appears as untracked and a git add -A would commit 19 MB. A fix that packs into the randomised scratch dir removes both, and a *.tgz ignore rule is worth having regardless.",
       "created_at": "2026-09-07T21:54:17Z",
-      "updated_at": "2026-09-07T22:44:04Z"
+      "updated_at": "2026-09-09T00:09:16Z"
     },
     {
       "id": "B293",
