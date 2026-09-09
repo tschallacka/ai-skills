@@ -423,6 +423,28 @@ fn screen_deltas_chain_and_publish_restored_primary_rows() {
 }
 
 #[test]
+fn child_exit_drains_buffered_output_past_one_read_chunk() {
+    let dir = temp_dir("drain-on-exit");
+    let script = "yes A | head -c 20000; printf DRAINEDMARK9F3XQ";
+    let mut child = start(&dir, &["sh", "-c", script], "600");
+    let mut output = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut output)
+        .unwrap();
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{}", wrapper_stderr(&dir));
+    assert!(
+        output.contains("DRAINEDMARK9F3XQ"),
+        "the tail marker written just before the child exited never reached a screen event -- \
+         the pty's final buffered burst was dropped when child_exit fired\n{}",
+        wrapper_stderr(&dir)
+    );
+}
+
+#[test]
 fn protocol_observes_fragmented_osc_overflow_without_leaking_payload() {
     let dir = temp_dir("fragmented-osc");
     let mut child = start_fixture(&dir, "600");
