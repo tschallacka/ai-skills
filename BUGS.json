@@ -2471,7 +2471,7 @@
     {
       "id": "B231",
       "title": "the git-worktrees skill prescribes a worktree location the EnterWorktree tool does not use, and warns against the one it does",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2482,17 +2482,17 @@
       "surfaces": [
         "chat/../git-worktrees/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "git-worktrees/SKILL.md's location section rewritten: names tsch-ai-worktrees (a sibling of the repo, not a child of tsch-ai-skills/ since that tree holds the chat server's private key, the editor's session registry, and installed binaries) and rules out three locations with the reason for each. Carries the recipe for the harness-tool case: make the worktree with git worktree add at the documented path, then enter it by path (not name) so EnterWorktree's own first-entry check (path appears in git worktree list) is satisfied without it defaulting to the in-repo location.",
+      "verification": "Already merged and on master (commit 7e36564, 2026-09-07, Claude-Session session_01CGZHz2fu1Y4csa5evwiJhc), whose own commit message explicitly states it closes B231-B234; the register was never updated to reflect it. tests/test-worktree-permissions.sh passes on current master, asserting no granted pattern reaches a parent of the worktrees root.",
       "found_by": "Michael 2026-09-07, asking whether the skill already specified the main-agent/subagent division; checking it surfaced this instead",
       "notes": "Correcting the surfaces field, which was mistyped on filing: the file is git-worktrees/SKILL.md at the repository root (the skill is tracked here and installs to ~/.claude/skills/git-worktrees/). Verified present: /home/mdibbets/git/ai-skills/git-worktrees/SKILL.md. B232 and B233 are the other two gaps in the same file, kept separate because each has its own fix and closing one leaves the others: B232 is the missing main-agent/subagent division, B233 the session-wide pin hazard. This entry is the wrong location. B234 depends on how this resolves: if worktrees are to live under the tsch-ai-skills config directory as this skill says, the installer has to create and permit that directory (it currently grants only the plans and planning-tmp paths, Read/Edit and no Write). If instead the in-repo .claude/worktrees/ location that EnterWorktree creates is blessed, B234 becomes unnecessary. Decide the location here first.",
       "created_at": "2026-09-07T10:53:20Z",
-      "updated_at": "2026-09-07T10:55:32Z"
+      "updated_at": "2026-09-09T13:21:52Z"
     },
     {
       "id": "B232",
       "title": "the git-worktrees skill never says worktrees are for subagents while the main agent works in the main checkout",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2503,17 +2503,17 @@
       "surfaces": [
         "git-worktrees/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "git-worktrees/SKILL.md now states the division of labour explicitly: worktrees are for subagents, the coordinator works in the main checkout.",
+      "verification": "Same commit 7e36564 as B231; already on master.",
       "found_by": "Michael 2026-09-07: 'You can work in the ~/git/ai-skills directory. worktrees is only for the subagens, not the main agent', then 'didn't the worktree skill specify that?' - it did not",
       "notes": "B231 (the prescribed location contradicts what EnterWorktree creates) and B233 (the pin is session-wide) are the other two gaps in this file. B233 is the consequence of this omission going unstated, so the two are worth fixing in one pass even though they close separately.",
       "created_at": "2026-09-07T10:53:38Z",
-      "updated_at": "2026-09-07T10:53:59Z"
+      "updated_at": "2026-09-09T13:21:52Z"
     },
     {
       "id": "B233",
       "title": "nothing warns that the worktree isolation pin is session-wide, so entering one breaks every subagent already working in another",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2524,17 +2524,17 @@
       "surfaces": [
         "git-worktrees/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "git-worktrees/SKILL.md documents that the isolation pin is session-wide, not per-agent: a coordinator entering a worktree revokes every running subagent's access to its own. Documents the recovery (coordinator leaves the worktree, keeping it, then each subagent re-enters) and warns against unblocking oneself by repointing another agent's worktree.",
+      "verification": "Same commit 7e36564 as B231; already on master.",
       "found_by": "hit live on 2026-09-07 while picking up a second bug alongside a running subagent; the subagent reported it correctly and refused to work around it",
       "notes": "B232 is the omission that made this reachable - nothing said the coordinator should stay in the main checkout. B231 is the third gap in the same file. All three want one editing pass over the skill's parallel-agents guidance.",
       "created_at": "2026-09-07T10:53:51Z",
-      "updated_at": "2026-09-07T10:53:59Z"
+      "updated_at": "2026-09-09T13:21:52Z"
     },
     {
       "id": "B234",
       "title": "the installer grants no permissions on the worktrees directory the git-worktrees skill tells agents to use, and grants Edit without Write anywhere",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2545,12 +2545,12 @@
       "surfaces": [
         "install.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/70-permissions.sh gained worktrees_permission_step, creating the worktrees root and granting Read/Edit/Write/Bash on it per agent kind (claude and opencode arms), reached outside the planning-only branch so any agent taking a worktree gets the grant, naming only the worktrees root and nothing above it.",
+      "verification": "tests/test-worktree-permissions.sh (added in the same commit, 153 lines) pins all four properties and passes on current master; per the commit message, mutation-tested three ways (dropping Write from claude entries, moving the step inside the planning branch, dropping write from the opencode rule set), each caught. Already merged as commit 7e36564; the register was never updated.",
       "found_by": "Michael 2026-09-07, asking whether the installer should be granting read/write on the tsch-ai-skills config directory so worktrees there are editable without prompts",
       "notes": "SCOPE WARNING for whoever implements this: grant the worktrees subtree specifically, NOT tsch-ai-skills/**. That directory also holds the chat home (channel logs, server.crt/server.key), the editor's private metadata and session registry, and on a shared install the installed binaries. A blanket Write there would let any agent overwrite the server's TLS private key or the binaries it is itself running - so the rule set should name .../tsch-ai-skills/worktrees/** and nothing above it.\n\nBLOCKED ON B231, and should be implemented together with it. If B231 resolves the other way - worktrees stay under the repository at .claude/worktrees/, which is what EnterWorktree actually creates - then this grant is unnecessary, because the repository checkout is already the agent's working directory and already permitted. So the location decision comes first and this entry follows it. Filing it now so the permission half is not forgotten once the location is settled.",
       "created_at": "2026-09-07T10:55:20Z",
-      "updated_at": "2026-09-07T10:55:32Z"
+      "updated_at": "2026-09-09T13:21:52Z"
     },
     {
       "id": "B243",
