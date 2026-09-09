@@ -18,7 +18,7 @@ use std::process::{Child, Command, Output, Stdio};
 struct TcpHarness {
     scratch: PathBuf,
     agent: String,
-    server: Option<Child>,
+    servers: Vec<Child>,
 }
 
 impl TcpHarness {
@@ -42,7 +42,7 @@ impl TcpHarness {
         Self {
             scratch,
             agent: format!("tcp-test-{name}"),
-            server: None,
+            servers: Vec::new(),
         }
     }
 
@@ -108,7 +108,7 @@ impl TcpHarness {
                     .and_then(|value| value.get("endpoint")?.as_str().map(str::to_owned))
             })
             .expect("the server announces its endpoint on stdout");
-        self.server = Some(server);
+        self.servers.push(server);
         // The endpoint file must exist before a discovery-based client
         // call can find the port; the announce prints after writing it.
         assert!(announced.starts_with("tcp:127.0.0.1:"));
@@ -125,7 +125,7 @@ impl TcpHarness {
 
 impl Drop for TcpHarness {
     fn drop(&mut self) {
-        if let Some(mut server) = self.server.take() {
+        for mut server in self.servers.drain(..) {
             let _ = server.kill();
             let _ = server.wait();
         }
@@ -379,4 +379,66 @@ fn open_autostarts_onto_a_loopback_port_when_unix_sockets_are_unavailable() {
         .args(["/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
         .status();
+}
+
+/// B308: an explicit `--endpoint` with no `--file` must not attach a
+/// session_token cached from an unrelated server. `resolve()`'s
+/// explicit-endpoint branch reads whatever the identity's cache slot holds
+/// — with no `--file` given that is the (identity, no-file) "focused tab"
+/// slot, which an earlier call under the same identity can have pointed at
+/// a completely different server. Forwarding that token here used to
+/// reconnect to the wrong tab (or, as here, fail outright with
+/// `session_unauthorized` against a server that never issued it) instead of
+/// treating the named endpoint as the fresh connection it is.
+#[test]
+fn an_explicit_endpoint_with_no_file_ignores_a_different_servers_cached_session() {
+    let mut harness = TcpHarness::new("cross-server-session");
+
+    let file_a = harness.path("a.txt");
+    std::fs::write(&file_a, "a\n").unwrap();
+    let auth_a = harness.auth_file("auth-a", "secret-a");
+    let endpoint_a = harness.start_tcp_server(&file_a, &auth_a);
+
+    // Populate this identity's no-file "focused tab" cache slot, pointing at
+    // server A — an ordinary reconnect-by-endpoint call, no --file involved.
+    let opened_a = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint_a,
+        "--auth-token",
+        "secret-a",
+    ]);
+    assert!(
+        opened_a.status.success(),
+        "open server A: {}",
+        stderr_text(&opened_a)
+    );
+
+    let file_b = harness.path("b.txt");
+    std::fs::write(&file_b, "b\n").unwrap();
+    let auth_b = harness.auth_file("auth-b", "secret-b");
+    let endpoint_b = harness.start_tcp_server(&file_b, &auth_b);
+
+    // Same identity, a completely different endpoint, no --file and no
+    // --session-token: this must be a fresh connection to server B, not a
+    // session_token forwarded from server A's cache entry.
+    let opened_b = harness.client(&[
+        "open",
+        "--endpoint",
+        &endpoint_b,
+        "--auth-token",
+        "secret-b",
+    ]);
+    assert!(
+        opened_b.status.success(),
+        "open server B must not fail with server A's stale session: {}",
+        stderr_text(&opened_b)
+    );
+    let payload_b = first_payload(&opened_b);
+    assert!(
+        payload_b["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("b.txt")),
+        "server B answered for its own file, not server A's: {payload_b}"
+    );
 }

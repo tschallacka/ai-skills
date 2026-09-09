@@ -181,15 +181,24 @@ pub fn resolve(request: &ResolveRequest) -> Result<Resolved, String> {
     if let Some(value) = &request.explicit_endpoint {
         // The cache is an optimization here, never a prerequisite: a named
         // endpoint must work as the *first* call under an identity, before
-        // any session file exists to read.
+        // any session file exists to read. It is also only valid for THIS
+        // endpoint: `cache_path` is keyed by (identity, file), and with no
+        // file it is the identity's no-file "focused tab" slot, which an
+        // earlier unrelated call under the same identity may have pointed at
+        // a completely different server. Forwarding that server's
+        // session_token here would reconnect to its tab instead of the one
+        // this call just named explicitly (B308), so the cached session is
+        // only trusted when its own endpoint is the one just requested.
+        let endpoint = Endpoint::parse(value);
         let session = cache_path
             .as_ref()
             .filter(|path| path.exists())
             .map(|path| read_session(path))
             .transpose()
-            .map_err(|error| format!("cannot read session token: {error}"))?;
+            .map_err(|error| format!("cannot read session token: {error}"))?
+            .filter(|session| session.endpoint == endpoint);
         return Ok(Resolved {
-            endpoint: Endpoint::parse(value),
+            endpoint,
             auth_token: session.as_ref().and_then(|s| s.auth_token.clone()),
             session_token: session.and_then(|s| s.session_token),
             cache_path,

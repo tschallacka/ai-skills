@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Endpoint {
     #[cfg(unix)]
     Unix(PathBuf),
