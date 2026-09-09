@@ -3746,6 +3746,7 @@ tests/test-install-ui.sh
 tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
+tests/test-installer-busy-binary.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-editor-steering.sh
 tests/test-installer-integration-mode.sh
@@ -4249,7 +4250,7 @@ install_skill() {
     local skill="$1"
     local root="$2"
     local destination="$root/$skill"
-    local relative physical source destination_file
+    local relative physical source destination_file install_tmpfile
     local changed=0
     local missing=0
     local managed_version_transition=0
@@ -4365,7 +4366,15 @@ EOF
             backup_file "$destination_file"
         fi
         mkdir -p "$(dirname "$destination_file")"
-        cp -p "$source" "$destination_file"
+        # mktemp beside the target so the rename is atomic and on the same
+        # filesystem, then mv over it. A plain `cp` onto a running binary is
+        # refused with ETXTBSY (B292); a rename replaces the directory entry
+        # while the running process keeps its own inode, so the busy text
+        # segment is never touched.
+        install_tmpfile="$(mktemp "$destination_file.tmp.XXXXXX")" \
+            || die "cannot write next to $destination_file"
+        cp -p "$source" "$install_tmpfile"
+        mv "$install_tmpfile" "$destination_file"
     done <<EOF
 $files
 EOF
