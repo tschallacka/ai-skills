@@ -39,7 +39,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	233970
+package/install.sh	234517
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -105,7 +105,7 @@ package/planning/scripts/plan-context-lib.sh	23697
 package/planning/scripts/plan-context-wrapper.sh	1259
 package/planning/scripts/plan-context.sh	23287
 package/planning/scripts/plan-core-lib.sh	18040
-package/planning/scripts/plan-crypt-lib.sh	10564
+package/planning/scripts/plan-crypt-lib.sh	10784
 package/planning/scripts/plan-document-lib.sh	23104
 package/planning/scripts/plan-env.sh	11889
 package/planning/scripts/plan-inventory-lib.sh	3921
