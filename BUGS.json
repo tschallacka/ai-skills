@@ -4014,7 +4014,7 @@
     {
       "id": "B255",
       "title": "a write-only agent is invisible and unreachable on the bus, with nothing saying so",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4025,12 +4025,12 @@
       "surfaces": [
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat/SKILL.md's Connecting-to-a-channel section now states up front that a one-shot send holds no membership at any moment, and that an agent expecting to be addressed must hold a presence tail - visibility and reachability both come from it, neither comes free from posting alone",
+      "verification": "PR #115, merged as 54d59964. Documentation-only fix per the bug's own stated surface; test-mode-markers.sh and test-skill-positional-params.sh unaffected and passing.",
       "found_by": "Michael, noticing editor-batch absent from the nick list while it was actively reporting, 2026-09-07",
       "notes": "B256 is the discovery half and the cheaper one: the server has answered NAMES all along and no client verb asks. Adding one makes presence queryable on demand, which answers 'is that agent live?' without requiring every agent to hold a tail. It does not replace this entry - a queryable list still shows nothing for an agent that holds no connection, and unreachability is the part that actually costs coordination.",
       "created_at": "2026-09-07T14:36:28Z",
-      "updated_at": "2026-09-07T14:37:44Z"
+      "updated_at": "2026-09-09T17:14:10Z"
     },
     {
       "id": "B260",
