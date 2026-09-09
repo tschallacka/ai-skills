@@ -278,6 +278,35 @@ grep -q 'missed-while-away' "$temporary_root/tail269.log" || t_fail \
     "B269: a tail resumed from a recorded 0 cursor did not backfill a message posted since: [$(cat "$temporary_root/tail269.log")]"
 kill "$tail269_pid" 2>/dev/null || true
 wait "$tail269_pid" 2>/dev/null || true
+
+# B295: a mention-filtered remote read (no --local) must not move the channel
+# cursor. It saved the id of the last MENTION it printed, which marked every
+# plain message below it as seen though nothing ever printed them -- join
+# records cursor 0 on an empty channel (B269), so a mentions read from there
+# must leave it at 0 for a plain read right after to still see everything.
+b295_dir="$temporary_root/c_b295"
+mkdir -p "$b295_dir"
+AI_CHAT_HOME="$b295_dir" timeout 8 "$CLIENT" join --server 127.0.0.1:"$port" \
+    --nick b295reader --chan '#b295' --insecure >/dev/null 2>&1
+cli b295poster send --server 127.0.0.1:"$port" --nick b295poster --chan '#b295' \
+    --text 'plain-one' --insecure >/dev/null 2>&1 || true
+cli b295poster send --server 127.0.0.1:"$port" --nick b295poster --chan '#b295' \
+    --text 'plain-two' --insecure >/dev/null 2>&1 || true
+cli b295poster send --server 127.0.0.1:"$port" --nick b295poster --chan '#b295' \
+    --text 'ping @b295reader now' --insecure >/dev/null 2>&1 || true
+mentions295="$(AI_CHAT_HOME="$b295_dir" timeout 8 "$CLIENT" read --server 127.0.0.1:"$port" \
+    --nick b295reader --chan '#b295' --mentions --insecure 2>&1)"
+case "$mentions295" in
+    *'ping @b295reader now'*) : ;;
+    *) t_fail "B295 setup: the mentions read did not return the mention: [$mentions295]" ;;
+esac
+after295="$(AI_CHAT_HOME="$b295_dir" timeout 8 "$CLIENT" read --server 127.0.0.1:"$port" \
+    --nick b295reader --chan '#b295' --insecure 2>&1)"
+case "$after295" in
+    *'plain-one'*) : ;;
+    *) t_fail "B295: a mention-filtered remote read moved the cursor past an unread plain message: [$after295]" ;;
+esac
+
 # mention-notify: a tail --mentions --mention-exit exits when SOMEBODY ELSE
 # mentions @<session nick>.
 #

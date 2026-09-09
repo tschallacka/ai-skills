@@ -1795,7 +1795,11 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
             }
         }
     }
-    if max_id > 0 {
+    // B295: a mention-filtered read must not move the cursor, the same reason
+    // the --local arm above guards its own save. Saving the id of the last
+    // MENTION printed marks every plain message below it as seen, though
+    // nothing printed them.
+    if !o.mentions && max_id > 0 {
         save_cursor(state_dir, &o.chan, max_id, o.no_session);
     }
     let _ = write_line(&mut tls, "QUIT");
@@ -1962,13 +1966,12 @@ fn serve_read(
         }
     });
     let max_id = lines.iter().filter_map(|line| msg_line_id(line)).max();
-    // Saved for a mention-filtered read too, because the standalone remote read
-    // saves there as well. That is very likely wrong -- the local arm guards it
-    // and says at length why saving a mention read's id marks the messages it
-    // skipped as seen -- but the two paths must not disagree, or forwarding
-    // becomes observable. Filed rather than fixed here.
-    if let Some(id) = max_id {
-        save_cursor(state_dir, &request.chan, id, false);
+    // B295: not saved for a mention-filtered read, matching the standalone
+    // remote read (now fixed the same way) and the --local arm's own guard.
+    if !request.mentions {
+        if let Some(id) = max_id {
+            save_cursor(state_dir, &request.chan, id, false);
+        }
     }
     control::Reply::ok(lines)
 }
