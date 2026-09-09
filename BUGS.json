@@ -3148,7 +3148,7 @@
     {
       "id": "B308",
       "title": "open --endpoint with no --file can attach a stale session_token from an unrelated server's cache",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3160,12 +3160,12 @@
         "src/ai-text-editor/src/client.rs",
         "src/ai-text-editor/src/transport.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "dc913a6 (PR #90), squash-merged to master — client::resolve()'s explicit-endpoint branch now filters the cached session by matching endpoint before reusing its auth_token/session_token; Endpoint gained PartialEq/Eq.",
+      "verification": "New regression test an_explicit_endpoint_with_no_file_ignores_a_different_servers_cached_session in tcp_flow.rs: opens server A (populating the identity's focus cache), then server B with no --file, asserts B's own file answers rather than session_unauthorized. Mutation-tested by reverting the endpoint filter: the test fails exactly as expected. cargo test: 49+4 passed. Full CI green on PR #90 across all legs.",
       "found_by": "Investigating test-ai-text-editor.sh's TCP section failing during T110 work, 2026-09-09",
       "notes": null,
       "created_at": "2026-09-09T07:03:13Z",
-      "updated_at": "2026-09-09T07:03:13Z"
+      "updated_at": "2026-09-09T07:46:08Z"
     },
     {
       "id": "B14",
