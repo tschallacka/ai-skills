@@ -2771,7 +2771,7 @@
     {
       "id": "B269",
       "title": "read returns nothing forever once a channel cursor is 0, because 0 is read as no cursor",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2782,12 +2782,12 @@
       "surfaces": [
         "src/chat-client-rs/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "read and its own reconnect path were already fixed to use cursor_recorded() (Option<u64>), telling a genuine recorded 0 apart from no cursor. tail's cursor-seeding loop read the same distinction correctly (6986dd3e) but only to pick a starting watermark; it never replayed anything between that cursor and its own JOIN, because tail issued no FETCH at all. When cursor_recorded() returns a real position, tail now issues the same FETCH read_delta already uses to backfill, per channel, before settling into the live JOIN subscription. A line that is not part of the fetch reply (a live push interleaved on the same socket) is parked on the existing pending queue instead of being dropped. An absent cursor is unchanged: it still seeds at LASTID.",
+      "verification": "Added a regression case to chat/tests/test-chat.sh: join an empty channel (recording cursor 0), post from another agent, start a fresh tail reusing that session, assert the backfilled message appears. Reverted the lib.rs fix locally and re-ran -- it fails with exactly the described symptom (empty tail output), confirming the test is a real guard. cargo test: 60/60 pass. Full chat test suite (test-chat.sh, test-chat-broadcast-stall.sh, test-chat-owner-socket.sh, test-chat-resolution.sh, test-chat-descriptor-leak.sh) passes with no regressions. Merged via PR #100, commit 2d58009.",
       "found_by": "T90 (src/chat-mcp): the adapter inherited the same rule and its own regression test caught it",
       "notes": "Session.cursors is a map, so cursors.get(chan) already separates a recorded 0 from an absent entry; src/chat-mcp/src/conn.rs read() uses exactly that. tail has the same cur > 0 shape at its LASTID fallback and needs checking against this. No test covers a read on a channel joined while empty. chat/tests/test-chat.sh:308-310 already documents this behaviour and works around it -- \"a join to an EMPTY channel seeds the cursor to 0, which read cannot tell apart from having no cursor at all\" -- by seeding the channel with a message before the joins. The suite therefore tiptoes around the defect rather than covering it. RULING (Tschallacka, 2026-09-08): yes -- tail backfills from a RECORDED cursor. A recorded position is replayed; only an absent one starts at the channel's current end, so the history gate that stops an old channel dumping its whole log is unchanged. The tail change in 6986dd3e is therefore necessary but not sufficient: it made tail read cursor_recorded, and tail never FETCHes, so a message posted between join and the tail starting is still lost. Verified by reproduction on 2026-09-08 -- join an empty channel, post one message, tail prints nothing. Stays confirmed until tail replays. T107 makes it structural. T107 makes the tail the only cursor writer, which removes the two-writer half of this. The unresolved half is unchanged: tail still never FETCHes, so 'backfills from a recorded cursor' is still not something it does. Stays confirmed. Ruled out as a factor in the B290/test-chat-broadcast-stall flake (was raised as a live alternative hypothesis before PR #98). test-chat-broadcast-stall's subscriber passes --no-session, which makes tail()'s cursor seed 0 unconditionally without ever calling cursor_recorded() -- this bug's code path is not reached by that test at all. Separately, the seed value never gates tail's live-push print loop (unconditional on PRIVMSG + channel membership, no cursor comparison), so even the session-cursor path wouldn't have explained an empty sub.out. This bug remains real and open on its own merits (read's backfill-on-reconnect, and tail's periodic resync-write per the existing notes) -- this is only evidence about what it does NOT explain.",
       "created_at": "2026-09-07T19:58:19Z",
-      "updated_at": "2026-09-09T10:58:27Z"
+      "updated_at": "2026-09-09T12:56:16Z"
     },
     {
       "id": "B271",
