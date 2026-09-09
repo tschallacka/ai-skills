@@ -140,6 +140,11 @@ It prints the id it allocated. `--title` and `--detail` are required and the
 command refuses without them: a task nobody else could pick up is a note to self,
 and it will read as one in three weeks.
 
+`--refs` is not write-once: `todo update T# --refs a,b` replaces the whole list,
+so a task filed without one (or with the wrong one) is not stuck that way.
+`--touching` matches only refs, not title or detail, so a task nobody can find
+by area is usually a missing `--refs`, not a search that needs widening.
+
 A sub-task is the same call with `--parent`:
 
 ```sh
