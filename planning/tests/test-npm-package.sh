@@ -10,10 +10,10 @@ baseline="$repo_root/planning/tests/fixtures/overview/npm-package-baseline.tsv"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/npm-package.XXXXXX")"
 tarball=''
-cleanup() { rm -rf "$tmp"; [ -z "$tarball" ] || rm -f "$repo_root/$tarball"; }
+cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
-tarball="$(cd "$repo_root" && npm pack --silent)"
-[ -f "$repo_root/$tarball" ]
+tarball="$(cd "$repo_root" && npm pack --silent --pack-destination "$tmp")"
+[ -f "$tmp/$tarball" ]
 # Compiled artifacts under bin/ and extensionless planning commands are
 # excluded, path and size both. Only one artifact is tracked; CI rebuilds them,
 # so their presence depends on whether a build has run here and their size on
@@ -30,9 +30,9 @@ packable() {
 
 actual="$tmp/actual.tsv"
 printf 'package_path\tbyte_size\n' >"$actual"
-tar -tzf "$repo_root/$tarball" | LC_ALL=C sort | while IFS= read -r path; do
+tar -tzf "$tmp/$tarball" | LC_ALL=C sort | while IFS= read -r path; do
     packable "$path" || continue
-    size="$(tar -xOf "$repo_root/$tarball" "$path" | wc -c | tr -d ' ')"
+    size="$(tar -xOf "$tmp/$tarball" "$path" | wc -c | tr -d ' ')"
     printf '%s\t%s\n' "$path" "$size"
 done >>"$actual"
 # The gzipped tarball's own size is deliberately NOT pinned: it varies with the
