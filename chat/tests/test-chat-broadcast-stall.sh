@@ -37,9 +37,7 @@ SERVER="$repo/target/release/chat-server-rs"
 CLIENT="$repo/target/release/chat-client-rs"
 
 if ! command -v timeout >/dev/null 2>&1; then
-    printf 'SKIP chat broadcast stall: no timeout(1) - the wedge assertions need a bounded wait\n' >&2
-    t_end
-    exit 0
+    t_skip 'chat broadcast stall: no timeout(1) - the wedge assertions need a bounded wait'
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -49,9 +47,7 @@ if ! command -v cargo >/dev/null 2>&1; then
         SERVER="$prebuilt_server"
         CLIENT="$prebuilt_client"
     else
-        printf 'SKIP chat broadcast stall: no cargo and no prebuilt chat/bin binaries\n' >&2
-        t_end
-        exit 0
+        t_skip 'chat broadcast stall: no cargo and no prebuilt chat/bin binaries'
     fi
 else
     ( cd "$repo/src/chat-server-rs" && cargo build --release >/dev/null 2>&1 ) \

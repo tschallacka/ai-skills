@@ -27,11 +27,11 @@ package/chat/binaries.tsv	1876
 package/chat/docs/README.md	1676
 package/chat/integration.tsv	1652
 package/chat/requires.tsv	467
-package/chat/tests/test-chat-broadcast-stall.sh	13692
-package/chat/tests/test-chat-descriptor-leak.sh	9591
-package/chat/tests/test-chat-owner-socket.sh	13770
-package/chat/tests/test-chat-resolution.sh	7891
-package/chat/tests/test-chat.sh	33181
+package/chat/tests/test-chat-broadcast-stall.sh	13620
+package/chat/tests/test-chat-descriptor-leak.sh	9487
+package/chat/tests/test-chat-owner-socket.sh	13730
+package/chat/tests/test-chat-resolution.sh	7851
+package/chat/tests/test-chat.sh	33141
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321

@@ -271,8 +271,10 @@ done
 total=0
 passed=0
 failed=0
+skipped=0
 unconfigured=0
 declare -a failed_names=()
+declare -a skipped_names=()
 declare -a unconfigured_names=()
 
 # How one test's outcome is reported and counted. Split out of run_one to keep
@@ -281,6 +283,16 @@ declare -a unconfigured_names=()
 report_one() { # <label> <exit-code>
     local label="$1" code="$2"
     if [ "$code" -eq 0 ]; then
+        # t_skip exits 0, same as a real pass (B268: a missing precondition is
+        # not a failure) -- only the trailing "<test>: SKIP" line in its own
+        # output tells the two apart.
+        if grep -q ': SKIP$' "$test_output" 2>/dev/null; then
+            skipped=$((skipped + 1))
+            skipped_names+=("$label")
+            printf '  %-52s SKIP\n' "$label"
+            sed 's/^/      /' "$test_output"
+            return 0
+        fi
         passed=$((passed + 1))
         printf '  %-52s PASS\n' "$label"
         [ "$verbose" = true ] && sed 's/^/      /' "$test_output"
@@ -378,11 +390,15 @@ done < <(discover_crates)
 elapsed="$(( $(date -u +%s) - start ))"
 echo
 echo "──────────────────────────────────────────────"
-printf 'Total ran: %d   Passed: %d   Failed: %d   Unconfigured: %d\n' "$total" "$passed" "$failed" "$unconfigured"
+printf 'Total ran: %d   Passed: %d   Failed: %d   Skipped: %d   Unconfigured: %d\n' \
+    "$total" "$passed" "$failed" "$skipped" "$unconfigured"
 printf 'Elapsed: %ds\n' "$elapsed"
 # bash 3.2 treats "${arr[@]}" of an empty array as unbound under `set -u`.
 if [ -n "${failed_names[*]+set}" ] && [ "${#failed_names[@]}" -gt 0 ]; then
     printf 'Failed: %s\n' "${failed_names[*]-}"
+fi
+if [ -n "${skipped_names[*]+set}" ] && [ "${#skipped_names[@]}" -gt 0 ]; then
+    printf 'Skipped: %s\n' "${skipped_names[*]-}"
 fi
 if [ -n "${unconfigured_names[*]+set}" ] && [ "${#unconfigured_names[@]}" -gt 0 ]; then
     printf 'Unconfigured (set PLANNING_CONTEXT_CACHE to run): %s\n' "${unconfigured_names[*]-}"

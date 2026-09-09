@@ -24,6 +24,9 @@
 #                                   prints its own message and prefix.
 #   t_failures                      the recorded count, for a test that prints
 #                                   its own epilogue.
+#   t_skip <reason>                 a missing precondition (no tool, no
+#                                   permission, no capability) ends the test as
+#                                   SKIP, not PASS -- call in place of t_end.
 #
 # Debugging a failure -- full guide in docs/DEBUGGING-TESTS.md, which is the
 # single source for the flags and the reasoning. In short:
@@ -490,4 +493,17 @@ t_end() {
         exit 1
     fi
     printf '%s: PASS\n' "${0##*/}"
+}
+
+# A test whose precondition is absent (no required tool, no permission this
+# host will grant, no capability to probe) calls this instead of t_end: "PASS"
+# cannot be told apart from "asserted nothing" (B268), since a skip records no
+# finding, so this gives a skip its own outcome. Loud on stderr, same as the
+# callers already were; run-tests.sh counts a trailing ": SKIP" line here as
+# SKIP rather than PASS.
+t_skip() {
+    printf 'SKIP %s\n' "$*" >&2
+    rm -f "${T_FINDINGS:-}"
+    printf '%s: SKIP\n' "${0##*/}"
+    exit 0
 }
