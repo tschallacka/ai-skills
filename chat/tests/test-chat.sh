@@ -658,5 +658,26 @@ after_tail="$(AI_CHAT_HOME="$cur_home" "$CLIENT" read --local --state "$st9" \
     --chan '#cur' 2>/dev/null | grep -c '^MSG ' || true)"
 [ "$after_tail" -eq 0 ] || t_fail \
     "tail --local never persisted the point it started watching: a later read re-printed $after_tail rows of backlog it had skipped"
-printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown, serverless local reads, local channel-name guard, local cursors)\n' >&2
+# B123: --version must print and return, not fall through to "no port given"
+# and start a server. A prior build parsed argv[1] as a port, and a parse
+# failure (including "--version" itself) read the same as no argument, so the
+# probe silently bound a real port and ran forever.
+b123_home="$temporary_root/b123"
+mkdir -p "$b123_home"
+version_rc=0
+version_out="$(AI_CHAT_HOME="$b123_home" timeout 4 "$SERVER" --version 2>&1)" || version_rc=$?
+[ "$version_rc" -eq 0 ] || t_fail "chat-server-rs --version exited $version_rc (want 0); output: $version_out"
+[[ "$version_out" == "chat-server-rs "* ]] || t_fail "chat-server-rs --version printed unexpected output: $version_out"
+[ ! -e "$b123_home/server.port" ] || t_fail "chat-server-rs --version wrote server.port; it must not bind a port at all"
+
+# A malformed argv[1] (a typo'd flag, not a port) must be refused, not treated
+# as "no port given" and started anyway.
+b123_home2="$temporary_root/b123-typo"
+mkdir -p "$b123_home2"
+typo_rc=0
+typo_out="$(AI_CHAT_HOME="$b123_home2" timeout 4 "$SERVER" --prot 2>&1)" || typo_rc=$?
+[ "$typo_rc" -eq 64 ] || t_fail "chat-server-rs --prot (a typo'd flag) exited $typo_rc (want 64, a usage refusal); output: $typo_out"
+[ ! -e "$b123_home2/server.port" ] || t_fail "chat-server-rs --prot wrote server.port; a malformed argument must not start the server"
+
+printf 'chat: exercised rust server + client (discovery, send TOFU, delta, fail-closed, idle tail wakes, session, join/leave, mentions, per-agent sessions in one home, dead-peer teardown, serverless local reads, local channel-name guard, local cursors, --version and malformed-argv refusal)\n' >&2
 t_end

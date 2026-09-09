@@ -31,7 +31,7 @@ package/chat/tests/test-chat-broadcast-stall.sh	13620
 package/chat/tests/test-chat-descriptor-leak.sh	9487
 package/chat/tests/test-chat-owner-socket.sh	13730
 package/chat/tests/test-chat-resolution.sh	7851
-package/chat/tests/test-chat.sh	34499
+package/chat/tests/test-chat.sh	35883
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
