@@ -4527,7 +4527,7 @@
     {
       "id": "B72",
       "title": "shellcheck directives were moved in a generated library without regenerating it",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4539,12 +4539,12 @@
         "planning/scripts/build-plan-libs.sh",
         ".github/workflows"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already resolved: .github/workflows/ci.yml shellcheck job (line ~1113) now runs ./planning/scripts/build-plan-libs.sh immediately before collecting files to lint, so a generated library is always rebuilt from current source before shellcheck ever reads it. build-plan-libs.sh --check also confirms all five libraries are up to date on the current tree.",
+      "verification": "./planning/scripts/build-plan-libs.sh --check reports \"All five libraries are up to date\"; .github/workflows/ci.yml shellcheck job invokes build-plan-libs.sh as its first step, before the file list used for linting is assembled.",
       "found_by": "main session, as the upstream cause of B70",
       "notes": null,
       "created_at": "2026-08-28T07:56:06Z",
-      "updated_at": "2026-08-28T07:56:06Z"
+      "updated_at": "2026-09-09T00:03:23Z"
     },
     {
       "id": "B73",
@@ -4839,7 +4839,7 @@
     {
       "id": "B107",
       "title": "PR #13 ships a TODO.json inside the interactive-shell skill, which would deliver a task list to users",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4851,12 +4851,12 @@
         "interactive-shell/TODO.json",
         "package.json"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already resolved: package.json files array includes an explicit \"!interactive-shell/TODO.json\" negation entry, which npm honors (unlike a separate .npmignore/.gitignore, a negated pattern inside the files array itself is not overridden by whole-directory inclusion).",
+      "verification": "npm pack --dry-run (Node v24.10.0, since this host has no system npm) lists 227 files including 7 other interactive-shell/* entries but no interactive-shell/TODO.json. The file is still tracked in git (for the skills own dev-time queue) but does not reach the packed tarball.",
       "found_by": "merge review of PR #13, maintainer session 2026-09-01",
       "notes": null,
       "created_at": "2026-09-01T16:03:47Z",
-      "updated_at": "2026-09-01T16:03:47Z"
+      "updated_at": "2026-09-09T00:03:23Z"
     },
     {
       "id": "B120",
