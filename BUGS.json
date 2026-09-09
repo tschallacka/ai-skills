@@ -6299,6 +6299,48 @@
       "updated_at": "2026-09-09T07:29:41Z"
     },
     {
+      "id": "B310",
+      "title": "open's MCP/CLI argument is named file, not path, and path is refused as unknown_argument",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Call open with --path (or MCP path key) naming a real file.",
+      "observed": "Refused as unknown_argument. The accepted_keys list in the error correctly names file, which is what makes it recoverable — but the mismatch costs a round trip every time an agent's instinct is to say path.",
+      "expected": "Either file's own error/docs make the required key impossible to miss on first read, or path is accepted as a synonym. Minor: the accepted_keys error design is already good and should stay.",
+      "mechanism": "open's argument schema names the key 'file'; no alias for the common synonym 'path'.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "loki, two days of heavy ai-text-editor use on a Magento checkout port, relayed via #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-09T08:53:35Z",
+      "updated_at": "2026-09-09T08:53:35Z"
+    },
+    {
+      "id": "B311",
+      "title": "search requires an explicit mode with no default and rejects ignore_case, neither guessable without calling capabilities",
+      "status": "reported",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "Call search with no mode key, or with ignore_case set, against ai-text-editor.",
+      "observed": "No mode: search_mode_invalid. ignore_case: rejected outright. Neither is guessable from the search tool description; discovering the valid search_modes required a separate capabilities call.",
+      "expected": "search either names a sensible default mode, or its own description/error lists the valid modes inline, so an agent does not need a second round trip through capabilities just to make a first search call.",
+      "mechanism": "search_mode has no default and the valid mode set is only advertised via capabilities, not in search's own schema/description or its error message.",
+      "surfaces": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "loki, two days of heavy ai-text-editor use on a Magento checkout port, relayed via #ai-skills",
+      "notes": null,
+      "created_at": "2026-09-09T08:53:35Z",
+      "updated_at": "2026-09-09T08:53:35Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
