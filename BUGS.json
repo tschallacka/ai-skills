@@ -492,7 +492,7 @@
     {
       "id": "B114",
       "title": "No helper can set a UI story's Status or Evidence, so a story can be run but never recorded and the completion gate can never pass",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "high",
       "parent": null,
@@ -507,12 +507,12 @@
         "planning/references/ui-user-story-validation.md",
         "planning/scripts/validate-plan-ui-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Added --status/--evidence to update-ui-story.sh. They write the row's Status/Evidence columns and, since validate-plan-ui-lib.sh checks the run cache's own '- Status:'/'- Evidence:' lines directly at --complete, the matching lines in ui-story-runs/US-NN.md too, so the two cannot silently disagree. Status is checked against the documented vocabulary; passed/bug found/excluded all require evidence, and excluded requires the user's approval recorded in it, matching what --complete already enforces.",
+      "verification": "Extended test-plan-commands.sh's UI-story fixture: rejects an out-of-vocabulary status, rejects passed with no evidence, accepts passed with evidence and verifies both the row and the run cache updated, rejects excluded without a user-approval reason, accepts it with one. ./run-tests.sh planning: 232/233 pass (the one failure was the then-unfixed B290 flake, unrelated). Merged via PR #97, commit 80a0e3d.",
       "found_by": "attempting to run the 84 browser stories of plan-overview-rebuild and finding nowhere to record a pass",
       "notes": "This is why every one of that plan's 84 stories still reads untested after eight review cycles and a full session of implementation: not because nobody ran them, but because a run cannot be written down. Reproduced on a throwaway copy of the plan rather than the plan itself, so the refusals above are from a real invocation and no plan artifact was touched. The three claims were each checked separately, because two of them look like they should work: 'stories' IS a resolvable document id in plan-document-lib.sh line 150, so -tp looks addressable until it asks for a paragraph label the file has never had; and update-ui-story.sh reports success while leaving the cell alone, which is the most misleading of the three. Whoever fixes this should cover the run cache too, and should decide whether an excluded story needs the user-approval reason the reference requires recorded alongside it.",
       "created_at": "2026-09-02T21:51:15Z",
-      "updated_at": "2026-09-02T21:51:15Z"
+      "updated_at": "2026-09-09T10:53:36Z"
     },
     {
       "id": "B117",
