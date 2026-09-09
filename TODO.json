@@ -670,6 +670,22 @@
       "updated_at": "2026-09-09T09:51:03Z"
     },
     {
+      "id": "T127",
+      "title": "ai-text-editor MCP: codex prompts for permission on every call, and the resulting delay routinely expires the servers idle timeout mid-task",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Michael, driving ai-text-editor via codex: codex asks for approval on every single ai-text-editor.open/read/search call, unlike a normal read-only tool. Each approval adds real wall-clock delay between calls, and the autostarted ai-text-editor-server has its own idle_timeout_seconds (open calls in the transcript pass 120, then 300). When the approval delay across several calls exceeds that window, the server exits and every open tab_id in flight goes tab_unknown - \"no session record has tab_id X; the tab may belong to a server that has since exited - open the file again for a current id (the journal replays)\". Codex then has to reopen the same file and retry, compounding the prompt fatigue. Two angles worth investigating together, since fixing either alone only helps half the symptom: (1) why codex prompts per-call at all for a local read-only-by-default MCP server - check whether ai-text-editor tools/list declares read-only tool annotations (e.g. an MCP readOnlyHint-style hint) that a conforming client could use to skip confirmation, and what codexs own MCP trust/allowlist config supports; (2) whether the servers idle_timeout_seconds should scale with, or be immune to, the callers own confirmation latency - a tab dying because a HUMAN was slow to click approve is a different failure than a tab dying because the agent went idle, and only the second is what the timeout is meant to catch.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "note": "Reported by Michael 2026-09-09, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) from a codex transcript driving ai-text-editor directly - real tab_unknown errors and re-opens shown in the transcript, not hypothesized.",
+      "created_at": "2026-09-09T12:30:19Z",
+      "updated_at": "2026-09-09T12:30:19Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
