@@ -2047,12 +2047,24 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             }
         },
         "replace" | "insert" => {
-            // B226: a line range or a pair of search-hit byte bounds resolves
-            // to the same (offset, delete_len) the byte spelling names, so
-            // everything below — the journal record, cursor adjustment, the
-            // undo entry — is untouched by the addressing.
-            let span = match edit_span(&envelope, &tab) {
-                Ok(span) => span,
+            // A match_id resolves to the same (offset, delete_len), tried
+            // first.
+            let span = match resolve_match_id(&envelope, &tab) {
+                Ok(Some(span)) => Some(span),
+                Ok(None) => {
+                    // B226: a line range or a pair of search-hit byte
+                    // bounds resolves to the same (offset, delete_len) the
+                    // byte spelling names, so everything below — the
+                    // journal record, cursor adjustment, the undo entry —
+                    // is untouched by the addressing.
+                    match edit_span(&envelope, &tab) {
+                        Ok(span) => span,
+                        Err((code, message)) => {
+                            frames.push(error(&envelope.request_id, code, message));
+                            return frames;
+                        }
+                    }
+                }
                 Err((code, message)) => {
                     frames.push(error(&envelope.request_id, code, message));
                     return frames;
@@ -2494,6 +2506,115 @@ fn expected_span_bytes(
             }
         }
     }
+}
+
+/// Resolve `replace`'s `match_id` to `(offset, delete_len)`, the same shape
+/// [`edit_span`] returns for a range — `Ok(None)` when the request names no
+/// `match_id` and the range/offset path applies.
+fn resolve_match_id(
+    envelope: &ai_text_editor::protocol::Envelope,
+    tab: &Tab,
+) -> Result<Option<(usize, usize)>, (&'static str, String)> {
+    let Some(match_id) = envelope.payload.get("match_id").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    if envelope.method != "replace" {
+        return Err((
+            "edit_range_unsupported",
+            format!(
+                "match_id addresses a span from a prior search hit and {} places bytes at a point; `replace` takes it (with no text, it deletes the span)",
+                envelope.method
+            ),
+        ));
+    }
+    for name in [
+        "offset",
+        "delete_len",
+        "cursor_id",
+        "range_start_line",
+        "range_end_line",
+        "range_start_byte",
+        "range_end_byte",
+        "expected_text",
+        "expected_bytes_base64",
+    ] {
+        if envelope.payload.get(name).is_some() {
+            return Err((
+                "edit_range_conflict",
+                format!("match_id and {name} address the same edit two ways; name one — match_id already carries its own content guard, so expected_text is redundant with it"),
+            ));
+        }
+    }
+    let Some((result_id, index)) = match_id.rsplit_once('#').and_then(|(rid, index)| {
+        index
+            .parse::<usize>()
+            .ok()
+            .map(|index| (rid.to_string(), index))
+    }) else {
+        return Err((
+            "match_id_invalid",
+            format!(
+                "match_id {match_id:?} is not shaped like <result_id>#<index>; use a match_id exactly as a search response reported it"
+            ),
+        ));
+    };
+    let Some(matches) = tab.results.get(&result_id) else {
+        return Err((
+            "match_id_stale",
+            "no live result set has this id — an edit since the search may have invalidated it, or this is a different tab; search again for a current match_id".into(),
+        ));
+    };
+    let Some(entry) = matches.get(index) else {
+        return Err((
+            "match_id_invalid",
+            format!("result set {result_id} has no match at index {index}"),
+        ));
+    };
+    let (Some(start), Some(end)) = (
+        entry.get("byte_start").and_then(Value::as_u64),
+        entry.get("byte_end").and_then(Value::as_u64),
+    ) else {
+        return Err((
+            "match_id_unsupported",
+            "the addressed match carries no byte_start/byte_end (a path_wildcard search result names a path, not a span in this tab, and cannot be edited this way)".into(),
+        ));
+    };
+    let (start, end) = (start as usize, end as usize);
+    let bytes = tab.document.bytes();
+    if start > end || end > bytes.len() {
+        return Err((
+            "match_id_stale",
+            "the addressed span no longer fits the tab — the document changed since the search that found it; search again for a current match_id".into(),
+        ));
+    }
+    // Content, not just position: a stale-but-plausible revision must not
+    // silently land at the wrong bytes.
+    let live = &bytes[start..end];
+    let expected: Option<Vec<u8>> = entry
+        .get("contents_base64")
+        .and_then(Value::as_str)
+        .and_then(|encoded| {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).ok()
+        })
+        .or_else(|| {
+            entry
+                .get("contents")
+                .and_then(Value::as_str)
+                .map(|text| text.as_bytes().to_vec())
+        });
+    if let Some(expected) = expected {
+        if live != expected.as_slice() {
+            return Err((
+                "match_id_stale",
+                format!(
+                    "the text at this match's span has changed since the search that found it (expected {} recorded bytes, {} live bytes differ at the same offset) — search again for a current match_id",
+                    expected.len(),
+                    live.len()
+                ),
+            ));
+        }
+    }
+    Ok(Some((start, end - start)))
 }
 
 /// The byte span of inclusive 1-based lines `start..=end`, the last line's
@@ -3855,6 +3976,48 @@ fn copy_file_snapshot(source: &std::path::Path, target: &std::path::Path) -> io:
     output.sync_all()
 }
 
+/// A match's contents, shrunk to its first and last `preview_lines` lines
+/// when it spans more than double that. `preview_lines == 0` returns the
+/// full contents unchanged; `byte_start`/`byte_end` stay exact regardless.
+fn preview_lines_of(bytes: &[u8], preview_lines: usize) -> Value {
+    if preview_lines == 0 {
+        return byte_preview(bytes);
+    }
+    let mut lines: Vec<&[u8]> = Vec::new();
+    let mut start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            lines.push(&bytes[start..=index]);
+            start = index + 1;
+        }
+    }
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+    if lines.len() <= preview_lines.saturating_mul(2) {
+        return byte_preview(bytes);
+    }
+    let head: Vec<u8> = lines[..preview_lines].concat();
+    let tail: Vec<u8> = lines[lines.len() - preview_lines..].concat();
+    let render = |part: &[u8]| -> Value {
+        match std::str::from_utf8(part) {
+            Ok(text) => json!({"text": text}),
+            Err(_) => json!({
+                "base64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, part)
+            }),
+        }
+    };
+    json!({
+        "bytes": bytes.len(),
+        "lines": lines.len(),
+        "truncated": true,
+        "omitted_lines": lines.len() - preview_lines * 2,
+        "omitted_bytes": bytes.len() - head.len() - tail.len(),
+        "head": render(&head),
+        "tail": render(&tail),
+    })
+}
+
 fn search(envelope: &ai_text_editor::protocol::Envelope, tab: &mut Tab, frames: &mut Vec<Value>) {
     let mode_name = envelope.payload.get("mode").and_then(Value::as_str);
     let mode = match parse_mode(mode_name) {
@@ -4238,13 +4401,20 @@ fn emit_results(
     if envelope.payload.get("order").and_then(Value::as_str) == Some("reverse") {
         results.reverse();
     }
+    // Every stored match carries a stable match_id (`<result_id>#<index>`),
+    // tagged before storing so the visible and stored copies agree.
+    for (index, entry) in results.iter_mut().enumerate() {
+        if let Some(object) = entry.as_object_mut() {
+            object.insert("match_id".into(), json!(format!("{result_id}#{index}")));
+        }
+    }
     let count = results.len();
     let preview = envelope
         .payload
         .get("limit")
         .and_then(Value::as_u64)
         .unwrap_or(4) as usize;
-    let visible = results.iter().take(preview).cloned().collect::<Vec<_>>();
+    let mut visible = results.iter().take(preview).cloned().collect::<Vec<_>>();
     let mode = envelope
         .payload
         .get("mode")
@@ -4269,6 +4439,37 @@ fn emit_results(
         true,
     );
     tab.results.insert(result_id.clone(), results);
+    // Display-only: shrinks `visible`, a clone; the stored `results` already
+    // moved into `tab.results` above, full-fidelity.
+    let preview_lines = envelope
+        .payload
+        .get("preview_lines")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    if preview_lines > 0 {
+        for entry in visible.iter_mut() {
+            let Some(object) = entry.as_object_mut() else {
+                continue;
+            };
+            let Some(encoded) = object.get("contents_base64").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(decoded) =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+            else {
+                continue;
+            };
+            let preview_value = preview_lines_of(&decoded, preview_lines);
+            if preview_value
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                object.remove("contents_base64");
+                object.insert("contents_preview".into(), preview_value);
+            }
+        }
+    }
     let mut payload = json!({
         "result_id": result_id,
         "count": count,

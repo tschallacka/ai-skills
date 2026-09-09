@@ -337,7 +337,7 @@ fn tool_definitions() -> Vec<Value> {
     ));
     tools.push((
         "replace",
-        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span three ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), or range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across). Pass expected_text to have the server verify the bytes at the span before deleting them.",
+        "Replace a span with text or base64 bytes; preserve the revision guard. Address the span four ways: offset plus delete_len in bytes, range_start_line/range_end_line (inclusive 1-based whole lines, the last line's newline included, so replacing with no text deletes the lines outright), range_start_byte/range_end_byte (half-open, exactly what a search hit reports as byte_start/byte_end, so a span across two hits is those two numbers copied across), or match_id (a search hit's own id — preferred when the span came from a search, since it carries its own content guard and needs no expected_text). Pass expected_text to have the server verify the bytes at the span before deleting them.",
         {
             let mut p: ToolProperties = Vec::new();
             p.extend(Vec::from([
@@ -378,6 +378,10 @@ fn tool_definitions() -> Vec<Value> {
                 (
                     "bytes_base64",
                     string("Replacement bytes, alternative to text."),
+                ),
+                (
+                    "match_id",
+                    string("A search hit's own id (<result_id>#<index>). Resolves to that hit's exact span and its own content guard, refused as match_id_stale if the document moved under it since. Takes no range key, offset, cursor_id or expected_text alongside it."),
                 ),
                 ("expected_revision", revision_guard()),
             ]));
@@ -554,6 +558,7 @@ fn tool_definitions() -> Vec<Value> {
         ("range_end_line", int("Inclusive last line (required on large tabs).")),
         ("range_start_byte", int("Inclusive first byte for exact_bytes on large tabs.")),
         ("range_end_byte", int("Exclusive last byte for exact_bytes on large tabs.")),
+        ("preview_lines", int("When a match spans more than double this many lines, shrink its shown contents to its first and last preview_lines lines (contents_preview) instead of the whole span. byte_start/byte_end, and so match_id, stay exact regardless. 0 (default) shows the full contents unshrunk.")),
     ])); p }, vec!["mode", "query"]));
     tools.push((
         "job_start",

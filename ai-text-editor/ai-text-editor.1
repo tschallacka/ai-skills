@@ -79,6 +79,15 @@ catches what it cannot: a revision proves the document has not moved since you
 read it, not that your length still matches the text there. With
 \fB--expected-text\fR and no \fB--delete-len\fR, its own length is the length.
 .PP
+\fB--match-id ID\fR addresses a \fBreplace\fR by a search hit's own id
+instead of a range: it resolves to that hit's exact span and carries its own
+content guard, refusing \fBmatch_id_stale\fR if the document moved under it.
+It takes no range key, \fB--offset\fR, or \fB--expected-text\fR alongside it,
+and \fBinsert\fR refuses it as \fBedit_range_unsupported\fR, the same as a
+range. \fBsearch --preview-lines N\fR shrinks a large hit's shown contents to
+its first and last N lines; \fBbyte_start\fR/\fBbyte_end\fR, and so
+\fB--match-id\fR, stay exact regardless.
+.PP
 For TCP startup use exactly one of \fB--auth-token TOKEN\fR or an owner-only
 \fB--auth-token-file PATH\fR. Clients pass \fB--auth-token TOKEN\fR or reuse a
 saved session token.

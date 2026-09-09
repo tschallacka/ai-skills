@@ -105,23 +105,33 @@ newline, and `--range-start-byte N --range-end-byte N` takes exactly the
 `byte_start`/`byte_end` a search hit reports, so a span across two hits is those
 two numbers copied across.
 
-**Guard by revision; add `--expected-text` only when the span's endpoints did
-not come from a read at that revision.** A revision proves the document has
-not moved since the read the coordinates came from — for a span read and
-edited in the same breath, that is the whole property that matters, and
-`--expected-text` re-sending the span's own content is duplicated generation
-that costs *output* tokens for no added safety. Reach for `--expected-text`
-when a coordinate is not fresh from a read: a line number carried across your
-own earlier edits, a search hit from an older revision, or an offset you
-computed rather than copied. There the guard earns its cost, because it
+**Default to search, confirm, then target by `--match-id`.** `search` finds
+the span; its response is the confirmation that the found text is the right
+text; `--match-id` (the hit's own id) then targets exactly that span, with no
+byte arithmetic and no content re-sent — the server already knows what it
+found there, and refuses `match_id_stale` if the document moved under it
+since. That is the whole point of routing through a search first: a coordinate
+you never had to compute cannot be miscomputed. `--preview-lines` keeps this
+cheap even for a large hit — the boundaries usually confirm a block is the
+right one without paying to see its middle.
+
+**Guard by revision otherwise; add `--expected-text` only when the span's
+endpoints did not come from a read (or a search) at that revision.** A
+revision proves the document has not moved since the coordinates were read —
+for a span read and edited in the same breath, that is the whole property
+that matters, and `--expected-text` re-sending the span's own content is
+duplicated generation that costs *output* tokens for no added safety. Reach
+for `--expected-text` when a coordinate is not fresh from a read or a live
+`match_id`: a line number carried across your own earlier edits, or an offset
+you computed rather than copied. There the guard earns its cost, because it
 catches what revision cannot — the document is unchanged but the text at this
 *span* is not what you think, the way a prior edit that shifted a length
 leaves a later `delete_len` wrong even though the revision it was read at is
-still current. When you do need it, a fresh `read` is still the cheaper way to
-get it right: reading spends input tokens, `--expected-text` spends output
-ones, and input is the far cheaper half. Every applied edit reports the
-`offset`, `delete_len` and `deleted` bytes it resolved, so verifying an edit
-against the response never needs a read-back either way.
+still current. When you do need it, a fresh `read` (or `search`) is still the
+cheaper way to get it right: reading spends input tokens, `--expected-text`
+spends output ones, and input is the far cheaper half. Every applied edit
+reports the `offset`, `delete_len` and `deleted` bytes it resolved, so
+verifying an edit against the response never needs a read-back either way.
 On a tab opened with NFC normalization, byte offsets address the ORIGINAL
 bytes, not the normalized view a read shows; a refused edit says so. Every
 job verb needs the `resume_token` `job_start` issued, and it is never shown to
@@ -195,11 +205,12 @@ default gives you.
 6. Insert, replace, delete, transact, restore normalized text when lossless,
    undo, redo, inspect history, and replay. A `replace` addresses its span by
    byte offset and length, by inclusive line range (the last line's newline
-   included, so a replace with no text deletes the lines outright), or by a
+   included, so a replace with no text deletes the lines outright), by a
    half-open byte range — the shape a search hit reports, so a span across two
-   hits needs no arithmetic. `--expected-text` has the server verify the bytes
-   at the span before deleting them, and supplies the length when nothing else
-   does.
+   hits needs no arithmetic — or by `--match-id`, a search hit's own id
+   (below). `--expected-text` has the server verify the bytes at the span
+   before deleting them, and supplies the length when nothing else does;
+   `--match-id` carries that guard already, so it takes no `--expected-text`.
 7. Search with explicit exact-text, exact-byte, wildcard, shell-wildcard,
    path-wildcard, Rust-regex, PCRE2-regex, and six fuzzy modes; all text modes
    are available on bounded large-file ranges. Every text mode matches within
@@ -209,7 +220,11 @@ default gives you.
    like HTML-escaped source that would have matched unescaped.
 8. Request counts, pager keys, first-four defaults, context lines, line/byte ranges,
    ordering, completeness, result generations, stale-page detection, and
-   explicit historical reads.
+   explicit historical reads. `--preview-lines N` shrinks a large `exact_bytes`
+   hit's shown contents to its first and last N lines (its `byte_start`/
+   `byte_end`, and so its `--match-id`, stay exact regardless) — for
+   confirming which of several similar blocks is the right one without
+   paying to see all of it.
    Large searches persist matches incrementally in bounded SQLite chunks and
    retain only the preview in server memory; page large result sets instead
    of expecting one unbounded response.

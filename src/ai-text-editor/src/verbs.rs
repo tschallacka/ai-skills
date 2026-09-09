@@ -124,6 +124,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "range_end_byte",
             "expected_text",
             "expected_bytes_base64",
+            "match_id",
         ],
         "large_edit" => &[
             "job_id",
@@ -164,6 +165,7 @@ pub fn extra_payload_keys(method: &str) -> Option<&'static [&'static str]> {
             "range_end_line",
             "range_start_byte",
             "range_end_byte",
+            "preview_lines",
         ],
         "job_start" => &["owner", "detached"],
         "job_poll" | "job_cancel" | "job_release" => &["job_id", "resume_token"],
@@ -198,6 +200,7 @@ pub fn refused_payload_keys(method: &str) -> &'static [&'static str] {
             "range_end_byte",
             "expected_text",
             "expected_bytes_base64",
+            "match_id",
         ],
         _ => &[],
     }
@@ -271,6 +274,7 @@ pub fn is_count_key(key: &str) -> bool {
             | "range_end_line"
             | "range_start_byte"
             | "range_end_byte"
+            | "preview_lines"
     )
 }
 
@@ -315,6 +319,16 @@ mod tests {
         // `expected_text_unsupported`, which beats the door's message.
         assert!(reads_payload_key("insert", "expected_text"));
         assert!(!reads_payload_key("search", "pager_key"));
+        // match_id: replace consumes it, insert only refuses it by name (a
+        // match is a span; insert places bytes at a point, same reasoning as
+        // the range_* keys just above it).
+        assert!(reads_payload_key("replace", "match_id"));
+        assert!(reads_payload_key("insert", "match_id"));
+        assert!(!extra_payload_keys("insert").unwrap().contains(&"match_id"));
+        assert!(!reads_payload_key("search", "match_id"));
+        // preview_lines is search-only.
+        assert!(reads_payload_key("search", "preview_lines"));
+        assert!(!reads_payload_key("replace", "preview_lines"));
     }
 
     /// B267. `offset` is the one that bit, but the shape is shared by every
