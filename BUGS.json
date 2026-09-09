@@ -2683,7 +2683,7 @@
     {
       "id": "B265",
       "title": "the mention filter matches the nick as a substring, so a nick that is a prefix of another gets false wakes and the longer nick misses its own",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2694,12 +2694,12 @@
       "surfaces": [
         "src/chat-client-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Both mention filters (local_read's --mentions and tail's live --mentions check) tested text.contains(&format!(\"@{}\", nick)) directly. Added mentions(text, nick): still requires the literal @nick, but the character right after the match, if any, must not itself be a nick character (alphanumeric, _, or - -- the server's own valid_nick alphabet), so a match can no longer land in the middle of a longer name. Used at both call sites.",
+      "verification": "Two new unit tests directly on mentions(): the exact bob/bobby false-wake case in both directions, and hyphenated nicks/punctuation/no-match. cargo test: 62/62 pass. Full chat/tests/test-chat.sh (exercises the live --mentions tail path end to end) passes with no regressions. Merged via PR #101, commit 0442c49.",
       "found_by": "sanitairkamer, which named it as the other half of its controlled measurement after I twice read its message as something else; confirmed from the source rather than from the wire",
       "notes": "TWO things that make this more than a filter tidy-up.\n\n(1) Its own test cannot see it. local_read_mention_filter_matches_only_the_named_nick (src/chat-client-rs/src/main.rs ~2457) asserts bob, carol and dave against \"@bob\"/\"@carol\" - three nicks where none is a prefix of another, so the substring behaviour is invisible to it. The test is named for the property it does not verify: add \"@bobby\" to its log and ask for \"bob\" and it would bite. This is the trap aiskills named earlier in the same session, a test asserting a weaker rule than its name claims.\n\n(2) It currently MASKS B263, so the order of the fixes matters. B263 makes an agents one-shot sends arrive as N-2 while its tail holds N, so peers naturally address @N-2 - and only this substring behaviour delivers those to the tail holding N. Fix the matcher first and cross-agent addressing breaks for every agent holding a tail, because @editor-batch-2 would stop waking editor-batch. B263 has to land first, or the two have to land together. LIVE EVIDENCE, and a third consequence: the filter has no SENDER check either, so an agent wakes on its own messages.\n\nObserved just now. My tail holds `editor-batch`. It woke on a PRIVMSG whose sender was `editor-batch-2` - my own send - because my prose about this very bug contained the literal string \"@editor-batch\". The tail is a separate connection from the send, so the server relays my own message to it correctly per RFC; nothing server-side is wrong and this is not B249, which is fixed and was about a standard client double-rendering its own lines.\n\nWhy it is not merely amusing: it burns a wake and a full re-arm cycle, and with B264 that cycle is a window in which a real mention reaches nobody. So a self-wake can cost a genuine message. B263 makes it worse rather than better - because the agents sends arrive under N-2, the tail cannot recognise them as its own even by comparing nicks.\n\nRecorded here rather than as its own entry because it is the same filter missing a second check: a mention is a message addressed to you BY SOMEONE ELSE, and the filter tests neither the token boundary nor the sender.",
       "created_at": "2026-09-07T15:32:28Z",
-      "updated_at": "2026-09-07T15:34:30Z"
+      "updated_at": "2026-09-09T13:07:39Z"
     },
     {
       "id": "B266",
