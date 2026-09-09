@@ -15,6 +15,7 @@
 
 mod cli;
 mod clock;
+mod dedupe;
 mod migrate;
 mod mutate;
 mod query;
@@ -51,6 +52,7 @@ Usage:
   bugs next-id
   bugs check
   bugs fmt
+  bugs dedupe    collapse duplicate ids a rebase left, closed beats open
   bugs migrate
   bugs resolve [<side>:<old-id>:<new-id> ...]   resolve a merge conflict
   bugs --help
@@ -192,6 +194,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
             Ok(ExitCode::SUCCESS)
         }
         "resolve" => resolve_command(&path, &args),
+        "dedupe" => dedupe_command(&path),
         "migrate" => migrate_command(&path),
         other => fail(format!("unknown command: {other}"), EX_USAGE),
     }
@@ -338,6 +341,37 @@ fn check(path: &str) -> Result<ExitCode, Failure> {
     }
     eprintln!("bugs: {path} breaks {} of its own rules", findings.len());
     Ok(ExitCode::from(1))
+}
+
+/// Collapse duplicate ids a rebase left behind (no git conflict involved --
+/// see dedupe.rs for why this is a separate path from `resolve`).
+fn dedupe_command(path: &str) -> Result<ExitCode, Failure> {
+    let register = read(path)?;
+    let outcome = dedupe::dedupe(&register);
+
+    if outcome.kept.is_empty() && outcome.ambiguous.is_empty() {
+        println!("no duplicate ids in {path}; nothing to dedupe");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if !outcome.ambiguous.is_empty() {
+        eprintln!("bugs: these duplicate ids do not resolve on their own:");
+        for problem in &outcome.ambiguous {
+            eprintln!("    {}:", problem.id);
+            for line in &problem.summary {
+                eprintln!("      {line}");
+            }
+        }
+        eprintln!("bugs: pick the right one by hand, then re-run — nothing was written");
+        return fail("refusing to guess at an ambiguous duplicate", EX_DATAERR);
+    }
+
+    let resolved = outcome.register.expect("no ambiguity means a result");
+    write(path, &resolved)?;
+    for note in &outcome.kept {
+        println!("{note}");
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Resolve an id collision in a conflicted register.
