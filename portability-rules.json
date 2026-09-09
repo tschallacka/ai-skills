@@ -166,6 +166,15 @@
       "replacement": "arr=(); while IFS= read -r l; do arr+=(\"$l\"); done < <(...)"
     },
     {
+      "id": "negative-array-index",
+      "construct": "a negative bash array subscript, e.g. ${arr[-1]}",
+      "detect": null,
+      "breaks": "bash 3.2 (added in bash 4.2)",
+      "symptom": "bad array subscript",
+      "replacement": "${arr[${#arr[@]} - 1]} for the last element, or a separate variable captured at append time",
+      "note": "Not gated: [-1] also appears legitimately inside jq/rjq filter strings (jq's own negative indexing), which a repo-wide grep cannot tell apart from a bash array subscript without false positives."
+    },
+    {
       "id": "od-padding",
       "construct": "comparing `od` output literally, e.g. od -An -c | tr -s ' '",
       "detect": null,

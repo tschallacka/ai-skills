@@ -69,7 +69,9 @@ mkdir -p "$h1"
 start_server "$h1"
 p1="$(wait_port "$h1")"
 case "$p1" in ''|*[!0-9]*) t_fail "first server did not report a port"; t_end; exit 1 ;; esac
-stop_server "${pids[-1]}"
+# PORTABILITY(negative-array-index): the last element is index (count - 1)
+# everywhere; bash 4.2+'s [-1] shorthand is not the CODE-STYLE.md §1 floor.
+stop_server "${pids[${#pids[@]} - 1]}"
 
 start_server "$h1"
 p1b="$(wait_port "$h1")"
@@ -124,12 +126,20 @@ disco_port="$(printf '%s' "$disco" | grep -oE '"port":[0-9]+' | head -1 | cut -d
 # A live, announcing server on loopback (its beacon host is 127.0.0.1, which
 # the ladder can actually dial), a client session pointing at a dead port,
 # and an empty cache: read must resolve via discovery and heal the session.
+#
+# B270: the default beacon port (7780) is shared with whatever else on the
+# machine announces there -- another agent's chat server, a sibling worktree
+# -- and discover_candidates returns every announcer, LAN addresses before
+# loopback. This test's server was not the only candidate, and the ladder
+# dialled and wrote "resolve me" into whichever one it found first. A private
+# port scopes the beacon to this test alone, on both sides, while keeping the
+# "no explicit flags" contract this case pins: CHAT_BEACON_PORT/
+# AI_CHAT_BEACON_PORT are the client and server's own env-var default, not a
+# --beacon-port flag either side passes.
+ladder_beacon_port=47996
 lh="$temporary_root/ladder-home"
 mkdir -p "$lh"
-# Default beacon port, loopback broadcast: the caller does nothing. The
-# client resolves the dead session through discovery with no env and no
-# flags, which is the contract this suite pins.
-AI_CHAT_HOME="$lh" CHAT_ANNOUNCE=1 CHAT_BCAST=127.0.0.1 \
+AI_CHAT_HOME="$lh" CHAT_ANNOUNCE=1 CHAT_BCAST=127.0.0.1 CHAT_BEACON_PORT="$ladder_beacon_port" \
     CHAT_ANNOUNCE_HOST=127.0.0.1 "$SERVER" >"$lh/server.out" 2>"$lh/server.err" &
 pids+=($!)
 lport="$(wait_port "$lh")"
@@ -137,7 +147,7 @@ case "$lport" in ''|*[!0-9]*) t_fail "ladder server did not report a port"; t_en
 
 cl="$temporary_root/client"
 mkdir -p "$cl"
-c_session() { AI_CHAT_HOME="$cl" timeout 8 "$CLIENT" "$@"; }
+c_session() { AI_CHAT_HOME="$cl" AI_CHAT_BEACON_PORT="$ladder_beacon_port" timeout 8 "$CLIENT" "$@"; }
 c_session session set --server 127.0.0.1:1 --nick junkbox >/dev/null 2>&1 || {
     t_fail "session set failed"
 }
