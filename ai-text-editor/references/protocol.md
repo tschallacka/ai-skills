@@ -268,6 +268,32 @@ An `insert` deletes nothing, so its span is empty and any `expected_text`
 could only ever mismatch; it is refused with `expected_text_unsupported`
 rather than left to fail confusingly.
 
+`replace` also takes `match_id` — a search hit's own id
+(`<result_id>#<index>`, carried on every match a `search` returns) — as a
+fourth way to address the span, instead of a line range, a byte range, or a
+recomputed offset. It resolves to the exact `byte_start`/`byte_end` the search
+recorded, and carries its own content guard: the bytes at that span must
+still equal what the search found there, or the request is refused as
+`match_id_stale`, the same way an edit since the search clears the whole
+result set the id names (looked up and refused as `match_id_stale` too, for
+the same reason). `match_id` takes no `range_*` key, `offset`, `cursor_id`, or
+`expected_text` — naming one alongside it is `edit_range_conflict`, since it
+already carries the guard `expected_text` would add. An `insert` refuses
+`match_id` the same way it refuses a range: `edit_range_unsupported`, because
+a match is a span and `insert` places bytes at a point. An id shaped wrong, or
+naming an index past the result set, is `match_id_invalid`.
+
+`search` takes `preview_lines` (an integer, `0` — the default — meaning
+unshrunk): when a match's `contents`/`contents_base64` spans more than
+`preview_lines * 2` lines, the response replaces it with `contents_preview`
+— `{head, tail, lines, omitted_lines, omitted_bytes, truncated: true}`,
+`head`/`tail` each holding the match's first/last `preview_lines` lines as
+`{text}` or `{base64}`. `byte_start`/`byte_end`, and so `match_id`, are
+unaffected — a `replace` addressed by a truncated match's `match_id` still
+edits the real, complete span. A match short enough not to need shrinking
+keeps its full `contents`/`contents_base64` unchanged, so a caller need not
+branch on which field a small hit carries.
+
 This is not the revision guard, and it catches what the revision guard cannot.
 A revision proves the *document* has not moved since the caller last read it. It
 says nothing about whether `delete_len` still matches the text at `offset` — so

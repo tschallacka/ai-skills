@@ -189,10 +189,17 @@ fn main() {
     for (argument, field) in [
         ("--expected-text", "expected_text"),
         ("--expected-bytes-base64", "expected_bytes_base64"),
+        ("--match-id", "match_id"),
     ] {
         if let Some(value) = option(&args, &[argument]) {
             payload.insert(field.into(), Value::String(value));
         }
+    }
+    if let Some(value) = option(&args, &["--preview-lines"]) {
+        payload.insert(
+            "preview_lines".into(),
+            json!(parse_number(&value, "--preview-lines")),
+        );
     }
     if let Some(value) = option(&args, &["--text", "-t"]) {
         payload.insert("text".into(), Value::String(value));

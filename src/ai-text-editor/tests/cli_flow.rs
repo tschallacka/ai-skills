@@ -34,6 +34,13 @@ use std::process::{Command, Output};
 /// Not `Command::new("kill")`: `kill` is a shell builtin, not an
 /// executable, so spawning it failed silently and every "killed server"
 /// test ran against a server that never died.
+/// Standard-alphabet base64, for `exact_bytes` search queries — the mode's
+/// `--query`/`--query-base64` are decoded as base64 either spelling, so a
+/// literal string query has to be encoded first.
+fn base64_of(text: &str) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, text.as_bytes())
+}
+
 fn terminate(pid: u32) {
     #[cfg(unix)]
     unsafe {
@@ -1277,6 +1284,322 @@ fn a_replace_takes_a_pair_of_search_hit_bounds() {
     );
     let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
     assert_eq!(String::from_utf8_lossy(&read.stdout), "alpha GONE omega\n");
+}
+
+#[test]
+fn a_replace_addresses_a_match_id_from_a_prior_search() {
+    // T129: a search hit carries its own match_id, and a following replace
+    // can point at it directly instead of copying byte_start/byte_end back
+    // as a range, or the matched text back as expected_text.
+    let harness = Harness::new("matchid");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "middle",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .expect("a search hit carries match_id")
+        .to_string();
+
+    let applied = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &match_id,
+        "-t",
+        "CENTER",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        applied.status.success(),
+        "a match_id replace must apply: {}",
+        refusal_text(&applied)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(
+        String::from_utf8_lossy(&read.stdout),
+        "alpha BEGIN CENTER END omega\n"
+    );
+}
+
+#[test]
+fn a_match_id_is_refused_once_the_edit_it_addresses_has_moved() {
+    // Every successful edit clears tab.results (the same line emit_results
+    // populated it from), so a match_id from before an unrelated edit names a
+    // result set that no longer exists — refused, not silently misapplied to
+    // whatever now sits at that offset.
+    let harness = Harness::new("matchidstale");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "middle",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // An unrelated edit elsewhere in the file still clears every result set.
+    let unrelated = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "-o",
+        "0",
+        "-t",
+        "X",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(unrelated.status.success(), "{}", refusal_text(&unrelated));
+    let revision = first_payload(&unrelated)["revision"].as_u64().unwrap();
+
+    let stale = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &match_id,
+        "-t",
+        "CENTER",
+        "-r",
+        &revision.to_string(),
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        !stale.status.success(),
+        "a match_id past its search must be refused, not silently applied"
+    );
+    assert!(
+        refusal_text(&stale).contains("match_id_stale"),
+        "refusal should name match_id_stale: {}",
+        refusal_text(&stale)
+    );
+}
+
+#[test]
+fn a_match_id_and_a_range_addressing_the_same_edit_are_refused() {
+    let harness = Harness::new("matchidconflict");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "middle",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let conflict = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &match_id,
+        "--range-start-byte",
+        "0",
+        "--range-end-byte",
+        "1",
+        "-t",
+        "x",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!conflict.status.success());
+    assert!(refusal_text(&conflict).contains("edit_range_conflict"));
+}
+
+#[test]
+fn an_out_of_range_match_id_index_is_refused() {
+    let harness = Harness::new("matchidoor");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "middle",
+        "-p",
+        "structured",
+    ]);
+    // At the default verbosity, `result_id` itself is trimmed as a duplicate
+    // of `pager_key` — the same value, so it addresses the same result set.
+    let result_id = first_payload(&found)["pager_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bogus = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &format!("{result_id}#7"),
+        "-t",
+        "x",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!bogus.status.success());
+    assert!(refusal_text(&bogus).contains("match_id_invalid"));
+}
+
+#[test]
+fn insert_refuses_match_id_by_name() {
+    // Same reasoning as insert's existing range-key refusal: a match is a
+    // span, and insert places bytes at a point.
+    let harness = Harness::new("matchidinsert");
+    let file = harness.write("doc.txt", "alpha BEGIN middle END omega\n");
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_text",
+        "--query",
+        "middle",
+        "-p",
+        "structured",
+    ]);
+    let match_id = first_payload(&found)["matches"][0]["match_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let refused = harness.client(&[
+        "insert",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &match_id,
+        "-t",
+        "x",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(!refused.status.success());
+    assert!(refusal_text(&refused).contains("edit_range_unsupported"));
+}
+
+#[test]
+fn search_preview_lines_shrinks_a_large_exact_bytes_match_without_moving_its_offsets() {
+    // T129: the boundaries usually confirm a large match is the right one:
+    // preview_lines shows the first and last lines and omits the middle,
+    // while byte_start/byte_end (and so match_id) stay exact — proved here
+    // by editing off a match_id taken from a truncated preview.
+    let harness = Harness::new("previewlines");
+    let mut body = String::from("BEGIN-MARKER\n");
+    for line in 0..40 {
+        body.push_str(&format!("filler line {line}\n"));
+    }
+    body.push_str("END-MARKER\n");
+    let file = harness.write("doc.txt", &body);
+    let opened = harness.open(&file);
+    let revision = revision_of(&opened).to_string();
+
+    let whole_block_b64 = base64_of(&body);
+
+    let found = harness.client(&[
+        "search",
+        "-f",
+        file.to_str().unwrap(),
+        "--mode",
+        "exact_bytes",
+        "--query-base64",
+        &whole_block_b64,
+        "--preview-lines",
+        "2",
+        "-p",
+        "structured",
+    ]);
+    assert!(found.status.success(), "{}", refusal_text(&found));
+    let payload = first_payload(&found);
+    let hit = &payload["matches"][0];
+    assert!(
+        hit.get("contents_base64").is_none(),
+        "a truncated match should not still carry the full contents_base64"
+    );
+    let preview = &hit["contents_preview"];
+    assert_eq!(preview["truncated"], serde_json::json!(true));
+    let head_text = preview["head"]["text"].as_str().expect("head is text");
+    let tail_text = preview["tail"]["text"].as_str().expect("tail is text");
+    assert!(head_text.starts_with("BEGIN-MARKER"), "head: {head_text}");
+    assert!(
+        tail_text.trim_end().ends_with("END-MARKER"),
+        "tail: {tail_text}"
+    );
+    assert!(
+        !head_text.contains("filler line 20") && !tail_text.contains("filler line 20"),
+        "a middle line must not survive into either boundary preview"
+    );
+
+    let match_id = hit["match_id"].as_str().unwrap().to_string();
+    let applied = harness.client(&[
+        "replace",
+        "-f",
+        file.to_str().unwrap(),
+        "--match-id",
+        &match_id,
+        "-t",
+        "REPLACED\n",
+        "-r",
+        &revision,
+        "-p",
+        "structured",
+    ]);
+    assert!(
+        applied.status.success(),
+        "editing off a match_id from a truncated preview must still use the real, exact span: {}",
+        refusal_text(&applied)
+    );
+    let read = harness.client(&["read", "-f", file.to_str().unwrap(), "-p", "text"]);
+    assert_eq!(String::from_utf8_lossy(&read.stdout), "REPLACED\n");
 }
 
 #[test]
