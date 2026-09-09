@@ -6234,6 +6234,28 @@
       "updated_at": "2026-09-08T12:30:33Z"
     },
     {
+      "id": "B307",
+      "title": "pre-push-check.sh --help prints its MODE marker as the first line",
+      "status": "confirmed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "IN_NIX_SHELL=1 bash pre-push-check.sh --help | head -1   # (or inside nix develop directly)",
+      "observed": "First line printed is \"MODE: DEV\", then the real docblock prose follows.",
+      "expected": "Interface output, not raw comment syntax: the marker line is stripped like every other shipped script's --help was fixed to do (B98, B306).",
+      "mechanism": "usage()'s awk strips leading '# ' from every commented line after the shebang unconditionally: 'NR > 1 && /^#/{ sub(/^# ?/, \"\"); print }'. Line 2 is '# MODE: DEV', which matches and gets printed verbatim as the first line of help. The B306 fix applied a '/^# ?(MODE|PACKAGE):/{ next }' guard to 11 other scripts' help-generating awk, but pre-push-check.sh itself (a dev-only, unshipped script at the repo root) was outside that batch's scope.",
+      "surfaces": [
+        "pre-push-check.sh",
+        "planning/tests/test-comment-format.sh"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Full local ./run-tests.sh run during T120 work, 2026-09-09. Not caught by CI: test-comment-format.sh's assertion does 'help_out=$(...) || continue', and on CI's runners pre-push-check.sh's own nix-shell re-exec guard (IN_NIX_SHELL unset, nix not on PATH in the plain test-suite job) makes --help exit 69 before reaching the marker line, so the assertion silently skips this file there. Locally, with nix already on PATH and IN_NIX_SHELL set from the dev shell, the same call succeeds and exposes the bug.",
+      "notes": null,
+      "created_at": "2026-09-09T06:02:58Z",
+      "updated_at": "2026-09-09T06:02:58Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
