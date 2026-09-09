@@ -118,7 +118,7 @@
     {
       "id": "B136",
       "title": "interactive-shell emits stale or corrupted parent-shell screen state after subprocess exit",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": "B134",
@@ -129,12 +129,12 @@
       "surfaces": [
         "src/interactive-shell/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "run()'s main loop stopped the instant waitpid(WNOHANG) confirmed the child dead, but that does not mean the pty's kernel buffer is empty -- an exit-time redraw burst can exceed one 8192-byte read and still be sitting there, unread, when the loop breaks. Once the loop exits with the child actually reaped, the master fd is now drained (nonblocking, so it costs nothing when empty) before the child_exit lifecycle event is emitted.",
+      "verification": "Added child_exit_drains_buffered_output_past_one_read_chunk: pipes >8192 bytes through a fast-exiting child with a distinguishing tail marker. Verified it reliably reproduces the bug on the pre-fix code (reverted lib.rs locally, marker never reached a screen event) and passes with the fix. cargo test -p interactive-shell: 40/40 pass. Merged via PR #95, commit 5f5c9a0.",
       "found_by": "fresh agent protocol run, subworker Socrates",
       "notes": "The autowrap fix addresses one renderer corruption mechanism but does not yet prove subprocess-transition synchronization is correct.",
       "created_at": "2026-09-01T16:20:00Z",
-      "updated_at": "2026-09-01T16:20:00Z"
+      "updated_at": "2026-09-09T10:22:41Z"
     },
     {
       "id": "B168",
