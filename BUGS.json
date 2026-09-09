@@ -4141,7 +4141,7 @@
     {
       "id": "B294",
       "title": "insert refuses a valid --range-start-line that read accepts on the same tab",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4152,12 +4152,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Not reproducible against a freshly built server (setup-dev-env.sh, 2026-09-09, current master): the same call now returns edit_range_unsupported (\"a range is a span and insert places bytes at a point; `replace` takes the range\") instead of the confusing argument_out_of_range on a quoted numeric string. The note on this entry already suspected the installed binary was stale; it was. Likely folded into the B237 per-verb payload_keys/verbs::reads_payload_key generalization, which this entry never got matched against.",
+      "verification": "ai-text-editor insert --range-start-line 1754 -t X -r 0 on a 2000-line tab: returns {\"code\":\"edit_range_unsupported\",...}, not argument_out_of_range. read at the same coordinates still succeeds, so the two verbs no longer disagree about the value, they disagree about whether the operation accepts a range at all, which is documented and correct.",
       "found_by": "writing T107 through the editor: the insert was refused, a read at the same coordinates was not",
       "notes": "Worked around with --offset, which insert accepted. The quoting in the message suggests the value reaches the validator as a JSON string on this path while read coerces it, so the likely site is insert's own argument parsing rather than the shared numeric validator -- read proves the shared one is sound. Not yet reproduced against a freshly built server: this host runs an installed binary, so confirm the version before ruling on it.",
       "created_at": "2026-09-08T13:57:14Z",
-      "updated_at": "2026-09-08T13:57:23Z"
+      "updated_at": "2026-09-09T00:01:16Z"
     },
     {
       "id": "B295",
