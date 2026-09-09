@@ -640,15 +640,27 @@ No dev journey, no what-we-tried-first, no incident report.
 
 **A FUNCTION gets three lines, and three is usually too many.** One block,
 three lines at the outside, recording a constraint a reader would otherwise
-undo: `add-goal.sh:44-46` ("emitted empty — a placeholder is valid to write and
-invalid to keep") and `create-step-testing.sh:61-63` (single-char `RS` for
-mawk/BSD-awk parity) are the model. Treat three as a ceiling you have to
+undo — a leading comment above the signature and an in-body one are held to
+the same three lines. `plan-root.sh:72-73` (why this mirrors a function with
+no shared library to borrow from) models the leading case; `add-goal.sh:73-75`
+("emitted empty — a placeholder is valid to write and invalid to keep") and
+`create-step-testing.sh:100-102` (mawk/BSD-awk `RS` parity) model the in-body
+one. Treat three as a ceiling you have to
 justify reaching, not a budget to fill — most functions want one line, and a
 well-named function with clear parameters usually wants none. If three lines
 are not enough, the function is doing too much or the explanation belongs in
 the file's leading block.
 
 In-body comments follow the function rule: three lines, same critical eye.
+
+**An item inserted directly after a comment does not inherit it.** A comment
+states a fact about the code it already sits on top of; inserting a new line,
+function, or test between that comment and what it originally described
+silently misattributes it — the comment now heads whatever landed there by
+insertion order, not what it was written about. When adding something right
+after an existing comment, either move the new item below the comment's
+original target or carry the comment down with the thing it actually
+describes.
 
 What does *not* belong in a comment, at any position and in any language:
 
