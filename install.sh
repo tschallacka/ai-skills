@@ -56,6 +56,7 @@ SOURCE_ROOT=""
 TEMP_ROOT=""
 SOURCE_VERSION=""
 YES=0
+DEV_BUILD=0
 SKILL_SELECTION=""
 TARGET_SELECTION=""
 CLI_MODE=""
@@ -371,8 +372,12 @@ Interactive by default. Options are useful for automation:
                            The older name for --integration ai-text-editor=…,
                            kept for scripts that already pass it.
   --target <path>          Install into one skill root without prompting
+  --dev-build              Prefer this host's freshly-built bin/<triple>/ over
+                           <skill>/bin/<triple>/ (setup-dev-env.sh populates
+                           the former; only CI/release populate the latter).
+                           Refuses rather than installing an absent binary.
   --yes                    Answer yes to every prompt, including the planning
-                           permission grants; an edited file is still backed up  
+                           permission grants; an edited file is still backed up
   --help                   Show this help
 
 Interactive prompts accept a for "yes to all" (auto-accepts every
@@ -505,6 +510,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || die_usage "--target needs a directory"
             TARGET_SELECTION="$2"
             shift 2
+            ;;
+        --dev-build)
+            DEV_BUILD=1
+            shift
             ;;
         --yes)
             YES=1
@@ -3775,6 +3784,7 @@ tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
@@ -4084,7 +4094,36 @@ EOF
 source_file() {
     local skill="$1"
     local relative="$2"
-    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$(platform_relative_path "$skill" "$relative")"
+    local physical
+    physical="$(platform_relative_path "$skill" "$relative")"
+    if [ "$DEV_BUILD" -eq 1 ]; then
+        case "$relative" in
+            bin/*)
+                if [ -f "$SOURCE_ROOT/$physical" ]; then
+                    printf '%s/%s\n' "$SOURCE_ROOT" "$physical"
+                    return
+                fi
+                [ -f "$SOURCE_ROOT/$skill/$physical" ] || die \
+                    "--dev-build: no build of $skill/$relative in $SOURCE_ROOT/bin/ or $SOURCE_ROOT/$skill/bin/ -- run ./setup-dev-env.sh, or drop --dev-build to use the shipped binary"
+                ;;
+        esac
+    fi
+    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$physical"
+}
+
+# True when --dev-build is set, this row is a binary, and its source resolved
+# to the repo-root dev build directory rather than the skill's shipped one --
+# so a caller can name which tree an installed binary actually came from
+# (T108: two locations silently disagreeing cost an hour to notice).
+source_is_dev_build() {
+    local skill="$1" relative="$2" physical
+    [ "$DEV_BUILD" -eq 1 ] || return 1
+    case "$relative" in
+        bin/*) ;;
+        *) return 1 ;;
+    esac
+    physical="$(platform_relative_path "$skill" "$relative")"
+    [ -f "$SOURCE_ROOT/$physical" ]
 }
 
 # Manifest entries keep the command name users invoke, without a platform
@@ -4283,6 +4322,11 @@ install_skill() {
     local rjq_notice_printed=0
     local files
     local overview_artifact=''
+    # Names of binaries this run took from the repo-root dev build directory
+    # rather than the skill's shipped one (T108), for the summary line -- the
+    # whole point being that "installed" cannot mean two different things
+    # depending on an invisible directory without saying which one happened.
+    local dev_build_binaries=''
 
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
@@ -4384,6 +4428,9 @@ EOF
         fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$physical"
+        if source_is_dev_build "$skill" "$relative"; then
+            dev_build_binaries="$dev_build_binaries ${relative##*/}"
+        fi
         # Back up unless we can prove the file is ours and untouched. A version
         # transition no longer suppresses this: the marker says the version
         # changed, not that the user's edits are expendable.
@@ -4413,7 +4460,7 @@ EOF
     version_marker_content > "$destination/.version"
     record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
-    summary_add "Installed: $destination$(summary_soft_note "$skill")"
+    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")"
 }
 # ---------------------------------------------------------------
 # 11b. End-of-run summary and replay commands
@@ -4485,6 +4532,21 @@ summary_soft_note() {
         note="$note   (warning: $(runtime_requirement_label "$tool") missing — $(runtime_requirement_why "$skill" "$tool"))"
     done < <(runtime_unmet_tools "$skill" soft)
     printf '%s' "$note"
+}
+
+# The suffix naming which binaries came from the repo-root dev build rather
+# than the skill's shipped one, when --dev-build found any (T108: "installed"
+# meaning two different things depending on an invisible directory is what
+# made a stale shipped binary cost an hour to notice). Unquoted expansion of
+# the space-joined list on purpose, same shape as RUNTIME_BLOCKED_SKILLS in
+# print_install_summary.
+summary_dev_build_note() {
+    local names="$1" name joined=''
+    [ -n "$names" ] || return 0
+    for name in $names; do
+        joined="$joined${joined:+, }$name"
+    done
+    printf '\n             dev build used for: %s' "$joined"
 }
 
 # Idempotent, because cleanup() calls it too: a run that dies part-way (the

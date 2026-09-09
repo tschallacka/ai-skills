@@ -106,6 +106,10 @@ while [ "$#" -gt 0 ]; do
             TARGET_SELECTION="$2"
             shift 2
             ;;
+        --dev-build)
+            DEV_BUILD=1
+            shift
+            ;;
         --yes)
             YES=1
             shift

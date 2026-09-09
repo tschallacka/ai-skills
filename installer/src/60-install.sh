@@ -104,6 +104,11 @@ install_skill() {
     local rjq_notice_printed=0
     local files
     local overview_artifact=''
+    # Names of binaries this run took from the repo-root dev build directory
+    # rather than the skill's shipped one (T108), for the summary line -- the
+    # whole point being that "installed" cannot mean two different things
+    # depending on an invisible directory without saying which one happened.
+    local dev_build_binaries=''
 
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
@@ -205,6 +210,9 @@ EOF
         fi
         source="$(source_file "$skill" "$relative")"
         destination_file="$destination/$physical"
+        if source_is_dev_build "$skill" "$relative"; then
+            dev_build_binaries="$dev_build_binaries ${relative##*/}"
+        fi
         # Back up unless we can prove the file is ours and untouched. A version
         # transition no longer suppresses this: the marker says the version
         # changed, not that the user's edits are expendable.
@@ -234,5 +242,5 @@ EOF
     version_marker_content > "$destination/.version"
     record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
-    summary_add "Installed: $destination$(summary_soft_note "$skill")"
+    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")"
 }

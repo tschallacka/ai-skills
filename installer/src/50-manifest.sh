@@ -403,6 +403,7 @@ tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
 tests/test-installer-dependencies.sh
+tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
@@ -712,7 +713,36 @@ EOF
 source_file() {
     local skill="$1"
     local relative="$2"
-    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$(platform_relative_path "$skill" "$relative")"
+    local physical
+    physical="$(platform_relative_path "$skill" "$relative")"
+    if [ "$DEV_BUILD" -eq 1 ]; then
+        case "$relative" in
+            bin/*)
+                if [ -f "$SOURCE_ROOT/$physical" ]; then
+                    printf '%s/%s\n' "$SOURCE_ROOT" "$physical"
+                    return
+                fi
+                [ -f "$SOURCE_ROOT/$skill/$physical" ] || die \
+                    "--dev-build: no build of $skill/$relative in $SOURCE_ROOT/bin/ or $SOURCE_ROOT/$skill/bin/ -- run ./setup-dev-env.sh, or drop --dev-build to use the shipped binary"
+                ;;
+        esac
+    fi
+    printf '%s/%s/%s\n' "$SOURCE_ROOT" "$skill" "$physical"
+}
+
+# True when --dev-build is set, this row is a binary, and its source resolved
+# to the repo-root dev build directory rather than the skill's shipped one --
+# so a caller can name which tree an installed binary actually came from
+# (T108: two locations silently disagreeing cost an hour to notice).
+source_is_dev_build() {
+    local skill="$1" relative="$2" physical
+    [ "$DEV_BUILD" -eq 1 ] || return 1
+    case "$relative" in
+        bin/*) ;;
+        *) return 1 ;;
+    esac
+    physical="$(platform_relative_path "$skill" "$relative")"
+    [ -f "$SOURCE_ROOT/$physical" ]
 }
 
 # Manifest entries keep the command name users invoke, without a platform

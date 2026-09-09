@@ -18,6 +18,7 @@ SOURCE_ROOT=""
 TEMP_ROOT=""
 SOURCE_VERSION=""
 YES=0
+DEV_BUILD=0
 SKILL_SELECTION=""
 TARGET_SELECTION=""
 CLI_MODE=""
@@ -318,8 +319,12 @@ Interactive by default. Options are useful for automation:
                            The older name for --integration ai-text-editor=…,
                            kept for scripts that already pass it.
   --target <path>          Install into one skill root without prompting
+  --dev-build              Prefer this host's freshly-built bin/<triple>/ over
+                           <skill>/bin/<triple>/ (setup-dev-env.sh populates
+                           the former; only CI/release populate the latter).
+                           Refuses rather than installing an absent binary.
   --yes                    Answer yes to every prompt, including the planning
-                           permission grants; an edited file is still backed up  
+                           permission grants; an edited file is still backed up
   --help                   Show this help
 
 Interactive prompts accept a for "yes to all" (auto-accepts every
