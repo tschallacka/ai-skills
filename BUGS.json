@@ -6172,7 +6172,7 @@
     {
       "id": "B263",
       "title": "holding a mention tail makes every later send from the same agent arrive under a suffixed nick, so one worker appears as two identities",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6184,12 +6184,12 @@
         "src/chat-client-rs/src/main.rs",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the same fix as B283: send now goes through forward_or_fall_back, routing through a held tail's live connection (T107) instead of opening a second one, so the server never sees the duplicate registration that produced the suffix. B263 was the general defect statement, B283 the specific incident; both close on the same commit.",
+      "verification": "8e4b52e0 / T107 (PR #78), refined at 60a9e04. chat/tests/test-chat-owner-socket.sh asserts from the channel log that a forwarded send arrives under the tail's plain nick, and that the same send with --no-session (which deliberately bypasses the socket) still arrives suffixed - so the test cannot pass on a build that merely stopped suffixing without real forwarding. Confirmed passing on current master. Also confirms the B265 mention-boundary fix (already merged this session) is safe: with the suffix source removed, there is no longer a routine '@nick-2' address for the boundary check to have to accommodate.",
       "found_by": "following B255s prescribed posture during the editor batch, then reading my own messages back in the channel log and finding them under a nick I had not chosen",
       "notes": "B265 currently masks this one, and that decides the order: peers address the suffixed @N-2 nick, and only B265s substring matching delivers those to the tail holding N. Fixing B265 alone would break cross-agent addressing for every agent holding a tail. This entry lands first, or both land together.",
       "created_at": "2026-09-07T15:25:02Z",
-      "updated_at": "2026-09-07T15:32:42Z"
+      "updated_at": "2026-09-09T16:03:35Z"
     },
     {
       "id": "B275",
