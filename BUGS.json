@@ -356,7 +356,7 @@
     {
       "id": "B77",
       "title": "subagent worktrees are reused for new tasks, so a fresh worker inherits the previous task's stale base commit",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "urgent",
       "parent": null,
@@ -367,12 +367,12 @@
       "surfaces": [
         "T35"
       ],
-      "fix": "git-worktrees/SKILL.md § Merging the work back: removal is stated as the task's last step, covering the no-merge case (abandoned work, a checkout only ever used to look at something) as well as the merged one, with the reuse consequence spelled out as the reason; docs/README.md carries the short form. Applied to this session's six worktrees, all confirmed clean and 0 commits ahead of HEAD before removal, and their five orphaned worktree-agent-* branches deleted.",
-      "verification": "Partial, and stated as such. Verified: 'git worktree list' now returns one line, the main checkout, so there is no worktree left for a next task to inherit; all six removals were preceded by a dirty/untracked count of 0 and 'git rev-list --count HEAD..<branch>' of 0, so nothing was discarded. NOT yet verified: that a subagent launched with isolation: worktree now starts at the tip. That observation needs a real launch and is the mutation that would fail without the fix — the next subagent this repo launches supplies it, and B77 stays confirmed until it does.",
+      "fix": "git-worktrees/SKILL.md: worktree removal is stated as the task's last step (covering both the merged and no-merge/abandoned cases), closing the reuse path where a finished subagent's stale worktree gets handed to the next task.",
+      "verification": "Live-verified 2026-09-09 by launching a fresh subagent with isolation: worktree: it landed on branch worktree-agent-a2a7fa85b5feaecee at commit 2a756102 (current master tip, PR #117's merge commit), with 'git rev-list --count HEAD..origin/master' = 0. The stale-base symptom (workers starting 350+ commits behind) did not reproduce.",
       "found_by": "main session, from two independent subagent reports in one hour; both workers only noticed because their briefs told them to check",
       "notes": "Third occurrence the same day: the plancrypt worker started 358 commits behind and reset to 9be8d1a. That is three of three subagent worktrees launched in this session — webview 354 behind, chatfix 352, plancrypt 358 — so the failure rate is not intermittent, it is universal. All three caught it only because their briefs carried an explicit instruction to check the base commit, which means the current mitigation is a sentence I have to remember to write into every brief. A worker launched without it reads a tree that predates the feature it was sent to change. The fix follows from the mechanism: when a subagent finishes and its worktree has no other purpose, remove it once its branch is merged — if a merge applies at all. That closes the reuse path at the point where the worktree becomes garbage, rather than trying to detect staleness at the point where it is handed out. Cleaning up is also the cheaper half: a stale-base check has to run in every brief and be remembered by every author, while a removal happens once, by whoever did the merge and is already looking at the branch. The title carried the disproven cause ('still created from a stale commit') and was corrected in place, since bug-update.sh has no --title; register-rebuild.sh bugs reports the file stamped, sorted and sound afterwards.",
       "created_at": "2026-08-28T10:35:34Z",
-      "updated_at": "2026-08-28T16:52:20Z"
+      "updated_at": "2026-09-09T18:16:13Z"
     },
     {
       "id": "B126",
