@@ -4814,7 +4814,7 @@
     {
       "id": "B99",
       "title": "plan-overview accepts --watch and --refresh and ignores both",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4827,12 +4827,12 @@
         "src/plan-overview/src/watch.rs",
         "src/plan-overview/src/serve.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "--watch and --refresh are now refused by name (not implemented yet; the render is a single snapshot) rather than silently accepted and ignored, per the bug's own stated resolution; filed T130 for actually wiring them up",
+      "verification": "PR #109, merged as afbfe20. New unit tests watch_and_refresh_are_refused_rather_than_silently_ignored and a_refresh_missing_its_value_is_still_refused_naming_the_value in src/plan-overview/src/main.rs.",
       "found_by": "wiki fact-check, maintainer session 2026-09-01",
       "notes": null,
       "created_at": "2026-09-01T15:14:52Z",
-      "updated_at": "2026-09-01T15:14:52Z"
+      "updated_at": "2026-09-09T15:09:22Z"
     },
     {
       "id": "B101",
