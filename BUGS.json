@@ -2576,7 +2576,7 @@
     {
       "id": "B250",
       "title": "insert accepts delete_len and ignores it, so an insert asked to delete first is answered as a success",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2587,12 +2587,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the shared payload_keys/reads_payload_key gate in src/ai-text-editor (verbs.rs + ai-text-editor-server.rs) refuses any payload key a verb does not read, covering insert's delete_len, search's pager_key/historical, and index's action",
+      "verification": "bc3cb7b adds a named regression test for each: an_insert_naming_delete_len_is_refused_rather_than_half_performed (B250), a_search_naming_a_page_argument_is_refused_and_points_at_page (B251), an_index_naming_action_is_refused_and_the_scan_still_works (B252), plus the schema-side no_tool_advertises_an_argument_its_verb_does_not_read. All 4 pass on current master; the behavioral fix itself predates bc3cb7b and already lived in verbs.rs, bc3cb7b is the commit that pins/proves it.",
       "found_by": "surfaced by B237's fix: binding the per-verb key table to both the server door and the adapter schemas, editor-batch agent 2026-09-07",
       "notes": null,
       "created_at": "2026-09-07T14:29:06Z",
-      "updated_at": "2026-09-07T14:29:06Z"
+      "updated_at": "2026-09-09T13:32:02Z"
     },
     {
       "id": "B253",
@@ -2860,7 +2860,7 @@
     {
       "id": "B280",
       "title": "chat/SKILL.md blesses a detached & for the presence tail while its own rule below forbids one",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2871,17 +2871,17 @@
       "surfaces": [
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat/SKILL.md's presence-tail instruction and its own posture rule were made consistent: both now say start the tail as a TRACKED background task, not a detached &",
+      "verification": "44a851e: chat/SKILL.md:230 and :429 both read \"Start it as a TRACKED background task — not with a detached &\", with no conflicting exception elsewhere. Confirmed on current master.",
       "found_by": "nitpicker, reviewing 8e67302a and f66a9199 in #ai-skills",
       "notes": null,
       "created_at": "2026-09-07T21:18:05Z",
-      "updated_at": "2026-09-07T21:18:05Z"
+      "updated_at": "2026-09-09T13:32:02Z"
     },
     {
       "id": "B281",
       "title": "the nitpicker profile restates the chat posture chat/SKILL.md owns, and restates the wrong half",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2893,12 +2893,12 @@
         ".agents/profiles/nitpicker.md",
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the nitpicker profile's posture note was corrected to match chat/SKILL.md instead of restating the wrong half of it",
+      "verification": "44a851e: .agents/profiles/nitpicker.md:57-59 now explicitly says not to use tail --mentions --mention-exit as a wait, matching chat/SKILL.md's posture. Confirmed on current master.",
       "found_by": "nitpicker, reviewing its own profile in #ai-skills",
       "notes": null,
       "created_at": "2026-09-07T21:18:24Z",
-      "updated_at": "2026-09-07T21:18:24Z"
+      "updated_at": "2026-09-09T13:32:02Z"
     },
     {
       "id": "B284",
@@ -3569,7 +3569,7 @@
     {
       "id": "B95",
       "title": "The compiled plan-document-lib.sh resolves plan_root two levels above the repo, so the bundled rjq is never put on PATH",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3582,12 +3582,12 @@
         "planning/scripts/plan-document-lib.sh",
         "planning/scripts/build-plan-libs.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "plan_bin_dir walks up looking for bin/<triple> instead of a hardcoded ../../../.. (dfd5781)",
+      "verification": "e6c5913 closed this correctly the first time; the closure was silently lost when commit 4353dfa deduplicated rebase-duplicated B94-B96 entries and kept the stale confirmed copy instead of the fixed one. Verified dfd5781's plan_bin_dir logic is still present and correct on current master; re-closing here to restore what 4353dfa erased.",
       "found_by": "binary-layout restructure recon",
       "notes": null,
       "created_at": "2026-08-31T13:20:46Z",
-      "updated_at": "2026-08-31T13:20:46Z"
+      "updated_at": "2026-09-09T13:31:42Z"
     },
     {
       "id": "B111",
@@ -3970,7 +3970,7 @@
     {
       "id": "B251",
       "title": "search advertises pager_key and historical, which only page reads, so a caller avoiding a rescan triggers one",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3981,12 +3981,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the shared payload_keys/reads_payload_key gate in src/ai-text-editor (verbs.rs + ai-text-editor-server.rs) refuses any payload key a verb does not read, covering insert's delete_len, search's pager_key/historical, and index's action",
+      "verification": "bc3cb7b adds a named regression test for each: an_insert_naming_delete_len_is_refused_rather_than_half_performed (B250), a_search_naming_a_page_argument_is_refused_and_points_at_page (B251), an_index_naming_action_is_refused_and_the_scan_still_works (B252), plus the schema-side no_tool_advertises_an_argument_its_verb_does_not_read. All 4 pass on current master; the behavioral fix itself predates bc3cb7b and already lived in verbs.rs, bc3cb7b is the commit that pins/proves it.",
       "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
       "notes": null,
       "created_at": "2026-09-07T14:29:06Z",
-      "updated_at": "2026-09-07T14:29:06Z"
+      "updated_at": "2026-09-09T13:32:02Z"
     },
     {
       "id": "B255",
@@ -6043,7 +6043,7 @@
     {
       "id": "B252",
       "title": "index advertises an action argument it never reads, so every call is a full rebuild",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6054,12 +6054,12 @@
       "surfaces": [
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the shared payload_keys/reads_payload_key gate in src/ai-text-editor (verbs.rs + ai-text-editor-server.rs) refuses any payload key a verb does not read, covering insert's delete_len, search's pager_key/historical, and index's action",
+      "verification": "bc3cb7b adds a named regression test for each: an_insert_naming_delete_len_is_refused_rather_than_half_performed (B250), a_search_naming_a_page_argument_is_refused_and_points_at_page (B251), an_index_naming_action_is_refused_and_the_scan_still_works (B252), plus the schema-side no_tool_advertises_an_argument_its_verb_does_not_read. All 4 pass on current master; the behavioral fix itself predates bc3cb7b and already lived in verbs.rs, bc3cb7b is the commit that pins/proves it.",
       "found_by": "surfaced by B237's fix, editor-batch agent 2026-09-07",
       "notes": null,
       "created_at": "2026-09-07T14:29:23Z",
-      "updated_at": "2026-09-07T14:29:23Z"
+      "updated_at": "2026-09-09T13:32:02Z"
     },
     {
       "id": "B256",
@@ -6171,7 +6171,7 @@
     {
       "id": "B275",
       "title": "A MODE: DEV agent profile ships to end users in the npm package, because package.json files excludes .agents/knowledge/ but not .agents/profiles/",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6184,17 +6184,17 @@
         "planning/tests/fixtures/overview/npm-package-baseline.tsv",
         ".agents/profiles/nitpicker.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "package.json's npm package files list now excludes .agents/profiles/, matching the existing .agents/knowledge/ exclusion",
+      "verification": "8e67302: package.json:49 has \"!.agents/profiles/**\"; confirmed present on current master.",
       "found_by": "nitpicker",
       "notes": null,
       "created_at": "2026-09-07T20:38:32Z",
-      "updated_at": "2026-09-07T20:38:32Z"
+      "updated_at": "2026-09-09T13:31:53Z"
     },
     {
       "id": "B282",
       "title": "a doc comment is orphaned when a new item is inserted between it and the item it described",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6206,12 +6206,12 @@
         "src/chat-client-rs/src/lib.rs",
         "installer/src/36-ui-render.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the B278/B271 doc comments were split onto the individual functions they each describe, instead of sitting as one leading block orphaned by an insertion between them",
+      "verification": "76efd17: src/chat-client-rs/src/lib.rs now carries the B278 comment on a_key_carries_the_nick_as_a_findable_suffix (2891-2894) and the B271 comment on a_subagent_under_one_harness_id_gets_its_own_session_per_nick (2944-2947), each separate; installer/src/36-ui-render.sh's iui_integration_offered and iui_info_actions each carry their own comment (296-300, 313-314). Confirmed present on current master.",
       "found_by": "nitpicker, reviewing 1267ac11 in #ai-skills",
       "notes": null,
       "created_at": "2026-09-07T21:18:24Z",
-      "updated_at": "2026-09-07T21:18:24Z"
+      "updated_at": "2026-09-09T13:31:53Z"
     },
     {
       "id": "B286",
@@ -6237,7 +6237,7 @@
     {
       "id": "B293",
       "title": "interactive-shell/bin is not gitignored, so built binaries there are stageable",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6248,12 +6248,12 @@
       "surfaces": [
         ".gitignore"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "added interactive-shell/bin/*/ to .gitignore, matching the pattern already used for chat/bin/*/ and ai-text-editor/bin/*/",
+      "verification": "83c5e3d: .gitignore:82 has interactive-shell/bin/*/. Verified with git check-ignore -q interactive-shell/bin/x86_64-unknown-linux-musl/ (a populated subdir, the actual risk case) -> ignored, on current master.",
       "found_by": "checking the tree before ending the 2026-09-08 session, after placing the binaries B291 describes as missing",
       "notes": null,
       "created_at": "2026-09-08T12:30:33Z",
-      "updated_at": "2026-09-08T12:30:33Z"
+      "updated_at": "2026-09-09T13:31:53Z"
     },
     {
       "id": "B307",
@@ -6431,7 +6431,7 @@
     {
       "id": "B118",
       "title": "chat-client-rs cannot dial a bare IPv6 server address, so an IPv6 bus is unreachable even when discovered",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -6442,12 +6442,12 @@
       "surfaces": [
         "src/chat-client-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "server_host/server_name (src/chat-client-rs/src/lib.rs) rsplit on the last colon and strip brackets, routing an IP literal through ServerName::IpAddress instead of ServerName::try_from",
+      "verification": "2e67706 (merged via PR #25, 8acbab7). Tests server_host_extracts_the_host_from_an_ipv6_address and the SNI-path IP-literal test cover both bracketed and bare IPv6 forms; both pass on current master.",
       "found_by": "an adversarial review of the chat-server-rs announce change (PR #20)",
       "notes": "Not a regression: before the announce change an IPv6 bind advertised an IPv4 address it was not listening on, so an IPv6 bus was unreachable then too. The failure merely moved from \"never found\" to \"found, then rejected at TLS\". The server side now refuses to announce a bare IPv6 host and says why, naming this entry, so nothing advertises an address that cannot be used -- that is containment, not a fix. Filed against the client because that is where the extraction lives; src/chat-client-rs/ is being worked on separately for B116, so this is recorded rather than fixed here to avoid two workers in one file. Low priority: no known caller binds IPv6, and the workaround is to bind IPv4 or set CHAT_ANNOUNCE_HOST.",
       "created_at": "2026-09-03T10:32:05Z",
-      "updated_at": "2026-09-03T10:32:05Z"
+      "updated_at": "2026-09-09T13:31:53Z"
     },
     {
       "id": "B188",
