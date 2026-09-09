@@ -1419,7 +1419,7 @@
     {
       "id": "B71",
       "title": "test-plan-libs-build.sh regenerates the libraries when it fails, so a second run passes and the defect looks like a flake",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1430,12 +1430,12 @@
       "surfaces": [
         "planning/tests/test-plan-libs-build.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "The 'a new function reaches its library' check planted a probe function file directly in the real planning/scripts/lib/progress/, then ran the real (unqualified) builder against the real scripts_dir twice, regenerating every compiled library from current sources and overwriting the real, checked-in files -- independent of whatever --check had already found earlier in the same run. Fixed by giving this section its own copy of scripts_dir and its own builder path, mirroring the 'two build targets differ' section further down which already does exactly this for the same reason.",
+      "verification": "Reproduced directly on the pre-fix code: manually staled plan-document-lib.sh, ran the unfixed test twice -- run 1 correctly failed 2 assertions and silently restored the file to 518 lines, run 2 then passed against the now-fresh file. Same reproduction against the fix: both runs report the identical 2 failures, and the real scripts_dir is untouched either way (verified with git status and a line-count check after each run). Full test passes on both default bash and the bash 3.2 floor against a clean tree. Merged via PR #102, commit 2d9dcfe.",
       "found_by": "main session; the masking is what made B70 look intermittent",
       "notes": null,
       "created_at": "2026-08-28T07:55:19Z",
-      "updated_at": "2026-08-28T07:55:19Z"
+      "updated_at": "2026-09-09T13:18:33Z"
     },
     {
       "id": "B74",
