@@ -743,6 +743,22 @@
       "updated_at": "2026-09-08T20:25:16Z"
     },
     {
+      "id": "T124",
+      "title": "ai-text-editor MCP: accept 'path' as an alias for 'file' on every tool that takes it",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Every tool's real parameter is 'file' (open, insert, replace, ...), but 'path' is the far more natural/common name an agent reaches for -- it is what open() and most file APIs call it, and it is what this session actually typed on the first two open calls today. Since the schema has additionalProperties: false, a caller who says 'path' gets no error and no file at all: the request silently proceeds with file=None, falls through to identity-based resolution, and can surface an unrelated, confusing failure (in this case session_stale, which had nothing to do with the real mistake). Wanted: accept 'path' as a synonym for 'file' in the MCP adapter's payload parsing (src/ai-text-editor-mcp/src/lib.rs's call_tool, where 'file' is read out of the arguments object), and/or have request construction refuse an unrecognized top-level key near 'file' rather than silently proceeding with none. Consider whether the tool schema's 'file' description should also say '(aka path)' so this is documented at the point of use.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor-mcp/src/lib.rs",
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": null,
+      "created_at": "2026-09-09T07:00:47Z",
+      "updated_at": "2026-09-09T07:00:47Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
