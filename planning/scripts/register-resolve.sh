@@ -49,6 +49,7 @@ usage() {
     awk 'NR == 1 { next }
          /^#/ {
              sub(/^#[[:space:]]?/, "")
+             if ($0 ~ /^(MODE|PACKAGE):/) next
              print; next
          }
          { exit }' "$0"

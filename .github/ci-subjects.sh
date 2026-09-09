@@ -41,7 +41,7 @@ scope=""
 crates=""
 
 usage() {
-    awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -uo/{ exit }' "$0"
+    awk 'NR > 1 && /^#/ && !/^# ?(MODE|PACKAGE):/{ sub(/^# ?/, ""); print } /^set -uo/{ exit }' "$0"
     exit "${1:-64}"
 }
 

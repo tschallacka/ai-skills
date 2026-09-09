@@ -30,7 +30,7 @@ kind="${1:-}"
 case "$kind" in
     bugs) file="${2:-$root/BUGS.json}" ;;
     todo) file="${2:-$root/TODO.json}" ;;
-    -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) printf 'usage: %s bugs|todo [file]\n' "${0##*/}" >&2; exit 64 ;;
 esac
 [ -f "$file" ] || { printf '%s: register not found: %s\n' "${0##*/}" "$file" >&2; exit 66; }
