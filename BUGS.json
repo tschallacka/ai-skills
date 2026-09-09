@@ -4099,7 +4099,7 @@
     {
       "id": "B279",
       "title": "chat/SKILL.md's presence tail advances the session cursor, so a later read reports nothing new",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4110,12 +4110,12 @@
       "surfaces": [
         "chat/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already resolved in the tree by the time this was picked up (chat/SKILL.md has since had several unrelated wake-guard commits -- efa4a18, 993217a, d6e54af, e0048de, 45076a9 -- that also carried this fix along). The presence-tail example now reads \"Start it as a TRACKED background task -- not with a detached `&`\" (line 230) with `--no-session` explained right beside it (line 232), consistently with the rule stated later (line 429) and the other --no-session guidance (lines 365, 405, 527). No remaining bare-& instruction for the presence tail anywhere in the file; the one remaining bare & (line 617) starts the server, a different, legitimate case. The register entry was simply never closed.",
+      "verification": "grep -n \"no-session|detached|tracked background\" chat/SKILL.md: every presence-tail example uses --no-session and the tracked-background-task wording consistently; the only remaining bare & starts chat-server-rs, out of this scope.",
       "found_by": "nitpicker",
       "notes": "Narrowed after measuring, 2026-09-07. The harness-invisibility half of the original filing does not hold: a bare-& tail spawned from one Claude Code Bash call was still running in the next call (pid 1311541, chat-client-rs), and names listed the probe nick throughout. So :234's exception is correct that & is usable for a tail nothing waits on, and :201 is not wrong for that reason. What remains is the cursor: the presence tail consumes the stream under the caller's session, so a later 'read' correctly reports nothing new, which is the silent loss :283 records. The fix is not to forbid the & but to say beside :201 that the presence tail owns the cursor and the log it writes is what you read - as the nitpicker profile's step 2 now does.",
       "created_at": "2026-09-07T21:07:49Z",
-      "updated_at": "2026-09-07T21:26:14Z"
+      "updated_at": "2026-09-09T00:00:08Z"
     },
     {
       "id": "B287",
