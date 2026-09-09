@@ -37,6 +37,7 @@ contains, it does not belong here.
 | [unix-sockets-across-platforms.md](unix-sockets-across-platforms.md) | Why does a socket bind that works on Linux fail on macOS, and what actually ports? |
 | [github-ci-runners.md](github-ci-runners.md) | What are GitHub's runners actually like — arch, speed, `$TMPDIR`, what a resource cap can enforce — and which of those breaks tests? |
 | [agent-identity-across-harnesses.md](agent-identity-across-harnesses.md) | Which agent is calling? What each harness tells an MCP server and a skill binary, and what it refuses to tell either. |
+| [claude-code-grep-shim.md](claude-code-grep-shim.md) | Why does `grep` warn "stray \ before -" on patterns already in this repo's own tests, and is it a real bug? |
 ## Format
 
 One file per question, named for the subject rather than the occasion. Open
