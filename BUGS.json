@@ -2073,7 +2073,7 @@
     {
       "id": "B158",
       "title": "with one subscriber attached, other clients' sends and reads fail with os error 11 after about ten seconds",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2082,12 +2082,12 @@
       "expected": "an attached subscriber costs nothing to anyone else: other clients send and read at their no-subscriber latency, and every accepted message reaches every member",
       "mechanism": "not measured, and not to be assumed identical to B122 -- that was lock starvation on hub.writers, which PR #43 fixed by moving each write onto its own connection's thread via an outbox, and the self-recovery here proves that fix works: there is no permanent wedge any more. What remains is a per-subscriber cost paid by unrelated clients, with a ~10s ceiling that matches a timeout rather than a lock queue. Candidates to measure first: the sender's own echo confirmation wait (a send that reports failure may still have been appended -- 2 of 4 did land), the 200ms read_tls cycle on the subscriber's connection state, and the outbox drain interval.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "the server's QUIT handler was returning from the connection loop instead of falling through the teardown at the bottom of it, so *guard = None, st.tcp.shutdown() and hub.deregister() never ran on a normal send-then-QUIT: one leaked descriptor per message. Enough sends leaked enough descriptors to start failing accept() for unrelated clients, which is this entry's exact shape (works fine with no subscriber holding a connection open, fails once one does, self-recovers when the subscriber's descriptors are freed).",
+      "verification": "a5958ee52a4f378553b85c3391e2ff21eef64982, same commit as B159/B160 - all three are one root cause. Its own commit message measured the exact regression this entry describes: at a limit of 40, sends 1-32 succeeded and 33-50 failed with the descriptor count climbing 5->15->35; after the fix it stays flat at 5 and 50 of 50 land. chat/tests/test-chat-descriptor-leak.sh asserts all three fixes together and passes on current master.",
       "found_by": "pr-master, verifying B122 in production after merging PR #43; three SIGSTOPped peers left over from another agent's test were ruled out by checking that none held a socket to the server's port",
       "notes": "2026-09-04, sharpened: the two failing sends were LOST, not merely unconfirmed. A later socket read of the channel shows only ids 47 ('one-subscriber send 1') and 48 ('one-subscriber send 4') from that run -- sends 2 and 3 appear nowhere, so the server never appended them. This distinguishes B127 from the earlier os-error-11 reports, where a send that reported failure had in fact landed and only the client's echo read timed out (message id 3 earlier the same day was such a case). Here the message is gone. So the failure is not confined to the sender's confirmation path, and a fix must be judged on whether every accepted message is appended and delivered, not on whether the sender stops seeing an error.",
       "created_at": "2026-09-04T08:54:09Z",
-      "updated_at": "2026-09-04T09:22:04Z"
+      "updated_at": "2026-09-09T16:41:19Z"
     },
     {
       "id": "B159",
