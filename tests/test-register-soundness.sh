@@ -53,7 +53,7 @@ check_register() { # <kind> <file>
         return
     fi
     if ! rjq -e '.' "$file" >/dev/null 2>&1; then
-        t_fail "$name is not valid JSON — if it is mid-merge, resolve it with planning/scripts/register-resolve.sh"
+        t_fail "$name is not valid JSON — if it is mid-merge, resolve it with 'bugs resolve' / 'todo resolve'"
         return
     fi
     findings="$(reg_findings "$kind" "$file")"
@@ -61,7 +61,7 @@ check_register() { # <kind> <file>
         count="$(printf '%s\n' "$findings" | wc -l | tr -d ' ')"
         t_fail "$name breaks $count of its own rules; the writers would have refused these:"
         printf '%s\n' "$findings" | sed 's/^/      /' >&2
-        printf '    fix each entry through bug-update.sh / todo-update.sh, or run\n' >&2
+        printf '    fix each entry through the shipped bugs/todo binaries, or run\n' >&2
         printf '    planning/scripts/register-rebuild.sh %s "%s" for structural damage\n' "$kind" "$file" >&2
         return
     fi

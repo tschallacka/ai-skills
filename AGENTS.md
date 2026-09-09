@@ -248,9 +248,10 @@ defaults verbatim.
   cannot see that collision: the additions land at different array positions,
   so it merges them textually with **no conflict** and the result carries two
   unrelated entries under one id. One merge on 2026-09-04 produced eight
-  duplicate ids that way, invisible until `reg_findings` ran. Worse,
-  `register-resolve.sh`'s advice for the textual case is to take one side,
-  which silently drops the other's entries. A single writer removes the class.
+  duplicate ids that way, invisible until `reg_findings` ran. Worse, the
+  resolvers' (`bugs resolve` / `todo resolve`) advice for the textual case is
+  to take one side, which silently drops the other's entries. A single writer
+  removes the class.
 
   The branch is `registers` and not `bugs` because git refuses a branch named
   `bugs` while any `bugs/*` ref exists, and work branches use the `bug/`

@@ -101,7 +101,7 @@ case "$out" in *'is not one of'*|*rc=65*) : ;; *) fail "an invented status was a
 # ---- B102: 'dropped' is in the shipped schema, so the shared checks must
 # accept it too - a status the schema offers but reg_findings refuses would
 # make a task written through the binary look unsound to every other reader
-# of reg_findings (register-resolve.sh, register-rebuild.sh, the CI guard).
+# of reg_findings (bugs resolve/todo resolve, register-rebuild.sh, the CI guard).
 out="$(run_todoup T9999 --status dropped --note 'evidence: superseded by T10000')"
 case "$out" in
         *'unknown status'*|*rc=65*) fail "'dropped' (a schema-listed status) was refused: $out" ;;
