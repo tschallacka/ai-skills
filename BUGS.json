@@ -2640,7 +2640,7 @@
     {
       "id": "B262",
       "title": "an unmarked request was served by whichever tab a no-file call cached first, so a read after opening a second file could answer from the first",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2651,12 +2651,12 @@
       "surfaces": [
         "src/ai-text-editor/src/client.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "T98 gave a session a focused tab (the tab open sets), and a bare request with no file/endpoint/tab marker now resolves to that focused tab or is refused by name, instead of the client cache's first-cached identity-only token; every response also names the tab it answered.",
+      "verification": "218c121 / cde4138 (\"ai-text-editor: address any tab by id or path, and carry a focused tab\"). Dedicated test an_unmarked_request_runs_on_the_focused_tab_and_the_answer_names_it in src/ai-text-editor/tests/cli_flow.rs passes on current master.",
       "found_by": "editor-batch agent while implementing T98, 2026-09-07; reported in its final summary and unfiled until now",
       "notes": "Filed by the coordinator from the agent's closing report rather than by the agent, so it exists independently of whether T98's branch lands. Related but distinct: B178 was cached endpoint reuse with no liveness or generation check - that was a dead endpoint being reused; this is a LIVE tab being the wrong one. Same cache, different failure.",
       "created_at": "2026-09-07T15:23:22Z",
-      "updated_at": "2026-09-07T15:23:22Z"
+      "updated_at": "2026-09-09T17:02:14Z"
     },
     {
       "id": "B264",
