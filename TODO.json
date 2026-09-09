@@ -56,19 +56,6 @@
       "updated_at": "2026-09-09T21:32:56Z"
     },
     {
-      "id": "T81f",
-      "title": "Traps already paid for while building the resolver — read before touching this code",
-      "status": "open",
-      "priority": "high",
-      "parent": "T81",
-      "detail": "1) jq/rjq rebinds '.' inside a pipe. 'select($t | has(.id))' asks whether $t has a key named by $t.id, not by the entry's id, so it silently matches nothing; and 'if ($map | has(.id))' silently renames nothing. Bind first: '(.id) as $i | ... has($i)'. This produced two separate silent no-ops in one afternoon, each of which looked like working code. 2) plan_register_temp_file records a path and PRINTS NOTHING, so 'x=$(plan_register_temp_file $(mktemp))' yields an empty path; assign first, register second. 3) A merge conflict cannot be faked: the tool reads git index stages :1 base, :2 ours, :3 theirs, so a fixture with hand-written conflict markers exercises none of it. Build real conflicts in throwaway repos. 4) An entry changed on ONE side only is not a divergence - the changed side wins, the way git merges a line one branch edited. Taking ours-first for every id silently DROPPED a theirs-only edit; that was a real data-loss bug my own test caught. A divergence is both sides changing a base entry differently. 5) from_entries keeps the LAST of a repeated id, so any id-keyed comparison under-reports a register that carries duplicates - check soundness separately. 6) test-flag-coverage.sh requires every accepted flag to appear in --help, which is why the confirmation is the CONFIRM environment variable and not a flag. Its 'every flag has a test' check uses grep -w, and '-' is a non-word character, so a flag that is a hyphen-prefix of another (--confirm inside --confirm-cascade) passes without a test of its own.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:04:38Z",
-      "updated_at": "2026-09-01T16:04:38Z"
-    },
-    {
       "id": "T85",
       "title": "Implement IN/1 and IN/2 in rjq",
       "status": "open",
@@ -411,58 +398,6 @@
       "note": null,
       "created_at": "2026-08-30T21:50:27Z",
       "updated_at": "2026-08-30T21:50:27Z"
-    },
-    {
-      "id": "T81e",
-      "title": "Split the tests per skill and retire planning/scripts/register-resolve.sh in favour of the two shipped resolvers, so there is one way to do the job",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T81",
-      "detail": "Retire planning/scripts/register-resolve.sh and planning/tests/test-register-resolve.sh once the two shipped resolvers exist, so there is one way to do the job. planning/tests/test-register-helpers.sh currently exercises the whole family and needs splitting per skill. tests/test-register-soundness.sh stays where it is: it gates the repository's OWN two registers and is not part of either skill. Only 12 files reference the helper family by path, and most are the helpers themselves, so the rename surface is small: TODO.json, BUGS.json, the helpers, planning/tests/test-register-helpers.sh, tests/test-register-soundness.sh and planning/tests/fixtures/overview/npm-package-baseline.tsv.",
-      "blocked_on": "nothing — both shipped resolvers now exist",
-      "refs": [],
-      "note": "Unblocked: bugs resolve and todo resolve both exist, so planning/scripts/register-resolve.sh and the register-* shell family can be retired. Left for its own change: 9 scripts, a test split, the installer manifest and the npm baseline all move together.",
-      "created_at": "2026-09-01T15:57:41Z",
-      "updated_at": "2026-09-01T21:24:21Z"
-    },
-    {
-      "id": "T81g",
-      "title": "What the resolver already does, so it is ported rather than redesigned",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T81",
-      "detail": "planning/scripts/register-resolve.sh is working, mutation-tested and bash-3.2 clean; its test is planning/tests/test-register-resolve.sh (7 sections). Behaviour worth keeping verbatim: reads the three index stages rather than branch names, so it works mid-conflict with no checkout; --check exits 1 on a conflicted register and 0 on a clean one, for use in a pre-push or CI hook; lists each collision with BOTH sides' titles plus a suggested free id taken from the high-water mark of both sides; refuses when a decision is missing, naming which; reports what each side changed since the merge base, separating 'modified on one side ONLY - read these keys' from 'modified identically on both sides, so the base is simply older' so nothing is falsely suspected; refuses a divergence with an explanation of why renaming would not help; checks EACH SIDE for soundness before asking for decisions, so an already-unsound branch is reported as that branch's fault rather than blamed on the decisions; follows renames into parent and into blocked_on when its whole value is the id; REPORTS prose mentions and never rewrites them, because an id inside a sentence may be a prefix of a longer id or belong to the other register; prints the resolved register to stdout and the confirmation to stderr; writes nothing until CONFIRM=<hash> is handed back, and the hash is identical under bash 5.3 and 3.2. Verified against the real conflict in PR #13, where it correctly refused because that branch's own register is unsound (B105).",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:04:38Z",
-      "updated_at": "2026-09-01T16:04:38Z"
-    },
-    {
-      "id": "T81h",
-      "title": "Packaging and registration rules a new shipped script must satisfy",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T81",
-      "detail": "1) Every file declares MODE: PROD (the user receives it) or MODE: DEV (only a maintainer does); an unmarked tracked file fails tests/test-mode-markers.sh. Syntax follows the format: '# MODE: X' in shell, '<!-- MODE: X -->' in Markdown, and AFTER any YAML frontmatter. No comment line may BEGIN with the marker keyword or the generators strip it. 2) install.sh is generated - never edit it; edit installer/src/NN-*.sh and run ./installer/build.sh, which the installer-build CI job verifies byte-for-byte. 3) A new file under planning/ needs PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv rows too, compared byte-for-byte so ROW ORDER matters; a file under bug-report/ or todo/ needs only the skill_files() arm, because those two registries are planning-only. 4) package.json's files array ships whole skill directories, and npm's rule is that a path included that way CANNOT be excluded by .npmignore or .gitignore - that is how untracked local notes nearly got published (B100), and it is why a register inside a skill directory would ship (B107). 5) After adding a shipped file, planning/tests/fixtures/overview/npm-package-baseline.tsv must be regenerated: the test compares npm pack output against it byte-size by byte-size. 6) test-flag-coverage.sh requires every accepted flag to be documented in --help AND referenced by a test. 7) Both skills already declare rjq hard in requires.tsv, so a shipped helper may rely on it; nothing else may be added to that budget - python3 is banned outright, not even guarded.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:05:03Z",
-      "updated_at": "2026-09-01T16:05:03Z"
-    },
-    {
-      "id": "T81i",
-      "title": "How to verify this work, and what a green run does not prove",
-      "status": "open",
-      "priority": "normal",
-      "parent": "T81",
-      "detail": "Run in this order: bash -n on every edited script; shellcheck at the severity CI uses, which is --severity=warning and NOT --severity=error as AGENTS.md still says (T75) - and the five generated plan-*-lib.sh must be built and NAMED on the command line, because shellcheck resolves a source= directive only against files given to it, so omitting them reports every variable read from them as unassigned; then the targeted tests; then ./run-tests.sh (123 test files, about 6-7 minutes); then bash32-run-tests for the bash 3.2 floor, which matters because 'bash32 ./run-tests.sh' is NOT the same test - children resolve to whatever bash PATH offers, so the wrapper that prepends a 3.2 bin dir is the only honest form. Known-failing on a developer box and NOT caused by your change: test-runtime-dependencies (fails identically on unmodified master here, passes in CI) and test-npm-package (fails whenever the working tree has uncommitted shipped-file changes, and aborts early via npm pack's prepack hook when the per-target chat binaries are absent - build them with ./setup-dev-env.sh or the baseline comparison never runs at all). Mutation-test every assertion added: revert the fix, watch the test fail, restore. An assertion never seen to fail is not verified, and a passing test after a mutation that changed no file is not evidence.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:05:03Z",
-      "updated_at": "2026-09-01T16:05:03Z"
     },
     {
       "id": "T83",
@@ -990,19 +925,6 @@
       "updated_at": "2026-09-01T15:14:23Z"
     },
     {
-      "id": "T81",
-      "title": "The bug-report and todo skills ship no readers or writers, so an installed skill has rules as prose only",
-      "status": "partly",
-      "priority": "high",
-      "parent": null,
-      "detail": "Both SKILL.md files teach an agent to maintain the register with hand-written rjq recipes, while this repository's own agents use validated helpers that refuse a bad entry. The helper family lives in planning/scripts and is all MODE: DEV, so it reaches nobody: register-lib.sh, register-read.sh, register-rebuild.sh, bug-add.sh, bug-update.sh, todo-add.sh, todo-update.sh (671 lines). PR #13 is the evidence that prose rules do not hold - its BUGS.json carried an out-of-enum severity and three duplicate ids, written by authors who had the tools available. Each skill needs its own copies carrying only its own rules, because the two registers do not share them: bugs have a severity enum, a required reproduction, and evidence requirements on confirmed/fixed; tasks have none of those, a different status enum, a parent tree, and legitimately suffixed sub-task ids.",
-      "blocked_on": null,
-      "refs": [],
-      "note": "Both binaries shipped and green: src/bug-report (bugs) and src/todo (todo), each with its own rules as types, its own resolver, its own migrate and — for the queue — prune. T81a-T81d closed; T81e (retiring the shell family) is what is left.",
-      "created_at": "2026-09-01T15:57:41Z",
-      "updated_at": "2026-09-01T21:24:21Z"
-    },
-    {
       "id": "T1e",
       "title": "Decide what a converted test prints on success",
       "status": "decided",
@@ -1029,6 +951,19 @@
       "note": "NOT verified, and the reason: the chat skill runtime chain was never exercised (registration and install only), the overview renderer was checked for existence and registration only, and B18-B29 need the environments the agents that found them had. CI had never run on this branch when the review was done, which is why PR #3 exists.",
       "created_at": "2026-08-24T12:17:47Z",
       "updated_at": "2026-08-24T12:17:47Z"
+    },
+    {
+      "id": "T81",
+      "title": "The bug-report and todo skills ship no readers or writers, so an installed skill has rules as prose only",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Both SKILL.md files teach an agent to maintain the register with hand-written rjq recipes, while this repository's own agents use validated helpers that refuse a bad entry. The helper family lives in planning/scripts and is all MODE: DEV, so it reaches nobody: register-lib.sh, register-read.sh, register-rebuild.sh, bug-add.sh, bug-update.sh, todo-add.sh, todo-update.sh (671 lines). PR #13 is the evidence that prose rules do not hold - its BUGS.json carried an out-of-enum severity and three duplicate ids, written by authors who had the tools available. Each skill needs its own copies carrying only its own rules, because the two registers do not share them: bugs have a severity enum, a required reproduction, and evidence requirements on confirmed/fixed; tasks have none of those, a different status enum, a parent tree, and legitimately suffixed sub-task ids.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "All children closed: T81a-d and T81e done, T81f-i obsolete (their premise -- porting register-resolve.sh as a new standalone script -- never happened; the capability shipped as bugs resolve/todo resolve instead). Both binaries ship, green, and register-resolve.sh is retired.",
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-09T22:22:05Z"
     },
     {
       "id": "T90",
@@ -1181,6 +1116,19 @@
       "updated_at": "2026-08-24T10:33:41Z"
     },
     {
+      "id": "T81e",
+      "title": "Split the tests per skill and retire planning/scripts/register-resolve.sh in favour of the two shipped resolvers, so there is one way to do the job",
+      "status": "done",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Retire planning/scripts/register-resolve.sh and planning/tests/test-register-resolve.sh once the two shipped resolvers exist, so there is one way to do the job. planning/tests/test-register-helpers.sh currently exercises the whole family and needs splitting per skill. tests/test-register-soundness.sh stays where it is: it gates the repository's OWN two registers and is not part of either skill. Only 12 files reference the helper family by path, and most are the helpers themselves, so the rename surface is small: TODO.json, BUGS.json, the helpers, planning/tests/test-register-helpers.sh, tests/test-register-soundness.sh and planning/tests/fixtures/overview/npm-package-baseline.tsv.",
+      "blocked_on": "nothing — both shipped resolvers now exist",
+      "refs": [],
+      "note": "Merged PR #126 (a335d74d). planning/scripts/register-resolve.sh and its test retired; bugs resolve/todo resolve are the one way to do the job now.",
+      "created_at": "2026-09-01T15:57:41Z",
+      "updated_at": "2026-09-09T22:21:40Z"
+    },
+    {
       "id": "T92",
       "title": "bump the GitHub Actions we pin to their latest majors, which run on node24",
       "status": "done",
@@ -1284,6 +1232,19 @@
       "updated_at": "2026-09-08T20:00:10Z"
     },
     {
+      "id": "T81f",
+      "title": "Traps already paid for while building the resolver — read before touching this code",
+      "status": "obsolete",
+      "priority": "high",
+      "parent": "T81",
+      "detail": "1) jq/rjq rebinds '.' inside a pipe. 'select($t | has(.id))' asks whether $t has a key named by $t.id, not by the entry's id, so it silently matches nothing; and 'if ($map | has(.id))' silently renames nothing. Bind first: '(.id) as $i | ... has($i)'. This produced two separate silent no-ops in one afternoon, each of which looked like working code. 2) plan_register_temp_file records a path and PRINTS NOTHING, so 'x=$(plan_register_temp_file $(mktemp))' yields an empty path; assign first, register second. 3) A merge conflict cannot be faked: the tool reads git index stages :1 base, :2 ours, :3 theirs, so a fixture with hand-written conflict markers exercises none of it. Build real conflicts in throwaway repos. 4) An entry changed on ONE side only is not a divergence - the changed side wins, the way git merges a line one branch edited. Taking ours-first for every id silently DROPPED a theirs-only edit; that was a real data-loss bug my own test caught. A divergence is both sides changing a base entry differently. 5) from_entries keeps the LAST of a repeated id, so any id-keyed comparison under-reports a register that carries duplicates - check soundness separately. 6) test-flag-coverage.sh requires every accepted flag to appear in --help, which is why the confirmation is the CONFIRM environment variable and not a flag. Its 'every flag has a test' check uses grep -w, and '-' is a non-word character, so a flag that is a hyphen-prefix of another (--confirm inside --confirm-cascade) passes without a test of its own.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "The resolver was never built as a new standalone shipped script the way T81g/h/i anticipated -- the capability shipped as a 'resolve' subcommand inside the already-shipped bugs/todo binaries instead (src/bug-report/src/resolve.rs, src/todo/src/resolve.rs), predating this session. These jq/rjq traps applied to planning/scripts/register-resolve.sh, now retired (T81e, PR #126); nothing remains that needs them.",
+      "created_at": "2026-09-01T16:04:38Z",
+      "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
       "id": "T82",
       "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
       "status": "obsolete",
@@ -1295,6 +1256,45 @@
       "note": "PR #13 is closed (not merged); interactive-shell is already a fully registered, shipped skill (in SKILL_NAMES, has its own SKILL.md/binaries.tsv/bin, ships in installer/src/50-manifest.sh) via a different path than this TODO described. Its blocking bugs are already resolved: B103, B104, B105, B106 obsolete, B107 fixed. Nothing left to merge.",
       "created_at": "2026-09-01T16:11:53Z",
       "updated_at": "2026-09-09T21:46:29Z"
+    },
+    {
+      "id": "T81g",
+      "title": "What the resolver already does, so it is ported rather than redesigned",
+      "status": "obsolete",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "planning/scripts/register-resolve.sh is working, mutation-tested and bash-3.2 clean; its test is planning/tests/test-register-resolve.sh (7 sections). Behaviour worth keeping verbatim: reads the three index stages rather than branch names, so it works mid-conflict with no checkout; --check exits 1 on a conflicted register and 0 on a clean one, for use in a pre-push or CI hook; lists each collision with BOTH sides' titles plus a suggested free id taken from the high-water mark of both sides; refuses when a decision is missing, naming which; reports what each side changed since the merge base, separating 'modified on one side ONLY - read these keys' from 'modified identically on both sides, so the base is simply older' so nothing is falsely suspected; refuses a divergence with an explanation of why renaming would not help; checks EACH SIDE for soundness before asking for decisions, so an already-unsound branch is reported as that branch's fault rather than blamed on the decisions; follows renames into parent and into blocked_on when its whole value is the id; REPORTS prose mentions and never rewrites them, because an id inside a sentence may be a prefix of a longer id or belong to the other register; prints the resolved register to stdout and the confirmation to stderr; writes nothing until CONFIRM=<hash> is handed back, and the hash is identical under bash 5.3 and 3.2. Verified against the real conflict in PR #13, where it correctly refused because that branch's own register is unsound (B105).",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Moot: no new script was ported: real jq builtin.jq-equivalent behaviour (index-stage reading, --check-equivalent via clean/conflicted exit codes, collision+divergence classification, since-base reporting, rename-following, prose-mention reporting, confirm-hash gating) was independently verified present in bugs/todo's own resolve.rs during T81e (PR #126), which is what actually retired register-resolve.sh. The one gap found -- no standalone --check subcommand -- was confirmed to have no caller anywhere in the repo, so it cost nothing.",
+      "created_at": "2026-09-01T16:04:38Z",
+      "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
+      "id": "T81h",
+      "title": "Packaging and registration rules a new shipped script must satisfy",
+      "status": "obsolete",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "1) Every file declares MODE: PROD (the user receives it) or MODE: DEV (only a maintainer does); an unmarked tracked file fails tests/test-mode-markers.sh. Syntax follows the format: '# MODE: X' in shell, '<!-- MODE: X -->' in Markdown, and AFTER any YAML frontmatter. No comment line may BEGIN with the marker keyword or the generators strip it. 2) install.sh is generated - never edit it; edit installer/src/NN-*.sh and run ./installer/build.sh, which the installer-build CI job verifies byte-for-byte. 3) A new file under planning/ needs PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv rows too, compared byte-for-byte so ROW ORDER matters; a file under bug-report/ or todo/ needs only the skill_files() arm, because those two registries are planning-only. 4) package.json's files array ships whole skill directories, and npm's rule is that a path included that way CANNOT be excluded by .npmignore or .gitignore - that is how untracked local notes nearly got published (B100), and it is why a register inside a skill directory would ship (B107). 5) After adding a shipped file, planning/tests/fixtures/overview/npm-package-baseline.tsv must be regenerated: the test compares npm pack output against it byte-size by byte-size. 6) test-flag-coverage.sh requires every accepted flag to be documented in --help AND referenced by a test. 7) Both skills already declare rjq hard in requires.tsv, so a shipped helper may rely on it; nothing else may be added to that budget - python3 is banned outright, not even guarded.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Moot: no new file was shipped, so there was no packaging/manifest surface to satisfy. bugs and todo already carry their own complete manifests from when they first shipped.",
+      "created_at": "2026-09-01T16:05:03Z",
+      "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
+      "id": "T81i",
+      "title": "How to verify this work, and what a green run does not prove",
+      "status": "obsolete",
+      "priority": "normal",
+      "parent": "T81",
+      "detail": "Run in this order: bash -n on every edited script; shellcheck at the severity CI uses, which is --severity=warning and NOT --severity=error as AGENTS.md still says (T75) - and the five generated plan-*-lib.sh must be built and NAMED on the command line, because shellcheck resolves a source= directive only against files given to it, so omitting them reports every variable read from them as unassigned; then the targeted tests; then ./run-tests.sh (123 test files, about 6-7 minutes); then bash32-run-tests for the bash 3.2 floor, which matters because 'bash32 ./run-tests.sh' is NOT the same test - children resolve to whatever bash PATH offers, so the wrapper that prepends a 3.2 bin dir is the only honest form. Known-failing on a developer box and NOT caused by your change: test-runtime-dependencies (fails identically on unmodified master here, passes in CI) and test-npm-package (fails whenever the working tree has uncommitted shipped-file changes, and aborts early via npm pack's prepack hook when the per-target chat binaries are absent - build them with ./setup-dev-env.sh or the baseline comparison never runs at all). Mutation-test every assertion added: revert the fix, watch the test fail, restore. An assertion never seen to fail is not verified, and a passing test after a mutation that changed no file is not evidence.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Moot as a checklist for a port that never happened this way; its content is generic verification practice already followed as a matter of course (bash -n, shellcheck, targeted tests, full ./run-tests.sh, mutation-testing new assertions) rather than anything specific to unbuilt work.",
+      "created_at": "2026-09-01T16:05:03Z",
+      "updated_at": "2026-09-09T22:22:05Z"
     }
   ]
 }
