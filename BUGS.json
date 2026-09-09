@@ -1726,7 +1726,7 @@
     {
       "id": "B112",
       "title": "A fix-key secret evicted from the temp dir makes every minted key and recorded claim permanently unverifiable, so the plan can never be approved",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1741,12 +1741,12 @@
         "planning/SKILL.md",
         "planning/MAINTAINER.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/scripts/verify-fix-keys.sh: the 'session secret missing' refusal now names the likely cause (ordinary temp-directory eviction, not approval-time invalidation) and the recovery command (mint-fix-keys.sh), with its cost spelled out. planning/SKILL.md documents the same.",
+      "verification": "Merged to master as 159a198e (PR #121, squash-merged). New assertions in test-fix-keys.sh confirm the old misleading wording is gone and both the cause and recovery command are named. CI green on ubuntu-latest/macos-latest/bash-3.2.",
       "found_by": "coordinator session resuming the plan-overview-rebuild plan; hit twice, first on the 63 keys of cycles 1 to 7 and again on cycle 8's fresh mint across a pause of a few hours",
       "notes": "Unnoticed because every test mints and verifies inside one run, so the secret always exists; nothing exercises a verify whose secret is gone. The error text makes it worse by naming approval-time invalidation as the cause, which is the one documented way the dir disappears, so an ordinary temp eviction reads as a protocol event. The practical consequence for anyone using the gate today is that mint, claim and approve must all complete in one sitting. Recovery is mint-fix-keys.sh, which mints a new session and rewrites the keys, at the cost of every recorded claim and the audit trail of which session claimed which key. The reproduction above is the deliberate form of an eviction that was twice observed accidentally; the observed text and exit code are quoted from those two runs, not from running that command, because deleting a live session secret would break whatever fixer is mid-claim.",
       "created_at": "2026-09-02T19:06:39Z",
-      "updated_at": "2026-09-02T19:07:06Z"
+      "updated_at": "2026-09-09T19:48:20Z"
     },
     {
       "id": "B113",
