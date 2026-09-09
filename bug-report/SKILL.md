@@ -109,6 +109,24 @@ It prints the id it allocated. `--title`, `--reproduce`, `--observed` and
 `--expected` are required and the command refuses without them: a defect nobody
 can reproduce is a rumour, and one with no stated expectation is an opinion.
 
+### Prose from a file, not the shell
+
+`--reproduce`, `--observed`, `--expected`, `--mechanism`, `--fix` and
+`--verification` each have a `-file` counterpart — `--reproduce-file` and so
+on — that reads the named file (or stdin, for `-`) verbatim and uses it as
+that flag's value:
+
+```sh
+bugs update B12 --status fixed --fix-file fix.txt --verification-file -   <<'EOF'
+Long prose with quotes, backticks, and $variables that would otherwise
+need shell-quoting to survive.
+EOF
+```
+
+Giving both a flag and its `-file` counterpart is refused, naming both: only
+one can be the source of the value. This is for prose long or strange enough
+that shell quoting would mangle it — a short `--fix` is still simpler.
+
 `bugs` is a single prebuilt binary that ships with this skill. It needs no shell
 and no other tool — not `rjq`, not `date` — so it behaves the same under bash,
 zsh or anything else, and the register can be written on a machine that has
