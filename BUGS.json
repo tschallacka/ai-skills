@@ -2130,7 +2130,7 @@
     {
       "id": "B162",
       "title": "a GitHub-tarball install cannot install planning: REVIEWER.md is generated, so it is never in the archive",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2139,12 +2139,12 @@
       "expected": "the download path installs every skill it offers, or refuses before touching the target when a promised file cannot exist",
       "mechanism": "planning/REVIEWER.md is gitignored and produced by planning/scripts/generate-reviewer.sh, so a git archive tarball never contains it, while install.sh's manifest lists it as a file to copy. download_source() takes the local checkout whenever install.sh sits beside planning/SKILL.md, so every local install has the generated file already present and the defect is invisible there -- only the tarball path can reach it. Either the installer generates it after extraction, or the manifest marks it optional, or it is committed.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/45-source.sh: download_source()'s tarball branch now generates the two gitignored planning artifacts (REVIEWER.md and the five plan-*-lib.sh files) via build-plan-libs.sh and generate-reviewer.sh when they're missing after extraction, since a git-archive tarball never carries gitignored files.",
+      "verification": "Merged to master as bf81add8 (PR #118, squash-merged); CI green on ubuntu-latest/macos-latest/bash-3.2 portability floor. Verified locally against a real 'git archive HEAD' extraction (no gitignored files present): both generators succeed and install_skill then successfully places REVIEWER.md.",
       "found_by": "Tschallacka asked for a fresh install to prove the GitHub download path; found on the first run",
       "notes": null,
       "created_at": "2026-09-04T12:05:37Z",
-      "updated_at": "2026-09-04T12:05:37Z"
+      "updated_at": "2026-09-09T18:32:54Z"
     },
     {
       "id": "B167",
