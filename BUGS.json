@@ -3170,7 +3170,7 @@
     {
       "id": "B312",
       "title": "a register-dedup commit can silently reopen or lose an entry, and at least one confirmed loss is unaccounted for",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3183,12 +3183,12 @@
         "planning/scripts/register-resolve.sh",
         "src/bug-report/src/resolve.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/bug-report/src/dedupe.rs (new): a 'bugs dedupe' subcommand that collapses duplicate ids a rebase left behind, preferring a closed status over an open one (a closure carries its own evidence, an open entry never does), and refusing to write anything when two entries disagree any other way. Documented in bug-report/SKILL.md.",
+      "verification": "Merged to master as 4b360217 (PR #119, squash-merged). 4 new unit tests: closed-beats-open regardless of array order, two differing closed statuses refused, identical duplicates collapse silently, a lone non-duplicate passes through untouched. Manually verified against synthetic fixtures for both the resolvable and ambiguous-refusal paths. cargo test/clippy/fmt and pre-push-check all clean; CI green on ubuntu-latest/macos-latest/bash-3.2 plus the full cross-target Rust build matrix.",
       "found_by": "Remote worker (bridge:session_01KC83KhD4yu3j3AUGe3qeoi), 2026-09-09 register-hygiene sweep; relayed via the ai-skills-relay session",
       "notes": "B95 itself is already re-closed correctly (see bugs show B95) - this entry is about the DEDUP MECHANISM's own fragility, not about B95 as a defect, filed separately so the register-integrity gap does not get lost once B95 looks fine again. The remote worker flagged 'if you see other B9x-range entries acting weird, that dedup commit may have clobbered more than one' as a live suspicion, not yet checked systematically. Also worth checking: whether register-resolve.sh's merge logic has an ordering rule for status (fixed/closed should always beat confirmed/reported when deduplicating the same defect).",
       "created_at": "2026-09-09T13:34:27Z",
-      "updated_at": "2026-09-09T13:34:33Z"
+      "updated_at": "2026-09-09T18:54:20Z"
     },
     {
       "id": "B14",
