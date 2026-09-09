@@ -244,6 +244,27 @@
       "updated_at": "2026-09-07T11:32:16Z"
     },
     {
+      "id": "B254",
+      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
+      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
+      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
+      "mechanism": "send issues FETCH <chan> 0, takes the channel's HIGHEST id from the reply and saves that as this agent's cursor (src/chat-client-rs/src/lib.rs, the FETCH block at the end of send). The id it saves is the channel maximum, not the id of the message just sent, so every send marks everything any peer posted since the last read as already seen. src/chat-mcp copies the pattern, so the adapter loses messages the same way.",
+      "surfaces": [
+        "src/chat-client-rs/src/main.rs"
+      ],
+      "fix": "send (both the standalone path and serve_send, the T107 owner-forwarded path) no longer saves any cursor at all - a cursor is a reader's position, and sending is not reading, so nothing advances it past a peer's unread message. Unconditional in both code paths, not just when a tail happens to own the connection, so this holds regardless of platform.",
+      "verification": "60a9e04a4cb15613d3be69b4a875f06a4e79c15f (\"one client session owns the connection: the tail serves the other verbs\"), same commit as B263/B283. chat/tests/test-chat.sh's two behavior-encoding assertions were updated to the new contract (send does not move the cursor; two agents sending to the same channel do not see each other's message counted against their own cursor). Full suite passes on current master. The register's own note flagged Windows' two-writer concern (T111) as a reason not to self-close from the fix comment alone, but that concern was about cursor-write races between processes; here send performs no cursor write at all in either code path, so there is nothing left to race on for this specific defect.",
+      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
+      "notes": "Rediscovered independently by t90-chat-mcp and filed as B288, now closed as a duplicate of this entry. Its evidence is stronger than the original and is the reason this is now blocking rather than major: an instruction from Tschallacka in #ai-skills was never read, because the agent sent a message after it arrived. The line sat in that agent's tail log the whole time and was permanently invisible to read.\n\nThe loss is silent in both directions -- the sender sees no gap and the writer sees a delivered line -- and it is worst for an instruction carrying no mention, which the wake guard also does not fire on. Two independent mechanisms have to fail for a message to be seen, and this defeats the one that was meant to be reliable. Attempted and reverted by aiskills, with what the attempt learned.\n\nThe fix itself is one line of deletion -- send simply stops saving a cursor, because a watermark over a shared channel cannot skip your own id without skipping the ids that interleave with it. But TWO tests encode the current behaviour, not one: chat/tests/test-chat.sh asserts the cursor advances to 2 after a send, and the per-agent isolation case uses a send to advance agent-a's #isoc cursor and asserts the result. A behaviour the suite states twice is a decision somebody made, so changing it is a decision, not a repair, and it does not belong inside an unrelated PR.\n\nWhat the fix needs before it lands: a ruling on whether a send advances the reader's cursor at all. If it does not, both assertions change and a caller sees its own message in its next read -- which the local echo already printed, so the cost is a duplicate line rather than lost information. Recommended, because the alternative is what this entry records: losing a peer's message silently. SEVERITY: this entry should read blocking, not major. aiskills ran `bugs update B254 --severity blocking`, the tool reported success and dropped the field (B289). Left as filed rather than hand-editing BUGS.json, since a hand-written register is what check exists to detect. Read this as blocking until B289 is fixed and the field can be set. T107 (commit 8e4b52e0) removes the structural cause on unix: with the tail owning the connection there is exactly one process that can write the channel cursor, so a sender and a reader can no longer disagree about it. Not closed from here -- that is a claim about this entry's own reproduction, which needs running, and the Windows arm still has two writers (T111).",
+      "created_at": "2026-09-07T14:32:45Z",
+      "updated_at": "2026-09-09T16:37:48Z"
+    },
+    {
       "id": "B278",
       "title": "folding the nick into the session key makes a saved session unreachable to any call that omits --nick",
       "status": "fixed",
@@ -417,27 +438,6 @@
       "notes": "This is an app-agnostic inference problem. Any fix must remain a heuristic and expose confidence rather than asserting mc semantics.",
       "created_at": "2026-09-01T18:00:00Z",
       "updated_at": "2026-09-01T18:20:00Z"
-    },
-    {
-      "id": "B254",
-      "title": "send advances the read cursor to the channel's newest id, so messages that arrived while you were not looking are marked seen",
-      "status": "confirmed",
-      "severity": "major",
-      "priority": "urgent",
-      "parent": null,
-      "reproduce": "As nick A: have another nick post two messages. Then, without reading them, run chat-client-rs send --chan '#c' --nick A --text hi, and then chat-client-rs read --chan '#c' --nick A.",
-      "observed": "The read returns nothing. The two messages were never shown to A and are already behind its cursor. Observed live on 2026-09-07: a peer agent posted a report, my own send moved the cursor past it, and the follow-up read correctly reported nothing new - so the report was only recoverable from a background tail's captured output.",
-      "expected": "A send moves the SENT message's id into the cursor at most, or leaves the read cursor alone entirely. Sending is not reading, and it must not mark another nick's message as seen. The two operations share one cursor today and only one of them shows the caller anything.",
-      "mechanism": "send issues FETCH <chan> 0, takes the channel's HIGHEST id from the reply and saves that as this agent's cursor (src/chat-client-rs/src/lib.rs, the FETCH block at the end of send). The id it saves is the channel maximum, not the id of the message just sent, so every send marks everything any peer posted since the last read as already seen. src/chat-mcp copies the pattern, so the adapter loses messages the same way.",
-      "surfaces": [
-        "src/chat-client-rs/src/main.rs"
-      ],
-      "fix": null,
-      "verification": null,
-      "found_by": "hit twice in one session while coordinating with a peer agent on the bus, 2026-09-07",
-      "notes": "Rediscovered independently by t90-chat-mcp and filed as B288, now closed as a duplicate of this entry. Its evidence is stronger than the original and is the reason this is now blocking rather than major: an instruction from Tschallacka in #ai-skills was never read, because the agent sent a message after it arrived. The line sat in that agent's tail log the whole time and was permanently invisible to read.\n\nThe loss is silent in both directions -- the sender sees no gap and the writer sees a delivered line -- and it is worst for an instruction carrying no mention, which the wake guard also does not fire on. Two independent mechanisms have to fail for a message to be seen, and this defeats the one that was meant to be reliable. Attempted and reverted by aiskills, with what the attempt learned.\n\nThe fix itself is one line of deletion -- send simply stops saving a cursor, because a watermark over a shared channel cannot skip your own id without skipping the ids that interleave with it. But TWO tests encode the current behaviour, not one: chat/tests/test-chat.sh asserts the cursor advances to 2 after a send, and the per-agent isolation case uses a send to advance agent-a's #isoc cursor and asserts the result. A behaviour the suite states twice is a decision somebody made, so changing it is a decision, not a repair, and it does not belong inside an unrelated PR.\n\nWhat the fix needs before it lands: a ruling on whether a send advances the reader's cursor at all. If it does not, both assertions change and a caller sees its own message in its next read -- which the local echo already printed, so the cost is a duplicate line rather than lost information. Recommended, because the alternative is what this entry records: losing a peer's message silently. SEVERITY: this entry should read blocking, not major. aiskills ran `bugs update B254 --severity blocking`, the tool reported success and dropped the field (B289). Left as filed rather than hand-editing BUGS.json, since a hand-written register is what check exists to detect. Read this as blocking until B289 is fixed and the field can be set. T107 (commit 8e4b52e0) removes the structural cause on unix: with the tail owning the connection there is exactly one process that can write the channel cursor, so a sender and a reader can no longer disagree about it. Not closed from here -- that is a claim about this entry's own reproduction, which needs running, and the Windows arm still has two writers (T111).",
-      "created_at": "2026-09-07T14:32:45Z",
-      "updated_at": "2026-09-08T13:58:50Z"
     },
     {
       "id": "B283",
