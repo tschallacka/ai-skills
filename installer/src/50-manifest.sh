@@ -395,6 +395,7 @@ tests/test-flag-coverage.sh
 tests/test-flag-form-equivalence.sh
 tests/test-function-length-ratchet.sh
 tests/test-goal-testing-row.sh
+tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
 tests/test-installer-any-of.sh

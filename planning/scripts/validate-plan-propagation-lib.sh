@@ -15,6 +15,7 @@
 #   plan_validate_propagation_leaves   (d) unverified graph leaves
 #   plan_validate_propagation_roster   (e) §9.x roster vs inventory
 #   plan_validate_propagation_freshness (f) code moving after the last record
+#   plan_validate_propagation_handoff  (g) a handoff claim with no ordering edge
 # (b) was removed by report 7 and is documented at its old site below.
 
 # shellcheck disable=SC2154
@@ -338,6 +339,63 @@ plan_validate_propagation_freshness() {
     done < <(plan_map_keys unit_type)
     [ "$drift" -le 3 ] || warn "$drift unit targets changed after the last plan record; bring the plan back to the world"
     return 0
+}
+
+# (g) A step's Handoff prose must not promise a later unit something the
+#     dependency graph does not order: a consumer that reads the Handoff as a
+#     licence to run early needs an edge, not a sentence. Paragraph buffering
+#     matches validate-plan-stale-lib.sh's stale_scan_doc: a history marker
+#     (stale_markers, sourced before this file) in one paragraph must not
+#     exempt an unfixed sibling under the same heading, and a corrective
+#     paragraph restating an old, disproven claim ("an earlier version of this
+#     paragraph said W82...") is exactly the shape that marker exists to skip.
+plan_handoff_units() {
+    local file="$1"
+    awk -v markers="$stale_markers" '
+        function flush() {
+            if (in_handoff && flat != "" && tolower(flat) !~ markers) {
+                print flat
+            }
+            flat = ""
+        }
+        /^## Handoff$/ { in_handoff = 1; next }
+        /^## / { flush(); in_handoff = 0; next }
+        !in_handoff { next }
+        /^[[:space:]]*$/ { flush(); next }
+        { flat = (flat == "" ? $0 : flat " " $0) }
+        END { flush() }
+    ' "$file" | tr -c 'A-Za-z0-9_' '\n' | grep -xE 'W[0-9][0-9]+' | sort -u
+}
+
+plan_validate_propagation_handoff() {
+    for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
+        plan_map_load unit_goal "$id" || plan_map_value=""
+        u_goal="$plan_map_value"
+        plan_map_load unit_step "$id" || plan_map_value=""
+        u_step="$plan_map_value"
+        step_file="$plan_dir/$u_goal/steps/$u_step.md"
+        [ -f "$step_file" ] || continue
+        named_units="$(plan_handoff_units "$step_file")" || true
+        for named in $named_units; do
+            [ "$named" = "$id" ] && continue
+            # A WNN outside this plan's inventory is a cross-plan reference,
+            # correct prose, not a claim this graph could ever order.
+            if ! plan_map_has unit_type "$named"; then
+                continue
+            fi
+            plan_map_clear dep_seen
+            plan_map_clear dep_failed
+            if dep_reaches "$named" "$id"; then
+                : # $named depends on $id, so $id already runs first -- exactly
+                  # what a handoff naming a LATER unit claims
+            elif dep_reaches "$id" "$named"; then
+                : # $id depends on $named: the reverse of the usual handoff
+                  # direction, but still a real edge, not an unordered claim
+            else
+                warn "$id handoff names $named, but neither has a dependency path to the other; add the ordering edge or correct the handoff"
+            fi
+        done
+    done
 }
 
 plan_validate_propagation_roster() {

@@ -1106,7 +1106,13 @@ plan's `commands.json` with its "when" context (and FAILs under
 by default. It flags a verification unit that grades a sibling with no
 dependency path to it (honouring deliberate reverse/baseline orderings and
 transitive ordering), a graph leaf in a goal that owns a verification unit, and
-a goal whose §9.x roster does not match the units the inventory assigns to it.
+a goal whose §9.x roster does not match the units the inventory assigns to it,
+and a step's `## Handoff` paragraph naming a later unit with no dependency path
+in either direction — a handoff is a licence for that unit to run early, and a
+promise the graph does not order is exactly what lets it run too early. A
+paragraph that also records a history marker (the same vocabulary `--stale`
+checks) is exempt, since a corrective paragraph legitimately restates an old,
+disproven claim rather than making a new ordering promise.
 It also WARNs (never blocks) when a unit's instructions mention a project
 symbol (one whose namespace root or path prefix the plan edits) that no
 inventory row owns — this rule cannot distinguish "edit this" from "this is
