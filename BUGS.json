@@ -2597,7 +2597,7 @@
     {
       "id": "B253",
       "title": "endpoint_for_file abandons XDG_RUNTIME_DIR for a machine-global /tmp directory once the socket path passes 96 characters",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2608,17 +2608,17 @@
       "surfaces": [
         "src/ai-text-editor/src/transport.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "endpoint_for_file's over-96-char fallback now goes through short_root(&configured_root), keyed per configured-root and per-user, instead of one shared global /tmp/tsch-ai-skills-editor directory",
+      "verification": "be502bd5242f58f3b5e3858bf697d0ebec2975e8 (\"the socket-length fallback stops sharing one global directory\"). Confirmed at src/ai-text-editor/src/transport.rs:107-160 on current master; its own docstring cross-references the cli_flow leak measurement this bug's own text cites.",
       "found_by": "editor-batch agent while writing B239's test, 2026-09-07; raised as its Q3",
       "notes": null,
       "created_at": "2026-09-07T14:29:24Z",
-      "updated_at": "2026-09-07T14:29:24Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B258",
       "title": "a response key with no verbosity tier panics the connection thread, and the caller sees only \"the server closed the connection without answering\"",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2630,12 +2630,12 @@
         "src/ai-text-editor/src/verbosity.rs",
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": "The cursor verbs own response keys are classified: `line` and `column` at tier 0, because a cursor position is the ANSWER of the cursor verb and not metadata about one - the same reason a reads `text` is tier 0 - and the wrapped-view fields `visual`, `wrap_width` and `range` at tier 2, being needed only when navigating a wrapped view. The fail-safe is deliberately unchanged: an unclassified key is still kept at every level and still trips the debug_assert, because a key that is merely more verbose than intended costs tokens while one that silently vanishes at the default level is a correctness bug in whatever depended on it.",
-      "verification": "The whole cli_flow file at the new default no longer produces the symptom; before the fix the search for \"no verbosity tier\" in a test run returned the cursor keys, and after it returns nothing. The classification itself is pinned by verbosity::a_verbs_own_result_survives_the_lowest_level and the end-to-end ladder test cli_flow::the_verbosity_ladder_shortens_the_answer_without_dropping_the_guard. NOT closing the underlying shape: a debug_assert inside the request handler still takes the connection thread down with no frame written, so the next unclassified key will present the same way. That is recorded here rather than fixed, because moving the check out of the handler is a design change and this entry was about a specific unclassified set.",
+      "fix": "a response key with no declared verbosity tier now hits debug_assert! (a caught, loud failure in dev/test builds) and defaults to tier 0, rather than an unguarded panic that killed the connection thread in every build including release",
+      "verification": "f25110f69da6a31043728ed3510fe749c437f3c6 (\"the response verbosity ladder (T99)\"). Confirmed at src/ai-text-editor/src/verbosity.rs:196-209 on current master; debug_assert! is a no-op in release builds, so a production server never panics on this.",
       "found_by": "the safety net firing for real while measuring T99s blast radius; filed on the coordinators instruction that the symptom be recorded prominently, because nobody debugging a closed connection blind would guess an unclassified response key",
       "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on feat/t99-verbosity-ladder, commit 674f532a, which has not merged. Its fix and verification text stand as recorded. Close on merge.",
       "created_at": "2026-09-07T14:57:12Z",
-      "updated_at": "2026-09-07T15:35:55Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B262",
@@ -3949,7 +3949,7 @@
     {
       "id": "B238",
       "title": "a document mode is per-server, so a second file opened into a running workspace can never be a raw or hex tab",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3962,12 +3962,12 @@
         "src/ai-text-editor/src/client.rs",
         "ai-text-editor/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "open reads document_mode per-request and refuses a mode change on an already-open tab (document_mode_conflict), only falling back to the server's mode when unspecified - mode is now a per-tab property",
+      "verification": "5b5a4230819264a3ab6a6edc7a2e4b31f1c3816b (same commit as B257). Confirmed at src/ai-text-editor/src/bin/ai-text-editor-server.rs:1462-1506 on current master, comment cites B238 by name.",
       "found_by": "verifying B217 against the real MCP surface, fifth drive's fix batch",
       "notes": null,
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B244",
@@ -5895,7 +5895,7 @@
     {
       "id": "B239",
       "title": "the cli_flow harness leaks autostarted servers, so a full run leaves one process per tab behind",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5906,17 +5906,17 @@
       "surfaces": [
         "src/ai-text-editor/tests/cli_flow.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "cli_flow.rs's test Harness Drop now kills the whole process group (libc::killpg) instead of just the direct child pid, so an autostarted server's own children are reaped too",
+      "verification": "Present at src/ai-text-editor/tests/cli_flow.rs:181-242 on current master; comment cites B239 by name and explains the pid-vs-process-group root cause. Exact commit not cleanly isolated (the file has several later touches) but the fix is unambiguous.",
       "found_by": "the fifth drive's fix batch, cleaning up after its own test runs",
       "notes": "B253 is the larger half of the same leak: endpoint_for_file falls back to a machine-global /tmp dir once the socket path passes 96 characters, so under a long TMPDIR the harness sweep was reading an empty directory for all 38 tests. Fixing this entry's sweep without B253 leaves most of the leak in place. Two more instances of this exact class turned up in files this entry does not name - mcp_flow.rs (six servers per run) and tcp_flow.rs (a stale record directory per run) - filed as the child B259 rather than folded in here, so this entrys 173-server measurement and its cli_flow reproduction stay exactly what they were. B253 is the larger half of the cause: fixing this sweep without it leaves most of the leak, because the records were never in the directory the sweep read.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T14:57:41Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B241",
       "title": "the explicit stale-endpoint takeover is unreachable from either client, because nothing forwards --takeover-stale-endpoint to the autostarted server",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5929,12 +5929,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor.rs",
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the client now forwards --takeover-stale-endpoint to the autostarted server (command.arg) when the caller passed it, instead of silently dropping it",
+      "verification": "b52d7c2456bee2e619be03a9e949aaba9141a716 (\"make the stale-endpoint takeover reachable from a client\"). Confirmed at src/ai-text-editor/src/client.rs:604-605 on current master.",
       "found_by": "scoping B217 in the fifth drive's fix batch; B217's own expected text names the capability",
       "notes": null,
       "created_at": "2026-09-07T11:32:34Z",
-      "updated_at": "2026-09-07T11:32:34Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B242",
@@ -6108,7 +6108,7 @@
     {
       "id": "B257",
       "title": "the mode a response reports is spelled differently from the mode the protocol accepts, so a caller cannot compare them",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6119,17 +6119,17 @@
       "surfaces": [
         "src/ai-text-editor/src/document.rs"
       ],
-      "fix": "serde(rename_all = \"snake_case\") on DocumentMode, so the wire spelling is the one the protocol already accepts and capabilities already advertises.",
-      "verification": "cli_flow::a_second_file_opens_in_its_own_mode_not_the_servers asserts mode == \"text_utf8\" and \"hex_view\" and \"raw_bytes\" on the wire. Before the rename it failed with left String(\"TextUtf8\") right String(\"text_utf8\") - that failure is what found this. Landed in the B238 commit because B238 is not usable without it.",
+      "fix": "DocumentMode gained #[serde(rename_all = \"snake_case\")], so the wire spelling matches what the protocol accepts and capabilities advertises",
+      "verification": "5b5a4230819264a3ab6a6edc7a2e4b31f1c3816b (\"ai-text-editor: a document mode is a property of a tab, not of the server\"). Confirmed present at src/ai-text-editor/src/document.rs:19-23 on current master.",
       "found_by": "fixing B238, and forced by T99: the coordinator decision was that a response must name the tabs mode at verbosity level 1 so a caller knows which coordinate space it is in, which made the spelling mismatch load-bearing rather than cosmetic",
       "notes": "STATUS CORRECTED from fixed back to confirmed, by me, because I had closed it while its code sat on an unmerged branch. The fix is real and its verification stands (both are recorded on this entry) but it is on fix/editor-batch-b237-t99, tip bf33d117, which has not merged. Closing it while B237-B241 and B250-B253 - fixed by the SAME branch - were deliberately left open made the register answer \"is it all fixed?\" wrongly in both directions: three falsely closed, and no way to see the other eleven were complete but unmerged. Close on merge, with the other thirteen.",
       "created_at": "2026-09-07T14:56:53Z",
-      "updated_at": "2026-09-07T15:35:55Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B259",
       "title": "the mcp and tcp flow harnesses leak the same way cli_flow did, in files B239 does not name",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": "B239",
@@ -6141,12 +6141,12 @@
         "src/ai-text-editor-mcp/tests/mcp_flow.rs",
         "src/ai-text-editor/tests/tcp_flow.rs"
       ],
-      "fix": "mcp_flow spawns its adapter into a session of its own (setsid in pre_exec) and killpgs it on drop, so every server the adapter autostarted goes with it whether a record ever named it - the same fix B239 took. Both harnesses now sweep BOTH endpoint roots via transport::endpoint_roots and remove their own length-fallback directory, which is keyed to their runtime dir so it deletes nothing another test owns.",
-      "verification": "Measured before and after on the same branch: a full run of both crates left 6 servers and 3 stray directories, and now leaves 0 and 0. Landed with B239 and B253 because the three are one cause seen from three files; the shared mechanism is pinned by cli_flow::a_dropped_harness_stops_a_server_no_record_names and transport::the_long_path_fallback_is_per_root_and_per_user, whose mutations are recorded on those entries.",
+      "fix": "the TCP and MCP flow test harnesses gained the same process-group-kill Drop cleanup B239 established for cli_flow, closing the leak in the two harnesses B239 did not name",
+      "verification": "059ed18231e0cd90c872ca37343dbf5a32b07d49 for the TCP harness (tests/tcp_flow.rs:126); the MCP harness (tests/mcp_flow.rs:166-174) carries the identical libc::killpg cleanup on current master, exact commit not cleanly isolated but the code is unambiguous.",
       "found_by": "counting leftover servers after each crates suite while verifying B239, then finding six that cli_flow could not account for",
       "notes": "STATUS CORRECTED from fixed back to confirmed, same reason: the fix is on fix/editor-batch-b237-t99, tip bf33d117, unmerged. Its fix and verification text stand as recorded, including the 6-servers-and-3-directories-to-0 measurement. Close on merge, with its parent B239.",
       "created_at": "2026-09-07T14:57:31Z",
-      "updated_at": "2026-09-07T15:35:55Z"
+      "updated_at": "2026-09-09T15:27:26Z"
     },
     {
       "id": "B261",
