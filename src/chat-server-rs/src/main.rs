@@ -1514,6 +1514,23 @@ fn main() {
         println!("  Start the TLS chat server on PORT or its remembered port.");
         return;
     }
+    if args.iter().any(|arg| arg == "--version") {
+        println!("chat-server-rs {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    // B123: a parse failure on argv[1] (a typo'd flag, "--prot 9999") used to
+    // read the same as no argument at all, so the server started anyway and
+    // silently bound whatever port a probe's own argument mistake happened to
+    // leave available. A malformed argument is refused, never treated as one.
+    if let Some(raw) = args.get(1) {
+        if raw.parse::<u16>().is_err() {
+            eprintln!(
+                "chat-server-rs: '{}' is not a valid port; usage: chat-server-rs [PORT]",
+                raw
+            );
+            std::process::exit(64);
+        }
+    }
     let bind = std::env::var("AI_CHAT_BIND").unwrap_or_else(|_| "127.0.0.1".into());
     let server_name = std::env::var("CHAT_SERVER_NAME").unwrap_or_else(|_| "server".into());
 
