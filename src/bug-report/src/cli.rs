@@ -17,6 +17,7 @@
 //! the pin prevents.
 
 use std::collections::HashMap;
+use std::io::Read;
 
 pub struct Args {
     pub command: String,
@@ -88,6 +89,32 @@ impl Args {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Resolve `<name>-file` into `<name>`: read the named file, or stdin for
+    /// `-`, and store its bytes verbatim. Refused if `<name>` is also set --
+    /// only one may be the source.
+    pub fn resolve_file_flag(&mut self, name: &str, file_flag: &str) -> Result<(), String> {
+        let Some(path) = self.flags.remove(file_flag) else {
+            return Ok(());
+        };
+        if self.flags.contains_key(name) {
+            return Err(format!(
+                "--{name} and --{file_flag} are mutually exclusive; use one"
+            ));
+        }
+        let text = if path == "-" {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|error| format!("cannot read stdin for --{file_flag}: {error}"))?;
+            buf
+        } else {
+            std::fs::read_to_string(&path)
+                .map_err(|error| format!("cannot read {path} for --{file_flag}: {error}"))?
+        };
+        self.flags.insert(name.to_string(), text);
+        Ok(())
     }
 }
 
@@ -162,5 +189,57 @@ mod tests {
         // The kebab-case spelling is the accepted one, since serde defines it.
         assert!(enum_value::<Colour>("sea-green", "--colour", allowed).is_ok());
         assert!(enum_value::<Colour>("SeaGreen", "--colour", allowed).is_err());
+    }
+
+    #[test]
+    fn a_file_flag_reads_the_file_verbatim() {
+        let dir = std::env::temp_dir().join(format!("cli-file-flag-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.txt");
+        std::fs::write(&path, "it's a `note` with shell-hostile characters").unwrap();
+
+        let mut args = parse(
+            &argv(&["add", "--note-file", path.to_str().unwrap()]),
+            &["note", "note-file"],
+        )
+        .unwrap();
+        args.resolve_file_flag("note", "note-file").unwrap();
+        assert_eq!(
+            args.flag("note"),
+            Some("it's a `note` with shell-hostile characters")
+        );
+    }
+
+    #[test]
+    fn both_the_plain_flag_and_its_file_form_are_refused_together() {
+        let mut args = parse(
+            &argv(&["add", "--note", "argv text", "--note-file", "/dev/null"]),
+            &["note", "note-file"],
+        )
+        .unwrap();
+        assert!(args.resolve_file_flag("note", "note-file").is_err());
+    }
+
+    #[test]
+    fn a_missing_file_is_refused_naming_the_flag() {
+        let mut args = parse(
+            &argv(&["add", "--note-file", "/nonexistent/definitely-missing.txt"]),
+            &["note-file"],
+        )
+        .unwrap();
+        let result = args.resolve_file_flag("note", "note-file");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("note-file"));
+    }
+
+    #[test]
+    fn no_file_flag_given_leaves_the_plain_flag_untouched() {
+        let mut args = parse(
+            &argv(&["add", "--note", "argv text"]),
+            &["note", "note-file"],
+        )
+        .unwrap();
+        args.resolve_file_flag("note", "note-file").unwrap();
+        assert_eq!(args.flag("note"), Some("argv text"));
     }
 }

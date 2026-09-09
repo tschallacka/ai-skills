@@ -155,6 +155,24 @@ recorded.
 Pass `--id` to choose the id yourself, which is how the suffixed sub-task ids
 (`T41a`) get written — the allocator only ever suggests the next number.
 
+### Prose from a file, not the shell
+
+`--detail`, `--note` and `--append-note` each have a `-file` counterpart —
+`--detail-file`, `--note-file`, `--append-note-file` — that reads the named
+file (or stdin, for `-`) verbatim and uses it as that flag's value:
+
+```sh
+todo add --title "Rewrite the migration guide" --detail-file detail.txt
+todo update T9 --status partly --note-file -   <<'EOF'
+Long prose with quotes, backticks, and $variables that would otherwise
+need shell-quoting to survive.
+EOF
+```
+
+Giving both a flag and its `-file` counterpart is refused, naming both: only
+one can be the source of the value. This is for prose long or strange enough
+that shell quoting would mangle it — a short `--note` is still simpler.
+
 The vocabulary is fixed and the binary will not accept anything outside it:
 
 | Field | Accepted |

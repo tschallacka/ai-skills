@@ -89,6 +89,9 @@ const FLAGS: &[&str] = &[
     "touching",
     "since",
     "older-than",
+    "detail-file",
+    "note-file",
+    "append-note-file",
 ];
 
 fn main() -> ExitCode {
@@ -123,7 +126,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
         _ => {}
     }
 
-    let args = match cli::parse(argv, FLAGS) {
+    let mut args = match cli::parse(argv, FLAGS) {
         Ok(args) => args,
         Err(cli::ParseError::MissingValue(flag)) => {
             return fail(format!("{flag} needs a value"), EX_USAGE)
@@ -132,6 +135,16 @@ fn run(argv: &[String]) -> Result<ExitCode, Failure> {
             return fail(format!("unknown option: {flag}"), EX_USAGE)
         }
     };
+
+    for (name, file_flag) in [
+        ("detail", "detail-file"),
+        ("note", "note-file"),
+        ("append-note", "append-note-file"),
+    ] {
+        if let Err(message) = args.resolve_file_flag(name, file_flag) {
+            return fail(message, EX_USAGE);
+        }
+    }
 
     let path = resolve_path(args.flag("file").map(str::to_string));
 
