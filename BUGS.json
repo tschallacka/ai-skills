@@ -3569,7 +3569,7 @@
     {
       "id": "B94",
       "title": "normalize_platform matches only Windows_NT, so plan-overview is reported unavailable under Git Bash, MSYS2 and Cygwin",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3582,12 +3582,12 @@
         "planning/scripts/lib/crypt/plan_crypt_target_triple.sh",
         "installer/src/50-manifest.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/20-runtime-tools.sh: normalize_platform now accepts MINGW*/MSYS*/CYGWIN* alongside Windows_NT, matching the sibling tables (bundled_rjq_artifact, skill_files()) that already accept the platform rust-development-guidelines.md declares served. planning/scripts/lib/crypt/plan_crypt_target_triple.sh had the opposite gap (accepted MINGW*/MSYS*/CYGWIN* but not bare Windows_NT) and now accepts both forms too.",
+      "verification": "Merged to master as d0695dd3 (PR #123, squash-merged). test-platform-selection.sh gains MINGW64_NT-10.0-19045/MSYS_NT-10.0-19045/CYGWIN_NT-10.0-19045 cases; test-plan-crypt.sh gains a stubbed-uname regression for plan_crypt_target_triple covering all four spellings. Reproduced the bug's own repro command before and after: now returns x86_64-pc-windows-msvc instead of exit 1. CI green on ubuntu-latest/macos-latest/bash-3.2.",
       "found_by": "binary-layout restructure recon",
       "notes": null,
       "created_at": "2026-08-31T13:20:02Z",
-      "updated_at": "2026-08-31T13:20:02Z"
+      "updated_at": "2026-09-09T20:39:49Z"
     },
     {
       "id": "B95",
