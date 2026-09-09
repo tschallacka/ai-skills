@@ -69,19 +69,6 @@
       "updated_at": "2026-09-01T16:04:38Z"
     },
     {
-      "id": "T82",
-      "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Blocking faults are filed as B103 through B107; read those first, they carry the evidence. Order of work: (1) fix the branch's own BUGS.json before touching the merge - dedupe B94, B95 and B96, keeping for B95 the 'fixed' copy because master closed it in PR #8, and remap B103's severity 'critical' to a value in the enum (blocking/major/minor/cosmetic; the author paired it with priority urgent, so blocking is the faithful reading). No renaming tool will touch an unsound register, by design. (2) Register the skill: SKILL_NAMES in installer/src/05-config.sh, both arms of skill_files() in installer/src/50-manifest.sh, then ./installer/build.sh; add requires.tsv, docs/README.md, a README.md table row, a package.json files entry, and binaries.tsv if its three-binary crate ships. (3) Add MODE markers to the six unmarked files. (4) Then merge origin/master into the branch and resolve BUGS.json with planning/scripts/register-resolve.sh (PR #15) - master's ids are the published ones and do not move, so rename the branch's side; expect six collisions, B97 through B102. (5) Regenerate planning/tests/fixtures/overview/npm-package-baseline.tsv and run the full suite plus bash32-run-tests.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-01T16:11:53Z",
-      "updated_at": "2026-09-01T16:11:53Z"
-    },
-    {
       "id": "T85",
       "title": "Implement IN/1 and IN/2 in rjq",
       "status": "open",
@@ -1295,6 +1282,19 @@
       "note": "Proposal, not law. Peer of T105: that one is a gap inside a rule, this is a gap in the contract's scope. RULED by Tschallacka, 2026-09-08: widen it. 'We started with bash only, so we evolved to rust focussed to get around system limitations etc... So widen it, so it applies to all languages. they are good rules, that should be held globally.'\n\nSo the shell-only scope was an artefact of shell being all there was when the rules were written, never a judgement that Rust deserved fewer. CODE-STYLE.md is now titled 'Code style and structure', opens 'The contract every source file in this repository conforms to, in every language', and section 11's table row reads 'This repository's own source, in every language'. Where a rule is inherently shell-specific -- set -euo pipefail, the bash 3.2 floor, local -- it simply has no counterpart in another language rather than exempting that language from the rest.\n\nSection 11 also now states that // /// and //! are all comments under it: rustdoc prose describing the API is what /// is for and is not why-prose, while an account of how the code came to look this way is, and belongs in the commit message.\n\nPrompted by a nitpicker citing the old scope line to rule a Rust file ungoverned, which is exactly the reading the entry predicted.",
       "created_at": "2026-09-08T10:48:24Z",
       "updated_at": "2026-09-08T20:00:10Z"
+    },
+    {
+      "id": "T82",
+      "title": "Resolve and merge PR #13 (interactive-shell), which is not mergeable as it stands",
+      "status": "obsolete",
+      "priority": "high",
+      "parent": null,
+      "detail": "Blocking faults are filed as B103 through B107; read those first, they carry the evidence. Order of work: (1) fix the branch's own BUGS.json before touching the merge - dedupe B94, B95 and B96, keeping for B95 the 'fixed' copy because master closed it in PR #8, and remap B103's severity 'critical' to a value in the enum (blocking/major/minor/cosmetic; the author paired it with priority urgent, so blocking is the faithful reading). No renaming tool will touch an unsound register, by design. (2) Register the skill: SKILL_NAMES in installer/src/05-config.sh, both arms of skill_files() in installer/src/50-manifest.sh, then ./installer/build.sh; add requires.tsv, docs/README.md, a README.md table row, a package.json files entry, and binaries.tsv if its three-binary crate ships. (3) Add MODE markers to the six unmarked files. (4) Then merge origin/master into the branch and resolve BUGS.json with planning/scripts/register-resolve.sh (PR #15) - master's ids are the published ones and do not move, so rename the branch's side; expect six collisions, B97 through B102. (5) Regenerate planning/tests/fixtures/overview/npm-package-baseline.tsv and run the full suite plus bash32-run-tests.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "PR #13 is closed (not merged); interactive-shell is already a fully registered, shipped skill (in SKILL_NAMES, has its own SKILL.md/binaries.tsv/bin, ships in installer/src/50-manifest.sh) via a different path than this TODO described. Its blocking bugs are already resolved: B103, B104, B105, B106 obsolete, B107 fixed. Nothing left to merge.",
+      "created_at": "2026-09-01T16:11:53Z",
+      "updated_at": "2026-09-09T21:46:29Z"
     }
   ]
 }
