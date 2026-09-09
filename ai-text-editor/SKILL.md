@@ -103,13 +103,25 @@ Address a `replace` by span rather than by arithmetic: `--range-start-line N
 --range-end-line N` deletes or replaces whole lines including the last one's
 newline, and `--range-start-byte N --range-end-byte N` takes exactly the
 `byte_start`/`byte_end` a search hit reports, so a span across two hits is those
-two numbers copied across. Pass `--expected-text` and the server checks the
-bytes at the span *before* deleting them, refusing by name on a mismatch — the
-guard the revision guard cannot be, because a revision proves the document has
-not moved, not that your length still matches the text there. With
-`--expected-text` and no `--delete-len`, its own length is the length. Every
-applied edit reports the `offset`, `delete_len` and `deleted` bytes it resolved,
-so verifying an edit does not need a read-back.
+two numbers copied across.
+
+**Guard by revision; add `--expected-text` only when the span's endpoints did
+not come from a read at that revision.** A revision proves the document has
+not moved since the read the coordinates came from — for a span read and
+edited in the same breath, that is the whole property that matters, and
+`--expected-text` re-sending the span's own content is duplicated generation
+that costs *output* tokens for no added safety. Reach for `--expected-text`
+when a coordinate is not fresh from a read: a line number carried across your
+own earlier edits, a search hit from an older revision, or an offset you
+computed rather than copied. There the guard earns its cost, because it
+catches what revision cannot — the document is unchanged but the text at this
+*span* is not what you think, the way a prior edit that shifted a length
+leaves a later `delete_len` wrong even though the revision it was read at is
+still current. When you do need it, a fresh `read` is still the cheaper way to
+get it right: reading spends input tokens, `--expected-text` spends output
+ones, and input is the far cheaper half. Every applied edit reports the
+`offset`, `delete_len` and `deleted` bytes it resolved, so verifying an edit
+against the response never needs a read-back either way.
 On a tab opened with NFC normalization, byte offsets address the ORIGINAL
 bytes, not the normalized view a read shows; a refused edit says so. Every
 job verb needs the `resume_token` `job_start` issued, and it is never shown to

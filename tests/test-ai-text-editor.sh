@@ -75,6 +75,9 @@ capabilities_output="$($client capabilities --session-token "$session")"
 contains "$capabilities_output" '"protocol_version": 1'
 contains "$capabilities_output" '"search_preview_matches": 4'
 contains "$capabilities_output" '"revision_required_methods"'
+contains "$capabilities_output" '"guard_preference"'
+contains "$capabilities_output" '"expected_revision"'
+contains "$capabilities_output" '"expected_text_when"'
 if editor insert --file "$file" --offset 0 --text 'unsafe' >"$scratch/missing-revision" 2>&1; then
     exit 1
 fi

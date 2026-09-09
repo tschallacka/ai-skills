@@ -56,6 +56,27 @@
       },
       "type": "array"
     },
+    "guard_preference": {
+      "properties": {
+        "expected_text_when": {
+          "type": "string"
+        },
+        "order": {
+          "items": {
+            "enum": [
+              "expected_revision",
+              "expected_text"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "order",
+        "expected_text_when"
+      ],
+      "type": "object"
+    },
     "protocol_version": {
       "const": 1
     },
