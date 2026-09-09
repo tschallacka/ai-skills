@@ -39,7 +39,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	233926
+package/install.sh	233970
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -118,7 +118,7 @@ package/planning/scripts/plan-table-lib.sh	12187
 package/planning/scripts/plans-board-lib.sh	10626
 package/planning/scripts/rebuild-plan-progress.sh	4239
 package/planning/scripts/register-command.sh	4423
-package/planning/scripts/register-lib.sh	5339
+package/planning/scripts/register-lib.sh	6611
 package/planning/scripts/register-read.sh	5446
 package/planning/scripts/register-rebuild.sh	2919
 package/planning/scripts/register-resolve.sh	27459
