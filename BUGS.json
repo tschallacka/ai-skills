@@ -3972,7 +3972,7 @@
     {
       "id": "B244",
       "title": "the server never relays JOIN to a channel's other members, so a client already connected never sees a nick arrive",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3983,12 +3983,12 @@
       "surfaces": [
         "src/chat-server-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the JOIN handler in chat-server-rs/src/main.rs now calls hub.relay(&chan, ..., idx) to tell every other member, in addition to the existing 353/366 reply to the joiner; Hub::relay is the same fanout PRIVMSG uses",
+      "verification": "0d6d4ed9f492fc19eb03b9e618a7edfe93510b33 (\"relay JOIN, PART and QUIT to the channel, so a nick list is true\"), mutation-tested per call site per its own commit message, and confirmed on the wire against a real IRC client (Konversation) per the register's own notes field. Present and correct on current master at main.rs:873.",
       "found_by": "Michael, from a Konversation nick list on 2026-09-07",
       "notes": "B245 is the departure half. Kept separate because fixing arrivals alone leaves a nick list that only ever grows: every agent that ever joined stays listed, which is arguably more misleading than the current under-reporting. Both should land together even though they close separately. VERIFIED ON THE WIRE 2026-09-07: Michael confirmed aiskills now appears in Konversation's nick list against the restarted server. That is the check the unit tests explicitly could not make, since the dev shell has no raw IRC client. B246 is what remains: the fix is server-side only, and the client still discards the membership lines, so humans see presence and agents do not. SECOND SYMPTOM, from sanitairkamer 2026-09-07, and it is worse than a stale list: the silent failure produced a WRONG INFERENCE. It read 'aiskills never appeared in my nick list all session' as 'that agent is not connected' rather than 'JOIN was never relayed to me', so it stopped addressing a peer that was present and answering. A presence bug that reads as absence is exactly the kind that makes agents stop coordinating with each other.",
       "created_at": "2026-09-07T12:44:52Z",
-      "updated_at": "2026-09-07T13:31:43Z"
+      "updated_at": "2026-09-09T14:17:47Z"
     },
     {
       "id": "B251",
@@ -5961,7 +5961,7 @@
     {
       "id": "B245",
       "title": "a departure is never relayed either, so a nick that left stays in every other client's nick list",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5972,12 +5972,12 @@
       "surfaces": [
         "src/chat-server-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the PART handler now calls hub.relay(&chan, ..., idx), and the disconnect/QUIT teardown path relays a QUIT per channel held (Hub::deregister), using the same fanout PRIVMSG and JOIN use",
+      "verification": "0d6d4ed9f492fc19eb03b9e618a7edfe93510b33, same commit as B244. Mutation-tested per its own message (PART 1 failure, QUIT 2 caught). Present and correct on current master at main.rs:911, with hub.relay calls also covering the QUIT teardown path.",
       "found_by": "found while pinning B244, 2026-09-07",
       "notes": "B244 is the arrival half and the reported symptom; this one was found by reading the same handler region.",
       "created_at": "2026-09-07T12:45:07Z",
-      "updated_at": "2026-09-07T12:45:07Z"
+      "updated_at": "2026-09-09T14:17:47Z"
     },
     {
       "id": "B246",
