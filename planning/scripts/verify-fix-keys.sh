@@ -120,7 +120,25 @@ verify_fix_keys() {
         plan_die "no SHA-256 implementation available (need $(plan_sha256_chain)) to verify fix keys" 69
 
     secret_file="$(printf '%s/review-fix-keys/%s/secret\n' "$(planning_tmpdir)" "$session_id")"
-    [ -f "$secret_file" ] || plan_die "session secret missing: $secret_file (was the session invalidated at approval?)"
+    if [ ! -f "$secret_file" ]; then
+        # B112: this is a MISSING file, distinct from the per-claim key
+        # mismatch below, which is the forged/stale-key case. The secret store
+        # is deliberately ephemeral (planning_tmpdir.sh: fresh per boot) while
+        # the mint-claim-verify protocol deliberately spans sessions, so an
+        # ordinary temp-directory eviction -- a reboot, tmpwatch, another
+        # process clearing ${TMPDIR:-/tmp} -- is the routine cause here, not a
+        # deliberate invalidation at approval.
+        plan_die "session secret missing: $secret_file
+This is an ordinary temp-directory eviction (reboot, tmpwatch, or anything
+else clearing \${TMPDIR:-/tmp}), not a sign the review was invalidated: the
+secret store is designed to be fresh per boot, while the mint-claim-verify
+protocol spans sessions.
+Recovery: re-mint fix keys for this plan --
+  $script_dir/mint-fix-keys.sh $plan_dir
+This starts a NEW session and rewrites fix-keys.json, so every fixer must
+re-claim its keys in fixes.md; the prior claims and the audit trail of which
+session claimed which key are lost."
+    fi
     [ -f "$fixes_file" ] || plan_die "fixes.md missing; a gated plan must record one claim per (finding, work unit)"
     secret="$(cat "$secret_file")"
 

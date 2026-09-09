@@ -210,6 +210,15 @@ if "$script_dir/verify-fix-keys.sh" "$plan_b" 2>"$temporary_root/verify-stale.lo
     fail 'verify passed with an invalidated (stale) session secret'
 fi
 grep -Fq 'session secret missing' "$temporary_root/verify-stale.log" || fail 'stale session not reported'
+# B112: an evicted secret is not a sign of a deliberate invalidation, and the
+# refusal must name the recovery command rather than ask a leading question.
+if grep -Fq 'was the session invalidated at approval?' "$temporary_root/verify-stale.log"; then
+    fail 'the refusal still blames approval-time invalidation for an ordinary eviction'
+fi
+grep -Fq 'temp-directory eviction' "$temporary_root/verify-stale.log" \
+    || fail 'the refusal does not name ordinary temp-directory eviction as the likely cause'
+grep -Fq 'mint-fix-keys.sh' "$temporary_root/verify-stale.log" \
+    || fail 'the refusal does not name the recovery command'
 rm -f "$plan_b/fix-keys.json"
 "$script_dir/verify-fix-keys.sh" "$plan_b" >/dev/null 2>&1 \
     || fail 'verify rejected an ungated plan (no fix-keys.json)'

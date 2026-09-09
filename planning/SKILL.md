@@ -979,6 +979,15 @@ dir is removed (invalidation) so a stale `fix-keys.json` fails closed on
 re-approval. Plans without `fix-keys.json` (ungated) and plans whose findings
 all carry no work unit approve without verification.
 
+The same "session secret missing" refusal also fires when the secret is lost
+to an ordinary temp-directory eviction between mint and claim, not only at a
+deliberate approval-time invalidation: the store is designed to be fresh per
+boot (`planning_tmpdir.sh`) while the mint-claim-verify protocol spans
+sessions, so mint, claim and approve must complete in one sitting or risk it.
+The refusal names the recovery — re-run `mint-fix-keys.sh` — which starts a
+new session and rewrites `fix-keys.json`, at the cost of every prior claim and
+the audit trail of which session claimed which key.
+
 #### Key reuse and rotation
 
 Fix keys are scoped to one review session. Reuse the same derived key within a
