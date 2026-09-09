@@ -32,6 +32,7 @@ case "${1:-}" in
         awk 'NR == 1 { next }
              /^#/ {
                  sub(/^#[[:space:]]?/, "")
+                 if ($0 ~ /^(MODE|PACKAGE):/) next
                  if ($0 ~ /^----[[:space:]]*(quoted:|end quoted)/) next
                  print; next
              }

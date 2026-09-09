@@ -104,6 +104,9 @@ while IFS= read -r file; do
     if printf '%s\n' "$help_out" | grep -c '^[[:space:]]*# ' >/dev/null; then
         note_fail "$file --help prints raw '# ' comment lines; strip them"
     fi
+    case "$help_out" in
+        MODE:*|PACKAGE:*) note_fail "$file --help prints its MODE/PACKAGE marker as the first line" ;;
+    esac
 done < <(script_list)
 
 # A fixed line window truncates help the moment the docblock grows. A docblock-

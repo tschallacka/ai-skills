@@ -38,7 +38,7 @@ package/git-merge-resolving/requires.tsv	1321
 package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
-package/install-ui.sh	7039
+package/install-ui.sh	7086
 package/install.sh	232235
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
@@ -97,7 +97,7 @@ package/planning/scripts/create-ui-validation.sh	3070
 package/planning/scripts/create-work-unit-inventory.sh	2868
 package/planning/scripts/generate-reviewer.sh	4171
 package/planning/scripts/mint-fix-keys.sh	10039
-package/planning/scripts/monitor-read.sh	5513
+package/planning/scripts/monitor-read.sh	5560
 package/planning/scripts/overview-state.sh	10008
 package/planning/scripts/plan-content-diff-lib.sh	7070
 package/planning/scripts/plan-content.sh	22408
@@ -121,15 +121,15 @@ package/planning/scripts/register-command.sh	4423
 package/planning/scripts/register-lib.sh	5317
 package/planning/scripts/register-read.sh	5446
 package/planning/scripts/register-rebuild.sh	2919
-package/planning/scripts/register-resolve.sh	27412
+package/planning/scripts/register-resolve.sh	27459
 package/planning/scripts/remove-coverage.sh	3611
 package/planning/scripts/remove-plan.sh	2363
 package/planning/scripts/remove-work-unit.sh	5842
 package/planning/scripts/render-plans-board.sh	20557
 package/planning/scripts/resolve-finding.sh	6629
-package/planning/scripts/role-context.sh	10743
+package/planning/scripts/role-context.sh	10790
 package/planning/scripts/run-adversary-probe.sh	5445
-package/planning/scripts/supervision-frame.sh	6256
+package/planning/scripts/supervision-frame.sh	6303
 package/planning/scripts/update-adversarial-review.sh	12862
 package/planning/scripts/update-plan-content.sh	33900
 package/planning/scripts/update-plan-progress.sh	3360
