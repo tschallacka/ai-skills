@@ -133,23 +133,6 @@
       "updated_at": "2026-09-09T22:19:46Z"
     },
     {
-      "id": "T108",
-      "title": "install.sh needs a dev mode that installs the dev build dir, not the day-old shipped binaries",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka: 'maybe add a dev mode, that respects the dev build dir, I think it didn't get updated.' He was right. There are two binary locations and the installer knows only one. setup-dev-env.sh builds this host's crates into the repo-root bin/<triple>/, which is where the skills look at runtime in a dev tree. install.sh copies from <skill>/bin/<triple>/, which only CI and a release populate. So running ./install.sh inside the repo -- which does NOT download, because download_source prefers a local tree when the script sits beside planning/SKILL.md -- silently installs whatever those shipped directories happen to hold. On 2026-09-08 that was a day-old ai-text-editor: the install downgraded a working editor to a build that predates expected_text on replace, mid-session, and the only symptom was a guard quietly no longer being accepted.\\n\\nWanted: a --dev flag (and a matching line in the summary saying which source each binary came from) that prefers bin/<triple>/<binary> over <skill>/bin/<triple>/<binary> when installing from a local tree, and refuses rather than silently skipping when neither exists. The summary must name the source, because 'installed' meaning two different things depending on an invisible directory is what made this cost an hour. Pairs with B291 (interactive-shell has no dev build at all) and B292 (cp cannot replace a running binary).",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/45-source.sh",
-        "installer/src/60-install.sh",
-        "setup-dev-env.sh"
-      ],
-      "note": "Also worth deciding whether setup-dev-env should populate <skill>/bin/<triple>/ directly instead, which would make one location serve both paths. That is the smaller change but it blurs 'shipped artifact' and 'local build', which is the distinction the release gates rely on. Reproduced concretely 2026-09-09: the day-old shipped binaries problem is not just stale content, it silently breaks the MCP protocol. ai-text-editor-mcp built 2026-09-04 vs source at 2026-09-07 advertised every tool with inputSchema {\"additionalProperties\":true,\"type\":\"object\"} (no properties, no required) -- 3 days of schema evolution (tab_id/tab_path/verbosity/expected_revision as named properties) missing entirely. Every mutating call (insert/replace/...) failed with revision_required no matter what was passed, with no indication the binary was stale -- the servers own staleness_notice/adapter_replaced() mechanism only fires on an in-session replacement, not on an adapter that was ALREADY stale when the session started. Confirms this needs either: install.sh dev mode using the freshly-built tree directly (this TODOs ask), or the MCP adapter checking its own build timestamp against the source it was compiled from and refusing/warning at initialize.",
-      "created_at": "2026-09-08T12:22:59Z",
-      "updated_at": "2026-09-08T23:47:33Z"
-    },
-    {
       "id": "T109",
       "title": "An update should detect the installed integration mode and keep it, not default back to skill",
       "status": "open",
@@ -1033,6 +1016,23 @@
       "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor. Landed on unix 2026-09-08 (commit 8e4b52e0, PR 78): control.rs holds the socket, the monitor thread and the client-side forwarder; lib.rs gained the serve_* verbs, the owner setup in tail, and forward_or_fall_back in send/read/names/join/leave. Ten unit tests plus chat/tests/test-chat-owner-socket.sh, whose --no-session control is the permanent mutation proving the unsuffixed assertion is not vacuous. Windows is NOT covered and is now T111; there the cfg(not(unix)) arm returns None so every verb keeps its pre-T107 behaviour. Two register entries came out of the work: B294 (insert refuses a line number read accepts) and B295 (the remote read arm saves a mention cursor), and B295 is why serve_read copies the remote behaviour rather than the better local one.",
       "created_at": "2026-09-08T11:12:48Z",
       "updated_at": "2026-09-08T13:58:10Z"
+    },
+    {
+      "id": "T108",
+      "title": "install.sh needs a dev mode that installs the dev build dir, not the day-old shipped binaries",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka: 'maybe add a dev mode, that respects the dev build dir, I think it didn't get updated.' He was right. There are two binary locations and the installer knows only one. setup-dev-env.sh builds this host's crates into the repo-root bin/<triple>/, which is where the skills look at runtime in a dev tree. install.sh copies from <skill>/bin/<triple>/, which only CI and a release populate. So running ./install.sh inside the repo -- which does NOT download, because download_source prefers a local tree when the script sits beside planning/SKILL.md -- silently installs whatever those shipped directories happen to hold. On 2026-09-08 that was a day-old ai-text-editor: the install downgraded a working editor to a build that predates expected_text on replace, mid-session, and the only symptom was a guard quietly no longer being accepted.\\n\\nWanted: a --dev flag (and a matching line in the summary saying which source each binary came from) that prefers bin/<triple>/<binary> over <skill>/bin/<triple>/<binary> when installing from a local tree, and refuses rather than silently skipping when neither exists. The summary must name the source, because 'installed' meaning two different things depending on an invisible directory is what made this cost an hour. Pairs with B291 (interactive-shell has no dev build at all) and B292 (cp cannot replace a running binary).",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/45-source.sh",
+        "installer/src/60-install.sh",
+        "setup-dev-env.sh"
+      ],
+      "note": "Merged PR #128 (2fcf9f4). --dev-build prefers the repo-root dev build over the shipped one for any binary row, refusing rather than installing an absent binary, with the summary naming which binaries came from the dev build.",
+      "created_at": "2026-09-08T12:22:59Z",
+      "updated_at": "2026-09-09T23:08:50Z"
     },
     {
       "id": "T110",
