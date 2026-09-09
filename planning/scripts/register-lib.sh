@@ -86,12 +86,33 @@ reg_sort() {
 }
 
 # reg_next_id <kind> <file>: the next free B/T number as a bare integer.
+# B78: a linked git worktree has its own copy of the register, so an id minted
+# there is the max this file has ever seen -- not the max across every
+# worktree that will eventually merge into one register. Two writers in two
+# worktrees can mint the same id within the hour and neither is wrong about
+# what they saw. Advisory only (stderr, not stdout): the alternative -- making
+# ids unique across trees that cannot see each other -- needs a shared
+# allocator this register does not have, while `bugs`/`todo resolve` already
+# exists to repair a collision once the trees merge.
+reg_in_linked_worktree() {
+    local file="$1" dir common
+    command -v git >/dev/null 2>&1 || return 1
+    dir="$(git -C "$(dirname "$file")" rev-parse --git-dir 2>/dev/null)" || return 1
+    common="$(git -C "$(dirname "$file")" rev-parse --git-common-dir 2>/dev/null)" || return 1
+    [ "$dir" != "$common" ]
+}
+
 reg_next_id() {
-    local kind="$1" file="$2" prefix="B"
+    local kind="$1" file="$2" prefix="B" next
     [ "$kind" = todo ] && prefix="T"
-    rjq -r --arg p "$prefix" '
+    next="$(rjq -r --arg p "$prefix" '
         [(if $p == "B" then .bugs else .tasks end)[].id | capture("^[A-Z]*(?<number>\\d+)$").number | tonumber] | max // 0 | . + 1
-    ' "$file"
+    ' "$file")"
+    if reg_in_linked_worktree "$file"; then
+        printf '%s: %s is a linked git worktree; %s is local to this copy of the register and may collide with an id minted concurrently in another worktree -- resolve a post-merge collision with bugs/todo resolve\n' \
+            "${0##*/}" "$(dirname "$file")" "$prefix$next" >&2
+    fi
+    printf '%s\n' "$next"
 }
 
 # reg_write <kind> <file>: stamp header fields a register owes, then sort.
