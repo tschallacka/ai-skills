@@ -141,6 +141,8 @@ plan() {
 ai-text-editor	ai-text-editor
 ai-text-editor	ai-text-editor-server
 ai-text-editor-mcp	ai-text-editor-mcp
+interactive-shell	interactive-shell
+interactive-shell	interactive-shell-input
 PLAN
 }
 
@@ -289,13 +291,15 @@ while IFS="$(printf '\t')" read -r crate binary; do
             chmod +x "$repo_root/planning/scripts/$binary$exe"
             printf '   -> planning/scripts/%s%s\n' "$binary" "$exe"
         fi
-        # The register skills resolve their tool at <skill>/bin/<triple>/, which
+        # bug-report and todo resolve their tool at <skill>/bin/<triple>/, which
         # is what skill_files() promises and what CI's "Place the compiled
-        # register rungs" step does. Without this copy the shared bin/ above is
-        # the only one, and test-register-schemas fails four assertions on a
-        # tree built the documented way. T72 folds both into one shared bin.
+        # register rungs" step does; interactive-shell's binaries.tsv resolves
+        # the same way (B291). Without this copy the shared bin/ above is the
+        # only one, and a dev-tree install ships the skill with no binaries at
+        # all even though setup-dev-env reported them built. T72 folds all of
+        # these into one shared bin.
         case "$crate" in
-            bug-report|todo)
+            bug-report|todo|interactive-shell)
                 skill_dir="$repo_root/$crate/bin/$triple"
                 mkdir -p "$skill_dir"
                 cp "$repo_root/target/$triple/release/$binary$exe" "$skill_dir/$binary$exe"
