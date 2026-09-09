@@ -267,22 +267,6 @@
       "updated_at": "2026-09-08T14:45:31Z"
     },
     {
-      "id": "T115",
-      "title": "Give run-tests.sh a per-test timeout and the CI jobs a timeout-minutes",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "There is no timeout anywhere: run_one has none, and ci.yml declares no timeout-minutes on any job, so every job inherits GitHub 6-hour default. Measured 2026-09-08: three test-suite legs sat in_progress for over three hours on one PR while every build leg had long since passed, and the only signal was the absence of a result.\n\nTwo changes. run_one wraps each test in the timeout(1) utility, so a hang FAILS AS ITSELF and names the test rather than silently consuming the leg -- report it distinctly (exit 124) so a timeout is never mistaken for an assertion failure. And each suite job gets a timeout-minutes as the backstop for a hang outside a test.\n\nThe per-test timeout is the one that matters: it converts \"the leg never finished\" into \"test-X timed out after N seconds\", which is the difference between a three-hour mystery and a two-minute diagnosis.",
-      "blocked_on": null,
-      "refs": [
-        "run-tests.sh",
-        ".github/workflows/ci.yml"
-      ],
-      "note": "Portability: macOS runners have timeout available (test-chat.sh already relies on it), but detect it and degrade to no timeout with a printed notice rather than failing the runner where it is absent. The first version of this entry lost a word: a backtick-quoted timeout inside a double-quoted shell argument was executed as a command substitution, so the tool name vanished from the detail. Backticks in register text are command substitution, not markup.",
-      "created_at": "2026-09-08T18:19:19Z",
-      "updated_at": "2026-09-08T18:19:44Z"
-    },
-    {
       "id": "T116",
       "title": "Select and shard the shell suite, so CI does not run 138 tests on 3 platforms for every commit",
       "status": "open",
@@ -1014,6 +998,22 @@
       "note": "Raised as a question about whether a tail can follow several channels; the answer was no, and the ruling makes it yes because the leave semantics require it. Landed d7c12ec5 on PR 78. --chan is repeatable; each channel keeps its own cursor; the loop prints any followed channel; the LASTID resync walks the set one channel per tick so bookkeeping does not grow with the count; tail --local refuses a second --chan rather than quietly following the first. leave parts a channel, drops its cursor and drops it from the set, and stops the tail when the set empties. Closed B296 by construction. Documented in chat/SKILL.md (d6e54af8) including why a second tail is the thing to avoid -- flowchart measured nick/nick-2 across two tails on the bus.",
       "created_at": "2026-09-08T14:18:47Z",
       "updated_at": "2026-09-08T14:38:49Z"
+    },
+    {
+      "id": "T115",
+      "title": "Give run-tests.sh a per-test timeout and the CI jobs a timeout-minutes",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "There is no timeout anywhere: run_one has none, and ci.yml declares no timeout-minutes on any job, so every job inherits GitHub 6-hour default. Measured 2026-09-08: three test-suite legs sat in_progress for over three hours on one PR while every build leg had long since passed, and the only signal was the absence of a result.\n\nTwo changes. run_one wraps each test in the timeout(1) utility, so a hang FAILS AS ITSELF and names the test rather than silently consuming the leg -- report it distinctly (exit 124) so a timeout is never mistaken for an assertion failure. And each suite job gets a timeout-minutes as the backstop for a hang outside a test.\n\nThe per-test timeout is the one that matters: it converts \"the leg never finished\" into \"test-X timed out after N seconds\", which is the difference between a three-hour mystery and a two-minute diagnosis.",
+      "blocked_on": null,
+      "refs": [
+        "run-tests.sh",
+        ".github/workflows/ci.yml"
+      ],
+      "note": "Already done — implemented directly by the maintainer in efa4a18 (2026-09-08, on master before this session started), triggered by a real 3-hour CI hang. run_one wraps each test in timeout(1) (test_timeout_seconds, default 600s, AI_SKILLS_TEST_TIMEOUT override), missing timeout(1) degrades with a printed notice rather than failing the runner, exit 124 is reported as its own TIMEOUT outcome distinct from FAIL. ci.yml's test and test-bash32 jobs both carry timeout-minutes: 45. Verified: efa4a18 is an ancestor of master; a deliberately hanging test under AI_SKILLS_TEST_TIMEOUT=2 exits 124 as expected.",
+      "created_at": "2026-09-08T18:19:19Z",
+      "updated_at": "2026-09-09T06:32:01Z"
     },
     {
       "id": "T1",
