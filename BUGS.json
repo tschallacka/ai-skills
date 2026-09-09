@@ -4724,7 +4724,7 @@
     {
       "id": "B92",
       "title": "README and both register docs advertise bug-add.sh/bug-update.sh/todo-add.sh/todo-update.sh helpers that were never shipped",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4737,12 +4737,12 @@
         "bug-report/docs/README.md",
         "todo/docs/README.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already resolved: README.md, bug-report/docs/README.md and todo/docs/README.md all describe the real interface (`bugs add`/`bugs update`, `todo add`/`todo update` as subcommands of the shipped binaries) rather than the fictional standalone bug-add.sh/bug-update.sh/todo-add.sh/todo-update.sh scripts this entry was filed against. grep for those four names across the repo returns nothing.",
+      "verification": "grep -rn \"bug-add.sh\\|bug-update.sh\\|todo-add.sh\\|todo-update.sh\" README.md bug-report/docs/README.md todo/docs/README.md: no matches. All three docs instead read \"bugs add\"/\"bugs update\" and \"todo add\"/\"todo update\".",
       "found_by": "skill review, maintainer session 2026-08-30",
       "notes": "Found while filing B91-B93 by hand through the documented rjq recipes, which is exactly the hand-editing the docs claim nobody does.",
       "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-08-30T21:50:11Z"
+      "updated_at": "2026-09-09T00:03:58Z"
     },
     {
       "id": "B96",
