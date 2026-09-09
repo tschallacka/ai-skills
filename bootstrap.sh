@@ -81,7 +81,7 @@ arm_rjq() {
 }
 
 usage() {
-    awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -euo/{ exit }' "$0"
+    awk 'NR > 1 && /^#/ && !/^# ?(MODE|PACKAGE):/{ sub(/^# ?/, ""); print } /^set -euo/{ exit }' "$0"
 }
 
 # One flag loop, no pre-scan of "$@" (CODE-STYLE.md section 6): the pre-scan
