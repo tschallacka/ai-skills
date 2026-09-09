@@ -20,7 +20,11 @@ offenders="$(git -C "$repo_root" grep -n -w jq -- \
     ':!tests/test-rjq-active-references.sh' ':!src/rjq/tests/differential.rs' \
     ':!planning/bin/**' ':!ai-text-editor/bin/**' ':!planning/tests/fixtures/**' ':!.npmignore' || true)"
 offenders="$(printf '%s\n' "$offenders" | awk -F: '
-    $0 ~ /(^|:)#/ || $0 ~ /:\/\// || $0 ~ /\.md:/ { next }
+    # B154: a comment is prose wherever it sits, not only at column zero.
+    # The bare $0 ~ /(^|:)#/ required the hash immediately after the
+    # line-number colon grep -n prints, so an INDENTED comment (the common
+    # case in shell, nix and rust alike) survived as a false offender.
+    $0 ~ /(^|:)[[:space:]]*#/ || $0 ~ /:[[:space:]]*\/\// || $0 ~ /\.md:/ { next }
     NF { print }
 ')"
 if [ -n "$offenders" ]; then
