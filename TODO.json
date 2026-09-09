@@ -56,24 +56,6 @@
       "updated_at": "2026-09-09T21:32:56Z"
     },
     {
-      "id": "T85",
-      "title": "Implement IN/1 and IN/2 in rjq",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "rjq is the mandated register runtime and does not implement jqs IN/1, so every membership test in a register snippet has to be written the long way with index and an explicit binding. That keeps biting, and it fails in the worst direction: rjq reports the error on stderr and exits non-zero, so a snippet that captures only stdout into a findings variable leaves it empty and prints sound. A validation that checked nothing, reading as a pass. The SKILL.md snippets in bug-report and todo were both rewritten off IN/1 for exactly this reason, and it caught me again today in an ad-hoc TODO.json check. It is a trap peculiar to this repo, because the idiom is standard jq and every agent reaches for it by default. jq defines both arities in its own stdlib in terms of any, so this is plausibly a prelude definition rather than Rust work - read the IN definitions in jqs builtin.jq and port them rather than trusting a remembered one-liner. Land it with a test that the register snippets in both SKILL.md files run green under rjq, since that is the whole point of having it, and a test that a membership test against a missing key is false rather than an error. Until it lands, reg_findings in planning/scripts/register-lib.sh is the one place that expression should live and callers should use it instead of hand-rolling.",
-      "blocked_on": null,
-      "refs": [
-        "src/rjq",
-        "planning/scripts/register-lib.sh",
-        "bug-report/SKILL.md",
-        "todo/SKILL.md"
-      ],
-      "note": null,
-      "created_at": "2026-09-03T18:16:44Z",
-      "updated_at": "2026-09-03T18:16:44Z"
-    },
-    {
       "id": "T86",
       "title": "Give every skill a load sanity check the agent must execute",
       "status": "open",
@@ -964,6 +946,24 @@
       "note": "All children closed: T81a-d and T81e done, T81f-i obsolete (their premise -- porting register-resolve.sh as a new standalone script -- never happened; the capability shipped as bugs resolve/todo resolve instead). Both binaries ship, green, and register-resolve.sh is retired.",
       "created_at": "2026-09-01T15:57:41Z",
       "updated_at": "2026-09-09T22:22:05Z"
+    },
+    {
+      "id": "T85",
+      "title": "Implement IN/1 and IN/2 in rjq",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "rjq is the mandated register runtime and does not implement jqs IN/1, so every membership test in a register snippet has to be written the long way with index and an explicit binding. That keeps biting, and it fails in the worst direction: rjq reports the error on stderr and exits non-zero, so a snippet that captures only stdout into a findings variable leaves it empty and prints sound. A validation that checked nothing, reading as a pass. The SKILL.md snippets in bug-report and todo were both rewritten off IN/1 for exactly this reason, and it caught me again today in an ad-hoc TODO.json check. It is a trap peculiar to this repo, because the idiom is standard jq and every agent reaches for it by default. jq defines both arities in its own stdlib in terms of any, so this is plausibly a prelude definition rather than Rust work - read the IN definitions in jqs builtin.jq and port them rather than trusting a remembered one-liner. Land it with a test that the register snippets in both SKILL.md files run green under rjq, since that is the whole point of having it, and a test that a membership test against a missing key is false rather than an error. Until it lands, reg_findings in planning/scripts/register-lib.sh is the one place that expression should live and callers should use it instead of hand-rolling.",
+      "blocked_on": null,
+      "refs": [
+        "src/rjq",
+        "planning/scripts/register-lib.sh",
+        "bug-report/SKILL.md",
+        "todo/SKILL.md"
+      ],
+      "note": "Merged PR #127 (672e3d6). IN/1 and IN/2 ported into rjq via a one-line jq-source prelude; verified against real jq 1.8.1 and rjq's own unit tests; both SKILL.md docs corrected.",
+      "created_at": "2026-09-03T18:16:44Z",
+      "updated_at": "2026-09-09T22:41:22Z"
     },
     {
       "id": "T90",
