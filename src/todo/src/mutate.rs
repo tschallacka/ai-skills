@@ -77,6 +77,11 @@ pub struct Change {
     pub priority: Option<Priority>,
     pub detail: Option<String>,
     pub blocked_on: Option<String>,
+    /// B260: `add` took `--refs a,b` but `update` had no member for it, so a
+    /// task filed without refs (or with the wrong ones) could never be
+    /// corrected -- and `--touching` matches refs only, so the omission was
+    /// permanent. Replaces the whole list, the same shape `add` gives it.
+    pub refs: Option<Vec<String>>,
     pub note: Option<String>,
     pub append_note: Option<String>,
 }
@@ -88,6 +93,7 @@ impl Change {
             && self.priority.is_none()
             && self.detail.is_none()
             && self.blocked_on.is_none()
+            && self.refs.is_none()
             && self.note.is_none()
             && self.append_note.is_none()
     }
@@ -146,6 +152,9 @@ pub fn update(register: &mut Register, id: &str, change: Change) -> Result<(), U
     }
     if let Some(blocked_on) = change.blocked_on {
         task.blocked_on = Some(blocked_on);
+    }
+    if let Some(refs) = change.refs {
+        task.refs = refs;
     }
     if let Some(note) = change.note {
         task.note = Some(note);
@@ -238,6 +247,30 @@ mod tests {
         assert_eq!(
             register.tasks.iter().find(|t| t.id == id).unwrap().title,
             "a corrected title"
+        );
+    }
+
+    /// B260: `add` took `--refs` but `update` had no member for it, so a task
+    /// filed without one could never be corrected, and `--touching` (which
+    /// matches refs only) would never find it.
+    #[test]
+    fn refs_are_write_once_no_longer() {
+        let mut register = empty();
+        let id = add(&mut register, new_task(Status::Open, None)).expect("added");
+        assert!(register.tasks[0].refs.is_empty());
+
+        let change = Change {
+            refs: Some(vec!["src/ai-text-editor/src/lib.rs".into()]),
+            ..Default::default()
+        };
+        assert!(
+            !change.is_empty(),
+            "a change naming only --refs must not read as empty"
+        );
+        update(&mut register, &id, change).expect("the refs change applies");
+        assert_eq!(
+            register.tasks.iter().find(|t| t.id == id).unwrap().refs,
+            vec!["src/ai-text-editor/src/lib.rs".to_string()]
         );
     }
 

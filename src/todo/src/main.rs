@@ -40,7 +40,7 @@ Usage:
            [--priority normal] [--status open] [--id T42] [--parent T7]
            [--blocked-on TEXT] [--refs a,b] [--note N]
   todo update <ID> [--title T] [--status S] [--priority P] [--detail D]
-                   [--blocked-on TEXT] [--note N] [--append-note N]
+                   [--blocked-on TEXT] [--refs a,b] [--note N] [--append-note N]
   todo show <ID>
   todo list [--status S] [--priority P] [--parent ID] [--touching TEXT]
             [--since ISO8601]
@@ -256,6 +256,7 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         priority: opt_enum(args.flag("priority"), "--priority", register::PRIORITIES)?,
         detail: args.flag("detail").map(str::to_string),
         blocked_on: args.flag("blocked-on").map(str::to_string),
+        refs: args.flag("refs").map(|_| args.list("refs")),
         note: args.flag("note").map(str::to_string),
         append_note: args.flag("append-note").map(str::to_string),
     };

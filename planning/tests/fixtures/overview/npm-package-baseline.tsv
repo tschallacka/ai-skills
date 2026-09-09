@@ -166,7 +166,7 @@ package/resource-limited-testing/scripts/limited-run.sh	4459
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187
-package/todo/SKILL.md	17366
+package/todo/SKILL.md	17675
 package/todo/binaries.tsv	1127
 package/todo/docs/README.md	1637
 package/todo/requires.tsv	1625
