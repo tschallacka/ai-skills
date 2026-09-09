@@ -152,6 +152,30 @@ fi
     'The locally served page is open and shows its initial button.' \
     'Mouse click on the visible button.' 'The visible button.' \
     'The requested result is visible.' '2 s'
+# B114: --status/--evidence is the only writer for a UI story's run result,
+# and it must keep the table row and the run cache in agreement.
+if "$script_dir/update-ui-story.sh" "$plan_dir" US-01 --status 'kaboom' >/dev/null 2>&1; then
+    echo 'update-ui-story accepted a status outside the documented vocabulary.' >&2
+    exit 1
+fi
+if "$script_dir/update-ui-story.sh" "$plan_dir" US-01 --status '✅ passed' >/dev/null 2>&1; then
+    echo 'update-ui-story accepted a passed status with no evidence.' >&2
+    exit 1
+fi
+"$script_dir/update-ui-story.sh" "$plan_dir" US-01 --status '✅ passed' \
+    --evidence 'Clicked the visible button; the requested result appeared.' >/dev/null
+grep -Fq '| US-01 | A visitor sees the initial button. | Open the page and click the visible button. | Mouse click on the visible button. | The requested result is visible. | ✅ passed | Clicked the visible button; the requested result appeared. | W02 | `ui-story-runs/US-01.md` |' "$plan_dir/ui-user-stories.md"
+grep -Fqx -- '- Status: `✅ passed`' "$plan_dir/ui-story-runs/US-01.md"
+grep -Fqx -- '- Evidence: Clicked the visible button; the requested result appeared.' "$plan_dir/ui-story-runs/US-01.md"
+if "$script_dir/update-ui-story.sh" "$plan_dir" US-01 --status '⏭️ excluded' \
+    --evidence 'Not relevant here.' >/dev/null 2>&1; then
+    echo 'update-ui-story accepted an excluded status with no user-approval reason.' >&2
+    exit 1
+fi
+"$script_dir/update-ui-story.sh" "$plan_dir" US-01 --status '⏭️ excluded' \
+    --evidence 'user-approved: cannot be exercised in this environment.' >/dev/null
+grep -Fq '| ⏭️ excluded | user-approved: cannot be exercised in this environment. |' "$plan_dir/ui-user-stories.md"
+grep -Eq '^- Status: .*excluded' "$plan_dir/ui-story-runs/US-01.md"
 "$script_dir/update-plan-content.sh" --decomposition-review "$plan_dir" completed
 
 "$script_dir/create-adversarial-review.sh" "$plan_dir"

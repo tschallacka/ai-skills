@@ -135,7 +135,7 @@ package/planning/scripts/update-plan-content.sh	33900
 package/planning/scripts/update-plan-progress.sh	3360
 package/planning/scripts/update-progress.sh	2256
 package/planning/scripts/update-step.sh	7182
-package/planning/scripts/update-ui-story.sh	4050
+package/planning/scripts/update-ui-story.sh	6879
 package/planning/scripts/update-work-unit.sh	13891
 package/planning/scripts/validate-plan-commands-lib.sh	7402
 package/planning/scripts/validate-plan-common-lib.sh	1810
