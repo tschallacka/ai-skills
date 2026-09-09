@@ -3524,7 +3524,7 @@
     {
       "id": "B78",
       "title": "reg_next_id mints the same id in two worktrees, because it can only see the register in its own tree",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3537,12 +3537,12 @@
         "planning/scripts/bug-add.sh",
         "planning/scripts/todo-add.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/scripts/register-lib.sh: reg_next_id now prints an advisory to stderr (stdout unchanged) when the register it read lives in a linked git worktree rather than the main checkout, naming the worktree and pointing at bugs/todo resolve as the recovery path.",
+      "verification": "Merged to master as 540dfe5c (PR #122, squash-merged). New test-worktree-id-collision-warning.sh builds a real git repo + linked worktree via 'git worktree add' and confirms the advisory fires only in the worktree copy, never the main checkout, with stdout unaffected in both cases. CI green on ubuntu-latest/macos-latest/bash-3.2.",
       "found_by": "main session and the webview subagent, independently minting B77 within the hour",
       "notes": null,
       "created_at": "2026-08-28T10:46:33Z",
-      "updated_at": "2026-08-28T10:46:33Z"
+      "updated_at": "2026-09-09T20:01:38Z"
     },
     {
       "id": "B80",
