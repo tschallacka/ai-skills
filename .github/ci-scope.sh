@@ -165,8 +165,16 @@ file_count="$(printf '%s\n' "$changed" | awk 'NF' | wc -l | tr -d ' ')"
 # A hit here is not a heuristic. The root manifest defines the members and the
 # release profile; the lock fixes every dependency version; the toolchain file
 # and the flake fix the compiler; the workflows are the thing being trusted, so
-# a change to them must be exercised in full; the installer and package.json
-# decide what ships, which the packaging gates read.
+# a change to them must be exercised in full.
+#
+# install.sh, package.json and installer/* are deliberately NOT global inputs
+# (B300). None of them are Rust source, so none of them can change what a
+# crate compiles to — their own correctness (install.sh matching
+# installer/build.sh's output, every shipped file declared, the npm baseline
+# matching the tree) is proved by dedicated jobs that already run
+# unconditionally, not by this selector. Before this fix, registering one new
+# filename in installer/src/50-manifest.sh forced scope=full on the ordinary
+# act of shipping a new file — which is most commits.
 #
 # `.github/*` covers the whole CI surface, not just the workflows, BECAUSE THE
 # SELECTOR MUST NOT EXEMPT ITSELF. This script and ci-subjects.sh decide how
@@ -181,8 +189,6 @@ while IFS= read -r path; do
     case "$path" in
         Cargo.toml|Cargo.lock|rust-toolchain.toml|flake.nix|flake.lock) global_hit="$path"; break ;;
         .github/*) global_hit="$path"; break ;;
-        install.sh|package.json) global_hit="$path"; break ;;
-        installer/*) global_hit="$path"; break ;;
     esac
 done <<CHANGED
 $changed

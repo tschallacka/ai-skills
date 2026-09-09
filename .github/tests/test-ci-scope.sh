@@ -40,9 +40,16 @@ check "the lock file"          full Cargo.lock
 check "the toolchain file"     full rust-toolchain.toml
 check "the flake"              full flake.nix
 check "a workflow"             full .github/workflows/ci.yml
-check "the installer"          full installer/src/50-manifest.sh
-check "the generated install"  full install.sh
-check "package.json"           full package.json
+
+echo "ci-scope: installer/packaging-only changes need no crate rebuild (B300)"
+# REGRESSION. None of these are Rust source, so none of them can change what a
+# crate compiles to -- their own correctness is proved by dedicated jobs that
+# run unconditionally regardless of this selector. Registering one new
+# filename in installer/src/50-manifest.sh used to force scope=full on the
+# ordinary act of shipping a new file, which is most commits.
+check "the installer"          none installer/src/50-manifest.sh
+check "the generated install"  none install.sh
+check "package.json"           none package.json
 
 echo "ci-scope: the selector does not exempt itself"
 # A change to the thing that decides the scope must be exercised in full,
