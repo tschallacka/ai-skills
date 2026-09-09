@@ -72,6 +72,21 @@ summary_soft_note() {
     printf '%s' "$note"
 }
 
+# The suffix naming which binaries came from the repo-root dev build rather
+# than the skill's shipped one, when --dev-build found any (T108: "installed"
+# meaning two different things depending on an invisible directory is what
+# made a stale shipped binary cost an hour to notice). Unquoted expansion of
+# the space-joined list on purpose, same shape as RUNTIME_BLOCKED_SKILLS in
+# print_install_summary.
+summary_dev_build_note() {
+    local names="$1" name joined=''
+    [ -n "$names" ] || return 0
+    for name in $names; do
+        joined="$joined${joined:+, }$name"
+    done
+    printf '\n             dev build used for: %s' "$joined"
+}
+
 # Idempotent, because cleanup() calls it too: a run that dies part-way (the
 # permission step needs a tty) must still end with the block that says what was
 # written, which for a headless run is the whole user-facing story.
