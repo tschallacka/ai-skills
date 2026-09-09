@@ -2224,13 +2224,9 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
     // channel's CURRENT end (LASTID) so tailing an old channel does not dump
     // its whole history — only new messages are shown from now on.
     //
-    // A recorded 0 is a position, not an absence (B269): it means this agent
-    // joined while the channel was empty. `read` was fixed and this was not,
-    // which left the collapse in the path every agent actually sits in.
-    //
-    // Per channel, because the cursor always was per channel -- the session
-    // holds a map. One tail following three channels is three watermarks, and
-    // they move independently.
+    // A recorded cursor (map, per channel) is replayed via FETCH below
+    // (B269): 0 is a position, not an absence, and JOIN's push starts from
+    // now, so history since the last run would otherwise be lost for good.
     let mut pending = VecDeque::new();
     let mut cursors: HashMap<String, u64> = HashMap::new();
     for chan in &o.chans {
@@ -2239,7 +2235,44 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             0
         } else {
             match Session::load(state_dir).cursor_recorded(chan) {
-                Some(cur) => cur,
+                Some(cur) => {
+                    let suffix = if o.mentions { " mentions" } else { "" };
+                    let _ = write_line(&mut tls, &format!("FETCH {} {}{}", chan, cur, suffix));
+                    let deadline = SystemTime::now() + Duration::from_secs(5);
+                    let mut max_id = cur;
+                    while SystemTime::now() < deadline {
+                        match read_line(&mut tls) {
+                            Ok(l) => {
+                                if l.starts_with(":server 000 end-of-history") {
+                                    break;
+                                }
+                                if l.starts_with("MSG ") {
+                                    if let Some(id) = l
+                                        .split_whitespace()
+                                        .nth(2)
+                                        .and_then(|s| s.parse::<u64>().ok())
+                                    {
+                                        if id > max_id {
+                                            max_id = id;
+                                        }
+                                    }
+                                    println!("{}", l);
+                                } else {
+                                    // A live push interleaved with the fetch
+                                    // reply on this same socket; parked for
+                                    // the tail loop below, not dropped.
+                                    pending.push_back(l);
+                                }
+                            }
+                            Err(e) => {
+                                if e.kind() != ErrorKind::WouldBlock {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    max_id
+                }
                 None => {
                     let _ = write_line(&mut tls, &format!("LASTID {}", chan));
                     read_last_id(&mut tls, chan, &mut pending)
@@ -2248,9 +2281,9 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
         };
         cursors.insert(chan.clone(), seed);
     }
-    // JOIN leaves this connection subscribed to the server's pushed PRIVMSG
-    // stream.  FETCH is intentionally not used here: it is a backfill
-    // operation for read/reconnect, not a steady-state transport.
+    // JOIN subscribes this connection to the live PRIVMSG stream from here
+    // on; the FETCH above is what covers everything before it, once per
+    // channel at startup rather than on every steady-state push.
     //
     // The set is owned by the loop rather than read from `o`, because a
     // borrowed `join` or `leave` changes it while the tail runs.

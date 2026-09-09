@@ -253,6 +253,31 @@ esac
 cli sess leave --chan '#old' --insecure >/dev/null 2>&1 || true
 cleft="$(cli sess session show 2>/dev/null | grep 'cursor #old' || true)"
 [ -z "$cleft" ] || t_fail "leave did not drop the #old cursor: [$cleft]"
+
+# B269: a tail resumed with a RECORDED cursor of 0 backfills via FETCH what
+# was posted since, rather than treating 0 as "no cursor" and starting only
+# from the live JOIN. 0 is what `join` records on an empty channel, so this
+# is the exact case the fix names: joined-while-empty, then something is
+# posted before the tail that will read it ever starts.
+b269_dir="$temporary_root/c_b269"
+mkdir -p "$b269_dir"
+j269="$(AI_CHAT_HOME="$b269_dir" timeout 8 "$CLIENT" join --server 127.0.0.1:"$port" \
+    --nick backfiller --chan '#backfill' --insecure 2>&1)"
+case "$j269" in
+    *'resuming after id 0'*) : ;;
+    *) t_fail "B269 setup: join did not seed cursor 0 on an empty channel: [$j269]" ;;
+esac
+cli poster269 send --server 127.0.0.1:"$port" --nick poster269 --chan '#backfill' \
+    --text 'missed-while-away' --insecure >/dev/null 2>&1 || true
+AI_CHAT_HOME="$b269_dir" timeout 6 "$CLIENT" tail --server 127.0.0.1:"$port" \
+    --nick backfiller --chan '#backfill' --insecure \
+    >"$temporary_root/tail269.log" 2>"$temporary_root/tail269.err" &
+tail269_pid=$!
+sleep 2
+grep -q 'missed-while-away' "$temporary_root/tail269.log" || t_fail \
+    "B269: a tail resumed from a recorded 0 cursor did not backfill a message posted since: [$(cat "$temporary_root/tail269.log")]"
+kill "$tail269_pid" 2>/dev/null || true
+wait "$tail269_pid" 2>/dev/null || true
 # mention-notify: a tail --mentions --mention-exit exits when SOMEBODY ELSE
 # mentions @<session nick>.
 #
