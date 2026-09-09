@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chat_proto::message::{numeric, numerics, Message, FETCH_END};
+use stale_lock::StaleLock;
 
 // How long a socket write may block before the peer is declared unresponsive,
 // and how much undelivered broadcast one peer may accumulate. Both are bounds
@@ -34,6 +35,12 @@ use chat_proto::message::{numeric, numerics, Message, FETCH_END};
 // queue that keeps that thread from blocking anyone else grows without bound.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTBOX_MAX_BYTES: usize = 1 << 20;
+// B161: an append that dies mid-critical-section (killed process, panic)
+// leaves the lock file behind with nobody left to release it. A normal
+// append holds it only long enough to scan the log and write one line, so a
+// few seconds of staleness margin above worst-case disk latency is generous
+// without letting a merely slow append get its lock stolen out from under it.
+const CHANNEL_LOCK_STALE_AFTER: Duration = Duration::from_secs(5);
 
 struct ConnState {
     conn: rustls::ServerConnection,
@@ -293,19 +300,14 @@ impl Hub {
     fn append(&self, chan: &str, nick: &str, text: &str) -> std::io::Result<(u64, String)> {
         let path = self.chan_path(chan);
         fs::create_dir_all(&self.chan_dir)?;
-        let lock = self.chan_dir.join(format!("{}.lock", chan));
-        let mut tries = 0;
-        while fs::create_dir(&lock).is_err() {
-            if lock.join("pid").exists() {
-                let _ = fs::remove_dir_all(&lock);
-                continue;
-            }
-            tries += 1;
-            if tries >= 200 {
-                return Err(std::io::Error::other("lock timeout"));
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let lock_path = self.chan_dir.join(format!("{}.lock", chan));
+        // B161: the directory-based lock this replaced checked for a `pid`
+        // file that nothing in this crate ever wrote, so its only reclaim
+        // path never fired and a lock left behind by a killed process blocked
+        // the channel forever. StaleLock's reclaim is mtime-based instead —
+        // it needs no cooperating writer to have left a marker behind.
+        let _lock = StaleLock::acquire(&lock_path, CHANNEL_LOCK_STALE_AFTER)
+            .map_err(|_| std::io::Error::other("lock timeout"))?;
         let result = (|| -> std::io::Result<(u64, String)> {
             let last = self.scan_highest(chan);
             let id = last + 1;
@@ -331,7 +333,6 @@ impl Hub {
             }
             Ok((id, line))
         })();
-        let _ = fs::remove_dir(&lock);
         result
     }
 
@@ -2128,5 +2129,66 @@ mod outbox_tests {
         let (lines, dead) = p.drain();
         assert!(dead);
         assert!(lines.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod append_lock_tests {
+    use super::Hub;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    fn hub_at(chan_dir: std::path::PathBuf) -> Hub {
+        Hub {
+            chan_dir,
+            highest: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            topics: Mutex::new(HashMap::new()),
+            nicks: Mutex::new(HashMap::new()),
+            writers: Mutex::new(Vec::new()),
+        }
+    }
+
+    // B161: a lock this crate never populates with a `pid` file (the old
+    // directory-based lock's only reclaim condition) must not be able to
+    // block a channel forever. The regression is specifically about
+    // RECOVERY, not ordinary contention, so this asserts the append after
+    // an abandoned lock succeeds at all -- a version that still spun for the
+    // old 10-second ceiling before failing would pass a bare timing
+    // assertion by accident if the ceiling were ever shortened elsewhere.
+    #[test]
+    fn an_abandoned_lock_is_reclaimed_not_blocked_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = hub_at(dir.path().to_path_buf());
+        std::fs::create_dir_all(&hub.chan_dir).unwrap();
+        let lock_path = hub.chan_dir.join("#ops.lock");
+        std::fs::write(&lock_path, b"stale-token").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+        {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&lock_path)
+                .unwrap();
+            file.set_modified(old).unwrap();
+        }
+        let result = hub.append("#ops", "alice", "hello");
+        assert!(
+            result.is_ok(),
+            "append did not recover an abandoned lock: {result:?}"
+        );
+        let (id, _line) = result.unwrap();
+        assert_eq!(id, 1, "the first message in a fresh channel must be id 1");
+    }
+
+    // Ordinary append still works with no lock contention at all: two calls
+    // in a row see incrementing ids, over the same lock/unlock path the
+    // reclaim test above exercises.
+    #[test]
+    fn appends_with_no_contention_get_incrementing_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = hub_at(dir.path().to_path_buf());
+        let (first, _) = hub.append("#ops", "alice", "hello").unwrap();
+        let (second, _) = hub.append("#ops", "alice", "again").unwrap();
+        assert_eq!((first, second), (1, 2));
     }
 }

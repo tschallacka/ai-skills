@@ -248,6 +248,8 @@ dependencies = [
  "rcgen",
  "rustls",
  "rustls-pki-types",
+ "stale-lock",
+ "tempfile",
 ]
 
 [[package]]
