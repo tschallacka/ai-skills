@@ -69,8 +69,8 @@ done
 [ "$ready" -eq 1 ] || { sed -n '1,120p' "$server_output" >&2; exit 1; }
 
 contains "$open_output" '"revision": 0'
-contains "$open_output" '"mode": "TextUtf8"'
-contains "$open_output" '"tab_uuid": "'
+contains "$open_output" '"mode": "text_utf8"'
+contains "$open_output" '"tab_id": "'
 capabilities_output="$($client capabilities --session-token "$session")"
 contains "$capabilities_output" '"protocol_version": 1'
 contains "$capabilities_output" '"search_preview_matches": 4'
@@ -119,7 +119,7 @@ server_pid=""
 server_pid="$!"
 reopened=""
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if reopened="$($client open --file "$file" --save-session-token "$session" 2>/dev/null)"; then
+    if reopened="$($client open --file "$file" --save-session-token "$session" --verbosity 2 2>/dev/null)"; then
         break
     fi
     sleep 0.1
@@ -132,10 +132,10 @@ contains "$insert_output" '"revision": 1'
 read_output="$(editor read --file "$file")"
 contains "$read_output" 'alpha!'
 
-wrapped_cursor="$(editor cursor --file "$file" --line 1 --column 4 --wrap-width 3)"
+wrapped_cursor="$(editor cursor --file "$file" --line 1 --column 4 --wrap-width 3 --verbosity 2)"
 contains "$wrapped_cursor" '"visual": {'
 contains "$wrapped_cursor" '"line": 2'
-visual_cursor="$(editor cursor --file "$file" --line 2 --column 1 --wrap-width 3 --visual)"
+visual_cursor="$(editor cursor --file "$file" --line 2 --column 1 --wrap-width 3 --visual --verbosity 2)"
 contains "$visual_cursor" '"line": 1'
 contains "$visual_cursor" '"column": 4'
 editor cursor --id 7 --line 2 --column 0 --file "$file" >/dev/null
@@ -194,7 +194,7 @@ grep -Fq 'external_change' "$scratch/external-save"
 backup_output="$(editor resolve --file "$file" --action backup)"
 contains "$backup_output" '"resolved": "backup"'
 [ -f "$file.back" ]
-reload_output="$(editor resolve --file "$file" --action reload)"
+reload_output="$(editor resolve --file "$file" --action reload --verbosity 3)"
 contains "$reload_output" '"history_event": "external_reload"'
 
 if editor close --file "$file" >"$scratch/close-prompt" 2>&1; then
@@ -232,7 +232,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 [ -n "$tcp_endpoint" ] || { sed -n '1,120p' "$tcp_output" >&2; exit 1; }
 tcp_open="$($client open --endpoint "$tcp_endpoint" --auth-token secret --save-session-token "$tcp_session")"
-contains "$tcp_open" '"mode": "TextUtf8"'
+contains "$tcp_open" '"mode": "text_utf8"'
 if "$client" open --endpoint "$tcp_endpoint" --auth-token wrong >"$scratch/tcp-auth-failure" 2>&1; then
     exit 1
 fi
@@ -257,7 +257,7 @@ large_output="$scratch/large-server-output"
 "$server" start --file "$large_file" --large-threshold-bytes 1 >"$large_output" 2>&1 &
 large_pid="$!"
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if large_open="$($client open --file "$large_file" --save-session-token "$session" 2>/dev/null)"; then
+    if large_open="$($client open --file "$large_file" --save-session-token "$session" --verbosity 2 2>/dev/null)"; then
         break
     fi
     sleep 0.1
@@ -272,7 +272,7 @@ if editor search --file "$large_file" --mode exact_text --query needle >"$scratc
     exit 1
 fi
 grep -Fq 'large_search_range_required' "$scratch/unbounded-large-search"
-large_search="$(editor search --file "$large_file" --mode exact_text --query needle --range-start-line 1 --range-end-line 3)"
+large_search="$(editor search --file "$large_file" --mode exact_text --query needle --range-start-line 1 --range-end-line 3 --verbosity 2)"
 contains "$large_search" '"count": 1'
 contains "$large_search" '"start_line": 1'
 contains "$large_search" '"end_line": 3'
@@ -293,7 +293,7 @@ contains "$large_bytes" '"byte_start": 6'
 contains "$large_bytes" '"contents_base64": "bmVlZGxl"'
 large_index="$(editor index --file "$large_file" --granularity 2)"
 contains "$large_index" '"complete": true'
-large_index_page="$(editor index --file "$large_file" --granularity 2 --offset 1 --limit 1)"
+large_index_page="$(editor index --file "$large_file" --granularity 2 --offset 1 --limit 1 --verbosity 2)"
 contains "$large_index_page" '"block_offset": 1'
 contains "$large_index_page" '"returned_blocks": 1'
 printf 'externally-reloaded\n' > "$large_file"
@@ -304,7 +304,7 @@ grep -Fq '"external_change_pending": true' "$scratch/large-external-output"
 large_backup="$(editor resolve --file "$large_file" --action backup)"
 contains "$large_backup" '"large_file": true'
 [ -f "$large_file.back" ]
-large_reload="$(editor resolve --file "$large_file" --action reload)"
+large_reload="$(editor resolve --file "$large_file" --action reload --verbosity 3)"
 contains "$large_reload" '"history_event": "external_reload"'
 contains "$large_reload" '"index_complete": false'
 editor close --file "$large_file" --journal-action clean >/dev/null
