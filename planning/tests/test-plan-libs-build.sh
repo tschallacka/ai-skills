@@ -82,15 +82,24 @@ done
 # ---- a new function reaches its library with no other edit ------------------
 # The group directory is the registration. If this ever needs a list updated
 # somewhere, the claim in the builder's docblock is false.
-probe_function="$scripts_dir/lib/progress/plan_zz_build_probe.sh"
+#
+# On a copy (B71): rebuilding the REAL scripts_dir here would silently repair
+# a stale committed library with the very run that is supposed to report it,
+# so a genuine staleness would fail once and then pass on every later run --
+# the reproducible defect reading as a flake instead.
+probe_copy="$work/probe-tree"
+mkdir -p "$probe_copy"
+cp -R "$scripts_dir" "$probe_copy/scripts"
+probe_builder="$probe_copy/scripts/build-plan-libs.sh"
+probe_function="$probe_copy/scripts/lib/progress/plan_zz_build_probe.sh"
 printf '#!/usr/bin/env bash\nplan_zz_build_probe() { printf probe; }\n' > "$probe_function"
-"$builder" >/dev/null 2>&1 || t_fail 'the build failed with a new function file present'
-if grep -Fq 'plan_zz_build_probe()' "$scripts_dir/plan-progress-lib.sh"; then :; else
+"$probe_builder" >/dev/null 2>&1 || t_fail 'the build failed with a new function file present'
+if grep -Fq 'plan_zz_build_probe()' "$probe_copy/scripts/plan-progress-lib.sh"; then :; else
     t_fail 'a new function file did not reach its compiled library'
 fi
 rm -f "$probe_function"
-"$builder" >/dev/null 2>&1 || t_fail 'the build failed after removing the probe'
-if grep -Fq 'plan_zz_build_probe' "$scripts_dir/plan-progress-lib.sh"; then
+"$probe_builder" >/dev/null 2>&1 || t_fail 'the build failed after removing the probe'
+if grep -Fq 'plan_zz_build_probe' "$probe_copy/scripts/plan-progress-lib.sh"; then
     t_fail 'removing a function file left it in the compiled library'
 fi
 
