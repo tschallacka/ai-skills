@@ -5273,7 +5273,7 @@
     {
       "id": "B154",
       "title": "test-rjq-active-references exempts a comment only at column zero",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5284,12 +5284,12 @@
       "surfaces": [
         "tests/test-rjq-active-references.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "the comment-exemption regex in tests/test-rjq-active-references.sh now allows optional leading whitespace before the hash or slash-slash, so an indented comment is exempt the same as a column-zero one",
+      "verification": "PR #111, merged as a75e09b. Manual repro of the bug's exact scenario confirmed the old pattern flagged an indented comment and the new one exempts it; nix develop -c bash tests/test-rjq-active-references.sh passes.",
       "found_by": "flake.nix comment explaining why the older filter tool is excluded",
       "notes": null,
       "created_at": "2026-09-03T22:26:48Z",
-      "updated_at": "2026-09-03T22:26:48Z"
+      "updated_at": "2026-09-09T15:10:12Z"
     },
     {
       "id": "B155",
