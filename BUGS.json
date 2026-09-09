@@ -465,7 +465,7 @@
     {
       "id": "B108",
       "title": "register-read.sh ships to users but the library it sources does not, so it dies on first use",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "high",
       "parent": null,
@@ -482,12 +482,12 @@
         "tests/test-skill-files-manifest.sh",
         "tests/test-installer-manifest.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "e74d76b (PR #86, squash-merged to master) — promoted planning/scripts/register-lib.sh to MODE: PROD, added it to the planning prod arm in installer/src/50-manifest.sh right after register-read.sh, added the matching row to PACKAGE-MANIFEST.tsv and PACKAGE-MAP.tsv, rebuilt install.sh, and refreshed the npm package baseline fixture.",
+      "verification": "tests/test-shipped-source-resolution.sh (from the B111 branch) run against the fixed tree: 0 failures across 73 scripts. Reproduced the original failure clean-room in a fresh ubuntu:24.04 Docker container with only the prod-shipped file set copied in: before the fix, scripts/register-read.sh --help died with 'line 32: .../scripts/register-lib.sh: No such file or directory'; after the fix, the same copy runs register-read.sh --help cleanly. Full CI green on PR #86 across all legs (ubuntu-latest, macos-latest, macOS bash 3.2, all cross targets).",
       "found_by": "T81 work, maintainer session 2026-09-01",
       "notes": "Re-confirmed on master at f4e7239 on 2026-09-02, still unfixed, and it is live on this machine rather than theoretical: /home/mdibbets/ai/agents/skills/planning/scripts/register-read.sh --help dies with \"line 32: .../scripts/register-lib.sh: No such file or directory\", and register-lib.sh is absent from the installed tree. Found again independently during an adversarial review round, which means it will bite the next helper call any agent makes. Confirmed with the repository's own manifest function, which is the authoritative split: `bash -c 'source installer/src/50-manifest.sh; SOURCE_ROOT=. skill_files planning prod'` lists scripts/register-command.sh and scripts/register-read.sh and NOT scripts/register-lib.sh, while the dev arm lists register-lib.sh and register-rebuild.sh. Master's register-read.sh still sources the library unconditionally at line 32, so a prod install cannot work. NEW SURFACE not in the list above: planning/PACKAGE-MANIFEST.tsv holds exactly two register rows - register-command.sh and register-read.sh - and omits register-lib.sh AND register-rebuild.sh entirely. So the pair is inconsistent in three places, not two, and CODE-STYLE.md section 3's rule that the four places move together is broken. That also means tests/test-skill-files-manifest.sh and tests/test-installer-manifest.sh should be failing on this pair and are not, which is a second defect worth checking while fixing this one. Installing the newest planning helper from the repository does NOT resolve it, since master reproduces the arms exactly as described. Re-confirmed on master d29b62ca, 2026-09-07, unchanged. The manifest still splits the pair: `skill_files planning prod` lists scripts/register-command.sh, scripts/register-read.sh, scripts/register-command and scripts/register-read, and NOT scripts/register-lib.sh, which appears only in the dev arm; planning/scripts/register-read.sh:31-32 still sources it unconditionally. Copying the prod arm into an empty tree and running the shipped reader reproduces the filed output verbatim: \"/tmp/drive5-prod/scripts/register-read.sh: line 32: /tmp/drive5-prod/scripts/register-lib.sh: No such file or directory\", exit 1. New evidence bearing on which arm to take: the prod arm now ALSO ships the Rust scripts/register-read binary beside the broken shell script, and planning/SKILL.md mentions register-command only, never telling anyone to run register-read.sh - so the second arm (stop shipping register-read.sh) breaks no documented interface, while the first arm (promote register-lib.sh to PROD) matches the sibling register-command.sh, which sources the already-shipped plan-document-lib.sh. Which arm wins is Tschallacka's call, not a drive's.",
       "created_at": "2026-09-01T19:02:00Z",
-      "updated_at": "2026-09-07T09:10:43Z"
+      "updated_at": "2026-09-09T05:52:37Z"
     },
     {
       "id": "B114",
