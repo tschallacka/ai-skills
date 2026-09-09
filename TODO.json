@@ -252,21 +252,6 @@
       "updated_at": "2026-09-08T12:54:52Z"
     },
     {
-      "id": "T110",
-      "title": "The revision guard must be advertised as the preferred edit guard, above expected_text",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Tschallacka's point, 2026-09-08: re-sending expected_text on every replace is OUTPUT tokens, while re-reading a span to learn it is INPUT tokens, and input is the cheaper half by a wide margin. The revision guard already proves the property that matters for a span located at the current revision -- the document has not moved since the read the line numbers came from -- so for that case expected_text is duplicated generation with no added safety.\n\nThe two guards answer different questions and both must stay: revision proves the DOCUMENT is unchanged, expected_text proves the BYTES AT THIS SPAN are the ones meant. The second earns its cost only when the span's coordinates could be stale or computed -- a line number carried across the agent's own edits, a search result from an earlier revision, an offset derived by arithmetic. It is not the default.\n\nWhat to change: SKILL.md and references/protocol.md currently present expected_text as the content guard without ranking the two or naming the cost, so an agent reaches for it by default and pays output tokens per edit. State the preference explicitly -- read, then guard by revision; add expected_text only when the coordinates did not come from a read at that same revision -- and say why in the token terms above, since that is the reason and an agent that does not know it will keep paying. The capabilities command should carry the same ordering, since that is what an agent queries rather than the prose.",
-      "blocked_on": null,
-      "refs": [
-        "ai-text-editor/SKILL.md"
-      ],
-      "note": "Raised while T107 was being written through the editor: five one-line replaces each re-sent their expected_text, which Tschallacka read as 'not much different from a patch edit'. The replace reply already echoes deleted.text, so the verification a caller wants is available AFTER the fact for free -- that is worth saying too, because it is what makes revision-only safe to recommend. EXTENSION (Tschallacka, 2026-09-08): advertising the revision guard is only the cheap half. On a large document with many edits, re-sending expected_text per edit is a serious context cost, so the guard should stop costing content at all.\n\nTwo designs, the second preferred. (a) --expected-digest: read returns a digest of exactly the range it returned, the caller echoes it, the server recomputes and refuses on mismatch. Same safety, ~15 output tokens instead of N lines, stateless. (b) --span-token: read returns an opaque handle bound to (tab, revision, start, end, digest); replace takes the handle and needs neither coordinates nor guard.\n\n(b) is strictly better because it makes the failure class UNREPRESENTABLE rather than merely detected: a caller can only replace a span it actually read, so an endpoint inferred from where the next item appeared to start cannot be expressed. That is the exact mistake that deleted forward_or_fall_back in this session -- a start line from a search, an end line inferred, and no guard.\n\nSharper rule for the prose while neither exists: guard by revision alone when the span is ONE line, or when BOTH endpoints came from a read; pass expected_text when either endpoint was inferred. That is a test a caller can actually apply, unlike 'prefer revision'.",
-      "created_at": "2026-09-08T13:56:30Z",
-      "updated_at": "2026-09-08T14:45:31Z"
-    },
-    {
       "id": "T116",
       "title": "Select and shard the shell suite, so CI does not run 138 tests on 3 platforms for every commit",
       "status": "open",
@@ -995,6 +980,21 @@
       "note": "Closes B283 by construction rather than by patch: with one owner the server never sees a second connection under the nick, so it never suffixes one. B254 and B269 become structurally impossible for the same reason -- the process that reads the stream is the only process that writes the cursor. Landed on unix 2026-09-08 (commit 8e4b52e0, PR 78): control.rs holds the socket, the monitor thread and the client-side forwarder; lib.rs gained the serve_* verbs, the owner setup in tail, and forward_or_fall_back in send/read/names/join/leave. Ten unit tests plus chat/tests/test-chat-owner-socket.sh, whose --no-session control is the permanent mutation proving the unsuffixed assertion is not vacuous. Windows is NOT covered and is now T111; there the cfg(not(unix)) arm returns None so every verb keeps its pre-T107 behaviour. Two register entries came out of the work: B294 (insert refuses a line number read accepts) and B295 (the remote read arm saves a mention cursor), and B295 is why serve_read copies the remote behaviour rather than the better local one.",
       "created_at": "2026-09-08T11:12:48Z",
       "updated_at": "2026-09-08T13:58:10Z"
+    },
+    {
+      "id": "T110",
+      "title": "The revision guard must be advertised as the preferred edit guard, above expected_text",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Tschallacka's point, 2026-09-08: re-sending expected_text on every replace is OUTPUT tokens, while re-reading a span to learn it is INPUT tokens, and input is the cheaper half by a wide margin. The revision guard already proves the property that matters for a span located at the current revision -- the document has not moved since the read the line numbers came from -- so for that case expected_text is duplicated generation with no added safety.\n\nThe two guards answer different questions and both must stay: revision proves the DOCUMENT is unchanged, expected_text proves the BYTES AT THIS SPAN are the ones meant. The second earns its cost only when the span's coordinates could be stale or computed -- a line number carried across the agent's own edits, a search result from an earlier revision, an offset derived by arithmetic. It is not the default.\n\nWhat to change: SKILL.md and references/protocol.md currently present expected_text as the content guard without ranking the two or naming the cost, so an agent reaches for it by default and pays output tokens per edit. State the preference explicitly -- read, then guard by revision; add expected_text only when the coordinates did not come from a read at that same revision -- and say why in the token terms above, since that is the reason and an agent that does not know it will keep paying. The capabilities command should carry the same ordering, since that is what an agent queries rather than the prose.",
+      "blocked_on": null,
+      "refs": [
+        "ai-text-editor/SKILL.md"
+      ],
+      "note": "Merged as PR #91 (b59dfc7), squash-merged to master. SKILL.md and references/protocol.md state the guard preference explicitly in token terms; capabilities now advertises guard_preference: {order, expected_text_when} so an agent can query it rather than depend on the prose. Verified locally against the real built binary (tests/test-ai-text-editor.sh, which stays UNCONFIGURED in CI since CI never populates the per-skill bin dir); full CI green on PR #91.",
+      "created_at": "2026-09-08T13:56:30Z",
+      "updated_at": "2026-09-09T07:56:16Z"
     },
     {
       "id": "T112",
