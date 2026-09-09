@@ -3679,7 +3679,7 @@
     {
       "id": "B161",
       "title": "Hub::append's stale-lock protocol is inverted, so an empty lock directory blocks a channel permanently",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3688,12 +3688,12 @@
       "expected": "a lock left by a dead process is recovered, and a send either appends and reports success or does neither",
       "mechanism": "the loop treats a lock containing a pid file as stale and removes it, but nothing in the crate ever creates pid, so the only recoverable case never occurs. The case that does occur -- an empty directory left by a process killed mid-append -- spins 200 x 50ms and returns 'lock timeout' before appending. Its ~10s ceiling is why this was first misread as B127's cause.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "chat-server-rs: Hub::append uses stale-lock's StaleLock (mtime-based reclaim) instead of a mkdir-lock keyed on a pid marker nothing ever wrote, so an abandoned lock from a killed process is reclaimed instead of blocking the channel forever",
+      "verification": "PR #125 merged 55dfd317, new unit tests an_abandoned_lock_is_reclaimed_not_blocked_forever and appends_with_no_contention_get_incrementing_ids pass; all CI legs green",
       "found_by": "chat-b122, while measuring B127",
       "notes": null,
       "created_at": "2026-09-04T10:08:35Z",
-      "updated_at": "2026-09-04T10:08:35Z"
+      "updated_at": "2026-09-09T21:40:52Z"
     },
     {
       "id": "B163",
