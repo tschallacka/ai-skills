@@ -51,9 +51,9 @@
         "tests/test-shipped-binaries.sh",
         "rust-development-guidelines.md"
       ],
-      "note": null,
+      "note": "NEEDS DISCUSSION before implementation: this is a config-schema bump (plan-env.sh 2->3) plus a change to where install.sh places binaries system-wide, touching ~10 tests and ~5 docs. Before starting I need a decision on migration: an existing install already has binaries under the per-skill bin/ path and a .env at schema 2. Should install.sh (a) auto-migrate on next run (move the files, rewrite .env, no user action), (b) leave old installs working via a documented fallback read-path in plan_bin_dir indefinitely, or (c) just document it as a breaking change users fix by re-running the installer? That choice drives whether plan_bin_dir needs to keep reading the old location at all, which changes the shape of the fix. Separately, the plan-crypt-not-in-binaries.tsv problem this TODO also names looks like a small, independent, low-risk fix (just add the missing manifest row) -- I can peel that off as its own bug/todo without waiting on the migration decision, if useful. Moving to the next item; this one is parked pending your call on (a)/(b)/(c).",
       "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-08-31T13:27:55Z"
+      "updated_at": "2026-09-09T21:32:56Z"
     },
     {
       "id": "T81f",
