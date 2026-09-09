@@ -152,8 +152,8 @@ printf 'pre-push-check (base: %s)\n' "${base_label:-no master or upstream; workt
 # additions land at different array positions, it merges them textually with NO
 # conflict, and the result carries two unrelated entries under one id. That
 # happened for real on 2026-09-04 -- eight duplicate ids in one merge, invisible
-# until reg_findings ran -- and register-resolve.sh's advice in the textual case
-# is to take one side, which silently drops the other's entries.
+# until reg_findings ran -- and the resolvers' advice in the textual case is to
+# take one side, which silently drops the other's entries.
 #
 # The structural answer is a single writer: register entries are filed on the
 # `bugs` branch and nowhere else, so ids are allocated in one place and no merge
