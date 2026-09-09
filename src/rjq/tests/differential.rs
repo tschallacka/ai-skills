@@ -40,6 +40,21 @@ const CORPUS: &[Case] = &[
         args: &["--argjson", "n", "3", ". + $n"],
         input: "4\n",
     },
+    Case {
+        name: "IN/1 membership",
+        args: &["IN(1,2,3)"],
+        input: "4\n",
+    },
+    Case {
+        name: "IN/1 against an empty generator",
+        args: &["IN(empty)"],
+        input: "\"z\"\n",
+    },
+    Case {
+        name: "IN/2 cross-generator membership",
+        args: &["IN((1,2); (2,3))"],
+        input: "null\n",
+    },
 ];
 
 #[test]

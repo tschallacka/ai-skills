@@ -310,10 +310,15 @@ evidence a closure owes.
 
 `planning/scripts/register-lib.sh`'s `reg_findings` is the shell oracle for the
 same rules, kept for the tests that compare the two. It tests membership with
-`index(...)` and an `as $e` binding, never jq's `IN/1`: `rjq` does not implement
-`IN/1` and exits 5 having printed nothing, and an empty findings string is the
-sound case — so an `IN/1` check reported every register sound. `A | index(B)`
-also evaluates `B` against `A`, so a bare `index(.status)` looks `.status` up on
+`index(...)` and an `as $e` binding rather than jq's `IN/1` — `rjq` now
+implements `IN/1` and `IN/2` (T85, ported from jq's own `builtin.jq`), but the
+oracle deliberately keeps its own independent expression of the rule rather
+than switching to it, since the two are compared against each other. An
+earlier version of this paragraph said `rjq` does not implement `IN/1` and
+exits 5 having printed nothing on a membership check, so an empty findings
+string read as a sound register without the check ever running; that trap is
+now closed, but a new hand-rolled check still has to get `A | index(B)` right:
+it evaluates `B` against `A`, so a bare `index(.status)` looks `.status` up on
 the array and dies with "cannot index". Anything editing that oracle keeps both
 properties.
 

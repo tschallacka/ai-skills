@@ -16,7 +16,7 @@ package/ai-text-editor/schemas/protocol.v1.json	764
 package/brainstorm/SKILL.md	11440
 package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
-package/bug-report/SKILL.md	17070
+package/bug-report/SKILL.md	17435
 package/bug-report/binaries.tsv	945
 package/bug-report/docs/README.md	1305
 package/bug-report/requires.tsv	1628
@@ -166,7 +166,7 @@ package/resource-limited-testing/scripts/limited-run.sh	4459
 package/text-etiquette/SKILL.md	3897
 package/text-etiquette/docs/README.md	1083
 package/text-etiquette/requires.tsv	1187
-package/todo/SKILL.md	17675
+package/todo/SKILL.md	18040
 package/todo/binaries.tsv	1127
 package/todo/docs/README.md	1637
 package/todo/requires.tsv	1625
