@@ -2951,7 +2951,7 @@
     {
       "id": "B289",
       "title": "bugs update silently ignores --severity, so a severity change reports success and does not happen",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2964,12 +2964,12 @@
         "src/bug-report/src/cli.rs",
         "src/bug-report/src/mutate.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "mutate::Change gained a severity: Option<Severity> field, wired through is_empty()/update() and main.rs's --severity parsing, matching every other settable field",
+      "verification": "PR #104, merged as c15d56f. New test a_severity_alone_is_a_change_and_is_applied; live repro (add --severity major; update --severity blocking; show) now reflects blocking.",
       "found_by": "t90-chat-mcp, noticing B254 still read severity major after aiskills said twice that it was blocking",
       "notes": "Consequence beyond the tool: aiskills reported B254 and B283 to Tschallacka as blocking, twice, on the strength of an \"Updated\" that had changed nothing. Both still read major. A register is read by severity at triage, so a silently dropped severity is a defect being triaged at the wrong level for as long as nobody re-reads the entry.\n\nUntil this is fixed, a severity is only settable at `bugs add` time, which means correcting one requires filing a new entry or editing BUGS.json by hand -- and a hand edit is exactly what `bugs check` exists to catch.",
       "created_at": "2026-09-07T22:11:29Z",
-      "updated_at": "2026-09-07T22:11:45Z"
+      "updated_at": "2026-09-09T14:23:06Z"
     },
     {
       "id": "B290",
@@ -3639,7 +3639,7 @@
     {
       "id": "B123",
       "title": "chat-server-rs treats any non-numeric argv[1] as 'no port' and starts a server, so --version never returns",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3650,12 +3650,12 @@
       "surfaces": [
         "src/chat-server-rs/src/main.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat-server-rs gained --version (prints and returns) and refuses any other non-numeric argv[1] with a usage message and exit 64, instead of falling through to the port-preference path and starting a server",
+      "verification": "PR #106, merged as 7a78a96. New B123 regression block in chat/tests/test-chat.sh (--version exits 0 with no server.port written; --prot exits 64 with no server.port written); full test-chat.sh passes under the nix dev shell.",
       "found_by": "chat-b122 (while checking whether the stale --help process of B122's brief was a live master defect)",
       "notes": null,
       "created_at": "2026-09-04T08:00:57Z",
-      "updated_at": "2026-09-04T08:00:57Z"
+      "updated_at": "2026-09-09T14:23:06Z"
     },
     {
       "id": "B156",
@@ -5939,7 +5939,7 @@
     {
       "id": "B242",
       "title": "bugs and todo refuse any flag value that begins with two dashes, so a title or note naming a flag cannot be written",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5951,12 +5951,12 @@
         "src/bug-report/src/cli.rs",
         "src/todo/src/cli.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "cli::parse (identical in src/bug-report and src/todo) now refuses a value as a swallowed flag only when it is itself exactly one of known_flags in --name form, not merely because it starts with --",
+      "verification": "PR #105, merged as b95cf38. New test a_value_that_merely_starts_with_dashes_is_accepted in both crates; the pre-existing missing-value trap test (--title --severity) still passes since --severity is a real known flag.",
       "found_by": "the fifth drive's fix batch, filing B241 during its own register pass",
       "notes": null,
       "created_at": "2026-09-07T11:32:47Z",
-      "updated_at": "2026-09-07T11:32:47Z"
+      "updated_at": "2026-09-09T14:23:06Z"
     },
     {
       "id": "B245",
