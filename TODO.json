@@ -557,34 +557,6 @@
       "updated_at": "2026-09-07T20:30:56Z"
     },
     {
-      "id": "T103",
-      "title": "CODE-STYLE 11: say that an item inserted after a comment must not adopt it",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Three instances of one edit shape in a day, each reported separately by the nitpicker: installer/src/36-ui-render.sh twice (iui_integration_offered inserted between iui_info_actions and its docblock, and the same on the pane actions) and src/chat-client-rs/src/lib.rs:2336 (four tests inserted between a B271 comment and the B271 test, so the comment now heads a B278 test and the described test has none).\n\nFiled as B282, but the nitpicker's point is that three corrections are worse value than one rule: CODE-STYLE 11 already says a comment states a fact about the code it sits on, and what is missing is the editing rule that follows from it -- when you insert an item directly after a comment, the comment belongs to what was there before, so move your item below it or carry the comment with the thing it describes.\n\nCheap to enforce beyond prose: a check that a doc comment naming a symbol sits on a symbol of that name would have caught all three.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-07T21:18:44Z",
-      "updated_at": "2026-09-07T21:18:44Z"
-    },
-    {
-      "id": "T105",
-      "title": "CODE-STYLE 11 does not state a comment-length cap for a function-leading block",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Section 11 caps comment length, but both of its model citations are in-body comments. The block that sits immediately above a function definition -- where most comments in this repo actually are -- has no stated cap, so nobody can be corrected against it and nobody can comply with it deliberately. Decide the cap for that position and write it into the section, or state that the position is deliberately uncapped. Raised by the nitpicker as a proposal it explicitly refused to enforce as law, because enforcing an unwritten rule from an agent's notes teaches people to disregard the ones that are written.",
-      "blocked_on": null,
-      "refs": [
-        "CODE-STYLE.md"
-      ],
-      "note": "Proposal, not law. T103 covers the orphan-comment rule and is a separate gap. Still open, and now wider: with CODE-STYLE governing every language (T106), the unwritten cap covers a Rust item's /// block as well as a shell function-leading one. Section 11 now says plainly that the three-line limit is written for IN-BODY comments, that an item's leading block is therefore uncapped, and that this is not permission to narrate -- the content rules still bind it. That is a holding position, not a ruling: the question this entry asks, whether a leading block should be capped at all and at what length, is unchanged.",
-      "created_at": "2026-09-08T10:48:14Z",
-      "updated_at": "2026-09-08T20:00:19Z"
-    },
-    {
       "id": "T111",
       "title": "The session owner needs a Windows transport: loopback TCP with a token",
       "status": "open",
@@ -1061,6 +1033,34 @@
       "note": "Already done - same commit as T96 (cde4138). Verified live: a read with no --file, --tab-id, --tab-path or --endpoint at all is served by the most recently opened tab (the focus open sets), and the response still names the tab_id it answered.",
       "created_at": "2026-09-06T17:57:28Z",
       "updated_at": "2026-09-09T08:10:52Z"
+    },
+    {
+      "id": "T103",
+      "title": "CODE-STYLE 11: say that an item inserted after a comment must not adopt it",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Three instances of one edit shape in a day, each reported separately by the nitpicker: installer/src/36-ui-render.sh twice (iui_integration_offered inserted between iui_info_actions and its docblock, and the same on the pane actions) and src/chat-client-rs/src/lib.rs:2336 (four tests inserted between a B271 comment and the B271 test, so the comment now heads a B278 test and the described test has none).\n\nFiled as B282, but the nitpicker's point is that three corrections are worse value than one rule: CODE-STYLE 11 already says a comment states a fact about the code it sits on, and what is missing is the editing rule that follows from it -- when you insert an item directly after a comment, the comment belongs to what was there before, so move your item below it or carry the comment with the thing it describes.\n\nCheap to enforce beyond prose: a check that a doc comment naming a symbol sits on a symbol of that name would have caught all three.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Closed by session_01KC83KhD4yu3j3AUGe3qeoi: fixed in CODE-STYLE.md §11 via PR #94, merged as bb2c4a1c.",
+      "created_at": "2026-09-07T21:18:44Z",
+      "updated_at": "2026-09-09T09:32:47Z"
+    },
+    {
+      "id": "T105",
+      "title": "CODE-STYLE 11 does not state a comment-length cap for a function-leading block",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Section 11 caps comment length, but both of its model citations are in-body comments. The block that sits immediately above a function definition -- where most comments in this repo actually are -- has no stated cap, so nobody can be corrected against it and nobody can comply with it deliberately. Decide the cap for that position and write it into the section, or state that the position is deliberately uncapped. Raised by the nitpicker as a proposal it explicitly refused to enforce as law, because enforcing an unwritten rule from an agent's notes teaches people to disregard the ones that are written.",
+      "blocked_on": null,
+      "refs": [
+        "CODE-STYLE.md"
+      ],
+      "note": "Proposal, not law. T103 covers the orphan-comment rule and is a separate gap. Still open, and now wider: with CODE-STYLE governing every language (T106), the unwritten cap covers a Rust item's /// block as well as a shell function-leading one. Section 11 now says plainly that the three-line limit is written for IN-BODY comments, that an item's leading block is therefore uncapped, and that this is not permission to narrate -- the content rules still bind it. That is a holding position, not a ruling: the question this entry asks, whether a leading block should be capped at all and at what length, is unchanged. Closed by session_01KC83KhD4yu3j3AUGe3qeoi: fixed in CODE-STYLE.md §11 via PR #94, merged as bb2c4a1c.",
+      "created_at": "2026-09-08T10:48:14Z",
+      "updated_at": "2026-09-09T09:32:47Z"
     },
     {
       "id": "T106",
