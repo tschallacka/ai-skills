@@ -284,24 +284,6 @@
       "updated_at": "2026-09-08T18:19:19Z"
     },
     {
-      "id": "T120",
-      "title": "Let todo and bugs read note and detail text from a file, so prose never crosses shell quoting",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Register prose can only reach the binaries through argv today. --file names the REGISTER, not the text, so every note and detail is a shell argument -- and a shell argument is where prose gets damaged.\n\nMeasured twice in one session, both silent: a note containing backticks ran them as command substitution, so one word became empty in T115 and another was replaced by the output of the file(1) utility in T119. Neither errored. Both wrote a register entry with a word missing, which is worse than a failure because the entry looks finished.\n\nThe workaround is single quotes, and the workaround is itself the evidence that the interface is wrong: prose in single quotes cannot contain an apostrophe, so the repaired T119 note had to be reworded around every possessive it wanted to use. Register prose should not be written around the shell.\n\nWanted: --note-file PATH and --detail-file PATH, and the same on bugs for --reproduce, --observed, --expected, --mechanism, --fix and --verification. Then the composition is the right one: the ai-text-editor writes the prose to a file, the binary reads the bytes verbatim, and nothing in between interprets them. A single dash meaning stdin serves the same purpose in a pipeline.\n\nThe register must still be WRITTEN by the binary, which owns the schema, stamps skill_version, and has a check() whose whole job is catching entries that did not come from the tools. This is about how the text reaches it, not about who writes the file.",
-      "blocked_on": null,
-      "refs": [
-        "src/todo/src/main.rs",
-        "src/bug-report/src/main.rs",
-        "todo/SKILL.md",
-        "bug-report/SKILL.md"
-      ],
-      "note": "Raised by Tschallacka after the second mangling: \"why not using ai editor?\" The register file must go through the binary, but the TEXT should not go through a shell, and there is currently no way to arrange that.",
-      "created_at": "2026-09-08T20:24:39Z",
-      "updated_at": "2026-09-08T20:24:39Z"
-    },
-    {
       "id": "T122",
       "title": "Ship a plugin that injects each subagent its own id at SubagentStart",
       "status": "open",
@@ -1030,6 +1012,24 @@
       "note": "Already done — implemented directly by the maintainer in efa4a18 (2026-09-08, on master before this session started), triggered by a real 3-hour CI hang. run_one wraps each test in timeout(1) (test_timeout_seconds, default 600s, AI_SKILLS_TEST_TIMEOUT override), missing timeout(1) degrades with a printed notice rather than failing the runner, exit 124 is reported as its own TIMEOUT outcome distinct from FAIL. ci.yml's test and test-bash32 jobs both carry timeout-minutes: 45. Verified: efa4a18 is an ancestor of master; a deliberately hanging test under AI_SKILLS_TEST_TIMEOUT=2 exits 124 as expected.",
       "created_at": "2026-09-08T18:19:19Z",
       "updated_at": "2026-09-09T06:32:01Z"
+    },
+    {
+      "id": "T120",
+      "title": "Let todo and bugs read note and detail text from a file, so prose never crosses shell quoting",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Register prose can only reach the binaries through argv today. --file names the REGISTER, not the text, so every note and detail is a shell argument -- and a shell argument is where prose gets damaged.\n\nMeasured twice in one session, both silent: a note containing backticks ran them as command substitution, so one word became empty in T115 and another was replaced by the output of the file(1) utility in T119. Neither errored. Both wrote a register entry with a word missing, which is worse than a failure because the entry looks finished.\n\nThe workaround is single quotes, and the workaround is itself the evidence that the interface is wrong: prose in single quotes cannot contain an apostrophe, so the repaired T119 note had to be reworded around every possessive it wanted to use. Register prose should not be written around the shell.\n\nWanted: --note-file PATH and --detail-file PATH, and the same on bugs for --reproduce, --observed, --expected, --mechanism, --fix and --verification. Then the composition is the right one: the ai-text-editor writes the prose to a file, the binary reads the bytes verbatim, and nothing in between interprets them. A single dash meaning stdin serves the same purpose in a pipeline.\n\nThe register must still be WRITTEN by the binary, which owns the schema, stamps skill_version, and has a check() whose whole job is catching entries that did not come from the tools. This is about how the text reaches it, not about who writes the file.",
+      "blocked_on": null,
+      "refs": [
+        "src/todo/src/main.rs",
+        "src/bug-report/src/main.rs",
+        "todo/SKILL.md",
+        "bug-report/SKILL.md"
+      ],
+      "note": "Merged as PR #88 (46f33ef), squash-merged to master. All writable text fields on both todo and bugs now have a --<field>-file counterpart reading from a file or stdin (-); shared Args::resolve_file_flag kept byte-identical between the crates. 47+25 cargo tests, tests/test-register-file-flags.sh end-to-end through the built binaries (including the stdin path), full ./run-tests.sh green.",
+      "created_at": "2026-09-08T20:24:39Z",
+      "updated_at": "2026-09-09T07:02:31Z"
     },
     {
       "id": "T1",

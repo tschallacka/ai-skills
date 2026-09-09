@@ -6236,7 +6236,7 @@
     {
       "id": "B307",
       "title": "pre-push-check.sh --help prints its MODE marker as the first line",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6248,12 +6248,12 @@
         "pre-push-check.sh",
         "planning/tests/test-comment-format.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "76a4ef0 (PR #87), squash-merged to master — usage()'s awk now skips # MODE:/# PACKAGE: lines the same way the B306 batch's 11 scripts do.",
+      "verification": "pre-push-check.sh --help no longer prints MODE: DEV as its first line (verified inside nix develop, matching how test-comment-format.sh invokes it); planning/tests/test-comment-format.sh passes; full ./run-tests.sh green (233 passed, 0 failed).",
       "found_by": "Full local ./run-tests.sh run during T120 work, 2026-09-09. Not caught by CI: test-comment-format.sh's assertion does 'help_out=$(...) || continue', and on CI's runners pre-push-check.sh's own nix-shell re-exec guard (IN_NIX_SHELL unset, nix not on PATH in the plain test-suite job) makes --help exit 69 before reaching the marker line, so the assertion silently skips this file there. Locally, with nix already on PATH and IN_NIX_SHELL set from the dev shell, the same call succeeds and exposes the bug.",
       "notes": null,
       "created_at": "2026-09-09T06:02:58Z",
-      "updated_at": "2026-09-09T06:02:58Z"
+      "updated_at": "2026-09-09T07:02:31Z"
     },
     {
       "id": "B25",
