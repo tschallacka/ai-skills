@@ -41,9 +41,7 @@ if ! command -v cargo >/dev/null 2>&1; then
         SERVER="$prebuilt_server"
         CLIENT="$prebuilt_client"
     else
-        printf 'SKIP chat owner socket: no cargo and no prebuilt chat/bin binaries\n' >&2
-        t_end
-        exit 0
+        t_skip 'chat owner socket: no cargo and no prebuilt chat/bin binaries'
     fi
 else
     ( cd "$repo/src/chat-server-rs" && cargo build --release >/dev/null 2>&1 ) \

@@ -32,9 +32,7 @@ if ! command -v cargo >/dev/null 2>&1; then
         TODO="$prebuilt_todo"
         BUGS="$prebuilt_bugs"
     else
-        printf 'SKIP test-register-file-flags: no cargo and no prebuilt bin/ binaries - rust assertions did not run\n' >&2
-        t_end
-        exit 0
+        t_skip 'test-register-file-flags: no cargo and no prebuilt bin/ binaries - rust assertions did not run'
     fi
 else
     ( cd "$root/src/todo" && cargo build --release >/dev/null 2>&1 ) \

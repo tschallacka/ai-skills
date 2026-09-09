@@ -40,9 +40,7 @@ SERVER="$repo/target/release/chat-server-rs"
 CLIENT="$repo/target/release/chat-client-rs"
 
 if ! command -v timeout >/dev/null 2>&1; then
-    printf 'SKIP chat descriptor leak: no timeout(1) - the send assertions need a bounded wait\n' >&2
-    t_end
-    exit 0
+    t_skip 'chat descriptor leak: no timeout(1) - the send assertions need a bounded wait'
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -52,9 +50,7 @@ if ! command -v cargo >/dev/null 2>&1; then
         SERVER="$prebuilt_server"
         CLIENT="$prebuilt_client"
     else
-        printf 'SKIP chat descriptor leak: no cargo and no prebuilt chat/bin binaries\n' >&2
-        t_end
-        exit 0
+        t_skip 'chat descriptor leak: no cargo and no prebuilt chat/bin binaries'
     fi
 else
     ( cd "$repo/src/chat-server-rs" && cargo build --release >/dev/null 2>&1 ) \
@@ -124,9 +120,7 @@ send_one() { # <port> <nick> <chan> <text> -> 0 when the send completed
 #    message must still be accepted and appended. Before the fix this stopped
 #    dead at the ceiling and silently lost everything after it.
 if ! ( ulimit -n 40 ) 2>/dev/null; then
-    printf 'SKIP chat descriptor leak: this host will not accept ulimit -n 40\n' >&2
-    t_end
-    exit 0
+    t_skip 'chat descriptor leak: this host will not accept ulimit -n 40'
 fi
 port="$(start_server low 40)"
 server_pid="$(cat "$work/low.pid" 2>/dev/null)"
