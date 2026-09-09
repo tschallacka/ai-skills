@@ -3168,6 +3168,29 @@
       "updated_at": "2026-09-09T07:46:08Z"
     },
     {
+      "id": "B312",
+      "title": "a register-dedup commit can silently reopen or lose an entry, and at least one confirmed loss is unaccounted for",
+      "status": "reported",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Two things observed together during a 2026-09-09 register-hygiene sweep (remote worker): (1) B95 was correctly closed once by e6c5913, then silently reopened when a later rebase-dedup commit (4353dfa) deduplicated rebase-duplicated B94-B96 entries and kept the stale confirmed copy instead of the fixed one. (2) A chat-server descriptor-leak fix appears to be present on master, and was apparently once filed as B127, but the id B127 in the current register names an unrelated interactive-shell bug - the descriptor-leak entry does not exist under any id in the live register.",
+      "observed": "For B95: the register showed status confirmed for a bug that had actually been fixed and closed already, until manually re-discovered and re-closed in the same sweep that found it. For the descriptor-leak case: a real fix appears to exist with no corresponding register entry to close, meaning either the entry was silently dropped during a merge/rebase/dedup pass, or its id was reassigned to a different bug and the original record was never recovered under a new id.",
+      "expected": "A dedup/rebase-merge pass over BUGS.json must not silently choose a stale (still-open) duplicate over a fixed one when two entries describe the same defect, and must not drop an entry (or its id) without leaving a trace that lets it be recovered. At minimum, a dedup operation should log or record which of two colliding entries it kept and why.",
+      "mechanism": "Not fully diagnosed. Likely mechanism for B95: commit 4353dfa's dedup logic, when merging duplicate ids created by an earlier rebase, picked one of the two duplicate B95 entries without checking which one carried the more advanced status (fixed vs confirmed) - it kept the stale one. The B127/descriptor-leak case may be the same class of defect (a dedup or id-reassignment pass overwriting or discarding an entry) but has not been traced to a specific commit yet.",
+      "surfaces": [
+        "BUGS.json",
+        "planning/scripts/register-resolve.sh",
+        "src/bug-report/src/resolve.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Remote worker (bridge:session_01KC83KhD4yu3j3AUGe3qeoi), 2026-09-09 register-hygiene sweep; relayed via the ai-skills-relay session",
+      "notes": "B95 itself is already re-closed correctly (see bugs show B95) - this entry is about the DEDUP MECHANISM's own fragility, not about B95 as a defect, filed separately so the register-integrity gap does not get lost once B95 looks fine again. The remote worker flagged 'if you see other B9x-range entries acting weird, that dedup commit may have clobbered more than one' as a live suspicion, not yet checked systematically. Also worth checking: whether register-resolve.sh's merge logic has an ordering rule for status (fixed/closed should always beat confirmed/reported when deduplicating the same defect).",
+      "created_at": "2026-09-09T13:34:27Z",
+      "updated_at": "2026-09-09T13:34:33Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",

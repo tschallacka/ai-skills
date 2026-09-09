@@ -702,6 +702,21 @@
       "updated_at": "2026-09-09T13:26:49Z"
     },
     {
+      "id": "T129",
+      "title": "ai-text-editor: an edit should be able to follow a search hit by result id, not by repeating offset/length/text",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Michaels idea: after a search call, the returned hit(s) carry enough identity that a following replace/insert should be able to say what search result it is acting on, rather than repeating byte_start/byte_end (or expected_text) by hand. A search_result_id already exists in ai-text-editor-server.rs, but only as an internal dedup/response tag (revision:mode:hash of the query+parameters) - it is not consumed anywhere as an argument, and nothing lets a replace/insert reference a prior searchs specific hit as its guard.\n\nShape to work out (not fixed, genuinely explorative): a search response could hand back a stable id per MATCH (not just per call), and replace/insert could accept that id in place of range_start_byte/range_end_byte/expected_text - the server already knows exactly what text is at that hit from the search it just ran, so it can verify the edit against that recorded match rather than the caller re-deriving or re-typing the boundary. This is in the same family as B226/B230/B294 (addressing and guarding an edit without hand computed byte arithmetic) but a further step: today the caller still repeats the target text or its offsets after a search already found them.\n\nAlso relevant to the JSONL-transcript-size work (see T128): if a replace could reference a search-result id instead of repeating the matched text as an argument, that removes one of the three places the same text gets duplicated in a transcript (see T128's do_change() example), for free, as a side effect of the API shape rather than as a pruning trick after the fact.",
+      "blocked_on": null,
+      "refs": [
+        "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
+      ],
+      "note": "Requested by Michael 2026-09-09. Checked first: search_result_id exists but is call-scoped and internal only, not a per-match id, and nothing consumes it as an edit argument. No prior todo/bug covers this under any name (checked by both this session and the remote worker independently, same result). Neither of us has the exact API shape in mind yet - filed as explorative, same as T128.",
+      "created_at": "2026-09-09T13:33:45Z",
+      "updated_at": "2026-09-09T13:33:45Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
