@@ -1759,6 +1759,7 @@ fn handle(envelope: ai_text_editor::protocol::Envelope, tab: &Arc<Mutex<Tab>>) -
             "fuzzy_gradient": {"range": [0.0, 1.0], "edit": "permitted_distance_fraction", "subsequence_token_ngram": "minimum_score", "phonetic_soundex": "binary_match_score"},
             "large_file": {"bounded_reads": true, "ordinary_mutations": false, "acknowledged_job_edits": true},
             "revision_required_methods": ai_text_editor::REVISION_GUARDED_METHODS,
+            "guard_preference": {"order": ["expected_revision", "expected_text"], "expected_text_when": "an endpoint (start or end) was not read at the tab's current revision"},
             "transports": ["unix_socket", "loopback_tcp"]
         }))),
         "resources" => frames.push(response(&envelope.request_id, json!(resources::report(tab.document.bytes().len(), tab.large_threshold_bytes)))),

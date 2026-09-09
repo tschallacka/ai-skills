@@ -276,6 +276,19 @@ addressing holds a perfectly current revision and is still wrong. That is how a
 `replace` deleted 35 bytes of a 36-byte token, left the orphan digit, and
 reported success.
 
+Neither guard is optional and neither is the default in every case: the
+revision guard is required on every revision-guarded method regardless
+(`revision_required_methods` above), and `expected_text` is additive on top of
+it. The preference is which span-correctness guard a caller should reach for.
+The revision guard alone is enough when both endpoints came from a `read` at
+that same revision — the property it proves is exactly the property that
+matters there, and `expected_text` would only re-send content the server
+already has, at output-token cost. Add `expected_text` when an endpoint did
+not come from such a read: carried across the caller's own edits, taken from
+an older revision's search hit, or computed by arithmetic. A caller unsure
+which case it is in should re-`read` the span rather than guess — that costs
+input tokens, the cheaper side of the same trade.
+
 Every applied `insert`/`replace` reports the `offset` and `delete_len` it
 resolved, `bytes_written`, and — when it deleted anything — `deleted`, the bytes that
 went. `deleted.bytes` is always the span's full length and `deleted.truncated`
