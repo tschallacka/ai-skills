@@ -56,7 +56,7 @@ package/planning/PACKAGE-MANIFEST.tsv	18561
 package/planning/REVIEWER.md	22954
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
-package/planning/SKILL.md	90308
+package/planning/SKILL.md	90900
 package/planning/artifact-comparisons.json	1779
 package/planning/binaries.tsv	1158
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
@@ -149,7 +149,7 @@ package/planning/scripts/validate-plan-serve-lib.sh	4080
 package/planning/scripts/validate-plan-stale-lib.sh	6808
 package/planning/scripts/validate-plan-ui-lib.sh	8404
 package/planning/scripts/validate-plan.sh	10506
-package/planning/scripts/verify-fix-keys.sh	7937
+package/planning/scripts/verify-fix-keys.sh	8946
 package/planning/scripts/verify-target.sh	9497
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
