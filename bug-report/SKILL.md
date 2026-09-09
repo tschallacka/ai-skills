@@ -351,6 +351,24 @@ nothing checked out. It follows a rename into `parent`, reports ids left in pros
 rather than rewriting them, refuses a register whose own side is already unsound,
 and writes nothing until the token it printed comes back.
 
+### Duplicate ids with no conflict marker
+
+A rebase can carry the same entry twice with no textual collision at all — two
+array elements, one id, nothing for git to flag. `check` reports it as
+`duplicate ids: …`; fixing it used to mean hand-editing the JSON, which is how
+a register once silently reopened an already-fixed entry by keeping its
+still-open duplicate instead.
+
+```sh
+bugs dedupe
+```
+
+Closed always beats open: a closure carries its own evidence, an open entry
+never does, so there is no case where the open duplicate is the more informed
+copy. Two entries that disagree any other way (two different closed
+resolutions, say) are refused and printed side by side rather than guessed at,
+and nothing is written until every duplicate in the file resolves.
+
 ## When not to use this
 
 Work that is queued rather than broken — a refactor, a migration, a decision —
