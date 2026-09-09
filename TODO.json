@@ -741,6 +741,22 @@
       "updated_at": "2026-09-09T07:00:47Z"
     },
     {
+      "id": "T125",
+      "title": "interactive-shell: a hook that recommends the skill when an agent says a command needs a tty/interactive input",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "An agent that tries a headless command, hits a tty/stdin requirement, and then tells the user something like 'I can't do this because it needs interactive input/a terminal/a tty' has just described exactly the situation this skill exists for -- but nothing points it there in the moment. Wanted: a hook (Stop is the natural candidate, since it can see the assistant's own just-produced text; PostToolUse on Bash could instead pattern-match the COMMAND's own stderr for tty/stdin refusals, which is a stronger, less false-positive-prone signal but only catches the raw error, not an agent explaining it in an already-decided response) that recognizes this admission-of-defeat pattern (mentions of tty, interactive, 'requires input', 'not a terminal', stdin-is-not-a-tty style phrasing, arriving after a Bash tool call) and injects a reminder naming interactive-shell as the way to actually drive the program. The two candidate hook points have different tradeoffs -- worth deciding which (or both) before building: a Bash-output pattern match is more reliable but can only fire once, at the tool-result boundary already past the assistant's own words, while a Stop-hook text scan can catch the assistant's own summary/refusal even when the underlying error was noisier or spread across several attempts. False positives (a command that fails for an unrelated reason while incidentally mentioning 'terminal', e.g. a terminal-emulator config error) need a plan too.",
+      "blocked_on": null,
+      "refs": [
+        "interactive-shell/SKILL.md",
+        "interactive-shell/docs/README.md"
+      ],
+      "note": null,
+      "created_at": "2026-09-09T07:31:25Z",
+      "updated_at": "2026-09-09T07:31:25Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
