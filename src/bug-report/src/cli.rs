@@ -31,6 +31,15 @@ pub enum ParseError {
     UnknownFlag(String),
 }
 
+/// Whether `value` is itself one of `known_flags` in `--name` form, rather
+/// than a value that merely starts with `--` (B242: a title or note about a
+/// flag, e.g. `--takeover-stale-endpoint is unreachable`, is not that flag).
+fn is_known_flag(value: &str, known_flags: &[&str]) -> bool {
+    value
+        .strip_prefix("--")
+        .is_some_and(|name| known_flags.contains(&name))
+}
+
 /// `known_switches` are the flags that take no value. Anything else beginning
 /// with `-` is expected to take one, so a typo produces "unknown flag" rather
 /// than silently swallowing the next argument.
@@ -48,7 +57,7 @@ pub fn parse(argv: &[String], known_flags: &[&str]) -> Result<Args, ParseError> 
                 return Err(ParseError::UnknownFlag(format!("--{name}")));
             }
             match argv.get(index + 1) {
-                Some(value) if !value.starts_with("--") => {
+                Some(value) if !is_known_flag(value, known_flags) => {
                     flags.insert(name, value.clone());
                     index += 2;
                 }
@@ -146,6 +155,21 @@ mod tests {
             &["title", "severity"],
         );
         assert!(matches!(result, Err(ParseError::MissingValue(_))));
+    }
+
+    /// B242: a title naming a flag is a legitimate value, not an attempt to
+    /// pass that flag, as long as it is not the bare flag itself.
+    #[test]
+    fn a_value_that_merely_starts_with_dashes_is_accepted() {
+        let args = parse(
+            &argv(&["add", "--title", "--takeover-stale-endpoint is unreachable"]),
+            &["title"],
+        )
+        .expect("a value starting with -- is still a value");
+        assert_eq!(
+            args.flag("title"),
+            Some("--takeover-stale-endpoint is unreachable")
+        );
     }
 
     #[test]
