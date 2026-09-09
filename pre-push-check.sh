@@ -61,7 +61,7 @@ if [ -z "${AI_SKILLS_PREPUSH_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
 fi
 
 usage() {
-    awk 'NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -u/{ exit }' "$0"
+    awk 'NR > 1 && /^# ?(MODE|PACKAGE):/{ next } NR > 1 && /^#/{ sub(/^# ?/, ""); print } /^set -u/{ exit }' "$0"
     exit "${1:-64}"
 }
 
