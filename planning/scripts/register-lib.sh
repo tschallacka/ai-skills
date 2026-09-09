@@ -25,7 +25,7 @@ reg_findings() {
         def st_enum:
             if $kind == "bug"
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
-            else ["open","done","blocked","partly","decided","obsolete"] end;
+            else ["open","done","blocked","partly","decided","dropped","obsolete"] end;
         (if $kind == "todo" and has("todos")
          then "register carries a .todos array - fold its entries into .tasks and drop the key" else empty end),
         ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
@@ -79,7 +79,7 @@ reg_sort() {
     else
         rjq 'def idnum: [(. | scan("[0-9]+") | tonumber)?, .];
             def prank: {urgent:0, high:1, normal:2, low:3, someday:4}[.priority // ""] // 5;
-            def srank: {open:0, blocked:1, partly:2, decided:3, done:4, obsolete:5}[.status // "open"] // 6;
+            def srank: {open:0, blocked:1, partly:2, decided:3, done:4, dropped:5, obsolete:6}[.status // "open"] // 7;
             .tasks |= sort_by(srank, prank, (.id | idnum))' "$file" > "$tmp"
     fi
     mv "$tmp" "$file"

@@ -98,6 +98,17 @@ rjq -e --arg id T9999 '.tasks[] | select(.id == $id) | .status == "done"' "$todo
 out="$(run_todoup T9999 --status finished)"
 case "$out" in *'is not one of'*|*rc=65*) : ;; *) fail "an invented status was accepted: $out" ;; esac
 
+# ---- B102: 'dropped' is in the shipped schema, so the shared checks must
+# accept it too - a status the schema offers but reg_findings refuses would
+# make a task written through the binary look unsound to every other reader
+# of reg_findings (register-resolve.sh, register-rebuild.sh, the CI guard).
+out="$(run_todoup T9999 --status dropped --note 'evidence: superseded by T10000')"
+case "$out" in
+        *'unknown status'*|*rc=65*) fail "'dropped' (a schema-listed status) was refused: $out" ;;
+    esac
+findings="$(reg_findings_out todo "$todo")"
+[ -z "$findings" ] || fail "a task with status dropped is reported unsound by reg_findings: $findings"
+
 # ---- a refused bug-update leaves the register byte-identical (B109) ---------
 # The refusal must be atomic: the value that fails the shared checks must not
 # already be in the file. cmp is the whole point of the case — a message alone
