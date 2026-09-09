@@ -2997,7 +2997,7 @@
     {
       "id": "B291",
       "title": "setup-dev-env.sh never builds the interactive-shell binaries, so a dev-tree install ships the skill with none",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3010,12 +3010,12 @@
         "installer/src/60-install.sh",
         "interactive-shell/binaries.tsv"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env.sh now builds the interactive-shell and interactive-shell-input crates alongside the others, so a dev-tree install ships the skill with its binaries.",
+      "verification": "Merged to master as 01b97ea0 (PR #116, squash-merged).",
       "found_by": "installing the newest skills on 2026-09-08: the wrapper was missing from the installed skill",
       "notes": null,
       "created_at": "2026-09-08T12:22:17Z",
-      "updated_at": "2026-09-08T12:22:17Z"
+      "updated_at": "2026-09-09T18:15:10Z"
     },
     {
       "id": "B292",
