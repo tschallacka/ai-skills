@@ -49,6 +49,13 @@ PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 # because it is documented and scripted against. It seeds the per-skill record
 # rather than living on as a second mechanism, so there is exactly one place the
 # decision is read from.
+# Distinguishes an operator explicitly saying `mcp` (whether via --integration
+# or the environment) from the silent, nobody-said-anything value this same
+# variable holds by default (T109): both live in INTEGRATION_DEFAULT, and only
+# this flag tells them apart, which matters once a detected installed mode is
+# also a candidate -- an explicit choice must still outrank detection.
+INTEGRATION_DEFAULT_EXPLICIT=0
+[ -z "${INTEGRATION_DEFAULT:-}" ] || INTEGRATION_DEFAULT_EXPLICIT=1
 INTEGRATION_DEFAULT="${INTEGRATION_DEFAULT:-skill}"
 INTEGRATION_SELECTION="${INTEGRATION_SELECTION:-}"
 if [ -n "${EDITOR_INTEGRATION:-}" ]; then
@@ -130,21 +137,31 @@ record_integration() {
         *) die_usage "no skill offers a $mode integration; declared modes are:$offered" ;;
     esac
     INTEGRATION_DEFAULT="$mode"
+    INTEGRATION_DEFAULT_EXPLICIT=1
 }
 
 # Which mode this run installs a skill in: the per-skill choice if one was made,
-# else the run-wide one, else `skill`.
+# else the mode already installed at DESTINATION (T109), else the run-wide
+# default, else `skill`.
 #
-# `skill` is the default on purpose. It is the interface that needs no client
-# configuration and no running server, which is what a piped-from-curl install
-# has to leave working; an MCP server's tools are listed in every session that
-# configures it, so it is opted into rather than assumed.
+# `skill` is the default on a FIRST install only. It is the interface that
+# needs no client configuration and no running server, which is what a
+# piped-from-curl install has to leave working; an MCP server's tools are
+# listed in every session that configures it, so it is opted into rather than
+# assumed. An UPDATE is different: the caller already chose once, and an
+# update that silently reads as "switch back to skill" tears down a live MCP
+# registration on a run that only meant "give me the newest version" (T109).
+#
+# destination is optional because two callers (the interactive picker's info
+# panel and its integration-cycle action, T95) render before a target root is
+# chosen and have no destination to detect from; they fall back to explicit-
+# or-default, same as before this existed.
 #
 # Here rather than in 50-manifest.sh because the picker reads it too (T95), and
 # install-ui.sh sources only 05-config, 20-runtime-tools, 30-render and the
 # three ui parts. A ui function calling into an unsourced part is B49.
 integration_mode_for() {
-    local skill="$1" line
+    local skill="$1" destination="${2:-}" line detected
     # bash 3.2 is the floor and has no associative arrays, so the per-skill
     # choices are newline-delimited `skill=mode` records.
     while IFS= read -r line; do
@@ -154,7 +171,45 @@ integration_mode_for() {
     done <<INTEGRATION_SELECTION_EOF
 $INTEGRATION_SELECTION
 INTEGRATION_SELECTION_EOF
+    # A run-wide --integration (or the equivalent environment variable) is
+    # still an explicit choice, even though it shares INTEGRATION_DEFAULT with
+    # that variable's own silent, nobody-said-anything value -- and an
+    # explicit choice outranks detection.
+    if [ "$INTEGRATION_DEFAULT_EXPLICIT" -eq 1 ]; then
+        printf '%s\n' "$INTEGRATION_DEFAULT"
+        return 0
+    fi
+    if [ -n "$destination" ]; then
+        detected="$(integration_installed_mode "$skill" "$destination")"
+        [ -z "$detected" ] || { printf '%s\n' "$detected"; return 0; }
+    fi
     printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
+# Where integration_mode_for's answer came from, for the install summary
+# (T109: an install that silently carries a mode forward is only progress over
+# a silent wrong default if it SAYS what it did and why).
+#
+# Takes the mode integration_mode_for ALREADY resolved, rather than resolving
+# its own: integration_installed_mode's disagreement warning belongs to that
+# one authoritative call, and a second, silenced (2>/dev/null) call here only
+# to label the answer must not print it a second time for a single decision.
+integration_mode_source_for() { # <skill> <resolved-mode> [destination] -> explicit|detected|default
+    local skill="$1" resolved="$2" destination="${3:-}" line
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf 'explicit\n'; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    [ "$INTEGRATION_DEFAULT_EXPLICIT" -ne 1 ] || { printf 'explicit\n'; return 0; }
+    if [ -n "$destination" ] \
+        && [ "$resolved" = "$(integration_installed_mode "$skill" "$destination" 2>/dev/null)" ]; then
+        printf 'detected\n'
+        return 0
+    fi
+    printf 'default\n'
 }
 
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)

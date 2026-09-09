@@ -405,6 +405,7 @@ tests/test-installer-busy-binary.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
+tests/test-installer-integration-carryover.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
@@ -661,6 +662,34 @@ ISHEOF
 # variables it reads and the writers that set them: the picker calls it too
 # (T95), and install-ui.sh does not source this part.
 
+# Which mode's binary is already on disk at DESTINATION, or empty when there
+# is none (a first install) -- signal 1 of the two T109 names (the other,
+# an agent config already pointing at this skill's mcp binary, is left for a
+# follow-up; the destination signal alone is what a headless `--all` update
+# needs to stop tearing down a live mode it was never told to leave).
+#
+# More than one mode's binary present is a half-finished earlier switch --
+# remove_stale_integration_binaries only ever cleans up what the CURRENT
+# mode's answer says to remove, so it cannot itself have caused this -- and
+# it is reported rather than guessed at, on stderr so a caller capturing the
+# mode itself is not corrupted by the warning.
+integration_installed_mode() { # <skill> <destination> -> mode, or empty
+    local skill="$1" destination="$2" path mode found=''
+    for path in "$destination"/bin/*/*; do
+        [ -f "$path" ] || continue
+        mode="$(integration_binary_mode "$skill" "${path##*/}")"
+        [ -n "$mode" ] || continue
+        if [ -n "$found" ] && [ "$found" != "$mode" ]; then
+            printf '%s: %s has binaries for both %s and %s modes; a previous switch may be unfinished. Pass --integration to say which mode to keep.\n' \
+                "${0##*/}" "$destination" "$found" "$mode" >&2
+            printf ''
+            return 0
+        fi
+        found="$mode"
+    done
+    printf '%s\n' "$found"
+}
+
 # Does this file belong in the mode this skill is being installed in?
 #
 # Only artifacts under bin/ carry a mode; everything else -- SKILL.md, the
@@ -668,15 +697,24 @@ ISHEOF
 # skill directory and not a lone binary. A skill that declares no
 # integration.tsv has no arm in the generated table, its lookup is empty, and
 # every file is allowed: the flag is a no-op for it rather than an error.
+#
+# `mode` is the answer install_skill() already resolved once, up front, and
+# every one of its calls passes it in: integration_mode_for detects from
+# whatever is CURRENTLY on disk at the destination, and this same function is
+# what remove_stale_integration_binaries uses to decide what to delete FROM
+# that disk -- recomputing per call would let the answer change mid-loop as
+# soon as the first stale binary is removed. A caller with no resolved mode
+# yet (the picker, T95) omits it and gets the old explicit-or-default answer.
 integration_file_allowed() {
-    local skill="$1" relative="$2" declared
+    local skill="$1" relative="$2" mode="${3:-}" declared
     case "$relative" in
         bin/*) : ;;
         *) return 0 ;;
     esac
     declared="$(integration_binary_mode "$skill" "${relative##*/}")"
     [ -n "$declared" ] || return 0
-    [ "$declared" = "$(integration_mode_for "$skill")" ]
+    [ -n "$mode" ] || mode="$(integration_mode_for "$skill")"
+    [ "$declared" = "$mode" ]
 }
 
 # A skill switching integration mode (mcp -> skill or back) leaves the
@@ -689,11 +727,11 @@ integration_file_allowed() {
 # list of triples or binary names to fall out of date the next platform this
 # grows to support.
 remove_stale_integration_binaries() {
-    local skill="$1" destination="$2" files="$3" relative physical
+    local skill="$1" destination="$2" files="$3" mode="${4:-}" relative physical
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         case "$relative" in bin/*) : ;; *) continue ;; esac
-        if integration_file_allowed "$skill" "$relative"; then
+        if integration_file_allowed "$skill" "$relative" "$mode"; then
             continue
         fi
         physical="$(platform_relative_path "$skill" "$relative")"

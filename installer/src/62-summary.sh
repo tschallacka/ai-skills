@@ -87,6 +87,23 @@ summary_dev_build_note() {
     printf '\n             dev build used for: %s' "$joined"
 }
 
+# The suffix naming which integration mode was installed and where that came
+# from, for a skill that offers a choice (T109: an install that silently
+# carries a mode forward is only progress over a silent wrong default if it
+# SAYS what it did). Silent for a skill with no integration.tsv, which is most
+# of them -- the flag is meaningless there and the summary should not imply a
+# choice was made.
+summary_integration_note() {
+    local skill="$1" mode="$2" source="$3" reason
+    [ -n "$(integration_modes "$skill")" ] || return 0
+    case "$source" in
+        explicit) reason='--integration' ;;
+        detected) reason='carried forward from the existing install' ;;
+        *) reason='default, no prior install found' ;;
+    esac
+    printf '\n             integration mode: %s (%s)' "$mode" "$reason"
+}
+
 # Idempotent, because cleanup() calls it too: a run that dies part-way (the
 # permission step needs a tty) must still end with the block that says what was
 # written, which for a headless run is the whole user-facing story.
