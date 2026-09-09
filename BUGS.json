@@ -1592,7 +1592,7 @@
     {
       "id": "B103",
       "title": "PR #13's interactive-shell skill is registered nowhere, so the installer cannot see it",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1610,14 +1610,14 @@
       "fix": null,
       "verification": null,
       "found_by": "merge review of PR #13, maintainer session 2026-09-01",
-      "notes": "Registration recipe is T82 step 2. B104 explains why the existing gates stayed quiet about this.",
+      "notes": "Registration recipe is T82 step 2. B104 explains why the existing gates stayed quiet about this. interactive-shell is fully registered: SKILL_NAMES in installer/src/05-config.sh, package.json's files list, README.md's skill table, and installer/src/50-manifest.sh (which even has interactive-shell-specific platform-exclusion logic). This described a state from PR #13's initial merge (2026-09-01) that was evidently resolved during or shortly after that integration; nothing here describes current code.",
       "created_at": "2026-09-01T16:02:57Z",
-      "updated_at": "2026-09-01T16:12:19Z"
+      "updated_at": "2026-09-09T13:19:43Z"
     },
     {
       "id": "B104",
       "title": "The marker and manifest gates cannot see an unregistered skill directory, so PR #13's six unmarked files pass",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1633,14 +1633,14 @@
       "fix": null,
       "verification": null,
       "found_by": "merge review of PR #13, maintainer session 2026-09-01",
-      "notes": null,
+      "notes": "Followed directly from B103 (an unregistered skill directory the marker/manifest gates could not see): interactive-shell is now fully registered and its files carry the required markers, so the gate has something to check. Same PR #13 vintage (2026-09-01), resolved with the registration.",
       "created_at": "2026-09-01T16:03:12Z",
-      "updated_at": "2026-09-01T16:03:12Z"
+      "updated_at": "2026-09-09T13:19:43Z"
     },
     {
       "id": "B105",
       "title": "PR #13's BUGS.json duplicates three entries and carries a severity outside the enum",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1654,14 +1654,14 @@
       "fix": null,
       "verification": null,
       "found_by": "merge review of PR #13, maintainer session 2026-09-01",
-      "notes": null,
+      "notes": "bugs check reports 311 entries, sound: no duplicate ids, no severity outside the enum. Whatever PR #13's BUGS.json carried at merge time (2026-09-01) was corrected during or shortly after that integration; the register is clean now.",
       "created_at": "2026-09-01T16:03:33Z",
-      "updated_at": "2026-09-01T16:03:33Z"
+      "updated_at": "2026-09-09T13:19:43Z"
     },
     {
       "id": "B106",
       "title": "PR #13 collides with master on six register ids, so its BUGS.json cannot merge as-is",
-      "status": "confirmed",
+      "status": "obsolete",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1676,9 +1676,9 @@
       "fix": null,
       "verification": null,
       "found_by": "merge review of PR #13, maintainer session 2026-09-01",
-      "notes": "Resolution recipe is T82. The tool that reports and renames these is planning/scripts/register-resolve.sh from PR #15; it currently refuses this merge because the branch side is unsound (B105), which has to be fixed on the branch first.",
+      "notes": "Resolution recipe is T82. The tool that reports and renames these is planning/scripts/register-resolve.sh from PR #15; it currently refuses this merge because the branch side is unsound (B105), which has to be fixed on the branch first. Same PR #13 integration event as B105 -- a register-id collision at merge time, not an ongoing code defect. bugs check reports the current register sound with no id collisions.",
       "created_at": "2026-09-01T16:03:33Z",
-      "updated_at": "2026-09-01T16:12:19Z"
+      "updated_at": "2026-09-09T13:19:43Z"
     },
     {
       "id": "B109",
