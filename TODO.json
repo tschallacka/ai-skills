@@ -654,6 +654,22 @@
       "updated_at": "2026-09-09T07:31:25Z"
     },
     {
+      "id": "T126",
+      "title": "interactive-shell: a hook that reminds the skill exists BEFORE an agent works around a TTY requirement, not only after it admits defeat",
+      "status": "open",
+      "priority": "normal",
+      "parent": "T125",
+      "detail": "T125 covers the 'admission of defeat' pattern: an agent tries a headless command, hits a tty/stdin error, and tells the user it can't do this. There is a distinct, earlier pattern T125's hook never sees: an agent that notices a program needs a TTY and proactively reasons its way AROUND that, choosing a workaround instead of ever attempting the interactive path -- e.g. Michael's example: 'msync needs a TTY for its source chooser. It has an --environment flag though -- trying that first, since a non-interactive path beats a PTY.' No error occurs, no refusal is stated, so T125's tty/stdin-refusal pattern match and its PostToolUse-on-Bash-stderr variant both never fire; the workaround is chosen silently in the agent's own reasoning before any command even runs. This is worth its own entry because the fix is different in kind: T125's hook watches an OUTCOME (a failed command, an admission), while this one would need to watch a DECISION being made in the assistant's own text -- closer to a Stop-hook or UserPromptSubmit-hook scan for phrasing like 'needs a TTY/terminal/interactive input' followed by 'instead' or 'so I will use X', regardless of whether anything was ever run. False positives need the same care T125 already flags (a program that merely mentions a terminal for unrelated reasons).",
+      "blocked_on": null,
+      "refs": [
+        "interactive-shell/SKILL.md",
+        "interactive-shell/docs/README.md"
+      ],
+      "note": "Reported by Michael, relayed via bridge:session_0114UV8CPfYa9xkB93JbKSDx (relay-ai-skills) after searching TODO.json and interactive-shell/SKILL.md and finding no existing match for the trigger sentence.",
+      "created_at": "2026-09-09T09:51:03Z",
+      "updated_at": "2026-09-09T09:51:03Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
