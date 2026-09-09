@@ -146,16 +146,42 @@ AI_CHAT_HOME="$work/c-sub" "$CLIENT" tail \
     --insecure --no-session >"$work/sub.out" 2>&1 &
 subscriber_pid=$!
 
+# The subscriber is launched in the background with nothing to synchronise on.
+# JOIN's live push only delivers what is broadcast AFTER it lands server-side
+# (B290/B206): fire the arming send before that and it is broadcast to whoever
+# is already joined and gone, so the subscriber then waits out its whole
+# budget for a message that was never coming -- reading identically to a
+# stall. NAMES needs no membership of its own (B256), so polling it here
+# cannot itself race the JOIN it is checking for.
+mkdir -p "$work/c-check"
+joined=false
+for _ in $(seq 1 60); do
+    # PORTABILITY(pipefail-grep-q): captured rather than piped into
+    # grep -q, so a members list ending exactly at "stallsub" cannot
+    # SIGPIPE the writer and be misread as "not yet joined".
+    members="$(AI_CHAT_HOME="$work/c-check" "$CLIENT" names \
+        --server 127.0.0.1:"$port" --nick checker --chan '#stall' \
+        --insecure --no-session 2>/dev/null || true)"
+    grep -qx stallsub <<<"$members" && { joined=true; break; }
+    sleep 0.5
+done
+if [ "$joined" != true ]; then
+    t_fail "the subscriber never joined #stall within 30s"
+    t_end
+    exit 1
+fi
+
 # Precondition, asserted rather than slept for: the subscriber is connected and
 # being serviced, proven by it printing a message another client sent. Without
 # this the whole test could pass vacuously against a subscriber that never got
 # off the ground - there would be nothing holding a connection state, and every
 # assertion below would be trivially true.
 #
-# It does NOT prove broadcast delivery: `tail` gets that message from its FETCH
-# poll of the channel log. Nothing the shipped client can do asserts the
-# broadcast path end to end, because it discards PRIVMSG lines; the outbox unit
-# tests in src/chat-server-rs/src/main.rs cover the queueing itself.
+# It does NOT prove broadcast delivery on its own: `tail`'s JOIN subscribes it
+# to the server's live PRIVMSG push, and this is that push's first message.
+# Nothing the shipped client can do asserts the broadcast path end to end
+# without also relying on that push; the outbox unit tests in
+# src/chat-server-rs/src/main.rs cover the queueing itself.
 send_as opener '#stall' 'subscriber-armed' 30
 attached=false
 for _ in $(seq 1 60); do

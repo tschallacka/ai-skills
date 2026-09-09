@@ -27,7 +27,7 @@ package/chat/binaries.tsv	1876
 package/chat/docs/README.md	1676
 package/chat/integration.tsv	1652
 package/chat/requires.tsv	467
-package/chat/tests/test-chat-broadcast-stall.sh	12496
+package/chat/tests/test-chat-broadcast-stall.sh	13692
 package/chat/tests/test-chat-descriptor-leak.sh	9591
 package/chat/tests/test-chat-owner-socket.sh	13770
 package/chat/tests/test-chat-resolution.sh	7891
