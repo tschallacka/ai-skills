@@ -3146,6 +3146,28 @@
       "updated_at": "2026-09-08T21:05:01Z"
     },
     {
+      "id": "B308",
+      "title": "open --endpoint with no --file can attach a stale session_token from an unrelated server's cache",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "In tests/test-ai-text-editor.sh's TCP section: open a file on the default unix-socket server with no explicit --agent/--session (so ambient CLAUDE_CODE_SESSION_ID or similar becomes the identity) -- this populates the (identity, no-file) 'focused tab' cache slot pointing at that server. Then start a SEPARATE TCP server and call: ai-text-editor open --endpoint tcp:HOST:PORT --auth-token secret --save-session-token FILE (no --file, no --session-token). Reproduced live 2026-09-09 running the real binaries.",
+      "observed": "The open answers session_unauthorized: 'the supplied session_token does not belong to a tab on this server' -- even though --endpoint explicitly names the new TCP server and no session_token was given on the command line at all.",
+      "expected": "An explicit --endpoint is a complete, self-sufficient address (SKILL.md: 'wins over discovery'). A caller naming one, with no --file and no --session-token, should get a fresh connection to that endpoint, not a session_token silently forwarded from a completely different, previously-cached server.",
+      "mechanism": "client::resolve()'s explicit_endpoint branch (src/ai-text-editor/src/client.rs, ~line 180) reads a session_token from cache_path unconditionally: cache_path is derived from (identity, request.file), and when no --file is given that resolves to the identity's FOCUS cache slot (cache_path(identity, None)), which may point at an entirely unrelated server from an earlier call under the same ambient identity. The code never checks whether the cached Session's own .endpoint matches the just-parsed request endpoint before reusing its session_token -- the comment above it ('the cache is an optimization here, never a prerequisite') is true for auth_token reuse across repeat calls to the SAME endpoint, but wrong for a cache entry that belongs to a DIFFERENT endpoint than the one just named explicitly.",
+      "surfaces": [
+        "src/ai-text-editor/src/client.rs",
+        "src/ai-text-editor/src/transport.rs"
+      ],
+      "fix": null,
+      "verification": null,
+      "found_by": "Investigating test-ai-text-editor.sh's TCP section failing during T110 work, 2026-09-09",
+      "notes": null,
+      "created_at": "2026-09-09T07:03:13Z",
+      "updated_at": "2026-09-09T07:03:13Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
