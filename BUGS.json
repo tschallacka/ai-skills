@@ -2092,7 +2092,7 @@
     {
       "id": "B159",
       "title": "accept() errors are discarded, so descriptor exhaustion is silent and the loop spins",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B158",
@@ -2101,17 +2101,17 @@
       "expected": "a rate-limited report naming the failure plus a backoff, the way the handshake-error path already does",
       "mechanism": "the accept loop's Err(_) => continue discarded the error value with no log, no counter and no sleep, so EMFILE is invisible and the retry is unbounded.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "the accept loop's Err(_) => continue now logs the failure (rate-limited to once a minute, with a running count) and sleeps 100ms before retrying, instead of discarding the error and spinning silently at full speed",
+      "verification": "a5958ee52a4f378553b85c3391e2ff21eef64982, same commit as B160. Confirmed present at src/chat-server-rs/src/main.rs:1658-1693 on current master.",
       "found_by": "chat-b122, while measuring B127",
       "notes": null,
       "created_at": "2026-09-04T10:08:35Z",
-      "updated_at": "2026-09-04T10:08:35Z"
+      "updated_at": "2026-09-09T16:40:16Z"
     },
     {
       "id": "B160",
       "title": "try_clone's fallback unwraps a second clone that fails for the same reason, so EMFILE aborts the server",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": "B158",
@@ -2120,12 +2120,12 @@
       "expected": "a connection arriving at the descriptor limit is refused and reported; it does not take the process down",
       "mechanism": "try_clone().unwrap_or_else(|_| try_clone().unwrap()) unwraps a second clone that fails for exactly the reason the first did, and the crate is panic = 'abort', so one connection at the limit kills every other live connection. The clone was also unnecessary: nothing after it uses stream.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "the accepted TCP stream is moved into ConnState directly instead of being cloned, removing the try_clone().unwrap_or_else(|_| try_clone().unwrap()) double-unwrap whose fallback failed for the same reason the first clone did and aborted the whole process (panic = \"abort\") under a descriptor limit",
+      "verification": "a5958ee52a4f378553b85c3391e2ff21eef64982 (\"chat: the server leaked a descriptor per connection, then lost messages\"). Confirmed present at src/chat-server-rs/src/main.rs:1720-1738 on current master, with a comment citing the exact old buggy expression and the panic it caused. Live sanity check under ulimit -n 7 with several sends: no abort, server exits cleanly on its own timeout.",
       "found_by": "chat-b122, while measuring B127",
       "notes": null,
       "created_at": "2026-09-04T10:08:35Z",
-      "updated_at": "2026-09-04T10:08:35Z"
+      "updated_at": "2026-09-09T16:40:16Z"
     },
     {
       "id": "B162",
