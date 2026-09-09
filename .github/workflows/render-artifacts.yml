@@ -27,7 +27,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc, package: plan-overview.exe }
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           # Only the crate is needed to build it. The full tree also carries
           # fixture paths long enough to fail checkout on the Windows runner.
@@ -60,7 +60,7 @@ jobs:
         run: '& "${{ github.workspace }}\target\${{ matrix.target }}\release\${{ matrix.package }}" --help'
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: plan-overview-${{ matrix.target }}
           path: ${{ github.workspace }}/target/${{ matrix.target }}/release/${{ matrix.package }}
