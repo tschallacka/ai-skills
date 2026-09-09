@@ -96,6 +96,7 @@ pub struct Change {
     pub title: Option<String>,
     pub status: Option<Status>,
     pub priority: Option<Priority>,
+    pub severity: Option<Severity>,
     pub fix: Option<String>,
     pub verification: Option<String>,
     pub mechanism: Option<String>,
@@ -108,6 +109,7 @@ impl Change {
         self.title.is_none()
             && self.status.is_none()
             && self.priority.is_none()
+            && self.severity.is_none()
             && self.fix.is_none()
             && self.verification.is_none()
             && self.mechanism.is_none()
@@ -188,6 +190,9 @@ pub fn update(register: &mut Register, id: &str, change: Change) -> Result<(), U
     }
     if let Some(priority) = change.priority {
         bug.priority = priority;
+    }
+    if let Some(severity) = change.severity {
+        bug.severity = severity;
     }
     if let Some(fix) = change.fix {
         bug.fix = Some(fix);
@@ -288,6 +293,26 @@ mod add_closure_tests {
             "the title change applies"
         );
         assert_eq!(r.find(&id).unwrap().title, "a corrected title");
+    }
+
+    /// B289: `--severity` was accepted by the global flag list but had no
+    /// member on `Change`, so `update` reported success and changed nothing.
+    #[test]
+    fn a_severity_alone_is_a_change_and_is_applied() {
+        let mut r = register();
+        let id = add(&mut r, new_bug(Status::Confirmed)).unwrap();
+        assert_eq!(r.find(&id).unwrap().severity, Severity::Minor);
+
+        let change = Change {
+            severity: Some(Severity::Blocking),
+            ..Change::default()
+        };
+        assert!(
+            !change.is_empty(),
+            "a change naming only --severity must not read as empty"
+        );
+        assert!(update(&mut r, &id, change).is_ok());
+        assert_eq!(r.find(&id).unwrap().severity, Severity::Blocking);
     }
 
     #[test]

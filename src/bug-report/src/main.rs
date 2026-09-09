@@ -40,7 +40,7 @@ Usage:
            [--mechanism M] [--parent B37] [--found-by W] [--surfaces a,b]
            [--fix F] [--verification V]   (closure evidence; required with --status fixed)
   bugs update <ID> [--title T] [--status S] [--fix F] [--verification V]
-                   [--reason R] [--priority P] [--mechanism M]
+                   [--reason R] [--priority P] [--severity S] [--mechanism M]
                    [--append-note N]
   bugs show <ID>
   bugs list [--status S] [--priority P] [--severity S] [--parent ID]
@@ -269,6 +269,7 @@ fn update(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         title: args.flag("title").map(str::to_string),
         status: opt_enum(args.flag("status"), "--status", register::STATUSES)?,
         priority: opt_enum(args.flag("priority"), "--priority", register::PRIORITIES)?,
+        severity: opt_enum(args.flag("severity"), "--severity", register::SEVERITIES)?,
         fix: args.flag("fix").map(str::to_string),
         verification: args.flag("verification").map(str::to_string),
         mechanism: args.flag("mechanism").map(str::to_string),
