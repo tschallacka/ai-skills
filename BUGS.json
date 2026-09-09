@@ -4717,9 +4717,9 @@
       "fix": null,
       "verification": null,
       "found_by": "skill review, maintainer session 2026-08-30",
-      "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed.",
+      "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed. Checked what would satisfy the hold, 2026-09-09: planning/tests/test-limited-run-contract.sh is a stubbed contract test (its own header: \"uname and memlimit are stubbed\") that asserts limited-run.sh COMPOSES the right command line (cpulimit --limit=N -- nice ... my-command), not that cpulimit actually throttles anything -- it does not satisfy \"verified end-to-end\". .github/workflows/ci.yml installs real memlimit on the macOS Apple Silicon runner but never installs cpulimit at all, so even a new e2e test (spin a real CPU-bound load, measure its actual CPU time under cpulimit, assert it stays below a ceiling) could not run for real in CI without first adding a brew install cpulimit step there. That is a CI workflow change, which I am flagging rather than making unilaterally. Still HELD; this only narrows what \"verified end-to-end\" is still missing.",
       "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-08-30T21:50:11Z"
+      "updated_at": "2026-09-09T04:15:10Z"
     },
     {
       "id": "B92",
