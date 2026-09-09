@@ -179,6 +179,7 @@ if [ "$propagation_mode" = true ]; then
     plan_validate_propagation_leaves
     plan_validate_propagation_roster
     plan_validate_propagation_freshness
+    plan_validate_propagation_handoff
 fi
 
 # plan_report_gates -- which of the three questions this run answers. They are
