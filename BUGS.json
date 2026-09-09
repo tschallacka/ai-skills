@@ -2555,7 +2555,7 @@
     {
       "id": "B243",
       "title": "test-review-lifecycle writes about 6G into a hardcoded /tmp directory, so the suite can exhaust a tmpfs machine",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2566,12 +2566,12 @@
       "surfaces": [
         "benchmark/planning/tests/test-review-lifecycle.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "copy_workspace_for_publication now excludes target/ and node_modules/ (both top-level and nested spellings, since the workspace has one top-level target/ and seven more under src/*/), citing this bug by name and explaining why .git is deliberately NOT excluded (the copy is used as a git repository). test-review-lifecycle.sh's hardcoded mktemp -d /tmp/reviewer-lifecycle-goal03.XXXXXX now honors ${TMPDIR:-/tmp}, so an operator can redirect it off tmpfs.",
+      "verification": "Confirmed present at benchmark/planning/setup-benchmark.sh:98-123 and benchmark/planning/tests/test-review-lifecycle.sh:146 on current master. Live measurement: this repo's own target/ is 4.6G; running the tar exclusion logic standalone against the live tree copies 352M (no target/ anywhere), matching the fix direction the entry itself specified and reproducing the same order-of-magnitude reduction the entry's own measurement showed (276K baseline vs 5.5G unpatched).",
       "found_by": "a suite run after the machine had already been rebooted once for an out-of-memory crash, 2026-09-07",
       "notes": "This is very likely the cause of the out-of-memory crash that forced a reboot on 2026-09-07, and the attribution matters because the first diagnosis was wrong. Agent scratch in /tmp was blamed and cleaned up first - roughly 20 logs and two 200KB install.sh copies, about 640KB total. That is three orders of magnitude too small to matter. This single test directory is 6G. Anyone reading the earlier /tmp-hygiene guidance should know it was necessary housekeeping but not the fix.\n\nTwo consequences worth acting on separately from the fix:\n1. The documented preset is the problem's detector, not its cause. resource-limited-testing's table names 6G/400% for a large suite, and this test needs about 6G on its own, so the suite cannot pass under its own recommended cap while this stands.\n2. It leaks on failure. The 6G tree was still there after exit 137, so a killed run leaves it until a reboot or a manual rm. A trap that removes the directory would at least bound the damage. CORRECTION to this entry's earlier note, from reading the source rather than inferring: the test is NOT careless about cleanup. Line 143 is trap 'rm -rf -- \"$tmp\"' EXIT. The leak happens because the memory cap SIGKILLs the process and an EXIT trap cannot run on SIGKILL - so the cap that stops it filling RAM is exactly what stops it reclaiming the space. Confirmed by measurement: exit 137, and the 5.5G tree was still present until an external cleanup removed it.\n\nMEASURED EVIDENCE, replacing the earlier estimate: peak 5,479,476 KB, reached in about 8 seconds from 276 KB. Every sample recorded the two 51M rjq binaries in target/debug.\n\nFIX DIRECTION: add target/, .git/ and node_modules/ to copy_workspace_for_publication's exclusion list. Note the blast radius is wider than this test - setup-benchmark.sh is the real harness, so every benchmark run copies the target tree too, which is a silent cost on any machine with a warm build.",
       "created_at": "2026-09-07T12:18:33Z",
-      "updated_at": "2026-09-07T12:22:04Z"
+      "updated_at": "2026-09-09T17:03:47Z"
     },
     {
       "id": "B250",
