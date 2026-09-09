@@ -3495,6 +3495,7 @@ scripts/create-step-testing.sh
 scripts/rebuild-plan-progress.sh
 scripts/register-command.sh
 scripts/register-read.sh
+scripts/register-lib.sh
 scripts/resolve-finding.sh
 scripts/render-plans-board.sh
 scripts/plans-board-lib.sh

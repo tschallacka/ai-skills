@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MODE: DEV
+# MODE: PROD
 # register-lib.sh — shared validation, sorting and stamping for the root
 # defect register (BUGS.json) and work queue (TODO.json).
 #
