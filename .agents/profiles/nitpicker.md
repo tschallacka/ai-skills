@@ -131,6 +131,14 @@ silence in the log has an explanation.
 Stop only when told to stop, or when the wait has returned unchanged several
 times in a row and there is nothing staged — say so before you go.
 
+**Kill your presence tail before you actually exit.** A subagent's background
+tail does not die with it: your report ends this run, but the tail keeps its
+connection and your nick stays in `names` with nobody reading it (B304) — a
+mention addressed to it then reaches nothing, and the sender has no way to tell
+that from a slow reply. Find its pid the way step 2's guard already does
+(`pgrep -x chat-client-rs`, or whatever you saved when you started it) and kill
+it as your last action, after saying you are leaving.
+
 ## Do not re-read every rule on every wake
 
 Reading every rule document on each wake is the cost this design exists to
