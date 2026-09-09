@@ -2748,7 +2748,7 @@
     {
       "id": "B268",
       "title": "a skipped test is reported as PASS, so a suite can be green while running nothing",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2761,12 +2761,12 @@
         "run-tests.sh",
         "chat/tests/test-chat-broadcast-stall.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Added t_skip <reason> to lib-test.sh: prints the reason (loud, unchanged) and ends the test with its own SKIP outcome instead of PASS. run-tests.sh reads a trailing '<test>: SKIP' line from the test's own output to count it separately from PASS in both the per-test line and a new Skipped: N summary column/epilogue list, without touching the overall pass/fail exit code. Converted the 9 sites across the suite that skip a whole test before any assertion runs; left the 7 sites that skip one check within a test that goes on to assert others, since those already ran something real and PASS is accurate for them.",
+      "verification": "Verified t_skip directly with a standalone probe (prints SKIP line, exits 0). Verified end-to-end with a synthetic throwaway test dropped into planning/tests/: run-tests.sh reported it as SKIP (not PASS) in both the per-test line and the Skipped: N summary, with no effect on the overall exit code. Full ./run-tests.sh: 232/233 pass (the one failure was this PR's own npm baseline needing a refresh for the changed file sizes, included in the fix). Merged via PR #99, commit bf4b475.",
       "found_by": "aiskills, while diagnosing why the macOS bash 3.2 leg failed test-chat-broadcast-stall while macos-latest passed it",
       "notes": "Found while diagnosing a different failure, and it cost real time: macos-latest reported test-chat-broadcast-stall as PASS while the macOS bash 3.2 leg failed it, and \"PASS\" was consistent with two very different stories -- the test ran and passed, or the test skipped for want of timeout(1), which stock macOS does not ship. Ruling the second out needed the raw job log rather than the summary, because the summary cannot express the difference. Note the interaction with the skip being LOUD on stderr: the authors did the right thing at the test end (the comment in test-chat-broadcast-stall.sh calls it \"a loud SKIP, not a failure\"), and the runner then flattens it back to PASS, so the loudness is lost exactly where the decision is made. Related to the evidence gap fixed in lib-test.sh on fix/worktrees-tmpdir-chat-relay: both are cases of CI reporting less than it knows.",
       "created_at": "2026-09-07T19:10:01Z",
-      "updated_at": "2026-09-07T19:10:11Z"
+      "updated_at": "2026-09-09T12:13:03Z"
     },
     {
       "id": "B269",
