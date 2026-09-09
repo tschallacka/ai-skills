@@ -40,6 +40,7 @@ planning/scripts/render-plans-board.sh	scripts/render-plans-board.sh	installer	r
 planning/scripts/plans-board-lib.sh	scripts/plans-board-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/register-command.sh	scripts/register-command.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/register-read.sh	scripts/register-read.sh	installer	review-approved	backup-then-replace	false
+planning/scripts/register-lib.sh	scripts/register-lib.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/resolve-finding.sh	scripts/resolve-finding.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/create-ui-story-run-cache.sh	scripts/create-ui-story-run-cache.sh	installer	review-approved	backup-then-replace	false
 planning/scripts/create-ui-validation.sh	scripts/create-ui-validation.sh	installer	review-approved	backup-then-replace	false
