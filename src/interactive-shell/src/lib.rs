@@ -2172,6 +2172,35 @@ pub fn run(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    if cleanup.reaped {
+        // Exit-time redraws can still sit in the pty's kernel buffer after
+        // waitpid reports death; drain it so child_exit reports the settled
+        // screen, not whatever the last 8192-byte read happened to catch.
+        loop {
+            let mut buf = [0; 8192];
+            let n = unsafe { libc::read(master, buf.as_mut_ptr().cast(), buf.len()) };
+            if n <= 0 {
+                break;
+            }
+            screen.feed(&buf[..n as usize]);
+            seq += 1;
+            json(
+                &mut out,
+                &ScreenEvent {
+                    v: 1,
+                    event: "screen",
+                    seq,
+                    base: seq - 1,
+                    rows: screen.delta(),
+                    cursor: screen.cursor(),
+                    elements: screen.elements(),
+                    styles: screen.styles(),
+                    scrollback: screen.scrollback(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
     if INTERRUPTED.load(Ordering::Relaxed) {
         reason = "signal";
         code = 130;
