@@ -3927,7 +3927,7 @@
     {
       "id": "B237",
       "title": "the unknown-argument check is global rather than per-verb, so a key another verb reads is silently ignored",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3939,12 +3939,12 @@
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs",
         "src/ai-text-editor-mcp/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "handle()'s unknown-argument check in ai-text-editor-server.rs is now per-verb: ai_text_editor::verbs::payload_keys(method)/reads_payload_key(method, key) are the one declaration both the CLI/NDJSON door and the MCP adapter's advertised inputSchema read, replacing the old protocol-wide KNOWN_PAYLOAD_KEYS list",
+      "verification": "593912658dadb53b2339254003a66736eecf0633 (\"ai-text-editor: the unknown-argument door is per-verb, not protocol-wide\"). Confirmed on current master: KNOWN_PAYLOAD_KEYS no longer exists; handle() at ai-text-editor-server.rs:1607 calls verbs::payload_keys/reads_payload_key, with a comment explicitly citing B237. This is the same commit that produced the payload_keys/reads_payload_key gate already verified and cited when closing B250, B251 and B252 earlier this session - B237 is the general mechanism those three were specific instances of.",
       "found_by": "found while fixing B226: the range keys were accepted and dropped, which the entry had not recorded",
       "notes": "Binding the per-verb table to both surfaces surfaced three live instances of this class, now filed separately so each closes on its own evidence: B250 (insert accepts delete_len and answers success), B251 (search advertises pager_key and historical, which only page reads), B252 (index advertises an action it never reads). B253 is unrelated to this class but was found in the same pass - the endpoint_for_file /tmp fallback.",
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T14:29:46Z"
+      "updated_at": "2026-09-09T14:16:25Z"
     },
     {
       "id": "B238",
