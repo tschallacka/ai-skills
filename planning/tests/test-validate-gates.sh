@@ -68,5 +68,33 @@ case "$complete_line" in
         note_fail '--complete still reported the completion gate as unchecked' ;;
 esac
 
+# 5. B97: a genuinely approved review must not fall through to "no". Build a
+#    second plan whose adversarial-review.md carries the approved verdict and
+#    whose plan-description.md mirrors it, and require the gate say so.
+"$scripts/create-plan.sh" p2 "Gates fixture, approved" >/dev/null
+plan2="$work/p2"
+"$scripts/add-goal.sh" "$plan2" 01-a "A" "one demonstrable outcome" >/dev/null
+"$scripts/add-work-unit.sh" "$plan2" --id W01 --type source --file src/a.rs \
+    --scope "a()" --subscope N/A --change "The one target." --depends-on -- \
+    --goal 01-a --step 01-step-a >/dev/null
+t_sed_i 's/- Status: 💤 pending/- Status: ✅ approved/' "$plan2/plan-description.md"
+cat > "$plan2/adversarial-review.md" <<'REVIEW'
+# Adversarial review: p2
+
+## Review scope
+
+Everything in scope for this fixture.
+
+## Findings
+
+None.
+
+## Verdict
+
+- Status: `✅ approved`
+REVIEW
+approved_line="$(gates "$plan2")"
+assert_has 'adversarially approved=yes' "$approved_line" 'an approved review is reported as approved (B97)'
+
 [ "$(t_failures)" -eq 0 ] || exit 1
 printf 'validate-gates: PASS\n'
