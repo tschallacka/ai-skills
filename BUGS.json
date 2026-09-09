@@ -4861,7 +4861,7 @@
     {
       "id": "B102",
       "title": "todo status 'dropped' is in the shipped schema but every writer rejects it",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4874,12 +4874,12 @@
         "todo/schema.2.0.0-alpha.1.json",
         "todo/schema.1.4.2.json"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "register-lib.sh's reg_findings status enum and reg_sort's srank map both gained 'dropped', matching the schema and the Rust register.rs Status::rank() ordering",
+      "verification": "PR #108, merged as 3af41ec. New regression case in planning/tests/test-register-helpers.sh; confirmed to fail without the fix (unknown status dropped) and pass with it.",
       "found_by": "building the register conflict resolver, maintainer session 2026-09-01",
       "notes": null,
       "created_at": "2026-09-01T15:54:24Z",
-      "updated_at": "2026-09-01T15:54:24Z"
+      "updated_at": "2026-09-09T14:30:08Z"
     },
     {
       "id": "B107",
