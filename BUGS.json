@@ -3020,7 +3020,7 @@
     {
       "id": "B292",
       "title": "install.sh copies binaries with cp, so an update aborts when the shipped binary is running",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3031,12 +3031,12 @@
       "surfaces": [
         "installer/src/60-install.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/60-install.sh: install_skill's binary-copy step now writes to a mktemp file beside the destination and mv's it into place, instead of cp -p'ing directly onto a possibly-running binary (avoids Linux ETXTBSY). New regression test planning/tests/test-installer-busy-binary.sh installs chat, starts the installed chat-server-rs, forces a full reinstall, and asserts it succeeds without ETXTBSY and without killing the running server.",
+      "verification": "Merged to master as 2a7561029d7ca771936c14c788e22dcf384ec844 (PR #117, squash-merged); CI green on ubuntu-latest/macos-latest/bash-3.2 portability floor, plus the new regression test passing.",
       "found_by": "installing the newest skills on 2026-09-08 while another agent's chat server and this session's editor server were running",
       "notes": null,
       "created_at": "2026-09-08T12:22:36Z",
-      "updated_at": "2026-09-08T12:22:36Z"
+      "updated_at": "2026-09-09T18:13:07Z"
     },
     {
       "id": "B296",
