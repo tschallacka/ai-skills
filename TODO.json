@@ -717,6 +717,19 @@
       "updated_at": "2026-09-09T14:03:07Z"
     },
     {
+      "id": "T130",
+      "title": "Wire plan-overview's --watch/--refresh into run(), using the already-tested watch.rs and StateStream",
+      "status": "open",
+      "priority": "normal",
+      "parent": null,
+      "detail": "B99 refused --watch/--refresh by name rather than silently ignoring them, since neither drove any behaviour. The pieces to wire already exist and are unit-tested: watch::watch_plan_dir(root) returns a Receiver<ChangeEvent> (with scan/coalesce/debounce already covered by tests/watch.rs), and serve::StateStream has subscribe/publish/current, but serve_on_port() currently takes a static state: String rather than a StateStream, so nothing ever calls publish(). The real work: (1) change serve_on_port to accept a StateStream and have respond()'s GET /state read state_stream.current() instead of a captured string, (2) in run(), when --watch is set, spawn watch_plan_dir and on each coalesced ChangeEvent re-extract/re-parse/re-render and state_stream.publish() the new state_json, (3) decide what --refresh actually means once --watch exists (a client poll interval for a non-serve --out render loop? a debounce window distinct from watch.rs's own DEBOUNCE_WINDOW?) - this needs a decision, not just plumbing. --refresh's exact semantics were never specified anywhere in the register, only assumed from its name.",
+      "blocked_on": null,
+      "refs": [],
+      "note": null,
+      "created_at": "2026-09-09T14:08:33Z",
+      "updated_at": "2026-09-09T14:08:33Z"
+    },
+    {
       "id": "T69",
       "title": "A postmortem template carrying token accounting and a reviewer-session table",
       "status": "open",
