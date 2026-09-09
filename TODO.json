@@ -490,19 +490,6 @@
       "updated_at": "2026-09-04T08:36:28Z"
     },
     {
-      "id": "T92",
-      "title": "bump the GitHub Actions we pin to their latest majors, which run on node24",
-      "status": "open",
-      "priority": "normal",
-      "parent": null,
-      "detail": "Every CI run prints 'Node 20 is being deprecated. This workflow is running with Node 24 by default.' We do not choose that: a JavaScript action declares its own runtime as runs.using in its action.yml, and the majors we pin declare node20. The punycode and url.parse DeprecationWarnings in the same logs come from inside those actions' bundled code under the newer Node, not from anything in this repo.\n\nWhat we pin, and where it should go -- runs.using verified by reading each new major's action.yml directly, not from release notes:\n\n  actions/checkout           v4 -> v7.0.1   node24\n  actions/upload-artifact    v4 -> v7.0.1   node24\n  actions/download-artifact  v4 -> v8.0.1   node24\n\nCall sites: .github/workflows/ci.yml lines 627, 741, 863, 884, 909, 932, 987 and .github/workflows/render-artifacts.yml lines 30, 63. dtolnay/rust-toolchain@1.98 is a composite action and is not implicated.\n\nThis is NOT a find-and-replace. upload-artifact v4->v7 and download-artifact v4->v8 cross breaking changes in artifact naming and overwrite behaviour, and we depend on that behaviour: the rust-artifact-manifest job downloads the per-target artifacts by name and publishes their hashes. So the bump has to be proven by a CI run that exercises that round trip, and the manifest job is the assertion.\n\nDo not reach for ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. It silences the warning by pinning the runner to the deprecated runtime, which is the opposite of the fix and leaves us to discover the removal as a hard failure instead.\n\nUrgency: the warnings are noise today and become failures when GitHub removes node20 from the runners (announced 2025-09-19). Raised by Tschallacka on 2026-09-04 after reading them in a run's logs.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T12:05:08Z",
-      "updated_at": "2026-09-04T12:05:08Z"
-    },
-    {
       "id": "T93",
       "title": "CI merges the registers branch to master on push, and refuses anything but the registers in it",
       "status": "open",
@@ -1014,6 +1001,19 @@
       "note": " Re-measured with an awk function-range scan instead of brace matching: two planning/tests files still define their own fail() without lib-test (test-installer-manifest, test-planning-context-contract), both inside the duplication-ratchet cap of 7 tolerated shims; no hidden eighteenth reporter.",
       "created_at": "2026-08-20T00:00:00Z",
       "updated_at": "2026-08-24T10:33:41Z"
+    },
+    {
+      "id": "T92",
+      "title": "bump the GitHub Actions we pin to their latest majors, which run on node24",
+      "status": "done",
+      "priority": "normal",
+      "parent": null,
+      "detail": "Every CI run prints 'Node 20 is being deprecated. This workflow is running with Node 24 by default.' We do not choose that: a JavaScript action declares its own runtime as runs.using in its action.yml, and the majors we pin declare node20. The punycode and url.parse DeprecationWarnings in the same logs come from inside those actions' bundled code under the newer Node, not from anything in this repo.\n\nWhat we pin, and where it should go -- runs.using verified by reading each new major's action.yml directly, not from release notes:\n\n  actions/checkout           v4 -> v7.0.1   node24\n  actions/upload-artifact    v4 -> v7.0.1   node24\n  actions/download-artifact  v4 -> v8.0.1   node24\n\nCall sites: .github/workflows/ci.yml lines 627, 741, 863, 884, 909, 932, 987 and .github/workflows/render-artifacts.yml lines 30, 63. dtolnay/rust-toolchain@1.98 is a composite action and is not implicated.\n\nThis is NOT a find-and-replace. upload-artifact v4->v7 and download-artifact v4->v8 cross breaking changes in artifact naming and overwrite behaviour, and we depend on that behaviour: the rust-artifact-manifest job downloads the per-target artifacts by name and publishes their hashes. So the bump has to be proven by a CI run that exercises that round trip, and the manifest job is the assertion.\n\nDo not reach for ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. It silences the warning by pinning the runner to the deprecated runtime, which is the opposite of the fix and leaves us to discover the removal as a hard failure instead.\n\nUrgency: the warnings are noise today and become failures when GitHub removes node20 from the runners (announced 2025-09-19). Raised by Tschallacka on 2026-09-04 after reading them in a run's logs.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Merged as PR #93 (a464bcb), squash-merged to master. actions/checkout v4->v7.0.1, actions/upload-artifact v4->v7.0.1, actions/download-artifact v4->v8.0.1, all verified node24 against the tag's own action.yml. Also bumped registers.yml/registers-sync.yml's checkout, not named in the original filing but in scope for 'every pinned major'. The rust-artifact-manifest job's upload/download-artifact round trip (the todo's own prescribed proof) passed on PR #93's CI, alongside one unrelated transient DNS flake on the macOS runner (dtolnay/rust-toolchain failing to resolve static.rust-lang.org) that a rerun cleared.",
+      "created_at": "2026-09-04T12:05:08Z",
+      "updated_at": "2026-09-09T08:59:45Z"
     },
     {
       "id": "T96",
