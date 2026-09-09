@@ -1569,7 +1569,7 @@
     {
       "id": "B100",
       "title": "npm pack ships gitignored project-specificies deviation notes",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -1582,12 +1582,12 @@
         ".npmignore",
         "installer/build-release.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "package.json's files array carries a negation entry, !project-specificies/*-deviations.md, added on PR #15 per this entry's own notes (npm's files array cannot be excluded by .npmignore/.gitignore, so this was the one mechanism that actually works).",
+      "verification": "Confirmed the negation entry is present in the current package.json (line 53). No *-deviations.md files exist on this workstation right now to re-run npm pack --dry-run against directly, but the fix's own mechanism is unconditional (it excludes the glob regardless of which files match it) and was already verified before/after on the original PR per this entry's notes.",
       "found_by": "wiki fact-check, maintainer session 2026-09-01",
       "notes": "Fixed on the branch in PR #15: package.json's files array gains !project-specificies/*-deviations.md, verified with npm pack --dry-run before and after.",
       "created_at": "2026-09-01T15:15:04Z",
-      "updated_at": "2026-09-01T16:12:19Z"
+      "updated_at": "2026-09-09T13:20:40Z"
     },
     {
       "id": "B103",
