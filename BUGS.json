@@ -3210,6 +3210,25 @@
       "updated_at": "2026-09-10T06:29:04Z"
     },
     {
+      "id": "B316",
+      "title": "install.sh's worktree permission grant writes a Write(...) rule Claude Code never matches",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Run the worktree permission step against a real Claude Code settings.json: SELECTED_TARGET_PATHS=($HOME/.claude/skills) worktrees_permission_step, then let the agent try to write a file under the granted worktrees root.",
+      "observed": "Reported live by the user against a work machine: \"Permission allow rule (../../.claude-work/settings.json): Write(/home/mdibbets/.config/tsch-ai-worktrees/**) is not matched by file permission checks — only Edit(path) rules are. Use Edit(/home/mdibbets/.config/tsch-ai-worktrees/**) instead (Edit rules cover all file-editing tools).\" The grant install.sh itself wrote is silently useless for the Write tool.",
+      "expected": "claude_worktrees_permissions should grant Edit(<worktrees>/**) only (plus Read and Bash), matching what claude_permissions already does for the planning root two functions earlier in the same file -- Edit(path) is Claude Code's umbrella rule for every file-editing tool, Write included, so a separate Write(path) entry is not just redundant but unmatched by the permission engine entirely.",
+      "mechanism": "installer/src/70-permissions.sh: claude_worktrees_permissions passed \"Write(\\($worktrees)/**)\" to claude_merge_allow alongside Read/Edit/Bash. Claude Code's permission engine keys file-editing-tool rules on Edit(path) only -- there is no Write(path) match and no fallback -- so the entry was dead weight that read as a grant but matched nothing.",
+      "surfaces": [],
+      "fix": "Dropped the Write(...) entry from claude_worktrees_permissions's entries list and from print_manual_worktrees_permissions' example line; regenerated install.sh from installer/src/*.sh. PR #139 (branch fix/b316-worktree-permission-write-rule).",
+      "verification": "tests/test-worktree-permissions.sh updated: now asserts Read+Edit+Bash are granted and explicitly asserts Write(...) is ABSENT, so a regression back to the dead rule is caught. Local run: PASS. shellcheck clean. planning/tests/test-npm-package.sh passes against the refreshed baseline. pre-push-check: PASS. Awaiting CI on PR #139.",
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-10T11:06:22Z",
+      "updated_at": "2026-09-10T11:18:02Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
