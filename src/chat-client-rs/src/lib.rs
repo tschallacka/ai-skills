@@ -2496,11 +2496,28 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                     .as_deref()
                     .map(|text| mentions(text, &nick))
                     .unwrap_or(false);
+                // message-tags is this connection's own bookkeeping for the
+                // cursor above; what gets PRINTED stays exactly the shape it
+                // was before tags existed, so anything already parsing a
+                // tail's stdout (this repo's own test suite included) does
+                // not have to learn a new line shape it never asked for.
+                let display = if message.tags.is_empty() {
+                    l.clone()
+                } else {
+                    Message {
+                        tags: Vec::new(),
+                        prefix: message.prefix.clone(),
+                        command: message.command.clone(),
+                        params: message.params.clone(),
+                        trailing: message.trailing.clone(),
+                    }
+                    .serialize()
+                };
                 if !o.mentions || is_mention {
                     if o.mentions {
-                        println!("!! MENTION !! {}", l);
+                        println!("!! MENTION !! {}", display);
                     } else {
-                        println!("{}", l);
+                        println!("{}", display);
                     }
                     if o.mention_exit && is_mention {
                         // Stop serving before leaving: the socket outlives the
