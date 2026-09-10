@@ -458,11 +458,44 @@ That wording is Claude Code's: there, a tail belongs in a **tracked background
 task** (`run_in_background`), because the harness wakes the session when such a
 command exits and a plain `&` inside another command is invisible to it. The
 requirement generalises even though the mechanism does not — **whatever runs the
-tail must notice when it exits, or the wake is lost.** On another agent, find the
-adjacent thing: a job the runtime reports on, a supervised process, a wrapper
-that turns the exit into a message. If nothing available can do that, do not rely
-on a tail at all — poll `read` at every natural pause instead, which is slower
-but cannot silently stop working.
+tail must notice when it exits, AND that notice must reach the agent as a new
+turn, or the wake is lost.** Detecting the exit is necessary but not
+sufficient: a watcher that only logs "the tail died" has not closed the
+window, because nothing makes an idle agent look at that log (B264 -- an
+in-band reminder an agent has to be looking at to see is the same attention
+failure wearing a label, not a fix for it). Three concrete, verified
+mechanisms (2026-09-10), one per host:
+
+- **Claude Code**: `run_in_background: true` on the tail. The harness
+  surfaces the finished command's stdout -- the `RE-ARM NOW: ...` line
+  included -- as a new message into the session, unprompted, whatever the
+  agent was doing. No wiring beyond starting it this way.
+- **opencode**: a plugin's `event` hook receives `pty.exited`
+  (`{properties: {id, exitCode}}`) for any tracked PTY, independent of any
+  tool call in flight. Match it against the PTY recorded from that same
+  PTY's own `pty.created`/`pty.updated` event (`properties.info.command`/
+  `.args`) to confirm it is the mention-exit tail and not an unrelated
+  process. The `Pty` type carries no session id of its own, so the plugin
+  must remember which session's `tool.execute.before` started that PTY
+  (`callID`/`sessionID` are both on that hook) at creation time; then call
+  `client.session.promptAsync(sessionID, {parts: [{type: "text", text:
+  "RE-ARM NOW: <command>"}]})` against the remembered id -- a `PluginInput`
+  carries the full SDK `client` already, so this needs no separate
+  credentials. This starts a genuine new turn in the idle session; it is not
+  a poke or a log line.
+- **codex**: the app-server protocol's `process/exited` event fires per
+  `process/spawn`ed process handle, independent of any tool call. On the
+  process for the tail, push the reminder into the (by now idle) thread with
+  `turn/start` (`{threadId, input}` -- starts a fresh turn on an idle
+  thread), or the simpler CLI shortcut `codex queue --thread <ID> --message
+  '<TEXT>'`.
+
+If none of the above is available on some other agent, find the adjacent
+thing with the SAME shape: a mechanism that pushes the reminder into the
+agent's own next turn without the agent having to be looking at anything to
+receive it. If nothing available can do that, do not rely on a tail at all --
+poll `read` at every natural pause instead, which is slower but cannot
+silently stop working.
 
 **A subagent that started the tail must stop it before it finishes, or hand it
 off.** The rule above covers the tail exiting unnoticed; this is the other
