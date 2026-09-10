@@ -3698,7 +3698,7 @@
     {
       "id": "B163",
       "title": "piping install.sh to bash silently installs into the first skill root, so --all reaches one agent",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3707,12 +3707,12 @@
       "expected": "a non-interactive run either installs into every detected root or refuses and names the flag to use; the documented curl-pipe form must be able to express what the menu offers",
       "mechanism": "the root selection is an interactive prompt with no command-line equivalent: --all selects all SKILLS, and --target names ONE root, so 'all listed roots' is reachable only from a tty. curl | bash has no tty by construction, which is the very form the header documents. Workaround today is a loop over --target, one run per root.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "select_targets() refuses (exit 1) when --yes is given with no interactive channel and more than one skill root is available, naming each root and the --target workaround. Exactly one available root is unchanged.",
+      "verification": "Merged PR #131 (3b89c47). tests/test-installer-multi-root-refusal.sh covers both branches and the workaround hermetically (PATH pinned so claude/codex/opencode on this dev machine's own PATH cannot make the single/multi-root cases undemonstrable); core assertions mutation-tested. Full ./run-tests.sh: 239 passed, 0 failed.",
       "found_by": "Tschallacka, fresh-install check on 2026-09-04",
       "notes": null,
       "created_at": "2026-09-04T12:05:37Z",
-      "updated_at": "2026-09-04T12:05:37Z"
+      "updated_at": "2026-09-10T01:29:17Z"
     },
     {
       "id": "B164",
