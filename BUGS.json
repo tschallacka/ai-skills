@@ -6379,7 +6379,7 @@
     {
       "id": "B309",
       "title": "tests/test-ai-text-editor.sh has drifted stale against several deliberate renames and the T99 verbosity ladder",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6390,12 +6390,12 @@
       "surfaces": [
         "tests/test-ai-text-editor.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Already fixed in commit 01b5c29c, PR #92 ('B309: fix tests/test-ai-text-editor.sh's drift against real renames and the verbosity ladder'), which merged before this bug was triaged in this session -- stale register bookkeeping, not a new fix.",
+      "verification": "bash tests/test-ai-text-editor.sh passes cleanly against the shipped Linux binaries (test-ai-text-editor: PASS), confirming the assertions already match the current mode/tab_id naming and T99 verbosity ladder.",
       "found_by": "Manually running the shipped-binary path while verifying T110/B308, 2026-09-09. Also worth a follow-up: this test having no CI signal at all for a week is the same class of gap T115/B111 exist to close for other suites -- consider whether a CI job should populate the per-skill bin dir, or whether this test's path should resolve to target/<triple>/release/ like others do.",
       "notes": null,
       "created_at": "2026-09-09T07:29:41Z",
-      "updated_at": "2026-09-09T07:29:41Z"
+      "updated_at": "2026-09-10T18:49:08Z"
     },
     {
       "id": "B310",
