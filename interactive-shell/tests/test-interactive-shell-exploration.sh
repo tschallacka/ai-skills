@@ -133,23 +133,22 @@ EOF
 done
 [ "$found" = yes ]
 send key F4
-# The editor opens on the file the discovery step selected. That is the mc
-# assertion this test can actually make, and it is deliberately where the mc
-# block now stops.
-#
-# NARROWED, and said out loud rather than quietly: everything that used to
-# follow here drove nano's keys (CTRL-A, CTRL-K, CTRL-O) and waited for nano's
-# "Write to File:" prompt on the assumption that EDITOR=nano makes mc's F4 open
-# nano. It does not -- mc opens its built-in mcedit, whose function-key bar
-# reads "2Save 3Mark 4Replac ... 10Quit", so those keystrokes meant unrelated
-# things and the save prompt never arrived. The block could never have passed;
-# it went unnoticed because CI has no mc (so this suite skips there) and this
-# branch had never had a CI run at all. Driving mcedit's own save instead is
-# real work, not a rename: F2 through the wrapper leaves the buffer modified and
-# the file untouched even though F4 (the same SS3 encoding) is honoured by the
-# panel. That is recorded as B125 rather than papered over with an assertion
-# that passes for the wrong reason.
 wait_screen 'Hello World'
+# B125, corrected: this used to stop here, on the belief that mc's F4 always
+# opens its own built-in mcedit regardless of $EDITOR (mcedit's function-key
+# bar reads "2Save 3Mark 4Replac ... 10Quit", and driving mcedit's own save
+# needs a key encoding this wrapper does not send). Live-verified 2026-09-10
+# against this mc build: F4 opens the editor $EDITOR names -- nano here --
+# on the file the discovery step selected, and nano's own CTRL-O/CTRL-X save
+# cycle (already proven standalone above) works identically driven through
+# mc. Whether an older or differently-configured mc still defaults to mcedit
+# regardless of $EDITOR is untested; this only claims what was reproduced.
+send text ' EDITED'
+send key CTRL-O
+wait_screen 'Write to File:'
+send key ENTER
+wait_file_content 'EDITED'
+send key CTRL-X
 send shutdown
 wait "$PID" 2>/dev/null || true
 PID=
