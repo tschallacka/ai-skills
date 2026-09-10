@@ -3968,6 +3968,7 @@ tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
+tests/test-installer-codex-permissions.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
@@ -5133,6 +5134,120 @@ def base:
     fi
 }
 
+# codex reads ~/.codex/config.toml, which is TOML, not JSON -- rjq is
+# JSON-only and this installer is not allowed a second runtime dependency
+# (B235). So this handles exactly one well-defined shape: a single-line
+# `writable_roots = [...]` array, wherever in the file it appears (TOML
+# allows either a dotted root key `sandbox_workspace_write.writable_roots =
+# [...]` or a `[sandbox_workspace_write]` table with a `writable_roots` key
+# inside it; both look identical on the matching line, so one grep covers
+# both). A multi-line array, or a file this cannot safely extend, falls back
+# to manual instructions -- the same posture opencode_permissions takes for a
+# config strict rjq cannot parse.
+codex_quoted_csv() { # <path...> -> "path1", "path2"
+    local path first=1
+    for path in "$@"; do
+        [ "$first" -eq 1 ] || printf ', '
+        printf '"%s"' "$path"
+        first=0
+    done
+}
+
+codex_writable_roots_line() { # <cfg> -> "<1-based line>:<content>" or nothing
+    grep -n 'writable_roots[[:space:]]*=' "$1" 2>/dev/null | head -1
+}
+
+# Writes a brand-new dotted-key line naming every path. Prepended (never
+# appended) when other content already exists: TOML's dotted-key syntax is
+# only guaranteed to define a ROOT-level key while no `[table]` header has
+# been opened yet, so appending after an existing file's own sections could
+# silently nest this key inside whichever section happens to be last instead
+# of at the root the reader expects. Prepending sidesteps that entirely.
+codex_write_fresh_roots() { # <cfg> <label> <path...>
+    local cfg="$1" label="$2" tmpfile
+    shift 2
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" || { echo "  codex: cannot create $(dirname "$cfg")/" >&2; return 1; }
+        printf 'sandbox_workspace_write.writable_roots = [%s]\n' "$(codex_quoted_csv "$@")" > "$cfg" \
+            || { echo "  codex: cannot write $cfg" >&2; return 1; }
+        echo "  codex: created $cfg" >&2
+    else
+        backup_file "$cfg"
+        tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+        cp -p "$cfg" "$tmpfile"
+        { printf 'sandbox_workspace_write.writable_roots = [%s]\n' "$(codex_quoted_csv "$@")"; cat "$cfg"; } \
+            > "$tmpfile" || { rm -f "$tmpfile"; die "cannot write next to $cfg"; }
+        mv "$tmpfile" "$cfg"
+    fi
+    printf '  codex: %s\n' "$label"
+}
+
+# Appends missing paths into an already-present single-line array, in place,
+# preserving everything else on the line (trailing whitespace, a comment).
+codex_append_roots() { # <cfg> <label> <line_no> <content> <path...>
+    local cfg="$1" label="$2" line_no="$3" content="$4" path tmpfile
+    shift 4
+    local to_add=()
+    for path in "$@"; do
+        case "$content" in
+            *"\"$path\""*) ;;
+            *) to_add+=("$path") ;;
+        esac
+    done
+    [ "${#to_add[@]}" -gt 0 ] || { printf '  codex: %s\n' "$label"; return 0; }
+
+    backup_file "$cfg"
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    awk -v n="$line_no" -v repl="${content%%]*}, $(codex_quoted_csv "${to_add[@]}")]${content#*]}" \
+        'NR==n { print repl; next } { print }' "$cfg" > "$tmpfile" \
+        || { rm -f "$tmpfile"; die "cannot update $cfg"; }
+    mv "$tmpfile" "$cfg"
+    printf '  codex: added to writable_roots:\n'
+    printf '%s\n' "${to_add[@]}" | sed 's|^|    - |'
+}
+
+codex_merge_writable_roots() { # <cfg> <label> <path...> -- 1 means "fall back"
+    local cfg="$1" label="$2" grep_line line_no content
+    shift 2
+    if [ ! -f "$cfg" ]; then
+        codex_write_fresh_roots "$cfg" "$label" "$@"
+        return 0
+    fi
+    grep_line="$(codex_writable_roots_line "$cfg")"
+    if [ -z "$grep_line" ]; then
+        codex_write_fresh_roots "$cfg" "$label" "$@"
+        return 0
+    fi
+    line_no="${grep_line%%:*}"
+    content="${grep_line#*:}"
+    case "$content" in
+        *'['*']'*) codex_append_roots "$cfg" "$label" "$line_no" "$content" "$@" ;;
+        *)
+            echo "  codex: $cfg's writable_roots is not a single-line array; add these by hand:" >&2
+            return 1
+            ;;
+    esac
+}
+
+codex_permissions() {
+    local scripts="$1" plans="$2" tmp="$3"
+    plans="$(strip_trailing_slashes "$plans")"
+    scripts="$(strip_trailing_slashes "$scripts")"
+    tmp="$(strip_trailing_slashes "$tmp")"
+    codex_merge_writable_roots "${CODEX_CONFIGFILE:-$HOME/.codex/config.toml}" \
+        'writable_roots already present' "$plans" "$scripts" "$tmp" \
+        || print_manual_permissions codex "$scripts" "$plans" "$tmp"
+}
+
+codex_worktrees_permissions() {
+    local worktrees
+    worktrees="$(strip_trailing_slashes "$1")"
+    codex_merge_writable_roots "${CODEX_CONFIGFILE:-$HOME/.codex/config.toml}" \
+        'worktree grant already in place' "$worktrees" \
+        || print_manual_worktrees_permissions codex "$worktrees"
+}
+
 print_manual_permissions() {
     local kind="$1" scripts="$2" plans="$3" tmp="$4"
     echo "  $kind: no safe auto-editable permission file was modified." >&2
@@ -5419,6 +5534,7 @@ worktrees_permission_step() {
             case "$kind" in
                 claude)   claude_worktrees_permissions "$worktrees" ;;
                 opencode) opencode_worktrees_permissions "$worktrees" ;;
+                codex)    codex_worktrees_permissions "$worktrees" ;;
                 *)        print_manual_worktrees_permissions "$kind" "$worktrees" ;;
             esac
         done
@@ -5439,6 +5555,7 @@ planning_permission_step() {
             case "$kind" in
                 claude)   claude_permissions "$scripts" "$plans" "$agent_tmp" ;;
                 opencode) opencode_permissions "$scripts" "$plans" "$agent_tmp" ;;
+                codex)    codex_permissions "$scripts" "$plans" "$agent_tmp" ;;
                 *)        print_manual_permissions "$kind" "$scripts" "$plans" "$agent_tmp" ;;
             esac
         done

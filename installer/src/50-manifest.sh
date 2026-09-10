@@ -430,6 +430,7 @@ tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
+tests/test-installer-codex-permissions.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
