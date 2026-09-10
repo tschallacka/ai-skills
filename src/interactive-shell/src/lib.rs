@@ -1058,14 +1058,20 @@ impl Screen {
         let Some(cells) = self.rows.get(row).and_then(|cells| cells.get(start..end)) else {
             return Vec::new();
         };
+        // '|' is a delimiter alongside whitespace: mc's own panel columns
+        // (and any `ls -l`-style piped table) are pipe-separated with no
+        // surrounding space at all (B142, confirmed against a live mc
+        // screen), so whitespace-only splitting left every such row as one
+        // fused field.
+        let is_delimiter = |cell: u8| cell.is_ascii_whitespace() || cell == b'|';
         let mut fields = Vec::new();
         let mut col = 0;
         while col < cells.len() {
-            while col < cells.len() && cells[col].is_ascii_whitespace() {
+            while col < cells.len() && is_delimiter(cells[col]) {
                 col += 1;
             }
             let field_start = col;
-            while col < cells.len() && !cells[col].is_ascii_whitespace() {
+            while col < cells.len() && !is_delimiter(cells[col]) {
                 col += 1;
             }
             if col > field_start {
@@ -1074,6 +1080,15 @@ impl Screen {
         }
         fields
     }
+    // A row whose trimmed span both STARTS and ENDS on a border character.
+    // Requiring the whole span to be border characters (the first version of
+    // this check) rejected every border row a live mc screen actually draws
+    // (B142): its title bar embeds the path in the top border and its footer
+    // embeds free-space stats in the bottom one. The edges are what a caller
+    // actually relies on -- they set the pane's left/right extent -- so this
+    // only requires those, at the cost of occasionally pairing two border-ish
+    // rows that were not really a matched top/bottom (same risk class as the
+    // rest of this heuristic).
     fn is_border_row(&self, row: usize) -> Option<(usize, usize)> {
         let cells = self.rows.get(row)?;
         let first = cells.iter().position(|cell| *cell != b' ')?;
@@ -1081,10 +1096,8 @@ impl Screen {
         if last <= first {
             return None;
         }
-        cells[first..=last]
-            .iter()
-            .all(|cell| *cell == b'-' || *cell == b'+')
-            .then_some((first, last))
+        let is_border = |cell: u8| cell == b'-' || cell == b'+';
+        (is_border(cells[first]) && is_border(cells[last])).then_some((first, last))
     }
     fn detect_panes(&self) -> Vec<Pane> {
         let total = self.rows.len();
@@ -1127,6 +1140,36 @@ impl Screen {
         panes.sort_by_key(|pane| pane.top);
         panes
     }
+    // A '|' at (row, col) is a genuine column divider, not a coincidence, if
+    // the row directly above or below continues it -- another '|' (the
+    // divider keeps going) or a border character (a bottom/top border's tee
+    // or cross meeting the divider, since is_border_row/line_drawing already
+    // normalize every ACS junction to '+').
+    fn pipe_joins_a_neighbor(&self, row: usize, col: usize) -> bool {
+        let continues = |candidate: usize| {
+            self.rows
+                .get(candidate)
+                .and_then(|cells| cells.get(col))
+                .is_some_and(|cell| *cell == b'|' || *cell == b'+')
+        };
+        (row > 0 && continues(row - 1)) || continues(row + 1)
+    }
+    // Field-start columns can match across rows by coincidence -- one row's
+    // boundary is a real '|' while another's is plain whitespace that
+    // happens to land on the same column. Requiring every '|' the block
+    // relies on to be vertically confirmed (see `pipe_joins_a_neighbor`)
+    // rejects that false table rather than rendering fabricated columns; a
+    // whitespace-only block (no '|' at all, e.g. htop's columns) is
+    // unaffected since there is nothing to validate.
+    fn table_pipes_are_validated(&self, rows: &[usize], start: usize, end: usize) -> bool {
+        rows.iter().all(|&row| {
+            self.rows.get(row).is_some_and(|cells| {
+                (start..end.min(cells.len()))
+                    .filter(|&col| cells[col] == b'|')
+                    .all(|col| self.pipe_joins_a_neighbor(row, col))
+            })
+        })
+    }
     // Renders `rows` (already restricted to the [start, end) column range) as a
     // sequence of `<table>` blocks -- maximal runs of >=2 consecutive rows whose
     // whitespace-delimited field start columns match exactly -- interleaved with
@@ -1156,6 +1199,12 @@ impl Screen {
                     } else {
                         break;
                     }
+                }
+            }
+            if j - i >= 2 {
+                let block: Vec<usize> = field_rows[i..j].iter().map(|(row, _)| *row).collect();
+                if !self.table_pipes_are_validated(&block, start, end) {
+                    j = i + 1;
                 }
             }
             if j - i >= 2 {
@@ -1320,7 +1369,13 @@ fn line_drawing(b: u8) -> u8 {
     match b {
         b'q' => b'-',
         b'x' => b'|',
-        b'j' | b'k' | b'l' | b'm' | b'n' => b'+',
+        // j/k/l/m are corners and n is a full cross; t/u/v/w are the DEC
+        // Special Graphics tee junctions (left/right/bottom/top), which mc
+        // draws where a horizontal divider meets an outer box border. Left
+        // unmapped, a live mc screen showed literal 't'/'u' bytes on such a
+        // row (B142), which defeated markup's ASCII '-'/'+' pane-border
+        // detection on exactly the screens it exists for.
+        b'j' | b'k' | b'l' | b'm' | b'n' | b't' | b'u' | b'v' | b'w' => b'+',
         _ => b,
     }
 }
@@ -2847,6 +2902,25 @@ mod tests {
             screen.markup(&[]),
             "<table>\n<tr><td>NAME</td><td>SIZE</td></tr>\n<tr><td>foo</td><td>1234</td></tr>\n</table>"
         );
+    }
+    #[test]
+    fn markup_treats_pipe_as_a_table_delimiter_alongside_whitespace() {
+        let mut screen = Screen::new(2, 16);
+        screen.feed(b"|foo    |1234|\r\n|barbaz |99  |");
+        assert_eq!(
+            screen.markup(&[]),
+            "<table>\n<tr><td>foo</td><td>1234</td></tr>\n<tr><td>barbaz</td><td>99</td></tr>\n</table>"
+        );
+    }
+    #[test]
+    fn markup_rejects_a_table_whose_pipe_does_not_align_with_a_neighbor_row() {
+        // Field starts coincidentally match (both rows split at columns 0 and
+        // 3), but row 0's boundary is a real '|' while row 1's is plain
+        // whitespace at that same column -- not a genuine shared divider, so
+        // no table should form.
+        let mut screen = Screen::new(2, 10);
+        screen.feed(b"ab|cd\r\nab cd");
+        assert_eq!(screen.markup(&[]), "ab|cd\nab cd");
     }
     #[test]
     fn markup_wraps_a_bordered_region_in_a_pane_div() {
