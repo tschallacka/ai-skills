@@ -165,6 +165,12 @@ enum Request {
         #[serde(default)]
         rows: Vec<usize>,
     },
+    #[serde(rename = "markup")]
+    Markup {
+        v: u8,
+        #[serde(default)]
+        rows: Vec<usize>,
+    },
     #[serde(rename = "wait")]
     Wait {
         v: u8,
@@ -985,6 +991,325 @@ impl Screen {
             .count();
         comparable >= 2 && different * 2 >= comparable
     }
+    // B142: a lightweight HTML-like markup mode, additive alongside view/rgbview/
+    // elements/observe. Box-drawing borders reach this model only as the ASCII
+    // '-'/'|'/'+' that `line_drawing` normalizes ACS output to (real multi-byte
+    // UTF-8 box-drawing glyphs would desync the one-byte-per-cell model this
+    // parser uses everywhere else), so pane detection is scoped to that ASCII
+    // shape and is deliberately non-nested: the first bottom border whose column
+    // extent matches a top border, with '|'/'+' at both edges on every row
+    // between, closes the pane. Table synthesis is likewise a single-pass,
+    // exact-match heuristic (same run of whitespace-delimited field start
+    // columns across >=2 consecutive rows), not a general table parser -- same
+    // risk class as the existing `highlighted` heuristic, not a stronger claim.
+    fn markup(&self, requested_rows: &[usize]) -> String {
+        let elements = self.elements();
+        let total = self.rows.len();
+        let cols = self.rows.first().map_or(0, Vec::len);
+        let mut out = String::new();
+        if !requested_rows.is_empty() {
+            let selected: Vec<usize> = requested_rows
+                .iter()
+                .copied()
+                .filter(|row| *row > 0 && *row <= total)
+                .map(|row| row - 1)
+                .collect();
+            self.markup_rows(&selected, 0, cols, &elements, &mut out);
+            return out.trim_end_matches('\n').to_string();
+        }
+        let panes = self.detect_panes();
+        let mut row = 0;
+        while row < total {
+            if let Some(pane) = panes.iter().find(|pane| pane.top == row) {
+                if let Some((start, end)) = self.trimmed_span(row, 0, cols) {
+                    out.push_str(&self.render_row_html(row, start, end, &elements));
+                }
+                out.push('\n');
+                out.push_str("<div class=\"pane\">\n");
+                let interior: Vec<usize> = (pane.top + 1..pane.bottom).collect();
+                self.markup_rows(&interior, pane.left + 1, pane.right, &elements, &mut out);
+                out.push_str("</div>\n");
+                if let Some((start, end)) = self.trimmed_span(pane.bottom, 0, cols) {
+                    out.push_str(&self.render_row_html(pane.bottom, start, end, &elements));
+                }
+                out.push('\n');
+                row = pane.bottom + 1;
+            } else {
+                let next_top = panes
+                    .iter()
+                    .map(|pane| pane.top)
+                    .filter(|top| *top > row)
+                    .min()
+                    .unwrap_or(total);
+                let block: Vec<usize> = (row..next_top).collect();
+                self.markup_rows(&block, 0, cols, &elements, &mut out);
+                row = next_top;
+            }
+        }
+        out.trim_end_matches('\n').to_string()
+    }
+    fn trimmed_span(&self, row: usize, start: usize, end: usize) -> Option<(usize, usize)> {
+        let cells = self.rows.get(row)?.get(start..end)?;
+        let first = cells.iter().position(|cell| *cell != b' ')?;
+        let last = cells.iter().rposition(|cell| *cell != b' ')?;
+        Some((start + first, start + last + 1))
+    }
+    fn row_fields(&self, row: usize, start: usize, end: usize) -> Vec<(usize, usize)> {
+        let Some(cells) = self.rows.get(row).and_then(|cells| cells.get(start..end)) else {
+            return Vec::new();
+        };
+        // '|' is a delimiter alongside whitespace: mc's own panel columns
+        // (and any `ls -l`-style piped table) are pipe-separated with no
+        // surrounding space at all (B142, confirmed against a live mc
+        // screen), so whitespace-only splitting left every such row as one
+        // fused field.
+        let is_delimiter = |cell: u8| cell.is_ascii_whitespace() || cell == b'|';
+        let mut fields = Vec::new();
+        let mut col = 0;
+        while col < cells.len() {
+            while col < cells.len() && is_delimiter(cells[col]) {
+                col += 1;
+            }
+            let field_start = col;
+            while col < cells.len() && !is_delimiter(cells[col]) {
+                col += 1;
+            }
+            if col > field_start {
+                fields.push((start + field_start, start + col));
+            }
+        }
+        fields
+    }
+    // A row whose trimmed span both STARTS and ENDS on a border character.
+    // Requiring the whole span to be border characters (the first version of
+    // this check) rejected every border row a live mc screen actually draws
+    // (B142): its title bar embeds the path in the top border and its footer
+    // embeds free-space stats in the bottom one. The edges are what a caller
+    // actually relies on -- they set the pane's left/right extent -- so this
+    // only requires those, at the cost of occasionally pairing two border-ish
+    // rows that were not really a matched top/bottom (same risk class as the
+    // rest of this heuristic).
+    fn is_border_row(&self, row: usize) -> Option<(usize, usize)> {
+        let cells = self.rows.get(row)?;
+        let first = cells.iter().position(|cell| *cell != b' ')?;
+        let last = cells.iter().rposition(|cell| *cell != b' ')?;
+        if last <= first {
+            return None;
+        }
+        let is_border = |cell: u8| cell == b'-' || cell == b'+';
+        (is_border(cells[first]) && is_border(cells[last])).then_some((first, last))
+    }
+    fn detect_panes(&self) -> Vec<Pane> {
+        let total = self.rows.len();
+        let borders: Vec<(usize, usize, usize)> = (0..total)
+            .filter_map(|row| self.is_border_row(row).map(|(l, r)| (row, l, r)))
+            .collect();
+        let mut panes = Vec::new();
+        let mut used = vec![false; borders.len()];
+        for a in 0..borders.len() {
+            if used[a] {
+                continue;
+            }
+            let (top, left, right) = borders[a];
+            for b in (a + 1)..borders.len() {
+                if used[b] || borders[b].1 != left || borders[b].2 != right {
+                    continue;
+                }
+                let bottom = borders[b].0;
+                if bottom <= top + 1 {
+                    continue;
+                }
+                let walls_hold = (top + 1..bottom).all(|row| {
+                    let cells = &self.rows[row];
+                    matches!(cells.get(left), Some(b'|') | Some(b'+'))
+                        && matches!(cells.get(right), Some(b'|') | Some(b'+'))
+                });
+                if walls_hold {
+                    panes.push(Pane {
+                        top,
+                        bottom,
+                        left,
+                        right,
+                    });
+                    used[a] = true;
+                    used[b] = true;
+                    break;
+                }
+            }
+        }
+        panes.sort_by_key(|pane| pane.top);
+        panes
+    }
+    // A '|' at (row, col) is a genuine column divider, not a coincidence, if
+    // the row directly above or below continues it -- another '|' (the
+    // divider keeps going) or a border character (a bottom/top border's tee
+    // or cross meeting the divider, since is_border_row/line_drawing already
+    // normalize every ACS junction to '+').
+    fn pipe_joins_a_neighbor(&self, row: usize, col: usize) -> bool {
+        let continues = |candidate: usize| {
+            self.rows
+                .get(candidate)
+                .and_then(|cells| cells.get(col))
+                .is_some_and(|cell| *cell == b'|' || *cell == b'+')
+        };
+        (row > 0 && continues(row - 1)) || continues(row + 1)
+    }
+    // Field-start columns can match across rows by coincidence -- one row's
+    // boundary is a real '|' while another's is plain whitespace that
+    // happens to land on the same column. Requiring every '|' the block
+    // relies on to be vertically confirmed (see `pipe_joins_a_neighbor`)
+    // rejects that false table rather than rendering fabricated columns; a
+    // whitespace-only block (no '|' at all, e.g. htop's columns) is
+    // unaffected since there is nothing to validate.
+    fn table_pipes_are_validated(&self, rows: &[usize], start: usize, end: usize) -> bool {
+        rows.iter().all(|&row| {
+            self.rows.get(row).is_some_and(|cells| {
+                (start..end.min(cells.len()))
+                    .filter(|&col| cells[col] == b'|')
+                    .all(|col| self.pipe_joins_a_neighbor(row, col))
+            })
+        })
+    }
+    // Renders `rows` (already restricted to the [start, end) column range) as a
+    // sequence of `<table>` blocks -- maximal runs of >=2 consecutive rows whose
+    // whitespace-delimited field start columns match exactly -- interleaved with
+    // plain lines for rows that don't join such a run.
+    fn markup_rows(
+        &self,
+        rows: &[usize],
+        start: usize,
+        end: usize,
+        elements: &[Clickable],
+        out: &mut String,
+    ) {
+        let field_rows: Vec<(usize, Vec<(usize, usize)>)> = rows
+            .iter()
+            .map(|&row| (row, self.row_fields(row, start, end)))
+            .collect();
+        let mut i = 0;
+        while i < field_rows.len() {
+            let starts0: Vec<usize> = field_rows[i].1.iter().map(|field| field.0).collect();
+            let mut j = i + 1;
+            if starts0.len() >= 2 {
+                while j < field_rows.len() {
+                    let starts_j: Vec<usize> =
+                        field_rows[j].1.iter().map(|field| field.0).collect();
+                    if starts_j == starts0 {
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if j - i >= 2 {
+                let block: Vec<usize> = field_rows[i..j].iter().map(|(row, _)| *row).collect();
+                if !self.table_pipes_are_validated(&block, start, end) {
+                    j = i + 1;
+                }
+            }
+            if j - i >= 2 {
+                out.push_str("<table>\n");
+                for (row, fields) in &field_rows[i..j] {
+                    out.push_str("<tr>");
+                    for &(field_start, field_end) in fields {
+                        out.push_str("<td>");
+                        out.push_str(&self.render_row_html(*row, field_start, field_end, elements));
+                        out.push_str("</td>");
+                    }
+                    out.push_str("</tr>\n");
+                }
+                out.push_str("</table>\n");
+            } else {
+                let (row, _) = field_rows[i];
+                if let Some((line_start, line_end)) = self.trimmed_span(row, start, end) {
+                    out.push_str(&self.render_row_html(row, line_start, line_end, elements));
+                }
+                out.push('\n');
+            }
+            i = j;
+        }
+    }
+    // Renders the [start, end) byte range of `row`: verified links as `<a
+    // href>`, highlighted runs as `<span class="...">`, everything else as
+    // escaped plain text -- so only the few interesting spans carry markup.
+    fn render_row_html(
+        &self,
+        row: usize,
+        start: usize,
+        end: usize,
+        elements: &[Clickable],
+    ) -> String {
+        let mut spans: Vec<&Clickable> = elements
+            .iter()
+            .filter(|element| {
+                element.row == row && element.col >= start && element.col + element.width <= end
+            })
+            .collect();
+        spans.sort_by_key(|element| element.col);
+        let mut filtered: Vec<&Clickable> = Vec::new();
+        for element in spans.drain(..) {
+            let covered = filtered.iter().any(|kept| {
+                kept.actionable && kept.col <= element.col && element.col < kept.col + kept.width
+            });
+            if !(covered && !element.actionable) {
+                filtered.push(element);
+            }
+        }
+        filtered.sort_by_key(|element| element.col);
+        let mut html = String::new();
+        let mut cursor = start;
+        let Some(cells) = self.rows.get(row) else {
+            return html;
+        };
+        for element in filtered {
+            if element.col > cursor {
+                html.push_str(&html_escape(&String::from_utf8_lossy(
+                    &cells[cursor..element.col],
+                )));
+            }
+            let label = html_escape(&element.label);
+            if element.actionable {
+                html.push_str("<a href=\"");
+                html.push_str(&html_escape(&element.uri));
+                html.push_str("\">");
+                html.push_str(&label);
+                html.push_str("</a>");
+            } else if element.highlighted {
+                html.push_str("<span class=\"");
+                html.push_str(&self.style_classes(row, element.col));
+                html.push_str("\">");
+                html.push_str(&label);
+                html.push_str("</span>");
+            } else {
+                html.push_str(&label);
+            }
+            cursor = element.col + element.width;
+        }
+        if cursor < end && cursor < cells.len() {
+            html.push_str(&html_escape(&String::from_utf8_lossy(
+                &cells[cursor..end.min(cells.len())],
+            )));
+        }
+        html
+    }
+    fn style_classes(&self, row: usize, col: usize) -> String {
+        let mut classes = vec!["selected".to_string()];
+        if let Some(style) = self.styles.get(row).and_then(|styles| styles.get(col)) {
+            if style.reverse {
+                classes.push("reverse".to_string());
+            }
+            if style.bold {
+                classes.push("bold".to_string());
+            }
+            if (1..=8).contains(&style.fg) {
+                classes.push(format!("fg-{}", color_name(style.fg)));
+            }
+            if (1..=8).contains(&style.bg) {
+                classes.push(format!("bg-{}", color_name(style.bg)));
+            }
+        }
+        classes.join(" ")
+    }
     fn styles(&self) -> BTreeMap<usize, Vec<StyleSpan>> {
         let plain = CellStyle {
             fg: 0,
@@ -1044,7 +1369,13 @@ fn line_drawing(b: u8) -> u8 {
     match b {
         b'q' => b'-',
         b'x' => b'|',
-        b'j' | b'k' | b'l' | b'm' | b'n' => b'+',
+        // j/k/l/m are corners and n is a full cross; t/u/v/w are the DEC
+        // Special Graphics tee junctions (left/right/bottom/top), which mc
+        // draws where a horizontal divider meets an outer box border. Left
+        // unmapped, a live mc screen showed literal 't'/'u' bytes on such a
+        // row (B142), which defeated markup's ASCII '-'/'+' pane-border
+        // detection on exactly the screens it exists for.
+        b'j' | b'k' | b'l' | b'm' | b'n' | b't' | b'u' | b'v' | b'w' => b'+',
         _ => b,
     }
 }
@@ -1072,6 +1403,44 @@ fn style_sgr(style: CellStyle) -> String {
         codes.push((39 + style.bg).to_string());
     }
     format!("\x1b[{}m", codes.join(";"))
+}
+
+// A non-nested pane detected by `Screen::detect_panes` for the B142 markup
+// mode: top/bottom are the row indices of the horizontal borders, left/right
+// the column indices of the vertical borders (the interior is exclusive of
+// both).
+struct Pane {
+    top: usize,
+    bottom: usize,
+    left: usize,
+    right: usize,
+}
+
+fn color_name(code: u8) -> &'static str {
+    match code {
+        1 => "black",
+        2 => "red",
+        3 => "green",
+        4 => "yellow",
+        5 => "blue",
+        6 => "magenta",
+        7 => "cyan",
+        _ => "white",
+    }
+}
+
+fn html_escape(text: &str) -> String {
+    text.chars()
+        .fold(String::with_capacity(text.len()), |mut escaped, ch| {
+            match ch {
+                '&' => escaped.push_str("&amp;"),
+                '<' => escaped.push_str("&lt;"),
+                '>' => escaped.push_str("&gt;"),
+                '"' => escaped.push_str("&quot;"),
+                _ => escaped.push(ch),
+            }
+            escaped
+        })
 }
 
 pub fn key_bytes(key: &str) -> Option<&'static [u8]> {
@@ -1862,6 +2231,20 @@ fn client(
             )
             .map_err(|e| e.to_string())?;
         }
+        Request::Markup { v: 1, rows } => {
+            json(
+                &mut stream,
+                &ViewEvent {
+                    v: 1,
+                    event: "markup",
+                    seq: *seq,
+                    cols: screen.rows.first().map_or(0, Vec::len),
+                    rows: screen.rows.len(),
+                    text: screen.markup(&rows),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Request::Wait {
             v: 1,
             contains,
@@ -2492,6 +2875,61 @@ mod tests {
             .unwrap();
         assert!(element.highlighted);
         assert_eq!(element.highlight_source, Some("color-outlier"));
+    }
+    #[test]
+    fn markup_wraps_a_highlighted_run_as_a_selected_span() {
+        let mut screen = Screen::new(1, 12);
+        screen.feed(b"\x1b[7mSELECT\x1b[27m");
+        assert_eq!(
+            screen.markup(&[]),
+            "<span class=\"selected reverse\">SELECT</span>"
+        );
+    }
+    #[test]
+    fn markup_wraps_a_verified_hyperlink_as_an_anchor() {
+        let mut screen = Screen::new(1, 30);
+        screen.feed(b"\x1b]8;;https://example.test\x1b\\LINK\x1b]8;;\x1b\\");
+        assert_eq!(
+            screen.markup(&[]),
+            "<a href=\"https://example.test\">LINK</a>"
+        );
+    }
+    #[test]
+    fn markup_turns_aligned_rows_into_a_table() {
+        let mut screen = Screen::new(2, 12);
+        screen.feed(b"NAME SIZE   \r\nfoo  1234   ");
+        assert_eq!(
+            screen.markup(&[]),
+            "<table>\n<tr><td>NAME</td><td>SIZE</td></tr>\n<tr><td>foo</td><td>1234</td></tr>\n</table>"
+        );
+    }
+    #[test]
+    fn markup_treats_pipe_as_a_table_delimiter_alongside_whitespace() {
+        let mut screen = Screen::new(2, 16);
+        screen.feed(b"|foo    |1234|\r\n|barbaz |99  |");
+        assert_eq!(
+            screen.markup(&[]),
+            "<table>\n<tr><td>foo</td><td>1234</td></tr>\n<tr><td>barbaz</td><td>99</td></tr>\n</table>"
+        );
+    }
+    #[test]
+    fn markup_rejects_a_table_whose_pipe_does_not_align_with_a_neighbor_row() {
+        // Field starts coincidentally match (both rows split at columns 0 and
+        // 3), but row 0's boundary is a real '|' while row 1's is plain
+        // whitespace at that same column -- not a genuine shared divider, so
+        // no table should form.
+        let mut screen = Screen::new(2, 10);
+        screen.feed(b"ab|cd\r\nab cd");
+        assert_eq!(screen.markup(&[]), "ab|cd\nab cd");
+    }
+    #[test]
+    fn markup_wraps_a_bordered_region_in_a_pane_div() {
+        let mut screen = Screen::new(3, 8);
+        screen.feed(b"+------+\r\n|inside|\r\n+------+");
+        assert_eq!(
+            screen.markup(&[]),
+            "+------+\n<div class=\"pane\">\ninside\n</div>\n+------+"
+        );
     }
     #[test]
     fn maximal_cursor_parameters_do_not_overflow() {

@@ -38,13 +38,30 @@ can recognize that a title or path may be clipped and request a larger resize.
 Use `rgbview [<ROW>...]` or `rgbview-delta [<ROW>...]` when ANSI foreground,
 background, bold, or reverse styling is useful; these still omit JSON but emit
 terminal SGR sequences for a color-capable consumer. `view` is preferable for
-minimum token cost.
+minimum token cost. Use `markup [<ROW>...]` when navigating an unfamiliar or
+dense screen (a large file listing, an unfamiliar pane layout) and the plain
+or color views leave you paging back and forth to find one entry: it re-encodes
+the same observation as lightweight HTML-like text -- a verified OSC 8 link as
+a literal `<a href="URI">label</a>`, a highlighted/selected run as `<span
+class="selected ...">`, and rows whose fields line up in the same columns as a
+real `<table>` -- using a small fixed utility-class vocabulary (`selected`,
+`reverse`, `bold`, `fg-<color>`, `bg-<color>`) so the same short token repeats
+verbatim everywhere it applies rather than a fresh inline style per row. This
+is additive, not a replacement: `view`, `rgbview`, `observe`, and `elements`
+are unchanged and still the right choice when markup's heuristic table/pane
+detection would add nothing (a short or already-plain screen). The structure
+markup infers is still a heuristic, the same risk class as `highlighted`
+today -- not proof of the application's real layout.
 For an unknown interface, identify the current focus, visible labels, selection
 state, and available navigation controls before acting. Prefer visible UI
 elements and keyboard navigation, including TAB to move focus and arrows or
-page keys to move within a pane. Ask the application's built-in help or a
-manpage when the screen does not explain an operation. Re-observe after each
-action and branch on what is actually shown.
+page keys to move within a pane. Before attempting any non-trivial navigation
+in an unfamiliar TUI, proactively consult the application's built-in help,
+F1, or a manpage -- do this first, not only as a fallback once the screen
+fails to explain an operation -- and, when fetch access is available, check
+for an existing tutorial or cheatsheet rather than learning purely by trial
+and error through the wrapper. Re-observe after each action and branch on what
+is actually shown.
 Use `observe` when you need structured JSON for cursor state, styles, scrollback,
 or all screen metadata. Use `elements [<ROW>...]` when you need only verified
 actionable elements and their labels/coordinates; row ranges such as `10-15`
@@ -53,7 +70,7 @@ are accepted. Send one request at a time with
 and receive 1-based row/column matches; it does not type, navigate, or assert
 that the match is clickable. Send one request at a time with
 `interactive-shell-input --socket <SOCKET> text '<TEXT>'`, `key <KEY>`, `combo <KEY> [CTRL] [ALT] [SHIFT]`, `paste '<TEXT>'`,
-`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
+`mouse <X> <Y> <BUTTON> down|up|move`, `resize <COLS> <ROWS>`, `view [<ROW>...]` (rows may be `10-15`), `view-delta [<ROW>...]`, `rgbview [<ROW>...]`, `rgbview-delta [<ROW>...]`, `elements [<ROW>...]`, `markup [<ROW>...]`, `observe`, `wait '<TEXT>' [<TIMEOUT_MS>]`, `raw <HEX>`, or
 `click-id <ID> <BUTTON>`, `click-label '<LABEL>' <BUTTON>`, `click-at <X> <Y> <BUTTON>`, or
 `shutdown`.
 
@@ -144,3 +161,10 @@ controls, including sequences split across PTY reads. Every ncurses extension
 remains a possible unsupported control. For mc or another TUI, use predicates
 based only on represented controls, or extend and test the model before relying
 on a new control.
+
+App-specific knowledge belongs in agent memory, not in this wrapper: once you
+work out a TUI's keybindings, its mode-toggle appearance, or its own color
+convention (e.g. mc's directories in blue), write it to
+`memory/tui-apps/<appname>.md` before finishing the task. A later session
+driving the same application should read that file back first, rather than
+rediscovering the same facts from scratch through trial and error.

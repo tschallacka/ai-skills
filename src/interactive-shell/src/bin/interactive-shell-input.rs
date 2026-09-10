@@ -9,7 +9,7 @@ fn main() {
     let a: Vec<String> = env::args().skip(1).collect();
     if a.first().is_some_and(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations:\n  text TEXT                 Send literal text\n  locate TEXT               Find visible text and return 1-based coordinates\n  key KEY                   Send a named key or printable key\n  combo KEY [MODIFIERS...]  Send an on-the-fly Ctrl/Alt/Shift combination\n  raw HEX                   Send an explicit byte sequence\n  paste TEXT                Send bracketed paste text\n  view [ROWS...]            Plain text, e.g. view 10-15\n  view-delta [ROWS...]      Only rows changed since the previous view\n  rgbview [ROWS...]         Plain text with ANSI colors preserved\n  rgbview-delta [ROWS...]   Colored changed rows only\n  elements [ROWS...]        Only verified actionable elements\n  observe                   Full structured screen snapshot\n  wait TEXT [TIMEOUT_MS]    Wait for visible text and return a snapshot\n  mouse, click-*, resize, shutdown\n\nview rows are 1-based and are labeled LINE [START-END] TEXT. Row ranges such\nas 10-15 are inclusive. Use locate to find visible text without typing it. Use\nobserve for cursor/styles/coordinate hints and elements for semantic clickable\nlabels. Application keybindings are unknown to this helper: discover them from\nthe screen, built-in help, or a manpage. The socket is read from the session\nfile when --session or --agent is used."
+            "usage: interactive-shell-input [--session ID | --agent ID] [--socket PATH] OPERATION [ARGUMENTS...]\n\noperations:\n  text TEXT                 Send literal text\n  locate TEXT               Find visible text and return 1-based coordinates\n  key KEY                   Send a named key or printable key\n  combo KEY [MODIFIERS...]  Send an on-the-fly Ctrl/Alt/Shift combination\n  raw HEX                   Send an explicit byte sequence\n  paste TEXT                Send bracketed paste text\n  view [ROWS...]            Plain text, e.g. view 10-15\n  view-delta [ROWS...]      Only rows changed since the previous view\n  rgbview [ROWS...]         Plain text with ANSI colors preserved\n  rgbview-delta [ROWS...]   Colored changed rows only\n  elements [ROWS...]        Only verified actionable elements\n  markup [ROWS...]          HTML-like structured markup (links, selected spans, tables)\n  observe                   Full structured screen snapshot\n  wait TEXT [TIMEOUT_MS]    Wait for visible text and return a snapshot\n  mouse, click-*, resize, shutdown\n\nview rows are 1-based and are labeled LINE [START-END] TEXT. Row ranges such\nas 10-15 are inclusive. Use locate to find visible text without typing it. Use\nobserve for cursor/styles/coordinate hints and elements for semantic clickable\nlabels. Use markup when navigating an unfamiliar or dense screen: verified\nlinks become <a href>, highlighted runs become <span class=\"selected ...\">,\nand aligned rows become a <table> -- a small fixed class vocabulary (reverse,\nbold, fg-<color>, bg-<color>) rather than raw styling per cell.\nApplication keybindings are unknown to this helper: discover them from\nthe screen, built-in help, or a manpage. The socket is read from the session\nfile when --session or --agent is used."
         );
         return;
     }
@@ -77,8 +77,8 @@ fn main() {
                 args.extend_from_slice(&a[i + 1..]);
                 i = a.len() - 1;
             }
-            "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements" | "observe"
-            | "shutdown" => {
+            "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements" | "markup"
+            | "observe" | "shutdown" => {
                 if op.is_some() {
                     eprintln!("only one operation is allowed");
                     std::process::exit(2);
@@ -86,7 +86,7 @@ fn main() {
                 op = Some(a[i].clone());
                 if matches!(
                     a[i].as_str(),
-                    "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements"
+                    "view" | "view-delta" | "rgbview" | "rgbview-delta" | "elements" | "markup"
                 ) && i + 1 < a.len()
                 {
                     args.extend_from_slice(&a[i + 1..]);
@@ -293,20 +293,20 @@ fn main() {
             }
             req["rows"] = rows.into();
         }
-        "elements" => {
+        "elements" | "markup" => {
             let mut rows = Vec::new();
             for spec in &args {
                 let (first, last) = spec.split_once('-').unwrap_or((spec, spec));
                 let first = first.parse::<usize>().unwrap_or_else(|_| {
-                    eprintln!("invalid elements row: {spec}");
+                    eprintln!("invalid {operation} row: {spec}");
                     std::process::exit(2)
                 });
                 let last = last.parse::<usize>().unwrap_or_else(|_| {
-                    eprintln!("invalid elements row: {spec}");
+                    eprintln!("invalid {operation} row: {spec}");
                     std::process::exit(2)
                 });
                 if first == 0 || last == 0 || first > last {
-                    eprintln!("invalid elements row range: {spec}");
+                    eprintln!("invalid {operation} row range: {spec}");
                     std::process::exit(2);
                 }
                 rows.extend(first..=last);
@@ -366,7 +366,7 @@ fn main() {
     s.shutdown(Shutdown::Write).unwrap();
     if matches!(
         operation.as_str(),
-        "view" | "view-delta" | "rgbview" | "rgbview-delta"
+        "view" | "view-delta" | "rgbview" | "rgbview-delta" | "markup"
     ) {
         let mut response = String::new();
         s.read_to_string(&mut response).unwrap_or_else(|error| {
@@ -379,7 +379,7 @@ fn main() {
                 eprintln!("invalid view response: {error}");
                 std::process::exit(1);
             });
-            if event["event"] == "view" {
+            if event["event"] == "view" || event["event"] == "markup" {
                 if !printed {
                     println!(
                         "terminal={}x{}",
