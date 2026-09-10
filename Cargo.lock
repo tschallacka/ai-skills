@@ -98,6 +98,7 @@ dependencies = [
 name = "ai-text-editor-mcp"
 version = "0.1.0"
 dependencies = [
+ "agent-session-key",
  "ai-text-editor",
  "libc",
  "serde",

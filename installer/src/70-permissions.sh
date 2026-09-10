@@ -11,6 +11,34 @@
 # a copy, because git is already its recovery path. Additions are idempotent:
 # entries already present are never duplicated.
 
+# T123: which skills a per-agent identity actually changes the correctness
+# of, AND which of those have a real MCP alternative to fall back to. `chat`
+# keys its nick and per-channel cursors by it; `ai-text-editor` keys tab
+# ownership by it. `interactive-shell` is deliberately absent even though it
+# is also session-dependent (its socket is named by the session id): it has
+# no MCP form at all, so the choice this list exists to make -- skill mode
+# here, or the MCP mode that can actually guarantee an identity -- is not a
+# choice interactive-shell has. Refusing it outright on Claude Code would
+# remove the skill entirely rather than trade one guarantee for a better one,
+# so it keeps agent-identity-plugin's SOFT half (SubagentStart context) as
+# its ceiling instead of a HARD refusal. T123's own register note names this
+# as a confirmed, not inherited, judgement call -- see
+# agent-identity-plugin/README.md.
+SESSION_DEPENDENT_MCP_CAPABLE=(chat ai-text-editor)
+
+# True (exit 0) when `skill` in `mode` on `root` cannot guarantee a per-agent
+# identity: Claude Code hands a subagent a byte-identical environment and
+# refuses to rewrite a shell command via a hook (measured, not assumed --
+# see src/agent-session-key/HARNESS-IDENTITY.md), so a skill invoked directly
+# from a subagent's own shell there has no way to learn who is calling it,
+# where the MCP path (agent-identity-plugin's PreToolUse register) does.
+session_identity_unguaranteed() {
+    local skill="$1" mode="$2" root="$3"
+    [ "$mode" = skill ] || return 1
+    contains "$skill" "${SESSION_DEPENDENT_MCP_CAPABLE[@]}" || return 1
+    [ "$(agent_kind_for_root "$root")" = claude ]
+}
+
 # Index lookup against the registry in section 1; anything not in it is custom.
 agent_kind_for_root() {
     local root="${1%/}" index
@@ -638,4 +666,60 @@ editor_steering_step() {
         return 0
     fi
     echo "  Left unchanged. Expect the editor to be bypassed for sed and heredocs." >&2
+}
+
+# ---------------------------------------------------------------
+# 13c. Step 5: agent identity plugin (T122/T123)
+# ---------------------------------------------------------------
+# The files a Claude Code root actually needs from agent-identity-plugin/ --
+# not README.md, which explains the mechanism to a person reading the
+# repository rather than to the plugin loader.
+agent_identity_plugin_files() {
+    cat <<'EOF'
+.claude-plugin/plugin.json
+hooks/hooks.json
+hooks/lib.sh
+hooks/subagent-start.sh
+hooks/pre-tool-use.sh
+EOF
+}
+
+# Installed the same way any other skill directory is: whatever this run's
+# checkout ships is copied verbatim, so `--dev-build`/source_file() do not
+# need a second code path for one plugin. Not registered as a selectable
+# skill in SKILL_NAMES on purpose -- nothing chooses it directly, and
+# session_identity_unguaranteed refusing on its absence would be circular if
+# it were also something --skill could omit by name.
+install_agent_identity_plugin() {
+    local root="$1" relative source destination_file
+    local destination="$root/agent-identity-plugin"
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$SOURCE_ROOT/agent-identity-plugin/$relative"
+        [ -f "$source" ] || continue
+        destination_file="$destination/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(agent_identity_plugin_files)
+    chmod +x "$destination"/hooks/*.sh 2>/dev/null || true
+}
+
+# Every root a session-dependent skill was actually selected for, Claude Code
+# ones only -- SubagentStart/PreToolUse are Claude Code's own hooks, and
+# session_identity_unguaranteed already says plainly what the gap is
+# everywhere else rather than pretending an install here would close it.
+agent_identity_plugin_step() {
+    local root kind skill needed=0
+    for skill in "${SESSION_DEPENDENT_MCP_CAPABLE[@]}" interactive-shell; do
+        contains "$skill" "${SELECTED_SKILLS[@]}" && needed=1
+    done
+    [ "$needed" -eq 1 ] || return 0
+    echo >&2
+    echo "== Step 5: agent identity plugin ==" >&2
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        [ "$kind" = claude ] || continue
+        install_agent_identity_plugin "$root"
+        echo "  Installed: $root/agent-identity-plugin (gives every subagent its own id; see agent-identity-plugin/README.md)" >&2
+    done
 }

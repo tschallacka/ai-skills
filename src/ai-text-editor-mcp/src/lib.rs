@@ -178,8 +178,6 @@ type ToolSpec = (
 /// tools only, and `mutating_required` is what pins that.
 pub const ADAPTER_ARGUMENTS: &[&str] = &[
     "endpoint",
-    "agent",
-    "session",
     "document_mode",
     "normalize_nfc",
     "idle_timeout_seconds",
@@ -197,10 +195,6 @@ fn adapter_argument(key: &str) -> Value {
         "endpoint" => string(
             "Explicit editor endpoint (unix:/path or host:port); wins over discovery.",
         ),
-        "agent" => string(
-            "Agent identity used to reconnect to this agent's running workspace.",
-        ),
-        "session" => string("Session identity; same resolution as agent."),
         "document_mode" => string(
             "Document mode for a server this call starts: text_utf8 (default), raw_bytes, or hex_view (16-byte rows). It shapes only a newly started server — when a workspace already serves the file, the tab reports what it actually is.",
         ),
@@ -691,6 +685,56 @@ fn tool_definitions() -> Vec<Value> {
         .collect()
 }
 
+/// Which agent this MCP call actually came from, resolved by the adapter
+/// itself rather than asked of the model (T122/T123, Q11a): a `session`/
+/// `agent` argument the model could pass was stripped from the schema
+/// because once the adapter can tell, a value the model supplies is at best
+/// redundant and at worst a claim that disagrees with the truth.
+///
+/// Two harnesses hand the adapter a real per-call identity on the wire
+/// already, so no plugin or hook is needed on either of them for the MCP
+/// path:
+///
+/// - codex puts the calling agent's thread id in
+///   `_meta["x-codex-turn-metadata"].thread_id` outright.
+/// - Claude Code puts only a call id, `_meta["claudecode/toolUseId"]`, but
+///   the `agent-identity-plugin`'s `PreToolUse` hook (fired before this call
+///   reached the server) already recorded which agent owns that same call
+///   id in a per-session register this process can read with nothing more
+///   than its own `CLAUDE_CODE_SESSION_ID` -- see
+///   `agent_session_key::lookup_hook_register` and
+///   `agent-identity-plugin/hooks/pre-tool-use.sh`.
+///
+/// `None` means neither signal was present -- an unmeasured harness, the
+/// plugin not installed, or a call from outside an MCP client at all -- and
+/// the caller falls through to `client::identity`'s own ladder exactly as it
+/// did before this existed.
+fn resolve_caller_identity(params: &Value) -> Option<String> {
+    resolve_caller_identity_with(params, &|name| std::env::var(name).ok())
+}
+
+/// `env` injected so every branch is testable without mutating this
+/// process's real, global environment -- `resolve_caller_identity` is the
+/// real entry point, this is what it and the tests both call.
+fn resolve_caller_identity_with(
+    params: &Value,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let meta = params.get("_meta")?;
+    if let Some(thread_id) = meta
+        .get("x-codex-turn-metadata")
+        .and_then(|v| v.get("thread_id"))
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+    {
+        return Some(thread_id.to_string());
+    }
+    let tool_use_id = meta.get("claudecode/toolUseId").and_then(Value::as_str)?;
+    let session_id = env("CLAUDE_CODE_SESSION_ID")?;
+    let register_path = agent_session_key::hook_register_path(env, &session_id);
+    agent_session_key::lookup_hook_register(&register_path, tool_use_id)
+}
+
 fn call_tool(id: Value, params: Value) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let arguments = params
@@ -719,11 +763,7 @@ fn call_tool(id: Value, params: Value) -> Value {
             .get("endpoint")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        explicit_identity: payload
-            .get("session")
-            .or_else(|| payload.get("agent"))
-            .and_then(Value::as_str)
-            .map(str::to_owned),
+        explicit_identity: resolve_caller_identity(&params),
         session_token_path: None, // no equivalent of the CLI's --session-token file over MCP
         agent_env_var: "TSCH_AI_EDITOR_AGENT".to_string(),
         document_mode: payload
@@ -868,6 +908,103 @@ fn parse_revision_argument(value: &Value) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
+
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn codex_wire_metadata_is_used_directly_with_no_register() {
+        let params = json!({"_meta": {"x-codex-turn-metadata": {"thread_id": "th-123"}}});
+        let identity = super::resolve_caller_identity_with(&params, &env_of(&[]));
+        assert_eq!(identity.as_deref(), Some("th-123"));
+    }
+
+    #[test]
+    fn an_empty_codex_thread_id_is_not_trusted_as_an_identity() {
+        let params = json!({"_meta": {"x-codex-turn-metadata": {"thread_id": ""}}});
+        let identity = super::resolve_caller_identity_with(&params, &env_of(&[]));
+        assert_eq!(identity, None);
+    }
+
+    #[test]
+    fn claude_code_joins_the_call_id_against_the_hook_register() {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-text-editor-mcp-identity-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir_str = dir.to_str().unwrap().to_string();
+        let vars = [
+            ("CLAUDE_CODE_SESSION_ID", "sess-1"),
+            ("AI_SKILLS_AGENT_IDENTITY_DIR", dir_str.as_str()),
+        ];
+        let env = env_of(&vars);
+        std::fs::write(
+            dir.join("sess-1.jsonl"),
+            "{\"tool_use_id\":\"toolu_x\",\"agent_id\":\"worker-42\",\"agent_type\":\"code-researcher\"}\n",
+        )
+        .unwrap();
+        let params = json!({"_meta": {"claudecode/toolUseId": "toolu_x"}});
+        let identity = super::resolve_caller_identity_with(&params, &env);
+        assert_eq!(identity.as_deref(), Some("worker-42"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_claude_code_call_id_with_no_matching_register_entry_resolves_to_nothing() {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-text-editor-mcp-identity-test-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        let dir_str = dir.to_str().unwrap().to_string();
+        let vars = [
+            ("CLAUDE_CODE_SESSION_ID", "sess-2"),
+            ("AI_SKILLS_AGENT_IDENTITY_DIR", dir_str.as_str()),
+        ];
+        let env = env_of(&vars);
+        let params = json!({"_meta": {"claudecode/toolUseId": "toolu_never_written"}});
+        let identity = super::resolve_caller_identity_with(&params, &env);
+        assert_eq!(
+            identity, None,
+            "an unrecorded call id must fall through to the ladder, not fail"
+        );
+    }
+
+    #[test]
+    fn a_call_with_no_meta_at_all_resolves_to_nothing() {
+        let identity = super::resolve_caller_identity_with(&json!({}), &env_of(&[]));
+        assert_eq!(identity, None);
+    }
+
+    #[test]
+    fn codex_metadata_is_tried_before_the_claude_code_join() {
+        // Both present is not a real scenario (one process is one harness),
+        // but the precedence has to be deliberate and tested regardless: an
+        // adapter that guessed instead of ordering these would answer
+        // differently depending on which happened to be checked first.
+        let params = json!({
+            "_meta": {
+                "x-codex-turn-metadata": {"thread_id": "th-wins"},
+                "claudecode/toolUseId": "toolu_ignored",
+            }
+        });
+        let identity = super::resolve_caller_identity_with(&params, &env_of(&[]));
+        assert_eq!(identity.as_deref(), Some("th-wins"));
+    }
 
     /// B261. The comparison is a pure function precisely so it can be tested
     /// without waiting on a filesystem timestamp to change.

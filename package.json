@@ -36,6 +36,7 @@
     "ai-text-editor",
     "www",
     "ci-failures",
+    "agent-identity-plugin",
     ".agents",
     "README.md",
     "LICENSE",

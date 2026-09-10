@@ -36,6 +36,12 @@ RUNTIME_BLOCKED_SKILLS=""
 # and printed as the end-of-run summary (section 11b).
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
+# Set by session_identity_skill_mode_refused (section 11) the first time a
+# (skill, root) pair is refused skill-mode for lacking a guaranteed per-agent
+# identity (T123); checked at the very end alongside RUNTIME_BLOCKED_SKILLS so
+# a refusal changes the exit code without aborting every other install in the
+# same run — a skill refused on one root can still succeed on another.
+INTEGRATION_REFUSED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 # How a skill is driven, for the skills that offer a choice (integration.tsv).

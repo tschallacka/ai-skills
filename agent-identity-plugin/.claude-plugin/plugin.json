@@ -1,0 +1,6 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "agent-identity",
+  "version": "0.1.0",
+  "description": "Gives every subagent its own id (SubagentStart context) and lets an MCP server resolve which agent is calling, per call, without the model naming itself (a PreToolUse register an MCP adapter joins against)."
+}
