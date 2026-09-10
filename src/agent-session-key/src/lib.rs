@@ -183,6 +183,75 @@ pub fn git_worktree_root() -> Option<String> {
     }
 }
 
+/// Where a hook-side register of per-call identities lives, for a harness
+/// (Claude Code, so far) whose wire carries a per-call id but no per-agent
+/// one: a `PreToolUse` hook (see `agent-identity-plugin/`) appends one JSONL
+/// line per call, `{"tool_use_id":..,"agent_id":..,"agent_type":..}`, and an
+/// MCP server joins its own incoming call's wire-carried call id against
+/// this file to learn which agent is really asking -- without the model
+/// ever being asked to say so itself.
+///
+/// `env` is threaded through for the same reason `resolve_session_key`
+/// threads it: every rung is testable without an actual process environment.
+/// `AI_SKILLS_AGENT_IDENTITY_DIR` overrides the directory outright, for a
+/// machine where `XDG_STATE_HOME`/`HOME` are not writable or not what a test
+/// wants isolated -- the hook script (`agent-identity-plugin/hooks/lib.sh`)
+/// honours the same variable, and the two must agree byte-for-byte or the
+/// writer and the reader compute different paths and never meet.
+pub fn hook_register_dir(env: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(dir) = env("AI_SKILLS_AGENT_IDENTITY_DIR").filter(|v| !v.is_empty()) {
+        return dir;
+    }
+    let state_home = env("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| format!("{}/.local/state", env("HOME").unwrap_or_default()));
+    format!("{state_home}/ai-skills/agent-identity")
+}
+
+pub fn hook_register_path(env: &dyn Fn(&str) -> Option<String>, session_id: &str) -> String {
+    format!("{}/{session_id}.jsonl", hook_register_dir(env))
+}
+
+/// Pull `"key":"value"` out of one JSON object line, for the fixed,
+/// self-produced shape the hook writes -- not a JSON parser. Handles the
+/// only escape the hook's own values can ever contain, `\"`, and stops
+/// exactly this crate stays dependency-free for a two-key lookup on a file
+/// it also wrote.
+fn json_string_field(line: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let after_key = &line[line.find(&needle)? + needle.len()..];
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let mut chars = after_colon.strip_prefix('"')?.chars();
+    let mut value = String::new();
+    loop {
+        match chars.next()? {
+            '\\' => value.push(chars.next()?),
+            '"' => return Some(value),
+            other => value.push(other),
+        }
+    }
+}
+
+/// Read the register at `path` and return the agent id recorded for
+/// `tool_use_id`, or `None` when there is no register, no matching line, or
+/// the line is unparsable (a torn write from a crashed hook is not a reason
+/// to misattribute the call -- it falls through to the ordinary ladder,
+/// same as a harness that never ran this hook at all).
+///
+/// The LAST matching line wins on purpose: `tool_use_id` is unique per call
+/// in practice, but taking the last of any duplicate is the safe direction
+/// if a hook ever retries a write.
+pub fn lookup_hook_register(path: &str, tool_use_id: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let mut found = None;
+    for line in contents.lines() {
+        if json_string_field(line, "tool_use_id").as_deref() == Some(tool_use_id) {
+            found = json_string_field(line, "agent_id");
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +388,77 @@ mod tests {
         let (key, src) = resolve_session_key(None, "CHAT_SESSION_ID", &env_of(&[]), None);
         assert_eq!(key, "shared");
         assert_eq!(src, KeySource::Shared);
+    }
+
+    #[test]
+    fn the_hook_register_dir_is_overridable_and_otherwise_xdg_derived() {
+        let overridden = hook_register_dir(&env_of(&[("AI_SKILLS_AGENT_IDENTITY_DIR", "/x")]));
+        assert_eq!(overridden, "/x");
+        let xdg = hook_register_dir(&env_of(&[("XDG_STATE_HOME", "/state")]));
+        assert_eq!(xdg, "/state/ai-skills/agent-identity");
+        let home_fallback = hook_register_dir(&env_of(&[("HOME", "/home/a")]));
+        assert_eq!(
+            home_fallback,
+            "/home/a/.local/state/ai-skills/agent-identity"
+        );
+    }
+
+    #[test]
+    fn the_last_matching_register_line_wins() {
+        let dir = std::env::temp_dir().join(format!(
+            "agent-session-key-test-{:016x}",
+            fnv1a64(format!("{:?}", std::time::Instant::now()).as_bytes())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sess.jsonl");
+        std::fs::write(
+            &path,
+            "{\"tool_use_id\":\"t1\",\"agent_id\":\"first\",\"agent_type\":\"main\"}\n\
+             {\"tool_use_id\":\"t2\",\"agent_id\":\"other\",\"agent_type\":\"worker\"}\n\
+             {\"tool_use_id\":\"t1\",\"agent_id\":\"second\",\"agent_type\":\"main\"}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            lookup_hook_register(path.to_str().unwrap(), "t1"),
+            Some("second".to_string())
+        );
+        assert_eq!(
+            lookup_hook_register(path.to_str().unwrap(), "t2"),
+            Some("other".to_string())
+        );
+        assert_eq!(lookup_hook_register(path.to_str().unwrap(), "absent"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_register_is_none_not_an_error() {
+        assert_eq!(
+            lookup_hook_register("/does/not/exist/anywhere.jsonl", "t1"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_null_agent_id_the_main_agent_hook_writes_is_read_back_as_the_literal_string() {
+        let dir = std::env::temp_dir().join(format!(
+            "agent-session-key-test-null-{:016x}",
+            fnv1a64(format!("{:?}", std::time::Instant::now()).as_bytes())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sess.jsonl");
+        // The plugin itself maps a JSON null agent_id to the literal string
+        // "main" before writing (see subagent-start.sh); this proves the
+        // reader round-trips whatever string was actually written, including
+        // that one, rather than needing special-case null handling here.
+        std::fs::write(
+            &path,
+            "{\"tool_use_id\":\"t1\",\"agent_id\":\"main\",\"agent_type\":\"main\"}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            lookup_hook_register(path.to_str().unwrap(), "t1"),
+            Some("main".to_string())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 ai-text-editor = { path = "../ai-text-editor" }
+agent-session-key = { path = "../agent-session-key" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
