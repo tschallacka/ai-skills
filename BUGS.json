@@ -3191,6 +3191,25 @@
       "updated_at": "2026-09-09T18:54:20Z"
     },
     {
+      "id": "B315",
+      "title": "T136/B110's new coherence checks make test-plan-commands.sh's pending-review fixture fail validate-plan.sh where it used to only warn",
+      "status": "confirmed",
+      "severity": "major",
+      "priority": "high",
+      "parent": null,
+      "reproduce": "Run planning/tests/test-plan-commands.sh on master (verified on a clean worktree at commit d8b90d5b, PR #135/T136-B110 merged, with planning/scripts/build-plan-libs.sh run first) -- reproduces independent of any other branch's changes.",
+      "observed": "The assertion 'A pending review should validate with warnings only (not fail)' fails: ! validate-plan.sh $plan_dir exits non-zero for the test's synthetic 'Status synchronization' plan fixture with a pending (not yet approved) adversarial review, where it previously (before PR #135 merged) exited 0 with only a WARN about the unapproved review.",
+      "expected": "validate-plan.sh continues to warn-but-pass for a pending review in normal (non --complete) mode, per the test's own comment: 'A pending review warns in normal mode but passes; --complete stays strict.'",
+      "mechanism": "Not yet isolated -- suspected: PR #135 (T136/B110) added plan_validate_stale_wording_retained and plan_validate_countable_enumeration to validate-plan.sh's coherence sweep; one of these two new checks likely produces a false-positive FAIL against this fixture's synthetic placeholder prose ('x'/'y' CSV values, boilerplate paragraph text), turning what should be a soft WARN-only path into a hard failure. Needs the actual validate-plan.sh log captured for this fixture to pin down which check and why.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "T87/T86 fork, while regression-testing planning/SKILL.md split against a clean checkout of master post-PR#135",
+      "notes": null,
+      "created_at": "2026-09-10T04:52:36Z",
+      "updated_at": "2026-09-10T04:52:36Z"
+    },
+    {
       "id": "B14",
       "title": "The documented renders sort ids as strings, so item 10 lands between item 1 and item 2",
       "status": "fixed",
