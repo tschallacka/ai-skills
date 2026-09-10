@@ -43,7 +43,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	251301
+package/install.sh	251459
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -56,11 +56,11 @@ package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
 package/package.json	1872
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
-package/planning/PACKAGE-MANIFEST.tsv	18561
-package/planning/REVIEWER.md	22954
+package/planning/PACKAGE-MANIFEST.tsv	18998
+package/planning/REVIEWER.md	24339
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
-package/planning/SKILL.md	90900
+package/planning/SKILL.md	92285
 package/planning/artifact-comparisons.json	1779
 package/planning/binaries.tsv	1158
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
@@ -140,9 +140,11 @@ package/planning/scripts/update-progress.sh	2256
 package/planning/scripts/update-step.sh	7182
 package/planning/scripts/update-ui-story.sh	6879
 package/planning/scripts/update-work-unit.sh	13891
+package/planning/scripts/validate-plan-coherence-lib.sh	7303
 package/planning/scripts/validate-plan-commands-lib.sh	7402
 package/planning/scripts/validate-plan-common-lib.sh	1810
 package/planning/scripts/validate-plan-comparisons-lib.sh	3912
+package/planning/scripts/validate-plan-countable-enumeration.awk	1633
 package/planning/scripts/validate-plan-docs-lib.sh	8817
 package/planning/scripts/validate-plan-goals-lib.sh	13658
 package/planning/scripts/validate-plan-inventory-lib.sh	11249
@@ -150,8 +152,9 @@ package/planning/scripts/validate-plan-placeholders-lib.sh	4687
 package/planning/scripts/validate-plan-propagation-lib.sh	23399
 package/planning/scripts/validate-plan-serve-lib.sh	4080
 package/planning/scripts/validate-plan-stale-lib.sh	6808
+package/planning/scripts/validate-plan-stale-wording.awk	3439
 package/planning/scripts/validate-plan-ui-lib.sh	8404
-package/planning/scripts/validate-plan.sh	10506
+package/planning/scripts/validate-plan.sh	10820
 package/planning/scripts/verify-fix-keys.sh	8946
 package/planning/scripts/verify-target.sh	9497
 package/planning/state-change-registry.json	1096

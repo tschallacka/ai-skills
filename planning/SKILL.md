@@ -835,9 +835,29 @@ mismatched plan-description status.
 
 Execution order is mandatory: write the complete draft plan first, invoke the
 fresh reviewer, wait for its artifact, resolve every finding by revising the
-plan, then invoke a fresh reviewer again when revisions were material. Only
-after an approved artifact exists may the planning agent run the readiness
-validator and create progress trackers.
+plan, run the coordinator's own self-coherence pass (below), then invoke a
+fresh reviewer again when revisions were material. Only after an approved
+artifact exists may the planning agent run the readiness validator and create
+progress trackers.
+
+**The coordinator's self-coherence pass.** Between resolving every finding and
+re-dispatching a reviewer, run `validate-plan.sh` over the plan and read its
+output before deciding the plan is ready for another cycle -- not only its exit
+code. Six reviewer cycles on a real plan (BUGS.json B110) were each gated by a
+purely intra-document inconsistency a mechanical sweep could have caught
+before the reviewer was ever dispatched, because this pass was advisory prose
+rather than a required step: each cycle correctly reported the inconsistency
+it found, so the loop looked like it was working, and nobody measured that the
+same defect class was recurring in a new surface each cycle. `validate-plan.sh`
+runs two exact checks for exactly that shape, as FAILs rather than the --stale
+sweep's advisory WARNs: a paragraph that quotes a claim as retracted (`an
+earlier version ... said "X"`) while another, non-retraction paragraph of the
+same document still carries that exact claim; and a handoff or similar
+paragraph naming a count ("the following four steps") with no explicit member
+(a WNN/BNN/TNN id, or a file path) named alongside it. Skipping this pass and
+dispatching a reviewer straight from a finding-resolution edit is what let six
+cycles in a row spend a reviewer's judgement on what a script would have
+caught for free.
 
 After review, revise only the named document target with the flagged update
 commands. Use `-dp`/`--description-paragraph`, `-gp`/`--goal-paragraph`,
