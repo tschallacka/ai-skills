@@ -3193,7 +3193,7 @@
     {
       "id": "B315",
       "title": "T136/B110's new coherence checks make test-plan-commands.sh's pending-review fixture fail validate-plan.sh where it used to only warn",
-      "status": "confirmed",
+      "status": "not-a-defect",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3205,9 +3205,9 @@
       "fix": null,
       "verification": null,
       "found_by": "T87/T86 fork, while regression-testing planning/SKILL.md split against a clean checkout of master post-PR#135",
-      "notes": null,
+      "notes": "Misdiagnosed: not a real regression in T136/B110's coherence checks. Reproduced planning/tests/test-plan-commands.sh standalone (nix develop --command ./planning/tests/test-plan-commands.sh, no prior bootstrap) and captured the actual validate-plan.sh output at the failing assertion: it is literally 'validate-plan.sh: rjq is required (it reads placeholders.json, state-change-registry.json, goal-tables.json and commands.json); install rjq and re-run' -- an early abort with nothing to do with stale-wording or countable-enumeration checks. rjq was simply not on PATH in that standalone run (this worktree's target/release/rjq did not exist; nothing had built or bootstrapped it). Rerunning the identical test with rjq explicitly placed on PATH (built from src/rjq) passes cleanly end to end, including the pending-review assertion this bug names. Confirming evidence: three independent full-suite runs since PR #135/T136-B110 merged (the T136/B110 fork itself: 240/241, only test-ai-text-editor failed and was confirmed an unrelated flake; the T131/B157 fork: 245/245; the T86/T87 fork: 246/246) never showed test-plan-commands.sh failing -- because run-tests.sh bootstraps rjq before running any test, so the standalone-invocation gap this bug actually hit never occurs there. The reproduce steps as originally filed omitted that a standalone run of this test needs rjq built/on PATH first (same class of environmental gap that produced several phantom failures earlier in this session with cargo and shellcheck).",
       "created_at": "2026-09-10T04:52:36Z",
-      "updated_at": "2026-09-10T04:52:36Z"
+      "updated_at": "2026-09-10T06:29:04Z"
     },
     {
       "id": "B14",
