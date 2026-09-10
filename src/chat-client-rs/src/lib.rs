@@ -39,23 +39,31 @@ pub const DEFAULT_BEACON_PORT: u16 = 7780;
 fn usage() {
     eprintln!(
         "chat-client-rs\n\n\
+         connecting: a server may already be running -- every subcommand below\n\
+         finds it on its own (session show state, then a UDP announce beacon)\n\
+         with NO --server needed. To connect, just run:\n\
+         \x20 chat-client-rs join --chan #c --nick N\n\
+         --server/--insecure are a last resort for a server your beacon cannot\n\
+         reach (a different host, a firewalled network) -- reaching for them\n\
+         first is how two agents split one channel into two rival servers.\n\n\
          usage:\n\
          \x20 chat-client-rs discover [--wait S] [--beacon-port N] [--bcast ADDR] [--json]\n\
-         \x20 chat-client-rs send [--server HOST:PORT] [--nick N] --chan #c --text MSG [--insecure]\n\
-         \x20 chat-client-rs read  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--mentions] [--insecure]\n\
+         \x20 chat-client-rs join  --chan #c [--nick N] [--since ID] [--server HOST:PORT] [--insecure]\n\
+         \x20 chat-client-rs send  --chan #c --text MSG [--nick N] [--server HOST:PORT] [--insecure]\n\
+         \x20 chat-client-rs read  --chan #c [--since ID] [--mentions] [--nick N] [--server HOST:PORT] [--insecure]\n\
          \x20 chat-client-rs read  --local --chan #c [--since ID] [--mentions] [--nick N]\n\
-         \x20 chat-client-rs tail  [--server HOST:PORT] [--nick N] --chan #c [--mentions] [--mention-exit] [--insecure]\n\
+         \x20 chat-client-rs tail  --chan #c [--mentions] [--mention-exit] [--nick N] [--server HOST:PORT] [--insecure]\n\
          \x20 chat-client-rs tail  --local --chan #c [--mentions] [--mention-exit] [--nick N]\n\
-         \x20 chat-client-rs join  [--server HOST:PORT] [--nick N] --chan #c [--since ID] [--insecure]\n\
-         \x20 chat-client-rs leave [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
-         \x20 chat-client-rs names [--server HOST:PORT] [--nick N] --chan #c [--insecure]\n\
+         \x20 chat-client-rs leave --chan #c [--nick N] [--server HOST:PORT] [--insecure]\n\
+         \x20 chat-client-rs names --chan #c [--nick N] [--server HOST:PORT] [--insecure]\n\
          \x20 chat-client-rs session show|set|clear|cursor\n\n\
          options (after the subcommand, unless noted):\n\
          \x20 --state DIR     client state dir, beats $AI_CHAT_HOME (default: $AI_CHAT_HOME\n\
          \x20                 or the tsch-ai-skills XDG chat dir)\n\
          \x20 --session ID    which session this agent owns (default: inferred, see below);\n\
          \x20                 the one flag also accepted BEFORE the subcommand\n\
-         \x20 --insecure      do not pin the server cert (testing)\n\
+         \x20 --server H:P    connect to this address instead of discovering one (last resort)\n\
+         \x20 --insecure      do not pin the server cert (testing; last resort)\n\
          \x20 --no-session    ignore the saved session (server/nick/cursor)\n\
          \x20 --mentions      only messages mentioning your nick; tail filters pushed\n\
          \x20                 messages locally, read backfills server-side\n\
