@@ -4779,7 +4779,7 @@
     {
       "id": "B86",
       "title": "I minted ids that collided with ids I had just reserved for a worker, one hour after filing B78 about that hazard",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4791,12 +4791,12 @@
         "BUGS.json",
         "planning/scripts/register-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "bug-report/SKILL.md documents that a verbal id reservation for another writer is not a reservation -- next-id only sees ids that already exist as real entries, so a reservation with no artifact is invisible to it. If an id must be held for someone else, add the entry now, even minimally.",
+      "verification": "Merged in PR #145, commit bf23f755. Documentation-only fix; relevant skill-doc tests pass, full CI green.",
       "found_by": "main session, on reading its own register after the worker reported its numbering",
       "notes": null,
       "created_at": "2026-08-28T11:08:56Z",
-      "updated_at": "2026-08-28T11:08:56Z"
+      "updated_at": "2026-09-10T19:39:21Z"
     },
     {
       "id": "B90",
@@ -4868,7 +4868,7 @@
     {
       "id": "B96",
       "title": "watcher_reports_a_real_edit is flaky on macOS: it fails intermittently on the bash 3.2 leg and passes on a re-run of the same commit",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4880,12 +4880,12 @@
         "src/plan-overview/tests/watch.rs",
         "src/plan-overview/src/watch.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/plan-overview/tests/watch.rs: widened watcher_reports_a_real_edit's recv_timeout from 2s to 10s -- a ceiling, not a race, against the shared oversubscribed macOS CI runner's scheduling delays (same class of flake already measured and documented elsewhere in this repo, e.g. tests/protocol.rs's READY_POLLS). No canonicalization exists anywhere in watch.rs's path handling, so the bug's own symlink-spelling hypothesis does not apply to this code path; timing is the remaining, most likely candidate.",
+      "verification": "Merged in PR #145, commit bf23f755. cargo test -p plan-overview passes; full CI green (including both macOS legs this test runs on).",
       "found_by": "PR #7 CI",
       "notes": null,
       "created_at": "2026-08-31T14:50:34Z",
-      "updated_at": "2026-08-31T14:50:34Z"
+      "updated_at": "2026-09-10T19:39:21Z"
     },
     {
       "id": "B99",
@@ -4913,7 +4913,7 @@
     {
       "id": "B101",
       "title": "plan-crypt is built and CI-tested but shipped by nothing, while MAINTAINER calls it shipped",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4927,12 +4927,12 @@
         "planning/MAINTAINER.md",
         ".gitignore"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/MAINTAINER.md and .gitignore now correctly state plan-crypt has no shipped binaries.tsv row -- CI builds and tests it against the NIST vector, but delivers it to no installed skill, unlike plan-overview/rjq.",
+      "verification": "Merged in PR #145, commit bf23f755. test-duplication-ratchet.sh and test-stale-sweep.sh pass; full CI green.",
       "found_by": "wiki fact-check, maintainer session 2026-09-01",
       "notes": null,
       "created_at": "2026-09-01T15:15:18Z",
-      "updated_at": "2026-09-01T15:15:18Z"
+      "updated_at": "2026-09-10T19:39:21Z"
     },
     {
       "id": "B102",
@@ -5220,7 +5220,7 @@
     {
       "id": "B146",
       "title": "mc assigns application-specific meaning to otherwise standard paging keys",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5231,12 +5231,12 @@
       "surfaces": [
         "interactive-shell/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "interactive-shell/SKILL.md now states explicitly that a named key describes byte delivery only; the resulting application behavior is application-defined and must be verified from the next screen, not assumed from the key's name.",
+      "verification": "Merged in PR #145, commit bf23f755. test-skill-file-length.sh, test-skill-docs-generation.sh, test-stale-sweep.sh pass; full CI green.",
       "found_by": "fresh unknown-TUI validation, subworker Laplace",
       "notes": "This is not evidence that PAGEUP/PAGEDOWN encoding is wrong. B144 removes the need to hand-build modified sequences; agents still must verify application semantics after every input.",
       "created_at": "2026-09-01T20:00:00Z",
-      "updated_at": "2026-09-01T20:00:00Z"
+      "updated_at": "2026-09-10T19:39:21Z"
     },
     {
       "id": "B147",
