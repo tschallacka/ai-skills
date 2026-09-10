@@ -26,24 +26,39 @@ jobs:
   test:
     # Proves: the deterministic suite passes, and leaks no temp files, on both
     # supported operating systems with each one's default bash.
-    name: Test suite passes on ${{ matrix.os }} (default bash)
+    name: Test suite passes on ${{ matrix.os }} (default bash, shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
+    # T116: the selected/sharded test list depends on the scope job's answer.
+    needs: scope
     # The backstop for a hang. run-tests.sh bounds each TEST, which is what
     # names the culprit; this bounds the JOB, for a hang outside any test or a
     # runner that wedges. Without it a job inherits GitHub's 6-hour default:
     # measured 2026-09-08, three legs sat over three hours on one pull request
     # while every build leg had long since passed, and the only symptom was
     # the absence of a result. The local suite takes about 10 minutes, so 45
-    # is generous enough never to fire on a slow runner.
+    # is generous enough never to fire on a slow runner; sharding only shortens
+    # a leg, so the same ceiling still covers it.
     timeout-minutes: 45
     # Both operating systems are blocking. The macOS leg earned this once two
     # consecutive runner runs were green under both bash flavors (runs
     # 32474258670 and 32476867183), closing blocker 8; a macOS regression now
     # fails the PR instead of being informational.
+    #
+    # SHARD_TOTAL (T116) must equal the length of the shard array below --
+    # kept as two adjacent literals in the same small diff on purpose, rather
+    # than derived, because a wrong shard COUNT is a silent under-coverage bug
+    # a green run cannot reveal (every shard still passes; some tests just
+    # never ran in any of them), where a mismatched-length mistake here is at
+    # least visible in review. test-run-tests-shard.sh independently proves
+    # run-tests.sh's own --shard math partitions correctly for whatever N it
+    # is given, which is the half a CI-only literal cannot cover.
+    env:
+      SHARD_TOTAL: 4
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        shard: [0, 1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -238,8 +253,16 @@ jobs:
         # missing; building here keeps that off the suite's clock.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Run the full deterministic test suite
-        run: ./run-tests.sh
+      - name: Write the selected test list (T116)
+        if: needs.scope.outputs.tests_scope == 'selective'
+        run: printf '%s\n' '${{ needs.scope.outputs.tests }}' | tr ' ' '\n' > selected-tests.txt
+
+      - name: Run this shard of the deterministic test suite
+        run: |
+          select_flag=()
+          [ '${{ needs.scope.outputs.tests_scope }}' != 'selective' ] \
+              || select_flag=(--select-file selected-tests.txt)
+          ./run-tests.sh "${select_flag[@]}" --shard "${{ matrix.shard }}/$SHARD_TOTAL"
 
       - name: Verify no temp files leaked outside the runner's scope
         run: |
@@ -269,12 +292,22 @@ jobs:
     # declares. A separate leg is needed because `#!/usr/bin/env bash` on a
     # macOS runner can resolve to a newer Homebrew bash, which hides every
     # bash-4-only construct.
-    name: Test suite passes on macOS system bash 3.2 (portability floor)
+    name: Test suite passes on macOS system bash 3.2 (portability floor, shard ${{ matrix.shard }})
     runs-on: macos-latest
+    # T116: same reason as the leg above.
+    needs: scope
     # Same backstop as the leg above, and this is the leg that caught the hang
     # first, because a timing difference on the 3.2 floor lost a race the
     # other shells won.
     timeout-minutes: 45
+    # See the "test" job's own comment on SHARD_TOTAL: kept equal to this
+    # array's length by hand, in the same small diff, on purpose.
+    env:
+      SHARD_TOTAL: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -412,8 +445,16 @@ jobs:
         # have one: a build in the other job does not reach this runner.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
-      - name: Run the full deterministic test suite under /bin/bash
-        run: /bin/bash ./run-tests.sh
+      - name: Write the selected test list (T116)
+        if: needs.scope.outputs.tests_scope == 'selective'
+        run: printf '%s\n' '${{ needs.scope.outputs.tests }}' | tr ' ' '\n' > selected-tests.txt
+
+      - name: Run this shard of the deterministic test suite under /bin/bash
+        run: |
+          select_flag=()
+          [ '${{ needs.scope.outputs.tests_scope }}' != 'selective' ] \
+              || select_flag=(--select-file selected-tests.txt)
+          /bin/bash ./run-tests.sh "${select_flag[@]}" --shard "${{ matrix.shard }}/$SHARD_TOTAL"
 
       - name: Verify no temp files leaked outside the runner's scope
         run: |
@@ -438,6 +479,31 @@ jobs:
   # by two consecutive green macOS runs (32474258670, 32476867183) -- so both
   # macOS legs above are now blocking.
 
+  test-suite-ok:
+    # T116: `test` and `test-bash32` are each sharded (2 os * 4 shards, plus 4
+    # more for the bash-3.2 leg), so their own check names carry a shard
+    # number and change if SHARD_TOTAL ever does. Branch protection needs ONE
+    # stable name to require regardless of shard count, which is this job's
+    # only reason to exist -- it proves nothing itself, it only reports
+    # whether every shard of both jobs actually passed.
+    #
+    # `if: always()` is required for a job whose own dependencies might fail:
+    # GitHub skips a job's default `if` (`success()`) the moment any `needs`
+    # entry fails, and a SKIPPED required check does not block a merge the way
+    # a FAILED one does -- exactly the silent-pass this job exists to prevent.
+    name: Shell test suite (all shards) passes
+    runs-on: ubuntu-latest
+    needs: [test, test-bash32]
+    if: always()
+    steps:
+      - name: Check every shard succeeded
+        run: |
+          if [ '${{ needs.test.result }}' != 'success' ] \
+              || [ '${{ needs['test-bash32'].result }}' != 'success' ]; then
+            echo "::error::one or more test-suite shards did not succeed (test: ${{ needs.test.result }}, test-bash32: ${{ needs['test-bash32'].result }})"
+            exit 1
+          fi
+
   scope:
     # Proves: nothing. This job DECIDES, and the decision is what the native
     # legs below obey. It is deliberately tiny and always runs, because every
@@ -458,6 +524,8 @@ jobs:
       plan_crypt: ${{ steps.subjects.outputs.plan_crypt }}
       planning_commands: ${{ steps.subjects.outputs.planning_commands }}
       editor: ${{ steps.subjects.outputs.editor }}
+      tests_scope: ${{ steps.decide_tests.outputs.scope }}
+      tests: ${{ steps.decide_tests.outputs.tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -503,6 +571,19 @@ jobs:
             --scope '${{ steps.decide.outputs.scope }}' \
             --crates '${{ steps.decide.outputs.crates }}'
 
+      - name: Decide which shell tests and crates run (T116)
+        id: decide_tests
+        shell: bash
+        run: |
+          # Same push-vs-pull-request reasoning as "Decide the scope" above:
+          # an integration branch's diff against itself is empty, so it must
+          # not be read as "nothing changed" here either.
+          if [ -z "${{ github.base_ref }}" ]; then
+            .github/ci-test-scope.sh --push-to "${{ github.ref_name }}"
+          else
+            .github/ci-test-scope.sh --base "origin/${{ github.base_ref }}"
+          fi
+
       - name: Say what was decided, in the run summary
         shell: bash
         run: |
@@ -520,6 +601,8 @@ jobs:
               printf '\nCrates in scope, with their dependents:\n\n'
               printf '%s\n' "$crates" | tr ' ' '\n' | sed 's/^/- `/; s/$/`/'
             fi
+            printf '\n## Test suite scope: `%s`\n\n' '${{ steps.decide_tests.outputs.scope }}'
+            printf '%s\n' '${{ steps.decide_tests.outputs.reason }}'
           } >> "$GITHUB_STEP_SUMMARY"
 
   native:

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: chat src/chat-proto src/chat-server-rs src/chat-client-rs src/chat-mcp
 # test-chat.sh - the chat skill's rust server and rust client, end to end.
 #
 # Build (from the nix dev shell, where cargo/rustc live), start the rust server,

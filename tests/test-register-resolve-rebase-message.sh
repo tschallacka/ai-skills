@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: src/bug-report/src/resolve.rs src/bug-report/src/main.rs
 # test-register-resolve-rebase-message.sh — B151: `bugs resolve`/`todo resolve`
 # name a real action ("fix that side on its own branch first") only when there
 # is a branch to fix. Under `git rebase`, neither index side is a branch tip --

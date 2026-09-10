@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: interactive-shell src/interactive-shell
 # test-interactive-shell.sh - drives nano through the PTY wrapper end to end.
 set -euo pipefail
 # Two levels up: this suite lives at interactive-shell/tests/, so the repo root

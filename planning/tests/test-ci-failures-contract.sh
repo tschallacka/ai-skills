@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: ci-failures/scripts/ci-failures.sh
 # test-ci-failures-contract — ci-failures.sh's own logic: forge detection, the
 # gh and glab target-resolution paths, and the shared extractor.
 #
