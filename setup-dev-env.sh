@@ -84,6 +84,29 @@ NONIX
     exit 69
 }
 
+# B164: the root Cargo.toml is a virtual workspace globbing members = ["src/*"],
+# so cargo treats every directory under src/ as a member and a missing
+# Cargo.toml is fatal for the WHOLE workspace before a single crate builds --
+# even one built by manifest path alone, since cargo still resolves the
+# workspace first. A directory holding only gitignored content (a stale
+# target/ left from a deleted crate) passes every git check while being
+# unbuildable, so name it here rather than let cargo's "failed to read
+# .../Cargo.toml" -- true but silent about the real cause -- be the only word.
+check_stray_src_dirs() {
+    local dir stray=()
+    for dir in "$repo_root"/src/*/; do
+        [ -d "$dir" ] || continue
+        [ -f "${dir}Cargo.toml" ] || stray+=("${dir%/}")
+    done
+    [ "${#stray[@]}" -eq 0 ] && return 0
+    printf 'setup-dev-env: src/ has %d director%s with no Cargo.toml, which breaks the whole workspace build:\n' \
+        "${#stray[@]}" "$([ "${#stray[@]}" -eq 1 ] && echo y || echo ies)" >&2
+    for dir in "${stray[@]}"; do printf '  %s\n' "${dir#"$repo_root"/}" >&2; done
+    printf 'Remove it (a leftover from a deleted or renamed crate) and re-run:\n' >&2
+    for dir in "${stray[@]}"; do printf '  rm -rf %q\n' "${dir#"$repo_root"/}" >&2; done
+    exit 70
+}
+
 # The host's Rust target triple, using the same five-row house list the skills
 # resolve against at runtime (rust-development-guidelines.md section 4). A
 # machine outside the list has no row to build and is refused by name.
@@ -262,6 +285,8 @@ fi
 # itself failing for one crate, which is not a per-crate condition.
 #
 # --list and --check return above this point, so they still cost no nix at all.
+check_stray_src_dirs
+
 if [ -z "${SETUP_DEV_ENV_IN_NIX:-}" ] && [ -z "${IN_NIX_SHELL:-}" ]; then
     require_nix
     exec nix develop "$repo_root" --command env \
