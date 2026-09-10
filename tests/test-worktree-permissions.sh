@@ -8,10 +8,11 @@
 #   1. The worktree root is covered at all. The only grant the installer made
 #      was planning's three paths, so a checkout under the documented worktrees
 #      root was unpermitted and cost a prompt per file.
-#   2. Write is granted, not just Edit. Edit covers changing a file that already
-#      exists; creating one needs Write, and creating files is most of what
-#      working in a fresh checkout consists of. This is the half that reads as
-#      "read/write is granted" while still prompting.
+#   2. Edit is granted, which is the umbrella that also covers creating a file.
+#      Claude Code's own settings.json rules have no match keyed on the Write
+#      tool -- a separate Write(...) entry is not redundant, it is unmatched
+#      noise that leaves the grant it promised silently missing (B316). Edit
+#      is what makes both changing and creating a file need no prompt.
 #   3. The grant does not depend on the planning skill being selected, because
 #      any agent may be asked to take a worktree. planning_permission_step sits
 #      inside main's `contains planning` branch; this step must not.
@@ -111,13 +112,20 @@ $1
     return 1
 }
 
-for verb in Read Edit Write; do
+for verb in Read Edit; do
     has_rule "$verb($worktrees/**)" \
         || t_fail "claude grants $verb on the worktree root: no $verb($worktrees/**) in $(printf '%s' "$allow" | tr '\n' ' ')"
 done
 
 has_rule "Bash($worktrees/**:*)" \
     || t_fail "claude may run the checkout's own scripts: no Bash($worktrees/**:*) in $(printf '%s' "$allow" | tr '\n' ' ')"
+
+# B316: a Write(...) entry matches nothing in Claude Code's permission engine
+# -- Edit(path) is the umbrella covering every file-editing tool, Write
+# included. Asserting its absence keeps this from regressing back to dead
+# rule noise that reads as a grant but is not one.
+has_rule "Write($worktrees/**)" \
+    && t_fail "claude grant includes a Write(...) rule, which Claude Code's permission engine never matches (B316): $(printf '%s' "$allow" | tr '\n' ' ')"
 
 # A pre-existing entry is preserved, not replaced: the writer merges.
 t_assert_contains "claude keeps entries it did not add" \
