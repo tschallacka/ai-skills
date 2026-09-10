@@ -5609,7 +5609,7 @@
     {
       "id": "B206",
       "title": "test-chat-broadcast-stall flakes on the macOS suite leg: same tree PASSes minutes apart",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": "B156",
@@ -5620,12 +5620,12 @@
       "surfaces": [
         "chat/tests/test-chat-broadcast-stall.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "Same defect and same fix as B290: the JOIN-completion race in the chat client/server, fixed by PR #98 (merged 37272e1).",
+      "verification": "B290 (same test, chat/tests/test-chat-broadcast-stall.sh) independently accumulated well over a dozen consecutive clean macOS bash-3.2 runs since 37272e1 with zero reproductions before closing as fixed. This entry's own notes record 5 additional clean runs on 2026-09-09. B156 (this entry's declared parent) is an unrelated flake in a different test (test-register-schemas) and stays open on its own.",
       "found_by": "master CI run 34029162166, 2026-09-06 — first red on master after the third-drive merges, and not one of its changes",
       "notes": "Same evidence as B290 (parent bug B156, same underlying test): 5 clean CI runs of macOS bash 3.2 on 2026-09-09, 0 failures, across PRs unrelated to chat. See B290 for the fuller evidence trail. Same fix (37272e1, PR #98) applies to this entry's parent test. See B290's notes for the mechanism and why it's fixed rather than merely rerun around. Not closed for the same reason: this entry's own standing bar (parent B156) is repeated confirmation.",
       "created_at": "2026-09-06T11:28:42Z",
-      "updated_at": "2026-09-09T11:12:04Z"
+      "updated_at": "2026-09-10T00:15:07Z"
     },
     {
       "id": "B208",
