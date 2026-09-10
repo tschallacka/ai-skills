@@ -6324,7 +6324,7 @@
     {
       "id": "B310",
       "title": "open's MCP/CLI argument is named file, not path, and path is refused as unknown_argument",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6335,17 +6335,17 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ai-text-editor-mcp's open tool description now leads with 'this argument is named \"file\", not \"path\"'.",
+      "verification": "Merged PR #130 (7ff501c). cargo test -p ai-text-editor-mcp passes.",
       "found_by": "loki, two days of heavy ai-text-editor use on a Magento checkout port, relayed via #ai-skills",
       "notes": null,
       "created_at": "2026-09-09T08:53:35Z",
-      "updated_at": "2026-09-09T08:53:35Z"
+      "updated_at": "2026-09-10T00:55:36Z"
     },
     {
       "id": "B311",
       "title": "search requires an explicit mode with no default and rejects ignore_case, neither guessable without calling capabilities",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -6356,12 +6356,12 @@
       "surfaces": [
         "src/ai-text-editor/src/bin/ai-text-editor-server.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "search::SearchError::MissingMode and ::Unsupported now list the full valid-mode set inline, so either error a caller can reach is self-sufficient without a separate capabilities call.",
+      "verification": "Merged PR #130 (7ff501c). New test search::tests::mode_errors_name_the_valid_modes_inline, mutation-tested (fails without the fix). cargo test -p ai-text-editor passes.",
       "found_by": "loki, two days of heavy ai-text-editor use on a Magento checkout port, relayed via #ai-skills",
       "notes": null,
       "created_at": "2026-09-09T08:53:35Z",
-      "updated_at": "2026-09-09T08:53:35Z"
+      "updated_at": "2026-09-10T00:55:36Z"
     },
     {
       "id": "B313",
