@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # MODE: PROD
-# generate-reviewer.sh — project the marked SKILL.md sections into REVIEWER.md.
+# generate-reviewer.sh — project the marked skill-source.txt sections into
+# REVIEWER.md.
 #
 # Copies each `<!-- REVIEWER_SECTION:START <name> -->` … `:END` block out of the
-# source skill into a compact reviewer contract, prefixed with the reviewer
+# authored source into a compact reviewer contract, prefixed with the reviewer
 # profile version and the source's SHA-256. The recorded hash is what
 # test-reviewer-projection.sh compares, so neither the projection nor the hash
 # format may change without regenerating REVIEWER.md.
+#
+# T87: the source moved from SKILL.md to skill-source.txt when SKILL.md
+# became a generated index (generate-skill-docs.sh); the REVIEWER_SECTION
+# markers themselves did not move or change shape, so this script's own
+# extraction logic is otherwise unchanged.
 #
 # Usage:
 #   generate-reviewer.sh [<skill-directory>] [<output-file>]
@@ -44,7 +50,7 @@ esac
 [ "$#" -le 2 ] || usage
 
 skill_dir="${1:-$(cd "$script_dir/.." && pwd)}"
-source_file="$skill_dir/SKILL.md"
+source_file="$skill_dir/skill-source.txt"
 output="${2:-$skill_dir/REVIEWER.md}"
 
 expected_sections=(mandatory-review bounded-context)
@@ -75,7 +81,7 @@ trap 'rm -f "$temp_output" "$temp_section"' EXIT
         "${source_file#"$skill_dir"/}"
     printf '> Reviewer profile contract: `%s`\n' "$REVIEWER_PROFILE_VERSION"
     printf '> Source SHA-256: `%s`\n\n' "$source_hash"
-    printf 'This file is a review-scoped projection of the tagged `SKILL.md`; '
+    printf 'This file is a review-scoped projection of the skill source; '
     printf 'the tagged skill remains authoritative.\n\n'
     printf '## Generated sections\n\n'
     for section in "${expected_sections[@]}"; do

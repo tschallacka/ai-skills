@@ -183,8 +183,15 @@ cp "$SCRIPT_DIR/telemetry.sh" "$CASE_ROOT/telemetry.sh"
 cp "$SCRIPT_DIR/session-id-from-jsonl.sh" "$CASE_ROOT/session-id-from-jsonl.sh"
 mkdir -p "$CAPSULE_ROOT/planning/references"
 mkdir -p "$CAPSULE_ROOT/planning/scripts"
+mkdir -p "$CAPSULE_ROOT/planning/parts"
 cp "$SCRIPT_DIR/task-spec.md" "$CAPSULE_ROOT/task-spec.md"
 cp "$SRC_ROOT/planning/SKILL.md" "$CAPSULE_ROOT/planning/SKILL.md"
+# T87: SKILL.md is now a short generated index; the agent under benchmark
+# reads its content from the parts it points at, so those have to be in the
+# capsule too. skill-source.txt travels as well -- generate-reviewer.sh below
+# reads it, not SKILL.md, since T87 moved REVIEWER.md's source off SKILL.md.
+cp -R "$SRC_ROOT/planning/parts/." "$CAPSULE_ROOT/planning/parts/"
+cp "$SRC_ROOT/planning/skill-source.txt" "$CAPSULE_ROOT/planning/skill-source.txt"
 cp -R "$SRC_ROOT/planning/scripts/." "$CAPSULE_ROOT/planning/scripts/"
 # The compiled libraries are generated and never tracked (MAINTAINER.md section
 # 2.15), so a git-archive capsule cannot carry them: build into the capsule from
@@ -199,12 +206,12 @@ if [ "$libs_missing" -eq 1 ]; then
     ( cd "$CAPSULE_ROOT/planning/scripts" && ./build-plan-libs.sh ) \
         || { echo "setup-benchmark: building the capsule libraries failed" >&2; exit 1; }
 fi
-if [ ! -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && [ -f "$CAPSULE_ROOT/planning/SKILL.md" ]; then
+if [ ! -f "$CAPSULE_ROOT/planning/REVIEWER.md" ] && [ -f "$CAPSULE_ROOT/planning/skill-source.txt" ]; then
     # Generated, never committed (MAINTAINER.md section 2.16): a git-archive
     # capsule cannot carry it, so the capsule generates its own from the
-    # SKILL.md it already has. The capsule's generator resolves its paths from
-    # its own location, and the capsule lib build above has produced the
-    # plan-crypt library it sources.
+    # skill-source.txt it already has. The capsule's generator resolves its
+    # paths from its own location, and the capsule lib build above has
+    # produced the plan-crypt library it sources.
     ( cd "$CAPSULE_ROOT/planning/scripts" \
         && ./generate-reviewer.sh "$CAPSULE_ROOT/planning" "$CAPSULE_ROOT/planning/REVIEWER.md" ) \
         || { echo "setup-benchmark: generating the capsule REVIEWER.md failed" >&2; exit 1; }
@@ -228,7 +235,7 @@ CAPSULE_MANIFEST="$CAPSULE_ROOT/worker-manifest.json"
         printf '{"path":"%s","sha256":"%s","role":"input"}' "$rel" "$hash"
         first=0
     done < <(find "$CAPSULE_ROOT" -type f ! -name worker-manifest.json -print | sort)
-    printf '],"source_hash":"%s"}\n' "$(benchmark_hash_file "$CAPSULE_ROOT/planning/SKILL.md")"
+    printf '],"source_hash":"%s"}\n' "$(benchmark_hash_file "$CAPSULE_ROOT/planning/skill-source.txt")"
 } > "$CAPSULE_MANIFEST"
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
     'exec "$@"' > "$CAPSULE_ROOT/plan-context-wrapper.sh"

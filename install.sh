@@ -3636,6 +3636,10 @@ skill_files() {
             planning)
             cat <<'EOF'
 SKILL.md
+parts/part-1.md
+parts/part-2.md
+parts/part-3.md
+parts/part-4.md
 docs/README.md
 REVIEWER.md
 binaries.tsv
@@ -3722,6 +3726,7 @@ scripts/mint-fix-keys.sh
 scripts/verify-fix-keys.sh
 scripts/verify-target.sh
 scripts/generate-reviewer.sh
+scripts/verify-skill-load.sh
 scripts/update-plan-progress.sh
 scripts/update-progress.sh
 scripts/update-step.sh
@@ -3813,6 +3818,8 @@ EOF
 ARCHITECTURE.md
 MAINTAINER.md
 PACKAGE-MAP.tsv
+skill-source.txt
+scripts/generate-skill-docs.sh
 scripts/build-plan-libs.sh
 scripts/lib/core/00-state.sh
 scripts/lib/core/plan_atomic_write.sh
@@ -4004,6 +4011,7 @@ tests/test-resolve-finding.sh
 tests/test-validate-gates.sh
 tests/test-skill-provenance.sh
 tests/test-skill-file-length.sh
+tests/test-skill-docs-generation.sh
 tests/test-gate-caps.sh
 tests/test-atomicity-flow.sh
 tests/test-plan-data-lib.sh

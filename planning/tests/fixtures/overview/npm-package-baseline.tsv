@@ -45,7 +45,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	251531
+package/install.sh	251708
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -58,11 +58,11 @@ package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
 package/package.json	1872
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
-package/planning/PACKAGE-MANIFEST.tsv	18998
-package/planning/REVIEWER.md	24339
+package/planning/PACKAGE-MANIFEST.tsv	19459
+package/planning/REVIEWER.md	24342
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
-package/planning/SKILL.md	92285
+package/planning/SKILL.md	1831
 package/planning/artifact-comparisons.json	1779
 package/planning/binaries.tsv	1158
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
@@ -74,6 +74,10 @@ package/planning/document-sections.json	5295
 package/planning/gate-caps.json	267
 package/planning/goal-tables.json	984
 package/planning/never-executable-extensions.json	245
+package/planning/parts/part-1.md	16803
+package/planning/parts/part-2.md	20390
+package/planning/parts/part-3.md	32950
+package/planning/parts/part-4.md	24349
 package/planning/placeholders.json	4713
 package/planning/references/comment-discipline-contract.md	2622
 package/planning/references/plan-read-contract.md	3346
@@ -101,7 +105,8 @@ package/planning/scripts/create-step-testing.sh	6678
 package/planning/scripts/create-ui-story-run-cache.sh	2839
 package/planning/scripts/create-ui-validation.sh	3070
 package/planning/scripts/create-work-unit-inventory.sh	2868
-package/planning/scripts/generate-reviewer.sh	4171
+package/planning/scripts/generate-reviewer.sh	4450
+package/planning/scripts/generate-skill-docs.sh	10333
 package/planning/scripts/mint-fix-keys.sh	10039
 package/planning/scripts/monitor-read.sh	5560
 package/planning/scripts/overview-state.sh	10008
@@ -132,7 +137,7 @@ package/planning/scripts/remove-plan.sh	2363
 package/planning/scripts/remove-work-unit.sh	5842
 package/planning/scripts/render-plans-board.sh	20557
 package/planning/scripts/resolve-finding.sh	6629
-package/planning/scripts/role-context.sh	10790
+package/planning/scripts/role-context.sh	11093
 package/planning/scripts/run-adversary-probe.sh	5445
 package/planning/scripts/supervision-frame.sh	6303
 package/planning/scripts/update-adversarial-review.sh	12862
@@ -158,7 +163,9 @@ package/planning/scripts/validate-plan-stale-wording.awk	3439
 package/planning/scripts/validate-plan-ui-lib.sh	8404
 package/planning/scripts/validate-plan.sh	10820
 package/planning/scripts/verify-fix-keys.sh	8946
+package/planning/scripts/verify-skill-load.sh	3051
 package/planning/scripts/verify-target.sh	9497
+package/planning/skill-source.txt	92627
 package/planning/state-change-registry.json	1096
 package/planning/telemetry-schema.json	888
 package/post-implementation-review/SKILL.md	11079

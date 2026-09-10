@@ -119,9 +119,12 @@ planning/scripts/plan-document-lib.sh
 planning/scripts/plan-progress-lib.sh
 planning/scripts/plan-table-lib.sh
 
-# The reviewer contract is generated from planning/SKILL.md by
-# planning/scripts/generate-reviewer.sh and pinned to its hash (MAINTAINER.md
-# section 2.16).
+# The reviewer contract is generated from planning/skill-source.txt (T87: SKILL.md
+# is itself generated now) by planning/scripts/generate-reviewer.sh and pinned to
+# its hash (MAINTAINER.md section 2.16). SKILL.md and planning/parts/*.md are
+# ALSO generated (by generate-skill-docs.sh), but unlike REVIEWER.md they stay
+# committed and shipped: a skill is consumed as files, with no build step at the
+# far end, so they are not ignored here.
 planning/REVIEWER.md
 
 # Workstation-only: the per-project deviation notes the project-specificies
