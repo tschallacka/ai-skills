@@ -67,6 +67,7 @@ else
     if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
         interactive_shell_permission_step
         interactive_shell_appprofiles_step
+        tui_hint_plugin_step
     fi
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
