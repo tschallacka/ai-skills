@@ -285,6 +285,17 @@ jobs:
             printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
             awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
           } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
+          # ~45 crates' worth of dependency objects (deps/, build/,
+          # .fingerprint/) is nearly the whole of target/release and was
+          # never needed past this point -- every final binary this job still
+          # reads directly (tony-the-pony) or copies elsewhere (chat,
+          # bug-report, todo) already happened before this step runs. Freeing
+          # it here is what a disk-tight runner needs: this step's own local
+          # repro of the failure it fixes showed 99% disk usage with 1.3G
+          # free before this reclaim existed.
+          du -sh target/release 2>/dev/null || true
+          rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
         if: needs.scope.outputs.tests_scope == 'selective'
@@ -503,6 +514,17 @@ jobs:
             printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
             awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
           } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
+          # ~45 crates' worth of dependency objects (deps/, build/,
+          # .fingerprint/) is nearly the whole of target/release and was
+          # never needed past this point -- every final binary this job still
+          # reads directly (tony-the-pony) or copies elsewhere (chat,
+          # bug-report, todo) already happened before this step runs. Freeing
+          # it here is what a disk-tight runner needs: this step's own local
+          # repro of the failure it fixes showed 99% disk usage with 1.3G
+          # free before this reclaim existed.
+          du -sh target/release 2>/dev/null || true
+          rm -rf target/release/deps target/release/build target/release/incremental target/release/.fingerprint
+          df -h . 2>/dev/null || true
 
       - name: Write the selected test list (T116)
         if: needs.scope.outputs.tests_scope == 'selective'
