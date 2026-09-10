@@ -39,6 +39,22 @@ version_marker_content() {
 skill_artifact_files() {
     local skill="$1" relative
     shift
+    # --dev-build is a strict opt-in mode: source_file() already checks BOTH
+    # the repo-root dev build and the shipped location for a bin/ row, and
+    # dies naming --dev-build when neither has it (B108's whole point -- a
+    # developer asking for the dev build wants that told loudly, not a
+    # skill that quietly installed without its binary). Gating existence
+    # here too, against the shipped location alone, would omit the row
+    # before source_file() ever got to check the dev-build root or die --
+    # exactly what B317 caused it to do (B318, test-installer-dev-build.sh
+    # section 3). Skip the gate under --dev-build and let that existing
+    # check own it, the way it did before B317; keep gating for the
+    # default path, where a missing binary should degrade the skill
+    # rather than abort the whole install (B317's own reason for existing).
+    if [ "${DEV_BUILD:-0}" -eq 1 ]; then
+        printf '%s\n' "$@"
+        return 0
+    fi
     for relative in "$@"; do
         [ -f "$SOURCE_ROOT/$skill/$relative" ] && printf '%s\n' "$relative"
     done
