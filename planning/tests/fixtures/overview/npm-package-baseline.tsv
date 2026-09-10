@@ -46,10 +46,10 @@ package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
 package/install.sh	257840
-package/interactive-shell/SKILL.md	9844
+package/interactive-shell/SKILL.md	11607
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
-package/interactive-shell/docs/README.md	5713
+package/interactive-shell/docs/README.md	6019
 package/interactive-shell/requires.tsv	1918
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5751
 package/interactive-shell/tests/test-interactive-shell.sh	7688
