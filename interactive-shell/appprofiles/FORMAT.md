@@ -40,6 +40,12 @@ One entry per dialog/prompt the app can show: trigger, its fields/buttons,
 how focus moves between them (TAB, arrows, a shortcut letter), how to
 confirm and how to cancel.
 
+### Menus
+Only if the app has a persistent menu bar or a full-screen settings/setup
+view (distinct from a one-off Dialog): how to open it, how to navigate
+between top-level items and into a submenu/section, how to change a
+setting, how to close/save/cancel. One entry per menu/screen.
+
 ### Workflows
 Numbered, key-presses-only sequences for common tasks. No narration between
 steps beyond what must be verified on screen before the next key (name the

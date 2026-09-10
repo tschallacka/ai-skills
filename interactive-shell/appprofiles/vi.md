@@ -1,8 +1,10 @@
 # vi / vim
 
 ### Identity
-Modal text editor. `vi` is commonly an alias for `vim` (check `vi
---version` or the startup screen). `vi FILE`.
+Modal text editor. `vi FILE`. On this system, `vi` is VIM 9.1 (not POSIX
+vi/nvi), so vim-only features (visual mode, multi-level undo, window
+splits, `:set`) are available; a different system's `vi` may not be vim --
+check `vi --version` or the startup screen there.
 
 ### Layout
 - Body -> buffer, one line per row, `~` marks rows past end-of-file
@@ -45,6 +47,3 @@ different things in different modes.
 
 ### Quirks
 None found beyond the standard modal behavior above.
-
-### Notes
-- This system's `vi` is VIM 9.1, not POSIX vi/nvi; vim-only features (visual mode, multi-level undo, splits, :set) are available.

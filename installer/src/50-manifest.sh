@@ -691,6 +691,10 @@ appprofiles/top.md
 appprofiles/htop.md
 appprofiles/tmux.md
 appprofiles/watch.md
+appprofiles/ncdu.md
+appprofiles/screen.md
+appprofiles/ssh.md
+appprofiles/telnet.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)

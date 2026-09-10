@@ -24,31 +24,27 @@ keys/PAGEUP/PAGEDOWN move the view) until exited with ESC or ENTER
 (ENTER also copies a mark), not just one keystroke.
 
 ### Keys
-All below (except copy-mode's own keys) are prefixed with CTRL-A (send as
-two wrapper actions: `combo a ctrl` then the command key, not a single
-combo).
+"After CTRL-A" keys are prefixed by the prefix key (send as two wrapper
+actions: `combo a ctrl` then the command key, not a single combo). Copy
+mode keys are sent directly, no prefix, once copy mode is entered.
 
-| Key (after CTRL-A) | Action | Notes |
-|-----|--------|-------|
-| c | Create a new window | |
-| n / p | Next/previous window | |
-| " | Window list (interactive picker) | [unconfirmed] |
-| A | Rename current window | [unconfirmed] |
-| S | Split region horizontally | [unconfirmed] |
-| \| | Split region vertically | [unconfirmed] |
-| Tab | Move focus to next region (after a split) | [unconfirmed] |
-| [ | Enter copy mode | Confirmed: enters a scrollable view, status line shows `Copy mode - ...` |
-| d | Detach | Confirmed: the attached client exits (wrapper session ends if screen was its direct child); the screen session and its windows keep running server-side, listed as "Detached" by `screen -ls`. Reattach with `screen -r NAME` in a new wrapper session. |
-| k | Kill current window | Prompts to confirm |
-| \\ | Kill all windows and quit screen | Prompts to confirm |
-
-### In copy mode (after CTRL-A `[`, no further prefix needed)
-| Key | Action | Notes |
-|-----|--------|-------|
-| arrow keys, PAGEUP/PAGEDOWN | Move the scrollback view | Confirmed: PAGEUP scrolled to earlier output |
-| SPACE | Start a selection mark | [unconfirmed] |
-| ENTER | End selection, copy it, exit copy mode | [unconfirmed] |
-| ESC | Exit copy mode without copying | Confirmed |
+| Key | Action | Mode | Notes |
+|-----|--------|------|-------|
+| c | Create a new window | After CTRL-A | |
+| n / p | Next/previous window | After CTRL-A | |
+| " | Window list (interactive picker) | After CTRL-A | [unconfirmed] |
+| A | Rename current window | After CTRL-A | [unconfirmed] |
+| S | Split region horizontally | After CTRL-A | [unconfirmed] |
+| \| | Split region vertically | After CTRL-A | [unconfirmed] |
+| Tab | Move focus to next region (after a split) | After CTRL-A | [unconfirmed] |
+| [ | Enter copy mode | After CTRL-A | Enters a scrollable view, status line shows `Copy mode - ...` |
+| d | Detach | After CTRL-A | Attached client exits (wrapper session ends if screen was its direct child); session/windows keep running server-side, listed as "Detached" by `screen -ls`. Reattach with `screen -r NAME` in a new wrapper session. |
+| k | Kill current window | After CTRL-A | Prompts to confirm |
+| \\ | Kill all windows and quit screen | After CTRL-A | Prompts to confirm |
+| arrow keys, PAGEUP/PAGEDOWN | Move the scrollback view | Copy mode | |
+| SPACE | Start a selection mark | Copy mode | [unconfirmed] |
+| ENTER | End selection, copy it, exit copy mode | Copy mode | [unconfirmed] |
+| ESC | Exit copy mode without copying | Copy mode | |
 
 ### Workflows
 1. Start a long-running process that must survive a disconnect: `screen -S
