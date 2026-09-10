@@ -65,6 +65,7 @@ rgbview              # compact text with terminal colors preserved
 rgbview-delta        # colored changed rows only
 locate 'label'       # visible text coordinates, not a click guarantee
 elements             # verified actionable elements and labels
+markup               # HTML-like structured text: links, selected spans, tables
 observe              # complete JSON snapshot and metadata
 wait 'expected text' 30000
 ```
@@ -73,7 +74,10 @@ Rows and mouse coordinates are one-based. `elements` reports semantic
 actionable elements such as OSC 8 hyperlinks. Ordinary visible text is exposed
 as a non-actionable coordinate hint. Use `click-id` or `click-label` only for
 actionable elements; use `click-at` for coordinate-driven TUIs and verify the
-result on the next screen.
+result on the next screen. `markup` is additive alongside `view`/`rgbview`:
+reach for it when navigating an unfamiliar or dense screen (a large listing,
+an unfamiliar pane layout) where the plain text leaves you paging back and
+forth to find one entry.
 
 View output includes the terminal size and rendered column spans. Prefer a
 small terminal to preserve context, increasing it only when labels or paths
