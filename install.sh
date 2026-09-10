@@ -87,6 +87,13 @@ PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 # because it is documented and scripted against. It seeds the per-skill record
 # rather than living on as a second mechanism, so there is exactly one place the
 # decision is read from.
+# Distinguishes an operator explicitly saying `mcp` (whether via --integration
+# or the environment) from the silent, nobody-said-anything value this same
+# variable holds by default (T109): both live in INTEGRATION_DEFAULT, and only
+# this flag tells them apart, which matters once a detected installed mode is
+# also a candidate -- an explicit choice must still outrank detection.
+INTEGRATION_DEFAULT_EXPLICIT=0
+[ -z "${INTEGRATION_DEFAULT:-}" ] || INTEGRATION_DEFAULT_EXPLICIT=1
 INTEGRATION_DEFAULT="${INTEGRATION_DEFAULT:-skill}"
 INTEGRATION_SELECTION="${INTEGRATION_SELECTION:-}"
 if [ -n "${EDITOR_INTEGRATION:-}" ]; then
@@ -183,21 +190,31 @@ record_integration() {
         *) die_usage "no skill offers a $mode integration; declared modes are:$offered" ;;
     esac
     INTEGRATION_DEFAULT="$mode"
+    INTEGRATION_DEFAULT_EXPLICIT=1
 }
 
 # Which mode this run installs a skill in: the per-skill choice if one was made,
-# else the run-wide one, else `skill`.
+# else the mode already installed at DESTINATION (T109), else the run-wide
+# default, else `skill`.
 #
-# `skill` is the default on purpose. It is the interface that needs no client
-# configuration and no running server, which is what a piped-from-curl install
-# has to leave working; an MCP server's tools are listed in every session that
-# configures it, so it is opted into rather than assumed.
+# `skill` is the default on a FIRST install only. It is the interface that
+# needs no client configuration and no running server, which is what a
+# piped-from-curl install has to leave working; an MCP server's tools are
+# listed in every session that configures it, so it is opted into rather than
+# assumed. An UPDATE is different: the caller already chose once, and an
+# update that silently reads as "switch back to skill" tears down a live MCP
+# registration on a run that only meant "give me the newest version" (T109).
+#
+# destination is optional because two callers (the interactive picker's info
+# panel and its integration-cycle action, T95) render before a target root is
+# chosen and have no destination to detect from; they fall back to explicit-
+# or-default, same as before this existed.
 #
 # Here rather than in 50-manifest.sh because the picker reads it too (T95), and
 # install-ui.sh sources only 05-config, 20-runtime-tools, 30-render and the
 # three ui parts. A ui function calling into an unsourced part is B49.
 integration_mode_for() {
-    local skill="$1" line
+    local skill="$1" destination="${2:-}" line detected
     # bash 3.2 is the floor and has no associative arrays, so the per-skill
     # choices are newline-delimited `skill=mode` records.
     while IFS= read -r line; do
@@ -207,7 +224,45 @@ integration_mode_for() {
     done <<INTEGRATION_SELECTION_EOF
 $INTEGRATION_SELECTION
 INTEGRATION_SELECTION_EOF
+    # A run-wide --integration (or the equivalent environment variable) is
+    # still an explicit choice, even though it shares INTEGRATION_DEFAULT with
+    # that variable's own silent, nobody-said-anything value -- and an
+    # explicit choice outranks detection.
+    if [ "$INTEGRATION_DEFAULT_EXPLICIT" -eq 1 ]; then
+        printf '%s\n' "$INTEGRATION_DEFAULT"
+        return 0
+    fi
+    if [ -n "$destination" ]; then
+        detected="$(integration_installed_mode "$skill" "$destination")"
+        [ -z "$detected" ] || { printf '%s\n' "$detected"; return 0; }
+    fi
     printf '%s\n' "${INTEGRATION_DEFAULT:-skill}"
+}
+
+# Where integration_mode_for's answer came from, for the install summary
+# (T109: an install that silently carries a mode forward is only progress over
+# a silent wrong default if it SAYS what it did and why).
+#
+# Takes the mode integration_mode_for ALREADY resolved, rather than resolving
+# its own: integration_installed_mode's disagreement warning belongs to that
+# one authoritative call, and a second, silenced (2>/dev/null) call here only
+# to label the answer must not print it a second time for a single decision.
+integration_mode_source_for() { # <skill> <resolved-mode> [destination] -> explicit|detected|default
+    local skill="$1" resolved="$2" destination="${3:-}" line
+    while IFS= read -r line; do
+        case "$line" in
+            "$skill="*) printf 'explicit\n'; return 0 ;;
+        esac
+    done <<INTEGRATION_SELECTION_EOF
+$INTEGRATION_SELECTION
+INTEGRATION_SELECTION_EOF
+    [ "$INTEGRATION_DEFAULT_EXPLICIT" -ne 1 ] || { printf 'explicit\n'; return 0; }
+    if [ -n "$destination" ] \
+        && [ "$resolved" = "$(integration_installed_mode "$skill" "$destination" 2>/dev/null)" ]; then
+        printf 'detected\n'
+        return 0
+    fi
+    printf 'default\n'
 }
 
 SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
@@ -3786,6 +3841,7 @@ tests/test-installer-busy-binary.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
 tests/test-installer-editor-steering.sh
+tests/test-installer-integration-carryover.sh
 tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
@@ -4042,6 +4098,34 @@ ISHEOF
 # variables it reads and the writers that set them: the picker calls it too
 # (T95), and install-ui.sh does not source this part.
 
+# Which mode's binary is already on disk at DESTINATION, or empty when there
+# is none (a first install) -- signal 1 of the two T109 names (the other,
+# an agent config already pointing at this skill's mcp binary, is left for a
+# follow-up; the destination signal alone is what a headless `--all` update
+# needs to stop tearing down a live mode it was never told to leave).
+#
+# More than one mode's binary present is a half-finished earlier switch --
+# remove_stale_integration_binaries only ever cleans up what the CURRENT
+# mode's answer says to remove, so it cannot itself have caused this -- and
+# it is reported rather than guessed at, on stderr so a caller capturing the
+# mode itself is not corrupted by the warning.
+integration_installed_mode() { # <skill> <destination> -> mode, or empty
+    local skill="$1" destination="$2" path mode found=''
+    for path in "$destination"/bin/*/*; do
+        [ -f "$path" ] || continue
+        mode="$(integration_binary_mode "$skill" "${path##*/}")"
+        [ -n "$mode" ] || continue
+        if [ -n "$found" ] && [ "$found" != "$mode" ]; then
+            printf '%s: %s has binaries for both %s and %s modes; a previous switch may be unfinished. Pass --integration to say which mode to keep.\n' \
+                "${0##*/}" "$destination" "$found" "$mode" >&2
+            printf ''
+            return 0
+        fi
+        found="$mode"
+    done
+    printf '%s\n' "$found"
+}
+
 # Does this file belong in the mode this skill is being installed in?
 #
 # Only artifacts under bin/ carry a mode; everything else -- SKILL.md, the
@@ -4049,15 +4133,24 @@ ISHEOF
 # skill directory and not a lone binary. A skill that declares no
 # integration.tsv has no arm in the generated table, its lookup is empty, and
 # every file is allowed: the flag is a no-op for it rather than an error.
+#
+# `mode` is the answer install_skill() already resolved once, up front, and
+# every one of its calls passes it in: integration_mode_for detects from
+# whatever is CURRENTLY on disk at the destination, and this same function is
+# what remove_stale_integration_binaries uses to decide what to delete FROM
+# that disk -- recomputing per call would let the answer change mid-loop as
+# soon as the first stale binary is removed. A caller with no resolved mode
+# yet (the picker, T95) omits it and gets the old explicit-or-default answer.
 integration_file_allowed() {
-    local skill="$1" relative="$2" declared
+    local skill="$1" relative="$2" mode="${3:-}" declared
     case "$relative" in
         bin/*) : ;;
         *) return 0 ;;
     esac
     declared="$(integration_binary_mode "$skill" "${relative##*/}")"
     [ -n "$declared" ] || return 0
-    [ "$declared" = "$(integration_mode_for "$skill")" ]
+    [ -n "$mode" ] || mode="$(integration_mode_for "$skill")"
+    [ "$declared" = "$mode" ]
 }
 
 # A skill switching integration mode (mcp -> skill or back) leaves the
@@ -4070,11 +4163,11 @@ integration_file_allowed() {
 # list of triples or binary names to fall out of date the next platform this
 # grows to support.
 remove_stale_integration_binaries() {
-    local skill="$1" destination="$2" files="$3" relative physical
+    local skill="$1" destination="$2" files="$3" mode="${4:-}" relative physical
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         case "$relative" in bin/*) : ;; *) continue ;; esac
-        if integration_file_allowed "$skill" "$relative"; then
+        if integration_file_allowed "$skill" "$relative" "$mode"; then
             continue
         fi
         physical="$(platform_relative_path "$skill" "$relative")"
@@ -4327,6 +4420,15 @@ install_skill() {
     # whole point being that "installed" cannot mean two different things
     # depending on an invisible directory without saying which one happened.
     local dev_build_binaries=''
+    # Resolved ONCE, up front, before anything below touches $destination:
+    # integration_mode_for detects from whatever is CURRENTLY on disk there,
+    # and remove_stale_integration_binaries (below) is about to delete from
+    # that same disk -- recomputing per call would let the answer change
+    # mid-loop as soon as the first stale binary was gone (T109).
+    local integration_mode
+    integration_mode="$(integration_mode_for "$skill" "$destination")"
+    local integration_mode_source
+    integration_mode_source="$(integration_mode_source_for "$skill" "$integration_mode" "$destination")"
 
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
@@ -4353,7 +4455,7 @@ install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        if ! integration_file_allowed "$skill" "$relative"; then
+        if ! integration_file_allowed "$skill" "$relative" "$integration_mode"; then
             [ -e "$destination/$relative" ] && changed=1
             continue
         fi
@@ -4409,17 +4511,17 @@ EOF
         fi
     elif [ "$missing" -eq 0 ]; then
         echo "Up to date: $destination" >&2
-        summary_add "Up to date: $destination$(summary_soft_note "$skill")"
+        summary_add "Up to date: $destination$(summary_soft_note "$skill")$(summary_integration_note "$skill" "$integration_mode" "$integration_mode_source")"
         return
     fi
 
-    remove_stale_integration_binaries "$skill" "$destination" "$files"
+    remove_stale_integration_binaries "$skill" "$destination" "$files" "$integration_mode"
 
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        integration_file_allowed "$skill" "$relative" || continue
+        integration_file_allowed "$skill" "$relative" "$integration_mode" || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -4460,7 +4562,7 @@ EOF
     version_marker_content > "$destination/.version"
     record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
-    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")"
+    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")$(summary_integration_note "$skill" "$integration_mode" "$integration_mode_source")"
 }
 # ---------------------------------------------------------------
 # 11b. End-of-run summary and replay commands
@@ -4547,6 +4649,23 @@ summary_dev_build_note() {
         joined="$joined${joined:+, }$name"
     done
     printf '\n             dev build used for: %s' "$joined"
+}
+
+# The suffix naming which integration mode was installed and where that came
+# from, for a skill that offers a choice (T109: an install that silently
+# carries a mode forward is only progress over a silent wrong default if it
+# SAYS what it did). Silent for a skill with no integration.tsv, which is most
+# of them -- the flag is meaningless there and the summary should not imply a
+# choice was made.
+summary_integration_note() {
+    local skill="$1" mode="$2" source="$3" reason
+    [ -n "$(integration_modes "$skill")" ] || return 0
+    case "$source" in
+        explicit) reason='--integration' ;;
+        detected) reason='carried forward from the existing install' ;;
+        *) reason='default, no prior install found' ;;
+    esac
+    printf '\n             integration mode: %s (%s)' "$mode" "$reason"
 }
 
 # Idempotent, because cleanup() calls it too: a run that dies part-way (the

@@ -109,6 +109,15 @@ install_skill() {
     # whole point being that "installed" cannot mean two different things
     # depending on an invisible directory without saying which one happened.
     local dev_build_binaries=''
+    # Resolved ONCE, up front, before anything below touches $destination:
+    # integration_mode_for detects from whatever is CURRENTLY on disk there,
+    # and remove_stale_integration_binaries (below) is about to delete from
+    # that same disk -- recomputing per call would let the answer change
+    # mid-loop as soon as the first stale binary was gone (T109).
+    local integration_mode
+    integration_mode="$(integration_mode_for "$skill" "$destination")"
+    local integration_mode_source
+    integration_mode_source="$(integration_mode_source_for "$skill" "$integration_mode" "$destination")"
 
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
@@ -135,7 +144,7 @@ install_skill() {
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        if ! integration_file_allowed "$skill" "$relative"; then
+        if ! integration_file_allowed "$skill" "$relative" "$integration_mode"; then
             [ -e "$destination/$relative" ] && changed=1
             continue
         fi
@@ -191,17 +200,17 @@ EOF
         fi
     elif [ "$missing" -eq 0 ]; then
         echo "Up to date: $destination" >&2
-        summary_add "Up to date: $destination$(summary_soft_note "$skill")"
+        summary_add "Up to date: $destination$(summary_soft_note "$skill")$(summary_integration_note "$skill" "$integration_mode" "$integration_mode_source")"
         return
     fi
 
-    remove_stale_integration_binaries "$skill" "$destination" "$files"
+    remove_stale_integration_binaries "$skill" "$destination" "$files" "$integration_mode"
 
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         physical="$(platform_relative_path "$skill" "$relative")"
-        integration_file_allowed "$skill" "$relative" || continue
+        integration_file_allowed "$skill" "$relative" "$integration_mode" || continue
         if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
             [ "$relative" = "$overview_artifact" ] || continue
         fi
@@ -242,5 +251,5 @@ EOF
     version_marker_content > "$destination/.version"
     record_digests "$destination" "$skill" "$files"
     echo "Installed: $destination" >&2
-    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")"
+    summary_add "Installed: $destination$(summary_soft_note "$skill")$(summary_dev_build_note "$dev_build_binaries")$(summary_integration_note "$skill" "$integration_mode" "$integration_mode_source")"
 }
