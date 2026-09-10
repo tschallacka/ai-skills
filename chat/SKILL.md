@@ -67,6 +67,17 @@ chat-client-rs session show | set | clear | cursor #chan [ID]
   `tail` joins the channel and consumes pushed PRIVMSG messages as they arrive.
   On reconnect, it uses `FETCH` only to backfill the saved cursor before
   resuming the push stream.
+- **CAP negotiation (IRCv3).** The server runs a real, generically extensible
+  capability registry (`CAP LS`/`REQ`/`ACK`/`NAK`/`END`), currently offering one
+  capability, `message-tags`: a client that negotiates it gets a `@msgid=<id>`
+  tag inline on each PRIVMSG the server relays, the same id `FETCH`/`LASTID`
+  would report. `chat-client-rs` negotiates it on every connect and, once
+  negotiated, `tail` uses that id to advance its cursor the instant a message
+  arrives, rather than the once-a-second `LASTID` poll it falls back to
+  against an older or unrelated IRC server that NAKs the request or never
+  answers `CAP` at all. A client sending `CAP LS` holds registration (no `001`)
+  until it sends `CAP END`; a plain `NICK`/`USER` client that never mentions
+  `CAP` registers exactly as it always did.
 - **Reading with no server: `--local` (maintenance escape hatch).** `read
   --local` and `tail --local` walk `channels/<chan>.log` directly. Agents must
   use the socket path so the server remains the only interface to the chat bus.

@@ -634,6 +634,8 @@ tests/test-chat-resolution.sh
 tests/test-chat-broadcast-stall.sh
 tests/test-chat-descriptor-leak.sh
 tests/test-chat-owner-socket.sh
+tests/test-chat-cap-negotiation.sh
+tests/test-chat-tail-msgid-cursor.sh
 CHATEOF
             ;;
         interactive-shell)

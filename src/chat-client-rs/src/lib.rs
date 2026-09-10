@@ -879,12 +879,17 @@ fn parse_flag(args: &[String], name: &str) -> Option<String> {
 
 pub type Client = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
+/// The third element is whether the server ACK'd `message-tags` (T135): a
+/// `tail` caller uses this to read the real msgid off a pushed PRIVMSG
+/// instead of inferring one, falling back to exactly its old polling
+/// behaviour when this is `false` -- a NAK, or an older/unrelated IRC server
+/// that never answers CAP at all.
 pub fn connect(
     server: &str,
     nick: &str,
     state_dir: &std::path::Path,
     insecure: bool,
-) -> Result<(Client, String), String> {
+) -> Result<(Client, String, bool), String> {
     let addr = resolve(server)?;
     let tcp = TcpStream::connect(addr).map_err(|e| format!("connect {}: {}", server, e))?;
     tcp.set_nodelay(true).ok();
@@ -901,11 +906,16 @@ pub fn connect(
     // Register first: the first write drives the TLS handshake, after which
     // the peer certificate is available for TOFU pinning. One retry covers a
     // transient race with a just-started server.
+    //
+    // CAP LS goes out ahead of NICK/USER, in the same retry loop, as a real
+    // IRCv3 client's first write: the server holds registration on CAP
+    // LS/REQ until CAP END (T133), so the hold has to start before NICK/USER
+    // reach it, not after.
     let mut attempts = 0;
     loop {
-        // Register in two writes (NICK then USER). The first write drives the
-        // handshake; flushing between them ensures each line is on the wire.
-        let res = write_line(&mut tls, &format!("NICK {}", nick))
+        let res = write_line(&mut tls, "CAP LS")
+            .and_then(|_| write_line(&mut tls, "CAP REQ :message-tags"))
+            .and_then(|_| write_line(&mut tls, &format!("NICK {}", nick)))
             .and_then(|_| write_line(&mut tls, &format!("USER {} 0 * :{}", nick, nick)));
         match res {
             Ok(()) => break,
@@ -919,13 +929,46 @@ pub fn connect(
         }
     }
 
+    // Read the CAP reply before ending negotiation: whatever a 433 (nickname
+    // in use) reply from the NICK line above needs is unaffected either way
+    // -- this only consumes CAP's own reply lines, so a 433 behind them in
+    // the stream reaches `wait_for_welcome`'s own read untouched.
+    let message_tags = negotiate_message_tags(&mut tls);
+    let _ = write_line(&mut tls, "CAP END");
+
     // TOFU: verify the certificate fingerprint against the pinned one, or persist
     // on first connect (unless --insecure).
     let fp = cert_fingerprint(&tls)?;
     if !insecure {
         check_or_pin(server, &fp, state_dir)?;
     }
-    Ok((tls, fp))
+    Ok((tls, fp, message_tags))
+}
+
+/// Read CAP replies until message-tags is ACK'd, NAK'd, or a 2s deadline
+/// passes with no CAP reply at all -- the "does not speak CAP" case is a
+/// timeout, not a single read, because it is indistinguishable on the wire
+/// from "slow".
+fn negotiate_message_tags(tls: &mut Client) -> bool {
+    let deadline = SystemTime::now() + Duration::from_secs(2);
+    while SystemTime::now() < deadline {
+        match read_line(tls) {
+            Ok(l) => {
+                if l.contains("CAP") && l.contains("ACK") && l.contains("message-tags") {
+                    return true;
+                }
+                if l.contains("CAP") && l.contains("NAK") {
+                    return false;
+                }
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::WouldBlock {
+                    return false;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn client_config(_insecure: bool) -> rustls::ClientConfig {
@@ -1235,7 +1278,7 @@ fn send(args: &[String], state_dir: &std::path::Path) {
         eprintln!("chat-client-rs: send needs --server --nick --chan --text (or a saved session)");
         std::process::exit(64);
     }
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, _message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -1375,7 +1418,7 @@ fn names(args: &[String], state_dir: &std::path::Path) {
         std::process::exit(64);
     }
     let session_current = used_session && server == from_session;
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, _message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -1445,7 +1488,7 @@ fn join_channel(args: &[String], state_dir: &std::path::Path) {
         eprintln!("chat-client-rs: join needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
     }
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, _message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -1495,7 +1538,7 @@ fn leave_channel(args: &[String], state_dir: &std::path::Path) {
         eprintln!("chat-client-rs: leave needs --server --nick --chan (or a saved session)");
         std::process::exit(64);
     }
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, _message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -1743,7 +1786,7 @@ fn read_delta(args: &[String], state_dir: &std::path::Path) {
             since = cur.to_string();
         }
     }
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, _message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -2234,7 +2277,7 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
             std::process::exit(64);
         }
     }
-    let (mut tls, _fp) = match connect(&server, &nick, state_dir, o.insecure) {
+    let (mut tls, _fp, message_tags) = match connect(&server, &nick, state_dir, o.insecure) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("chat-client-rs: {}", e);
@@ -2427,16 +2470,54 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                 {
                     continue;
                 }
+                // T135: a message-tags-negotiated connection gets the real id
+                // inline on this exact line, which is what B157 asked for --
+                // no separate poll, no window where the cursor lags what was
+                // just shown. Both the plain and the mention-filtered path
+                // advance from it identically; only what gets PRINTED differs
+                // between them, below.
+                if message_tags {
+                    if let Some(id) = message
+                        .tags
+                        .iter()
+                        .find(|t| t.key == "msgid")
+                        .and_then(|t| t.value.as_deref())
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
+                        let recorded = cursors.entry(addressed_to.to_string()).or_insert(0);
+                        if id > *recorded {
+                            *recorded = id;
+                            save_cursor(state_dir, addressed_to, id, o.no_session);
+                        }
+                    }
+                }
                 let is_mention = message
                     .trailing
                     .as_deref()
                     .map(|text| mentions(text, &nick))
                     .unwrap_or(false);
+                // message-tags is this connection's own bookkeeping for the
+                // cursor above; what gets PRINTED stays exactly the shape it
+                // was before tags existed, so anything already parsing a
+                // tail's stdout (this repo's own test suite included) does
+                // not have to learn a new line shape it never asked for.
+                let display = if message.tags.is_empty() {
+                    l.clone()
+                } else {
+                    Message {
+                        tags: Vec::new(),
+                        prefix: message.prefix.clone(),
+                        command: message.command.clone(),
+                        params: message.params.clone(),
+                        trailing: message.trailing.clone(),
+                    }
+                    .serialize()
+                };
                 if !o.mentions || is_mention {
                     if o.mentions {
-                        println!("!! MENTION !! {}", l);
+                        println!("!! MENTION !! {}", display);
                     } else {
-                        println!("{}", l);
+                        println!("{}", display);
                     }
                     if o.mention_exit && is_mention {
                         // Stop serving before leaving: the socket outlives the
@@ -2451,10 +2532,17 @@ fn tail(args: &[String], state_dir: &std::path::Path) {
                         std::process::exit(0);
                     }
                 }
-                // A pushed IRC line has no history-row id. Resynchronize at a
-                // bounded cadence from the server's authoritative maximum,
-                // rather than guessing from the number of pushes received.
-                if last_sync.elapsed() >= Duration::from_secs(1) && !following.chans.is_empty() {
+                // T135's fallback: without a negotiated msgid tag (NAK'd, or
+                // an older/unrelated server that never answered CAP at all),
+                // a pushed line carries no id, so resynchronize at a bounded
+                // cadence from the server's authoritative maximum instead --
+                // exactly this tail's behaviour before message-tags existed.
+                // A negotiated connection never reaches here: every pushed
+                // line already carried its own real id, above.
+                if !message_tags
+                    && last_sync.elapsed() >= Duration::from_secs(1)
+                    && !following.chans.is_empty()
+                {
                     // ONE channel per tick, round-robin. The cost of staying
                     // synchronized must not grow with the number of channels
                     // followed -- a tail on five channels would otherwise spend
