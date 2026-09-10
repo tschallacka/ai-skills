@@ -20,6 +20,17 @@ installer="$repo_root/install.sh"
 source "$tests_dir/lib-test.sh"
 t_begin
 
+# This test's own installed() calls, across every assertion, produce far more
+# than lib-test.sh's default 40-file evidence budget on their own -- a real
+# skill install writes SKILL.md, docs/README.md, requires.tsv, a binary and
+# more per skill, and the later assertions here install every skill at once.
+# At the default budget the dump exhausted itself on the FIRST few installs'
+# own files and never reached the install.sh log for a later, failing "--skill
+# all" call -- exactly the log this test now writes to explain such a
+# failure. Respect an explicit override; only raise the silent default.
+: "${AI_SKILLS_TEST_EVIDENCE_FILES:=400}"
+export AI_SKILLS_TEST_EVIDENCE_FILES
+
 work="$(mktemp -d "${TMPDIR:-/tmp}/installer-selection.XXXXXX")"
 # No cleanup trap of our own: $work sits under $TMPDIR, which lib-test.sh
 # already rewrote to $T_TMPDIR and already owns via t_tmpdir_cleanup (set as
