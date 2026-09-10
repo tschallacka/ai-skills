@@ -69,8 +69,16 @@ fn watcher_reports_a_real_edit() {
     fs::write(root.join("plan.md"), "one").unwrap();
     let (events, stop) = watch_plan_dir(root.clone()).unwrap();
     fs::write(root.join("plan.md"), "two").unwrap();
+    // B96: this was 2 seconds, needing one of eight 250ms (SCAN_INTERVAL)
+    // polls to land -- fine on an idle machine, not on the shared,
+    // oversubscribed macOS CI runner (see tests/protocol.rs's own
+    // READY_POLLS comment for the same runner behavior measured elsewhere
+    // in this repo), where run 33401864955 failed here and the identical
+    // job passed on a rerun with no code change. A CEILING, not a sleep: a
+    // healthy run still returns the moment the event arrives, so this costs
+    // nothing there and only buys margin on a starved run.
     let event = events
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(10))
         .expect("edit event");
     assert_eq!(event.changed, vec![root.join("plan.md")]);
     let _ = stop.send(());
