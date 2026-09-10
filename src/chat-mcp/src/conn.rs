@@ -150,7 +150,11 @@ impl Held {
     /// there is no flag for a model to reach for when a pin mismatch is
     /// inconvenient. A mismatch is a refusal with the reason in it.
     pub fn open(server: &str, nick: &str, state_dir: &std::path::Path) -> Result<Held, String> {
-        let (mut tls, _fingerprint) = client::connect(server, nick, state_dir, false)?;
+        // message-tags negotiation result unused here: chat-mcp's own push
+        // consumer does not yet track a msgid cursor the way chat-client-rs
+        // tail does (T135 scoped there only) -- left for a follow-up.
+        let (mut tls, _fingerprint, _message_tags) =
+            client::connect(server, nick, state_dir, false)?;
         client::wait_for_welcome(&mut tls, nick)?;
         // The registration handshake used a five-second read timeout so a
         // silent server could not hang it. From here the loop wants a tick.
