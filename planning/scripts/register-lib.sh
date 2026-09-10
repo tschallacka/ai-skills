@@ -27,7 +27,15 @@ reg_findings() {
             then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
             else ["open","done","blocked","partly","decided","dropped","obsolete"] end;
         (if $kind == "todo" and has("todos")
-         then "register carries a .todos array - fold its entries into .tasks and drop the key" else empty end),
+         then (
+             (.tasks // []) as $tasks_ids_source
+             | ($tasks_ids_source | map(.id)) as $task_ids
+             | ((.todos // []) | map(.id)) as $todo_ids
+             | ($todo_ids - $task_ids) as $only_in_todos
+             | if ($only_in_todos | length) > 0
+               then "register carries a .todos array whose id(s) \($only_in_todos | join(", ")) do not exist in .tasks -- a fold that drops the .todos key without moving these loses them (B69)"
+               else "register carries a .todos array - fold its entries into .tasks and drop the key" end
+         ) else empty end),
         ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
         | ($items | map(.id)) as $ids
         | [

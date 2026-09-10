@@ -206,6 +206,36 @@ EOF
 
     remove_stale_integration_binaries "$skill" "$destination" "$files" "$integration_mode"
 
+    # B277: verify every file this run is about to copy actually exists BEFORE
+    # mkdir'ing the destination or copying anything, so a missing declared
+    # artifact refuses cleanly -- nothing written, one clear message naming
+    # the skill, the missing file and the fix -- rather than a raw `cp: cannot
+    # stat` mid-loop that leaves a half-written destination behind with no
+    # .version marker (install_skill copies files in order and writes .version
+    # last; a cp failure partway through never reaches it). Mirrors the real
+    # copy loop's own skip conditions exactly, or this would refuse on a row
+    # the loop itself would have skipped.
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
+        integration_file_allowed "$skill" "$relative" "$integration_mode" || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
+        if [ "$skill" = planning ] && bundled_bin_row_missing "$relative"; then
+            continue
+        fi
+        source="$(source_file "$skill" "$relative")"
+        if [ ! -f "$source" ]; then
+            case "$relative" in
+                bin/*) die "$skill/$relative is declared but missing at $source -- the crates are not built in this tree; run ./setup-dev-env.sh, or use a release tarball" ;;
+                *)     die "$skill/$relative is declared but missing at $source -- the checkout is incomplete or the package is corrupt" ;;
+            esac
+        fi
+    done <<EOF
+$files
+EOF
+
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue

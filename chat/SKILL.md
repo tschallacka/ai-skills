@@ -756,13 +756,18 @@ and the key is resolved per invocation from the first of these that applies.
    is involved. Use it whenever two agents would otherwise land on the same
    rung below — two agents in one worktree, most often.
 2. **A session id the harness already exports.** Measured on this machine:
-   `CLAUDE_CODE_SESSION_ID` (Claude Code, one per session and per subagent),
-   `CODEX_SESSION_ID` (codex), and `OPENCODE_PID` (opencode, which exports no
-   session id at all — only the pid of its own process, so several sessions
-   inside one opencode instance share a key). Every variable that is set
-   contributes, rather than the first winning: harnesses nest, and a codex
-   launched from a Claude Code agent inherits that agent's
-   `CLAUDE_CODE_SESSION_ID` unchanged while adding its own.
+   `CLAUDE_CODE_SESSION_ID` (Claude Code), `CODEX_SESSION_ID` (codex), and
+   `OPENCODE_PID` (opencode, which exports no session id at all — only the pid
+   of its own process, so several sessions inside one opencode instance share
+   a key). Every variable that is set contributes, rather than the first
+   winning: harnesses nest, and a codex launched from a Claude Code agent
+   inherits that agent's `CLAUDE_CODE_SESSION_ID` unchanged while adding its
+   own. **Claude Code does not give a subagent its own id** (B303, measured
+   2026-09-08): `CLAUDE_CODE_SESSION_ID` and every other identifying variable
+   are identical between a main agent and its subagents, so this rung alone
+   cannot tell them apart — a main agent and all of its subagents resolve to
+   one session here. Use `--session ID` (rung 1) whenever a subagent needs its
+   own.
 3. **The worktree root.** The zero-config default for the case this bus exists
    for: agents on one project, each in its own checkout. Sibling worktrees get
    separate sessions; the shared repository directory is deliberately not part

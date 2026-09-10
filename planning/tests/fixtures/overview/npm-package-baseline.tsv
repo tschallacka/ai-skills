@@ -22,7 +22,7 @@ package/bug-report/docs/README.md	1305
 package/bug-report/requires.tsv	1628
 package/bug-report/schema.1.4.2.json	2754
 package/bug-report/schema.2.0.0-alpha.1.json	2499
-package/chat/SKILL.md	45760
+package/chat/SKILL.md	46114
 package/chat/binaries.tsv	1876
 package/chat/docs/README.md	1890
 package/chat/integration.tsv	1652
@@ -45,7 +45,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	254009
+package/install.sh	257840
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -115,7 +115,7 @@ package/planning/scripts/plan-content.sh	22408
 package/planning/scripts/plan-context-lib.sh	23697
 package/planning/scripts/plan-context-wrapper.sh	1259
 package/planning/scripts/plan-context.sh	23287
-package/planning/scripts/plan-core-lib.sh	18040
+package/planning/scripts/plan-core-lib.sh	18376
 package/planning/scripts/plan-crypt-lib.sh	10784
 package/planning/scripts/plan-document-lib.sh	23104
 package/planning/scripts/plan-env.sh	11889
@@ -129,7 +129,7 @@ package/planning/scripts/plan-table-lib.sh	12187
 package/planning/scripts/plans-board-lib.sh	10626
 package/planning/scripts/rebuild-plan-progress.sh	4239
 package/planning/scripts/register-command.sh	4423
-package/planning/scripts/register-lib.sh	6611
+package/planning/scripts/register-lib.sh	7111
 package/planning/scripts/register-read.sh	5446
 package/planning/scripts/register-rebuild.sh	2919
 package/planning/scripts/remove-coverage.sh	3611
@@ -174,7 +174,7 @@ package/post-implementation-review/requires.tsv	1162
 package/project-specificies/SKILL.md	4059
 package/project-specificies/docs/README.md	1472
 package/project-specificies/requires.tsv	1162
-package/resource-limited-testing/SKILL.md	9407
+package/resource-limited-testing/SKILL.md	9515
 package/resource-limited-testing/docs/README.md	1115
 package/resource-limited-testing/requires.tsv	1407
 package/resource-limited-testing/scripts/limited-run.sh	4459

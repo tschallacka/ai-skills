@@ -582,10 +582,39 @@ emit() {
 if [ "$check_only" = true ]; then
     temporary="$(mktemp "${TMPDIR:-/tmp}/install.sh.XXXXXX")"
     trap 'rm -f "$temporary"' EXIT
+    # Layer 1 (unchanged): a build from installer/src ON DISK must match
+    # install.sh ON DISK -- catches "edited a part, forgot to rebuild" the
+    # moment it happens, uncommitted or not.
     emit > "$temporary"
     if ! diff -u "$output" "$temporary"; then
         printf '%s: install.sh is stale; run installer/build.sh\n' "${0##*/}" >&2
         exit 1
+    fi
+    # Layer 2 (B165): layer 1 alone can't see a commit boundary -- a source
+    # edit regenerated into install.sh and committed ALONE (source left
+    # unstaged) makes both sides of layer 1's comparison agree, since both
+    # read the same uncommitted disk state. CI clones the commit, where the
+    # source edit is absent, and disagrees (caught live, PR #48, 2026-09-04).
+    # Once layer 1 confirms disk is internally consistent, also build from
+    # `git archive HEAD` and compare against the SAME disk install.sh: this
+    # answers "does what's actually committed agree with itself", independent
+    # of what layer 1 already proved about the working tree.
+    if command -v git >/dev/null 2>&1 && git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        head_dir="$(mktemp -d "${TMPDIR:-/tmp}/build-sh-head.XXXXXX")"
+        if git -C "$repo_root" archive HEAD -- installer 2>/dev/null | tar -x -C "$head_dir"; then
+            head_temporary="$(mktemp "${TMPDIR:-/tmp}/install.sh.head.XXXXXX")"
+            ( script_dir="$head_dir/installer"; src_dir="$script_dir/src"; registry="$script_dir/tools.tsv"
+              emit > "$head_temporary" )
+            if ! diff -u "$output" "$head_temporary" >/dev/null 2>&1; then
+                printf '%s: install.sh matches installer/src on disk, but a build from the last COMMIT (installer/ at HEAD) does not -- installer/src has uncommitted changes not yet committed alongside install.sh. Commit them together, or this will fail in CI where the source edit is absent (B165):\n' "${0##*/}" >&2
+                diff -u "$output" "$head_temporary" >&2 || true
+                rm -f "$head_temporary"
+                rm -rf "$head_dir"
+                exit 1
+            fi
+            rm -f "$head_temporary"
+        fi
+        rm -rf "$head_dir"
     fi
     printf '%s\n' 'install.sh is up to date'
     exit 0

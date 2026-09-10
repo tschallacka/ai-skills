@@ -138,8 +138,9 @@ and is injectable, so the command it starts stays inside the capped tree.
 
 - [memlimit](https://github.com/pingiun/memlimit) — preventive, RSS-based memory
   caps for macOS. MIT licence, by Jelle Besseling (pingiun). Not bundled and not
-  vendored: the wrapper detects it with `command -v`, and on macOS the installer
-  refuses to run until it is present.
+  vendored: the wrapper detects it with `command -v`. `requires.tsv` declares it
+  soft on macOS, so its absence installs with a warning rather than refusing —
+  see "Without memlimit" above for what the wrapper degrades to.
 - `cpulimit` — optional best-effort CPU throttle on both platforms.
 
 ## Starting presets

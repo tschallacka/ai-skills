@@ -4671,6 +4671,36 @@ EOF
 
     remove_stale_integration_binaries "$skill" "$destination" "$files" "$integration_mode"
 
+    # B277: verify every file this run is about to copy actually exists BEFORE
+    # mkdir'ing the destination or copying anything, so a missing declared
+    # artifact refuses cleanly -- nothing written, one clear message naming
+    # the skill, the missing file and the fix -- rather than a raw `cp: cannot
+    # stat` mid-loop that leaves a half-written destination behind with no
+    # .version marker (install_skill copies files in order and writes .version
+    # last; a cp failure partway through never reaches it). Mirrors the real
+    # copy loop's own skip conditions exactly, or this would refuse on a row
+    # the loop itself would have skipped.
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        physical="$(platform_relative_path "$skill" "$relative")"
+        integration_file_allowed "$skill" "$relative" "$integration_mode" || continue
+        if [ "$skill" = planning ] && { case "$relative" in bin/*/plan-overview|bin/*/plan-overview.exe) true ;; *) false ;; esac; }; then
+            [ "$relative" = "$overview_artifact" ] || continue
+        fi
+        if [ "$skill" = planning ] && bundled_bin_row_missing "$relative"; then
+            continue
+        fi
+        source="$(source_file "$skill" "$relative")"
+        if [ ! -f "$source" ]; then
+            case "$relative" in
+                bin/*) die "$skill/$relative is declared but missing at $source -- the crates are not built in this tree; run ./setup-dev-env.sh, or use a release tarball" ;;
+                *)     die "$skill/$relative is declared but missing at $source -- the checkout is incomplete or the package is corrupt" ;;
+            esac
+        fi
+    done <<EOF
+$files
+EOF
+
     mkdir -p "$destination"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
@@ -5109,8 +5139,23 @@ print_manual_permissions() {
     echo "    - grant $kind read/write on $plans" >&2
     echo "    - allow $kind to execute the planning helpers under $scripts" >&2
     echo "    - allow $kind read/write/execute under the planning temp dir $tmp" >&2
-    echo "    - example (Claude Code settings.json permissions.allow):" >&2
-    echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*), Bash(bash $scripts/**:*)" >&2
+    # B236: the worked example must match the agent being addressed, or -- for
+    # a kind this fallback does not carry per-agent syntax for -- state no
+    # example rather than print one written for a different agent's format.
+    case "$kind" in
+        claude)
+            echo "    - example (Claude Code settings.json permissions.allow):" >&2
+            echo "        Read($plans/**), Edit($plans/**), Bash($scripts/**:*), Bash(bash $scripts/**:*)" >&2
+            ;;
+        opencode)
+            echo "    - example (opencode.json permission, each pattern -> \"allow\"):" >&2
+            echo "        {\"permission\": {\"read\": {\"$plans/**\": \"allow\"}, \"edit\": {\"$plans/**\": \"allow\"}, \"bash\": {\"$scripts/**\": \"allow\"}}}" >&2
+            ;;
+        codex)
+            echo "    - example (~/.codex/config.toml):" >&2
+            echo "        sandbox_workspace_write.writable_roots = [\"$plans\", \"$scripts\", \"$tmp\"]" >&2
+            ;;
+    esac
 }
 
 # Fallback because auto-configuration is not always possible or effective
@@ -5340,8 +5385,22 @@ print_manual_worktrees_permissions() {
     local kind="$1" worktrees="$2"
     echo "  $kind: no safe auto-editable permission file was modified." >&2
     echo "    - grant $kind read, write and execute under $worktrees" >&2
-    echo "    - example (Claude Code settings.json permissions.allow):" >&2
-    echo "        Read($worktrees/**), Edit($worktrees/**), Bash($worktrees/**:*)" >&2
+    # B236: match the addressed agent's own syntax, or state none for a kind
+    # this fallback carries no worked example for.
+    case "$kind" in
+        claude)
+            echo "    - example (Claude Code settings.json permissions.allow):" >&2
+            echo "        Read($worktrees/**), Edit($worktrees/**), Bash($worktrees/**:*)" >&2
+            ;;
+        opencode)
+            echo "    - example (opencode.json permission, each pattern -> \"allow\"):" >&2
+            echo "        {\"permission\": {\"read\": {\"$worktrees/**\": \"allow\"}, \"edit\": {\"$worktrees/**\": \"allow\"}, \"bash\": {\"$worktrees/**\": \"allow\"}, \"external_directory\": {\"$worktrees/**\": \"allow\"}}}" >&2
+            ;;
+        codex)
+            echo "    - example (~/.codex/config.toml):" >&2
+            echo "        sandbox_workspace_write.writable_roots = [\"$worktrees\"]" >&2
+            ;;
+    esac
 }
 
 # Runs for every install, not only a planning one: any agent may be asked to
@@ -5400,8 +5459,22 @@ print_manual_interactive_shell_permissions() {
     local kind="$1" bins="$2"
     echo "  $kind: no safe auto-editable permission file was modified." >&2
     echo "    - allow $kind to execute the wrapper and its input client under $bins" >&2
-    echo "    - example (Claude Code settings.json permissions.allow):" >&2
-    echo "        Bash($bins/**:*)" >&2
+    # B236: match the addressed agent's own syntax, or state none for a kind
+    # this fallback carries no worked example for.
+    case "$kind" in
+        claude)
+            echo "    - example (Claude Code settings.json permissions.allow):" >&2
+            echo "        Bash($bins/**:*)" >&2
+            ;;
+        opencode)
+            echo "    - example (opencode.json permission, each pattern -> \"allow\"):" >&2
+            echo "        {\"permission\": {\"bash\": {\"$bins/**\": \"allow\"}}}" >&2
+            ;;
+        codex)
+            echo "    - example (~/.codex/config.toml):" >&2
+            echo "        sandbox_workspace_write.writable_roots = [\"$bins\"]" >&2
+            ;;
+    esac
 }
 
 claude_interactive_shell_permissions() {

@@ -39,7 +39,11 @@ for script in "$scripts"/*.sh; do
     # for --plan-dir live in plan_hoist_plan_dir, inside plan-document-lib.sh. So
     # a scan for labels reported --plan-dir on none of the 24 scripts that take
     # it, and neither check below applied to it.
-    if grep -q 'plan_hoist_plan_dir' "$script" && [ "$is_lib" -eq 0 ]; then
+    # B82: a comment naming the helper (e.g. explaining why it is or is not
+    # used) must not count as a call -- full-line comments are excluded.
+    # PORTABILITY(pipefail-grep-q): grep -c, not -q, then compare the count.
+    hoist_hits="$( { grep -v '^[[:space:]]*#' "$script" || true; } | { grep -c 'plan_hoist_plan_dir' || true; } )"
+    if [ "${hoist_hits:-0}" -gt 0 ] && [ "$is_lib" -eq 0 ]; then
         flags="$(printf '%s\n--plan-dir\n' "$flags" | grep -E '^--?[a-zA-Z]' | sort -u)"
     fi
     [ -n "$flags" ] || [ "$is_lib" -eq 1 ] || continue
