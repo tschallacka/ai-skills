@@ -18,6 +18,12 @@ contradicts or extends a profile belongs in the agent's own memory
 ### Identity
 One line: what it is, the command(s) that start it.
 
+### Options
+Only if invocation-time flags materially change what an agent should
+expect (a one-shot vs. repeating mode, a mode that changes the whole
+interaction, e.g. `-f`/batch-file input). Table: `flag | effect | notes`.
+Distinct from Keys, which covers keys pressed once the program is running.
+
 ### Layout
 Bullet list, row/region -> content. What is FIXED regardless of what the
 buffer/data currently holds.

@@ -707,6 +707,25 @@ appprofiles/vmstat.md
 appprofiles/dpkg-reconfigure.md
 appprofiles/man.md
 appprofiles/info.md
+appprofiles/ex.md
+appprofiles/ed.md
+appprofiles/emacs.md
+appprofiles/powertop.md
+appprofiles/atop.md
+appprofiles/nmon.md
+appprofiles/iotop.md
+appprofiles/iptraf.md
+appprofiles/mtr.md
+appprofiles/tcpdump.md
+appprofiles/write.md
+appprofiles/talk.md
+appprofiles/journalctl.md
+appprofiles/dig.md
+appprofiles/gdb.md
+appprofiles/lldb.md
+appprofiles/sdiff.md
+appprofiles/select.md
+appprofiles/read.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
