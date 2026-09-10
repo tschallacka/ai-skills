@@ -33,6 +33,33 @@ case "${1:-}" in
     *) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; exit 64 ;;
 esac
 
+# B165: --check answers "does the committed install.sh match a build from the
+# COMMITTED sources", the same question CI answers. Building from installer/
+# as it sits ON DISK instead lets an uncommitted source edit sit on both sides
+# of the comparison -- present in the disk build AND already reflected in a
+# disk install.sh someone regenerated and committed alone -- so the two agree
+# locally while CI, which clones the commit and has no such edit, disagrees
+# (caught live, PR #48, 2026-09-04). Materialize installer/ from HEAD instead
+# and build from that copy, so the answer never depends on working-tree state
+# beyond install.sh itself, which test_check_mode_detects_edit still mutates
+# on disk to prove the guard has teeth.
+check_head_dir=''
+if [ "$check_only" = true ] && command -v git >/dev/null 2>&1 \
+    && git -C "$script_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    check_head_dir="$(mktemp -d "${TMPDIR:-/tmp}/build-sh-head.XXXXXX")"
+    trap 'rm -rf "$check_head_dir"' EXIT
+    if ! git -C "$repo_root" archive HEAD -- installer 2>/dev/null | tar -x -C "$check_head_dir"; then
+        printf '%s: could not read installer/ from HEAD; falling back to the working tree\n' "${0##*/}" >&2
+        rm -rf "$check_head_dir"
+        trap - EXIT
+        check_head_dir=''
+    fi
+fi
+if [ -n "$check_head_dir" ]; then
+    script_dir="$check_head_dir/installer"
+    src_dir="$script_dir/src"
+fi
+
 [ -d "$src_dir" ] || { printf '%s: missing %s\n' "${0##*/}" "$src_dir" >&2; exit 66; }
 
 registry="$script_dir/tools.tsv"
