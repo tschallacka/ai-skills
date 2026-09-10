@@ -5209,7 +5209,7 @@
     {
       "id": "B151",
       "title": "register-resolve.sh tells a rebase to fix an unsound side on its own branch, which names no action a rebase can take",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5220,12 +5220,12 @@
       "surfaces": [
         "planning/scripts/register-resolve.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "src/bug-report/src/resolve.rs and src/todo/src/resolve.rs gained in_rebase() (checks .git/rebase-merge and .git/rebase-apply, since MERGE_HEAD is absent under a rebase/cherry-pick/revert); both main.rs unsound-side refusals now branch on it, printing a rebase-appropriate message (defer the file to the commit whose register is already sound, or resolve the id collision in place and continue) instead of the merge-only 'fix that side on its own branch first'. PR #134, squash-merged as 1c78a4ec25f849a435eab9f1446910de17a2005a (master).",
+      "verification": "tests/test-register-resolve-rebase-message.sh and tests/test-todo-resolve-rebase-message.sh each drive a REAL git rebase into a real conflict with one side unsound, asserting the new wording, and a REAL git merge the same way, asserting the original wording is unchanged there.",
       "found_by": "pr13-rescue, rebasing PR #31 onto master 16c8c06",
       "notes": "Peer of B150: same assumption, other symptom. This half fails safe -- it refuses rather than answering wrongly -- which is why it is minor where B150 is blocking. Workaround used on pr13-rescue: resolve every BUGS.json conflict before the renumbering commit with 'git checkout --ours', then run the tool once at that commit, where the replayed side's register is sound.",
       "created_at": "2026-09-03T22:06:04Z",
-      "updated_at": "2026-09-03T22:06:23Z"
+      "updated_at": "2026-09-10T04:18:24Z"
     },
     {
       "id": "B152",
