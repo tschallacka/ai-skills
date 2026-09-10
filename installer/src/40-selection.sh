@@ -28,13 +28,23 @@ select_skills() {
                 exit "$ui_rc"
                 ;;
         esac
+        # show_shop_menu prints "all" as the entry ONE PAST the last named
+        # skill (labels = SKILL_NAMES + "all N skills"), so that is the number
+        # this prompt must offer and default to -- a value hardcoded from an
+        # era with six total menu entries stayed "6" through every skill this
+        # repo added since, so the printed "all" choice (today far past 6) had
+        # no number that actually selected it: typing what the menu itself
+        # showed died "Unknown skill: <n>", while the disconnected "6" secretly
+        # still worked, matching nothing on screen.
         show_shop_menu
         printf '\033[%d;1H' "$MENU_PROMPT_ROW"
-        ask "Choose 1-6 or enter comma-separated names [6]: "
-        SKILL_SELECTION="${REPLY:-6}"
+        local all_choice=$(( ${#SKILL_NAMES[@]} + 1 ))
+        ask "Choose 1-$all_choice or enter comma-separated names [$all_choice]: "
+        SKILL_SELECTION="${REPLY:-$all_choice}"
     fi
 
-    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "6" ]; then
+    local all_choice=$(( ${#SKILL_NAMES[@]} + 1 ))
+    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "$all_choice" ]; then
         SELECTED_SKILLS=("${SKILL_NAMES[@]}")
         return
     fi
@@ -48,9 +58,10 @@ select_skills() {
         # out-of-range number falls through to the name check and dies there.
         # `all` anywhere in the selection means every skill, so
         # `--skill all --skill todo` is not a contradiction to be resolved by
-        # ordering. The bare "6" spelling stays whole-string only, above: with
-        # seven skills, 6 is also a valid position, and reading it as "all" in a
-        # list would silently install one thing when a list was asked for.
+        # ordering. The bare $all_choice spelling stays whole-string only,
+        # above: every number up to and including the skill count is a valid
+        # position, and reading one as "all" inside a list would silently
+        # install everything when a list was asked for.
         case "$name" in
             all) SELECTED_SKILLS=("${SKILL_NAMES[@]}"); return ;;
         esac

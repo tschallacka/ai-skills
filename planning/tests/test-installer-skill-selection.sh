@@ -57,10 +57,24 @@ every="$("$BASH" -c 'source "'"$repo_root"'/installer/src/05-config.sh"; printf 
 t_assert_eq 'all installs every skill' "$(installed --skill all)" "$every"
 t_assert_eq 'all combined with a name still installs every skill' \
     "$(installed --skill all --skill todo)" "$every"
-# The bare 6 keeps meaning all, whole-string only: with seven skills 6 is also a
-# position, and reading it as all inside a list would install one thing when a
-# list was asked for.
-t_assert_eq 'the bare menu answer 6 still means all' "$(installed --skill 6)" "$every"
+# The bare "one past the last skill" (what show_shop_menu prints as "all N
+# skills") keeps meaning all, whole-string only: every number up to and
+# including the skill count is also a position, and reading one as all inside
+# a list would install one thing when a list was asked for. Computed, not
+# hardcoded: this sentinel used to be the literal "6", from an era with six
+# total menu entries, and silently stopped matching what the menu printed as
+# skills were added to SKILL_NAMES -- typing the number the menu actually
+# showed for "all" died "Unknown skill: <n>", while the disconnected literal
+# "6" quietly still worked, matching nothing on screen.
+skill_count="$("$BASH" -c 'source "'"$repo_root"'/installer/src/05-config.sh"; printf "%s" "${#SKILL_NAMES[@]}"')"
+all_choice=$((skill_count + 1))
+t_assert_eq 'the bare menu answer one past the last skill still means all' \
+    "$(installed --skill "$all_choice")" "$every"
+# The old literal "6" is now an ordinary position (whatever skill sits there),
+# never a secret synonym for all -- the fix is that the sentinel moved to
+# track the real count, not that "6" grew a second meaning alongside it.
+t_assert_eq 'the number 6 alone now means skill number 6, not all' \
+    "$(installed --skill 6)" "todo "
 
 # ── the refusals are unchanged ───────────────────────────────────────────────
 rc=0
