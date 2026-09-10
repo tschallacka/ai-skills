@@ -192,9 +192,20 @@ actual screen, since a different version or configuration can behave
 differently than what was recorded.
 
 App-specific knowledge beyond a shipped profile -- or for an app with none --
-belongs in agent memory, not in this wrapper: once you work out a TUI's
-keybindings, its mode-toggle appearance, or its own color convention (e.g.
-mc's directories in blue), write it to `memory/tui-apps/<appname>.md` before
-finishing the task. A later session driving the same application should read
-that file back first, rather than rediscovering the same facts from scratch
-through trial and error.
+belongs in
+`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles.d/<appname>.md`, a
+sibling of the vendor `appprofiles/` directory but agent-writable: once you
+work out a TUI's keybindings, its mode-toggle appearance, or its own color
+convention (e.g. mc's directories in blue), write it there, in the same
+format as `appprofiles/FORMAT.md`, before finishing the task. A later session
+driving the same application should read that file back first, rather than
+rediscovering the same facts from scratch through trial and error.
+
+Its first line must be the literal marker `<!-- tui-app-profile: v1 -->`, or
+nothing that reads `appprofiles.d/` -- including the tui-hint plugin that
+reminds an agent this note exists -- will treat it as one. Unlike the vendor
+`appprofiles/` directory, this one is not itself a trust boundary: it is just
+wherever an agent writes a file, and the marker is what tells a reader this
+particular file is meant to be read as a profile. Being a sibling of
+`appprofiles/` rather than a project-relative path, it works identically for
+every harness this skill supports, with nothing host-specific to resolve.

@@ -6,6 +6,10 @@ Interactive binary search tool for finding the commit that introduced a bug or c
 
 Sequential CLI workflow (not a curses TUI) for narrowing down a problematic commit via binary search.
 
+### Invocation
+
+^git\s+bisect(\s|$)
+
 ### Workflows
 
 1. **Start a bisection**:

@@ -10,13 +10,31 @@ unconfirmed.
 Installed to `${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles/`,
 reinstalled (overwritten) on every install run. Not written to by an agent
 at runtime -- a session-specific or machine-specific finding that
-contradicts or extends a profile belongs in the agent's own memory
-(`memory/tui-apps/<name>.md` per interactive-shell/SKILL.md), not here.
+contradicts or extends a profile, or a profile for an app with none shipped,
+belongs in the sibling `appprofiles.d/` directory (per
+interactive-shell/SKILL.md), not here.
+
+A file in `appprofiles.d/` follows this same format, but its first line must
+be the literal marker `<!-- tui-app-profile: v1 -->` -- nothing that reads
+that directory (including the tui-hint plugin) treats an unmarked file there
+as a profile, since the directory is otherwise just wherever an agent
+happens to drop a `.md` file. A vendor file under `appprofiles/` carries no
+marker; its presence in that directory is enough.
 
 ## Sections, in order. Omit one that does not apply.
 
 ### Identity
 One line: what it is, the command(s) that start it.
+
+### Invocation
+Only if the profile's filename does not, by itself, match the leading
+program word a hook sees on a command line -- a git subcommand
+(`git bisect` needs `git-bisect.md`), or a flag-gated mode. One extended
+regex (`grep -E` syntax) per line, matched against the command line with any
+leading `sudo`/`env`/`VAR=value` wrapper already stripped; the first line
+that matches wins. Omit the section entirely when the filename's own name
+(before `.md`) is already the leading word -- that is a hook's default
+match and needs no declaration here.
 
 ### Options
 Only if invocation-time flags materially change what an agent should

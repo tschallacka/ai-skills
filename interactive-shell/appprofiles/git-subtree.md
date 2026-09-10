@@ -6,6 +6,10 @@ Non-interactive Git subcommand for managing subtrees (embedded repositories). `g
 
 Entirely non-interactive command for integrating external repositories as subdirectories.
 
+### Invocation
+
+^git\s+subtree(\s|$)
+
 ### Quirks
 
 - `git subtree` is non-interactive; no prompts or interactive features

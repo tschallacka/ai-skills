@@ -6,6 +6,11 @@ Interactive patch staging tool for selectively adding changes to the index. `git
 
 Interactive workflow for staging individual hunks (pieces) of modified files.
 
+### Invocation
+
+^git\s+add\s+.*(-p\b|--patch\b)
+^git\s+add\s+.*(-i\b|--interactive\b)
+
 ### Dialogs
 
 #### Hunk staging prompt
