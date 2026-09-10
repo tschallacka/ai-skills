@@ -465,7 +465,7 @@
     {
       "id": "B317",
       "title": "skill_files() lists chat/todo/bug-report binaries unconditionally, so a missing one kills the whole install under set -e",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "urgent",
       "parent": null,
@@ -474,12 +474,12 @@
       "expected": "A skill whose own compiled binary is missing should not take the entire install down with it -- either it degrades honestly (installs its non-binary files, the way ai-text-editor and interactive-shell already do via skill_artifact_files) or refuses that one skill loudly (the way rjq's bundled_bin_row_missing does), never a raw `cp` failure that `set -e` turns into a silent, total install abort.",
       "mechanism": null,
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "chat, todo and bug-report's skill_files() case arms in installer/src/50-manifest.sh now route their bin/ artifacts through skill_artifact_files() (existence-gated), matching ai-text-editor and interactive-shell, instead of an unconditional printf. Added tests/test-skill-files-bin-gated.sh as a static guard against the pattern regressing. Also fixed a knock-on ordering issue this exposed in tests/test-release-package.sh (build-release.sh, which builds those same binaries itself, now runs before \"expected\" is derived, not after). Merged as PR #138 (commit 307267f4f2c92b2bae3edc4d5a5dac9e22970a80).",
+      "verification": "Verified live: with chat/todo/bug-report/interactive-shell/ai-text-editor's bin/ directories moved aside entirely, install.sh --skill all now exits 0 and installs all 16 skills (chat degraded, no binary) instead of crashing after chat. CI green on PR #138: all 28 checks, including the macOS bash-3.2 shard 1 and 3 that previously reproduced the crash.",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-10T11:37:24Z",
-      "updated_at": "2026-09-10T11:37:24Z"
+      "updated_at": "2026-09-10T12:53:01Z"
     },
     {
       "id": "B108",
