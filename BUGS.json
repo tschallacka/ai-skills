@@ -3748,9 +3748,9 @@
       "fix": null,
       "verification": null,
       "found_by": "chat-b122 via a repetition control (fail, then pass, unchanged tree); interference hypothesis eliminated by pr-master from the test source",
-      "notes": null,
+      "notes": "Investigated 2026-09-10: ruled out one candidate mechanism. test-register-file-flags.sh and test-register-resolve-rebase-message.sh (immediately before test-register-schemas.sh in sort order) do 'cargo build --release' in src/todo and src/bug-report, but that populates src/*/target/release/ -- a completely different path from bin/<triple>/, which is what install.sh (used by test-register-schemas.sh, no --dev-build) actually reads from. So the two builds cannot race or interact with each other's binary lookups; they are unrelated build outputs. Reproduced against a genuinely fresh git clone (no bin/ directory at all, bug-report/todo never built) with just the 5-test register cluster: passed cleanly across 4 consecutive runs, both cold and warm. Attempted the full suite (even sharded 0-3/4, sequentially) against the same fresh clone to get closer to the original 212-test/740s conditions the repro needed, but the harness killed the run twice this session for low system memory -- a real local resource constraint, not a decision to abandon reproduction. Root cause remains unproven; the timing hypothesis is more plausible than before given the file-flags/schemas ordering is now confirmed NOT to interact via shared build output. Deferring further reproduction to a machine that can run the full suite without OOM, or to CI's own ground truth.",
       "created_at": "2026-09-04T08:38:20Z",
-      "updated_at": "2026-09-04T08:38:20Z"
+      "updated_at": "2026-09-10T19:46:50Z"
     },
     {
       "id": "B161",
