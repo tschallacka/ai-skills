@@ -133,25 +133,6 @@
       "updated_at": "2026-09-09T22:19:46Z"
     },
     {
-      "id": "T109",
-      "title": "An update should detect the installed integration mode and keep it, not default back to skill",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "Updating a skill that has an integration mode must not need a flag to say which mode it is already in. Today it does, and the failure is silent in the dangerous direction: integration_mode_for (installer/src/05-config.sh) falls back to INTEGRATION_DEFAULT, which is 'skill', so a plain 'install.sh --all' over an mcp install reads as a request to switch to skill mode. remove_stale_integration_binaries then deletes the bridge binary and the MCP registration is torn down, on an update whose author only meant 'give me the newest version'.\\n\\nWanted precedence: an explicit --integration flag first, then the mode already installed, then INTEGRATION_DEFAULT for a first install. Two signals can establish the installed mode, and they should agree: integration.tsv maps mode to binary, so whichever declared binary is present in the destination's bin/<triple>/ names the mode; and the agent's own config carries the MCP registration for the mcp arm. Disagreement between them means a half-finished earlier switch, which is worth reporting rather than resolving silently.\\n\\nThe summary must say which mode was carried forward and where that was read from, because the whole point is that the caller no longer states it -- an install that silently picks a mode is what this task exists to remove, and replacing an explicit wrong default with an implicit one would not be progress. A first install of a skill with no prior state still needs the default, or a prompt when interactive.",
-      "blocked_on": null,
-      "refs": [
-        "installer/src/05-config.sh",
-        "installer/src/60-install.sh",
-        "installer/src/72-mcp-registration.sh",
-        "ai-text-editor/integration.tsv",
-        "chat/integration.tsv"
-      ],
-      "note": "Hit on 2026-09-08 installing master: both --integration ai-text-editor=mcp and --integration chat=skill had to be passed by hand, from knowledge of what was already there, purely to stop the update unregistering a running editor bridge. An updater that needs to be told the state it can see is a trap set for whoever forgets.",
-      "created_at": "2026-09-08T12:54:52Z",
-      "updated_at": "2026-09-08T12:54:52Z"
-    },
-    {
       "id": "T116",
       "title": "Select and shard the shell suite, so CI does not run 138 tests on 3 platforms for every commit",
       "status": "open",
@@ -1033,6 +1014,25 @@
       "note": "Merged PR #128 (2fcf9f4). --dev-build prefers the repo-root dev build over the shipped one for any binary row, refusing rather than installing an absent binary, with the summary naming which binaries came from the dev build.",
       "created_at": "2026-09-08T12:22:59Z",
       "updated_at": "2026-09-09T23:08:50Z"
+    },
+    {
+      "id": "T109",
+      "title": "An update should detect the installed integration mode and keep it, not default back to skill",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "Updating a skill that has an integration mode must not need a flag to say which mode it is already in. Today it does, and the failure is silent in the dangerous direction: integration_mode_for (installer/src/05-config.sh) falls back to INTEGRATION_DEFAULT, which is 'skill', so a plain 'install.sh --all' over an mcp install reads as a request to switch to skill mode. remove_stale_integration_binaries then deletes the bridge binary and the MCP registration is torn down, on an update whose author only meant 'give me the newest version'.\\n\\nWanted precedence: an explicit --integration flag first, then the mode already installed, then INTEGRATION_DEFAULT for a first install. Two signals can establish the installed mode, and they should agree: integration.tsv maps mode to binary, so whichever declared binary is present in the destination's bin/<triple>/ names the mode; and the agent's own config carries the MCP registration for the mcp arm. Disagreement between them means a half-finished earlier switch, which is worth reporting rather than resolving silently.\\n\\nThe summary must say which mode was carried forward and where that was read from, because the whole point is that the caller no longer states it -- an install that silently picks a mode is what this task exists to remove, and replacing an explicit wrong default with an implicit one would not be progress. A first install of a skill with no prior state still needs the default, or a prompt when interactive.",
+      "blocked_on": null,
+      "refs": [
+        "installer/src/05-config.sh",
+        "installer/src/60-install.sh",
+        "installer/src/72-mcp-registration.sh",
+        "ai-text-editor/integration.tsv",
+        "chat/integration.tsv"
+      ],
+      "note": "Merged PR #129 (00481a2). integration_mode_for now detects the installed mode from the destination when no --integration is given, outranked only by an explicit flag/env choice. Summary always names the mode and its source (explicit/carried forward/default).",
+      "created_at": "2026-09-08T12:54:52Z",
+      "updated_at": "2026-09-10T00:13:53Z"
     },
     {
       "id": "T110",
