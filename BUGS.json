@@ -5025,7 +5025,7 @@
     {
       "id": "B125",
       "title": "mc F4 opens the built-in mcedit, not $EDITOR, and F2 does not save through the wrapper",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5037,12 +5037,12 @@
         "interactive-shell/tests/test-interactive-shell-exploration.sh",
         "src/interactive-shell/src/lib.rs"
       ],
-      "fix": "Not fixed. The exploration test's mc block was narrowed to stop at 'the editor opened on the selected file', which is the assertion it can make; the nano-keyed edit-and-save sequence that followed was removed rather than left failing. Driving mcedit's own save is separate work: it needs the real encoding mcedit reads for F2 (terminfo kf2 may be \\x1b[12~ rather than SS3) and a decision on whether the wrapper should offer both.",
-      "verification": "Not verified as fixed -- deliberately recorded as an open limitation. What is verified is the diagnosis: probes under the wrapper captured mcedit's function-key bar after F4, and the file unchanged on disk with the modified flag still set after F2.",
+      "fix": "Live-verified against a real mc session: F4 opens $EDITOR (nano) on the selected file rather than mcedit on this build, and nano's already-proven CTRL-O/CTRL-X save cycle works identically driven through mc -- contradicting the original finding that F4 always opens mcedit regardless of $EDITOR. Restored interactive-shell/tests/test-interactive-shell-exploration.sh's mc save assertion (previously narrowed/removed) now that it genuinely passes. Additionally, separately live-tested mcedit itself directly (not through mc): F2 DOES save correctly -- it opens a 'Confirm save file' dialog with [Save]/[Cancel] buttons that itself needs confirming (ENTER); the encoding (\\x1bOQ, matching this terminal's xterm-256color kf2) was never the problem, only a missed intermediate confirmation dialog in the original investigation. Documented as reference material in interactive-shell/appprofiles/mcedit.md (shipped as part of a new app-profiles feature).",
+      "verification": "Merged in PR #147, commit 32e473ea. interactive-shell/tests/test-interactive-shell-exploration.sh passes cleanly across repeated runs and under bash 3.2. mcedit F2-save finding independently re-verified live via a direct mcedit session (typed text, F2, confirmed 'Confirm save file' dialog appeared, ENTER, verified on-disk content changed).",
       "found_by": "PR #13 rescue: the block had never run in CI (no mc on GitHub runners, and this branch had no CI run at all), so it failed the first time it was executed",
       "notes": "The nano end-to-end path is unaffected and passes: interactive-shell/tests/test-interactive-shell.sh drives nano's CTRL-X/CTRL-O save prompts through the wrapper successfully. This bug is about mc's editor only.",
       "created_at": "2026-09-03T00:00:00Z",
-      "updated_at": "2026-09-03T00:00:00Z"
+      "updated_at": "2026-09-10T21:26:45Z"
     },
     {
       "id": "B130",
