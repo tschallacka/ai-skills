@@ -696,6 +696,17 @@ appprofiles/screen.md
 appprofiles/ssh.md
 appprofiles/telnet.md
 appprofiles/alsamixer.md
+appprofiles/passwd.md
+appprofiles/sudo.md
+appprofiles/su.md
+appprofiles/chsh.md
+appprofiles/cryptsetup.md
+appprofiles/nslookup.md
+appprofiles/iostat.md
+appprofiles/vmstat.md
+appprofiles/dpkg-reconfigure.md
+appprofiles/man.md
+appprofiles/info.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
