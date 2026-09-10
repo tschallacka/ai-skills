@@ -16,7 +16,7 @@ package/ai-text-editor/schemas/protocol.v1.json	764
 package/brainstorm/SKILL.md	11440
 package/brainstorm/docs/README.md	1387
 package/brainstorm/requires.tsv	1162
-package/bug-report/SKILL.md	17435
+package/bug-report/SKILL.md	18181
 package/bug-report/binaries.tsv	945
 package/bug-report/docs/README.md	1305
 package/bug-report/requires.tsv	1628
@@ -46,7 +46,7 @@ package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
 package/install.sh	257840
-package/interactive-shell/SKILL.md	11607
+package/interactive-shell/SKILL.md	12235
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	6019
