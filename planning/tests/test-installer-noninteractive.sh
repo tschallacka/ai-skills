@@ -69,21 +69,33 @@ t_assert_eq 'a second install under --yes also succeeds' "$rc" '0'
 t_assert_eq 'and the scripts are there' \
     "$([ -x "$work/target-again/planning/scripts/create-plan.sh" ] && printf yes || printf no)" 'yes'
 
-# ── headless with no --target: default root, never a silent exit (B39) ──────
+# ── headless with no --target: never a silent exit (B39) ────────────────────
 # show_splash's bare return once propagated the tty test's status 1 under
 # set -e, killing the run before anything printed. The run must either install
-# into a default root or say why it cannot — never exit 1 with zero bytes.
+# somewhere or say clearly why it cannot — never exit with zero bytes printed.
+#
+# Which of those two happens is environment-dependent and correctly so (B163):
+# with exactly one skill root detected there is nothing to choose between, and
+# it installs; with more than one (this developer machine, for instance, has
+# claude/codex/opencode themselves on PATH, so every one of their roots counts
+# as detected) a headless run cannot express "all of them", so it refuses by
+# name rather than silently picking one — which is the whole fix B163 exists
+# for. Both outcomes are exercised directly and hermetically in
+# test-installer-multi-root-refusal.sh; this assertion only pins "never
+# silent" across whichever one this environment reaches.
 no_target_home="$work/home-notarget"
 mkdir -p "$no_target_home"
 no_target_out="$work/notarget.out"
 rc=0
 HOME="$no_target_home" AI_SKILLS_NO_SPLASH="" bash "$installer" --skill git-worktrees \
     --yes >"$no_target_out" 2>&1 </dev/null || rc=$?
-if [ "$rc" -ne 0 ]; then
-    t_fail "headless install without --target exited $rc"
-fi
 [ -s "$no_target_out" ] || t_fail 'headless install without --target printed nothing'
-t_assert_contains 'the no-target install says where it wrote' \
-    'Installed:' "$(cat "$no_target_out")"
+case "$rc" in
+    0) t_assert_contains 'the no-target install says where it wrote' \
+        'Installed:' "$(cat "$no_target_out")" ;;
+    1) t_assert_contains 'a refused no-target install says why' \
+        'skill roots are available' "$(cat "$no_target_out")" ;;
+    *) t_fail "headless install without --target exited $rc, neither success nor the named refusal" ;;
+esac
 
 t_end
