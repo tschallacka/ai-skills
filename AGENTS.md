@@ -53,6 +53,10 @@ Key skills and when they apply:
 - `project-specificies` — repo/behavior quirks affect implementation or debugging.
 - `resource-limited-testing` — about to run a test/build/analyzer that could
   consume substantial CPU/memory; run it under a resource cap.
+- `www` — the human types `www`, or you notice yourself thrashing (retrying
+  variants of a failing command, re-reading the same files, guessing at an
+  unmeasured cause). Stop and answer what do we have / what are the values /
+  what are we trying to achieve, in that order, before continuing.
 - `codebase-memory` (config external to this repo) — structural codebase
   queries against a code knowledge graph.
 - `planning` also hosts `magequery`/`magento-*` skills in some environments —

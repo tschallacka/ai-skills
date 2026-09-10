@@ -265,7 +265,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -281,6 +281,7 @@ SKILL_DESCRIPTIONS=(
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
     'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
+    'A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -350,6 +351,10 @@ A rust wrapper allocates a real PTY and publishes each screen change as one JSON
 Observation is the point: compact row views and deltas keep context small, and element discovery reports what is actually on screen rather than assuming a shortcut.
 An acknowledgement means the wrapper accepted the input, never that the program acted on it, so every state change is confirmed against the next screen.
 POSIX only, and the screen model is honest about its limits: byte-oriented cells, so non-ASCII widths are approximate.'
+    'A brake: the human types www, or the agent notices it is thrashing, and both mean stop immediately.
+Three questions answered in order, in their exact wording, before anything else continues: what do we have, what are the values, what are we trying to achieve.
+Each forces something a thrashing agent has usually lost -- measured facts over impressions, concrete particulars over the abstract shape of the problem, and the goal over the symptom being chased.
+Only then does work continue, and only as one reasoned step or a numbered question -- never another speculative attempt.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -3242,13 +3247,23 @@ select_skills() {
                 exit "$ui_rc"
                 ;;
         esac
+        # show_shop_menu prints "all" as the entry ONE PAST the last named
+        # skill (labels = SKILL_NAMES + "all N skills"), so that is the number
+        # this prompt must offer and default to -- a value hardcoded from an
+        # era with six total menu entries stayed "6" through every skill this
+        # repo added since, so the printed "all" choice (today far past 6) had
+        # no number that actually selected it: typing what the menu itself
+        # showed died "Unknown skill: <n>", while the disconnected "6" secretly
+        # still worked, matching nothing on screen.
         show_shop_menu
         printf '\033[%d;1H' "$MENU_PROMPT_ROW"
-        ask "Choose 1-6 or enter comma-separated names [6]: "
-        SKILL_SELECTION="${REPLY:-6}"
+        local all_choice=$(( ${#SKILL_NAMES[@]} + 1 ))
+        ask "Choose 1-$all_choice or enter comma-separated names [$all_choice]: "
+        SKILL_SELECTION="${REPLY:-$all_choice}"
     fi
 
-    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "6" ]; then
+    local all_choice=$(( ${#SKILL_NAMES[@]} + 1 ))
+    if [ "$SKILL_SELECTION" = "all" ] || [ "$SKILL_SELECTION" = "$all_choice" ]; then
         SELECTED_SKILLS=("${SKILL_NAMES[@]}")
         return
     fi
@@ -3262,9 +3277,10 @@ select_skills() {
         # out-of-range number falls through to the name check and dies there.
         # `all` anywhere in the selection means every skill, so
         # `--skill all --skill todo` is not a contradiction to be resolved by
-        # ordering. The bare "6" spelling stays whole-string only, above: with
-        # seven skills, 6 is also a valid position, and reading it as "all" in a
-        # list would silently install one thing when a list was asked for.
+        # ordering. The bare $all_choice spelling stays whole-string only,
+        # above: every number up to and including the skill count is a valid
+        # position, and reading one as "all" inside a list would silently
+        # install everything when a list was asked for.
         case "$name" in
             all) SELECTED_SKILLS=("${SKILL_NAMES[@]}"); return ;;
         esac
@@ -3971,6 +3987,9 @@ EOF
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         text-etiquette)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            ;;
+        www)
             printf '%s\n' SKILL.md docs/README.md requires.tsv
             ;;
         todo)

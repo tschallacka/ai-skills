@@ -212,7 +212,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -228,6 +228,7 @@ SKILL_DESCRIPTIONS=(
     'Shorthand and a clipped register for an agent prose: chat, dev talk, and its own thinking. Short, factual, no people-please prose; plain english on request.'
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
     'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
+    'A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -297,6 +298,10 @@ A rust wrapper allocates a real PTY and publishes each screen change as one JSON
 Observation is the point: compact row views and deltas keep context small, and element discovery reports what is actually on screen rather than assuming a shortcut.
 An acknowledgement means the wrapper accepted the input, never that the program acted on it, so every state change is confirmed against the next screen.
 POSIX only, and the screen model is honest about its limits: byte-oriented cells, so non-ASCII widths are approximate.'
+    'A brake: the human types www, or the agent notices it is thrashing, and both mean stop immediately.
+Three questions answered in order, in their exact wording, before anything else continues: what do we have, what are the values, what are we trying to achieve.
+Each forces something a thrashing agent has usually lost -- measured facts over impressions, concrete particulars over the abstract shape of the problem, and the goal over the symptom being chased.
+Only then does work continue, and only as one reasoned step or a numbered question -- never another speculative attempt.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
