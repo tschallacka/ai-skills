@@ -54,14 +54,17 @@ installed() { # <args...> -> "<sorted skill list> "\n"<log path>"
 }
 
 # Same assertion installed()'s callers already made inline, plus the cleanup:
-# on a match, the install.sh log this call produced is no longer needed to
-# explain anything, so it is removed rather than left for a LATER failure's
-# evidence dump to wade through.
+# on a match, neither the install.sh log nor the files that call actually
+# installed are needed to explain anything, so both are removed rather than
+# left for a LATER failure's evidence dump to wade through. A passing
+# "--skill all" call writes 16 skills' worth of files -- SKILL.md, docs,
+# requires.tsv, a binary each -- which on its own exhausts the evidence budget
+# before it ever reaches a later, failing call's log.
 assert_installed() { # <label> <installed()-output> <expected>
     local label="$1" output="$2" expected="$3" got log
     got="${output%$'\n'*}"
     log="${output##*$'\n'}"
-    [ "$got" = "$expected" ] && rm -f "$log"
+    [ "$got" = "$expected" ] && rm -rf "${log%.log}" "$log"
     t_assert_eq "$label" "$got" "$expected"
 }
 
@@ -80,7 +83,8 @@ comma_out="$(installed --skill todo,bug-report)"
 repeat_out="$(installed --skill todo --skill bug-report)"
 comma_got="${comma_out%$'\n'*}"; repeat_got="${repeat_out%$'\n'*}"
 if [ "$comma_got" = "$repeat_got" ]; then
-    rm -f "${comma_out##*$'\n'}" "${repeat_out##*$'\n'}"
+    comma_log="${comma_out##*$'\n'}"; repeat_log="${repeat_out##*$'\n'}"
+    rm -rf "${comma_log%.log}" "$comma_log" "${repeat_log%.log}" "$repeat_log"
 fi
 t_assert_eq 'the comma form gives the same set' "$comma_got" "$repeat_got"
 assert_installed 'mixing the two spellings works' \
