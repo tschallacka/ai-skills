@@ -470,10 +470,22 @@ fn resolve_command(path: &str, args: &cli::Args) -> Result<ExitCode, Failure> {
         }
     }
     if unsound {
-        eprintln!("todo: fix that side on its own branch first — no renaming can make a");
-        eprintln!(
-            "      queue sound that was already unsound, and merging it carries the fault in."
-        );
+        if sides.in_rebase {
+            // B151: under a merge, "fix that side on its own branch" names a
+            // real action -- under a rebase neither side is a branch tip, ours
+            // is HEAD mid-replay and theirs is the commit currently being
+            // applied, so that instruction has no referent.
+            eprintln!("todo: this file is conflicted mid-rebase, where 'ours' and 'theirs' name");
+            eprintln!("      commits being replayed, not branch tips -- there is no branch to go");
+            eprintln!("      fix. Defer this file to the commit whose queue is already sound");
+            eprintln!("      (skip it here and let that commit's own fix carry forward), or");
+            eprintln!("      resolve the id collision in this file now and continue the rebase.");
+        } else {
+            eprintln!("todo: fix that side on its own branch first — no renaming can make a");
+            eprintln!(
+                "      queue sound that was already unsound, and merging it carries the fault in."
+            );
+        }
         return fail("refusing to resolve into an unsound queue", EX_DATAERR);
     }
 
