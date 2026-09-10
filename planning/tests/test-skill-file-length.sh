@@ -19,10 +19,9 @@
 # the budget assumes 2 bytes per token: 25,000 tokens, 50,000 bytes.
 #
 # Ratcheted, not a hard cap, for the same reason as the function-length ratchet:
-# planning/SKILL.md is over TODAY and splitting it is T87. A hard cap would
-# block every commit until that lands. The COUNT of over-budget skills may
-# shrink and never grow, so a new one fails here at the moment it is added.
-# When T87 lands, lower CAP to 0 in the same commit. Never raise it.
+# planning/SKILL.md WAS over budget, and splitting it (T87) is what got CAP to
+# 0. The COUNT of over-budget skills may shrink and never grow, so a new one
+# fails here at the moment it is added. Never raise CAP.
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test.sh"
@@ -32,7 +31,7 @@ export LC_ALL=C
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 BUDGET=50000
-CAP=1
+CAP=0
 
 note_fail() { printf 'skill-file-length: %s\n' "$1" >&2; t_record "$1"; }
 

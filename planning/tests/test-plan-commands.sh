@@ -254,9 +254,9 @@ fi
 grep -Fq '02-research declares testing is required but has no test or verification work unit' \
     "$temporary_root/missing-test.log"
 
-profile_source="$temporary_root/SKILL.md"
+profile_source="$temporary_root/skill-source.txt"
 profile_output="$temporary_root/REVIEWER.md"
-cp "$script_dir/../SKILL.md" "$profile_source"
+cp "$script_dir/../skill-source.txt" "$profile_source"
 generated_output="$($script_dir/generate-reviewer.sh "$temporary_root" "$profile_output")"
 grep -Fq 'profile contract: `1.4.2`' "$profile_output"
 grep -Eq '^> Source SHA-256: `[0-9a-f]{64}`$' "$profile_output"
@@ -274,8 +274,8 @@ fi
 
 missing_dir="$temporary_root/missing-section"
 mkdir -p "$missing_dir"
-missing_source="$missing_dir/SKILL.md"
-cp "$script_dir/../SKILL.md" "$missing_source"
+missing_source="$missing_dir/skill-source.txt"
+cp "$script_dir/../skill-source.txt" "$missing_source"
 t_sed_i '/REVIEWER_SECTION:END bounded-context/d' "$missing_source"
 if "$script_dir/generate-reviewer.sh" "$missing_dir" "$temporary_root/missing.md" >/dev/null 2>&1; then
     echo 'A missing reviewer section unexpectedly passed generation.' >&2
@@ -284,8 +284,8 @@ fi
 
 empty_dir="$temporary_root/empty-section"
 mkdir -p "$empty_dir"
-empty_source="$empty_dir/SKILL.md"
-cp "$script_dir/../SKILL.md" "$empty_source"
+empty_source="$empty_dir/skill-source.txt"
+cp "$script_dir/../skill-source.txt" "$empty_source"
 t_sed_i '/REVIEWER_SECTION:START bounded-context/,/REVIEWER_SECTION:END bounded-context/{ /START/d; /END/!d; }' "$empty_source"
 if "$script_dir/generate-reviewer.sh" "$empty_dir" "$temporary_root/empty.md" >/dev/null 2>&1; then
     echo 'An empty reviewer section unexpectedly passed generation.' >&2

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # MODE: DEV
-# test-reviewer-projection.sh — REVIEWER.md is a projection of SKILL.md, and it
-# pins the whole-file SHA-256 of its source, so any SKILL.md edit must be
-# followed by a regeneration.
+# test-reviewer-projection.sh — REVIEWER.md is a projection of
+# skill-source.txt (T87: moved off SKILL.md when SKILL.md became a
+# generated index), and it pins the whole-file SHA-256 of its source, so
+# any source edit must be followed by a regeneration.
 
 set -euo pipefail
 # shellcheck source=planning/tests/lib-test.sh
@@ -12,7 +13,7 @@ t_begin
 export LC_ALL=C
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source_file="$repo_dir/planning/SKILL.md"
+source_file="$repo_dir/planning/skill-source.txt"
 planning_dir="$repo_dir/planning"
 # shellcheck source=planning/tests/lib-test.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
