@@ -3250,7 +3250,7 @@
     {
       "id": "B318",
       "title": "B317's existence gate silences --dev-build's loud refusal when a binary is missing everywhere",
-      "status": "reported",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3259,12 +3259,12 @@
       "expected": "skill_artifact_files() (B317) checks only the shipped-binary location before including a bin/ row in skill_files()'s output; when neither the shipped nor the dev-build-root location has the binary, it silently omits the row, so install_skill's copy loop never reaches source_file(), whose own --dev-build-aware existence check and die never run. --dev-build is a strict, opt-in developer mode where source_file() already owns this exact check correctly (dev-root, then shipped, then die); B317's gate should not pre-empt it.",
       "mechanism": "installer/src/50-manifest.sh: skill_artifact_files() gates on [ -f \"$SOURCE_ROOT/$skill/$relative\" ] unconditionally, including when DEV_BUILD=1. Fix: skip the gate entirely under --dev-build (print every candidate unfiltered, exactly the pre-B317 behavior for that mode only), leaving the default (non-dev-build) path's gating -- B317's actual fix -- untouched.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/50-manifest.sh: skill_artifact_files() now skips its existence gate entirely when DEV_BUILD=1, printing every candidate unfiltered so source_file()'s own dev-build-aware existence check + die (dev-root, then shipped, then refuse naming --dev-build) runs as before B317. Default (non-dev-build) path keeps B317's gating untouched.",
+      "verification": "planning/tests/test-installer-dev-build.sh section 3 passes: removing both the dev-build root and shipped binary for bug-report and running install.sh --skill bug-report --dev-build --yes now exits nonzero and names --dev-build in its refusal, instead of silently installing with no binary. Full local suite (249 tests) + CI both green. Merged master@e2792b7a (PR #140).",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-10T13:20:04Z",
-      "updated_at": "2026-09-10T13:20:04Z"
+      "updated_at": "2026-09-10T14:09:12Z"
     },
     {
       "id": "B14",
