@@ -20,42 +20,87 @@ installer="$repo_root/install.sh"
 source "$tests_dir/lib-test.sh"
 t_begin
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/installer-selection.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+# assert_installed below deletes a passing call's install.sh log immediately,
+# so this test's own evidence footprint stays small -- but raise the budget
+# anyway, since a run with more than one real failure still needs room for
+# each failing call's log, not just the first.
+: "${AI_SKILLS_TEST_EVIDENCE_FILES:=400}"
+export AI_SKILLS_TEST_EVIDENCE_FILES
 
-# The installed directory names, sorted, for one invocation.
-installed() { # <args...>
+work="$(mktemp -d "${TMPDIR:-/tmp}/installer-selection.XXXXXX")"
+# No cleanup trap of our own: $work sits under $TMPDIR, which lib-test.sh
+# already rewrote to $T_TMPDIR and already owns via t_tmpdir_cleanup (set as
+# an EXIT trap when it was sourced above). A second `trap ... EXIT` here does
+# not chain with that one, it REPLACES it -- so this file used to delete its
+# own install.sh logs before t_tmpdir_cleanup's on-failure evidence dump ever
+# ran, leaving a real "all installs every skill" regression with no clue why
+# in the CI log beyond the expected/got mismatch. lib-test.sh's own cleanup
+# removes $work as part of $T_TMPDIR regardless; nothing here needs to repeat it.
+
+# The installed directory names, sorted, for one invocation. install.sh's own
+# stdout/stderr goes to a log beside $target, named on stdout right after the
+# skill list so a caller can find and remove it once it knows the call
+# matched -- a green run should not carry its own install noise into a later
+# failure's evidence dump, and a real skill install writes several files each
+# (SKILL.md, docs, requires.tsv, a binary), which the "install every skill"
+# assertions below multiply by sixteen.
+installed() { # <args...> -> "<sorted skill list> "\n"<log path>"
     local target
     target="$(mktemp -d "$work/t.XXXXXX")"
-    ( "$BASH" "$installer" "$@" --target "$target" --yes ) >/dev/null 2>&1 || true
-    ( cd "$target" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ' )
+    "$BASH" "$installer" "$@" --target "$target" --yes >"$target.log" 2>&1 || true
+    printf '%s\n%s\n' \
+        "$(cd "$target" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')" \
+        "$target.log"
+}
+
+# Same assertion installed()'s callers already made inline, plus the cleanup:
+# on a match, neither the install.sh log nor the files that call actually
+# installed are needed to explain anything, so both are removed rather than
+# left for a LATER failure's evidence dump to wade through. A passing
+# "--skill all" call writes 16 skills' worth of files -- SKILL.md, docs,
+# requires.tsv, a binary each -- which on its own exhausts the evidence budget
+# before it ever reaches a later, failing call's log.
+assert_installed() { # <label> <installed()-output> <expected>
+    local label="$1" output="$2" expected="$3" got log
+    got="${output%$'\n'*}"
+    log="${output##*$'\n'}"
+    [ "$got" = "$expected" ] && rm -rf "${log%.log}" "$log"
+    t_assert_eq "$label" "$got" "$expected"
 }
 
 # ── the repeated form accumulates ───────────────────────────────────────────
-t_assert_eq 'two --skill flags install both' \
+assert_installed 'two --skill flags install both' \
     "$(installed --skill todo --skill bug-report)" 'bug-report todo '
-t_assert_eq 'and order does not change the set' \
+assert_installed 'and order does not change the set' \
     "$(installed --skill bug-report --skill todo)" 'bug-report todo '
-t_assert_eq 'three flags install three' \
+assert_installed 'three flags install three' \
     "$(installed --skill todo --skill bug-report --skill brainstorm)" 'brainstorm bug-report todo '
 
 # ── it agrees with the comma form, which is what it is joined into ───────────
-t_assert_eq 'the comma form gives the same set' \
-    "$(installed --skill todo,bug-report)" "$(installed --skill todo --skill bug-report)"
-t_assert_eq 'mixing the two spellings works' \
+# Both sides are a fresh installed() call, so both logs are named; only a
+# genuine mismatch needs either kept.
+comma_out="$(installed --skill todo,bug-report)"
+repeat_out="$(installed --skill todo --skill bug-report)"
+comma_got="${comma_out%$'\n'*}"; repeat_got="${repeat_out%$'\n'*}"
+if [ "$comma_got" = "$repeat_got" ]; then
+    comma_log="${comma_out##*$'\n'}"; repeat_log="${repeat_out##*$'\n'}"
+    rm -rf "${comma_log%.log}" "$comma_log" "${repeat_log%.log}" "$repeat_log"
+fi
+t_assert_eq 'the comma form gives the same set' "$comma_got" "$repeat_got"
+assert_installed 'mixing the two spellings works' \
     "$(installed --skill todo,brainstorm --skill bug-report)" 'brainstorm bug-report todo '
 
 # ── de-duplication, and the menu-number spelling ────────────────────────────
-t_assert_eq 'a repeated skill is installed once' \
+assert_installed 'a repeated skill is installed once' \
     "$(installed --skill todo --skill todo)" 'todo '
-t_assert_eq 'a menu number and a name combine' \
+assert_installed 'a menu number and a name combine' \
     "$(installed --skill 7 --skill todo)" 'bug-report todo '
 
 # ── all, wherever it appears ────────────────────────────────────────────────
 # `--skill all --skill todo` is not a contradiction to resolve by ordering.
 every="$("$BASH" -c 'source "'"$repo_root"'/installer/src/05-config.sh"; printf "%s\n" "${SKILL_NAMES[@]}" | LC_ALL=C sort | tr "\n" " "')"
-t_assert_eq 'all installs every skill' "$(installed --skill all)" "$every"
-t_assert_eq 'all combined with a name still installs every skill' \
+assert_installed 'all installs every skill' "$(installed --skill all)" "$every"
+assert_installed 'all combined with a name still installs every skill' \
     "$(installed --skill all --skill todo)" "$every"
 # The bare "one past the last skill" (what show_shop_menu prints as "all N
 # skills") keeps meaning all, whole-string only: every number up to and
@@ -68,12 +113,12 @@ t_assert_eq 'all combined with a name still installs every skill' \
 # "6" quietly still worked, matching nothing on screen.
 skill_count="$("$BASH" -c 'source "'"$repo_root"'/installer/src/05-config.sh"; printf "%s" "${#SKILL_NAMES[@]}"')"
 all_choice=$((skill_count + 1))
-t_assert_eq 'the bare menu answer one past the last skill still means all' \
+assert_installed 'the bare menu answer one past the last skill still means all' \
     "$(installed --skill "$all_choice")" "$every"
 # The old literal "6" is now an ordinary position (whatever skill sits there),
 # never a secret synonym for all -- the fix is that the sentinel moved to
 # track the real count, not that "6" grew a second meaning alongside it.
-t_assert_eq 'the number 6 alone now means skill number 6, not all' \
+assert_installed 'the number 6 alone now means skill number 6, not all' \
     "$(installed --skill 6)" "todo "
 
 # ── the refusals are unchanged ───────────────────────────────────────────────

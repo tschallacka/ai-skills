@@ -72,6 +72,20 @@ SOURCE_ROOT="$repo_root"
 SOURCE_VERSION='test'
 REPO_REF='test'
 
+# B317: skill_files() now lists a skill's own bin/ artifacts only when they
+# already exist on disk (chat, todo and bug-report included, matching
+# ai-text-editor and interactive-shell). The builder cross/natively builds
+# those same binaries itself and writes them into this same checkout
+# ($repo_root/chat/bin/<triple>/…, not a scratch dir), so it has to run BEFORE
+# "expected" is derived below -- otherwise a checkout where nothing had
+# pre-built them sees skill_files() list none of them (correctly, for install.sh's
+# own runtime), while the tarball the builder produces a few lines later has
+# them anyway, and the two "expected" vs "actual" sets disagree over files
+# that were always going to ship.
+"$builder" --out "$work/dist" >/dev/null
+tarball="$work/dist/ai-skills-$version.tar.gz"
+[ -f "$tarball" ] || t_fail "the builder wrote no $tarball"
+
 {
     printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
     while IFS= read -r path; do
@@ -102,10 +116,8 @@ t_assert_eq 'the expected set is not empty' \
     "$([ "$expected_count" -gt 50 ] && printf 'over 50')" 'over 50'
 
 # ── property 1: the tarball holds exactly those paths ───────────────────────
-"$builder" --out "$work/dist" >/dev/null
-tarball="$work/dist/ai-skills-$version.tar.gz"
-[ -f "$tarball" ] || t_fail "the builder wrote no $tarball"
-
+# The builder already ran above, before "expected" was derived; $tarball is
+# already written.
 tar -tzf "$tarball" | sed "s|^ai-skills-$version/||" | grep -v '/$' | sort > "$work/actual"
 t_assert_eq 'nothing expected is missing from the tarball' \
     "$(comm -23 "$work/expected" "$work/actual" | tr '\n' ' ')" ''

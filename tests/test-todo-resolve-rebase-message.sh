@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: src/todo/src/resolve.rs src/todo/src/main.rs
 # test-todo-resolve-rebase-message.sh — the todo half of B151, mirroring
 # tests/test-register-resolve-rebase-message.sh's bugs case. `todo resolve`
 # shares the same "fix that side on its own branch first" wording (and the

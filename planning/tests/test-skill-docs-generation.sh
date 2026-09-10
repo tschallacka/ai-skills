@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # MODE: DEV
+# COVERS: planning/scripts/generate-skill-docs.sh planning/scripts/verify-skill-load.sh planning/skill-source.txt
 # test-skill-docs-generation.sh — T87 (SKILL.md/parts are exactly what
 # generate-skill-docs.sh produces from skill-source.txt) and T86 (every part
 # carries a load-sanity line verify-skill-load.sh actually checks).

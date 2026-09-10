@@ -33,7 +33,7 @@ package/chat/tests/test-chat-descriptor-leak.sh	9487
 package/chat/tests/test-chat-owner-socket.sh	13730
 package/chat/tests/test-chat-resolution.sh	8572
 package/chat/tests/test-chat-tail-msgid-cursor.sh	5325
-package/chat/tests/test-chat.sh	37520
+package/chat/tests/test-chat.sh	37601
 package/ci-failures/SKILL.md	4151
 package/ci-failures/docs/README.md	1146
 package/ci-failures/requires.tsv	1641
@@ -45,14 +45,14 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	252115
+package/install.sh	253042
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
 package/interactive-shell/docs/README.md	5713
 package/interactive-shell/requires.tsv	1918
 package/interactive-shell/tests/test-interactive-shell-exploration.sh	5751
-package/interactive-shell/tests/test-interactive-shell.sh	7638
+package/interactive-shell/tests/test-interactive-shell.sh	7688
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296

@@ -101,11 +101,20 @@ t_keep_test_root() {
 
 # Printable? A core dump or a build artifact in the root would otherwise spray
 # the log with control bytes and bury the text files that matter.
+#
+# NUL bytes, not ASCII-printability: install.sh's own diagnostics use real
+# UTF-8 punctuation (an em dash in a soft-requirement warning, for one), which
+# `tr -d '[:print:][:space:]'` under LC_ALL=C treats as junk because every
+# multi-byte UTF-8 byte has its high bit set -- so a perfectly readable
+# install.sh log was misfiled as "(binary, not shown)" on exactly the runs
+# that most needed to be read. A core dump or compiled binary reliably carries
+# a NUL within its first few bytes; legitimate text, UTF-8 included, never
+# does.
 t_evidence_is_text() { # <path>
-    local junk
-    junk="$(LC_ALL=C head -c 4096 "$1" 2>/dev/null \
-        | LC_ALL=C tr -d '[:print:][:space:]' | LC_ALL=C wc -c | tr -d ' ')"
-    [ "${junk:-1}" = 0 ]
+    local total stripped
+    total="$(LC_ALL=C head -c 4096 "$1" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')"
+    stripped="$(LC_ALL=C head -c 4096 "$1" 2>/dev/null | LC_ALL=C tr -d '\0' | LC_ALL=C wc -c | tr -d ' ')"
+    [ "${total:-0}" = "${stripped:-1}" ]
 }
 
 t_evidence_dump() { # <root>
