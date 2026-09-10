@@ -539,19 +539,23 @@ EOF
                 schema.1.4.2.json schema.2.0.0-alpha.1.json
             # The queue's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its queue instead of being told
-            # to hand-edit JSON. Only the host's row is emitted, the way
-            # bug-report, planning and chat do it.
+            # to hand-edit JSON. Only the host's row is emitted, existence-gated
+            # through skill_artifact_files (B317): a raw printf of the path
+            # named a `cp` source that a fresh checkout's own binary had not
+            # been built for, and install_skill's copy loop has no guard of its
+            # own -- under set -e that one missing file killed every skill still
+            # queued behind it, not just this one.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/todo' ;;
+                    skill_artifact_files todo bin/x86_64-unknown-linux-musl/todo ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/todo' ;;
+                    skill_artifact_files todo bin/aarch64-unknown-linux-musl/todo ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/todo' ;;
+                    skill_artifact_files todo bin/x86_64-apple-darwin/todo ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/todo' ;;
+                    skill_artifact_files todo bin/aarch64-apple-darwin/todo ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/todo.exe' ;;
+                    skill_artifact_files todo bin/x86_64-pc-windows-msvc/todo.exe ;;
                 *)
                     printf 'skill_files: no todo artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -562,19 +566,20 @@ EOF
                 schema.1.4.2.json schema.2.0.0-alpha.1.json
             # The register's tools ship as one prebuilt binary per target, so an
             # installed skill can actually write its register instead of being
-            # told to hand-edit JSON. Only the host's row is emitted, the way
-            # planning and chat do it.
+            # told to hand-edit JSON. Only the host's row is emitted,
+            # existence-gated through skill_artifact_files (B317): see todo's
+            # arm above for why a raw printf of the path is not safe here.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/bugs' ;;
+                    skill_artifact_files bug-report bin/x86_64-unknown-linux-musl/bugs ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/bugs' ;;
+                    skill_artifact_files bug-report bin/aarch64-unknown-linux-musl/bugs ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/bugs' ;;
+                    skill_artifact_files bug-report bin/x86_64-apple-darwin/bugs ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/bugs' ;;
+                    skill_artifact_files bug-report bin/aarch64-apple-darwin/bugs ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/bugs.exe' ;;
+                    skill_artifact_files bug-report bin/x86_64-pc-windows-msvc/bugs.exe ;;
                 *)
                     printf 'skill_files: no bugs artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
@@ -620,17 +625,22 @@ requires.tsv
 binaries.tsv
 integration.tsv
 CHATEOF
+            # Existence-gated through skill_artifact_files (B317): a fresh
+            # checkout with none of chat's three binaries built used to name
+            # them anyway, and install_skill's `cp` of the first one killed the
+            # whole install under set -e, taking every skill queued after chat
+            # down with it.
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
-                    printf '%s\n' 'bin/x86_64-unknown-linux-musl/chat-server-rs' 'bin/x86_64-unknown-linux-musl/chat-client-rs' 'bin/x86_64-unknown-linux-musl/chat-mcp' ;;
+                    skill_artifact_files chat bin/x86_64-unknown-linux-musl/chat-server-rs bin/x86_64-unknown-linux-musl/chat-client-rs bin/x86_64-unknown-linux-musl/chat-mcp ;;
                 Linux:aarch64|Linux:arm64)
-                    printf '%s\n' 'bin/aarch64-unknown-linux-musl/chat-server-rs' 'bin/aarch64-unknown-linux-musl/chat-client-rs' 'bin/aarch64-unknown-linux-musl/chat-mcp' ;;
+                    skill_artifact_files chat bin/aarch64-unknown-linux-musl/chat-server-rs bin/aarch64-unknown-linux-musl/chat-client-rs bin/aarch64-unknown-linux-musl/chat-mcp ;;
                 Darwin:x86_64)
-                    printf '%s\n' 'bin/x86_64-apple-darwin/chat-server-rs' 'bin/x86_64-apple-darwin/chat-client-rs' 'bin/x86_64-apple-darwin/chat-mcp' ;;
+                    skill_artifact_files chat bin/x86_64-apple-darwin/chat-server-rs bin/x86_64-apple-darwin/chat-client-rs bin/x86_64-apple-darwin/chat-mcp ;;
                 Darwin:arm64)
-                    printf '%s\n' 'bin/aarch64-apple-darwin/chat-server-rs' 'bin/aarch64-apple-darwin/chat-client-rs' 'bin/aarch64-apple-darwin/chat-mcp' ;;
+                    skill_artifact_files chat bin/aarch64-apple-darwin/chat-server-rs bin/aarch64-apple-darwin/chat-client-rs bin/aarch64-apple-darwin/chat-mcp ;;
                 MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64|Windows*:x86_64|MINGW*:amd64|MSYS*:amd64|CYGWIN*:amd64|Windows*:amd64)
-                    printf '%s\n' 'bin/x86_64-pc-windows-msvc/chat-server-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-client-rs.exe' 'bin/x86_64-pc-windows-msvc/chat-mcp.exe' ;;
+                    skill_artifact_files chat bin/x86_64-pc-windows-msvc/chat-server-rs.exe bin/x86_64-pc-windows-msvc/chat-client-rs.exe bin/x86_64-pc-windows-msvc/chat-mcp.exe ;;
                 *)
                     printf 'skill_files: no chat artifact for %s:%s\n' "$(uname -s)" "$(uname -m)" >&2
                     return 69 ;;
