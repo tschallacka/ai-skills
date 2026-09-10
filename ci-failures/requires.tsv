@@ -20,6 +20,6 @@
 # missing it. awk and sed parse this.
 tool	condition	strength	why
 bash	*:*	hard	the whole script is a bash script, so without bash there is nothing to run it
-rjq	*:*	hard	every gh/glab API response is parsed with rjq; gh's own --jq embeds a second, hidden jq this repository's own tests are built to catch
+rjq	*:*	hard	every gh/glab API response is parsed with rjq, the JSON tool this repository requires everywhere
 gh	*:*	soft	reads CI results from a github.com (or GitHub Enterprise) remote; without it only a gitlab.com or self-hosted GitLab remote can be read
 glab	*:*	soft	reads CI results from a gitlab.com (or self-hosted GitLab) remote; without it only a github.com remote can be read

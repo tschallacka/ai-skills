@@ -378,6 +378,7 @@ tests/test-adversarial-review-preamble.sh
 tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
+tests/test-ci-failures-contract.sh
 tests/test-comment-format.sh
 tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
