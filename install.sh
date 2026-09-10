@@ -3972,6 +3972,7 @@ tests/test-installer-busy-binary.sh
 tests/test-installer-codex-permissions.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
+tests/test-installer-editor-gate-plugin.sh
 tests/test-installer-editor-steering.sh
 tests/test-installer-integration-carryover.sh
 tests/test-installer-integration-mode.sh
@@ -5810,6 +5811,49 @@ editor_steering_step() {
     fi
     echo "  Left unchanged. Expect the editor to be bypassed for sed and heredocs." >&2
 }
+
+# The files a Claude Code root actually needs from editor-gate-plugin/ --
+# not README.md or tests/, neither of which the plugin loader reads.
+editor_gate_plugin_files() {
+    cat <<'EOF'
+.claude-plugin/plugin.json
+hooks/hooks.json
+hooks/lib.sh
+hooks/editor-token
+hooks/pre-tool-use-bash.sh
+hooks/pre-tool-use-edit-write.sh
+EOF
+}
+
+# Installed the same way tui-hint-plugin/ and agent-identity-plugin/ are:
+# whatever this run's checkout ships is copied verbatim into the target
+# root, not registered as a selectable skill in SKILL_NAMES -- nothing
+# chooses it directly, it rides with ai-text-editor.
+install_editor_gate_plugin() {
+    local root="$1" relative source destination_file
+    local destination="$root/editor-gate-plugin"
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$SOURCE_ROOT/editor-gate-plugin/$relative"
+        [ -f "$source" ] || continue
+        destination_file="$destination/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(editor_gate_plugin_files)
+    chmod +x "$destination"/hooks/editor-token "$destination"/hooks/*.sh 2>/dev/null || true
+}
+
+# Bash/Edit/Write PreToolUse hooks are Claude Code's own -- offered only to
+# a selected Claude Code root, same gate editor_steering_step already uses.
+editor_gate_plugin_step() {
+    local root kind
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        [ "$kind" = claude ] || continue
+        install_editor_gate_plugin "$root"
+        echo "  Installed: $root/editor-gate-plugin (gates sed -i/perl -i/heredoc writes behind a minted token; see editor-gate-plugin/README.md)" >&2
+    done
+}
 # ---------------------------------------------------------------
 # 7b. MCP registration
 # ---------------------------------------------------------------
@@ -6081,6 +6125,7 @@ else
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
         editor_steering_step
+        editor_gate_plugin_step
     fi
 
     echo >&2

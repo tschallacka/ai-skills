@@ -71,6 +71,7 @@ else
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
         editor_steering_step
+        editor_gate_plugin_step
     fi
 
     echo >&2

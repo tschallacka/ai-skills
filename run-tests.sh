@@ -141,6 +141,10 @@ suites=(
     # Registered with the suite dir, not after it: an interactive-shell/tests
     # that nothing discovers is the same dead weight chat/tests was.
     interactive-shell/tests
+    # Same reasoning: editor-gate-plugin/tests covers the pattern-matching and
+    # token mint/consume logic its Bash hard gate and Edit/Write soft
+    # reminder both depend on.
+    editor-gate-plugin/tests
     # .github/tests covers ci-scope.sh and ci-subjects.sh, which decide how much
     # of the workspace CI compiles, and registers-guard.sh, which decides
     # whether a registers push may reach master WITHOUT review. Undiscovered
