@@ -659,6 +659,13 @@ tests/test-interactive-shell-exploration.sh
 TODO.json
 ISHEOF
             ;;
+        ci-failures)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            local file
+            for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
+                [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
+            done
+            ;;
     esac
 }
 

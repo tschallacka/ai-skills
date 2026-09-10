@@ -57,6 +57,8 @@ Key skills and when they apply:
   variants of a failing command, re-reading the same files, guessing at an
   unmeasured cause). Stop and answer what do we have / what are the values /
   what are we trying to achieve, in that order, before continuing.
+- `ci-failures` — a CI run or pipeline is red and you need to know which job
+  and which line failed; works against GitHub and GitLab.
 - `codebase-memory` (config external to this repo) — structural codebase
   queries against a code knowledge graph.
 - `planning` also hosts `magequery`/`magento-*` skills in some environments —
@@ -272,15 +274,17 @@ defaults verbatim.
 - Before committing: inspect `git status`/`git diff`; run `bash -n`,
   `git diff --check`, and the relevant tests; confirm no generated archives,
   npm cache, or temporary targets are staged.
-- When CI is red, read it with `./ci-failures.sh` rather than by hand. It takes
-  a run id, a PR number (`47` or `pr/47`), a branch, or nothing for the current
-  branch, and prints each failing job with the lines that identify the failure;
-  `--raw DIR` keeps the whole de-escaped log when a screen dump has to be read
-  in full. Three things it knows that cost a session to find out: `gh run view`
-  refuses while a run is in progress but the per-job logs API does not, that
-  API refuses a body without `--allow-escape-sequences`, and stripping the
-  colour codes afterwards needs a literal ESC because `\x1b` is a GNU
-  extension.
+- When CI is red, read it with the `ci-failures` skill
+  (`ci-failures/scripts/ci-failures.sh`) rather than by hand. It takes a
+  run/pipeline id, a PR/MR number (`47` or `pr/47`), a branch, or nothing for
+  the current branch, detects GitHub vs. GitLab from the git remote (naming
+  which it picked), and prints each failing job with the lines that identify
+  the failure; `--raw DIR` keeps the whole de-escaped log when a screen dump
+  has to be read in full. Three things it knows that cost a session to find
+  out on the GitHub side: `gh run view` refuses while a run is in progress but
+  the per-job logs API does not, that API refuses a body without
+  `--allow-escape-sequences`, and stripping the colour codes afterwards needs
+  a literal ESC because `\x1b` is a GNU extension.
 - Every edited shell script must pass `shellcheck -s bash <file>` with no new
   findings (`.shellcheckrc` already silences the three checks that are noise
   here). CI gates on `error` severity across all tracked `*.sh` outside
