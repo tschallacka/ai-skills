@@ -14,7 +14,6 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 struct Harness {
     scratch: PathBuf,
-    agent: String,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     child: Child,
@@ -90,7 +89,6 @@ impl Harness {
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Some(Self {
             scratch,
-            agent: format!("mcp-flow-{name}"),
             stdin,
             stdout,
             child,
@@ -102,8 +100,11 @@ impl Harness {
     }
 
     fn call(&mut self, id: i64, tool: &str, arguments: Vec<(&str, Value)>) -> Value {
+        // T122/T123: `agent` is no longer part of any tool's wire schema --
+        // identity is resolved from the PreToolUse hook register instead, so
+        // sending it here made `open` (and anything else validating strictly
+        // against ADAPTER_ARGUMENTS) refuse the request as an unknown argument.
         let mut map = serde_json::Map::new();
-        map.insert("agent".into(), json!(self.agent));
         for (key, value) in arguments {
             map.insert(key.into(), value);
         }

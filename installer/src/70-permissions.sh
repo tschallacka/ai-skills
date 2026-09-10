@@ -691,7 +691,8 @@ EOF
 # session_identity_unguaranteed refusing on its absence would be circular if
 # it were also something --skill could omit by name.
 install_agent_identity_plugin() {
-    local root="$1" destination="$root/agent-identity-plugin" relative source destination_file
+    local root="$1" relative source destination_file
+    local destination="$root/agent-identity-plugin"
     while IFS= read -r relative; do
         [ -n "$relative" ] || continue
         source="$SOURCE_ROOT/agent-identity-plugin/$relative"

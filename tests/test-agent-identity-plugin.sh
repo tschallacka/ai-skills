@@ -34,7 +34,8 @@ else
 fi
 
 plugin="$root/agent-identity-plugin"
-export PATH="$(dirname "$RJQ"):$PATH"
+rjq_dir="$(dirname "$RJQ")"
+export PATH="$rjq_dir:$PATH"
 export AI_SKILLS_AGENT_IDENTITY_DIR="$work/register"
 
 run_subagent_start() { # <payload json>
