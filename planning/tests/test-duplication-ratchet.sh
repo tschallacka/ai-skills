@@ -24,6 +24,31 @@ scripts="$root/scripts"
 
 note_fail() { printf 'duplication-ratchet: %s\n' "$1" >&2; t_record "$1"; }
 
+# Occurrences of <pattern> in <file...>, full-line comments excluded (B73: a
+# comment explaining why a file does NOT use the forbidden pattern still
+# names it, and used to count as a use).
+count_in_code() { # <pattern> <file...>
+    local pattern="$1" total=0 f hits
+    shift
+    for f in "$@"; do
+        hits="$( { grep -v '^[[:space:]]*#' "$f" || true; } | { grep -o "$pattern" || true; } | wc -l | tr -d ' ')"
+        total=$(( total + hits ))
+    done
+    printf '%s' "$total"
+}
+
+# Files where <pattern> occurs outside a full-line comment (same exclusion as
+# count_in_code, for the presence checks below).
+files_with_in_code() { # <pattern> <file...>
+    local pattern="$1" f code
+    shift
+    for f in "$@"; do
+        code="$( { grep -v '^[[:space:]]*#' "$f" || true; } | { grep -c "$pattern" || true; } )"
+        [ "${code:-0}" -gt 0 ] && printf '%s\n' "$f"
+    done
+    return 0
+}
+
 # Cap, label, and the counting command. Keep in step with MAINTAINER.md §3.
 check_cap() {
     local label="$1" cap="$2" actual="$3"
@@ -35,8 +60,8 @@ check_cap() {
 }
 
 # Hand-rolled `"$f.tmp.$$"` temp files, which plan_atomic_write/plan_track_tmp own.
-check_cap 'hand-rolled .tmp.$$ temp sites' 43 \
-    "$( { grep -ho '\.tmp\.\$\$' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+check_cap 'hand-rolled .tmp.$$ temp sites' 42 \
+    "$(count_in_code '\.tmp\.\$\$' "$scripts"/*.sh)"
 
 # Tests that do not source lib-test.sh, and so cannot record a finding that
 # survives a command substitution. Six of them kept a byte-identical copy of the
@@ -60,17 +85,17 @@ check_cap 'tests not sourcing lib-test.sh' 7 \
 # 30th site: remove-coverage.sh (T17) matches coverage rows by outcome cell --
 # a new distinct table, admitted on the same terms as the 29th. The shared
 # reader that would absorb both remains future work tracked in MAINTAINER §3.
-check_cap "inline awk -F'|' parsers" 15 \
-    "$( { grep -ho "awk -F'|'" "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+check_cap "inline awk -F'|' parsers" 11 \
+    "$(count_in_code "awk -F'|'" "$scripts"/*.sh)"
 
 # The seed progress-bar literal. test-progress-bar-shape.sh pins the glyphs, so a
 # migration must stay byte-identical.
 check_cap 'seed progress-bar literal copies' 3 \
-    "$( { grep -l '0%%  #### ' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+    "$(files_with_in_code '0%%  #### ' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # percent/bar/icon derivation; update-progress.sh is the canonical copy.
 check_cap 'percent/bar/icon derivation copies' 3 \
-    "$( { grep -l 'completed \* 100 + total / 2' "$scripts"/*.sh || true; } | wc -l | tr -d ' ')"
+    "$(files_with_in_code 'completed \* 100 + total / 2' "$scripts"/*.sh | wc -l | tr -d ' ')"
 
 # Repo-wide, not just $scripts: two `# DEDUPE:` markers once survived in
 # benchmark/ while this check was scoped to a single directory.
