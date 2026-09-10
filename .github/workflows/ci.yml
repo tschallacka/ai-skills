@@ -253,6 +253,39 @@ jobs:
         # missing; building here keeps that off the suite's clock.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
 
+      - name: Build and stage every migrated planning command (T116)
+        # T116: sharding a single job into several means a shell test needing
+        # one of these binaries can now land in a DIFFERENT job than whichever
+        # of its siblings happened to build it as a side effect of testing its
+        # own crate -- setup-dev-env.sh's own comment already calls this exact
+        # "degrades honestly" property what hides the compiled path never being
+        # exercised. Same data source and copy rule as setup-dev-env.sh and the
+        # native job's own "Build and execute every registered planning
+        # command" step: planning/rust-migration.tsv names the migrated
+        # crates, and a binary is staged into planning/scripts/ only where a
+        # `.sh` sibling still names it as this repository's own oracle.
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r path kind candidate note; do
+            [ -n "$candidate" ] || continue
+            case "$candidate" in
+              render-plans-board) continue ;; # owned by another migration
+              overview-state) crate=plan-overview ;;
+              *) crate="$candidate" ;;
+            esac
+            [ -f "planning/scripts/$candidate.sh" ] || continue
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
+            cargo build --manifest-path "$manifest" --release
+            binary="target/release/$crate"
+            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
+            cp "$binary" "planning/scripts/$candidate"
+            chmod +x "planning/scripts/$candidate"
+          done < <({
+            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
+          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
+
       - name: Write the selected test list (T116)
         if: needs.scope.outputs.tests_scope == 'selective'
         run: printf '%s\n' '${{ needs.scope.outputs.tests }}' | tr ' ' '\n' > selected-tests.txt
@@ -444,6 +477,32 @@ jobs:
         # Its own step on this leg for the same reason the register binaries
         # have one: a build in the other job does not reach this runner.
         run: cargo build --release --manifest-path src/tony-the-pony/Cargo.toml
+
+      - name: Build and stage every migrated planning command (T116)
+        # See the sibling step of the same name on the default-bash leg for
+        # why this is here at all now that a shard can land apart from
+        # whichever shard happens to test the crate that builds it.
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r path kind candidate note; do
+            [ -n "$candidate" ] || continue
+            case "$candidate" in
+              render-plans-board) continue ;; # owned by another migration
+              overview-state) crate=plan-overview ;;
+              *) crate="$candidate" ;;
+            esac
+            [ -f "planning/scripts/$candidate.sh" ] || continue
+            manifest="src/$crate/Cargo.toml"
+            [ -f "$manifest" ] || { echo "::error::missing crate for $candidate: $manifest"; exit 1; }
+            cargo build --manifest-path "$manifest" --release
+            binary="target/release/$crate"
+            [ -x "$binary" ] || { echo "::error::missing release artifact: $binary"; exit 1; }
+            cp "$binary" "planning/scripts/$candidate"
+            chmod +x "planning/scripts/$candidate"
+          done < <({
+            printf 'planning\truntime-binary\tplan-overview\tdeclared in planning/binaries.tsv\n'
+            awk -F '\t' '$2 == "runtime-binary" || $2 == "build-generator" || $2 == "dev-binary" { print }' planning/rust-migration.tsv
+          } | LC_ALL=C sort -t "$(printf '\t')" -k3,3)
 
       - name: Write the selected test list (T116)
         if: needs.scope.outputs.tests_scope == 'selective'
