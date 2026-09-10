@@ -3982,7 +3982,7 @@
     {
       "id": "B235",
       "title": "the installer can write no codex permission config, so codex is told to grant its own access by hand",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3993,12 +3993,12 @@
       "surfaces": [
         "installer/src/70-permissions.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/70-permissions.sh: added a narrow TOML editor (codex_merge_writable_roots and helpers) that edits ~/.codex/config.toml's sandbox_workspace_write.writable_roots array -- creates the file fresh when absent, prepends a new writable_roots line when the file exists but lacks one (TOML dotted-key root scope requires no [table] header to have opened yet, so appending after existing content risks nesting inside the wrong section), merges into an existing single-line array idempotently, and refuses (falling back to the existing manual-instructions path) a multi-line array or anything else it cannot safely recognize. Wired into both planning_permission_step and worktrees_permission_step's codex arm. Scoped to writable_roots only, not the [projects.\"<path>\"] trust_level knob -- the bug's own live-test evidence showed writable_roots is what actually gates the cross-directory write failure being fixed.",
+      "verification": "Merged in PR #146, commit b9647272728d4404e3fb8d52d69cc17bce59a7e8. New test-installer-codex-permissions.sh covers fresh creation, prepending onto unrelated existing content, idempotent merge into an existing array (including a rerun), and refusal on a multi-line array -- all passing under both default bash and bash 3.2, memory-limited via resource-limited-testing's wrapper. Existing test-installer-opencode-permissions.sh and test-worktree-permissions.sh unaffected. Full CI green (21 checks).",
       "found_by": "live three-agent verification of the worktrees grant, 2026-09-07",
       "notes": "B236 is the cosmetic half found in the same output: the fallback's worked example is Claude Code settings.json syntax whatever agent it addresses. Separate entry because a codex writer removes the fallback for codex without fixing the example for openclaw, cline or a custom root.\n\nLive test result that bears on the priority: codex DID write and edit files in a worktree under the new root with no prompt - but only because the worktree was its own cwd, which workspace-write makes writable by definition. It was not the grant working; there was no grant. An agent whose cwd is elsewhere, writing into a worktree, is still outside writable_roots and would be refused. So this is filed major but not urgent: it bites the cross-worktree case rather than the common one. CONFIRMED with the test that actually isolates it, 2026-09-07, at Michael's direction. The first run was a false positive because the worktree was the agent's own cwd; this run put the cwd somewhere else entirely - a fresh 'git init' directory holding only the prompt file - and asked each agent to write into a worktree under the new root.\n\nCodex refused and asked, verbatim: 'Would you like to run the following command? ... Reason: May I create and update the requested file in /home/mdibbets/.config/tsch-ai-worktrees/perm-probe2, OUTSIDE THE WORKSPACE WRITE ROOTS?' The request was declined and no file was created, which is the failure this entry describes: the installer granted codex nothing, so the worktrees root is not in writable_roots and a cross-directory write stops for a human.\n\nThe same test passed with no prompt for the two agents that DID get a grant: opencode wrote, appended and read the file (its external_directory rule on the worktrees root is what permits writing outside the cwd, so that rule earns its place), and Claude Code completed in 21s with '0 awaiting input'. Both files verified on disk, and the blank cwd still held only PROMPT.md afterwards, so nothing leaked into it.\n\nOne prompt that is NOT this bug, for whoever reads this next: Claude Code asks a one-time workspace-trust question for any first-time directory ('Is this a project you created or one you trust?'). That is about the CWD, not the target, and no permission grant suppresses it.",
       "created_at": "2026-09-07T11:19:04Z",
-      "updated_at": "2026-09-07T11:27:25Z"
+      "updated_at": "2026-09-10T20:35:55Z"
     },
     {
       "id": "B237",
