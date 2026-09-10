@@ -4615,7 +4615,7 @@
     {
       "id": "B81",
       "title": "the overview page emits every step drill-down with an unterminated id attribute, so 100 details elements are malformed",
-      "status": "reported",
+      "status": "obsolete",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4630,9 +4630,9 @@
       "fix": null,
       "verification": null,
       "found_by": "webview, reading the overview surface before proposing work on it",
-      "notes": "A one-character fix, deliberately not made: render-plan-overview.sh is the .plans/plan-overview-rebuild plan W15 change target and W15 deletes the file, so a fix here is thrown-away work in a file another plan owns. The wider point for that plan is that the current suite proves the page is self-contained and byte-deterministic without proving it is well-formed, which is how a defect present on every one of a hundred elements survived.",
+      "notes": "A one-character fix, deliberately not made: render-plan-overview.sh is the .plans/plan-overview-rebuild plan W15 change target and W15 deletes the file, so a fix here is thrown-away work in a file another plan owns. The wider point for that plan is that the current suite proves the page is self-contained and byte-deterministic without proving it is well-formed, which is how a defect present on every one of a hundred elements survived. planning/scripts/render-plan-overview.sh no longer exists -- replaced by the compiled Rust plan-overview renderer (commit 32dbb1bd, 'planning: compiled plan-overview renderer, portability and installer overhaul'), exactly as this entry's own notes predicted ('W15 deletes the file'), just via completed work rather than the unrecoverable plan-overview-rebuild plan (see T51). The new renderer (src/plan-overview/src/render/) has no 'step-open'/details-with-id markup at all -- a different HTML structure entirely -- so this specific defect cannot recur in it.",
       "created_at": "2026-08-28T10:45:00Z",
-      "updated_at": "2026-08-28T10:45:00Z"
+      "updated_at": "2026-09-10T00:19:55Z"
     },
     {
       "id": "B82",
