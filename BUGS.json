@@ -6385,6 +6385,28 @@
       "updated_at": "2026-09-09T14:57:34Z"
     },
     {
+      "id": "B314",
+      "title": "the fallback skill-selection menu's numbered 'all' choice never matched what it displayed",
+      "status": "fixed",
+      "severity": "minor",
+      "priority": "normal",
+      "parent": null,
+      "reproduce": "source installer/src/05-config.sh; echo ${#SKILL_NAMES[@]}; then read installer/src/40-selection.sh's select_skills(): the ask prompt and the whole-string all-sentinel both hardcode the literal '6'",
+      "observed": "show_shop_menu labels the 'all' option as position ${#SKILL_NAMES[@]}+1 (today 16, after www: 15 skills + all), but select_skills()'s prompt said 'Choose 1-6 ... [6]' and only the literal string '6' was ever treated as 'all'. Typing the number the menu actually printed for its own 'all' row (16) fell through the bounds check ('name -le 15' failed) and died 'Unknown skill: 16'; typing the disconnected literal '6' silently selected everything instead, matching nothing shown on screen.",
+      "expected": "the fallback menu's 'all' sentinel (both the prompt text/default and the whole-string special case) tracks the real skill count, so typing the number the menu displays for 'all' actually selects all, and no other number is secretly hijacked to mean the same thing.",
+      "mechanism": "Both occurrences of the sentinel were the literal '6', dating from an era with six total menu entries (five skills + all), never updated as SKILL_NAMES grew to 14 skills before this fix (15 with www).",
+      "surfaces": [
+        "installer/src/40-selection.sh",
+        "planning/tests/test-installer-skill-selection.sh"
+      ],
+      "fix": "select_skills() now computes all_choice=$(( ${#SKILL_NAMES[@]} + 1 )) once and uses it for both the prompt text/default and the whole-string all-sentinel, instead of the hardcoded literal 6.",
+      "verification": "planning/tests/test-installer-skill-selection.sh: 'the bare menu answer one past the last skill still means all' (computed, not hardcoded) and 'the number 6 alone now means skill number 6, not all' -- both mutation-tested by reverting the sentinel back to the literal 6, which fails both assertions.",
+      "found_by": "session_01KC83KhD4yu3j3AUGe3qeoi, incidentally while adding the www skill and noticing SKILL_NAMES/SKILL_DESCRIPTIONS/SKILL_DETAILS grew past 6 entries long ago",
+      "notes": null,
+      "created_at": "2026-09-10T01:36:22Z",
+      "updated_at": "2026-09-10T01:36:22Z"
+    },
+    {
       "id": "B25",
       "title": "Reviewer prose cannot quote table syntax: a pipe anywhere in a CSV cell refuses the findings write, and \\| does not survive either",
       "status": "fixed",
