@@ -5306,7 +5306,7 @@
     {
       "id": "B152",
       "title": "screen coordinates are approximate for non-ASCII terminal cells",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5318,12 +5318,12 @@
         "src/interactive-shell/src/lib.rs",
         "interactive-shell/SKILL.md"
       ],
-      "fix": "Documented limitation — no universal Unicode-cell rewrite in this iteration.",
-      "verification": "The skill explicitly marks non-ASCII glyph widths and coordinates as approximate.",
+      "fix": "interactive-shell/SKILL.md:139-140 already documents the limitation ('The screen model stores PTY text as terminal bytes rather than full Unicode cells; non-ASCII glyph widths and coordinates may therefore be approximate.'), matching the fix this entry itself already recorded ('Documented limitation -- no universal Unicode-cell rewrite in this iteration.').",
+      "verification": "grep -n 'non-ASCII glyph widths and coordinates may therefore be approximate' interactive-shell/SKILL.md confirms the documented boundary is live. Closing as stale bookkeeping -- the entry's own fix/verification fields already described this as done; only the status field was never flipped.",
       "found_by": "critical post-implementation review, subworker Raman",
       "notes": "A future Unicode-cell implementation should be separately designed and tested for combining and wide characters.",
       "created_at": "2026-09-01T20:00:00Z",
-      "updated_at": "2026-09-01T20:00:00Z"
+      "updated_at": "2026-09-10T14:31:39Z"
     },
     {
       "id": "B153",
@@ -6657,7 +6657,7 @@
     {
       "id": "B240",
       "title": "the man page has a broken roff macro, so 'capabilities' renders as literal BcapabilitiesR",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -6668,12 +6668,12 @@
       "surfaces": [
         "ai-text-editor/ai-text-editor.1"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "ai-text-editor/ai-text-editor.1 line 166 already carries the correct \\fBcapabilities\\fR / \\fBresources\\fR escapes -- fixed incidentally by a5ba5a8d (T129, PR #107, 2026-09-09) which touched the same MODES section for an unrelated reason. No BcapabilitiesR literal remains anywhere in the file.",
+      "verification": "grep -n BcapabilitiesR ai-text-editor/ai-text-editor.1 finds nothing; man -l ai-text-editor/ai-text-editor.1 renders the MODES section's 'capabilities is read-only machine-readable discovery' line correctly. Closing as stale bookkeeping -- the register entry predates the incidental fix and was never updated.",
       "found_by": "the fifth drive's fix batch, while editing the same section for B218 and B220",
       "notes": null,
       "created_at": "2026-09-07T11:32:16Z",
-      "updated_at": "2026-09-07T11:32:16Z"
+      "updated_at": "2026-09-10T14:31:39Z"
     },
     {
       "id": "B59",
