@@ -426,6 +426,7 @@ tests/test-goal-testing-row.sh
 tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
+tests/test-installer-agent-identity.sh
 tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh

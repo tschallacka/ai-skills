@@ -72,6 +72,13 @@ else
         editor_steering_step
     fi
 
+    # Its own gate (agent_identity_plugin_step) decides whether any selected
+    # skill needs it; called unconditionally here for the same reason the two
+    # steps above are gated inside a contains check at the call site instead --
+    # this one's condition spans three skills, so it is simpler to keep it
+    # where the skill list already is.
+    agent_identity_plugin_step
+
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi
@@ -79,5 +86,7 @@ fi
 print_install_summary
 
 # Non-zero when a requested skill was blocked, so a partial install cannot read
-# as success in CI. A soft warning never changes the status.
-[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1
+# as success in CI. A soft warning never changes the status. INTEGRATION_REFUSED
+# (T123) is the same shape for a different cause: an explicit --integration
+# skill=skill this installer refused rather than shipped broken.
+[ -z "$RUNTIME_BLOCKED_SKILLS" ] && [ "$INTEGRATION_REFUSED" -eq 0 ] || exit 1

@@ -119,6 +119,26 @@ install_skill() {
     local integration_mode_source
     integration_mode_source="$(integration_mode_source_for "$skill" "$integration_mode" "$destination")"
 
+    # T123: a per-agent identity is a hard requirement of skill mode for
+    # chat/ai-text-editor on a Claude Code root, not a preference -- installing
+    # it anyway would produce exactly the silent wrong answer the requirement
+    # exists to prevent (two agents sharing one nick, or one tab ownership).
+    # An EXPLICIT request for skill mode there is refused, by name, the same
+    # way an unoffered --integration mode already is (section 2); a DEFAULT
+    # or DETECTED resolution is corrected to mcp instead and says so, because
+    # nothing asked for skill mode specifically -- there is nothing to refuse,
+    # only a default that would have been wrong on this root.
+    if session_identity_unguaranteed "$skill" "$integration_mode" "$root"; then
+        if [ "$integration_mode_source" = explicit ]; then
+            echo "Refusing $skill in skill mode on $destination: a subagent's shell is byte-identical to its parent's on Claude Code, so skill mode cannot tell which agent is calling -- that silently shares one $skill identity across every agent in the session. Install $skill's mcp mode here instead (--integration $skill=mcp), or choose a different agent root." >&2
+            INTEGRATION_REFUSED=1
+            return 0
+        fi
+        echo "$skill installs as mcp on $destination: skill mode cannot guarantee which agent is calling on Claude Code (see agent-identity-plugin/README.md), so mcp -- which can -- is used instead of the usual default." >&2
+        integration_mode=mcp
+        integration_mode_source=default
+    fi
+
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
     fi

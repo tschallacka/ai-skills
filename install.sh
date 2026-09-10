@@ -74,6 +74,12 @@ RUNTIME_BLOCKED_SKILLS=""
 # and printed as the end-of-run summary (section 11b).
 SUMMARY_LINES=()
 SUMMARY_PRINTED=0
+# Set by session_identity_skill_mode_refused (section 11) the first time a
+# (skill, root) pair is refused skill-mode for lacking a guaranteed per-agent
+# identity (T123); checked at the very end alongside RUNTIME_BLOCKED_SKILLS so
+# a refusal changes the exit code without aborting every other install in the
+# same run — a skill refused on one root can still succeed on another.
+INTEGRATION_REFUSED=0
 
 PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"
 # How a skill is driven, for the skills that offer a choice (integration.tsv).
@@ -3964,6 +3970,7 @@ tests/test-goal-testing-row.sh
 tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
+tests/test-installer-agent-identity.sh
 tests/test-installer-any-of.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
@@ -4584,6 +4591,26 @@ install_skill() {
     local integration_mode_source
     integration_mode_source="$(integration_mode_source_for "$skill" "$integration_mode" "$destination")"
 
+    # T123: a per-agent identity is a hard requirement of skill mode for
+    # chat/ai-text-editor on a Claude Code root, not a preference -- installing
+    # it anyway would produce exactly the silent wrong answer the requirement
+    # exists to prevent (two agents sharing one nick, or one tab ownership).
+    # An EXPLICIT request for skill mode there is refused, by name, the same
+    # way an unoffered --integration mode already is (section 2); a DEFAULT
+    # or DETECTED resolution is corrected to mcp instead and says so, because
+    # nothing asked for skill mode specifically -- there is nothing to refuse,
+    # only a default that would have been wrong on this root.
+    if session_identity_unguaranteed "$skill" "$integration_mode" "$root"; then
+        if [ "$integration_mode_source" = explicit ]; then
+            echo "Refusing $skill in skill mode on $destination: a subagent's shell is byte-identical to its parent's on Claude Code, so skill mode cannot tell which agent is calling -- that silently shares one $skill identity across every agent in the session. Install $skill's mcp mode here instead (--integration $skill=mcp), or choose a different agent root." >&2
+            INTEGRATION_REFUSED=1
+            return 0
+        fi
+        echo "$skill installs as mcp on $destination: skill mode cannot guarantee which agent is calling on Claude Code (see agent-identity-plugin/README.md), so mcp -- which can -- is used instead of the usual default." >&2
+        integration_mode=mcp
+        integration_mode_source=default
+    fi
+
     if [ "$skill" = planning ]; then
         overview_artifact="$(plan_overview_selected_artifact || true)"
     fi
@@ -4902,6 +4929,34 @@ ensure_plan_root_after_install() {
 # here. That also means a config file inside a git work tree is replaced without
 # a copy, because git is already its recovery path. Additions are idempotent:
 # entries already present are never duplicated.
+
+# T123: which skills a per-agent identity actually changes the correctness
+# of, AND which of those have a real MCP alternative to fall back to. `chat`
+# keys its nick and per-channel cursors by it; `ai-text-editor` keys tab
+# ownership by it. `interactive-shell` is deliberately absent even though it
+# is also session-dependent (its socket is named by the session id): it has
+# no MCP form at all, so the choice this list exists to make -- skill mode
+# here, or the MCP mode that can actually guarantee an identity -- is not a
+# choice interactive-shell has. Refusing it outright on Claude Code would
+# remove the skill entirely rather than trade one guarantee for a better one,
+# so it keeps agent-identity-plugin's SOFT half (SubagentStart context) as
+# its ceiling instead of a HARD refusal. T123's own register note names this
+# as a confirmed, not inherited, judgement call -- see
+# agent-identity-plugin/README.md.
+SESSION_DEPENDENT_MCP_CAPABLE=(chat ai-text-editor)
+
+# True (exit 0) when `skill` in `mode` on `root` cannot guarantee a per-agent
+# identity: Claude Code hands a subagent a byte-identical environment and
+# refuses to rewrite a shell command via a hook (measured, not assumed --
+# see src/agent-session-key/HARNESS-IDENTITY.md), so a skill invoked directly
+# from a subagent's own shell there has no way to learn who is calling it,
+# where the MCP path (agent-identity-plugin's PreToolUse register) does.
+session_identity_unguaranteed() {
+    local skill="$1" mode="$2" root="$3"
+    [ "$mode" = skill ] || return 1
+    contains "$skill" "${SESSION_DEPENDENT_MCP_CAPABLE[@]}" || return 1
+    [ "$(agent_kind_for_root "$root")" = claude ]
+}
 
 # Index lookup against the registry in section 1; anything not in it is custom.
 agent_kind_for_root() {
@@ -5531,6 +5586,61 @@ editor_steering_step() {
     fi
     echo "  Left unchanged. Expect the editor to be bypassed for sed and heredocs." >&2
 }
+
+# ---------------------------------------------------------------
+# 13c. Step 5: agent identity plugin (T122/T123)
+# ---------------------------------------------------------------
+# The files a Claude Code root actually needs from agent-identity-plugin/ --
+# not README.md, which explains the mechanism to a person reading the
+# repository rather than to the plugin loader.
+agent_identity_plugin_files() {
+    cat <<'EOF'
+.claude-plugin/plugin.json
+hooks/hooks.json
+hooks/lib.sh
+hooks/subagent-start.sh
+hooks/pre-tool-use.sh
+EOF
+}
+
+# Installed the same way any other skill directory is: whatever this run's
+# checkout ships is copied verbatim, so `--dev-build`/source_file() do not
+# need a second code path for one plugin. Not registered as a selectable
+# skill in SKILL_NAMES on purpose -- nothing chooses it directly, and
+# session_identity_unguaranteed refusing on its absence would be circular if
+# it were also something --skill could omit by name.
+install_agent_identity_plugin() {
+    local root="$1" destination="$root/agent-identity-plugin" relative source destination_file
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$SOURCE_ROOT/agent-identity-plugin/$relative"
+        [ -f "$source" ] || continue
+        destination_file="$destination/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(agent_identity_plugin_files)
+    chmod +x "$destination"/hooks/*.sh 2>/dev/null || true
+}
+
+# Every root a session-dependent skill was actually selected for, Claude Code
+# ones only -- SubagentStart/PreToolUse are Claude Code's own hooks, and
+# session_identity_unguaranteed already says plainly what the gap is
+# everywhere else rather than pretending an install here would close it.
+agent_identity_plugin_step() {
+    local root kind skill needed=0
+    for skill in "${SESSION_DEPENDENT_MCP_CAPABLE[@]}" interactive-shell; do
+        contains "$skill" "${SELECTED_SKILLS[@]}" && needed=1
+    done
+    [ "$needed" -eq 1 ] || return 0
+    echo >&2
+    echo "== Step 5: agent identity plugin ==" >&2
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        [ "$kind" = claude ] || continue
+        install_agent_identity_plugin "$root"
+        echo "  Installed: $root/agent-identity-plugin (gives every subagent its own id; see agent-identity-plugin/README.md)" >&2
+    done
+}
 # ---------------------------------------------------------------
 # 7b. MCP registration
 # ---------------------------------------------------------------
@@ -5803,6 +5913,13 @@ else
         editor_steering_step
     fi
 
+    # Its own gate (agent_identity_plugin_step) decides whether any selected
+    # skill needs it; called unconditionally here for the same reason the two
+    # steps above are gated inside a contains check at the call site instead --
+    # this one's condition spans three skills, so it is simpler to keep it
+    # where the skill list already is.
+    agent_identity_plugin_step
+
     echo >&2
     echo "Done. Restart the agent CLI if it does not detect the new skills automatically." >&2
 fi
@@ -5810,5 +5927,7 @@ fi
 print_install_summary
 
 # Non-zero when a requested skill was blocked, so a partial install cannot read
-# as success in CI. A soft warning never changes the status.
-[ -z "$RUNTIME_BLOCKED_SKILLS" ] || exit 1
+# as success in CI. A soft warning never changes the status. INTEGRATION_REFUSED
+# (T123) is the same shape for a different cause: an explicit --integration
+# skill=skill this installer refused rather than shipped broken.
+[ -z "$RUNTIME_BLOCKED_SKILLS" ] && [ "$INTEGRATION_REFUSED" -eq 0 ] || exit 1
