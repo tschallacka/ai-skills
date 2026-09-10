@@ -5199,9 +5199,14 @@ claude_worktrees_permissions() {
     # test-installer-opencode-permissions counts that phrase expecting exactly
     # one. Distinct wording keeps its count honest and tells the two apart in
     # the output.
+    # No separate Write(...) entry: Claude Code's permission engine has no rule
+    # keyed on the Write tool, and does not fall back to a matching Edit(...)
+    # rule either -- Edit(path) is the umbrella that covers every file-editing
+    # tool, Write included, so a Write(path) entry here matches nothing and
+    # leaves the grant it promised silently missing. claude_permissions above
+    # already grants the planning root this way for the same reason.
     claude_merge_allow 'def entries: [
-    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)",
-    "Write(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
+    "Read(\($worktrees)/**)", "Edit(\($worktrees)/**)", "Bash(\($worktrees)/**:*)"
 ];' 'worktree grant already in place' --arg worktrees "$worktrees"
 }
 
@@ -5310,7 +5315,7 @@ print_manual_worktrees_permissions() {
     echo "  $kind: no safe auto-editable permission file was modified." >&2
     echo "    - grant $kind read, write and execute under $worktrees" >&2
     echo "    - example (Claude Code settings.json permissions.allow):" >&2
-    echo "        Read($worktrees/**), Edit($worktrees/**), Write($worktrees/**), Bash($worktrees/**:*)" >&2
+    echo "        Read($worktrees/**), Edit($worktrees/**), Bash($worktrees/**:*)" >&2
 }
 
 # Runs for every install, not only a planning one: any agent may be asked to
