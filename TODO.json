@@ -23,21 +23,6 @@
       "updated_at": "2026-08-31T14:59:45Z"
     },
     {
-      "id": "T51",
-      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
-      "blocked_on": null,
-      "refs": [
-        ".plans/plan-overview-rebuild/adversarial-review.md"
-      ],
-      "note": "BLOCKED, needs discussion: .plans/plan-overview-rebuild/adversarial-review.md (and the whole plan directory) does not exist anywhere I can find -- not in the working tree, not in .plans/'s own nested snapshot git history (which holds chat-irc-rust-migration and untrack-generated-files instead), not in any other worktree, and there is no trace of it in the main repo's git log. Its findings (AR-03 through AR-11) only survive as free-text quotes inside BUGS.json entries that were filed while resolving some of them. QUESTION FOR TOMORROW: is there a backup of this plan directory somewhere (another machine, an archive), or is it gone -- in which case is this TODO obsolete (the plan it gates may already be superseded / abandoned) or does it need to be redone from scratch against the current plan-overview code? I have not closed this out; picking up other high-priority items in the meantime.",
-      "created_at": "2026-08-27T12:37:03Z",
-      "updated_at": "2026-09-09T21:32:02Z"
-    },
-    {
       "id": "T72",
       "title": "Move installed binaries to the shared XDG bin and retire the per-skill bin/",
       "status": "open",
@@ -51,9 +36,9 @@
         "tests/test-shipped-binaries.sh",
         "rust-development-guidelines.md"
       ],
-      "note": "NEEDS DISCUSSION before implementation: this is a config-schema bump (plan-env.sh 2->3) plus a change to where install.sh places binaries system-wide, touching ~10 tests and ~5 docs. Before starting I need a decision on migration: an existing install already has binaries under the per-skill bin/ path and a .env at schema 2. Should install.sh (a) auto-migrate on next run (move the files, rewrite .env, no user action), (b) leave old installs working via a documented fallback read-path in plan_bin_dir indefinitely, or (c) just document it as a breaking change users fix by re-running the installer? That choice drives whether plan_bin_dir needs to keep reading the old location at all, which changes the shape of the fix. Separately, the plan-crypt-not-in-binaries.tsv problem this TODO also names looks like a small, independent, low-risk fix (just add the missing manifest row) -- I can peel that off as its own bug/todo without waiting on the migration decision, if useful. Moving to the next item; this one is parked pending your call on (a)/(b)/(c).",
+      "note": "NEEDS DISCUSSION before implementation: this is a config-schema bump (plan-env.sh 2->3) plus a change to where install.sh places binaries system-wide, touching ~10 tests and ~5 docs. Before starting I need a decision on migration: an existing install already has binaries under the per-skill bin/ path and a .env at schema 2. Should install.sh (a) auto-migrate on next run (move the files, rewrite .env, no user action), (b) leave old installs working via a documented fallback read-path in plan_bin_dir indefinitely, or (c) just document it as a breaking change users fix by re-running the installer? That choice drives whether plan_bin_dir needs to keep reading the old location at all, which changes the shape of the fix. Separately, the plan-crypt-not-in-binaries.tsv problem this TODO also names looks like a small, independent, low-risk fix (just add the missing manifest row) -- I can peel that off as its own bug/todo without waiting on the migration decision, if useful. Moving to the next item; this one is parked pending your call on (a)/(b)/(c). DECIDED 2026-09-10 (Tschallacka): no backwards compatibility -- option (c). install.sh moving binaries to the shared XDG bin is a breaking change for an existing per-skill-bin install; users fix it by re-running the installer. plan_bin_dir does not need to keep reading the old per-skill location at all. Ready to implement; the plan-crypt-not-in-binaries.tsv gap this TODO also names is still a small, independent, low-risk fix that can be peeled off separately if useful.",
       "created_at": "2026-08-31T13:27:55Z",
-      "updated_at": "2026-09-09T21:32:56Z"
+      "updated_at": "2026-09-10T12:42:40Z"
     },
     {
       "id": "T104",
@@ -1230,6 +1215,21 @@
       "note": "Evaluated and declined, PR #135 (merged as d8b90d5bf95bdec59170c2ea5f0824940b38d574): mapping a step's free-form acceptance criterion to a Definition-of-done coverage row has no anchor between the two documents -- planning/SKILL.md's own Coverage rows section already says this is enforced by review, not the validator, with no mechanical form that avoids false warnings. The other half (flag a coverage row crediting more than the documented outcome+proof pair) was implemented then measured against the real corpus: rows legitimately crediting 3-5 units, with Notes explaining each, are common and correct in this repository's own reviewed plans, so the bare id-count check produced FAILs on well-formed, approved content and was removed.",
       "created_at": "2026-09-09T21:06:27Z",
       "updated_at": "2026-09-10T04:30:47Z"
+    },
+    {
+      "id": "T51",
+      "title": "Resolve the eleven adversarial-review findings on plan-overview-rebuild and obtain an independent approval",
+      "status": "obsolete",
+      "priority": "high",
+      "parent": null,
+      "detail": "A fresh reviewer with persona chris wrote AR-02 through AR-12, all blocking. Resolved so far: AR-12, the stale reversed-decision text in plan sections 7.1 and 7.4, corrected; AR-09, whose cited mechanism was a disproved hypothesis, corrected in section 8.2 with the measured cause and filed as B51. AR-02 is verified exactly as stated: no inventory row names Cargo.toml or a crate root, and section 6.2 places the crate at a path outside the repository that no unit owns. Still to verify and resolve: AR-03 the state-document producer is bash and cannot run on the declared Windows target; AR-04 nine files that must change have no owning inventory row; AR-05 ten cargo test units can never fail a gate because run-tests.sh discovers only test-star.sh; AR-06 the mode-marker test has no exempt arm for a compiled binary; AR-07 seven coverage rows name proofs that are graph leaves; AR-08 story US-64 contradicts unit W53 and the requested planning-state autoplay; AR-10 about twelve stories need fixture plans nobody creates; AR-11 the single-buffer memory requirement has no verification. Treat each finding as a hypothesis to verify before acting, and sweep all seven surfaces when resolving rather than only the one cited. A second fresh reviewer must then perform the independent approval: the planning agent may not approve its own review and the approval gate refuses self-certification.",
+      "blocked_on": null,
+      "refs": [
+        ".plans/plan-overview-rebuild/adversarial-review.md"
+      ],
+      "note": "BLOCKED, needs discussion: .plans/plan-overview-rebuild/adversarial-review.md (and the whole plan directory) does not exist anywhere I can find -- not in the working tree, not in .plans/'s own nested snapshot git history (which holds chat-irc-rust-migration and untrack-generated-files instead), not in any other worktree, and there is no trace of it in the main repo's git log. Its findings (AR-03 through AR-11) only survive as free-text quotes inside BUGS.json entries that were filed while resolving some of them. QUESTION FOR TOMORROW: is there a backup of this plan directory somewhere (another machine, an archive), or is it gone -- in which case is this TODO obsolete (the plan it gates may already be superseded / abandoned) or does it need to be redone from scratch against the current plan-overview code? I have not closed this out; picking up other high-priority items in the meantime. Confirmed with Tschallacka 2026-09-10: the plan-overview-rebuild plan directory this TODO chased was not lost -- it was intentionally moved and repurposed as test fixture data, now at planning/tests/fixtures/overview/{size,navigation}/adversarial-review.md (plus its sibling work-unit-inventory.md/progress.md/ui-user-stories.md/bugs.md). Those fixtures capture the review at cycle 7 (AR-82), verdict \"approved pending one more independent cycle finding none\" -- many cycles past the AR-02 through AR-11 findings this TODO was tracking. Those specific findings are long since superseded by later cycles resolving or replacing them; nothing here still needs the independent-approval action this TODO described. The plan is done, not lost, and its artifacts now serve as size/navigation test input rather than a live review.",
+      "created_at": "2026-08-27T12:37:03Z",
+      "updated_at": "2026-09-10T12:42:32Z"
     },
     {
       "id": "T81f",
