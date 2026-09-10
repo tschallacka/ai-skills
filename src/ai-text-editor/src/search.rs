@@ -20,11 +20,18 @@ pub enum SearchMode {
     FuzzySoundex,
 }
 
+// B311: named here, not only in the capabilities response and the MCP tool's
+// own "mode" description, so the two SearchError messages below are
+// self-sufficient -- a caller that reaches either without having read either
+// of those still gets the valid set inline, rather than needing a separate
+// capabilities round trip to discover it. Keep the three lists in sync.
+const VALID_MODES: &str = "exact_text, exact_bytes, wildcard, shell_wildcard, path_wildcard, regex_rust, regex_pcre2, fuzzy_edit, fuzzy_subsequence, fuzzy_token, fuzzy_ngram, fuzzy_phonetic, fuzzy_soundex";
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SearchError {
-    #[error("search mode must be explicitly selected")]
+    #[error("search mode must be explicitly selected; valid modes are: {VALID_MODES}")]
     MissingMode,
-    #[error("search mode is unsupported: {0}")]
+    #[error("search mode is unsupported: {0}; valid modes are: {VALID_MODES}")]
     Unsupported(String),
     #[error("invalid search expression: {0}")]
     InvalidExpression(String),
@@ -386,6 +393,22 @@ mod tests {
         assert_eq!(
             matches(SearchMode::RegexPcre2, r"cat|dog", "a dog").unwrap(),
             vec![(2, 5)]
+        );
+    }
+
+    // B311: a caller that reaches either error should not need a separate
+    // capabilities call to learn what a valid mode looks like.
+    #[test]
+    fn mode_errors_name_the_valid_modes_inline() {
+        let missing = parse_mode(None).unwrap_err().to_string();
+        assert!(
+            missing.contains("exact_text") && missing.contains("fuzzy_soundex"),
+            "MissingMode should list the valid modes, got: {missing}"
+        );
+        let unsupported = parse_mode(Some("bogus")).unwrap_err().to_string();
+        assert!(
+            unsupported.contains("exact_text") && unsupported.contains("fuzzy_soundex"),
+            "Unsupported should list the valid modes, got: {unsupported}"
         );
     }
     #[test]

@@ -242,9 +242,14 @@ fn tool_definitions() -> Vec<Value> {
     let routing = || {
         let mut properties: ToolProperties = Vec::from([
             (
+                // B310: the argument name IS "file" (not "path") -- the
+                // description leads with that spelling because a caller's
+                // instinct otherwise costs a round trip through
+                // unknown_argument before it reads the accepted_keys the
+                // refusal already lists.
                 "file",
                 string(
-                    "Path served by this request; routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
+                    "The file path (this argument is named \"file\", not \"path\"); routes to that file's own tab in the agent's workspace, opening it if the workspace does not have it yet.",
                 ),
             ),
             // T96: declared on every tool, including the job verbs, because
