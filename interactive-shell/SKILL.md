@@ -137,6 +137,16 @@ the screen model, and rejects dimensions outside the wrapper bounds.
 when the current application documents a modified navigation key that is not
 listed as a standalone named key.
 
+A named key describes byte delivery only, not application behavior (B146):
+`PAGEUP`/`PAGEDOWN` send the standard xterm bytes for that key on every
+application, but what those bytes DO -- scroll a pane, move a selection,
+change a directory level, nothing at all -- is defined by the application on
+the other end, not by the wrapper. This holds for every named key, not only
+paging: a correctly-delivered key is not evidence that the application acted
+on it the way the name suggests. Verify the actual effect from the next
+screen; do not assume a generic scrolling or navigation meaning just because
+the key has a generic name.
+
 Do not treat a successful socket acknowledgement as proof that the application
 accepted the key. A screen delta, changed selection, prompt, or lifecycle event
 is the evidence for the next decision. When output is large, request a row

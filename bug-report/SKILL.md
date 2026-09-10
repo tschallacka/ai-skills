@@ -244,6 +244,20 @@ bugs next-id
 An absent filter matches everything rather than matching the empty string, so
 `list` with no flags is the whole register and not an empty one.
 
+## Reserving an id for another writer
+
+Telling a worker "take B80 and B81" and then continuing to file your own
+entries is not a reservation (B86): `next-id` only sees ids that already exist
+in the file, so nothing stops you from minting B80 yourself an hour later,
+and nothing about the register's own soundness check can catch it -- each
+copy stays internally consistent even though the two entries collide. A
+reservation with no artifact is not a reservation.
+
+If an id must be held for someone else, `add` the entry now, even minimally,
+so the id is real and `next-id` skips past it the same way it does for any
+other filed bug. Handing off a bare number in chat and filing your own
+entries in the meantime reintroduces exactly this hazard.
+
 ## Keeping the file in priority order
 
 Nothing to do: every write re-sorts. The order is priority, then severity, then

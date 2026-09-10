@@ -176,16 +176,18 @@ library, and `test-plan-libs-build.sh` runs it.
   the minter and the verifier. It used to be a copy in each script under a
   comment saying the two must stay byte-identical, and `test-duplication-ratchet.sh`
   held them to it; one definition is the mechanism that comment was asking for.
-- No single hash tool is a hard requirement. `plan_sha256_hex` walks the shipped
-  `plan-crypt` binary first, then the GNU tool, then the BSD one, refusing with
-  69 only when none exists. `openssl` was the last rung and is gone from the
-  chain and from `requires.tsv`: a static binary asks the target machine for
-  nothing, so shipping one *lowered* the declared requirement. The binary is
-  opportunistic, found the way the chat skill's own binary lookup works —
-  `PLAN_CRYPT_BIN`, then `PATH`, then `planning/bin/<target triple>/plan-crypt`
-  and `planning/bin/plan-crypt`. Per-target artifacts are CI-delivered and
-  untracked (§2.16); a local `planning/bin/<triple>` path exists only after a
-  local build. A pin naming a file that does not exist is a
+- No single hash tool is a hard requirement. `plan_sha256_hex` walks an
+  opportunistically-built `plan-crypt` binary first, then the GNU tool, then
+  the BSD one, refusing with 69 only when none exists. `openssl` was the last
+  rung and is gone from the chain and from `requires.tsv`. The binary is
+  found the way the chat skill's own binary lookup works — `PLAN_CRYPT_BIN`,
+  then `PATH`, then `planning/bin/<target triple>/plan-crypt` and
+  `planning/bin/plan-crypt`. **Unlike `plan-overview` and `rjq`
+  (`planning/binaries.tsv`), plan-crypt has no shipped row** (B101): CI builds
+  and tests it against the NIST vector, but delivers it to no installed
+  skill, so an installed planning skill runs the shell fallback chain only,
+  and a `planning/bin/<triple>` path exists only after a local
+  `setup-dev-env.sh` build. A pin naming a file that does not exist is a
   refusal rather than a fall-through, which is how a test takes the compiled
   rung out of the picture.
 - Two implementations of one algorithm can disagree, so they are pinned to each
