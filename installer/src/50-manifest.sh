@@ -434,6 +434,7 @@ tests/test-installer-busy-binary.sh
 tests/test-installer-codex-permissions.sh
 tests/test-installer-dependencies.sh
 tests/test-installer-dev-build.sh
+tests/test-installer-editor-gate-plugin.sh
 tests/test-installer-editor-steering.sh
 tests/test-installer-integration-carryover.sh
 tests/test-installer-integration-mode.sh
