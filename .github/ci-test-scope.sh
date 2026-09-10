@@ -141,7 +141,7 @@ while IFS= read -r path; do
 done <<CHANGED
 $changed
 CHANGED
-[ -z "$global_hit" ] || decide full "$global_hit changed, which the whole suite's execution depends on"
+[ -z "$global_hit" ] || decide full "$global_hit changed, which the whole suite execution depends on"
 
 if [ "$file_count" -gt 100 ]; then
     decide full "$file_count files changed, past the point where selecting pays"
