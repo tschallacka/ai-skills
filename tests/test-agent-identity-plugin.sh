@@ -38,11 +38,11 @@ export PATH="$(dirname "$RJQ"):$PATH"
 export AI_SKILLS_AGENT_IDENTITY_DIR="$work/register"
 
 run_subagent_start() { # <payload json>
-    printf '%s' "$1" | bash "$plugin/hooks/subagent-start.sh"
+    printf '%s' "$1" | "$BASH" "$plugin/hooks/subagent-start.sh"
 }
 
 run_pre_tool_use() { # <payload json>
-    printf '%s' "$1" | bash "$plugin/hooks/pre-tool-use.sh"
+    printf '%s' "$1" | "$BASH" "$plugin/hooks/pre-tool-use.sh"
 }
 
 # ── SubagentStart: injects the id and type, names them by name ─────────────
