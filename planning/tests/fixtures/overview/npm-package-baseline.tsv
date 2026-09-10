@@ -57,10 +57,10 @@ package/merge-request-etiquette/requires.tsv	1296
 package/package.json	1872
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	18998
-package/planning/REVIEWER.md	22954
+package/planning/REVIEWER.md	24339
 package/planning/ROLES.md	4355
 package/planning/RUST-ARTIFACT-MANIFEST.md	716
-package/planning/SKILL.md	90900
+package/planning/SKILL.md	92285
 package/planning/artifact-comparisons.json	1779
 package/planning/binaries.tsv	1158
 package/planning/context/brainstorm-limiting-context-benchmark.json	4080
