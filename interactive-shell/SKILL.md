@@ -119,6 +119,15 @@ instead of searching the active pane. Discover the pane's own search or
 navigation control from the current screen, built-in help, or its manpage; do
 not assume that typing a visible filename selects it.
 
+Set `EDITOR` (and `VISUAL`) before starting a file manager if it needs to
+open and save a file: Midnight Commander's edit key opened `$EDITOR` on the
+selected file rather than its own built-in editor when verified this way
+(B125), and an editor's own already-proven save keys (e.g. nano's CTRL-O then
+ENTER, CTRL-X to return) work the same driven through the file manager as
+standalone. Verify this on the file manager and version actually in use
+before relying on it -- a different build or configuration may still open
+its internal editor regardless of `$EDITOR`.
+
 Named keys include ENTER, CTRL-A through CTRL-Z, ALT-graphic keys, BACKSPACE,
 TAB, ESC, META-LEFT, META-RIGHT, UP, DOWN, LEFT, RIGHT, HOME, END, PAGEUP, PAGEDOWN, INSERT,
 DELETE, CTRL-PAGEUP, CTRL-PAGEDOWN, CTRL-INSERT, CTRL-DELETE, SHIFT/CTRL
