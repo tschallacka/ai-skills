@@ -427,6 +427,7 @@ tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
 tests/test-installer-any-of.sh
+tests/test-installer-appprofiles.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
@@ -680,6 +681,16 @@ agents/openai.yaml
 docs/README.md
 requires.tsv
 binaries.tsv
+appprofiles/FORMAT.md
+appprofiles/mc.md
+appprofiles/mcedit.md
+appprofiles/nano.md
+appprofiles/vi.md
+appprofiles/less.md
+appprofiles/top.md
+appprofiles/htop.md
+appprofiles/tmux.md
+appprofiles/watch.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)

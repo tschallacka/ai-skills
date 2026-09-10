@@ -172,9 +172,20 @@ remains a possible unsupported control. For mc or another TUI, use predicates
 based only on represented controls, or extend and test the model before relying
 on a new control.
 
-App-specific knowledge belongs in agent memory, not in this wrapper: once you
-work out a TUI's keybindings, its mode-toggle appearance, or its own color
-convention (e.g. mc's directories in blue), write it to
-`memory/tui-apps/<appname>.md` before finishing the task. A later session
-driving the same application should read that file back first, rather than
-rediscovering the same facts from scratch through trial and error.
+Before driving an unfamiliar TUI by trial and error, check
+`${XDG_CONFIG_HOME:-~/.config}/tsch-ai-skills/appprofiles/<appname>.md` --
+vendor-shipped, installed alongside this skill, for common programs (mc,
+mcedit, nano, vi, less, top, htop, tmux, watch): screen layout, keybindings,
+dialogs, and known quirks, kept current with `appprofiles/FORMAT.md`
+elsewhere in this skill's own source. These are read-only reference and
+never rewritten at runtime; still verify a profile's claims against the
+actual screen, since a different version or configuration can behave
+differently than what was recorded.
+
+App-specific knowledge beyond a shipped profile -- or for an app with none --
+belongs in agent memory, not in this wrapper: once you work out a TUI's
+keybindings, its mode-toggle appearance, or its own color convention (e.g.
+mc's directories in blue), write it to `memory/tui-apps/<appname>.md` before
+finishing the task. A later session driving the same application should read
+that file back first, rather than rediscovering the same facts from scratch
+through trial and error.

@@ -3965,6 +3965,7 @@ tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
 tests/test-installer-any-of.sh
+tests/test-installer-appprofiles.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
@@ -4218,6 +4219,16 @@ agents/openai.yaml
 docs/README.md
 requires.tsv
 binaries.tsv
+appprofiles/FORMAT.md
+appprofiles/mc.md
+appprofiles/mcedit.md
+appprofiles/nano.md
+appprofiles/vi.md
+appprofiles/less.md
+appprofiles/top.md
+appprofiles/htop.md
+appprofiles/tmux.md
+appprofiles/watch.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
@@ -5632,6 +5643,31 @@ interactive_shell_permission_step() {
     done
 }
 
+# Vendor-shipped reference docs (interactive-shell/appprofiles/FORMAT.md and
+# one per common TUI program) land in a stable, agent-facing location
+# independent of which agent root(s) were selected: SELECTED_TARGET_PATHS[0]
+# is only where they are read FROM, since every installed copy is identical.
+# Reinstalled (overwritten) every run, so an updated profile always replaces
+# an older one already on disk -- unconditional, no confirm, since these are
+# read-only reference files with no permission or security implication.
+interactive_shell_appprofiles_step() {
+    local source="${SELECTED_TARGET_PATHS[0]%/}/interactive-shell/appprofiles"
+    local destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/appprofiles"
+    local file base copied=0
+    [ -d "$source" ] || return 0
+    mkdir -p "$destination" || { echo "  app profiles: cannot create $destination" >&2; return 0; }
+    for file in "$source"/*.md; do
+        [ -f "$file" ] || continue
+        base="${file##*/}"
+        if cp "$file" "$destination/$base"; then
+            copied=$((copied + 1))
+        else
+            echo "  app profiles: cannot write $destination/$base" >&2
+        fi
+    done
+    echo "  app profiles: installed $copied file(s) to $destination" >&2
+}
+
 # ---------------------------------------------------------------
 # 13b. Step 4: ai-text-editor tool steering
 # ---------------------------------------------------------------
@@ -5987,6 +6023,7 @@ else
     # about where it may write, so they follow the registration.
     if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
         interactive_shell_permission_step
+        interactive_shell_appprofiles_step
     fi
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
