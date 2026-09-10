@@ -21,13 +21,23 @@ source "$tests_dir/lib-test.sh"
 t_begin
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/installer-selection.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+# No cleanup trap of our own: $work sits under $TMPDIR, which lib-test.sh
+# already rewrote to $T_TMPDIR and already owns via t_tmpdir_cleanup (set as
+# an EXIT trap when it was sourced above). A second `trap ... EXIT` here does
+# not chain with that one, it REPLACES it -- so this file used to delete its
+# own install.sh logs before t_tmpdir_cleanup's on-failure evidence dump ever
+# ran, leaving a real "all installs every skill" regression with no clue why
+# in the CI log beyond the expected/got mismatch. lib-test.sh's own cleanup
+# removes $work as part of $T_TMPDIR regardless; nothing here needs to repeat it.
 
-# The installed directory names, sorted, for one invocation.
+# The installed directory names, sorted, for one invocation. install.sh's own
+# stdout/stderr goes to a log beside $target rather than /dev/null, so a
+# future failure's evidence dump (t_evidence_dump, on by default) shows WHY a
+# skill did not install, not only that the resulting set was short.
 installed() { # <args...>
     local target
     target="$(mktemp -d "$work/t.XXXXXX")"
-    ( "$BASH" "$installer" "$@" --target "$target" --yes ) >/dev/null 2>&1 || true
+    "$BASH" "$installer" "$@" --target "$target" --yes >"$target.log" 2>&1 || true
     ( cd "$target" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ' )
 }
 
