@@ -3965,6 +3965,7 @@ tests/test-handoff-ordering-gate.sh
 tests/test-inner-shell-consistency.sh
 tests/test-install-ui.sh
 tests/test-installer-any-of.sh
+tests/test-installer-appprofiles.sh
 tests/test-installer-backups.sh
 tests/test-installer-build.sh
 tests/test-installer-busy-binary.sh
@@ -4218,6 +4219,69 @@ agents/openai.yaml
 docs/README.md
 requires.tsv
 binaries.tsv
+appprofiles/FORMAT.md
+appprofiles/alsamixer.md
+appprofiles/atop.md
+appprofiles/bluetoothctl.md
+appprofiles/chsh.md
+appprofiles/cryptsetup.md
+appprofiles/dialog.md
+appprofiles/dig.md
+appprofiles/dpkg-reconfigure.md
+appprofiles/ed.md
+appprofiles/emacs.md
+appprofiles/ex.md
+appprofiles/expect.md
+appprofiles/gdb.md
+appprofiles/git-add-patch.md
+appprofiles/git-bisect.md
+appprofiles/git-subtree.md
+appprofiles/gpg.md
+appprofiles/htop.md
+appprofiles/info.md
+appprofiles/iotop.md
+appprofiles/iptraf.md
+appprofiles/iostat.md
+appprofiles/journalctl.md
+appprofiles/less.md
+appprofiles/lldb.md
+appprofiles/lynx.md
+appprofiles/man.md
+appprofiles/mc.md
+appprofiles/mcedit.md
+appprofiles/mtr.md
+appprofiles/nano.md
+appprofiles/ncdu.md
+appprofiles/nmon.md
+appprofiles/nslookup.md
+appprofiles/openssl.md
+appprofiles/passwd.md
+appprofiles/pg.md
+appprofiles/powertop.md
+appprofiles/pydoc.md
+appprofiles/read.md
+appprofiles/redis-cli.md
+appprofiles/rsync.md
+appprofiles/screen.md
+appprofiles/sdiff.md
+appprofiles/select.md
+appprofiles/socat.md
+appprofiles/ssh.md
+appprofiles/ssh-keygen.md
+appprofiles/su.md
+appprofiles/sudo.md
+appprofiles/supervisorctl.md
+appprofiles/talk.md
+appprofiles/tcpdump.md
+appprofiles/telnet.md
+appprofiles/tmux.md
+appprofiles/top.md
+appprofiles/varnishadm.md
+appprofiles/vi.md
+appprofiles/vmstat.md
+appprofiles/watch.md
+appprofiles/whiptail.md
+appprofiles/write.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
@@ -5632,6 +5696,31 @@ interactive_shell_permission_step() {
     done
 }
 
+# Vendor-shipped reference docs (interactive-shell/appprofiles/FORMAT.md and
+# one per common TUI program) land in a stable, agent-facing location
+# independent of which agent root(s) were selected: SELECTED_TARGET_PATHS[0]
+# is only where they are read FROM, since every installed copy is identical.
+# Reinstalled (overwritten) every run, so an updated profile always replaces
+# an older one already on disk -- unconditional, no confirm, since these are
+# read-only reference files with no permission or security implication.
+interactive_shell_appprofiles_step() {
+    local source="${SELECTED_TARGET_PATHS[0]%/}/interactive-shell/appprofiles"
+    local destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/appprofiles"
+    local file base copied=0
+    [ -d "$source" ] || return 0
+    mkdir -p "$destination" || { echo "  app profiles: cannot create $destination" >&2; return 0; }
+    for file in "$source"/*.md; do
+        [ -f "$file" ] || continue
+        base="${file##*/}"
+        if cp "$file" "$destination/$base"; then
+            copied=$((copied + 1))
+        else
+            echo "  app profiles: cannot write $destination/$base" >&2
+        fi
+    done
+    echo "  app profiles: installed $copied file(s) to $destination" >&2
+}
+
 # ---------------------------------------------------------------
 # 13b. Step 4: ai-text-editor tool steering
 # ---------------------------------------------------------------
@@ -5987,6 +6076,7 @@ else
     # about where it may write, so they follow the registration.
     if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
         interactive_shell_permission_step
+        interactive_shell_appprofiles_step
     fi
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then

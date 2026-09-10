@@ -66,6 +66,7 @@ else
     # about where it may write, so they follow the registration.
     if contains interactive-shell "${SELECTED_SKILLS[@]}"; then
         interactive_shell_permission_step
+        interactive_shell_appprofiles_step
     fi
 
     if contains ai-text-editor "${SELECTED_SKILLS[@]}"; then
