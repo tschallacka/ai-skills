@@ -92,19 +92,6 @@
       "updated_at": "2026-09-03T18:33:20Z"
     },
     {
-      "id": "T88",
-      "title": "a www skill: a brake the human can pull, and one the agent pulls on itself when it is thrashing",
-      "status": "open",
-      "priority": "high",
-      "parent": null,
-      "detail": "www is the three W's, and the skill's whole job is to make the agent answer all three, in order, before it does anything else. W1 What do we have? W2 What are the values? W3 What are we trying to achieve? These are Tschallacka's own words and they are the required prompts -- not a paraphrase, not a longer checklist. They earned their place by resolving a thrashing agent immediately, in a short time, where more elaborate prodding had not.\n\nTwo triggers, one behaviour. (1) The human types 'www' -- that alone means stop: no further tool calls, no continuing the current line of attack. (2) The agent notices it is thrashing: retrying variants of a failing command, re-reading the same files, guessing at a cause it has not measured, or otherwise acting without knowing. Same brake, pulled by the agent on itself, without waiting to be told.\n\nAnswering all three W's is the gate, and each has a distinct job. 'What do we have' forces an inventory of what is actually in hand -- the real error text, the measured facts, the files that exist -- separated from what was assumed. 'What are the values' forces the concrete particulars out into the open: the actual paths, ports, ids, exit codes and settings, rather than the shape of the problem in the abstract, which is where a thrashing agent hides. 'What are we trying to achieve' forces the goal back into view, which is the one a thrashing agent has usually lost while chasing a symptom.\n\nOnly after all three are answered may work continue, and then with one reasoned step or a numbered question -- never another speculative attempt. Requested by Tschallacka on 2026-09-04, after a session where a worker guessed three times at a Darwin errno instead of stopping, and where a hypothesis stayed wrongly ruled out for a day because two variables were tested together.",
-      "blocked_on": null,
-      "refs": [],
-      "note": null,
-      "created_at": "2026-09-04T08:01:38Z",
-      "updated_at": "2026-09-04T08:04:31Z"
-    },
-    {
       "id": "T94",
       "title": "Turn ci-failures.sh into a pipeline-failure-retrieval skill, with glab alongside gh",
       "status": "open",
@@ -928,6 +915,19 @@
       "note": "Merged PR #127 (672e3d6). IN/1 and IN/2 ported into rjq via a one-line jq-source prelude; verified against real jq 1.8.1 and rjq's own unit tests; both SKILL.md docs corrected.",
       "created_at": "2026-09-03T18:16:44Z",
       "updated_at": "2026-09-09T22:41:22Z"
+    },
+    {
+      "id": "T88",
+      "title": "a www skill: a brake the human can pull, and one the agent pulls on itself when it is thrashing",
+      "status": "done",
+      "priority": "high",
+      "parent": null,
+      "detail": "www is the three W's, and the skill's whole job is to make the agent answer all three, in order, before it does anything else. W1 What do we have? W2 What are the values? W3 What are we trying to achieve? These are Tschallacka's own words and they are the required prompts -- not a paraphrase, not a longer checklist. They earned their place by resolving a thrashing agent immediately, in a short time, where more elaborate prodding had not.\n\nTwo triggers, one behaviour. (1) The human types 'www' -- that alone means stop: no further tool calls, no continuing the current line of attack. (2) The agent notices it is thrashing: retrying variants of a failing command, re-reading the same files, guessing at a cause it has not measured, or otherwise acting without knowing. Same brake, pulled by the agent on itself, without waiting to be told.\n\nAnswering all three W's is the gate, and each has a distinct job. 'What do we have' forces an inventory of what is actually in hand -- the real error text, the measured facts, the files that exist -- separated from what was assumed. 'What are the values' forces the concrete particulars out into the open: the actual paths, ports, ids, exit codes and settings, rather than the shape of the problem in the abstract, which is where a thrashing agent hides. 'What are we trying to achieve' forces the goal back into view, which is the one a thrashing agent has usually lost while chasing a symptom.\n\nOnly after all three are answered may work continue, and then with one reasoned step or a numbered question -- never another speculative attempt. Requested by Tschallacka on 2026-09-04, after a session where a worker guessed three times at a Darwin errno instead of stopping, and where a hypothesis stayed wrongly ruled out for a day because two variables were tested together.",
+      "blocked_on": null,
+      "refs": [],
+      "note": "Implemented and merged: PR #132, squash-merged as 48be7fefd843c73cd998452bd9d946a68e0c4340 (master). Added the www skill (SKILL.md/docs/README.md/requires.tsv), registered it in installer/src/05-config.sh, 50-manifest.sh, README.md, package.json, AGENTS.md. Also fixed B314 (the fallback skill-selection menu's hardcoded stale all-sentinel) in the same PR, found while touching this code.",
+      "created_at": "2026-09-04T08:01:38Z",
+      "updated_at": "2026-09-10T02:10:56Z"
     },
     {
       "id": "T90",
