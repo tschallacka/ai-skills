@@ -695,6 +695,7 @@ appprofiles/ncdu.md
 appprofiles/screen.md
 appprofiles/ssh.md
 appprofiles/telnet.md
+appprofiles/alsamixer.md
 ISHEOF
             case "$(uname -s):$(uname -m)" in
                 Linux:x86_64|Linux:amd64)
