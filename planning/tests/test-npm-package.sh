@@ -23,7 +23,7 @@ packable() {
     case "$1" in
         */bin/*) return 1 ;;
         package/planning/scripts/*)
-            case "$1" in *.sh) return 0 ;; *) return 1 ;; esac ;;
+            case "$1" in *.sh|*.awk) return 0 ;; *) return 1 ;; esac ;;
         *) return 0 ;;
     esac
 }

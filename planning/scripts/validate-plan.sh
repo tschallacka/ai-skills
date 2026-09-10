@@ -10,6 +10,7 @@
 #   2. plan docs      — headings, UI verdict, review verdict, hand-edit damage
 #   3. placeholders   — registered template tokens (WARN, or FAIL when generated)
 #   4. stale          — --stale phrase sweep, advisory: WARN only, never gates
+#   4b. coherence     — B110: intra-document self-coherence, exact, FAILs
 #   5. inventory      — parse the work-unit table and build the data model
 #   6. dependencies   — cycles and unknown edges
 #   7. proof coverage — KNOWN DEAD, see validate-plan-inventory-lib.sh
@@ -146,6 +147,9 @@ source "$script_dir/validate-plan-common-lib.sh"
 source "$script_dir/validate-plan-docs-lib.sh"
 source "$script_dir/validate-plan-placeholders-lib.sh"
 source "$script_dir/validate-plan-stale-lib.sh"
+# After stale-lib: reads $stale_docs and $stale_markers, which
+# plan_validate_stale() (called below) publishes.
+source "$script_dir/validate-plan-coherence-lib.sh"
 source "$script_dir/validate-plan-inventory-lib.sh"
 source "$script_dir/validate-plan-ui-lib.sh"
 source "$script_dir/validate-plan-goals-lib.sh"
@@ -160,6 +164,8 @@ plan_validate_plan_docs
 plan_validate_step_numbers "$plan_dir"
 plan_validate_placeholders
 plan_validate_stale
+plan_validate_stale_wording_retained
+plan_validate_countable_enumeration
 plan_validate_inventory
 plan_validate_dependency_graph
 plan_validate_inventory_target_paths

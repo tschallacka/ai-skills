@@ -192,6 +192,9 @@ scripts/validate-plan-common-lib.sh
 scripts/validate-plan-docs-lib.sh
 scripts/validate-plan-placeholders-lib.sh
 scripts/validate-plan-stale-lib.sh
+scripts/validate-plan-coherence-lib.sh
+scripts/validate-plan-stale-wording.awk
+scripts/validate-plan-countable-enumeration.awk
 scripts/validate-plan-inventory-lib.sh
 scripts/validate-plan-ui-lib.sh
 scripts/validate-plan-goals-lib.sh
@@ -379,6 +382,7 @@ tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
 tests/test-ci-failures-contract.sh
+tests/test-coherence-checks.sh
 tests/test-comment-format.sh
 tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
