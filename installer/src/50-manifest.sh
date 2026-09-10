@@ -410,6 +410,7 @@ tests/test-installer-integration-mode.sh
 tests/test-installer-interactive-shell-permission.sh
 tests/test-installer-manifest.sh
 tests/test-installer-mcp-registration.sh
+tests/test-installer-multi-root-refusal.sh
 tests/test-installer-noninteractive.sh
 tests/test-installer-opencode-permissions.sh
 tests/test-installer-skill-selection.sh

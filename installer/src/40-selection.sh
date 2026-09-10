@@ -109,8 +109,27 @@ select_targets() {
     echo "  $custom_choice) custom directory" >&2
     echo "  a) all listed roots" >&2
     # --yes exists to prevent a headless run stopping on a question; with no
-    # interactive channel it takes the menu's own default, the first root.
+    # interactive channel and exactly one root, there is nothing to choose
+    # between, so it takes the menu's own default. With MORE than one root,
+    # that same default silently narrowed --all to a single agent (B163): the
+    # summary reported the one root it picked, but said nothing about the
+    # others being left on whatever version they had. A headless run cannot
+    # express "all listed roots" any other way -- --target names exactly one
+    # -- so refusing and naming the workaround is louder than the original
+    # bug, not a regression: the workaround (loop --target once per root) was
+    # already the documented recovery.
     if [ "${YES:-0}" -eq 1 ] && ! [ -t 3 ]; then
+        if [ "${#AVAILABLE_TARGET_PATHS[@]}" -gt 1 ]; then
+            {
+                printf '%s: no interactive channel and %d skill roots are available; refusing to silently pick one.\n' \
+                    "${0##*/}" "${#AVAILABLE_TARGET_PATHS[@]}"
+                printf 'Add --target to this same command and run it once per root:\n'
+                for path in "${AVAILABLE_TARGET_PATHS[@]}"; do
+                    printf '  --target %s\n' "$path"
+                done
+            } >&2
+            exit 1
+        fi
         printf '%s: no interactive channel; using the first listed root\n' "${0##*/}" >&2
         selection="1"
     else
