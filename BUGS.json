@@ -2054,7 +2054,7 @@
     {
       "id": "B157",
       "title": "a broadcast PRIVMSG carries no message id, so a push-consuming client cannot maintain an accurate cursor",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -2063,12 +2063,12 @@
       "expected": "the pushed line names the id it is delivering, so a push-consuming client can record exactly what it has seen and backfill from that cursor on reconnect without guessing",
       "mechanism": "the broadcaster serialises a chat-proto Message with command PRIVMSG, params [chan] and the text as trailing, which is deliberately the RFC-shaped line a stock IRC client expects; the id lives only in the log record and in the additive FETCH extension's MSG reply. The two paths therefore disagree about what a delivered message is, and only the polling path can drive a cursor. Any fix has to stay wire-compatible with a stock client -- an IRCv3 message tag or a private numeric alongside the PRIVMSG rather than a changed PRIVMSG shape.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "Real IRCv3 CAP negotiation (T131-T135): chat-proto's Message gained a tags field (parse+serialize, IRCv3-escaped); chat-server-rs replaced its CAP stub with a real per-connection capability registry (LS/REQ/ACK/NAK, registration held until CAP END) and tags a broadcast PRIVMSG's msgid to a peer that negotiated message-tags via the new Hub::relay_privmsg, byte-identical untagged to a peer that did not; chat-client-rs negotiates message-tags on every connect (falling back gracefully against an older/unrelated server) and tail uses the real tag to advance its cursor the instant a message arrives, replacing the once-a-second LASTID poll.",
+      "verification": "chat/tests/test-chat-cap-negotiation.sh (live server, raw IRC-over-TLS: LS/REQ/ACK/NAK, registration held across LS...END, plain-client regression, independent negotiation, tagged-vs-plain-peer split) and chat/tests/test-chat-tail-msgid-cursor.sh (live server+client, timing assertion: five rapid sends caught up within 400ms, verified to fail against a deliberately forced poll-only build and pass against the real one). Merged as PR #136, squash-merged as e383ca868c50d7497e786ca4ea928d86c2f7a057 (master).",
       "found_by": "bug-fixer, while implementing T91a; it asked rather than shipping the counting inference, which is how this surfaced",
       "notes": null,
       "created_at": "2026-09-04T08:43:02Z",
-      "updated_at": "2026-09-04T08:43:02Z"
+      "updated_at": "2026-09-10T05:47:47Z"
     },
     {
       "id": "B158",
