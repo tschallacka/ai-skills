@@ -25,8 +25,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chat_proto::message::{numeric, numerics, Message, FETCH_END};
+use chat_proto::message::{numeric, numerics, Message, Tag, FETCH_END};
 use stale_lock::StaleLock;
+
+// The server's capability registry (T133): every capability this server can
+// negotiate via CAP REQ. A generic list, not a hardcoded single flag, so a
+// second capability later is one entry here plus its own wiring at the point
+// that uses it -- not a second copy of the negotiation state machine.
+const CAPABILITIES: &[&str] = &["message-tags"];
+
+// The CAP REQ decision: IRCv3 requires all-or-nothing for a multi-capability
+// request (a partial ACK/NAK is not a valid reply), and the echoed list must
+// be exactly the requested string, unchanged -- the caller does that echo, so
+// this returns only the names, for the caller to record when accepted. Pure
+// and unit-tested separately from the connection plumbing around it.
+fn negotiate_req(requested: &str) -> (bool, Vec<String>) {
+    let names: Vec<&str> = requested.split_whitespace().collect();
+    let all_supported = !names.is_empty() && names.iter().all(|n| CAPABILITIES.contains(n));
+    (all_supported, names.iter().map(|n| n.to_string()).collect())
+}
 
 // How long a socket write may block before the peer is declared unresponsive,
 // and how much undelivered broadcast one peer may accumulate. Both are bounds
@@ -120,6 +137,11 @@ enum Offer {
 struct Peer {
     slot: Mutex<Option<ConnState>>,
     out: Mutex<Outbox>,
+    // Mirrors this connection's own Session::caps, so a broadcaster on a
+    // DIFFERENT thread can decide what to queue for this peer (e.g. whether
+    // to add a message-tags msgid) without touching that connection's Session,
+    // which lives on its own thread's stack and is not otherwise reachable.
+    caps: Mutex<Vec<String>>,
 }
 
 impl Peer {
@@ -132,7 +154,23 @@ impl Peer {
                 joined: Vec::new(),
                 dead: false,
             }),
+            caps: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Record this connection's currently negotiated (ACK'd) capabilities.
+    fn set_caps(&self, caps: &[String]) {
+        if let Ok(mut c) = self.caps.lock() {
+            *c = caps.to_vec();
+        }
+    }
+
+    /// Whether this connection has negotiated the named capability.
+    fn has_cap(&self, name: &str) -> bool {
+        self.caps
+            .lock()
+            .map(|c| c.iter().any(|cap| cap == name))
+            .unwrap_or(false)
     }
 
     /// Record which channels this connection is in, so a broadcaster can filter
@@ -379,8 +417,11 @@ impl Hub {
     /// lock the accept loop needs, one idle subscriber wedged the whole server
     /// (B122). `Peer::offer` skips a non-member, so passing the channel is all
     /// the scoping this needs.
-    fn relay(&self, chan: &str, line: &str, except_idx: usize) {
-        let peers: Vec<Arc<Peer>> = match self.writers.lock() {
+    /// Every peer but one, snapshotted under `writers` alone -- nothing that
+    /// can block is done while holding it. Shared by `relay` and
+    /// `relay_privmsg` so the two cannot drift on who gets addressed.
+    fn peers_except(&self, except_idx: usize) -> Vec<Arc<Peer>> {
+        match self.writers.lock() {
             Ok(writers) => writers
                 .iter()
                 .enumerate()
@@ -388,12 +429,36 @@ impl Hub {
                 .map(|(_, p)| Arc::clone(p))
                 .collect(),
             Err(_) => Vec::new(),
-        };
-        for p in &peers {
+        }
+    }
+
+    fn relay(&self, chan: &str, line: &str, except_idx: usize) {
+        for p in &self.peers_except(except_idx) {
             if p.offer(chan, line) == Offer::Dropped {
                 // The peer is not draining its queue. It is marked dead, so its
                 // own thread tears it down; say so, because a silently dropped
                 // subscriber looks like message loss.
+                eprintln!(
+                    "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
+                    chan, OUTBOX_MAX_BYTES
+                );
+            }
+        }
+    }
+
+    /// Like `relay`, but for a PRIVMSG/NOTICE broadcast that carries a
+    /// message-tags msgid: each peer gets `tagged_line` if it negotiated
+    /// message-tags, `untagged_line` (byte-identical to what it would have
+    /// received before T134) otherwise -- one offer() per peer either way, so
+    /// there is never a second queued line for the same event.
+    fn relay_privmsg(&self, chan: &str, tagged_line: &str, untagged_line: &str, except_idx: usize) {
+        for p in &self.peers_except(except_idx) {
+            let line = if p.has_cap("message-tags") {
+                tagged_line
+            } else {
+                untagged_line
+            };
+            if p.offer(chan, line) == Offer::Dropped {
                 eprintln!(
                     "chat-server-rs: dropping unresponsive peer on {}: over {} bytes of undelivered messages",
                     chan, OUTBOX_MAX_BYTES
@@ -531,6 +596,14 @@ struct Session {
     registered: bool,
     joined: Vec<String>,
     closed: bool,
+    // T133: true from CAP LS/REQ until CAP END. While true, registration is
+    // held even once NICK+USER are both known -- a real IRCv3 client sends
+    // CAP LS before registering and expects 001 withheld until it says END.
+    cap_negotiating: bool,
+    // Capabilities this connection has negotiated (ACK'd), so the CAP
+    // handling below and the message-tags wiring at PRIVMSG time agree on
+    // what this connection asked for.
+    caps: Vec<String>,
 }
 
 fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
@@ -543,6 +616,8 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         joined: Vec::new(),
         registered: false,
         closed: false,
+        cap_negotiating: false,
+        caps: Vec::new(),
     };
 
     // Emit to a connection state's TLS writer. Called while holding the
@@ -554,6 +629,56 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
         if !st.closed && st.write_line(s).is_err() {
             st.closed = true;
         }
+    }
+
+    // Complete registration (the 001..376 welcome block) exactly once, and
+    // only when nothing is still holding it back: nick and user both known,
+    // not already registered, and -- T133 -- not in the middle of CAP
+    // negotiation. Three call sites need this (after USER, the general
+    // fallback for a burst that skipped straight to another command, and CAP
+    // END); before this existed the first two each had their own copy of the
+    // same welcome block, which is what let them silently disagree about the
+    // hold condition when CAP negotiation was added.
+    fn maybe_complete_registration(sess: &mut Session, st: &mut ConnState) {
+        if sess.registered || sess.nick.is_empty() || sess.user.is_empty() || sess.cap_negotiating {
+            return;
+        }
+        sess.registered = true;
+        let sn = sess.server_name.clone();
+        let n = sess.nick.clone();
+        for (code, text) in [
+            (numerics::RPL_WELCOME, "Welcome to the chat server"),
+            (numerics::RPL_YOURHOST, "Your host is the chat server"),
+            (
+                numerics::RPL_CREATED,
+                "This server was created for agent chat",
+            ),
+            (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
+        ] {
+            w(st, &numeric(&sn, code, &n, text).serialize());
+        }
+        w(
+            st,
+            &numeric(
+                &sn,
+                numerics::RPL_ISUPPORT,
+                &n,
+                "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
+            )
+            .serialize(),
+        );
+        w(
+            st,
+            &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
+        );
+        w(
+            st,
+            &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize(),
+        );
+        w(
+            st,
+            &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
+        );
     }
 
     // Set the moment this connection is finished -- a dead peer, a failed
@@ -679,7 +804,43 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                 let trailing = msg.trailing.clone();
 
                 if verb == "CAP" {
-                    w(st, "CAP * LS :");
+                    let sn = sess.server_name.clone();
+                    let subcommand = params.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                    match subcommand.as_str() {
+                        "LS" => {
+                            // A client sending CAP LS at all is negotiating,
+                            // which holds registration until it says END --
+                            // even a bare `CAP LS` with no REQ that follows.
+                            sess.cap_negotiating = true;
+                            w(st, &format!(":{} CAP * LS :{}", sn, CAPABILITIES.join(" ")));
+                        }
+                        "LIST" => {
+                            w(st, &format!(":{} CAP * LIST :{}", sn, sess.caps.join(" ")));
+                        }
+                        "REQ" => {
+                            sess.cap_negotiating = true;
+                            let requested = trailing.clone().unwrap_or_default();
+                            let (accepted, names) = negotiate_req(&requested);
+                            if accepted {
+                                for name in names {
+                                    if !sess.caps.contains(&name) {
+                                        sess.caps.push(name);
+                                    }
+                                }
+                                peer.set_caps(&sess.caps);
+                                w(st, &format!(":{} CAP * ACK :{}", sn, requested));
+                            } else {
+                                w(st, &format!(":{} CAP * NAK :{}", sn, requested));
+                            }
+                        }
+                        "END" => {
+                            sess.cap_negotiating = false;
+                            maybe_complete_registration(&mut sess, st);
+                        }
+                        _ => {
+                            w(st, &format!(":{} CAP * NAK :", sn));
+                        }
+                    }
                     continue;
                 }
                 if verb == "PING" {
@@ -743,46 +904,10 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                     st.host = sess.host.clone();
                     // Once both NICK and USER are present, registration is
                     // complete: send the welcome block now (not on the next
-                    // verb) so the client does not stall waiting for it.
-                    if !sess.registered && !sess.nick.is_empty() {
-                        sess.registered = true;
-                        let sn = sess.server_name.clone();
-                        let n = sess.nick.clone();
-                        for (code, text) in [
-                            (numerics::RPL_WELCOME, "Welcome to the chat server"),
-                            (numerics::RPL_YOURHOST, "Your host is the chat server"),
-                            (
-                                numerics::RPL_CREATED,
-                                "This server was created for agent chat",
-                            ),
-                            (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
-                        ] {
-                            w(st, &numeric(&sn, code, &n, text).serialize());
-                        }
-                        w(
-                            st,
-                            &numeric(
-                                &sn,
-                                numerics::RPL_ISUPPORT,
-                                &n,
-                                "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
-                            )
-                            .serialize(),
-                        );
-                        w(
-                            st,
-                            &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
-                        );
-                        w(
-                            st,
-                            &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat")
-                                .serialize(),
-                        );
-                        w(
-                            st,
-                            &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
-                        );
-                    }
+                    // verb) so the client does not stall waiting for it --
+                    // unless CAP negotiation is still open (T133), in which
+                    // case this is a no-op until CAP END says so.
+                    maybe_complete_registration(&mut sess, st);
                     continue;
                 }
                 if verb == "QUIT" {
@@ -804,46 +929,11 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                     break;
                 }
 
-                if !sess.registered && !sess.nick.is_empty() && !sess.user.is_empty() {
-                    sess.registered = true;
-                    let sn = sess.server_name.clone();
-                    let n = sess.nick.clone();
-                    for (code, text) in [
-                        (numerics::RPL_WELCOME, "Welcome to the chat server"),
-                        (numerics::RPL_YOURHOST, "Your host is the chat server"),
-                        (
-                            numerics::RPL_CREATED,
-                            "This server was created for agent chat",
-                        ),
-                        (numerics::RPL_MYINFO, "ai-skills chat 1.0"),
-                    ] {
-                        w(st, &numeric(&sn, code, &n, text).serialize());
-                    }
-                    w(
-                        st,
-                        &numeric(
-                            &sn,
-                            numerics::RPL_ISUPPORT,
-                            &n,
-                            "NICKLEN=32 CHANNELLEN=32 PREFIX=(o)@ TARGMAX=PRIVMSG:4,NOTICE:4",
-                        )
-                        .serialize(),
-                    );
-                    w(
-                        st,
-                        &numeric(&sn, numerics::RPL_MOTDSTART, &n, "chat server").serialize(),
-                    );
-                    w(
-                        st,
-                        &numeric(&sn, numerics::RPL_MOTD, &n, "agent-to-agent chat").serialize(),
-                    );
-                    w(
-                        st,
-                        &numeric(&sn, numerics::RPL_ENDOFMOTD, &n, "end of MOTD").serialize(),
-                    );
-                    // Fall through so a JOIN/PRIVMSG issued in the same burst
-                    // (as real clients do) is not swallowed by registration.
-                }
+                // Fall through so a JOIN/PRIVMSG issued in the same burst (as
+                // real clients do) is not swallowed by registration; a no-op
+                // if already registered, still holding for CAP, or missing
+                // nick/user.
+                maybe_complete_registration(&mut sess, st);
                 if verb == "NICK" || verb == "USER" {
                     continue;
                 }
@@ -954,16 +1044,34 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                         }
                         match hub.append(&chan, &sess.nick, &text) {
                             Ok((id, _)) => {
-                                let m = Message {
-                                    prefix: Some(format!(
-                                        "{}!{}@{}",
-                                        sess.nick, sess.user, sess.host
-                                    )),
+                                let prefix =
+                                    Some(format!("{}!{}@{}", sess.nick, sess.user, sess.host));
+                                let untagged = Message {
+                                    tags: Vec::new(),
+                                    prefix: prefix.clone(),
                                     command: verb.clone(),
                                     params: vec![chan.clone()],
                                     trailing: Some(text.clone()),
-                                };
-                                let out = m.serialize();
+                                }
+                                .serialize();
+                                // T134: the SAME id FETCH would report for this
+                                // message, carried inline on the one broadcast
+                                // line for a peer that negotiated message-tags
+                                // -- not a second queued line, so the earlier
+                                // atomicity concern that ruled out a private
+                                // numeric alongside PRIVMSG (see the
+                                // confirmation note below) does not apply here.
+                                let tagged = Message {
+                                    tags: vec![Tag {
+                                        key: "msgid".to_string(),
+                                        value: Some(id.to_string()),
+                                    }],
+                                    prefix,
+                                    command: verb.clone(),
+                                    params: vec![chan.clone()],
+                                    trailing: Some(text.clone()),
+                                }
+                                .serialize();
                                 // The sender is told NOTHING here, which is the
                                 // RFC 1459 flow: a PRIVMSG is relayed to the
                                 // other members, and a client renders its own
@@ -987,14 +1095,14 @@ fn serve(peer: Arc<Peer>, hub: Arc<Hub>, idx: usize, server_name: String) {
                                 // client that does not ask sees nothing extra,
                                 // and the id still proves the line was
                                 // persisted rather than merely reflected.
-                                let _ = id;
+                                //
                                 // Broadcast to OTHER connections by queueing on
                                 // each peer's outbox rather than writing to
-                                // their sockets from this thread. Hub::relay
-                                // owns that fanout and the lock discipline it
-                                // depends on (B122); it is shared with JOIN and
-                                // PART so the three cannot drift apart.
-                                hub.relay(&chan, &out, idx);
+                                // their sockets from this thread.
+                                // Hub::relay_privmsg owns that fanout (shared
+                                // lock discipline with Hub::relay, B122) and
+                                // picks tagged vs. untagged per peer.
+                                hub.relay_privmsg(&chan, &tagged, &untagged, idx);
                             }
                             Err(e) => w(st, &format!("ERROR :{}", e)),
                         }
@@ -2129,6 +2237,128 @@ mod outbox_tests {
         let (lines, dead) = p.drain();
         assert!(dead);
         assert!(lines.is_empty());
+    }
+}
+
+// T133 (CAP negotiation) and T134 (message-tags on broadcast PRIVMSG). Like
+// membership_relay_tests above, the live parts (LS/REQ/END over a real
+// connection, registration actually held) need a socket and are covered by
+// chat/tests/test-chat-cap-negotiation.sh; what is pure here is tested here.
+#[cfg(test)]
+mod cap_negotiation_tests {
+    use super::{negotiate_req, Hub, Peer, CAPABILITIES};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    fn hub_with(peers: Vec<Arc<Peer>>) -> Hub {
+        Hub {
+            chan_dir: PathBuf::from("/nonexistent"),
+            highest: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
+            topics: Mutex::new(HashMap::new()),
+            nicks: Mutex::new(HashMap::new()),
+            writers: Mutex::new(peers),
+        }
+    }
+
+    #[test]
+    fn a_registered_capability_is_accepted() {
+        let (accepted, names) = negotiate_req("message-tags");
+        assert!(accepted);
+        assert_eq!(names, vec!["message-tags".to_string()]);
+    }
+
+    #[test]
+    fn an_unregistered_capability_is_refused() {
+        let (accepted, _) = negotiate_req("no-such-capability");
+        assert!(!accepted);
+    }
+
+    #[test]
+    fn a_mixed_request_is_all_or_nothing() {
+        // IRCv3: a REQ naming several capabilities is one ACK or one NAK for
+        // the whole set, never a partial grant -- one unsupported name among
+        // several supported ones must refuse all of them.
+        let (accepted, _) = negotiate_req("message-tags no-such-capability");
+        assert!(
+            !accepted,
+            "one unsupported capability must NAK the whole request"
+        );
+    }
+
+    #[test]
+    fn an_empty_request_is_refused() {
+        let (accepted, names) = negotiate_req("");
+        assert!(!accepted);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn every_capability_the_registry_declares_is_individually_acceptable() {
+        // A generic registry (T131's design requirement) means this holds for
+        // whatever CAPABILITIES lists, not only "message-tags" by name.
+        for cap in CAPABILITIES {
+            let (accepted, _) = negotiate_req(cap);
+            assert!(accepted, "{cap} is in CAPABILITIES but was refused");
+        }
+    }
+
+    #[test]
+    fn a_peer_with_no_negotiated_caps_has_none() {
+        let p = Peer::new();
+        assert!(!p.has_cap("message-tags"));
+    }
+
+    #[test]
+    fn set_caps_is_what_has_cap_reads() {
+        let p = Peer::new();
+        p.set_caps(&["message-tags".to_string()]);
+        assert!(p.has_cap("message-tags"));
+        assert!(!p.has_cap("no-such-capability"));
+    }
+
+    // T134's own contract: a negotiated peer gets the tagged line, a
+    // non-negotiated peer in the SAME channel gets the untagged one, from one
+    // relay_privmsg call -- never a second queued line for either.
+    #[test]
+    fn relay_privmsg_splits_by_negotiated_capability() {
+        let tagged_peer = Arc::new(Peer::new());
+        let plain_peer = Arc::new(Peer::new());
+        tagged_peer.set_joined(&["#ops".to_string()]);
+        plain_peer.set_joined(&["#ops".to_string()]);
+        tagged_peer.set_caps(&["message-tags".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&tagged_peer), Arc::clone(&plain_peer)]);
+
+        hub.relay_privmsg(
+            "#ops",
+            "@msgid=7 :nick!u@h PRIVMSG #ops :hi",
+            ":nick!u@h PRIVMSG #ops :hi",
+            usize::MAX,
+        );
+
+        let (tagged_lines, _) = tagged_peer.drain();
+        assert_eq!(
+            tagged_lines,
+            vec!["@msgid=7 :nick!u@h PRIVMSG #ops :hi".to_string()]
+        );
+        let (plain_lines, _) = plain_peer.drain();
+        assert_eq!(plain_lines, vec![":nick!u@h PRIVMSG #ops :hi".to_string()]);
+    }
+
+    #[test]
+    fn relay_privmsg_excludes_the_sender_by_index_like_relay() {
+        let sender = Arc::new(Peer::new());
+        sender.set_joined(&["#ops".to_string()]);
+        let hub = hub_with(vec![Arc::clone(&sender)]);
+
+        hub.relay_privmsg("#ops", "@msgid=1 tagged", "untagged", 0);
+
+        let (lines, _) = sender.drain();
+        assert!(
+            lines.is_empty(),
+            "the sender must not receive its own broadcast"
+        );
     }
 }
 
