@@ -29,6 +29,6 @@ Not modal -- output redraws automatically; no dialogs from watch itself
   less). Use CTRL-C.
 
 ### Unconfirmed
-- Whether SPACE forces an immediate refresh
-- Whether `d` toggles diff highlighting
-- Any in-session help/keybinding list
+- Confirmation of SPACE forcing immediate refresh (sent as text, refreshed at next interval)
+- Whether `d` toggles diff highlighting (visual confirmation difficult via terminal)
+- Any in-session help/keybinding list (watch has minimal interactive keys)

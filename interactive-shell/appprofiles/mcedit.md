@@ -20,7 +20,7 @@ buffer.
 ### Keys
 | Key | Action | Notes |
 |-----|--------|-------|
-| F2 | Save | Opens the "Confirm save file" dialog; does NOT write by itself. Encoding is this wrapper's standard F2 (`\x1bOQ`, matches this terminal's `xterm-256color` `kf2`) -- not an encoding problem. |
+| F2 | Save | Opens the "Confirm save file" dialog; does NOT write by itself |
 | ENTER (in dialog, after F2) | Confirm save | `[ Save ]` is the default button |
 | F10 | Quit | Prompts to save first if modified |
 | F3 | Mark (start/extend selection) | |
@@ -44,11 +44,9 @@ buffer.
 
 ### Quirks
 - F2 alone does not save -- it opens a confirmation dialog that itself must
-  be confirmed (ENTER). Checking only the buffer rows (not the full screen)
-  misses this dialog and reads as "F2 does nothing."
+  be confirmed (ENTER). Checking only the buffer rows, not the full screen,
+  misses this dialog.
 
 ### Unconfirmed
-- Whether the save-confirmation dialog is configurable (on/off) across mc
-  configs
-- Button navigation inside the save dialog beyond ENTER-on-default (TAB?
-  arrows?)
+- Whether the save-confirmation dialog is configurable (on/off) in mc's Options
+- Button navigation inside the save dialog beyond ENTER-on-default (TAB/arrows not tested)

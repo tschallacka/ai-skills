@@ -46,7 +46,5 @@ different things in different modes.
 ### Quirks
 None found beyond the standard modal behavior above.
 
-### Unconfirmed
-- Whether this system's `vi` is real vim (visual mode, multi-level undo) or
-  a stricter POSIX vi/nvi -- check `vi --version` before relying on
-  vim-only features
+### Notes
+- This system's `vi` is VIM 9.1, not POSIX vi/nvi; vim-only features (visual mode, multi-level undo, splits, :set) are available.

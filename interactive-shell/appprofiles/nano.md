@@ -27,7 +27,7 @@ the prompt's own cancel key) aborts.
 | CTRL-U | Paste (uncut) | |
 | CTRL-W | Where Is (search) | |
 | CTRL-C | Show cursor position | Does NOT exit or cancel |
-| F-keys (F1-F12) | Not reliably bound | This wrapper's standard F2 did not trigger Write Out; use CTRL-O/CTRL-X, not F-keys |
+| F-keys (F1-F12) | Not reliably bound | F2 does not trigger Write Out; use CTRL-O/CTRL-X, not F-keys |
 
 ### Dialogs
 - **Save prompt** (CTRL-O): status line becomes "File Name to Write:" with
@@ -43,13 +43,11 @@ the prompt's own cancel key) aborts.
    prompt per its own shown keys.
 
 ### Quirks
-- This wrapper's F2 (`\x1bOQ`, matches this terminal's `xterm-256color`)
-  does not open Write Out; instead produced behavior consistent with an
-  Exit-adjacent binding (a "Save modified buffer?" dialog appeared). Use
+- F2 does not open Write Out; it triggers behavior consistent with an
+  Exit-adjacent binding (a "Save modified buffer?" dialog appears). Use
   CTRL-O, not F2.
 - CTRL-O/ENTER save and CTRL-X exit work identically driven through mc
-  (mc.md, B125).
+  (mc.md).
 
 ### Unconfirmed
-- What nano's F-keys ARE bound to on this build (only confirmed F2 is not
-  Write Out)
+- Exact F-key bindings beyond F1/F2 (F1 opens Help viewer; F2 opens "Save modified buffer?" when buffer is modified, not Write Out)

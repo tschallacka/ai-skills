@@ -29,8 +29,12 @@ answered or cancelled; the prompt names what it wants.
 | M | Sort by %MEM | |
 | k | Kill | Prompts for PID then signal |
 | r | Renice | Prompts for PID then value |
-| 1 | Toggle combined vs per-core CPU lines | |
+| 1 | Toggle combined vs per-core CPU lines | Switches between single %Cpu line and per-core %Cpu0/1/2... lines |
+| t | Toggle CPU display format | Switches between percentage breakdown and graph-style display |
+| m | Toggle memory display format | Switches between rows and graph-style display |
+| c | Toggle command line vs name | Shows full command line vs. binary name only |
 | h | Help | |
+| W | Write config | Saves current settings to ~/.toprc |
 
 ### Workflows
 1. Find top CPU consumer: `P` (often already default), read first process
@@ -41,6 +45,8 @@ answered or cancelled; the prompt names what it wants.
 - Screen updates on its own timer; a `view` shortly after the last one may
   show different numbers with no input sent -- not a missed keystroke.
 
+### Notes
+- Default column set (verified): PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND. Columns configurable via `f`/`F` (f toggles fields, F exits field menu).
+
 ### Unconfirmed
-- Exact column set/order is configurable (`f`/`F` in many builds), not
-  exhaustively catalogued -- read the header row as source of truth
+- Exact behavior of `f`/`F` field selection on this wrapper
