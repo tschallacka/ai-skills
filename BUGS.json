@@ -463,6 +463,25 @@
       "updated_at": "2026-09-08T13:58:50Z"
     },
     {
+      "id": "B317",
+      "title": "skill_files() lists chat/todo/bug-report binaries unconditionally, so a missing one kills the whole install under set -e",
+      "status": "reported",
+      "severity": "major",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Remove (or never build) chat/bin/<triple>/chat-server-rs in a checkout, then run: install.sh --skill all --target <dir> --yes. Root-caused live via T116 (PR #138): a fresh macOS CI checkout with no chat binaries built reproduces it deterministically.",
+      "observed": "install.sh dies mid-loop with `cp: cannot stat '.../chat/bin/aarch64-apple-darwin/chat-server-rs': No such file or directory`\\'s -- everything already queued (git-worktrees onward) never installs, and the run exits under `set -e` with no diagnostic beyond the raw cp error.",
+      "expected": "A skill whose own compiled binary is missing should not take the entire install down with it -- either it degrades honestly (installs its non-binary files, the way ai-text-editor and interactive-shell already do via skill_artifact_files) or refuses that one skill loudly (the way rjq's bundled_bin_row_missing does), never a raw `cp` failure that `set -e` turns into a silent, total install abort.",
+      "mechanism": null,
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-10T11:37:24Z",
+      "updated_at": "2026-09-10T11:37:24Z"
+    },
+    {
       "id": "B108",
       "title": "register-read.sh ships to users but the library it sources does not, so it dies on first use",
       "status": "fixed",
@@ -3212,7 +3231,7 @@
     {
       "id": "B316",
       "title": "install.sh's worktree permission grant writes a Write(...) rule Claude Code never matches",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "high",
       "parent": null,
@@ -3221,12 +3240,12 @@
       "expected": "claude_worktrees_permissions should grant Edit(<worktrees>/**) only (plus Read and Bash), matching what claude_permissions already does for the planning root two functions earlier in the same file -- Edit(path) is Claude Code's umbrella rule for every file-editing tool, Write included, so a separate Write(path) entry is not just redundant but unmatched by the permission engine entirely.",
       "mechanism": "installer/src/70-permissions.sh: claude_worktrees_permissions passed \"Write(\\($worktrees)/**)\" to claude_merge_allow alongside Read/Edit/Bash. Claude Code's permission engine keys file-editing-tool rules on Edit(path) only -- there is no Write(path) match and no fallback -- so the entry was dead weight that read as a grant but matched nothing.",
       "surfaces": [],
-      "fix": "Dropped the Write(...) entry from claude_worktrees_permissions's entries list and from print_manual_worktrees_permissions' example line; regenerated install.sh from installer/src/*.sh. PR #139 (branch fix/b316-worktree-permission-write-rule).",
-      "verification": "tests/test-worktree-permissions.sh updated: now asserts Read+Edit+Bash are granted and explicitly asserts Write(...) is ABSENT, so a regression back to the dead rule is caught. Local run: PASS. shellcheck clean. planning/tests/test-npm-package.sh passes against the refreshed baseline. pre-push-check: PASS. Awaiting CI on PR #139.",
+      "fix": "Dropped the Write(...) entry from claude_worktrees_permissions and print_manual_worktrees_permissions in installer/src/70-permissions.sh; regenerated install.sh. Merged as commit 7193608244c2dbde6c35458003a56a7b2595056d (PR #139, squash-merged).",
+      "verification": "tests/test-worktree-permissions.sh asserts Read+Edit+Bash are granted and asserts Write(...) is absent. CI green on the PR: shellcheck, npm-package baseline, pre-push-check all passed.",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-10T11:06:22Z",
-      "updated_at": "2026-09-10T11:18:02Z"
+      "updated_at": "2026-09-10T11:47:29Z"
     },
     {
       "id": "B14",
