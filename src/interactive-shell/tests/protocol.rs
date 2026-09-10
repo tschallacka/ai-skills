@@ -773,6 +773,49 @@ fn rgbview_preserves_styles_without_json_wrapping() {
     child.wait().unwrap();
 }
 
+// B142: the markup mode over the real socket, not just the unit-tested
+// Screen::markup -- proves the CLI wiring (dispatch, row filtering, the
+// "markup" event name the CLI's response printer looks for) round-trips.
+#[test]
+fn markup_reports_a_verified_link_over_the_socket() {
+    let dir = temp_dir("markup");
+    let mut child = start(
+        &dir,
+        &[
+            "sh",
+            "-c",
+            "printf '\\033]8;;https://example.test\\033\\\\LINK\\033]8;;\\033\\\\'; sleep 600",
+        ],
+        "600",
+    );
+    let _ = request_all(
+        &dir,
+        r#"{"v":1,"op":"wait","contains":"LINK"}
+"#,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_interactive-shell-input"))
+        .args([
+            "--socket",
+            dir.join("socket").to_str().unwrap(),
+            "markup",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("<a href=\"https://example.test\">LINK</a>"),
+        "markup did not report the verified link: {text:?}"
+    );
+    let _ = request(
+        &dir,
+        r#"{"v":1,"op":"shutdown"}
+"#,
+    );
+    child.wait().unwrap();
+}
+
 #[test]
 fn locate_returns_visible_coordinates_without_sending_input() {
     let dir = temp_dir("locate");
