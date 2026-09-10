@@ -2,7 +2,7 @@ package_path	byte_size
 package/.agents/MAINTAINER-STYLE-CONTRACT.md	2884
 package/.agents/MAINTAINER.md	11239
 package/LICENSE	1068
-package/README.md	16234
+package/README.md	16518
 package/ai-text-editor/SKILL.md	20272
 package/ai-text-editor/agents/openai.yaml	111
 package/ai-text-editor/ai-text-editor.1	16672
@@ -32,6 +32,10 @@ package/chat/tests/test-chat-descriptor-leak.sh	9487
 package/chat/tests/test-chat-owner-socket.sh	13730
 package/chat/tests/test-chat-resolution.sh	8572
 package/chat/tests/test-chat.sh	37520
+package/ci-failures/SKILL.md	4151
+package/ci-failures/docs/README.md	1146
+package/ci-failures/requires.tsv	1641
+package/ci-failures/scripts/ci-failures.sh	21495
 package/git-merge-resolving/SKILL.md	9341
 package/git-merge-resolving/docs/README.md	2835
 package/git-merge-resolving/requires.tsv	1321
@@ -39,7 +43,7 @@ package/git-worktrees/SKILL.md	12177
 package/git-worktrees/docs/README.md	1440
 package/git-worktrees/requires.tsv	1162
 package/install-ui.sh	7086
-package/install.sh	246581
+package/install.sh	251301
 package/interactive-shell/SKILL.md	9844
 package/interactive-shell/agents/openai.yaml	153
 package/interactive-shell/binaries.tsv	1996
@@ -50,7 +54,7 @@ package/interactive-shell/tests/test-interactive-shell.sh	7638
 package/merge-request-etiquette/SKILL.md	7307
 package/merge-request-etiquette/docs/README.md	2094
 package/merge-request-etiquette/requires.tsv	1296
-package/package.json	1853
+package/package.json	1872
 package/planning/MAINTAINER-STYLE-CONTRACT.md	15134
 package/planning/PACKAGE-MANIFEST.tsv	18561
 package/planning/REVIEWER.md	22954

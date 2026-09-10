@@ -378,6 +378,7 @@ tests/test-adversarial-review-preamble.sh
 tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
+tests/test-ci-failures-contract.sh
 tests/test-comment-format.sh
 tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
@@ -658,6 +659,13 @@ tests/test-interactive-shell.sh
 tests/test-interactive-shell-exploration.sh
 TODO.json
 ISHEOF
+            ;;
+        ci-failures)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            local file
+            for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
+                [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
+            done
             ;;
     esac
 }

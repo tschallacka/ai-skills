@@ -212,7 +212,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www ci-failures)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -229,6 +229,7 @@ SKILL_DESCRIPTIONS=(
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
     'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
     'A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step.'
+    'What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number or a branch -- on GitHub or GitLab.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -302,6 +303,10 @@ POSIX only, and the screen model is honest about its limits: byte-oriented cells
 Three questions answered in order, in their exact wording, before anything else continues: what do we have, what are the values, what are we trying to achieve.
 Each forces something a thrashing agent has usually lost -- measured facts over impressions, concrete particulars over the abstract shape of the problem, and the goal over the symptom being chased.
 Only then does work continue, and only as one reasoned step or a numbered question -- never another speculative attempt.'
+    'Resolves a CI run or pipeline from an id, a PR/MR number, or a branch, and prints just the lines that identify each failing jobs failure.
+Detects GitHub vs. GitLab from the git remote and names which it picked, rather than choosing silently between their different APIs and failure vocabularies.
+gh is exercised against this repository real Actions runs; the glab path is written against GitLab documented REST API v4 and exercised only against a stub, for lack of a live GitLab remote to verify it on.
+--raw DIR keeps each failing job full de-escaped log, for when the extracted lines are not enough.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"

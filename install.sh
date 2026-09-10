@@ -265,7 +265,7 @@ INTEGRATION_SELECTION_EOF
     printf 'default\n'
 }
 
-SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www)
+SKILL_NAMES=(planning project-specificies resource-limited-testing brainstorm post-implementation-review todo bug-report chat git-worktrees git-merge-resolving merge-request-etiquette text-etiquette ai-text-editor interactive-shell www ci-failures)
 SKILL_DESCRIPTIONS=(
     'Durable, resumable plans with steps and verification.'
     'Records project conventions, quirks, and deviations.'
@@ -282,6 +282,7 @@ SKILL_DESCRIPTIONS=(
     'Server-owned editor tabs for agents: bounded reads, explicit search modes, revision-aware edits, undo/redo, raw-byte and hex access, SQLite metadata, and Unix-socket or TCP transport.'
     'Drives unknown full-screen terminal programs through a PTY wrapper and a unix-socket input client.'
     'A brake the human can pull, and one the agent pulls on itself when it is thrashing: stop, answer three questions, then one reasoned step.'
+    'What actually failed in a CI run or pipeline, from a run/pipeline id, a PR/MR number or a branch -- on GitHub or GitLab.'
 )
 
 # The detail pane's body: a summary sentence, then what it actually does. Kept
@@ -355,6 +356,10 @@ POSIX only, and the screen model is honest about its limits: byte-oriented cells
 Three questions answered in order, in their exact wording, before anything else continues: what do we have, what are the values, what are we trying to achieve.
 Each forces something a thrashing agent has usually lost -- measured facts over impressions, concrete particulars over the abstract shape of the problem, and the goal over the symptom being chased.
 Only then does work continue, and only as one reasoned step or a numbered question -- never another speculative attempt.'
+    'Resolves a CI run or pipeline from an id, a PR/MR number, or a branch, and prints just the lines that identify each failing jobs failure.
+Detects GitHub vs. GitLab from the git remote and names which it picked, rather than choosing silently between their different APIs and failure vocabularies.
+gh is exercised against this repository real Actions runs; the glab path is written against GitLab documented REST API v4 and exercised only against a stub, for lack of a live GitLab remote to verify it on.
+--raw DIR keeps each failing job full de-escaped log, for when the extracted lines are not enough.'
 )
 TARGET_NAMES=(
     "Universal Agent Skills"
@@ -677,6 +682,12 @@ runtime_requirements() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1" in
+        ci-failures)
+            case "$platform" in *:*) printf '%s\n' bash ;; esac
+            case "$platform" in *:*) printf '%s\n' rjq ;; esac
+            case "$platform" in *:*) printf '%s\n' gh ;; esac
+            case "$platform" in *:*) printf '%s\n' glab ;; esac
+            ;;
         git-merge-resolving)
             case "$platform" in *:*) printf '%s\n' git ;; esac
             ;;
@@ -697,6 +708,10 @@ runtime_requirement_strength() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
+        ci-failures:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        ci-failures:rjq) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
+        ci-failures:gh) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
+        ci-failures:glab) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'soft' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'hard' ;; esac ;;
@@ -709,6 +724,10 @@ runtime_requirement_why() {
     local platform
     platform="$(uname -s):$(uname -m)"
     case "$1:$2" in
+        ci-failures:bash) case "$platform" in *:*) printf '%s\n' 'the whole script is a bash script, so without bash there is nothing to run it' ;; esac ;;
+        ci-failures:rjq) case "$platform" in *:*) printf '%s\n' 'every gh/glab API response is parsed with rjq, the JSON tool this repository requires everywhere' ;; esac ;;
+        ci-failures:gh) case "$platform" in *:*) printf '%s\n' 'reads CI results from a github.com (or GitHub Enterprise) remote; without it only a gitlab.com or self-hosted GitLab remote can be read' ;; esac ;;
+        ci-failures:glab) case "$platform" in *:*) printf '%s\n' 'reads CI results from a gitlab.com (or self-hosted GitLab) remote; without it only a github.com remote can be read' ;; esac ;;
         git-merge-resolving:git) case "$platform" in *:*) printf '%s\n' 'every command the guidance names reads history or a conflicted index through git; without it the reasoning still reads but nothing can be checked' ;; esac ;;
         merge-request-etiquette:git) case "$platform" in *:*) printf '%s\n' 'the description is derived from git log for the branch; without git the guidance still reads but its commands cannot run' ;; esac ;;
         planning:bash) case "$platform" in *:*) printf '%s\n' 'every helper this skill ships is a bash script, so without bash none of them run; the guidance in SKILL.md still reads fine' ;; esac ;;
@@ -732,6 +751,8 @@ runtime_tool_verify() {
         python3) command -v python3 >/dev/null 2>&1 ;;
         node) command -v node >/dev/null 2>&1 ;;
         perl) command -v perl >/dev/null 2>&1 ;;
+        gh) command -v gh >/dev/null 2>&1 ;;
+        glab) command -v glab >/dev/null 2>&1 ;;
         *) command -v "$1" >/dev/null 2>&1 ;;
     esac
 }
@@ -836,6 +857,52 @@ runtime_tool_install_hint() {
                         printf '%s\n' '  sudo apk add perl'
                     else
                         printf '%s\n' '  install the perl package for your distribution'
+                    fi
+                    ;;
+            esac
+            ;;
+        gh)
+            case "$platform" in
+                Darwin:*)
+                    if command -v brew >/dev/null 2>&1; then
+                        printf '%s\n' '  brew install gh'
+                    else
+                        printf '%s\n' '  install Homebrew (https://brew.sh) then: brew install gh'
+                    fi
+                    ;;
+                Linux:*)
+                    if command -v apt-get >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apt-get install -y gh'
+                    elif command -v dnf >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo dnf install -y gh'
+                    elif command -v pacman >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo pacman -S --noconfirm github-cli'
+                    elif command -v apk >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apk add github-cli'
+                    else
+                        printf '%s\n' '  install the GitHub CLI (gh) package for your distribution, or see https://github.com/cli/cli#installation'
+                    fi
+                    ;;
+            esac
+            ;;
+        glab)
+            case "$platform" in
+                Darwin:*)
+                    if command -v brew >/dev/null 2>&1; then
+                        printf '%s\n' '  brew install glab'
+                    else
+                        printf '%s\n' '  install Homebrew (https://brew.sh) then: brew install glab'
+                    fi
+                    ;;
+                Linux:*)
+                    if command -v dnf >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo dnf install -y glab'
+                    elif command -v pacman >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo pacman -S --noconfirm glab'
+                    elif command -v apk >/dev/null 2>&1; then
+                        printf '%s\n' '  sudo apk add glab'
+                    else
+                        printf '%s\n' '  install the GitLab CLI (glab) package for your distribution, or see https://gitlab.com/gitlab-org/cli#installation'
                     fi
                     ;;
             esac
@@ -3849,6 +3916,7 @@ tests/test-adversarial-review-preamble.sh
 tests/test-adversary-probe-fixture.sh
 tests/test-artifact-comparisons.sh
 tests/test-blast-radius.sh
+tests/test-ci-failures-contract.sh
 tests/test-comment-format.sh
 tests/test-context-id-suggestions.sh
 tests/test-context-json-control-chars.sh
@@ -4129,6 +4197,13 @@ tests/test-interactive-shell.sh
 tests/test-interactive-shell-exploration.sh
 TODO.json
 ISHEOF
+            ;;
+        ci-failures)
+            printf '%s\n' SKILL.md docs/README.md requires.tsv
+            local file
+            for file in "$SOURCE_ROOT/ci-failures/scripts/"*.sh; do
+                [ -f "$file" ] && printf '%s\n' "scripts/$(basename "$file")"
+            done
             ;;
     esac
 }

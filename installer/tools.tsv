@@ -46,6 +46,8 @@ verify	openssl	*:*	1	-	command -v openssl
 verify	python3	*:*	1	-	command -v python3
 verify	node	*:*	1	-	command -v node
 verify	perl	*:*	1	-	command -v perl
+verify	gh	*:*	1	-	command -v gh
+verify	glab	*:*	1	-	command -v glab
 verify	*	*:*	1	-	command -v "$1"
 hint	python3	Darwin:*	1	brew	  brew install python3
 hint	python3	Darwin:*	1	port	  sudo port install python3
@@ -71,6 +73,19 @@ hint	perl	Linux:*	1	dnf	  sudo dnf install -y perl
 hint	perl	Linux:*	1	pacman	  sudo pacman -S --noconfirm perl
 hint	perl	Linux:*	1	apk	  sudo apk add perl
 hint	perl	Linux:*	1	-	  install the perl package for your distribution
+hint	gh	Darwin:*	1	brew	  brew install gh
+hint	gh	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install gh
+hint	gh	Linux:*	1	apt-get	  sudo apt-get install -y gh
+hint	gh	Linux:*	1	dnf	  sudo dnf install -y gh
+hint	gh	Linux:*	1	pacman	  sudo pacman -S --noconfirm github-cli
+hint	gh	Linux:*	1	apk	  sudo apk add github-cli
+hint	gh	Linux:*	1	-	  install the GitHub CLI (gh) package for your distribution, or see https://github.com/cli/cli#installation
+hint	glab	Darwin:*	1	brew	  brew install glab
+hint	glab	Darwin:*	1	-	  install Homebrew (https://brew.sh) then: brew install glab
+hint	glab	Linux:*	1	dnf	  sudo dnf install -y glab
+hint	glab	Linux:*	1	pacman	  sudo pacman -S --noconfirm glab
+hint	glab	Linux:*	1	apk	  sudo apk add glab
+hint	glab	Linux:*	1	-	  install the GitLab CLI (glab) package for your distribution, or see https://gitlab.com/gitlab-org/cli#installation
 hint	memlimit	*:*	1	-	  curl -LsSf https://github.com/pingiun/memlimit/releases/latest/download/memlimit-installer.sh | sh
 hint	memlimit	*:*	2	brew	  or: brew tap pingiun/memlimit https://github.com/pingiun/memlimit && brew install --HEAD memlimit
 hint	memlimit	*:*	2	cargo	  or: cargo install --git https://github.com/pingiun/memlimit memlimit
