@@ -3578,7 +3578,7 @@
     {
       "id": "B69",
       "title": "the .todos fold deleted T47 rather than folding it, on a stated reason that was false",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3590,12 +3590,12 @@
         "TODO.json",
         "planning/scripts/register-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/scripts/register-lib.sh: reg_findings()'s .todos check now names the specific at-risk ids (todo_ids - task_ids) instead of a generic fold-it nag",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "main session, reviewing ox's landed work against the caution given before it started",
       "notes": null,
       "created_at": "2026-08-28T07:49:34Z",
-      "updated_at": "2026-08-28T07:49:34Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B78",
@@ -3793,7 +3793,7 @@
     {
       "id": "B164",
       "title": "a stray directory under src/ breaks the whole cargo build, and git reports the tree clean",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -3802,12 +3802,12 @@
       "expected": "either the build ignores a directory that is not a crate, or the failure names the real cause: a directory under src/ with no Cargo.toml",
       "mechanism": "the workspace manifest globs members = [\"src/*\"], so cargo treats every directory there as a member and a missing Cargo.toml is fatal for the whole workspace, not just that member. Because the leftover holds only ignored files, no git command surfaces it, so the tree looks pristine by every measure while being unbuildable. Options: list members explicitly, use exclude, or have setup-dev-env.sh name unexpected src/ directories before invoking cargo.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "setup-dev-env.sh: added check_stray_src_dirs() scanning src/*/ for missing Cargo.toml, refusing by name with an rm -rf remedy before any cargo command runs",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "pr-master, building pristine master before a fresh-install check on 2026-09-04",
       "notes": null,
       "created_at": "2026-09-04T12:05:37Z",
-      "updated_at": "2026-09-04T12:05:37Z"
+      "updated_at": "2026-09-10T16:33:11Z"
     },
     {
       "id": "B172",
@@ -4197,7 +4197,7 @@
     {
       "id": "B277",
       "title": "a failed install leaves a half-written skill directory and reports it as a raw cp error",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4210,12 +4210,12 @@
         "install.sh",
         "tests/test-register-schemas.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/60-install.sh: install_skill() now preflights the full file list (same skip conditions as the real copy loop) checking each source file exists before any mkdir/copy, dying with a clear message instead of leaving a half-written directory on a mid-loop cp failure",
+      "verification": "Merged in PR #142, commit fad51b8a. Verified original B277 repro still degrades per B317, and a synthetic missing-file case now refuses cleanly with zero partial state",
       "found_by": "aiskills, reproducing the fresh-worktree failure t90-chat-mcp asked about",
       "notes": "Reproduced while answering whether tests/test-register-schemas.sh failing 4x in a fresh worktree was MAINTAINER 1.9 or a defect. It is both: the 1.9 hypothesis is confirmed -- a fresh checkout has no bin/<triple>/ -- and this is what 1.9 looks like from inside a test. Not a sed defect: the test reads .version with sed -n and gets an empty string because the file is absent, and version_marker_content would have written package_version=unknown rather than an empty value had it run at all.",
       "created_at": "2026-09-07T20:56:00Z",
-      "updated_at": "2026-09-07T20:56:12Z"
+      "updated_at": "2026-09-10T16:33:11Z"
     },
     {
       "id": "B279",
@@ -4325,7 +4325,7 @@
     {
       "id": "B303",
       "title": "chat/SKILL.md claims the harness gives each subagent its own session id, and it does not",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "major",
       "priority": "normal",
       "parent": null,
@@ -4337,12 +4337,12 @@
         "chat/SKILL.md",
         "src/agent-session-key/src/lib.rs"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "chat/SKILL.md: corrected false claim that CLAUDE_CODE_SESSION_ID is per-subagent; documented measured reality (identical between main agent and subagents, opencode has no session id, harnesses nest and inherit)",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "measuring it while designing per-agent sessions for the editor, after Tschallacka said the claim was wrong",
       "notes": "INVESTIGATION, at Tschallacka's request: can a subagent identify itself to the MCP some other way? Three routes, all measured closed on 2026-09-08.\n\n1. A SUBAGENT SETTING AN ENV VAR THAT REACHES MCP CALLS -- no, structurally. The adapter is a long-lived process whose environment was captured at execve: /proc/5515/environ was fixed when it started, two hours and forty minutes before the test. A variable exported inside a bash tool call lives in that transient shell and dies with it; nothing pushes new environment into an already-running stdio child.\n\n2. A SUBAGENT GETTING ITS OWN ADAPTER -- no. A subagent was made to call the editor MCP and then count adapters: it reported one, pid 5515, which is the same pid the parent session uses, parented to the claude process rather than to either agent. Polling from the parent across the whole window agreed, constant at one.\n\n3. THE ADAPTER INFERRING WHO CALLS -- no. It is one process on one stdio stream, and in MCP the client is the harness, singular. The adapter reads method and params and there is no per-caller field to read; anything identifying a sub-agent would have to be placed in the tool ARGUMENTS by the model itself, which is the declaration we already have.\n\nCAN IT REMEMBER A KEY A SUBAGENT SET? Technically yes -- it is long-lived and could hold state -- but it is unsound, and that matters more. With a parent and its subagents interleaving on one connection and no caller id, \"remember the last session set\" attributes every later call to whoever set it most recently. Interleaving is the normal case here, not an edge one: this session ran subagents in the background while editing throughout.\n\nCONCLUSION: identity cannot be inferred, only declared. The nick in the chat client is therefore the general answer rather than a workaround, and the editor's equivalent already exists -- the session argument every MCP tool takes and the --session flag on the CLI. What is missing is that it is optional, so omitting it falls back to the shared harness rung silently.",
       "created_at": "2026-09-08T20:45:10Z",
-      "updated_at": "2026-09-08T20:48:25Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B6",
@@ -4670,7 +4670,7 @@
     {
       "id": "B73",
       "title": "the duplication ratchet counts inline table parsers in comments, not only in code",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4681,12 +4681,12 @@
       "surfaces": [
         "planning/tests/test-duplication-ratchet.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/tests/test-duplication-ratchet.sh: added count_in_code()/files_with_in_code() helpers excluding full-line comments so a comment naming a forbidden pattern to explain non-use doesn't count as a use; caps lowered 43->42 and 15->11 to match real counts; gate-caps.json and MAINTAINER.md synced",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "main session, while replacing three inline parsers with one helper for T66",
       "notes": "Recurred twice more the same day, both times against someone writing a comment to explain a correct choice. In test-flag-coverage it was a comment naming plan_hoist_plan_dir, filed as B82. In the duplication ratchet it was my own comment saying why resolve-finding.sh uses mktemp instead of a pid-suffixed temp path — the comment contained the pattern, so the ratchet counted it as a use and reported 44 against a cap of 43 for a file with zero such sites. Three instances now across three gates, and in every one the person was documenting the rule the gate enforces. The shared cause is that all three match file text rather than code; the shared cost is that the correct response looks like evasion, since the only way past is to describe the forbidden thing without naming it.",
       "created_at": "2026-08-28T10:19:35Z",
-      "updated_at": "2026-08-28T11:11:46Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B81",
@@ -4713,7 +4713,7 @@
     {
       "id": "B82",
       "title": "test-flag-coverage decides a script accepts --plan-dir by grepping for a function name, so a comment mentioning it counts as a call",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4725,17 +4725,17 @@
         "planning/tests/test-flag-coverage.sh",
         "planning/tests/test-duplication-ratchet.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/tests/test-flag-coverage.sh: same comment-exclusion fix applied to the plan_hoist_plan_dir hoist-detection check, using grep -c instead of the banned pipefail-grep-q construct",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "the webview subagent, while renaming a variable and explaining the rename in a comment",
       "notes": null,
       "created_at": "2026-08-28T10:59:48Z",
-      "updated_at": "2026-08-28T10:59:48Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B83",
       "title": "a library's local array leaks its type across the shellcheck source boundary, so any caller using the same variable name as a scalar is falsely flagged",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4747,12 +4747,12 @@
         "planning/scripts/lib/core/plan_hoist_plan_dir.sh",
         "planning/scripts/plan-document-lib.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "planning/scripts/lib/core/plan_hoist_plan_dir.sh: renamed local 'out' array to '_hoist_out' to stop shellcheck -x cross-file type inference from flagging callers' own scalar 'out' variables",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "the webview subagent diagnosed the cause; the same warning then appeared in the plancrypt subagent's test file, and in a gate count I wrote myself",
       "notes": null,
       "created_at": "2026-08-28T11:01:56Z",
-      "updated_at": "2026-08-28T11:01:56Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B84",
@@ -4824,7 +4824,7 @@
     {
       "id": "B91",
       "title": "resource-limited-testing SKILL.md claims the installer hard-refuses without memlimit; requires.tsv declares it soft",
-      "status": "reported",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -4835,12 +4835,12 @@
       "surfaces": [
         "resource-limited-testing/SKILL.md"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "resource-limited-testing/SKILL.md: corrected memlimit bullet to match requires.tsv's actual soft policy (warns, doesn't refuse) instead of claiming a hard refusal",
+      "verification": "Merged in PR #142, commit fad51b8a",
       "found_by": "skill review, maintainer session 2026-08-30",
       "notes": "HELD on instruction: the maintainer wants the macOS fallback CPU limiter (cpulimit) path verified end-to-end before the prose is touched, and believes soft is the intended strength, which requires.tsv already records. The fix is one paragraph once confirmed. Checked what would satisfy the hold, 2026-09-09: planning/tests/test-limited-run-contract.sh is a stubbed contract test (its own header: \"uname and memlimit are stubbed\") that asserts limited-run.sh COMPOSES the right command line (cpulimit --limit=N -- nice ... my-command), not that cpulimit actually throttles anything -- it does not satisfy \"verified end-to-end\". .github/workflows/ci.yml installs real memlimit on the macOS Apple Silicon runner but never installs cpulimit at all, so even a new e2e test (spin a real CPU-bound load, measure its actual CPU time under cpulimit, assert it stays below a ceiling) could not run for real in CI without first adding a brew install cpulimit step there. That is a CI workflow change, which I am flagging rather than making unilaterally. Still HELD; this only narrows what \"verified end-to-end\" is still missing.",
       "created_at": "2026-08-30T21:50:11Z",
-      "updated_at": "2026-09-09T04:15:10Z"
+      "updated_at": "2026-09-10T16:33:00Z"
     },
     {
       "id": "B92",
@@ -5370,7 +5370,7 @@
     {
       "id": "B155",
       "title": "connecting to the chat server takes out-of-band knowledge, so agents start a rival server and split the channel",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5379,17 +5379,17 @@
       "expected": "one documented, idempotent entry point that an agent reaches for unprompted -- it discovers a running server, joins it, and starts one only if none is announcing; it never needs a port supplied by hand and never needs --insecure against a server whose cert is in the chat home",
       "mechanism": "the client's usage block leads with '[--server HOST:PORT]' on every subcommand and lists --insecure as a plain option, so the discoverable path reads as the exception rather than the default. Nothing in the usage says 'a server may already be running, find it first', and there is no single connect verb: join/send/read each take the server independently, so an agent that has not read the session-resolution paragraph at the bottom of the help concludes it must supply a server, and if it cannot reach one it concludes it must start one.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "src/chat-client-rs/src/lib.rs: usage() now leads with the discovery-first connect instruction (chat-client-rs join --chan #c --nick N, no --server) and reframes --server/--insecure as last-resort options",
+      "verification": "Merged in PR #142, commit fad51b8a. cargo build --release, cargo test --release (62 passed), cargo fmt --check, cargo clippy -- -D warnings all clean",
       "found_by": "Tschallacka, observing an agent told to connect on 2026-09-04; transcript captured by pr-master",
       "notes": null,
       "created_at": "2026-09-04T07:32:39Z",
-      "updated_at": "2026-09-04T07:32:39Z"
+      "updated_at": "2026-09-10T16:33:11Z"
     },
     {
       "id": "B165",
       "title": "installer/build.sh --check compares the committed install.sh against a WORKING TREE build, so an uncommitted source edit passes locally and fails in CI",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "normal",
       "parent": null,
@@ -5398,12 +5398,12 @@
       "expected": "the check answers the question CI answers: does the committed install.sh match a build from the COMMITTED sources",
       "mechanism": "the check regenerates from installer/src as it is ON DISK and compares that to install.sh on disk, so an uncommitted source edit sits on both sides of the comparison and cancels out. CI clones the commit, where the edit is absent, and gets a different answer. Fix by building from HEAD (git show HEAD:installer/src/...) rather than the worktree, or by refusing when installer/src has unstaged changes and saying why -- a check that can only be trusted on a clean tree should say so rather than pass.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/build.sh --check: two-layer check -- layer 1 unchanged (disk build vs disk install.sh, catches stale install.sh), layer 2 new (build from git archive HEAD vs disk install.sh, catches a source edit regenerated into install.sh and committed alone while installer/src stays uncommitted)",
+      "verification": "Merged in PR #142, commit fad51b8a. Verified against 3 scratch-clone scenarios (clean tree, blast-radius-style disk mutation, B165 repro) plus test-installer-build.sh, test-blast-radius.sh, test-installer-any-of.sh all passing",
       "found_by": "pr-master, after CI caught a commit carrying the generated install.sh without its source (PR #48)",
       "notes": null,
       "created_at": "2026-09-04T12:36:25Z",
-      "updated_at": "2026-09-04T12:36:25Z"
+      "updated_at": "2026-09-10T16:33:11Z"
     },
     {
       "id": "B173",
@@ -6636,7 +6636,7 @@
     {
       "id": "B236",
       "title": "the manual permission fallback prints Claude Code settings.json syntax whatever agent it is talking to",
-      "status": "confirmed",
+      "status": "fixed",
       "severity": "minor",
       "priority": "low",
       "parent": null,
@@ -6647,12 +6647,12 @@
       "surfaces": [
         "installer/src/70-permissions.sh"
       ],
-      "fix": null,
-      "verification": null,
+      "fix": "installer/src/70-permissions.sh: print_manual_permissions/print_manual_worktrees_permissions/print_manual_interactive_shell_permissions now branch on agent kind (claude/opencode/codex) to print the correct settings syntax per agent, falling through to no example for an unrecognized kind",
+      "verification": "Merged in PR #142, commit fad51b8a. Verified via direct function calls per kind and test-worktree-permissions.sh PASS",
       "found_by": "live three-agent verification of the worktrees grant, 2026-09-07",
       "notes": null,
       "created_at": "2026-09-07T11:19:23Z",
-      "updated_at": "2026-09-07T11:19:23Z"
+      "updated_at": "2026-09-10T16:33:11Z"
     },
     {
       "id": "B240",
