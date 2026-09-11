@@ -87,30 +87,29 @@ targets_to_try() {
 }
 
 installer_binary_path() { # <target> -> where its binary sits once built
-    local target="$1" host
-    host="$(host_target 2>/dev/null || true)"
-    if [ "$target" = "$host" ]; then
-        printf '%s/target/release/installer\n' "$repo_root"
-    else
-        printf '%s/target/%s/release/installer\n' "$repo_root" "$target"
-    fi
+    printf '%s/target/%s/release/installer\n' "$repo_root" "$1"
 }
 
 # Builds only when nothing is there yet, same "build-if-missing, staleness is
 # the tests' job" posture build-release.sh already takes with the chat and
 # register binaries. Returns 1 (not a hard exit) when cargo is absent or the
-# cross build fails, so the caller can decide whether that is fatal.
+# build fails, so the caller can decide whether that is fatal.
+#
+# ALWAYS passes --target, even when it names the running host: `uname`
+# cannot tell a glibc host from a musl one, so a "this is the host, skip
+# --target" shortcut here would silently link against whatever libc the
+# host's default toolchain happens to use and call the result
+# x86_64-unknown-linux-musl regardless -- caught by inspecting a build this
+# script itself produced with that shortcut still in place (`file` showed
+# a glibc interpreter on a binary named as a musl one). The target's std
+# library must be installed (`rustup target add`, the CI native job's own
+# "Install the target standard library" step) for this to succeed.
 ensure_installer_binary() {
-    local target="$1" host bin
-    host="$(host_target 2>/dev/null || true)"
+    local target="$1" bin
     bin="$(installer_binary_path "$target")"
     [ -x "$bin" ] && return 0
     command -v cargo >/dev/null 2>&1 || return 1
-    if [ "$target" = "$host" ]; then
-        (cd "$repo_root" && cargo build --release -p installer) || return 1
-    else
-        (cd "$repo_root" && cargo build --release -p installer --target "$target") || return 1
-    fi
+    (cd "$repo_root" && cargo build --release -p installer --target "$target") || return 1
     [ -x "$bin" ]
 }
 
