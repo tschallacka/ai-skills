@@ -23,6 +23,7 @@ mod integration;
 mod plan_migration;
 mod plugins;
 mod requirements;
+mod tools;
 mod ui;
 
 use std::io::Write;
@@ -1292,7 +1293,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         })
         .collect();
 
-    match ui::run_picker(skills) {
+    match ui::run_picker(skills, &source) {
         None => {
             println!("interactive: no changes made");
             Ok(ExitCode::SUCCESS)

@@ -141,9 +141,14 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
             }
         }
     }
+    // Always listed, same as install.sh's iui_info_actions -- usable only
+    // when the info pane has focus, but named here regardless so a reader
+    // in the list pane already knows what focusing it offers.
+    lines.push(pad("", width));
+    lines.push(pad("ACTIONS", width));
+    lines.push(pad("  d  help me install dependencies", width));
+    lines.push(pad("  r  reverify dependencies", width));
     if skill.offered_modes.len() > 1 {
-        lines.push(pad("", width));
-        lines.push(pad("ACTIONS", width));
         for line in wrap(
             &format!(
                 "  m  integration mode: {}   (cycles: {})",
@@ -385,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn a_skill_offering_more_than_one_mode_shows_the_actions_line() {
+    fn a_skill_offering_more_than_one_mode_shows_the_mode_line() {
         let mut list = skills(&["ai-text-editor"]);
         list[0].offered_modes = vec!["skill".to_string(), "mcp".to_string()];
         list[0].mode = "mcp".to_string();
@@ -399,9 +404,12 @@ mod tests {
     }
 
     #[test]
-    fn a_skill_with_one_mode_shows_no_actions_line() {
+    fn a_skill_with_one_mode_still_shows_actions_but_no_mode_line() {
         let state = PickerState::new(skills(&["todo"]));
         let lines = info_lines(&state, 60);
-        assert!(!lines.iter().any(|l| l.contains("ACTIONS")));
+        assert!(lines.iter().any(|l| l.contains("ACTIONS")));
+        assert!(lines.iter().any(|l| l.contains("help me install dependencies")));
+        assert!(lines.iter().any(|l| l.contains("reverify dependencies")));
+        assert!(!lines.iter().any(|l| l.contains("integration mode")));
     }
 }

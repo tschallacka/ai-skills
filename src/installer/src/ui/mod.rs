@@ -4,8 +4,7 @@
 //! 37-ui-input.sh calls iui_select_skills(). Ties layout, model, render,
 //! input, terminal and the mascot together; see each submodule's own doc
 //! comment for what it ports and what it deliberately leaves out (no
-//! dependency table, no mouse, no integration-mode cycling, no hint
-//! carousel or "right-top" mascot placement).
+//! mouse, no "right-top" mascot placement).
 
 pub mod input;
 pub mod layout;
@@ -17,13 +16,15 @@ pub mod terminal;
 use input::Key;
 use mascot::{ColorMode, EyeAnimator};
 use model::{Focus, PickerState, SkillEntry};
+use std::path::Path;
 
 /// `None` when fd 0 is not a tty (the caller's cue to fall back to a plain
 /// listing, same as install.sh's iui_run returning 69) or the user quit
 /// (q/Esc/Ctrl-C/EOF); `Some(names_and_modes)` in original skill order once
 /// `i` confirms, the mode being whatever `m` last cycled it to (or the
 /// run's already-resolved default, if `m` was never pressed for that skill).
-pub fn run_picker(skills: Vec<SkillEntry>) -> Option<Vec<(String, String)>> {
+/// `source_root` is only used by `r` (reverify).
+pub fn run_picker(skills: Vec<SkillEntry>, source_root: &Path) -> Option<Vec<(String, String)>> {
     if !terminal::is_tty() {
         return None;
     }
@@ -56,7 +57,7 @@ pub fn run_picker(skills: Vec<SkillEntry>) -> Option<Vec<(String, String)>> {
                 state.done = true;
                 state.confirmed = false;
             }
-            key => handle_key(&mut state, key, &layout),
+            key => handle_key(&mut state, key, &layout, source_root),
         }
         if state.done {
             break;
@@ -99,7 +100,7 @@ fn clamp_info_scroll(state: &mut PickerState, layout: &layout::Layout) {
     }
 }
 
-fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout) {
+fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout, source_root: &Path) {
     match key {
         Key::Up | Key::Char('k') => state.move_by(-1),
         Key::Down | Key::Char('j') => state.move_by(1),
@@ -121,10 +122,11 @@ fn handle_key(state: &mut PickerState, key: Key, layout: &layout::Layout) {
         Key::Tab | Key::ShiftTab => state.toggle_focus(),
         Key::Char('a') => state.select_all(),
         Key::Char('n') => state.select_none(),
-        // Focus-gated like a future d/r would be: the ACTIONS lines are only
-        // usable when the info pane holds focus, same as install.sh's
-        // iui_handle_key ('i' already means "install", so cycling the mode
-        // could not reuse it).
+        // d/r/m are focus-gated: the ACTIONS lines are only usable when the
+        // info pane holds focus, same as install.sh's iui_handle_key ('i'
+        // already means "install", so cycling the mode could not reuse it).
+        Key::Char('d') if state.focus == Focus::Info => state.dep_hint(),
+        Key::Char('r') if state.focus == Focus::Info => state.reverify(source_root),
         Key::Char('m') if state.focus == Focus::Info => state.cycle_integration_mode(),
         Key::Char('i') => {
             state.done = true;

@@ -205,6 +205,62 @@ impl PickerState {
         self.message = vec![format!("{} will be installed in {} mode", skill.name, skill.mode)];
     }
 
+    /// Lists how to install every currently-missing requirement of the
+    /// skill under the cursor -- ported from
+    /// installer/src/37-ui-input.sh's `iui_action_dep_hint`. A group
+    /// requirement's label names every member (`requirement_label`'s "any
+    /// of a, b"); the install hint underneath is printed once per member,
+    /// since installer/tools.tsv's hint table is keyed by a single tool id,
+    /// not by a group.
+    pub fn dep_hint(&mut self) {
+        let Some(skill) = self.skills.get(self.cursor) else {
+            return;
+        };
+        let mut message = vec!["HOW TO INSTALL THE MISSING DEPENDENCIES".to_string()];
+        let mut any = false;
+        for (req, met) in &skill.status.requirements {
+            if *met {
+                continue;
+            }
+            any = true;
+            message.push(format!(
+                "{} ({}): {}",
+                crate::requirements::requirement_label(req),
+                match req.strength {
+                    crate::requirements::Strength::Hard => "hard",
+                    crate::requirements::Strength::Soft => "soft",
+                },
+                req.why
+            ));
+            let members: Vec<&str> = if req.group.is_some() {
+                req.tool.split(", ").collect()
+            } else {
+                vec![req.tool.as_str()]
+            };
+            for member in members {
+                message.extend(crate::tools::install_hint(member));
+            }
+        }
+        if !any {
+            message.push("nothing missing for this skill".to_string());
+        }
+        self.message = message;
+    }
+
+    /// Re-checks the skill under the cursor's requirements against this
+    /// host right now -- ported from `iui_action_reverify`. install.sh
+    /// caches a tool's verify result across skills and clears it here; this
+    /// installer never cached one in the first place (each requirement is a
+    /// handful of PATH lookups, cheap enough to just redo), so reverify is
+    /// simply a fresh `skill_status` call.
+    pub fn reverify(&mut self, source_root: &std::path::Path) {
+        let Some(skill) = self.skills.get_mut(self.cursor) else {
+            return;
+        };
+        skill.status = crate::requirements::skill_status(source_root, &skill.name);
+        self.message = vec!["reverified; each skill is checked fresh".to_string()];
+    }
+
     pub fn selected_count(&self) -> usize {
         self.selected.iter().filter(|s| **s).count()
     }
@@ -419,5 +475,69 @@ mod tests {
             state.selected_with_modes(),
             vec![("a".to_string(), "skill".to_string()), ("b".to_string(), "mcp".to_string())]
         );
+    }
+
+    #[test]
+    fn dep_hint_lists_only_the_unmet_requirements_with_install_instructions() {
+        let mut list = skills(&["a"]);
+        list[0].status = SkillStatus {
+            state: SkillState::Blocked,
+            blocker: Some("rjq".to_string()),
+            requirements: vec![
+                (
+                    crate::requirements::Requirement {
+                        tool: "bash".to_string(),
+                        group: None,
+                        strength: crate::requirements::Strength::Hard,
+                        why: "needs bash".to_string(),
+                    },
+                    true,
+                ),
+                (
+                    crate::requirements::Requirement {
+                        tool: "rjq".to_string(),
+                        group: None,
+                        strength: crate::requirements::Strength::Hard,
+                        why: "needs json".to_string(),
+                    },
+                    false,
+                ),
+            ],
+        };
+        let mut state = PickerState::new(list);
+        state.dep_hint();
+        assert_eq!(state.message[0], "HOW TO INSTALL THE MISSING DEPENDENCIES");
+        assert!(state.message.iter().any(|l| l.contains("rjq (hard): needs json")));
+        assert!(!state.message.iter().any(|l| l.contains("bash (hard)")));
+        assert!(state.message.len() > 2, "expected an install hint line too: {:?}", state.message);
+    }
+
+    #[test]
+    fn dep_hint_says_so_when_nothing_is_missing() {
+        let mut state = PickerState::new(skills(&["a"]));
+        state.dep_hint();
+        assert_eq!(
+            state.message,
+            vec![
+                "HOW TO INSTALL THE MISSING DEPENDENCIES".to_string(),
+                "nothing missing for this skill".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn reverify_recomputes_the_cursor_skills_status_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a")).unwrap();
+        let mut state = PickerState::new(skills(&["a"]));
+        assert_eq!(state.skills[0].status.state, SkillState::Ok);
+        std::fs::write(
+            dir.path().join("a/requires.tsv"),
+            "tool\tcondition\tstrength\twhy\ndefinitely-not-a-real-tool-xyz\t*:*\thard\tneeds it\n",
+        )
+        .unwrap();
+        state.reverify(dir.path());
+        assert_eq!(state.skills[0].status.state, SkillState::Blocked);
+        assert_eq!(state.message, vec!["reverified; each skill is checked fresh".to_string()]);
     }
 }
