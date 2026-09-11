@@ -309,6 +309,25 @@
       "updated_at": "2026-09-07T22:04:38Z"
     },
     {
+      "id": "B319",
+      "title": "tui-hint-plugin and editor-gate-plugin PreToolUse hooks fail (or fail open) when rjq is not on PATH",
+      "status": "reported",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Docker-build a fresh image from this repo's Dockerfile (node:20-bookworm-slim + Claude Code CLI, no rjq preinstalled). Run install.sh --all --target <root>/.claude/skills --yes as a non-root user with no rjq on PATH. Then run claude -p with a prompt that runs a plain Bash command (e.g. printf hello redirected into test.txt) and, separately, one matching editor-gate-plugin's hard-gate pattern (a heredoc-fed write). Claude Code's own --debug-file log shows: 'Hook PreToolUse:Bash (PreToolUse) error: .../tui-hint-plugin/hooks/pre-tool-use.sh: line 26: rjq: command not found' and the same for editor-gate-plugin's two hook scripts, on every single Bash/Edit/Write call.",
+      "observed": "Every PreToolUse hook invocation for these two plugins errors out (rjq: command not found) because the hook scripts call rjq directly with no availability check and no fallback, and neither ai-text-editor nor interactive-shell (the skills these plugins ride along with) declare rjq as a runtime requirement anywhere -- so a fresh Claude Code install with only those skills selected has no reason to have rjq on PATH at all. installer/src/20-runtime-tools.sh's prepend_bundled_rjq only prepends rjq to PATH for the lifetime of the install.sh process itself; it is never persisted anywhere a later, independent Claude Code hook invocation could find it. Confirmed live in a disposable Docker container: hooks.json IS read and the hooks ARE invoked (Claude Code's plugin auto-discovery under <root>/.claude/skills/<plugin>/.claude-plugin/plugin.json works correctly), but every invocation dies on the missing rjq before printing any hookSpecificOutput JSON.",
+      "expected": "Both hooks should work with no dependency on a tool this repo never promised interactive-shell or ai-text-editor users would have; at minimum they should degrade to a no-op (tui-hint-plugin) or a documented, deliberate fail-closed default (editor-gate-plugin's hard gate) rather than crashing on a missing binary with unclear consequences for whether the underlying tool call is allowed or blocked.",
+      "mechanism": "Both plugins' PreToolUse hook scripts call rjq to parse the JSON payload on stdin and to build the JSON response, under set -euo pipefail, with no command -v rjq guard beforehand. Since rjq is a build-time/install-time tool bundled only inside this repo's own bin dir (or wherever prepend_bundled_rjq's PATH edit reached, which does not outlive the install.sh process), a real end-user's Claude Code session -- which runs completely independently, potentially hours or days later, with none of install.sh's environment -- has no guarantee rjq is reachable. For tui-hint-plugin (purely advisory) the impact is a logged hook error and a missing reminder -- degraded, not dangerous. For editor-gate-plugin's hard gate on Bash, the impact is worse: because the hook script cannot even reach the point of emitting a deny decision, Claude Code very likely treats the erroring hook as non-blocking and the underlying tool call proceeds -- i.e. the gate silently fails open exactly for the dangerous commands it exists to catch, which is the opposite of its intended fail-closed security posture.",
+      "surfaces": [],
+      "fix": null,
+      "verification": null,
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-11T00:49:48Z",
+      "updated_at": "2026-09-11T00:49:48Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
