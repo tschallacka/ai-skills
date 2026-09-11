@@ -434,6 +434,76 @@ fn home_dir_opt() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
 }
 
+/// Accumulates what a run actually did, for the final `== Summary ==` block
+/// -- ported from install.sh's `SUMMARY_LINES`/`summary_add` and
+/// `summary_blocked_block`/`replay_commands`. install.sh's own per-line
+/// soft-requirement/dev-build/integration-mode suffixes
+/// (`summary_soft_note`/`summary_dev_build_note`/`summary_integration_note`)
+/// are not reproduced here; this covers the two lines install.sh's own
+/// comment calls the whole point of the block -- what was installed, and,
+/// for anything blocked on a hard requirement, the exact command that
+/// retries once it's met.
+#[derive(Default)]
+struct Summary {
+    installed: Vec<String>,
+    platform_blocked: Vec<(String, String)>,
+    hard_blocked: Vec<HardBlocked>,
+}
+
+struct HardBlocked {
+    skill: String,
+    /// (label, install-hint lines) for every unmet hard requirement, in
+    /// `requirements::skill_status`'s own order.
+    unmet: Vec<(String, Vec<String>)>,
+}
+
+impl Summary {
+    /// `roots` and `yes` are threaded in at print time, not recorded per
+    /// skill: install.sh's own `replay_commands` reads `SELECTED_TARGET_PATHS`
+    /// and `YES` fresh when the summary prints, not when the skill was
+    /// blocked, since the whole run shares one root list and one --yes.
+    fn print(&self, roots: &[PathBuf], yes: bool) {
+        if self.installed.is_empty() && self.platform_blocked.is_empty() && self.hard_blocked.is_empty() {
+            return;
+        }
+        println!();
+        println!("== Summary ==");
+        for line in &self.installed {
+            println!("{line}");
+        }
+        for (skill, reason) in &self.platform_blocked {
+            println!("Skipped:   {skill} -- {reason}, nothing was written");
+        }
+        let replay_prefix = std::env::args()
+            .next()
+            .unwrap_or_else(|| "installer".to_string());
+        for blocked in &self.hard_blocked {
+            println!(
+                "Skipped:   {} -- a hard requirement is missing, nothing was written",
+                blocked.skill
+            );
+            println!("To install {} once its requirements are met:", blocked.skill);
+            let mut step = 1;
+            for (label, hint) in &blocked.unmet {
+                println!("  {step}. install {label}:");
+                for line in hint {
+                    println!("  {line}");
+                }
+                step += 1;
+            }
+            println!("  {step}. replay this run:");
+            for root in roots {
+                let yes_flag = if yes { " --yes" } else { "" };
+                println!(
+                    "  {replay_prefix} install --skill {} --target {}{yes_flag}",
+                    blocked.skill,
+                    root.display()
+                );
+            }
+        }
+    }
+}
+
 /// A skill missing a hard requirement is skipped rather than installed and
 /// then left half-usable -- same rule as install.sh's
 /// summary_blocked_block/RUNTIME_BLOCKED_SKILLS: "Skipped: %s -- a hard
@@ -453,17 +523,42 @@ fn install_selected_skills(
     skills: &[String],
     integration_selection: &IntegrationSelection,
     dev_build: bool,
+    summary: &mut Summary,
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
     for skill in skills {
         if let Some(reason) = manifest::skill_unsupported_here(skill) {
             println!("Skipped: {skill} -- {reason}, nothing was written");
+            summary.platform_blocked.push((skill.clone(), reason.to_string()));
             continue;
         }
         let status = requirements::skill_status(source, skill);
         if status.state == requirements::SkillState::Blocked {
-            let reason = status.blocker.unwrap_or_else(|| "a required tool".to_string());
+            let reason = status.blocker.clone().unwrap_or_else(|| "a required tool".to_string());
             println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
+            // Install hints are per bare tool (installer/tools.tsv is keyed
+            // by a single tool id, not a group), so a group requirement's
+            // hint is every member's hint concatenated -- same reasoning as
+            // ui::model::PickerState::dep_hint.
+            let unmet: Vec<(String, Vec<String>)> = status
+                .requirements
+                .iter()
+                .filter(|(r, met)| !met && r.strength == requirements::Strength::Hard)
+                .map(|(r, _)| {
+                    let label = requirements::requirement_label(r);
+                    let members: Vec<&str> = if r.group.is_some() {
+                        r.tool.split(", ").collect()
+                    } else {
+                        vec![r.tool.as_str()]
+                    };
+                    let hint = members.iter().flat_map(|m| tools::install_hint(m)).collect();
+                    (label, hint)
+                })
+                .collect();
+            summary.hard_blocked.push(HardBlocked {
+                skill: skill.clone(),
+                unmet,
+            });
             continue;
         }
         install::install_skill(
@@ -474,7 +569,9 @@ fn install_selected_skills(
             dev_build,
         )
         .map_err(|e| e.to_string())?;
-        println!("installed {skill} -> {}", target.join(skill).display());
+        let line = format!("installed {skill} -> {}", target.join(skill).display());
+        println!("{line}");
+        summary.installed.push(line);
         installed.push(skill.clone());
     }
     Ok(installed)
@@ -803,6 +900,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     // run-wide YES/YES_ALL: an "a" (all) answer for the first root's prompt
     // must still auto-answer every later root's prompts too.
     let mut confirms = Confirms::new(args.yes);
+    let mut summary = Summary::default();
     for (target, kind) in &roots {
         let installed = install_selected_skills(
             &source,
@@ -810,9 +908,12 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
             &skills,
             &integration_selection,
             args.dev_build,
+            &mut summary,
         )?;
         run_post_install_steps(kind.as_deref(), &source, target, &installed, &mut confirms);
     }
+    let root_paths: Vec<PathBuf> = roots.iter().map(|(t, _)| t.clone()).collect();
+    summary.print(&root_paths, args.yes);
     Ok(ExitCode::SUCCESS)
 }
 enum GrantTarget {
@@ -1408,10 +1509,18 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             for (name, mode) in &selected {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
-            let installed =
-                install_selected_skills(&source, &target, &names, &picked, dev_build)?;
+            let mut summary = Summary::default();
+            let installed = install_selected_skills(
+                &source,
+                &target,
+                &names,
+                &picked,
+                dev_build,
+                &mut summary,
+            )?;
             let mut confirms = Confirms::new(yes);
             run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
+            summary.print(std::slice::from_ref(&target), yes);
             Ok(ExitCode::SUCCESS)
         }
     }
