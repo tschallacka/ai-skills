@@ -69,87 +69,101 @@ validate_story_cache() {
     fi
 }
 
+plan_validate_ui_story_row() { # <story_id> <actions> <interaction> <status> <evidence> <related> <cache_path>
+    local story_id="$1" actions="$2" interaction="$3" status="$4" evidence="$5" related="$6" cache_path="$7"
+    local verification_count related_id
+    if ! [[ "$actions $interaction" =~ [Cc]lick|[Tt]ap|[Tt]ype|[Kk]eyboard|[Pp]ress|[Ss]wipe|[Pp]inch|[Dd]rag|[Ss]elect ]]; then
+        fail "$story_id has no documented direct user interaction"
+    fi
+    # actions and interaction only. Evidence describes the result, where
+    # naming browser storage is often the accurate account of what the page
+    # did, and failing that rewards a vaguer artifact.
+    if [[ "$actions $interaction" =~ $prohibited_pattern ]]; then
+        fail "$story_id is driven by prohibited console, state, or direct-API input"
+    fi
+    validate_story_cache "$story_id" "$cache_path" "$status"
+    case "$status" in
+        '💤 untested'|'⏳ in progress'|'✅ passed'|'🐛 bug found'|'⏭️ excluded') ;;
+        *) fail "$story_id has an unsupported user-story status '$status'" ;;
+    esac
+    [ "$status" = '🐛 bug found' ] && plan_map_set bug_story_ids "$story_id" 1
+    verification_count=0
+    while IFS= read -r related_id; do
+        [ -n "$related_id" ] || continue
+        if ! plan_map_has unit_type "$related_id"; then
+            fail "$story_id refers to unknown work unit $related_id"
+        elif plan_map_load unit_type "$related_id" && [ "$plan_map_value" = verification ]; then
+            verification_count=$((verification_count + 1))
+        fi
+    done < <(printf '%s\n' "$related" | grep -oE 'W[0-9][0-9]+' || true)
+    if [ "$verification_count" -eq 0 ]; then
+        fail "$story_id has no related verification work unit"
+    fi
+    if [ "$complete_mode" = true ]; then
+        case "$status" in
+            '✅ passed') ;;
+            '⏭️ excluded')
+                [[ "$evidence" =~ [Uu]ser[[:space:]-]approved ]] || fail "$story_id is excluded without recorded user approval"
+                ;;
+            *) fail "$story_id is not validated at plan completion ($status)" ;;
+        esac
+    fi
+}
+
+plan_validate_ui_stories() { # <stories_file>
+    local stories="$1" story_count story_id actions interaction status evidence related cache_path
+    if [ ! -f "$stories" ]; then
+        fail "UI validation is required but ui-user-stories.md is missing"
+        return
+    fi
+    grep -Eq '^# UI user stories: .+' "$stories" || fail "Missing user-story title in $stories"
+    story_count=0
+    # Cleared, not declared: plan_map_* maps are process-global, and this
+    # function may run twice in one process.
+    plan_map_clear bug_story_ids
+    while IFS=$'\t' read -r story_id actions interaction status evidence related cache_path; do
+        [ -n "$story_id" ] || continue
+        story_count=$((story_count + 1))
+        plan_validate_ui_story_row "$story_id" "$actions" "$interaction" "$status" "$evidence" "$related" "$cache_path"
+    done < <(
+        awk -F'|' '
+            /^\|[[:space:]]*US-[0-9][0-9]+[[:space:]]*\|/ {
+                for (i = 2; i <= 10; i++) {
+                    if (i != 2 && i != 4 && i != 5 && i != 7 && i != 8 && i != 9 && i != 10) continue
+                    value = $i
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                    printf "%s%s", value, (i == 10 ? ORS : "\t")
+                }
+            }
+        ' "$stories"
+    )
+    if [ "$story_count" -eq 0 ]; then
+        fail "ui-user-stories.md has no story rows; use IDs such as US-01"
+    fi
+}
+
+plan_validate_ui_bugs() { # <bugs_file>
+    local bugs_file="$1" story_id
+    if [ ! -f "$bugs_file" ]; then
+        fail "UI validation requires bugs.md"
+        return
+    fi
+    grep -Eq '^# UI bugs: .+' "$bugs_file" || fail "Missing UI bug title in $bugs_file"
+    while IFS= read -r story_id; do
+        [ -n "$story_id" ] || continue
+        grep -Eq "^\\|[[:space:]]*BUG-[0-9]+[[:space:]]*\\|[[:space:]]*${story_id}[[:space:]]*\\|.*-investigate-.*\\|.*-fix-" "$bugs_file" || fail "$story_id bug lacks linked investigation and fix goals"
+    done < <(plan_map_keys bug_story_ids)
+    if [ "$complete_mode" = true ] && grep -Eq '^\|[[:space:]]*BUG-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ open|⏳ in progress)[[:space:]]*\|$' "$bugs_file"; then
+        fail "UI bugs.md has unresolved bugs at plan completion"
+    fi
+}
+
 plan_validate_ui() {
     if [ "$ui_affected" = yes ]; then
         require_heading "$plan_dir/plan-description.md" '## UI validation'
         grep -Fqx -- '- Required: yes' "$plan_dir/plan-description.md" || fail "UI-affected plan must require UI validation"
-        stories="$plan_dir/ui-user-stories.md"
-        bugs_file="$plan_dir/bugs.md"
-        if [ ! -f "$stories" ]; then
-            fail "UI validation is required but ui-user-stories.md is missing"
-        else
-            grep -Eq '^# UI user stories: .+' "$stories" || fail "Missing user-story title in $stories"
-            story_count=0
-            # Cleared, not declared: plan_map_* maps are process-global, and this
-            # function may run twice in one process.
-            plan_map_clear bug_story_ids
-            while IFS=$'\t' read -r story_id actions interaction status evidence related cache_path; do
-                [ -n "$story_id" ] || continue
-                story_count=$((story_count + 1))
-                if ! [[ "$actions $interaction" =~ [Cc]lick|[Tt]ap|[Tt]ype|[Kk]eyboard|[Pp]ress|[Ss]wipe|[Pp]inch|[Dd]rag|[Ss]elect ]]; then
-                    fail "$story_id has no documented direct user interaction"
-                fi
-                # actions and interaction only. Evidence describes the result,
-                # where naming browser storage is often the accurate account of
-                # what the page did, and failing that rewards a vaguer artifact.
-                if [[ "$actions $interaction" =~ $prohibited_pattern ]]; then
-                    fail "$story_id is driven by prohibited console, state, or direct-API input"
-                fi
-                validate_story_cache "$story_id" "$cache_path" "$status"
-                case "$status" in
-                    '💤 untested'|'⏳ in progress'|'✅ passed'|'🐛 bug found'|'⏭️ excluded') ;;
-                    *) fail "$story_id has an unsupported user-story status '$status'" ;;
-                esac
-                [ "$status" = '🐛 bug found' ] && plan_map_set bug_story_ids "$story_id" 1
-                verification_count=0
-                while IFS= read -r related_id; do
-                    [ -n "$related_id" ] || continue
-                    if ! plan_map_has unit_type "$related_id"; then
-                        fail "$story_id refers to unknown work unit $related_id"
-                    elif plan_map_load unit_type "$related_id" && [ "$plan_map_value" = verification ]; then
-                        verification_count=$((verification_count + 1))
-                    fi
-                done < <(printf '%s\n' "$related" | grep -oE 'W[0-9][0-9]+' || true)
-                if [ "$verification_count" -eq 0 ]; then
-                    fail "$story_id has no related verification work unit"
-                fi
-                if [ "$complete_mode" = true ]; then
-                    case "$status" in
-                        '✅ passed') ;;
-                        '⏭️ excluded')
-                            [[ "$evidence" =~ [Uu]ser[[:space:]-]approved ]] || fail "$story_id is excluded without recorded user approval"
-                            ;;
-                        *) fail "$story_id is not validated at plan completion ($status)" ;;
-                    esac
-                fi
-            done < <(
-                awk -F'|' '
-                    /^\|[[:space:]]*US-[0-9][0-9]+[[:space:]]*\|/ {
-                        for (i = 2; i <= 10; i++) {
-                            if (i != 2 && i != 4 && i != 5 && i != 7 && i != 8 && i != 9 && i != 10) continue
-                            value = $i
-                            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-                            printf "%s%s", value, (i == 10 ? ORS : "\t")
-                        }
-                    }
-                ' "$stories"
-            )
-            if [ "$story_count" -eq 0 ]; then
-                fail "ui-user-stories.md has no story rows; use IDs such as US-01"
-            fi
-        fi
-        if [ ! -f "$bugs_file" ]; then
-            fail "UI validation requires bugs.md"
-        else
-            grep -Eq '^# UI bugs: .+' "$bugs_file" || fail "Missing UI bug title in $bugs_file"
-            while IFS= read -r story_id; do
-                [ -n "$story_id" ] || continue
-                grep -Eq "^\\|[[:space:]]*BUG-[0-9]+[[:space:]]*\\|[[:space:]]*${story_id}[[:space:]]*\\|.*-investigate-.*\\|.*-fix-" "$bugs_file" || fail "$story_id bug lacks linked investigation and fix goals"
-            done < <(plan_map_keys bug_story_ids)
-            if [ "$complete_mode" = true ] && grep -Eq '^\|[[:space:]]*BUG-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ open|⏳ in progress)[[:space:]]*\|$' "$bugs_file"; then
-                fail "UI bugs.md has unresolved bugs at plan completion"
-            fi
-        fi
+        plan_validate_ui_stories "$plan_dir/ui-user-stories.md"
+        plan_validate_ui_bugs "$plan_dir/bugs.md"
     elif grep -Fqx -- '- Required: yes' "$plan_dir/plan-description.md"; then
         fail "Plan requires UI validation but declares UI affected: no"
     fi

@@ -1048,6 +1048,25 @@ prepend_bundled_rjq() {
     fi
 }
 
+# prepend_bundled_rjq only reaches install.sh's own process -- gone the
+# moment it exits. A plugin whose hook runs independently later (tui-hint-
+# plugin, editor-gate-plugin; B319) needs rjq at a location it can resolve
+# on its own, without adding it to the user's global PATH. This copies the
+# same artifact prepend_bundled_rjq already found to one fixed,
+# install-root-independent path both plugins' hooks check first. A no-op,
+# not a failure, on a host with no bundled artifact for it -- those hooks
+# fall back to their own dependency-free JSON handling.
+install_shared_rjq() {
+    local artifact destination
+    artifact="$(bundled_rjq_artifact)" || return 0
+    [ -n "$artifact" ] || return 0
+    [ -x "$SOURCE_ROOT/planning/$artifact" ] || return 0
+    destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/rjq"
+    mkdir -p "$(dirname "$destination")" 2>/dev/null || return 0
+    cp -p "$SOURCE_ROOT/planning/$artifact" "$destination" 2>/dev/null || return 0
+    chmod +x "$destination" 2>/dev/null || true
+}
+
 # A skill is installable when every hard requirement is met. A missing soft one
 # is deliberately not consulted here — it costs a warning, not the install.
 skill_runtime_tools_present() {
@@ -3717,7 +3736,9 @@ scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
 scripts/plan-content-diff-lib.sh
+scripts/plan-content-lib.sh
 scripts/plan-context-lib.sh
+scripts/plan-context-commands-lib.sh
 scripts/plan-context.sh
 scripts/plan-context-wrapper.sh
 scripts/plan-env.sh
@@ -5032,7 +5053,6 @@ strip_trailing_slashes() {
 # rjq is the only runtime dependency this installer is allowed to add.
 claude_permissions() {
     local cfg="${CLAUDE_CONFIGFILE:-$HOME/.claude/settings.json}" scripts="$1" plans="$2" tmp="$3"
-    local doc added tmpfile program
     [ -f "$cfg" ] || { echo "  claude-code: no $cfg found; skipped" >&2; return 0; }
     if ! command -v rjq >/dev/null 2>&1; then
         echo "  claude-code: rjq is not installed; cannot edit $cfg safely." >&2
@@ -5043,50 +5063,14 @@ claude_permissions() {
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
     backup_file "$cfg"
-
-    # An unparseable or non-object settings.json is rebuilt from {} rather than
-    # edited. `objectify` is the same defensive read at every level.
-    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
-    [ -n "$doc" ] || doc='{}'
-    program='
-def objectify: if type == "object" then . else {} end;
-def entries: [
+    claude_merge_allow 'def entries: [
     "Read(\($plans)/**)", "Edit(\($plans)/**)",
     "Bash(\($scripts)/**:*)", "Read(\($scripts)/**)",
     "Bash(bash \($scripts)/**:*)",
     "Read(\($tmp)/**)", "Edit(\($tmp)/**)",
     "Bash(\($tmp)/**:*)"
-];
-def allowed: objectify | .permissions | objectify | .allow
-    | if type == "array" then . else [] end;
-'
-    added="$(printf '%s' "$doc" | rjq -r \
-        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
-        "$program"'(entries - allowed)[]')"
-
-    # mktemp in the config's own directory so the rename is atomic, and cp -p to
-    # inherit the user's mode before rjq truncates it.
-    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
-    cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | rjq \
-        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
-        "$program"'
-        objectify
-        | (.permissions | objectify) as $perm
-        | ($perm.allow | if type == "array" then . else [] end) as $allow
-        | .permissions = ($perm | .allow = ($allow + (entries - $allow)))' \
-        > "$tmpfile"; then
-        rm -f "$tmpfile"
-        die "rjq failed to update $cfg"
-    fi
-    mv "$tmpfile" "$cfg"
-
-    if [ -n "$added" ]; then
-        printf '  claude-code: added to permissions.allow:\n'
-        printf '%s\n' "$added" | sed 's|^|    - |'
-    else
-        printf '  claude-code: permissions already present\n'
-    fi
+];' 'permissions already present' \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp"
 }
 
 # opencode reads ~/.config/opencode/opencode.json or opencode.jsonc -- either
@@ -5104,100 +5088,72 @@ opencode_configfile() {
     fi
 }
 
-opencode_permissions() {
-    local cfg scripts="$1" plans="$2" tmp="$3"
-    local doc added legacy tmpfile program created=0
+# Resolves (creating a minimal one if missing) and backs up the opencode
+# config, refusing a non-empty file strict rjq cannot parse (JSON-C
+# comments or trailing commas a rewrite would strip). $1 is a printf format
+# for the "not strict JSON" detail with one %s for the config path --
+# callers word it differently on purpose (test-installer-opencode-
+# permissions counts specific phrases) -- and the rest of "$@" is the
+# manual-fallback command to run and report through on any failure. Echoes
+# the resolved cfg path on success; prints nothing and returns 1 otherwise,
+# the manual fallback already having run. Extracted so every opencode
+# permission merge does not re-run this same setup, which is what made
+# opencode_permissions alone exceed CODE-STYLE.md's 40-line cap.
+opencode_prepare_config() {
+    local not_strict_fmt="$1"
+    shift
+    local cfg created=0
     cfg="$(opencode_configfile)"
     if [ ! -f "$cfg" ]; then
-        mkdir -p "$(dirname "$cfg")" \
-            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_permissions opencode "$scripts" "$plans" "$tmp"; return 0; }
+        mkdir -p "$(dirname "$cfg")" || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; "$@"; return 1; }
         printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
-            || { echo "  opencode: cannot write $cfg" >&2; print_manual_permissions opencode "$scripts" "$plans" "$tmp"; return 0; }
+            || { echo "  opencode: cannot write $cfg" >&2; "$@"; return 1; }
         echo "  opencode: created $cfg" >&2
         created=1
     fi
     if ! command -v rjq >/dev/null 2>&1; then
         echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
-        print_manual_permissions opencode "$scripts" "$plans" "$tmp"
-        return 0
+        "$@"
+        return 1
     fi
+    # Emptiness is decided here -- rjq's own exit status for empty input
+    # flips between versions.
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        # shellcheck disable=SC2059
+        printf "  opencode: $not_strict_fmt\n" "$cfg" >&2
+        "$@"
+        return 1
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+    printf '%s\n' "$cfg"
+}
+
+opencode_permissions() {
+    local scripts="$1" plans="$2" tmp="$3" cfg doc legacy
     plans="$(strip_trailing_slashes "$plans")"
     scripts="$(strip_trailing_slashes "$scripts")"
     tmp="$(strip_trailing_slashes "$tmp")"
-    # A non-empty config that strict rjq cannot parse carries JSON-C comments or
-    # trailing commas, which a rewrite would strip: print manual instructions
-    # instead of rebuilding from {}. Emptiness is decided here -- rjq's own exit
-    # status for empty input flips between versions.
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
-        echo "  opencode: $cfg is not strict JSON; add these by hand:" >&2
-        print_manual_permissions opencode "$scripts" "$plans" "$tmp"
-        return 0
-    fi
-    [ "$created" -eq 1 ] || backup_file "$cfg"
+    cfg="$(opencode_prepare_config '%s is not strict JSON; add these by hand:' \
+        print_manual_permissions opencode "$scripts" "$plans" "$tmp")" || return 0
 
+    # A stray Claude-style permission.allow list is not valid shape here;
+    # opencode_merge_permission's own `base` drops it as part of the merge
+    # below, so the removal has to be reported before that overwrite erases
+    # the evidence it happened.
     doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
-    [ -n "$doc" ] || doc='{}'
-    # opencode's permission block is keyed by tool name; each value is either an
-    # action string ("ask"/"allow"/"deny") or a {pattern: action} object. A bare
-    # action string is preserved as the "*" fallback pattern. A stray
-    # Claude-style allow/deny/ask list is not valid here, so `base` migrates it
-    # out — that removal is what the legacy notice below reports.
-    program='
-def objectify: if type == "object" then . else {} end;
-def wanted: [
+    legacy="$(printf '%s' "${doc:-{\}}" | rjq -r '
+        (if type == "object" then . else {} end) | .permission
+        | if type == "object" and (.allow | type) == "array" and (.allow | length) > 0
+          then "yes" else "no" end')"
+    [ "$legacy" = "yes" ] && printf '  opencode: removed invalid claude-style permission.allow list\n'
+
+    opencode_merge_permission 'def wanted: [
     ["read",               ["\($plans)/**", "\($scripts)/**", "\($tmp)/**"]],
     ["edit",               ["\($plans)/**", "\($tmp)/**"]],
     ["bash",               ["\($scripts)/**", "bash \($scripts)/**", "\($tmp)/**"]],
     ["external_directory", ["\($plans)/**", "\($scripts)/**", "\($tmp)/**"]]
-];
-def rules: if type == "object" then . elif type == "string" then {"*": .} else {} end;
-def base:
-    objectify
-    | .permission as $p
-    | (if ($p | type) == "string"
-       then reduce wanted[] as $w ({}; .[$w[0]] = {"*": $p})
-       else ($p | objectify) end)
-    | del(.allow, .deny, .ask);
-'
-    legacy="$(printf '%s' "$doc" | rjq -r '
-        (if type == "object" then . else {} end) | .permission
-        | if type == "object" and (.allow | type) == "array" and (.allow | length) > 0
-          then "yes" else "no" end')"
-    added="$(printf '%s' "$doc" | rjq -r \
-        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
-        "$program"'
-        [ wanted[] as $w
-          | ($w[0]) as $tool
-          | (base[$tool] | rules) as $rule
-          | $w[1][] as $pattern
-          | select($rule[$pattern] != "allow")
-          | "\($tool): \($pattern)" ][]')"
-
-    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
-    cp -p "$cfg" "$tmpfile"
-    if ! printf '%s' "$doc" | rjq \
-        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp" \
-        "$program"'
-        (if type == "object" then . else {} end) as $data
-        | (reduce wanted[] as $w (base;
-              .[$w[0]] = (reduce $w[1][] as $pattern ((.[$w[0]] | rules); .[$pattern] = "allow"))
-          )) as $perm
-        | $data | .permission = $perm' \
-        > "$tmpfile"; then
-        rm -f "$tmpfile"
-        die "rjq failed to update $cfg"
-    fi
-    mv "$tmpfile" "$cfg"
-
-    if [ "$legacy" = "yes" ]; then
-        printf '  opencode: removed invalid claude-style permission.allow list\n'
-    fi
-    if [ -n "$added" ]; then
-        printf '  opencode: allowed in permission:\n'
-        printf '%s\n' "$added" | sed 's|^|    - |'
-    else
-        printf '  opencode: permissions already present\n'
-    fi
+];' "$cfg" 'permissions already present' \
+        --arg plans "$plans" --arg scripts "$scripts" --arg tmp "$tmp"
 }
 
 # codex reads ~/.codex/config.toml, which is TOML, not JSON -- rjq is
@@ -5343,6 +5299,32 @@ print_manual_permissions() {
 # (e.g. Codex/OpenClaw/Cline have no stable JSON permission key, or an agent
 # changed its format). Prints a self-contained prompt the user can paste into
 # their AI agent so the agent configures the correct permissions itself.
+# The prompt's closing half: the config-file instructions and its own
+# closing marker. Split out so print_agent_permission_prompt, whose only
+# real logic is the scripts-directory loop between the two halves, stays
+# inside CODE-STYLE.md's 40-line cap.
+print_agent_permission_prompt_footer() {
+    local plans="$1" tmp="$2"
+    cat <<PROMPT
+Find your own permission/settings file (for example: Claude Code
+settings.json "permissions.allow", OpenCode opencode.json "permission.allow",
+Codex policy/sandbox config, Cline or OpenClaw allowed-tools list) and add
+entries that:
+  - grant read + write under $plans
+  - grant read/write/execute under $tmp
+  - allow executing Bash for the planning helper scripts (Read/Edit/Write plus
+    Bash rules scoped to those scripts)
+Add only entries that are not already present. If you modify a config file,
+first copy it to .<basename>.<UTC timestamp>.back beside it before editing --
+the same scheme the installer uses -- then tell me the exact path and the
+entries you changed. If the file is inside a git working tree, commit or stash
+instead: git is its recovery path and a stray backup file only clutters the
+tree. Do not change any other permissions and do
+not grant broad or all-tools access.
+--- END AGENT PROMPT (copy from here) ---
+PROMPT
+}
+
 print_agent_permission_prompt() {
     local plans="$1" tmp="$2"; shift 2
     local root kind
@@ -5371,24 +5353,7 @@ PROMPT
         kind="$(agent_kind_for_root "$root")"
         printf '   - %s: %s\n' "$kind" "${root%/}/planning/scripts"
     done
-    cat <<PROMPT
-Find your own permission/settings file (for example: Claude Code
-settings.json "permissions.allow", OpenCode opencode.json "permission.allow",
-Codex policy/sandbox config, Cline or OpenClaw allowed-tools list) and add
-entries that:
-  - grant read + write under $plans
-  - grant read/write/execute under $tmp
-  - allow executing Bash for the planning helper scripts (Read/Edit/Write plus
-    Bash rules scoped to those scripts)
-Add only entries that are not already present. If you modify a config file,
-first copy it to .<basename>.<UTC timestamp>.back beside it before editing --
-the same scheme the installer uses -- then tell me the exact path and the
-entries you changed. If the file is inside a git working tree, commit or stash
-instead: git is its recovery path and a stray backup file only clutters the
-tree. Do not change any other permissions and do
-not grant broad or all-tools access.
---- END AGENT PROMPT (copy from here) ---
-PROMPT
+    print_agent_permission_prompt_footer "$plans" "$tmp"
 }
 
 # Merge a jq-computed `entries` list into Claude's permissions.allow.
@@ -5526,33 +5491,12 @@ opencode_merge_permission() {
 }
 
 opencode_worktrees_permissions() {
-    local worktrees="$1"
-    local cfg created=0
-    cfg="$(opencode_configfile)"
-    if [ ! -f "$cfg" ]; then
-        mkdir -p "$(dirname "$cfg")" \
-            || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
-        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
-            || { echo "  opencode: cannot write $cfg" >&2; print_manual_worktrees_permissions opencode "$worktrees"; return 0; }
-        echo "  opencode: created $cfg" >&2
-        created=1
-    fi
-    if ! command -v rjq >/dev/null 2>&1; then
-        echo "  opencode: rjq is not installed; cannot edit $cfg safely." >&2
-        print_manual_worktrees_permissions opencode "$worktrees"
-        return 0
-    fi
+    local worktrees="$1" cfg
     worktrees="$(strip_trailing_slashes "$worktrees")"
-    # A config strict rjq cannot parse carries comments or trailing commas a
-    # rewrite would strip, so print instructions rather than rebuild it. The
-    # wording avoids the planning arm's "is not strict JSON", which
+    # Wording avoids the planning arm's "is not strict JSON", which
     # test-installer-opencode-permissions counts expecting exactly one.
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
-        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add the worktree rules by hand:" >&2
-        print_manual_worktrees_permissions opencode "$worktrees"
-        return 0
-    fi
-    [ "$created" -eq 1 ] || backup_file "$cfg"
+    cfg="$(opencode_prepare_config 'cannot safely rewrite %s (comments or trailing commas); add the worktree rules by hand:' \
+        print_manual_worktrees_permissions opencode "$worktrees")" || return 0
     opencode_merge_permission 'def wanted: [
     ["read",               ["\($worktrees)/**"]],
     ["edit",               ["\($worktrees)/**"]],
@@ -5825,6 +5769,7 @@ tui_hint_plugin_step() {
     contains interactive-shell "${SELECTED_SKILLS[@]}" || return 0
     echo >&2
     echo "== tui-hint plugin ==" >&2
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         case "$kind" in
@@ -5966,6 +5911,7 @@ install_editor_gate_plugin() {
 # a selected Claude Code root, same gate editor_steering_step already uses.
 editor_gate_plugin_step() {
     local root kind
+    install_shared_rjq
     for root in "${SELECTED_TARGET_PATHS[@]}"; do
         kind="$(agent_kind_for_root "$root")"
         [ "$kind" = claude ] || continue

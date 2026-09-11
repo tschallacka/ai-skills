@@ -2,69 +2,21 @@
 # MODE: PROD
 # tui-hint-plugin/hooks/lib.sh -- shared by pre-tool-use.sh.
 #
-# JSON in and out is hand-rolled here (tui_hint_json_field/tui_hint_json_escape
-# below), not rjq: B319 -- a hook script runs independently of install.sh,
-# potentially long after and on a machine with no cargo/dev toolchain, and
-# neither ai-text-editor nor interactive-shell (the skills this plugin rides
-# with) ever promised rjq would be on PATH there. install.sh's own
-# prepend_bundled_rjq only reaches the install run's own process.
-#
-# Extracts the string value of a top-level JSON key from stdin. Not a general
-# parser -- it is exactly as much JSON as a Claude Code PreToolUse payload
-# ever needs: find "key", skip to the first quote after it, then copy until
-# an unescaped closing quote, unescaping \" \\ \/ \n \t \r as it goes. Prints
-# nothing and returns 1 when the key is absent.
-tui_hint_json_field() { # <key>, payload on stdin
-    awk -v key="$1" '
-    { s = s $0 "\n" }
-    END {
-        needle = "\"" key "\""
-        pos = index(s, needle)
-        if (pos == 0) { exit 1 }
-        pos += length(needle)
-        len = length(s)
-        while (pos <= len) {
-            c = substr(s, pos, 1)
-            if (c == ":" || c == " " || c == "\t" || c == "\n" || c == "\r") { pos++; continue }
-            break
-        }
-        if (substr(s, pos, 1) != "\"") { exit 1 }
-        pos++
-        out = ""
-        while (pos <= len) {
-            c = substr(s, pos, 1)
-            if (c == "\\") {
-                nc = substr(s, pos + 1, 1)
-                if (nc == "n") out = out "\n"
-                else if (nc == "t") out = out "\t"
-                else if (nc == "r") out = out "\r"
-                else out = out nc
-                pos += 2
-                continue
-            }
-            if (c == "\"") break
-            out = out c
-            pos++
-        }
-        printf "%s", out
-        exit 0
-    }'
-}
-
-# The inverse: escapes a value for embedding inside a JSON string literal.
-# Every dynamic value this plugin writes into hookSpecificOutput goes through
-# this first -- an unescaped quote or backslash in a profile path or program
-# name would otherwise corrupt the JSON (or, worst case, let a value inject a
-# sibling key). Backslash first, or escaping the quote would double-escape
-# the backslash that operation itself just introduced.
-tui_hint_json_escape() { # <value>
-    local value="$1"
-    value="${value//\\/\\\\}"
-    value="${value//\"/\\\"}"
-    value="${value//$'\n'/\\n}"
-    value="${value//$'\t'/\\t}"
-    value="${value//$'\r'/\\r}"
-    printf '%s' "$value"
+# rjq is this repo's real JSON tool. install_shared_rjq (installer/src/
+# 20-runtime-tools.sh) copies it to a fixed, install-root-independent path
+# as part of installing this plugin -- deliberately not the user's global
+# PATH, since neither ai-text-editor nor interactive-shell (the skills this
+# plugin rides with) ever promised rjq would be there themselves.
+# tui_hint_rjq_bin resolves that path (B319: install.sh's own PATH-prepend
+# does not outlive its process, so a hook running independently later
+# cannot assume an ambient `rjq`).
+tui_hint_rjq_bin() {
+    local bin="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/bin/rjq"
+    if [ -x "$bin" ]; then
+        printf '%s\n' "$bin"
+        return 0
+    fi
+    command -v rjq
 }
 #
 # The program a shell command line runs is not always its first word: a

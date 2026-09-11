@@ -210,10 +210,8 @@ trap - EXIT
 printf 'Created %s\n' "$plan_dir"
 
 # Which build of the skill just created this plan, and a warning if it is an
-# installed copy behind a canonical checkout. Stated at creation rather than
-# left to be discovered: a copy 290 lines adrift behaved like a working skill
-# until a reader concluded the reader was missing a feature and patched around
-# it (T52). The provenance line goes to stdout with the result; the drift
-# warning to stderr, since it is a diagnostic and not the result.
+# installed copy behind a canonical checkout (T52). The provenance line goes
+# to stdout with the result; the drift warning to stderr, since it is a
+# diagnostic and not the result.
 plan_skill_provenance "$script_dir/.." || true
 plan_warn_skill_drift "$script_dir/.."

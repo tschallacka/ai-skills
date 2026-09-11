@@ -12,8 +12,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=editor-gate-plugin/hooks/lib.sh
 source "$script_dir/lib.sh"
 
+rjq_bin="$(editor_gate_rjq_bin)" || { printf '{}'; exit 0; }
 payload="$(cat)"
-tool_name="$(editor_gate_json_field tool_name <<<"$payload" || true)"
+tool_name="$(printf '%s' "$payload" | "$rjq_bin" -r '.tool_name // empty')"
 
 case "$tool_name" in
     Edit | Write) ;;

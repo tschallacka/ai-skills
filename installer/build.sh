@@ -225,7 +225,7 @@ validate_probes_declared() {
                 missing=1
             # The universe filter lives INSIDE the process substitution: a
             # pipe after `done` would put the loop itself in a subshell, and
-            # its exit and missing-flag would die there (found the hard way).
+            # its exit and missing-flag would die there.
             done < <(probe_universe_hits "$repo_root/$skill/$script")
         done < <(shipped_scripts_of "$skill")
     done < <(for skill_dir in "$repo_root"/*/; do

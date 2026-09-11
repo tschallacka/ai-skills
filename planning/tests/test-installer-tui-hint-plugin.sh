@@ -43,6 +43,15 @@ t_assert_eq 'lib.sh landed and is executable' \
 t_assert_eq 'README.md is not copied (the plugin loader never reads it)' \
     "$([ -f "$plugin_dir/README.md" ] && printf yes || printf no)" 'no'
 
+# B319: the hook resolves rjq from this stable location, not the user's
+# global PATH -- install_shared_rjq must have actually put a working binary
+# there, or the hook falls back to failing (tui-hint: a quiet no-op).
+shared_rjq="$home/.config/tsch-ai-skills/bin/rjq"
+t_assert_eq 'the shared rjq binary landed at its stable location' \
+    "$([ -x "$shared_rjq" ] && printf yes || printf no)" 'yes'
+t_assert_eq 'the shared rjq binary actually runs' \
+    "$("$shared_rjq" -n '1+1' 2>/dev/null)" '2'
+
 # ── opencode: one copy of the .js, registered once in opencode.jsonc ───────
 home="$work/opencode-home"
 rc=0

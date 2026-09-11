@@ -11,7 +11,7 @@
 # generated from installer/src/ — same reason: a file over roughly 25,000
 # tokens is silently truncated by at least one harness this repo runs under
 # (see .agents/knowledge/agent-read-limits.md), and planning/SKILL.md alone
-# was 1502 lines / 89,860 bytes, well past that (T87).
+# was well past that (T87).
 #
 # skill-source.txt marks each part with a comment pair:
 #   <!-- SKILL_SECTION:START <name> targets=<target,...> -->

@@ -86,53 +86,38 @@ $(plan_duplicate_step_numbers "$plan_dir")
 COLLISIONS
 }
 
-plan_validate_plan_docs() {
-    for heading in \
-        '## Current state' \
-        '## Desired outcome' \
-        '## Approach' \
-        '## Approach decisions' \
-        '## Scope' \
-        '## Affected areas' \
-        '## Constraints and decisions' \
-        '## Risks and open questions' \
-        '## Environment facts' \
-        '## UI classification' \
-        '## Adversarial review'; do
-        require_heading "$plan_dir/plan-description.md" "$heading"
-    done
-    get_single_field "$plan_dir/plan-description.md" 'UI affected'; ui_affected="$field_value"
-    case "$ui_affected" in
-        yes|no) ;;
-        *) fail "UI classification must declare '- UI affected: yes' or 'no'" ;;
-    esac
-
-    review_file="$plan_dir/adversarial-review.md"
+plan_validate_plan_docs_review() {
+    # review_approved is read by validate-plan.sh's plan_report_gates after
+    # this function returns, so it stays a global, not a local.
+    local review_file="$plan_dir/adversarial-review.md"
     if [ ! -f "$review_file" ]; then
         fail "Missing adversarial-review.md"
+        return
+    fi
+    require_heading "$review_file" '## Review scope'
+    require_heading "$review_file" '## Findings'
+    require_heading "$review_file" '## Verdict'
+    review_approved=true
+    grep -Fqx -- '- Status: `✅ approved`' "$review_file" || review_approved=false
+    if [ "${review_approved:-true}" = true ]; then
+        grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md" || fail "Plan description does not mirror approved adversarial-review status"
+        if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|' "$review_file"; then
+            fail "Adversarial review has unresolved findings"
+        fi
     else
-        require_heading "$review_file" '## Review scope'
-        require_heading "$review_file" '## Findings'
-        require_heading "$review_file" '## Verdict'
-        review_approved=true
-        grep -Fqx -- '- Status: `✅ approved`' "$review_file" || review_approved=false
-        if [ "${review_approved:-true}" = true ]; then
-            grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md" || fail "Plan description does not mirror approved adversarial-review status"
-            if grep -Eq '^\|[[:space:]]*AR-[0-9]+[[:space:]]*\|.*\|[[:space:]]*(💤 open|⏳ in progress)[[:space:]]*\|' "$review_file"; then
-                fail "Adversarial review has unresolved findings"
-            fi
+        if grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"; then
+            fail "Plan description claims approval but adversarial review is not approved"
+        fi
+        if [ "$complete_mode" = true ]; then
+            fail "Adversarial review is not approved"
         else
-            if grep -Fqx -- '- Status: ✅ approved' "$plan_dir/plan-description.md"; then
-                fail "Plan description claims approval but adversarial review is not approved"
-            fi
-            if [ "$complete_mode" = true ]; then
-                fail "Adversarial review is not approved"
-            else
-                warn "Adversarial review is not approved (expected mid-cycle; use validate-plan.sh --complete for the strict gate)"
-            fi
+            warn "Adversarial review is not approved (expected mid-cycle; use validate-plan.sh --complete for the strict gate)"
         fi
     fi
+}
 
+plan_validate_plan_docs_inventory() {
+    local review
     require_heading "$inventory" '## Definition-of-done coverage'
     require_heading "$inventory" '## Work units'
     require_heading "$inventory" '## Decomposition review'
@@ -152,9 +137,13 @@ plan_validate_plan_docs() {
     if grep -qi 'TBD' "$inventory"; then
         fail "Inventory contains TBD; add a bounded discovery work unit instead"
     fi
+}
 
-    # --- defect-report hardening: helper-flag-shaped text, duplicate paragraph
-    #     labels, and path-like shell fragments must never appear in plan docs ---
+# Builds the plan_docs global the placeholder and stale passes iterate, and
+# hardens each entry against hand-edit damage: helper-flag-shaped text,
+# duplicate paragraph labels, and path-like shell fragments.
+plan_validate_plan_docs_hardening() {
+    local swallowed_flag_regex goal_file step_file doc duplicate_label
     swallowed_flag_regex='(^|[[:space:]])-(p|dp|gp|sp|rp|tp|ia|ib)[[:space:]]+[0-9]+\.[0-9]+[[:space:]]*:'
     plan_docs=("$plan_dir/plan-description.md" "$plan_dir/adversarial-review.md")
     while IFS= read -r -d '' goal_file; do
@@ -177,4 +166,31 @@ plan_validate_plan_docs() {
             fail "$(basename "$doc") contains a shell-variable path fragment; bind file paths to the plan, not to script internals"
         fi
     done
+}
+
+plan_validate_plan_docs() {
+    local heading
+    for heading in \
+        '## Current state' \
+        '## Desired outcome' \
+        '## Approach' \
+        '## Approach decisions' \
+        '## Scope' \
+        '## Affected areas' \
+        '## Constraints and decisions' \
+        '## Risks and open questions' \
+        '## Environment facts' \
+        '## UI classification' \
+        '## Adversarial review'; do
+        require_heading "$plan_dir/plan-description.md" "$heading"
+    done
+    get_single_field "$plan_dir/plan-description.md" 'UI affected'; ui_affected="$field_value"
+    case "$ui_affected" in
+        yes|no) ;;
+        *) fail "UI classification must declare '- UI affected: yes' or 'no'" ;;
+    esac
+
+    plan_validate_plan_docs_review
+    plan_validate_plan_docs_inventory
+    plan_validate_plan_docs_hardening
 }

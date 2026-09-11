@@ -1,5 +1,7 @@
 # whiptail
 
+### Identity
+
 Simpler ncurses dialog-box toolkit (from the newt library), similar to dialog but with a more modern flat-UI style. `whiptail --menu`, `whiptail --yesno`, `whiptail --inputbox`, `whiptail --checklist`, etc.
 
 ### Options

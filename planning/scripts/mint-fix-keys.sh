@@ -150,11 +150,44 @@ ensure_session_secret() {
 # ---- quoted: fix-key derivation ----
 # SHA-256 over (secret)(session_id|finding|work unit), secret first
 # ---- end quoted ----
+mint_fix_keys_emit_json() { # <tsv_file> <session_id> <minted_by> <plan_dir> <json_file>
+    local tsv_file="$1" session_id="$2" minted_by="$3" plan_dir="$4" json_file="$5" json_tmp
+
+    # A tracked temp in the target's own directory: the rename is atomic and the
+    # cleanup trap removes it if awk fails. `$f.tmp.$$` had no trap at all.
+    json_tmp="$(mktemp "$plan_dir/fix-keys.json.XXXXXX")"
+    tmp_files+=("$json_tmp")
+    # mktemp creates 0600; restore the mode a plain `>` redirect would have
+    # produced so fix-keys.json keeps the permissions it had before.
+    chmod "$(printf '%03o' "$(( 0666 & ~0$(umask) ))")" "$json_tmp"
+
+    awk -v sid="$session_id" -v minted_by="$minted_by" '
+        BEGIN { print "{"; printf "  \"session_id\": \"%s\",\n", sid; printf "  \"minted_by\": \"%s\",\n", minted_by; print "  \"keys\": {" }
+        { fid = $1; wu = $2; key = $3
+          if (fid != current_fid) {
+              if (current_fid != "") print "    },"
+              printf "    \"%s\": {\n", fid
+              current_fid = fid
+              first_in_fid = 1
+          }
+          if (first_in_fid) printf "      \"%s\": \"%s\"\n", wu, key
+          else printf "    , \"%s\": \"%s\"\n", wu, key
+          first_in_fid = 0
+        }
+        END {
+            if (current_fid != "") print "    }"
+            print "  }"
+            print "}"
+        }
+    ' "$tsv_file" > "$json_tmp"
+    mv -f "$json_tmp" "$json_file"
+}
+
 mint_fix_keys() {
     local plan_dir="$1" review_file="$1/adversarial-review.md"
     local json_file="$1/fix-keys.json"
     local session_id="${2:-}" secret_file secret pairs_file tsv_file minted_by
-    local gated_rows skipped_rows fid wu count_file json_tmp
+    local gated_rows skipped_rows fid wu count_file
     [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file"
     if [ -z "$session_id" ]; then
         session_id="$(plan_session_id "$plan_dir")"
@@ -194,34 +227,7 @@ mint_fix_keys() {
     # to the session id that names the secret dir.
     minted_by="${MINTED_BY:-$session_id}"
 
-    # A tracked temp in the target's own directory: the rename is atomic and the
-    # cleanup trap removes it if awk fails. `$f.tmp.$$` had no trap at all.
-    json_tmp="$(mktemp "$plan_dir/fix-keys.json.XXXXXX")"
-    tmp_files+=("$json_tmp")
-    # mktemp creates 0600; restore the mode a plain `>` redirect would have
-    # produced so fix-keys.json keeps the permissions it had before.
-    chmod "$(printf '%03o' "$(( 0666 & ~0$(umask) ))")" "$json_tmp"
-
-    awk -v sid="$session_id" -v minted_by="$minted_by" '
-        BEGIN { print "{"; printf "  \"session_id\": \"%s\",\n", sid; printf "  \"minted_by\": \"%s\",\n", minted_by; print "  \"keys\": {" }
-        { fid = $1; wu = $2; key = $3
-          if (fid != current_fid) {
-              if (current_fid != "") print "    },"
-              printf "    \"%s\": {\n", fid
-              current_fid = fid
-              first_in_fid = 1
-          }
-          if (first_in_fid) printf "      \"%s\": \"%s\"\n", wu, key
-          else printf "    , \"%s\": \"%s\"\n", wu, key
-          first_in_fid = 0
-        }
-        END {
-            if (current_fid != "") print "    }"
-            print "  }"
-            print "}"
-        }
-    ' "$tsv_file" > "$json_tmp"
-    mv -f "$json_tmp" "$json_file"
+    mint_fix_keys_emit_json "$tsv_file" "$session_id" "$minted_by" "$plan_dir" "$json_file"
 }
 
 main() {

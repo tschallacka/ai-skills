@@ -23,63 +23,74 @@
 # each file alone and cannot see the assignments.
 set -euo pipefail
 
+plan_validate_completion_goals() { # reads $plan_progress
+    local goal_name goal_status prow
+    while IFS= read -r goal_name; do
+        [ -n "$goal_name" ] || continue
+        goal_status=""
+        while IFS= read -r prow || [ -n "$prow" ]; do
+            case "$prow" in '|'*) ;; *) continue ;; esac
+            if [ "$(plan_table_cell "$prow" 2)" = "$goal_name" ]; then
+                goal_status="$(plan_table_cell "$prow" 4)"
+                break
+            fi
+        done < "$plan_progress"
+        [ "$goal_status" = '✅ completed' ] || fail "$goal_name is not completed in plan progress"
+    done < <(plan_map_keys goal_units)
+}
+
+plan_validate_completion_units() {
+    local id u_goal u_step goal_progress step_status prow
+    for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
+        plan_map_load unit_goal "$id" || plan_map_value=""
+        u_goal="$plan_map_value"
+        plan_map_load unit_step "$id" || plan_map_value=""
+        u_step="$plan_map_value"
+        goal_progress="$plan_dir/$u_goal/progress.md"
+        if [ ! -f "$goal_progress" ]; then
+            fail "$id completion requires $goal_progress"
+            continue
+        fi
+        step_status=""
+        while IFS= read -r prow || [ -n "$prow" ]; do
+            case "$prow" in '|'*) ;; *) continue ;; esac
+            if [ "$(plan_table_cell "$prow" 3)" = "$u_step" ]; then
+                step_status="$(plan_table_cell "$prow" 5)"
+                break
+            fi
+        done < "$goal_progress"
+        [ "$step_status" = '✅ completed' ] || fail "$id is not completed in $u_goal progress"
+    done
+}
+
 plan_validate_completion() {
     if [ "$complete_mode" = true ]; then
         plan_progress="$plan_dir/progress.md"
         if [ ! -f "$plan_progress" ]; then
             fail "Completion requires plan-level progress.md"
         else
-            while IFS= read -r goal_name; do
-                [ -n "$goal_name" ] || continue
-                goal_status=""
-                while IFS= read -r prow || [ -n "$prow" ]; do
-                    case "$prow" in '|'*) ;; *) continue ;; esac
-                    if [ "$(plan_table_cell "$prow" 2)" = "$goal_name" ]; then
-                        goal_status="$(plan_table_cell "$prow" 4)"
-                        break
-                    fi
-                done < "$plan_progress"
-                [ "$goal_status" = '✅ completed' ] || fail "$goal_name is not completed in plan progress"
-            done < <(plan_map_keys goal_units)
+            plan_validate_completion_goals
         fi
-        for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
-            plan_map_load unit_goal "$id" || plan_map_value=""
-            u_goal="$plan_map_value"
-            plan_map_load unit_step "$id" || plan_map_value=""
-            u_step="$plan_map_value"
-            goal_progress="$plan_dir/$u_goal/progress.md"
-            if [ ! -f "$goal_progress" ]; then
-                fail "$id completion requires $goal_progress"
-                continue
-            fi
-            step_status=""
-            while IFS= read -r prow || [ -n "$prow" ]; do
-                case "$prow" in '|'*) ;; *) continue ;; esac
-                if [ "$(plan_table_cell "$prow" 3)" = "$u_step" ]; then
-                    step_status="$(plan_table_cell "$prow" 5)"
-                    break
-                fi
-            done < "$goal_progress"
-            [ "$step_status" = '✅ completed' ] || fail "$id is not completed in $u_goal progress"
-        done
+        plan_validate_completion_units
     fi
 }
 
 # --- propagation checks (--propagation): the surfaces of a work unit must
 #     agree. A finding cites one surface; a fix must reach the others, and this
 #     is the mechanical part of that contract. ---
-plan_validate_propagation_symbols() {
-    # (a) Flag a ::-symbol or path on an edit-intent line when its namespace
-    #     root or path prefix is one the plan itself edits, no inventory row
-    #     owns it, and the line instructs an edit. Vendor seams drop out.
-    declare -a project_prefixes=()
+# Sets project_prefixes: the namespace root or leading path segments of every
+# unit's File column. File column forms: Namespace\Class.php,
+# app/code/V/M/File.php, app/design/.../file.phtml, path/to/file.php.
+plan_validate_propagation_symbols_prefixes() {
+    local candidate fc ns_root
+    # Plain assignment, not `local`/`declare -a`: this must be readable as a
+    # global by plan_validate_propagation_symbols_token, and `declare -g`
+    # needs bash 4.2+ while this repo's floor is bash 3.2.
+    project_prefixes=()
     for candidate in ${unit_ids[@]+"${unit_ids[@]}"}; do
         plan_map_load unit_file "$candidate" || plan_map_value=""
         fc="$plan_map_value"
         [ -n "$fc" ] && [ "$fc" != "N/A" ] || continue
-        # File column forms: Namespace\Class.php, app/code/V/M/File.php,
-        # app/design/.../file.phtml, path/to/file.php. Derive the namespace
-        # root or the leading directory segments.
         case "$fc" in
             *'\\'*)
                 ns_root="${fc%%\\*}"
@@ -93,86 +104,121 @@ plan_validate_propagation_symbols() {
         esac
         [ -n "$ns_root" ] && project_prefixes+=("$ns_root")
     done
-    for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
-        plan_map_load unit_goal "$id" || plan_map_value=""
-        u_goal="$plan_map_value"
-        plan_map_load unit_step "$id" || plan_map_value=""
-        u_step="$plan_map_value"
-        step_file="$plan_dir/$u_goal/steps/$u_step.md"
-        [ -f "$step_file" ] || continue
-        instr_section="$(awk '
-            /^## Instructions$/ { in_sec = 1; next }
-            /^## / && in_sec { exit }
-            in_sec { print }
-        ' "$step_file")"
-        [ -n "$instr_section" ] || continue
-        # Edit/create-intent lines: the symbol must sit on a line that also
-        # instructs an edit (create, add, implement, edit, change, update,
-        # modify, rewrite, replace, override).
-        edit_lines="$(printf '%s' "$instr_section" | grep -iE '(create|add|implement|edit|change|update|modify|rewrite|replace|override)' || true)"
-        [ -n "$edit_lines" ] || continue
-        # Well-formed Class::method tokens only. X::class and Vendor_Module::path
-        # are excluded: the tokeniser would truncate them into a plausible but
-        # nonexistent Class::method.
+}
 
-        # PORTABILITY(ere-word-boundary): `tr` yields maximal word runs, so a
-        # run starting with the token means exactly what a leading \b meant.
-        tokens="$(printf '%s' "$edit_lines" | tr -c 'A-Za-z0-9_\\:' '\n' \
-            | grep -oE '^[A-Z][A-Za-z0-9_]*(\\[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*' \
-            | sort -u || true)"
-        for token in $tokens; do
-            # Skip X::class — a PHP class constant (Foo::class, Bar::class),
-            # not a method call, and not an edit target.
-            [ "${token##*::}" = "class" ] && continue
-            # Template-identifier guard: Vendor_Module::<path> (Magento_Weee::
-            # email/items/price/row.phtml) is a template id, not a class method.
-            if [[ "$token" =~ ^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*:: ]]; then
-                # Confirm the full source line carries a path after ::(a slash).
-                # PORTABILITY(pipefail-grep-q): grep -c drains the pipe, and the
-                # match must stay line-scoped, which a bash =~ would not be.
-                if printf '%s' "$edit_lines" \
-                    | grep -cE "${token%%::*}[A-Za-z0-9_]*::[^ (]*/" >/dev/null; then
-                    continue
-                fi
-            fi
-            # Condition 1: the symbol's namespace root must be a project prefix
-            # the plan edits (vendor seams drop out here by construction).
-            klass="${token%%::*}"
-            klass_short="${klass##*\\}"
-            prefix_match=false
-            # PORTABILITY(empty-array-setu)
-            for prefix in ${project_prefixes[@]+"${project_prefixes[@]}"}; do
-                case "$klass" in
-                    "$prefix"*|"$klass_short") prefix_match=true; break ;;
-                esac
-                [[ "$klass_short" == "$prefix"* ]] && { prefix_match=true; break; }
-            done
-            [ "$prefix_match" = true ] || continue
-            # Condition 2: no inventory row owns it (file basename or scope).
-            owned=false
-            for candidate in ${unit_ids[@]+"${unit_ids[@]}"}; do
-                plan_map_load unit_file "$candidate" || plan_map_value=""
-                file_cell="$plan_map_value"
-                plan_map_load unit_scope "$candidate" || plan_map_value=""
-                scope_cell="$plan_map_value"
-                scope_class="${scope_cell%%::*}"
-                scope_class_short="${scope_class##*\\}"
-                [ "$(basename "$file_cell" 2>/dev/null)" = "$klass_short" ] && { owned=true; break; }
-                [ "$file_cell" = "$klass" ] && { owned=true; break; }
-                [ "$scope_class" = "$klass" ] && { owned=true; break; }
-                [ "$scope_class_short" = "$klass_short" ] && { owned=true; break; }
-            done
-            # From text alone this cannot separate "edit this" from "this is
-            # where we attach", and the short class form carries no namespace.
-            # Deliberately a WARN: as a FAIL the heuristic would block plans.
-            if [ "$owned" = false ] && [ "$token" != "$id" ]; then
-                warn "$id instructions mention '$token' which no inventory row owns; verify it is a seam description, or add a discovery/ownership row if it is an edit target"
-            fi
-        done
-        # (b) Removed by report 7: cross-mention warnings fired on any passing
-        #     sibling reference ("W83 owns this payload, do not duplicate it")
-        #     and produced 500+ warnings that penalised the seven-surface prose.
+# One ::-symbol token found on an edit-intent line of unit $id's step. Well-
+# formed Class::method tokens only: X::class and Vendor_Module::path are
+# excluded, since the tokeniser would truncate them into a plausible but
+# nonexistent Class::method.
+# True when $token's namespace root ($klass, and its unqualified short form)
+# is a project prefix the plan edits -- vendor seams drop out here by
+# construction. `|| return 0`, not `|| return`: called as a bare statement
+# under `set -e`, a bare `return` here would propagate the failed test's exit
+# status and abort the whole run.
+plan_validate_propagation_symbols_prefix_match() { # <klass> <klass_short>
+    local klass="$1" klass_short="$2" prefix
+    # PORTABILITY(empty-array-setu)
+    for prefix in ${project_prefixes[@]+"${project_prefixes[@]}"}; do
+        case "$klass" in
+            "$prefix"*|"$klass_short") return 0 ;;
+        esac
+        [[ "$klass_short" == "$prefix"* ]] && return 0
     done
+    return 1
+}
+
+# True when some inventory row's File or Scope cell already names $klass or
+# $klass_short (by basename, full class, or scope class either form).
+plan_validate_propagation_symbols_owned() { # <klass> <klass_short>
+    local klass="$1" klass_short="$2" candidate file_cell scope_cell scope_class scope_class_short
+    for candidate in ${unit_ids[@]+"${unit_ids[@]}"}; do
+        plan_map_load unit_file "$candidate" || plan_map_value=""
+        file_cell="$plan_map_value"
+        plan_map_load unit_scope "$candidate" || plan_map_value=""
+        scope_cell="$plan_map_value"
+        scope_class="${scope_cell%%::*}"
+        scope_class_short="${scope_class##*\\}"
+        [ "$(basename "$file_cell" 2>/dev/null)" = "$klass_short" ] && return 0
+        [ "$file_cell" = "$klass" ] && return 0
+        [ "$scope_class" = "$klass" ] && return 0
+        [ "$scope_class_short" = "$klass_short" ] && return 0
+    done
+    return 1
+}
+
+plan_validate_propagation_symbols_token() { # <id> <token> <edit_lines>
+    local id="$1" token="$2" edit_lines="$3"
+    local klass klass_short
+    # Skip X::class — a PHP class constant (Foo::class, Bar::class), not a
+    # method call, and not an edit target.
+    [ "${token##*::}" = "class" ] && return
+    # Template-identifier guard: Vendor_Module::<path> (Magento_Weee::
+    # email/items/price/row.phtml) is a template id, not a class method.
+    if [[ "$token" =~ ^[A-Z][a-zA-Z0-9]*_[A-Z][a-zA-Z0-9]*:: ]]; then
+        # Confirm the full source line carries a path after ::(a slash).
+        # PORTABILITY(pipefail-grep-q): grep -c drains the pipe, and the
+        # match must stay line-scoped, which a bash =~ would not be.
+        if printf '%s' "$edit_lines" \
+            | grep -cE "${token%%::*}[A-Za-z0-9_]*::[^ (]*/" >/dev/null; then
+            return
+        fi
+    fi
+    klass="${token%%::*}"
+    klass_short="${klass##*\\}"
+    plan_validate_propagation_symbols_prefix_match "$klass" "$klass_short" || return 0
+    # From text alone this cannot separate "edit this" from "this is where we
+    # attach", and the short class form carries no namespace. Deliberately a
+    # WARN: as a FAIL the heuristic would block plans.
+    if ! plan_validate_propagation_symbols_owned "$klass" "$klass_short" && [ "$token" != "$id" ]; then
+        warn "$id instructions mention '$token' which no inventory row owns; verify it is a seam description, or add a discovery/ownership row if it is an edit target"
+    fi
+}
+
+# Every ::-symbol on an edit-intent line of one unit's step instructions.
+plan_validate_propagation_symbols_unit() { # <id>
+    local id="$1" u_goal u_step step_file instr_section edit_lines tokens token
+    plan_map_load unit_goal "$id" || plan_map_value=""
+    u_goal="$plan_map_value"
+    plan_map_load unit_step "$id" || plan_map_value=""
+    u_step="$plan_map_value"
+    step_file="$plan_dir/$u_goal/steps/$u_step.md"
+    # `|| return 0` throughout this function, not `|| return`: called as a bare
+    # statement under `set -e`, a bare `return` would propagate the failed
+    # test's exit status and abort the whole run.
+    [ -f "$step_file" ] || return 0
+    instr_section="$(awk '
+        /^## Instructions$/ { in_sec = 1; next }
+        /^## / && in_sec { exit }
+        in_sec { print }
+    ' "$step_file")"
+    [ -n "$instr_section" ] || return 0
+    # Edit/create-intent lines: the symbol must sit on a line that also
+    # instructs an edit (create, add, implement, edit, change, update, modify,
+    # rewrite, replace, override).
+    edit_lines="$(printf '%s' "$instr_section" | grep -iE '(create|add|implement|edit|change|update|modify|rewrite|replace|override)' || true)"
+    [ -n "$edit_lines" ] || return 0
+    # PORTABILITY(ere-word-boundary): `tr` yields maximal word runs, so a run
+    # starting with the token means exactly what a leading \b meant.
+    tokens="$(printf '%s' "$edit_lines" | tr -c 'A-Za-z0-9_\\:' '\n' \
+        | grep -oE '^[A-Z][A-Za-z0-9_]*(\\[A-Za-z_][A-Za-z0-9_]*)*::[A-Za-z_][A-Za-z0-9_]*' \
+        | sort -u || true)"
+    for token in $tokens; do
+        plan_validate_propagation_symbols_token "$id" "$token" "$edit_lines"
+    done
+}
+
+# (a) Flag a ::-symbol or path on an edit-intent line when its namespace root
+# or path prefix is one the plan itself edits, no inventory row owns it, and
+# the line instructs an edit. Vendor seams drop out.
+plan_validate_propagation_symbols() {
+    local id
+    plan_validate_propagation_symbols_prefixes
+    for id in ${unit_ids[@]+"${unit_ids[@]}"}; do
+        plan_validate_propagation_symbols_unit "$id"
+    done
+    # (b) Removed by report 7: cross-mention warnings fired on any passing
+    #     sibling reference ("W83 owns this payload, do not duplicate it")
+    #     and produced 500+ warnings that penalised the seven-surface prose.
 }
 
     # (c) A verification unit must reach, transitively, every same-goal unit it
@@ -398,77 +444,100 @@ plan_validate_propagation_handoff() {
     done
 }
 
-plan_validate_propagation_roster() {
-    while IFS= read -r goal_name; do
-        [ -n "$goal_name" ] || continue
-        goal_file="$plan_dir/$goal_name/goal.md"
-        [ -f "$goal_file" ] || continue
-        # Assigned set: the inventory's units for this goal.
-        plan_map_load goal_units "$goal_name" || plan_map_value=""
-        assigned="$(for id in $plan_map_value; do printf '%s ' "$id"; done)"
-        roster_ids="$(awk -v assigned=" $assigned " '
-            # Capture the §9.1 paragraph (the line after the § 9.1 label, until
-            # the next § label or heading).
-            /^§ 9\.1$/ { in_91 = 1; next }
-            in_91 && /^§ / { in_91 = 0 }
-            in_91 && /^## / { in_91 = 0 }
-            in_91 && !/^[[:space:]]*$/ {
-                para = para " " $0
-            }
-            END {
-                if (para != "") {
-                    # Leading run: everything before em-dash / " - " / period /
-                    # "in that order". Split on those and take the head.
-                    head = para
-                    sub(/ —.*/, "", head)
-                    sub(/ - .*/, "", head)
-                    sub(/\..*/, "", head)
-                    sub(/, in that order.*/, "", head)
-                    sub(/ in that order.*/, "", head)
-                    # Bare WNN in the leading run.
-                    n = split(head, parts, /[ ,]+/)
-                    for (i = 1; i <= n; i++) {
-                        if (parts[i] ~ /^W[0-9][0-9]+$/) print parts[i]
-                    }
+# §9.x roster vs inventory agreement for one goal.
+# Captures the §9.1 paragraph (the line after the § 9.1 label, until the next
+# § label or heading), then extracts the bare WNN ids from its leading run:
+# everything before an em-dash / " - " / period / "in that order".
+plan_validate_propagation_roster_leading_run() { # <goal-file> -> WNN ids, one per line
+    awk '
+        /^§ 9\.1$/ { in_91 = 1; next }
+        in_91 && /^§ / { in_91 = 0 }
+        in_91 && /^## / { in_91 = 0 }
+        in_91 && !/^[[:space:]]*$/ {
+            para = para " " $0
+        }
+        END {
+            if (para != "") {
+                head = para
+                sub(/ —.*/, "", head)
+                sub(/ - .*/, "", head)
+                sub(/\..*/, "", head)
+                sub(/, in that order.*/, "", head)
+                sub(/ in that order.*/, "", head)
+                n = split(head, parts, /[ ,]+/)
+                for (i = 1; i <= n; i++) {
+                    if (parts[i] ~ /^W[0-9][0-9]+$/) print parts[i]
                 }
             }
-        ' "$goal_file")"
-        # Add the id that heads each per-unit paragraph. Only the leading
-        # backticked id: stripping every backtick and harvesting the whole line
-        # also collected ids the description legitimately cross-references ("as
-        # `W05` does"), and the roster check then failed the goal for a unit it
-        # never claimed to own. The em-dash exclusion noted below applies to the
-        # leading-run pass above, not to this one.
-        blurb_ids="$(awk '
-            /^## Owned work units$/ { in_section = 1; next }
-            /^## Goal-size exception$/ { in_section = 0 }
-            in_section && /^`W[0-9][0-9]+`/ {
-                after_tick = substr($0, 2)
-                id = substr(after_tick, 1, index(after_tick, "`") - 1)
-                if (id ~ /^W[0-9][0-9]+$/) print id
-            }
-        ' "$goal_file")"
-        # An empty match is a real answer here, not an error: grep's exit 1
-        # under pipefail would abort the whole run before any verdict prints.
-        roster_ids="$(printf '%s\n%s\n' "$roster_ids" "$blurb_ids" | { grep -E '^W[0-9][0-9]+$' || true; } | sort -u | tr '\n' ' ')"
-        # Roster-only units: a roster id the inventory does not assign to this
-        # goal. Ids not in the plan at all are skipped; cross-plan references
-        # sit after the em-dash and are already out of the leading run.
-        for rid in $roster_ids; do
-            if ! plan_map_has unit_type "$rid"; then
-                continue
-            fi
-            case " $assigned " in
-                *" $rid "*) : ;;
-                *) fail "$goal_name §9.x roster lists $rid which the inventory does not assign to this goal; reconcile the roster and the inventory" ;;
-            esac
-        done
-        # Assigned units missing from the roster.
-        for aid in $assigned; do
-            case " $roster_ids " in
-                *" $aid "*) : ;;
-                *) fail "$goal_name §9.x roster omits $aid which the inventory assigns to this goal; add it to the roster" ;;
-            esac
-        done
+        }
+    ' "$1"
+}
+
+# Each per-unit blurb's leading backticked id. Only the leading id: stripping
+# every backtick and harvesting the whole line also collected ids the
+# description legitimately cross-references ("as `W05` does"), and the roster
+# check then failed the goal for a unit it never claimed to own.
+plan_validate_propagation_roster_blurb_ids() { # <goal-file> -> WNN ids, one per line
+    awk '
+        /^## Owned work units$/ { in_section = 1; next }
+        /^## Goal-size exception$/ { in_section = 0 }
+        in_section && /^`W[0-9][0-9]+`/ {
+            after_tick = substr($0, 2)
+            id = substr(after_tick, 1, index(after_tick, "`") - 1)
+            if (id ~ /^W[0-9][0-9]+$/) print id
+        }
+    ' "$1"
+}
+
+plan_validate_propagation_roster_ids() { # <goal-file> -> space-separated WNN ids
+    local goal_file="$1" leading_run blurb_ids
+    leading_run="$(plan_validate_propagation_roster_leading_run "$goal_file")"
+    blurb_ids="$(plan_validate_propagation_roster_blurb_ids "$goal_file")"
+    # An empty match is a real answer here, not an error: grep's exit 1 under
+    # pipefail would abort the whole run before any verdict prints.
+    printf '%s\n%s\n' "$leading_run" "$blurb_ids" | { grep -E '^W[0-9][0-9]+$' || true; } | sort -u | tr '\n' ' '
+}
+
+# Roster-only units (a roster id the inventory does not assign to this goal;
+# ids not in the plan at all are skipped) and assigned units missing from the
+# roster, both against $goal_name.
+plan_validate_propagation_roster_compare() { # <goal-name> <assigned> <roster-ids>
+    local goal_name="$1" assigned="$2" roster_ids="$3" rid aid
+    for rid in $roster_ids; do
+        if ! plan_map_has unit_type "$rid"; then
+            continue
+        fi
+        case " $assigned " in
+            *" $rid "*) : ;;
+            *) fail "$goal_name §9.x roster lists $rid which the inventory does not assign to this goal; reconcile the roster and the inventory" ;;
+        esac
+    done
+    for aid in $assigned; do
+        case " $roster_ids " in
+            *" $aid "*) : ;;
+            *) fail "$goal_name §9.x roster omits $aid which the inventory assigns to this goal; add it to the roster" ;;
+        esac
+    done
+}
+
+plan_validate_propagation_roster_goal() { # <goal_name>
+    local goal_name="$1" goal_file assigned roster_ids id
+    goal_file="$plan_dir/$goal_name/goal.md"
+    # `|| return 0`, not `|| return`: called as a bare statement under `set -e`,
+    # a bare `return` here would propagate the failed test's exit status and
+    # abort the whole run.
+    [ -f "$goal_file" ] || return 0
+    # Assigned set: the inventory's units for this goal.
+    plan_map_load goal_units "$goal_name" || plan_map_value=""
+    assigned="$(for id in $plan_map_value; do printf '%s ' "$id"; done)"
+    roster_ids="$(plan_validate_propagation_roster_ids "$goal_file")"
+    plan_validate_propagation_roster_compare "$goal_name" "$assigned" "$roster_ids"
+}
+
+plan_validate_propagation_roster() {
+    local goal_name
+    while IFS= read -r goal_name; do
+        [ -n "$goal_name" ] || continue
+        plan_validate_propagation_roster_goal "$goal_name"
     done < <(plan_map_keys goal_units)
 }

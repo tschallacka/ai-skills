@@ -80,11 +80,75 @@ done
 # the two must stay byte-identical; one definition is the mechanism that
 # comment was asking for.
 
+verify_fix_keys_resolve_secret() { # <session_id> <plan_dir> -> sets VERIFY_FIX_KEYS_SECRET
+    local session_id="$1" plan_dir="$2" secret_file
+    secret_file="$(printf '%s/review-fix-keys/%s/secret\n' "$(planning_tmpdir)" "$session_id")"
+    if [ ! -f "$secret_file" ]; then
+        # B112: this is a MISSING file, distinct from the per-claim key
+        # mismatch below, which is the forged/stale-key case. The secret store
+        # is deliberately ephemeral (planning_tmpdir.sh: fresh per boot) while
+        # the mint-claim-verify protocol deliberately spans sessions, so an
+        # ordinary temp-directory eviction -- a reboot, tmpwatch, another
+        # process clearing ${TMPDIR:-/tmp} -- is the routine cause here, not a
+        # deliberate invalidation at approval.
+        plan_die "session secret missing: $secret_file
+This is an ordinary temp-directory eviction (reboot, tmpwatch, or anything
+else clearing \${TMPDIR:-/tmp}), not a sign the review was invalidated: the
+secret store is designed to be fresh per boot, while the mint-claim-verify
+protocol spans sessions.
+Recovery: re-mint fix keys for this plan --
+  $script_dir/mint-fix-keys.sh $plan_dir
+This starts a NEW session and rewrites fix-keys.json, so every fixer must
+re-claim its keys in fixes.md; the prior claims and the audit trail of which
+session claimed which key are lost."
+    fi
+    VERIFY_FIX_KEYS_SECRET="$(cat "$secret_file")"
+}
+
+verify_fix_keys_check_claims() { # <fixes_file> <pairs_file> <secret> <session_id> <claims_file> -> "failures warnings"
+    local fixes_file="$1" pairs_file="$2" secret="$3" session_id="$4" claims_file="$5"
+    local failures=0 warnings=0 line_no=0 line fid wu key expected
+
+    while IFS= read -r line; do
+        line_no=$((line_no + 1))
+        [ -n "$line" ] || continue
+        if ! awk -F'\t' 'NF == 3 { exit 0 } { exit 1 }' <<< "$line"; then
+            printf 'malformed fixes.md claim (line %s): expected finding_id, work_unit, key\n' "$line_no" >&2
+            failures=$((failures + 1))
+            continue
+        fi
+        fid="$(printf '%s' "$line" | awk -F'\t' '{print $1}')"
+        wu="$(printf '%s' "$line" | awk -F'\t' '{print $2}')"
+        key="$(printf '%s' "$line" | awk -F'\t' '{print $3}')"
+        if ! grep -Fqx "$fid	$wu" "$pairs_file"; then
+            printf 'ignoring claim for pair %s/%s (not gated in fix-keys.json)\n' "$fid" "$wu" >&2
+            warnings=$((warnings + 1))
+            continue
+        fi
+        expected="$(plan_fix_key "$secret" "$session_id|$fid|$wu")"
+        if [ "$expected" != "$key" ]; then
+            printf 'fix key mismatch for %s/%s (forged or stale key)\n' "$fid" "$wu" >&2
+            failures=$((failures + 1))
+        fi
+        printf '%s\t%s\n' "$fid" "$wu" >> "$claims_file"
+    done < "$fixes_file"
+
+    while IFS=$'\t' read -r fid wu; do
+        [ -n "$fid" ] || continue
+        if ! grep -Fqx "$fid	$wu" "$claims_file"; then
+            printf 'no fix key claim recorded for gated pair %s/%s\n' "$fid" "$wu" >&2
+            failures=$((failures + 1))
+        fi
+    done < "$pairs_file"
+
+    printf '%s %s\n' "$failures" "$warnings"
+}
+
 verify_fix_keys() {
     local plan_dir="$1"
     local review_file="$1/adversarial-review.md" json_file="$1/fix-keys.json"
-    local fixes_file="$1/fixes.md" session_id minted_by secret_file secret
-    local pairs_file claims_file line_no failures warnings n fid wu key expected line
+    local fixes_file="$1/fixes.md" session_id minted_by secret
+    local pairs_file claims_file failures warnings
     local claimed_by="${2:-}"
     [ -f "$review_file" ] || plan_die "adversarial-review.md not found: $review_file"
 
@@ -119,63 +183,11 @@ verify_fix_keys() {
     plan_sha256_hex < /dev/null > /dev/null 2>&1 || \
         plan_die "no SHA-256 implementation available (need $(plan_sha256_chain)) to verify fix keys" 69
 
-    secret_file="$(printf '%s/review-fix-keys/%s/secret\n' "$(planning_tmpdir)" "$session_id")"
-    if [ ! -f "$secret_file" ]; then
-        # B112: this is a MISSING file, distinct from the per-claim key
-        # mismatch below, which is the forged/stale-key case. The secret store
-        # is deliberately ephemeral (planning_tmpdir.sh: fresh per boot) while
-        # the mint-claim-verify protocol deliberately spans sessions, so an
-        # ordinary temp-directory eviction -- a reboot, tmpwatch, another
-        # process clearing ${TMPDIR:-/tmp} -- is the routine cause here, not a
-        # deliberate invalidation at approval.
-        plan_die "session secret missing: $secret_file
-This is an ordinary temp-directory eviction (reboot, tmpwatch, or anything
-else clearing \${TMPDIR:-/tmp}), not a sign the review was invalidated: the
-secret store is designed to be fresh per boot, while the mint-claim-verify
-protocol spans sessions.
-Recovery: re-mint fix keys for this plan --
-  $script_dir/mint-fix-keys.sh $plan_dir
-This starts a NEW session and rewrites fix-keys.json, so every fixer must
-re-claim its keys in fixes.md; the prior claims and the audit trail of which
-session claimed which key are lost."
-    fi
     [ -f "$fixes_file" ] || plan_die "fixes.md missing; a gated plan must record one claim per (finding, work unit)"
-    secret="$(cat "$secret_file")"
+    verify_fix_keys_resolve_secret "$session_id" "$plan_dir"
+    secret="$VERIFY_FIX_KEYS_SECRET"
 
-    failures=0
-    warnings=0
-    line_no=0
-    while IFS= read -r line; do
-        line_no=$((line_no + 1))
-        [ -n "$line" ] || continue
-        if ! awk -F'\t' 'NF == 3 { exit 0 } { exit 1 }' <<< "$line"; then
-            printf 'malformed fixes.md claim (line %s): expected finding_id, work_unit, key\n' "$line_no" >&2
-            failures=$((failures + 1))
-            continue
-        fi
-        fid="$(printf '%s' "$line" | awk -F'\t' '{print $1}')"
-        wu="$(printf '%s' "$line" | awk -F'\t' '{print $2}')"
-        key="$(printf '%s' "$line" | awk -F'\t' '{print $3}')"
-        if ! grep -Fqx "$fid	$wu" "$pairs_file"; then
-            printf 'ignoring claim for pair %s/%s (not gated in fix-keys.json)\n' "$fid" "$wu" >&2
-            warnings=$((warnings + 1))
-            continue
-        fi
-        expected="$(plan_fix_key "$secret" "$session_id|$fid|$wu")"
-        if [ "$expected" != "$key" ]; then
-            printf 'fix key mismatch for %s/%s (forged or stale key)\n' "$fid" "$wu" >&2
-            failures=$((failures + 1))
-        fi
-        printf '%s\t%s\n' "$fid" "$wu" >> "$claims_file"
-    done < "$fixes_file"
-
-    while IFS=$'\t' read -r fid wu; do
-        [ -n "$fid" ] || continue
-        if ! grep -Fqx "$fid	$wu" "$claims_file"; then
-            printf 'no fix key claim recorded for gated pair %s/%s\n' "$fid" "$wu" >&2
-            failures=$((failures + 1))
-        fi
-    done < "$pairs_file"
+    read -r failures warnings < <(verify_fix_keys_check_claims "$fixes_file" "$pairs_file" "$secret" "$session_id" "$claims_file")
 
     # Counted with the key failures and checked before them, so a self-certified
     # claim set cannot pass on a caller that only reads the exit status.

@@ -208,28 +208,18 @@ write_plan() {
         PLAN_STEPS_ROOT "$plan_root/steps"
 }
 
-check_manifests() {
-    local plan_root="$1"
-    local plans_root="${2:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}"
-    plan_root=$(absolute_path "$plan_root")
-    plans_root=$(absolute_path "$plans_root")
-    manifest_check "$(global_env_path "$plans_root")" \
-        'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLANNING_SKILL_ROOT PLANNING_SCRIPTS_ROOT PLANNING_TESTS_ROOT'
-    manifest_check "$(plan_env_path "$plan_root")" \
-        'PLAN_ENV_SCHEMA_VERSION PLAN_SNAPSHOT_REPO PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
-    local global_root plan_manifest_root global_schema plan_schema
-    local global_skill_root global_scripts_root global_tests_root
-    load_manifest "$(global_env_path "$plans_root")"
-    global_schema=$PLAN_ENV_SCHEMA_VERSION
-    global_root=$PLANS_ROOT
-    global_skill_root=$PLANNING_SKILL_ROOT
-    global_scripts_root=$PLANNING_SCRIPTS_ROOT
-    global_tests_root=$PLANNING_TESTS_ROOT
-    load_manifest "$(plan_env_path "$plan_root")"
-    plan_schema=$PLAN_ENV_SCHEMA_VERSION
+# check_manifests_fields <plan_root> <plans_root> <global_schema>
+# <global_root> <global_skill_root> <global_scripts_root>
+# <global_tests_root> — the per-field consistency checks once both manifests
+# are loaded (loaded separately since load_manifest overwrites its globals on
+# the second call, so the global-manifest fields are captured by the caller
+# first and passed in here).
+check_manifests_fields() {
+    local plan_root="$1" plans_root="$2" global_schema="$3" global_root="$4" \
+        global_skill_root="$5" global_scripts_root="$6" global_tests_root="$7"
+    local plan_schema=$PLAN_ENV_SCHEMA_VERSION plan_manifest_root=$PLAN_ROOT
     [ "$global_schema" = 2 ] || die "unsupported global manifest schema: $global_schema" 65
     [ "$plan_schema" = 2 ] || die "unsupported plan manifest schema: $plan_schema" 65
-    plan_manifest_root=$PLAN_ROOT
     [ "$global_root" = "$plans_root" ] || die "global manifest root mismatch" 65
     [ "$plan_manifest_root" = "$plan_root" ] || die "plan manifest root mismatch" 65
     [ "$PLANS_ROOT" = "$plans_root" ] || die "plan manifest root mismatch" 65
@@ -249,6 +239,27 @@ check_manifests() {
         ''|"$plans_root"|"$plan_root") ;;
         *) die "snapshot repo mismatch" 65 ;;
     esac
+}
+
+check_manifests() {
+    local plan_root="$1"
+    local plans_root="${2:-${PLANS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/plans}}"
+    plan_root=$(absolute_path "$plan_root")
+    plans_root=$(absolute_path "$plans_root")
+    manifest_check "$(global_env_path "$plans_root")" \
+        'PLAN_ENV_SCHEMA_VERSION PLANS_ROOT PLANNING_SKILL_ROOT PLANNING_SCRIPTS_ROOT PLANNING_TESTS_ROOT'
+    manifest_check "$(plan_env_path "$plan_root")" \
+        'PLAN_ENV_SCHEMA_VERSION PLAN_SNAPSHOT_REPO PLANS_ROOT PLAN_ROOT PLAN_NAME GLOBAL_PLANS_ENV_FILE PLAN_ENV_FILE PLAN_DESCRIPTION_FILE PLAN_PROGRESS_FILE PLAN_WORK_UNIT_INVENTORY PLAN_VALIDATION_FILE PLAN_CONTEXT_ROOT PLAN_STEPS_ROOT'
+    local global_schema global_root global_skill_root global_scripts_root global_tests_root
+    load_manifest "$(global_env_path "$plans_root")"
+    global_schema=$PLAN_ENV_SCHEMA_VERSION
+    global_root=$PLANS_ROOT
+    global_skill_root=$PLANNING_SKILL_ROOT
+    global_scripts_root=$PLANNING_SCRIPTS_ROOT
+    global_tests_root=$PLANNING_TESTS_ROOT
+    load_manifest "$(plan_env_path "$plan_root")"
+    check_manifests_fields "$plan_root" "$plans_root" "$global_schema" "$global_root" \
+        "$global_skill_root" "$global_scripts_root" "$global_tests_root"
 }
 
 case "${1:-}" in
