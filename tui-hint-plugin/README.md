@@ -1,12 +1,15 @@
 # tui-hint-plugin
 
-A Claude Code plugin that reminds an agent, at the moment it is about to run
-a program via a plain Bash call, that this repository ships a reference
-profile for that program under interactive-shell/appprofiles/ (or the agent's
-own prior session left one under appprofiles.d/) -- and that the program
-can usually be driven more effectively through the `interactive-shell` skill
-(which gives a real PTY, screen observation, and verified keystrokes) than a
-headless invocation, which cannot observe the screen at all.
+An instinct, not a skill: a Claude Code plugin that surfaces, at the moment
+an agent is about to run a program via a plain Bash call, that this
+repository ships a reference profile for that program under
+interactive-shell/appprofiles/ (or the agent's own prior session left one
+under appprofiles.d/) -- and that the program can usually be driven more
+effectively through the `interactive-shell` skill (which gives a real PTY,
+screen observation, and verified keystrokes) than a headless invocation,
+which cannot observe the screen at all. Nothing here is invoked; it rides
+along on every matching Bash call, the way a reflex needs no deliberate
+recall.
 
 ## Why this exists
 
@@ -34,7 +37,8 @@ skill it may not have loaded recently.
   If a profile is found, the hook returns `additionalContext` naming it --
   surfaced to the model itself, not just the user-visible transcript -- and
   always `permissionDecision: "allow"`. **This hook never blocks or modifies
-  a tool call**; it is purely advisory.
+  a tool call**; it is purely an instinct -- advisory, always-on, and asking
+  nothing of the agent's own memory.
 
 ## Matching is data-driven, not hardcoded per program
 

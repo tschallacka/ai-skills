@@ -2,5 +2,5 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "tui-hint",
   "version": "0.1.0",
-  "description": "Reminds an agent that a Bash command it is about to run has a shipped interactive-shell app profile (screen layout, keybindings, dialogs, known quirks) and can be driven more effectively through the interactive-shell skill than a plain headless call."
+  "description": "An instinct: surfaces, on every matching Bash call, that it has a shipped interactive-shell app profile (screen layout, keybindings, dialogs, known quirks) and can be driven more effectively through the interactive-shell skill than a plain headless call."
 }
