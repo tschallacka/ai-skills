@@ -5759,32 +5759,9 @@ install_tui_hint_plugin_claude() {
 # .js file is copied once to a stable location under this installer's own
 # XDG directory, independent of which root(s) were selected, and that path
 # is added to the array if not already present.
-install_tui_hint_plugin_opencode() {
-    local source="$SOURCE_ROOT/tui-hint-plugin/opencode/tui-hint-plugin.js"
-    local destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/tui-hint-plugin/tui-hint-plugin.js"
-    local cfg doc added tmpfile created=0
-    [ -f "$source" ] || return 0
-    mkdir -p "$(dirname "$destination")" || { echo "  opencode: cannot create $(dirname "$destination")/" >&2; return 0; }
-    cp -p "$source" "$destination" || { echo "  opencode: cannot write $destination" >&2; return 0; }
-
-    cfg="$(opencode_configfile)"
-    if [ ! -f "$cfg" ]; then
-        mkdir -p "$(dirname "$cfg")" || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; return 0; }
-        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
-            || { echo "  opencode: cannot write $cfg" >&2; return 0; }
-        echo "  opencode: created $cfg" >&2
-        created=1
-    fi
-    if ! command -v rjq >/dev/null 2>&1; then
-        echo "  opencode: rjq is not installed; add \"$destination\" to $cfg's \"plugin\" array by hand." >&2
-        return 0
-    fi
-    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
-        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add \"$destination\" to its \"plugin\" array by hand." >&2
-        return 0
-    fi
-    [ "$created" -eq 1 ] || backup_file "$cfg"
-
+opencode_register_plugin_entry() { # <cfg> <destination> <created:0|1>
+    local cfg="$1" destination="$2" created="$3"
+    local doc added tmpfile
     doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
     [ -n "$doc" ] || doc='{}'
     added='false'
@@ -5808,6 +5785,35 @@ install_tui_hint_plugin_opencode() {
     else
         echo "  opencode: plugin already registered" >&2
     fi
+}
+
+install_tui_hint_plugin_opencode() {
+    local source="$SOURCE_ROOT/tui-hint-plugin/opencode/tui-hint-plugin.js"
+    local destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/tui-hint-plugin/tui-hint-plugin.js"
+    local cfg created=0
+    [ -f "$source" ] || return 0
+    mkdir -p "$(dirname "$destination")" || { echo "  opencode: cannot create $(dirname "$destination")/" >&2; return 0; }
+    cp -p "$source" "$destination" || { echo "  opencode: cannot write $destination" >&2; return 0; }
+
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; add \"$destination\" to $cfg's \"plugin\" array by hand." >&2
+        return 0
+    fi
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add \"$destination\" to its \"plugin\" array by hand." >&2
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+
+    opencode_register_plugin_entry "$cfg" "$destination" "$created"
 }
 
 # Every root a tui-hint-relevant skill was actually selected for. Claude

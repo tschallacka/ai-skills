@@ -120,7 +120,10 @@ tui_hint_match_profile() { # <profiles dir> <stripped command line> <require_mar
         [ -n "$patterns" ] || continue
         while IFS= read -r pattern; do
             [ -n "$pattern" ] || continue
-            if printf '%s' "$command" | grep -Eq -- "$pattern"; then
+            # PORTABILITY(pipefail-grep-q): grep -c, not -q, reads the whole
+            # line rather than exiting on first match, so this pipe cannot
+            # SIGPIPE the writer under `set -o pipefail`.
+            if printf '%s' "$command" | grep -Ec -- "$pattern" >/dev/null; then
                 printf '%s\n' "$base"
                 return 0
             fi
