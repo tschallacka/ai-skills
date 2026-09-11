@@ -32,15 +32,11 @@
 //! the fallback is a no-op there either way; the exact path only matters --
 //! and only engages -- when `--source` names a raw checkout directly.
 //!
-//! `--dev-build`/`DEV_BUILD` (install.sh's separate "prefer this host's
-//! freshly-built binary over the shipped one" switch) has nothing to reach
-//! here: it is a question about which binary `source_file()` resolves a
-//! manifest row TO, not which rows the manifest names in the first place,
-//! and this installer's own copy step (below) only ever reads from
-//! `source_root.join(skill)` -- one location, not two. `main.rs` still
-//! accepts `--dev-build` on the command line so an existing script naming
-//! it does not start failing, but nothing downstream of argument parsing
-//! consumes it.
+//! install.sh's separate `--dev-build`/`DEV_BUILD` ("prefer this host's
+//! freshly-built binary over the shipped one") has no port here: this
+//! installer's own copy step (below) only ever reads from
+//! `source_root.join(skill)` -- one location, not two -- so there is no
+//! second binary source to choose between.
 
 use crate::backup;
 use crate::digest;
@@ -510,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dev_marked_file_is_dropped_by_default_but_shipped_with_dev_build() {
+    fn a_dev_marked_file_is_dropped_by_default_but_shipped_with_package_dev() {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         write(
@@ -529,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn an_entire_tests_directory_is_dropped_by_default_but_shipped_with_dev_build() {
+    fn an_entire_tests_directory_is_dropped_by_default_but_shipped_with_package_dev() {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         write(

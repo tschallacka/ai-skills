@@ -43,15 +43,13 @@ Usage:
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR] [--integration MODE|SKILL=MODE ...]
                      [--editor-integration skill|mcp] [--yes]
-                     [--package prod|dev] [--dev-build]
+                     [--package prod|dev]
                      runs the planning/worktrees/interactive-shell/editor
                      permission prompts unless --yes auto-answers them;
                      --package dev (default prod; also read from
                      $PACKAGE_SELECTION) also ships MODE:DEV-marked files
                      (tests, maintainer docs) instead of filtering them out,
-                     for installing straight from a raw checkout during dev;
-                     --dev-build is unrelated: prefer this host's freshly-
-                     built binary over the shipped one
+                     for installing straight from a raw checkout during dev
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
@@ -72,12 +70,12 @@ Usage:
                      machine-facing: planning's own self-update tooling
   installer resolve-source planning RELATIVE [--source DIR]
   installer install-skill SKILL --target DIR --approval yes|no
-                     [--source DIR] [--package prod|dev] [--dev-build]
+                     [--source DIR] [--package prod|dev]
                      refuses on any unmanaged collision instead of backing
                      up (exit 2 declined, 3 collision, 0 installed)
   installer interactive [--target DIR | --agent NAME] [--source DIR]
                      [--integration MODE|SKILL=MODE ...] [--yes]
-                     [--package prod|dev] [--dev-build]
+                     [--package prod|dev]
                      full-screen skill picker; installs the confirmed
                      selection, or does nothing if the user quits. With
                      neither --target nor --agent, prompts to choose an
@@ -176,10 +174,7 @@ fn run_list(argv: &[String]) -> Result<ExitCode, String> {
 /// install.sh's own `PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"`
 /// (installer/src/05-config.sh) -- a single global default, read the same
 /// way whatever subcommand runs, overridable everywhere by `--package
-/// prod|dev`. Not `--dev-build`/`DEV_BUILD`: that is install.sh's separate
-/// "prefer this host's freshly-built binary" switch (`source_file`'s own
-/// dev-build-vs-shipped resolution), a different question from which file
-/// TIER `skill_files()` ships in the first place.
+/// prod|dev`.
 fn package_selection_env_default() -> bool {
     std::env::var("PACKAGE_SELECTION")
         .map(|v| v == "dev")
@@ -251,12 +246,6 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 i += 1;
                 package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
-            // Accepted, not stored: install.sh's separate "prefer this
-            // host's freshly-built binary" switch has nothing left to
-            // reach now that skill_manifest.rs no longer runs bash --
-            // still parsed so an existing script naming it does not start
-            // failing outright.
-            "--dev-build" => {}
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -762,11 +751,9 @@ fn install_selected_skills(
         // offering more than one integration mode names which it got and
         // why. summary_dev_build_note has no port -- it names binaries that
         // came from a repo-root dev build location distinct from the
-        // shipped one, a second binary source this installer's own
-        // `--dev-build` flag has no equivalent of (it only forwards
-        // `DEV_BUILD` into skill_manifest.rs's bash subprocess; `--package
-        // prod|dev` is the separate, independent switch that widens
-        // skill_files' own file-tier selection).
+        // shipped one, a second binary source this installer has no concept
+        // of at all (its copy step only ever reads from
+        // `source_root.join(skill)`).
         for (req, met) in &status.requirements {
             if *met || req.strength != requirements::Strength::Soft {
                 continue;
@@ -1758,7 +1745,7 @@ fn run_resolve_source(argv: &[String]) -> Result<ExitCode, String> {
 }
 
 /// `installer install-skill <skill> --target DIR --approval yes|no
-/// [--source DIR] [--dev-build]` -- ported from install.sh's
+/// [--source DIR] [--package prod|dev]` -- ported from install.sh's
 /// `--install-skill <skill> --target DIR --approval yes|no`. Exit codes
 /// mirror install.sh's own documented contract for this entry point: 0
 /// installed, 2 approval declined, 3 an unsafe or unmanaged collision.
@@ -1787,9 +1774,6 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
-            // Accepted, not stored -- see parse_install_args's own comment
-            // on --dev-build.
-            "--dev-build" => {}
             other if skill.is_none() && !other.starts_with("--") => skill = Some(other.to_string()),
             other => return Err(format!("install-skill: unknown option: {other}")),
         }
@@ -1850,9 +1834,6 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
             }
-            // Accepted, not stored -- see parse_install_args's own comment
-            // on --dev-build.
-            "--dev-build" => {}
             other => return Err(format!("interactive: unknown option: {other}")),
         }
         i += 1;
