@@ -150,7 +150,7 @@ pub fn install_skill_cli(
     skill: &str,
     target: &Path,
     approval_yes: bool,
-    dev_build: bool,
+    package_dev: bool,
 ) -> Result<CliInstallOutcome, String> {
     if manifest::known_skill(skill).is_none() {
         return Err(format!("unsupported CLI skill: {skill}"));
@@ -168,7 +168,7 @@ pub fn install_skill_cli(
     let dest_dir = target.join(skill);
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), None);
     let relative_paths =
-        install::skill_relative_files(source_root, skill, dev_build).map_err(|e| e.to_string())?;
+        install::skill_relative_files(source_root, skill, package_dev).map_err(|e| e.to_string())?;
 
     let mut collision = false;
     let mut unsafe_collision = false;

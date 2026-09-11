@@ -43,12 +43,15 @@ Usage:
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR] [--integration MODE|SKILL=MODE ...]
                      [--editor-integration skill|mcp] [--yes]
-                     [--dev-build]
+                     [--package prod|dev] [--dev-build]
                      runs the planning/worktrees/interactive-shell/editor
                      permission prompts unless --yes auto-answers them;
-                     --dev-build also ships MODE:DEV-marked files (tests,
-                     maintainer docs) instead of filtering them out, for
-                     installing straight from a raw checkout during dev
+                     --package dev (default prod; also read from
+                     $PACKAGE_SELECTION) also ships MODE:DEV-marked files
+                     (tests, maintainer docs) instead of filtering them out,
+                     for installing straight from a raw checkout during dev;
+                     --dev-build is unrelated: prefer this host's freshly-
+                     built binary over the shipped one
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
@@ -69,11 +72,12 @@ Usage:
                      machine-facing: planning's own self-update tooling
   installer resolve-source planning RELATIVE [--source DIR]
   installer install-skill SKILL --target DIR --approval yes|no
-                     [--source DIR] [--dev-build]
+                     [--source DIR] [--package prod|dev] [--dev-build]
                      refuses on any unmanaged collision instead of backing
                      up (exit 2 declined, 3 collision, 0 installed)
   installer interactive [--target DIR | --agent NAME] [--source DIR]
-                     [--integration MODE|SKILL=MODE ...] [--yes] [--dev-build]
+                     [--integration MODE|SKILL=MODE ...] [--yes]
+                     [--package prod|dev] [--dev-build]
                      full-screen skill picker; installs the confirmed
                      selection, or does nothing if the user quits. With
                      neither --target nor --agent, prompts to choose an
@@ -169,6 +173,27 @@ fn run_list(argv: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// install.sh's own `PACKAGE_SELECTION="${PACKAGE_SELECTION:-prod}"`
+/// (installer/src/05-config.sh) -- a single global default, read the same
+/// way whatever subcommand runs, overridable everywhere by `--package
+/// prod|dev`. Not `--dev-build`/`DEV_BUILD`: that is install.sh's separate
+/// "prefer this host's freshly-built binary" switch (`source_file`'s own
+/// dev-build-vs-shipped resolution), a different question from which file
+/// TIER `skill_files()` ships in the first place.
+fn package_selection_env_default() -> bool {
+    std::env::var("PACKAGE_SELECTION")
+        .map(|v| v == "dev")
+        .unwrap_or(false)
+}
+
+fn parse_package_flag(value: &str) -> Result<bool, String> {
+    match value {
+        "prod" => Ok(false),
+        "dev" => Ok(true),
+        other => Err(format!("--package must be prod or dev, not {other}")),
+    }
+}
+
 struct InstallArgs {
     skills: Vec<String>,
     all: bool,
@@ -179,7 +204,7 @@ struct InstallArgs {
     agents: Vec<String>,
     integration: Vec<String>,
     yes: bool,
-    dev_build: bool,
+    package_dev: bool,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -190,7 +215,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut agents: Vec<String> = Vec::new();
     let mut integration = Vec::new();
     let mut yes = false;
-    let mut dev_build = false;
+    let mut package_dev = package_selection_env_default();
 
     let mut i = 0;
     while i < argv.len() {
@@ -222,7 +247,16 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 integration.push(format!("ai-text-editor={mode}"));
             }
             "--yes" => yes = true,
-            "--dev-build" => dev_build = true,
+            "--package" => {
+                i += 1;
+                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+            }
+            // Accepted, not stored: install.sh's separate "prefer this
+            // host's freshly-built binary" switch has nothing left to
+            // reach now that skill_manifest.rs no longer runs bash --
+            // still parsed so an existing script naming it does not start
+            // failing outright.
+            "--dev-build" => {}
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -235,7 +269,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         agents,
         integration,
         yes,
-        dev_build,
+        package_dev,
     })
 }
 
@@ -674,7 +708,7 @@ fn install_selected_skills(
     target: &Path,
     skills: &[String],
     integration_selection: &IntegrationSelection,
-    dev_build: bool,
+    package_dev: bool,
     summary: &mut Summary,
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
@@ -718,7 +752,7 @@ fn install_selected_skills(
             skill,
             target,
             integration_selection.choice_for(skill),
-            dev_build,
+            package_dev,
         )
         .map_err(|e| e.to_string())?;
         let mut line = format!("installed {skill} -> {}", target.join(skill).display());
@@ -729,8 +763,10 @@ fn install_selected_skills(
         // why. summary_dev_build_note has no port -- it names binaries that
         // came from a repo-root dev build location distinct from the
         // shipped one, a second binary source this installer's own
-        // dev_build flag (which instead widens skill_files' own package
-        // selection) has no equivalent of.
+        // `--dev-build` flag has no equivalent of (it only forwards
+        // `DEV_BUILD` into skill_manifest.rs's bash subprocess; `--package
+        // prod|dev` is the separate, independent switch that widens
+        // skill_files' own file-tier selection).
         for (req, met) in &status.requirements {
             if *met || req.strength != requirements::Strength::Soft {
                 continue;
@@ -1140,7 +1176,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
             target,
             &skills,
             &integration_selection,
-            args.dev_build,
+            args.package_dev,
             &mut summary,
         )?;
         let _ = kind;
@@ -1730,7 +1766,7 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
     let mut approval: Option<String> = None;
-    let mut dev_build = false;
+    let mut package_dev = package_selection_env_default();
     let mut skill: Option<String> = None;
     let mut i = 0;
     while i < argv.len() {
@@ -1747,7 +1783,13 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 approval = Some(argv.get(i).ok_or("--approval needs yes or no")?.clone());
             }
-            "--dev-build" => dev_build = true,
+            "--package" => {
+                i += 1;
+                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+            }
+            // Accepted, not stored -- see parse_install_args's own comment
+            // on --dev-build.
+            "--dev-build" => {}
             other if skill.is_none() && !other.starts_with("--") => skill = Some(other.to_string()),
             other => return Err(format!("install-skill: unknown option: {other}")),
         }
@@ -1762,7 +1804,7 @@ fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
         _ => return Err("--approval must be yes or no".to_string()),
     };
     let source = resolve_source(source)?;
-    match cli_mode::install_skill_cli(&source, &skill, &target, approval_yes, dev_build)? {
+    match cli_mode::install_skill_cli(&source, &skill, &target, approval_yes, package_dev)? {
         cli_mode::CliInstallOutcome::Installed(dest) => {
             println!("Installed: {}", dest.display());
             Ok(ExitCode::SUCCESS)
@@ -1778,7 +1820,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut agent: Option<String> = None;
     let mut integration_args = Vec::new();
     let mut yes = false;
-    let mut dev_build = false;
+    let mut package_dev = package_selection_env_default();
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -1804,7 +1846,13 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 integration_args.push(format!("ai-text-editor={mode}"));
             }
             "--yes" => yes = true,
-            "--dev-build" => dev_build = true,
+            "--package" => {
+                i += 1;
+                package_dev = parse_package_flag(argv.get(i).ok_or("--package needs prod or dev")?)?;
+            }
+            // Accepted, not stored -- see parse_install_args's own comment
+            // on --dev-build.
+            "--dev-build" => {}
             other => return Err(format!("interactive: unknown option: {other}")),
         }
         i += 1;
@@ -1882,7 +1930,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                     root,
                     &names,
                     &picked,
-                    dev_build,
+                    package_dev,
                     &mut summary,
                 )?;
                 for skill in installed {

@@ -14,22 +14,33 @@
 //! (installer/src/60-install.sh), ported with a different digest (blake3,
 //! not cksum) since this manifest is this installer's own.
 //!
-//! `dev_build` gates whether a raw dev checkout's own maintainer-only
-//! content ships along with a skill -- install.sh's default is `prod`
-//! (`--dev-build` opts out), driven by a hand-maintained `skill_files()`
-//! manifest (installer/src/50-manifest.sh). This installer gets install.sh's
-//! own, exact answer whenever it can: `skill_manifest::skill_files_via_install_sh`
-//! extracts `skill_files()` (and its one helper) out of a real `install.sh`
-//! sitting next to `source_root` and runs them with bash itself, so the
-//! file list is install.sh's own, byte-for-byte, not a re-derivation of it.
-//! `collect_relative_files`'s own `should_ship` (`# MODE: DEV` header /
-//! `tests/` directory) is the fallback for when that is not possible -- no
-//! `install.sh` next to `--source` (a `build-release.sh` tarball, which
-//! never ships one; `bootstrap.sh` downloads the skill payload alone), or
-//! no `bash` on PATH. That tarball is the common end-user path and is
-//! already prod-only content, so the fallback is a no-op there either way;
-//! the exact path only matters -- and only engages -- when `--source`
-//! names a raw checkout directly.
+//! `package_dev` gates whether a raw dev checkout's own maintainer-only
+//! content ships along with a skill -- install.sh's `--package prod|dev`/
+//! `PACKAGE_SELECTION` (default `prod`), driven by a hand-maintained
+//! `skill_files()` manifest (installer/src/50-manifest.sh). This installer
+//! gets install.sh's own, exact answer whenever it can:
+//! `skill_manifest::skill_files_via_install_sh` extracts `skill_files()`'s
+//! own source text out of a real `install.sh` sitting next to `source_root`
+//! and interprets it directly (no `bash` subprocess), so the file list is
+//! install.sh's own, not a re-derivation of it. `collect_relative_files`'s
+//! own `should_ship` (`# MODE: DEV` header / `tests/` directory) is the
+//! fallback for when that is not possible -- no `install.sh` next to
+//! `--source` (a `build-release.sh` tarball, which never ships one;
+//! `bootstrap.sh` downloads the skill payload alone), or `skill_files()`'s
+//! source no longer matches the dialect that parser understands. That
+//! tarball is the common end-user path and is already prod-only content, so
+//! the fallback is a no-op there either way; the exact path only matters --
+//! and only engages -- when `--source` names a raw checkout directly.
+//!
+//! `--dev-build`/`DEV_BUILD` (install.sh's separate "prefer this host's
+//! freshly-built binary over the shipped one" switch) has nothing to reach
+//! here: it is a question about which binary `source_file()` resolves a
+//! manifest row TO, not which rows the manifest names in the first place,
+//! and this installer's own copy step (below) only ever reads from
+//! `source_root.join(skill)` -- one location, not two. `main.rs` still
+//! accepts `--dev-build` on the command line so an existing script naming
+//! it does not start failing, but nothing downstream of argument parsing
+//! consumes it.
 
 use crate::backup;
 use crate::digest;
@@ -53,7 +64,7 @@ pub fn install_skill(
     skill: &str,
     target_root: &Path,
     integration_choice: Option<&str>,
-    dev_build: bool,
+    package_dev: bool,
 ) -> io::Result<()> {
     let source_dir = source_root.join(skill);
     if !source_dir.is_dir() {
@@ -72,7 +83,7 @@ pub fn install_skill(
     fs::create_dir_all(&dest_dir)?;
 
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), integration_choice);
-    let relative_paths = relative_paths_for(source_root, skill, dev_build)?;
+    let relative_paths = relative_paths_for(source_root, skill, package_dev)?;
 
     // A symlinked destination file (or the digest manifest itself) is left
     // for manual review rather than silently replaced -- ported from
@@ -130,8 +141,8 @@ pub fn install_skill(
 /// `cli_install_skill`), which needs the same "what would this skill ship"
 /// answer without going through the backup/digest machinery this module's
 /// own `install_skill` wraps it in.
-pub fn skill_relative_files(source_root: &Path, skill: &str, dev_build: bool) -> io::Result<Vec<String>> {
-    relative_paths_for(source_root, skill, dev_build)
+pub fn skill_relative_files(source_root: &Path, skill: &str, package_dev: bool) -> io::Result<Vec<String>> {
+    relative_paths_for(source_root, skill, package_dev)
 }
 
 /// install.sh's own `skill_files()` answer when it can be gotten (a real
@@ -143,8 +154,8 @@ pub fn skill_relative_files(source_root: &Path, skill: &str, dev_build: bool) ->
 /// missing source is a documented `die`), so a missing file here reads as
 /// "this row does not apply on this host" the same way a platform-gated
 /// binary row already does.
-fn relative_paths_for(source_root: &Path, skill: &str, dev_build: bool) -> io::Result<Vec<String>> {
-    if let Some(exact) = skill_manifest::skill_files_via_install_sh(source_root, skill, dev_build) {
+fn relative_paths_for(source_root: &Path, skill: &str, package_dev: bool) -> io::Result<Vec<String>> {
+    if let Some(exact) = skill_manifest::skill_files_via_install_sh(source_root, skill, package_dev) {
         let source_dir = source_root.join(skill);
         return Ok(exact
             .into_iter()
@@ -159,7 +170,7 @@ fn relative_paths_for(source_root: &Path, skill: &str, dev_build: bool) -> io::R
             })
             .collect());
     }
-    collect_relative_files(&source_root.join(skill), &PathBuf::new(), dev_build)
+    collect_relative_files(&source_root.join(skill), &PathBuf::new(), package_dev)
 }
 
 /// Relative paths (forward-slash joined, regardless of host) of every FILE
@@ -167,7 +178,7 @@ fn relative_paths_for(source_root: &Path, skill: &str, dev_build: bool) -> io::R
 /// here: this is an early slice and install.sh's own tree has none under a
 /// skill directory, so refusing silently on one would be a worse surprise
 /// than not handling it at all yet.
-fn collect_relative_files(dir: &Path, prefix: &Path, dev_build: bool) -> io::Result<Vec<String>> {
+fn collect_relative_files(dir: &Path, prefix: &Path, package_dev: bool) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
@@ -175,11 +186,11 @@ fn collect_relative_files(dir: &Path, prefix: &Path, dev_build: bool) -> io::Res
         let file_type = entry.file_type()?;
         let relative = prefix.join(entry.file_name());
         if file_type.is_dir() {
-            if !dev_build && entry.file_name() == "tests" {
+            if !package_dev && entry.file_name() == "tests" {
                 continue;
             }
-            out.extend(collect_relative_files(&entry.path(), &relative, dev_build)?);
-        } else if file_type.is_file() && (dev_build || should_ship(&entry.path())) {
+            out.extend(collect_relative_files(&entry.path(), &relative, package_dev)?);
+        } else if file_type.is_file() && (package_dev || should_ship(&entry.path())) {
             out.push(relative.to_string_lossy().replace('\\', "/"));
         }
     }
