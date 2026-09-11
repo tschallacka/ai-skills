@@ -70,6 +70,24 @@ pub fn claude_planning_permissions(
     merge_allow_entries(&cfg, &entries)
 }
 
+/// No separate `Write(...)` entry: Claude Code's permission engine has no
+/// rule keyed on the Write tool and does not fall back to a matching
+/// `Edit(...)` rule either -- `Edit(path)` is the umbrella that already
+/// covers every file-editing tool, Write included.
+pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<PermissionOutcome> {
+    let cfg = claude_settings_path(home);
+    if !cfg.is_file() {
+        return Ok(PermissionOutcome::NoConfigFile);
+    }
+    let worktrees = strip_trailing_slashes(worktrees);
+    let entries = vec![
+        format!("Read({worktrees}/**)"),
+        format!("Edit({worktrees}/**)"),
+        format!("Bash({worktrees}/**:*)"),
+    ];
+    merge_allow_entries(&cfg, &entries)
+}
+
 /// A JSON document read as an object, same as install.sh's `objectify`:
 /// anything that isn't already an object (a scalar, an array, or a file that
 /// failed to parse at all) reads as `{}` rather than refusing.
@@ -312,6 +330,148 @@ pub fn opencode_planning_permissions(
     )
 }
 
+pub fn opencode_worktrees_permissions(
+    worktrees: &str,
+    home: &Path,
+) -> io::Result<OpencodePermissionOutcome> {
+    let cfg = opencode_configfile(home);
+    if opencode_prepare_config(&cfg)?.is_none() {
+        return Ok(OpencodePermissionOutcome::NotStrictJson);
+    }
+    let pattern = vec![format!("{}/**", strip_trailing_slashes(worktrees))];
+    opencode_merge_permission(
+        &cfg,
+        &[
+            ("read", &pattern),
+            ("edit", &pattern),
+            ("write", &pattern),
+            ("bash", &pattern),
+            ("external_directory", &pattern),
+        ],
+    )
+}
+
+// ---------------------------------------------------------------
+// codex
+// ---------------------------------------------------------------
+//
+// codex reads ~/.codex/config.toml, which is TOML, not JSON: this handles
+// exactly one well-defined shape, a single-line `writable_roots = [...]`
+// array wherever it appears (a root-level dotted key or inside a
+// `[sandbox_workspace_write]` table look identical on the matching line, so
+// one search covers both). A multi-line array falls back to
+// `NotSingleLineArray`, same as install.sh's manual-instructions fallback.
+
+pub enum CodexOutcome {
+    /// No config file existed; one was written with just this array.
+    Created,
+    /// The config existed with no `writable_roots` line; one was prepended
+    /// (TOML's dotted-key syntax only reliably names a root-level key while
+    /// no `[table]` header has been opened yet, so prepending -- never
+    /// appending after whatever section happens to be last -- is the only
+    /// placement guaranteed to land at the root).
+    Prepended,
+    AlreadyPresent,
+    Appended(Vec<String>),
+    /// The line exists but is not a single `[...]` array on one line; this
+    /// installer refuses to guess how to extend it.
+    NotSingleLineArray,
+}
+
+fn codex_configfile(home: &Path) -> PathBuf {
+    std::env::var("CODEX_CONFIGFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".codex").join("config.toml"))
+}
+
+fn quoted_csv(paths: &[String]) -> String {
+    paths
+        .iter()
+        .map(|p| format!("\"{p}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn writable_roots_line(content: &str) -> Option<usize> {
+    let re = regex::Regex::new(r"writable_roots\s*=").expect("static regex");
+    content.lines().position(|line| re.is_match(line))
+}
+
+fn rejoin_preserving_trailing_newline(original: &str, lines: Vec<String>) -> String {
+    let mut out = lines.join("\n");
+    if original.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn write_fresh_roots(cfg: &Path, wanted: &[String]) -> io::Result<CodexOutcome> {
+    let line = format!(
+        "sandbox_workspace_write.writable_roots = [{}]\n",
+        quoted_csv(wanted)
+    );
+    if !cfg.is_file() {
+        if let Some(parent) = cfg.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(cfg, line)?;
+        return Ok(CodexOutcome::Created);
+    }
+    backup::backup_file(cfg)?;
+    let existing = fs::read_to_string(cfg)?;
+    write_preserving_mode(cfg, &format!("{line}{existing}"))?;
+    Ok(CodexOutcome::Prepended)
+}
+
+fn codex_merge_writable_roots(cfg: &Path, wanted: &[String]) -> io::Result<CodexOutcome> {
+    if !cfg.is_file() {
+        return write_fresh_roots(cfg, wanted);
+    }
+    let content = fs::read_to_string(cfg)?;
+    let Some(line_index) = writable_roots_line(&content) else {
+        return write_fresh_roots(cfg, wanted);
+    };
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let line = lines[line_index].clone();
+    if !(line.contains('[') && line.contains(']')) {
+        return Ok(CodexOutcome::NotSingleLineArray);
+    }
+    let to_add: Vec<String> = wanted
+        .iter()
+        .filter(|p| !line.contains(&format!("\"{p}\"")))
+        .cloned()
+        .collect();
+    if to_add.is_empty() {
+        return Ok(CodexOutcome::AlreadyPresent);
+    }
+    backup::backup_file(cfg)?;
+    let (before, after) = line.split_once(']').unwrap_or((line.as_str(), ""));
+    lines[line_index] = format!("{before}, {}]{after}", quoted_csv(&to_add));
+    write_preserving_mode(cfg, &rejoin_preserving_trailing_newline(&content, lines))?;
+    Ok(CodexOutcome::Appended(to_add))
+}
+
+pub fn codex_planning_permissions(
+    scripts: &str,
+    plans: &str,
+    tmp: &str,
+    home: &Path,
+) -> io::Result<CodexOutcome> {
+    let cfg = codex_configfile(home);
+    let wanted = vec![
+        strip_trailing_slashes(plans).to_string(),
+        strip_trailing_slashes(scripts).to_string(),
+        strip_trailing_slashes(tmp).to_string(),
+    ];
+    codex_merge_writable_roots(&cfg, &wanted)
+}
+
+pub fn codex_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<CodexOutcome> {
+    let cfg = codex_configfile(home);
+    let wanted = vec![strip_trailing_slashes(worktrees).to_string()];
+    codex_merge_writable_roots(&cfg, &wanted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,5 +682,127 @@ mod tests {
         // merge then adds "allow" only for the specific patterns requested.
         assert_eq!(doc["permission"]["read"]["*"], "ask");
         assert_eq!(doc["permission"]["read"]["/plans/**"], "allow");
+    }
+
+    #[test]
+    fn claude_worktrees_permissions_grants_three_entries() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = settings_at(home.path(), "{}");
+
+        let outcome = claude_worktrees_permissions("/wt", home.path()).unwrap();
+        let added = match outcome {
+            PermissionOutcome::Added(entries) => entries,
+            _ => panic!("expected Added"),
+        };
+        assert_eq!(added.len(), 3);
+        let doc: Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+        let allow = doc["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|v| v == "Bash(/wt/**:*)"));
+        assert!(!allow
+            .iter()
+            .any(|v| v.as_str().unwrap().starts_with("Write(")));
+    }
+
+    #[test]
+    fn opencode_worktrees_permissions_grants_five_tools() {
+        let home = tempfile::tempdir().unwrap();
+        let outcome = opencode_worktrees_permissions("/wt", home.path()).unwrap();
+        let added = match outcome {
+            OpencodePermissionOutcome::Merged { added, .. } => added,
+            _ => panic!("expected Merged"),
+        };
+        assert_eq!(added.len(), 5);
+        assert!(added.contains(&"write: /wt/**".to_string()));
+    }
+
+    fn codex_cfg(home: &Path) -> PathBuf {
+        home.join(".codex").join("config.toml")
+    }
+
+    #[test]
+    fn a_missing_codex_config_is_created_with_the_roots_array() {
+        let home = tempfile::tempdir().unwrap();
+        let outcome =
+            codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        assert!(matches!(outcome, CodexOutcome::Created));
+
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert_eq!(
+            content,
+            "sandbox_workspace_write.writable_roots = [\"/plans\", \"/scripts\", \"/tmp\"]\n"
+        );
+    }
+
+    #[test]
+    fn an_existing_config_with_no_roots_line_gets_one_prepended() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = codex_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, "model = \"o3\"\n").unwrap();
+
+        let outcome =
+            codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        assert!(matches!(outcome, CodexOutcome::Prepended));
+
+        let content = fs::read_to_string(&cfg).unwrap();
+        assert!(content.starts_with("sandbox_workspace_write.writable_roots ="));
+        assert!(content.ends_with("model = \"o3\"\n"));
+    }
+
+    #[test]
+    fn a_second_codex_grant_adds_only_the_missing_path() {
+        let home = tempfile::tempdir().unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let outcome = codex_worktrees_permissions("/wt", home.path()).unwrap();
+        let added = match outcome {
+            CodexOutcome::Appended(paths) => paths,
+            _ => panic!("expected Appended"),
+        };
+        assert_eq!(added, vec!["/wt".to_string()]);
+
+        let content = fs::read_to_string(codex_cfg(home.path())).unwrap();
+        assert!(content.contains("\"/plans\", \"/scripts\", \"/tmp\", \"/wt\""));
+    }
+
+    #[test]
+    fn a_third_codex_grant_with_nothing_new_reports_already_present() {
+        let home = tempfile::tempdir().unwrap();
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let outcome =
+            codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        assert!(matches!(outcome, CodexOutcome::AlreadyPresent));
+    }
+
+    #[test]
+    fn a_multiline_roots_array_is_refused_rather_than_guessed_at() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = codex_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(
+            &cfg,
+            "sandbox_workspace_write.writable_roots = [\n  \"/existing\",\n]\n",
+        )
+        .unwrap();
+        let before = fs::read_to_string(&cfg).unwrap();
+
+        let outcome =
+            codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+        assert!(matches!(outcome, CodexOutcome::NotSingleLineArray));
+        assert_eq!(fs::read_to_string(&cfg).unwrap(), before);
+    }
+
+    #[test]
+    fn a_file_with_no_trailing_newline_keeps_it_that_way() {
+        let home = tempfile::tempdir().unwrap();
+        let cfg = codex_cfg(home.path());
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        fs::write(&cfg, "model = \"o3\"").unwrap();
+
+        codex_planning_permissions("/scripts", "/plans", "/tmp", home.path()).unwrap();
+
+        let content = fs::read_to_string(&cfg).unwrap();
+        assert!(!content.ends_with('\n'));
     }
 }

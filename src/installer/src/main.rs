@@ -30,14 +30,14 @@ Usage:
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR]
-  installer grant-claude-permissions --scripts DIR --plans DIR --tmp DIR
-  installer grant-opencode-permissions --scripts DIR --plans DIR --tmp DIR
-                     grant Claude Code / opencode read/write on the planning
-                     skill's own scripts, plan root, and tmp directory
+  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR)
+                     grant that agent read/write on the planning skill's own
+                     scripts/plan-root/tmp directory, or on a worktree root
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
              (resolves to that agent's own skills directory under $HOME).
+             grant-permissions only knows claude, codex and opencode.
 ";
 
 fn main() -> ExitCode {
@@ -64,8 +64,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         }
         Some("list") => run_list(&argv[1..]),
         Some("install") => run_install(&argv[1..]),
-        Some("grant-claude-permissions") => run_grant_claude_permissions(&argv[1..]),
-        Some("grant-opencode-permissions") => run_grant_opencode_permissions(&argv[1..]),
+        Some("grant-permissions") => run_grant_permissions(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -221,79 +220,88 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-struct GrantArgs {
-    scripts: String,
-    plans: String,
-    tmp: String,
+enum GrantTarget {
+    Planning {
+        scripts: String,
+        plans: String,
+        tmp: String,
+    },
+    Worktrees {
+        worktrees: String,
+    },
 }
 
-fn parse_grant_args(command: &str, argv: &[String]) -> Result<GrantArgs, String> {
+struct GrantArgs {
+    agent: String,
+    target: GrantTarget,
+}
+
+fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
+    let mut agent: Option<String> = None;
     let mut scripts: Option<String> = None;
     let mut plans: Option<String> = None;
     let mut tmp: Option<String> = None;
+    let mut worktrees: Option<String> = None;
 
     let mut i = 0;
     while i < argv.len() {
+        macro_rules! value {
+            () => {{
+                i += 1;
+                argv.get(i)
+                    .ok_or_else(|| format!("{} needs a value", argv[i - 1]))?
+                    .clone()
+            }};
+        }
         match argv[i].as_str() {
-            "--scripts" => {
-                i += 1;
-                scripts = Some(argv.get(i).ok_or("--scripts needs a value")?.clone());
-            }
-            "--plans" => {
-                i += 1;
-                plans = Some(argv.get(i).ok_or("--plans needs a value")?.clone());
-            }
-            "--tmp" => {
-                i += 1;
-                tmp = Some(argv.get(i).ok_or("--tmp needs a value")?.clone());
-            }
-            other => return Err(format!("{command}: unknown option: {other}")),
+            "--agent" => agent = Some(value!()),
+            "--scripts" => scripts = Some(value!()),
+            "--plans" => plans = Some(value!()),
+            "--tmp" => tmp = Some(value!()),
+            "--worktrees" => worktrees = Some(value!()),
+            other => return Err(format!("grant-permissions: unknown option: {other}")),
         }
         i += 1;
     }
-    Ok(GrantArgs {
-        scripts: scripts.ok_or(format!("{command}: --scripts is required"))?,
-        plans: plans.ok_or(format!("{command}: --plans is required"))?,
-        tmp: tmp.ok_or(format!("{command}: --tmp is required"))?,
-    })
+    let agent = agent.ok_or("grant-permissions: --agent is required")?;
+    let target = match (scripts, plans, tmp, worktrees) {
+        (Some(scripts), Some(plans), Some(tmp), None) => GrantTarget::Planning {
+            scripts,
+            plans,
+            tmp,
+        },
+        (None, None, None, Some(worktrees)) => GrantTarget::Worktrees { worktrees },
+        _ => return Err(
+            "grant-permissions: pass either --scripts/--plans/--tmp together, or --worktrees alone"
+                .to_string(),
+        ),
+    };
+    Ok(GrantArgs { agent, target })
 }
 
-fn home_dir(command: &str) -> Result<PathBuf, String> {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| format!("{command}: needs $HOME set"))
-}
-
-fn run_grant_claude_permissions(argv: &[String]) -> Result<ExitCode, String> {
-    let args = parse_grant_args("grant-claude-permissions", argv)?;
-    let home = home_dir("grant-claude-permissions")?;
-
-    match permissions::claude_planning_permissions(&args.scripts, &args.plans, &args.tmp, &home)
-        .map_err(|e| e.to_string())?
-    {
+fn print_permission_outcome(
+    agent: &str,
+    already_present: &str,
+    outcome: permissions::PermissionOutcome,
+) {
+    match outcome {
         permissions::PermissionOutcome::NoConfigFile => {
-            println!("claude-code: no settings.json found; skipped");
+            println!("{agent}: no settings.json found; skipped");
         }
         permissions::PermissionOutcome::AlreadyPresent => {
-            println!("claude-code: permissions already present");
+            println!("{agent}: {already_present}");
         }
         permissions::PermissionOutcome::Added(entries) => {
-            println!("claude-code: added to permissions.allow:");
+            println!("{agent}: added to permissions.allow:");
             for entry in entries {
                 println!("  - {entry}");
             }
         }
     }
-    Ok(ExitCode::SUCCESS)
 }
 
-fn run_grant_opencode_permissions(argv: &[String]) -> Result<ExitCode, String> {
-    let args = parse_grant_args("grant-opencode-permissions", argv)?;
-    let home = home_dir("grant-opencode-permissions")?;
-
-    match permissions::opencode_planning_permissions(&args.scripts, &args.plans, &args.tmp, &home)
-        .map_err(|e| e.to_string())?
-    {
+fn print_opencode_outcome(already_present: &str, outcome: permissions::OpencodePermissionOutcome) {
+    match outcome {
         permissions::OpencodePermissionOutcome::NotStrictJson => {
             println!("opencode: config is not strict JSON; add the rules by hand");
         }
@@ -305,13 +313,105 @@ fn run_grant_opencode_permissions(argv: &[String]) -> Result<ExitCode, String> {
                 println!("opencode: removed invalid claude-style permission.allow list");
             }
             if added.is_empty() {
-                println!("opencode: permissions already present");
+                println!("opencode: {already_present}");
             } else {
                 println!("opencode: allowed:");
                 for entry in added {
                     println!("  - {entry}");
                 }
             }
+        }
+    }
+}
+
+/// install.sh's `codex_write_fresh_roots` always prints its caller's own
+/// "done" label at the end, even on a fresh create or prepend -- `label`
+/// carries that same per-context wording through (planning says "writable_
+/// roots already present", worktrees says "worktree grant already in
+/// place", regardless of which of those two branches actually ran).
+fn print_codex_outcome(label: &str, outcome: permissions::CodexOutcome) {
+    match outcome {
+        permissions::CodexOutcome::Created => {
+            println!("codex: created config.toml");
+            println!("codex: {label}");
+        }
+        permissions::CodexOutcome::Prepended | permissions::CodexOutcome::AlreadyPresent => {
+            println!("codex: {label}");
+        }
+        permissions::CodexOutcome::Appended(paths) => {
+            println!("codex: added to writable_roots:");
+            for path in paths {
+                println!("  - {path}");
+            }
+        }
+        permissions::CodexOutcome::NotSingleLineArray => {
+            println!("codex: writable_roots is not a single-line array; add these by hand");
+        }
+    }
+}
+
+fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_grant_args(argv)?;
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "grant-permissions: needs $HOME set".to_string())?;
+
+    match (args.agent.as_str(), &args.target) {
+        (
+            "claude",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let outcome = permissions::claude_planning_permissions(scripts, plans, tmp, &home)
+                .map_err(|e| e.to_string())?;
+            print_permission_outcome("claude-code", "permissions already present", outcome);
+        }
+        ("claude", GrantTarget::Worktrees { worktrees }) => {
+            let outcome = permissions::claude_worktrees_permissions(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_permission_outcome("claude-code", "worktree grant already in place", outcome);
+        }
+        (
+            "opencode",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let outcome = permissions::opencode_planning_permissions(scripts, plans, tmp, &home)
+                .map_err(|e| e.to_string())?;
+            print_opencode_outcome("permissions already present", outcome);
+        }
+        ("opencode", GrantTarget::Worktrees { worktrees }) => {
+            let outcome = permissions::opencode_worktrees_permissions(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_opencode_outcome("worktree grant already in place", outcome);
+        }
+        (
+            "codex",
+            GrantTarget::Planning {
+                scripts,
+                plans,
+                tmp,
+            },
+        ) => {
+            let outcome = permissions::codex_planning_permissions(scripts, plans, tmp, &home)
+                .map_err(|e| e.to_string())?;
+            print_codex_outcome("writable_roots already present", outcome);
+        }
+        ("codex", GrantTarget::Worktrees { worktrees }) => {
+            let outcome = permissions::codex_worktrees_permissions(worktrees, &home)
+                .map_err(|e| e.to_string())?;
+            print_codex_outcome("worktree grant already in place", outcome);
+        }
+        (other, _) => {
+            return Err(format!(
+            "grant-permissions: unknown --agent {other}; known agents are: claude, codex, opencode"
+        ))
         }
     }
     Ok(ExitCode::SUCCESS)
