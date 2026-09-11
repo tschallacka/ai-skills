@@ -311,7 +311,7 @@
     {
       "id": "B319",
       "title": "tui-hint-plugin and editor-gate-plugin PreToolUse hooks fail (or fail open) when rjq is not on PATH",
-      "status": "reported",
+      "status": "fixed",
       "severity": "blocking",
       "priority": "urgent",
       "parent": null,
@@ -320,12 +320,12 @@
       "expected": "Both hooks should work with no dependency on a tool this repo never promised interactive-shell or ai-text-editor users would have; at minimum they should degrade to a no-op (tui-hint-plugin) or a documented, deliberate fail-closed default (editor-gate-plugin's hard gate) rather than crashing on a missing binary with unclear consequences for whether the underlying tool call is allowed or blocked.",
       "mechanism": "Both plugins' PreToolUse hook scripts call rjq to parse the JSON payload on stdin and to build the JSON response, under set -euo pipefail, with no command -v rjq guard beforehand. Since rjq is a build-time/install-time tool bundled only inside this repo's own bin dir (or wherever prepend_bundled_rjq's PATH edit reached, which does not outlive the install.sh process), a real end-user's Claude Code session -- which runs completely independently, potentially hours or days later, with none of install.sh's environment -- has no guarantee rjq is reachable. For tui-hint-plugin (purely advisory) the impact is a logged hook error and a missing reminder -- degraded, not dangerous. For editor-gate-plugin's hard gate on Bash, the impact is worse: because the hook script cannot even reach the point of emitting a deny decision, Claude Code very likely treats the erroring hook as non-blocking and the underlying tool call proceeds -- i.e. the gate silently fails open exactly for the dangerous commands it exists to catch, which is the opposite of its intended fail-closed security posture.",
       "surfaces": [],
-      "fix": null,
-      "verification": null,
+      "fix": "Both plugins' PreToolUse hooks no longer call rjq. tui_hint_json_field()/editor_gate_json_field() (awk) extract a top-level string value from the payload; tui_hint_json_escape()/editor_gate_json_escape() JSON-escape any dynamic value before it goes into hookSpecificOutput. PR #151 (commit d34670ae, squashed as f4d2ccc).",
+      "verification": "Re-ran the same live reproduction: fresh Docker build off current master, rjq removed from PATH, install.sh as a non-root user, live claude -p invocation. Both plugins' hooks now emit valid JSON on every PreToolUse call with no rjq on PATH. Also added adversarial round-trip test cases (embedded quotes/backslashes in extracted and escaped values) to both plugins' test suites; all pass with rjq deliberately hidden from PATH.",
       "found_by": "",
       "notes": null,
       "created_at": "2026-09-11T00:49:48Z",
-      "updated_at": "2026-09-11T00:49:48Z"
+      "updated_at": "2026-09-11T01:29:33Z"
     },
     {
       "id": "B33",
