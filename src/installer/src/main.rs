@@ -21,6 +21,7 @@ mod mcp;
 mod permissions;
 mod plan_migration;
 mod plugins;
+mod ui;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -50,6 +51,9 @@ Usage:
                      interactive-shell / ai-text-editor
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
+  installer interactive (--target DIR | --agent NAME) [--source DIR]
+                     full-screen skill picker; installs the confirmed
+                     selection, or does nothing if the user quits
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -81,6 +85,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         }
         Some("list") => run_list(&argv[1..]),
         Some("install") => run_install(&argv[1..]),
+        Some("interactive") => run_interactive(&argv[1..]),
         Some("grant-permissions") => run_grant_permissions(&argv[1..]),
         Some("mcp-register") => run_mcp_register(&argv[1..]),
         Some("mcp-unregister") => run_mcp_unregister(&argv[1..]),
@@ -750,4 +755,65 @@ fn run_set_claude_env(argv: &[String]) -> Result<ExitCode, String> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
+    let mut source: Option<PathBuf> = None;
+    let mut target: Option<PathBuf> = None;
+    let mut agent: Option<String> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            "--target" => {
+                i += 1;
+                target = Some(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
+            }
+            "--agent" => {
+                i += 1;
+                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
+            other => return Err(format!("interactive: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    let source = resolve_source(source)?;
+    let target = resolve_target(target, agent)?;
+
+    let names = discover::discover_skills(&source).map_err(|e| e.to_string())?;
+    let skills = names
+        .into_iter()
+        .map(|name| {
+            let description = manifest::known_skill(&name)
+                .map(|s| s.description.to_string())
+                .unwrap_or_default();
+            let installed = target.join(&name).join("SKILL.md").is_file();
+            ui::model::SkillEntry {
+                name,
+                description,
+                installed,
+            }
+        })
+        .collect();
+
+    match ui::run_picker(skills) {
+        None => {
+            println!("interactive: no changes made");
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(selected) if selected.is_empty() => {
+            println!("interactive: nothing selected; no changes made");
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(selected) => {
+            for skill in &selected {
+                install::install_skill(&source, skill, &target).map_err(|e| e.to_string())?;
+                println!("installed {skill} -> {}", target.join(skill).display());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }
