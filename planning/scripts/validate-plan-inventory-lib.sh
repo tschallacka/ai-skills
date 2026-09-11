@@ -43,94 +43,86 @@ plan_emit_coverage_id_cells() {
     done < "$1"
 }
 
-plan_validate_inventory() {
-    while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
-        [ -n "$id" ] || continue
-        if [[ ! "$id" =~ ^W[0-9][0-9]+$ ]]; then
-            fail "Invalid work-unit ID: $id"
-            continue
+# plan_validate_inventory_row <id> <type> <file> <scope> <subscope> <intended>
+# <depends> <goal> <step> — the per-row rules for one Work units table line;
+# on a valid row, records it into the unit_* maps and unit_ids.
+plan_validate_inventory_row() {
+    local id="$1" type="$2" file="$3" scope="$4" subscope="$5" intended="$6" depends="$7" goal="$8" step="$9"
+    local sym_count
+    if [[ ! "$id" =~ ^W[0-9][0-9]+$ ]]; then
+        fail "Invalid work-unit ID: $id"
+        return
+    fi
+    if plan_map_has unit_type "$id"; then
+        fail "Duplicate work-unit ID: $id"
+        return
+    fi
+    case "$type" in
+        source|markup|style|test|config|docs|data|generated|discovery|verification) ;;
+        *) fail "$id has unsupported type '$type'" ;;
+    esac
+    if [ -z "$file" ] || [ -z "$scope" ] || [ -z "$subscope" ] || [ -z "$intended" ] || [ -z "$goal" ] || [ -z "$step" ]; then
+        fail "$id has an empty required work-unit field"
+    fi
+    if [ "$type" = verification ] && [ "$file" != N/A ]; then
+        fail "$id is verification and must use File 'N/A'"
+    fi
+    # Mirrors add-work-unit.sh: discovery may use N/A because its target is
+    # not yet knowable. Kept in the same shape as the writer's rule so the
+    # two cannot drift into disagreeing about what a valid row is.
+    if [ "$type" != verification ] && [ "$type" != discovery ] && [ "$file" = N/A ]; then
+        fail "$id is neither verification nor discovery and must name one file"
+    fi
+    if [[ "$file" == *'*'* || "$file" == */ ]]; then
+        fail "$id must name one concrete file, not a glob or directory: $file"
+    fi
+    # A scope names one symbol. Key on the count of ::-qualified symbols,
+    # not on conjunctions: " and " legitimately joins one file's own
+    # description. A comma list still signals multiple scopes.
+    if [ "$type" != verification ]; then
+        sym_count="$(printf '%s' "$scope" | grep -oE '[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*(\(\))?' | wc -l | tr -d ' ')" || true
+        if [ "$sym_count" -gt 1 ]; then
+            fail "$id lists multiple symbols or scopes: $scope"
+        elif [[ "$scope" == *','* ]]; then
+            fail "$id lists multiple symbols or scopes: $scope"
         fi
-        if plan_map_has unit_type "$id"; then
-            fail "Duplicate work-unit ID: $id"
-            continue
-        fi
-        case "$type" in
-            source|markup|style|test|config|docs|data|generated|discovery|verification) ;;
-            *) fail "$id has unsupported type '$type'" ;;
-        esac
-        if [ -z "$file" ] || [ -z "$scope" ] || [ -z "$subscope" ] || [ -z "$intended" ] || [ -z "$goal" ] || [ -z "$step" ]; then
-            fail "$id has an empty required work-unit field"
-        fi
-        if [ "$type" = verification ] && [ "$file" != N/A ]; then
-            fail "$id is verification and must use File 'N/A'"
-        fi
-        # Mirrors add-work-unit.sh: discovery may use N/A because its target is
-        # not yet knowable. Kept in the same shape as the writer's rule so the
-        # two cannot drift into disagreeing about what a valid row is.
-        if [ "$type" != verification ] && [ "$type" != discovery ] && [ "$file" = N/A ]; then
-            fail "$id is neither verification nor discovery and must name one file"
-        fi
-        if [[ "$file" == *'*'* || "$file" == */ ]]; then
-            fail "$id must name one concrete file, not a glob or directory: $file"
-        fi
-        # A scope names one symbol. Key on the count of ::-qualified symbols,
-        # not on conjunctions: " and " legitimately joins one file's own
-        # description. A comma list still signals multiple scopes.
-        if [ "$type" != verification ]; then
-            sym_count="$(printf '%s' "$scope" | grep -oE '[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*(\(\))?' | wc -l | tr -d ' ')" || true
-            if [ "$sym_count" -gt 1 ]; then
-                fail "$id lists multiple symbols or scopes: $scope"
-            elif [[ "$scope" == *','* ]]; then
-                fail "$id lists multiple symbols or scopes: $scope"
-            fi
-        fi
-        if [ "$type" = style ] && [[ ! "$scope" =~ ^[.#][A-Za-z_-][A-Za-z0-9_-]*$ ]]; then
-            fail "$id style scope must be one CSS selector, such as .completion-message"
-        fi
-        if [ "$type" = markup ] && [[ ! "$scope" =~ ^[#.][A-Za-z_-][A-Za-z0-9_-]*$ ]]; then
-            fail "$id markup scope must be one named DOM selector, such as #checkout-summary"
-        fi
-        if [[ ! "$goal" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]]; then
-            fail "$id has invalid goal name '$goal'"
-        fi
-        if [[ ! "$step" =~ ^[0-9][0-9]-step-[a-z0-9-]+$ ]]; then
-            fail "$id has invalid step name '$step'"
-        fi
-        if [ "$subscope" != N/A ] && { [[ "$subscope" == *','* ]] || [[ "$subscope" == *' and '* ]]; }; then
-            fail "$id lists multiple subscope targets: $subscope"
-        fi
-        plan_map_set unit_type "$id" "$type"
-        plan_map_set unit_file "$id" "$file"
-        plan_map_set unit_scope "$id" "$scope"
-        plan_map_set unit_subscope "$id" "$subscope"
-        plan_map_set unit_goal "$id" "$goal"
-        plan_map_set unit_step "$id" "$step"
-        plan_map_set unit_depends "$id" "$depends"
-        unit_ids+=("$id")
-        if plan_map_has seen_steps "$goal/$step"; then
-            fail "Multiple work units are assigned to $goal/steps/$step.md"
-        fi
-        plan_map_set seen_steps "$goal/$step" "$id"
-        # goal_units accumulates a space-delimited id list, leading space and all
-        # (callers word-split it and one caller strips the leading space).
-        plan_map_load goal_units "$goal" || plan_map_value=""
-        plan_map_set goal_units "$goal" "$plan_map_value $id"
-    done < <(
-        emit_unit_cells() {
-            local uline ujoined upart
-            while IFS= read -r uline || [ -n "$uline" ]; do
-                [[ $uline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]] || continue
-                ujoined=""
-                while IFS= read -r upart; do
-                    [ -n "$upart" ] || continue
-                    ujoined="$ujoined$upart"$'\t'
-                done < <(plan_table_cells "$uline")
-                printf '%s\n' "${ujoined%$'\t'}"
-            done < "$inventory"
-        }
-        emit_unit_cells
-    )
+    fi
+    if [ "$type" = style ] && [[ ! "$scope" =~ ^[.#][A-Za-z_-][A-Za-z0-9_-]*$ ]]; then
+        fail "$id style scope must be one CSS selector, such as .completion-message"
+    fi
+    if [ "$type" = markup ] && [[ ! "$scope" =~ ^[#.][A-Za-z_-][A-Za-z0-9_-]*$ ]]; then
+        fail "$id markup scope must be one named DOM selector, such as #checkout-summary"
+    fi
+    if [[ ! "$goal" =~ ^[0-9][0-9]-[a-z0-9-]+$ ]]; then
+        fail "$id has invalid goal name '$goal'"
+    fi
+    if [[ ! "$step" =~ ^[0-9][0-9]-step-[a-z0-9-]+$ ]]; then
+        fail "$id has invalid step name '$step'"
+    fi
+    if [ "$subscope" != N/A ] && { [[ "$subscope" == *','* ]] || [[ "$subscope" == *' and '* ]]; }; then
+        fail "$id lists multiple subscope targets: $subscope"
+    fi
+    plan_map_set unit_type "$id" "$type"
+    plan_map_set unit_file "$id" "$file"
+    plan_map_set unit_scope "$id" "$scope"
+    plan_map_set unit_subscope "$id" "$subscope"
+    plan_map_set unit_goal "$id" "$goal"
+    plan_map_set unit_step "$id" "$step"
+    plan_map_set unit_depends "$id" "$depends"
+    unit_ids+=("$id")
+    if plan_map_has seen_steps "$goal/$step"; then
+        fail "Multiple work units are assigned to $goal/steps/$step.md"
+    fi
+    plan_map_set seen_steps "$goal/$step" "$id"
+    # goal_units accumulates a space-delimited id list, leading space and all
+    # (callers word-split it and one caller strips the leading space).
+    plan_map_load goal_units "$goal" || plan_map_value=""
+    plan_map_set goal_units "$goal" "$plan_map_value $id"
+}
 
+# plan_validate_inventory_coverage — cross-links every recorded unit_id
+# against the definition-of-done coverage table, once every row is parsed.
+plan_validate_inventory_coverage() {
     if [ "${#unit_ids[@]}" -eq 0 ]; then
         fail "No work-unit rows found; use IDs such as W01 in the Work units table"
     fi
@@ -148,6 +140,29 @@ plan_validate_inventory() {
         [ -n "$coverage_id" ] || continue
         plan_map_has unit_type "$coverage_id" || fail "Definition-of-done coverage names unknown work unit $coverage_id"
     done < <(plan_map_keys coverage_ids)
+}
+
+plan_validate_inventory() {
+    while IFS=$'\t' read -r id type file scope subscope intended depends goal step; do
+        [ -n "$id" ] || continue
+        plan_validate_inventory_row "$id" "$type" "$file" "$scope" "$subscope" "$intended" "$depends" "$goal" "$step"
+    done < <(
+        emit_unit_cells() {
+            local uline ujoined upart
+            while IFS= read -r uline || [ -n "$uline" ]; do
+                [[ $uline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]] || continue
+                ujoined=""
+                while IFS= read -r upart; do
+                    [ -n "$upart" ] || continue
+                    ujoined="$ujoined$upart"$'\t'
+                done < <(plan_table_cells "$uline")
+                printf '%s\n' "${ujoined%$'\t'}"
+            done < "$inventory"
+        }
+        emit_unit_cells
+    )
+
+    plan_validate_inventory_coverage
 }
 
 # Recursive: do not rename or inline (it calls itself, and the visit_state

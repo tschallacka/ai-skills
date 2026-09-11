@@ -240,6 +240,29 @@ context_unit_row_text() {
     printf -- '- Step: %s\n' "$plan_inventory_step"
 }
 
+# context_view_execution_summary <file> <row_text> — the composite
+# "execution-summary" view context_view_text dispatches to.
+context_view_execution_summary() {
+    local file="$1" row_text="$2" companion
+    [ -n "$row_text" ] || { context_die "usage: execution-summary view applies only to a work unit"; return; }
+    printf '## Execution summary\n'
+    sed -n '/^## Ownership$/,/^## Objective$/p; /^## Change target$/,/^## Objective$/p' "$file" | sed '$d'
+    printf '\n## Inventory\n%s\n' "$row_text"
+    printf '\n## Acceptance criteria\n'
+    awk '/^## Acceptance criteria$/{seen=1; next} seen && /^§ 6\.1$/{getline; print; exit}' "$file"
+    printf '\n## Dependencies\n'
+    awk 'tolower($0) ~ /depends on/ {print}' "$file"
+    printf '%s\n' "$row_text" | awk 'tolower($0) ~ /depends on/ {print}'
+    printf '\n## Testing\n'
+    companion="${file%.md}-testing.md"
+    if [ -f "$companion" ]; then
+        awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
+    else
+        printf 'No testing companion found for this step.\n'
+    fi
+    printf '\n## Status\nRead the owning goal progress tracker for current completion status.\n'
+}
+
 context_view_text() {
     local file="$1" view="$2" row_text="${3:-}"
     case "$view" in
@@ -258,25 +281,7 @@ context_view_text() {
             [ -f "$companion" ] || { context_die "usage: testing view unavailable for $file"; return; }
             awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
             ;;
-        execution-summary)
-            [ -n "$row_text" ] || { context_die "usage: execution-summary view applies only to a work unit"; return; }
-            printf '## Execution summary\n'
-            sed -n '/^## Ownership$/,/^## Objective$/p; /^## Change target$/,/^## Objective$/p' "$file" | sed '$d'
-            printf '\n## Inventory\n%s\n' "$row_text"
-            printf '\n## Acceptance criteria\n'
-            awk '/^## Acceptance criteria$/{seen=1; next} seen && /^§ 6\.1$/{getline; print; exit}' "$file"
-            printf '\n## Dependencies\n'
-            awk 'tolower($0) ~ /depends on/ {print}' "$file"
-            printf '%s\n' "$row_text" | awk 'tolower($0) ~ /depends on/ {print}'
-            printf '\n## Testing\n'
-            companion="${file%.md}-testing.md"
-            if [ -f "$companion" ]; then
-                awk '/^## Automated tests$/{seen=1; next} seen && NF {print}' "$companion"
-            else
-                printf 'No testing companion found for this step.\n'
-            fi
-            printf '\n## Status\nRead the owning goal progress tracker for current completion status.\n'
-            ;;
+        execution-summary) context_view_execution_summary "$file" "$row_text" ;;
         dependencies)
             awk 'tolower($0) ~ /depends on/ {print}' "$file"
             [ -z "$row_text" ] || printf '%s\n' "$row_text" |
@@ -289,6 +294,80 @@ context_view_text() {
     esac
 }
 
+# context_build_index_goals_and_steps <plan_dir> — goal, goal-progress and
+# step rows.
+context_build_index_goals_and_steps() {
+    local plan_dir="$1" file goal step goal_progress
+    find "$plan_dir" -type f -name 'goal.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
+        printf 'goal:%s\t%s\tgoal\t%s\n' "$(basename "$(dirname "$file")")" "$file" "$(context_hash_file "$file")"
+        goal_progress="$(dirname "$file")/progress.md"
+        [ -f "$goal_progress" ] || continue
+        printf 'goal-progress:%s\t%s\tgoal-progress\t%s\n' \
+            "$(basename "$(dirname "$file")")" "$goal_progress" \
+            "$(context_hash_file "$goal_progress")"
+    done
+    find "$plan_dir" -type f -path '*/steps/*.md' -not -name '*-testing.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
+        goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
+        printf 'step:%s/%s\t%s\tstep\t%s\n' "$goal" "$step" "$file" "$(context_hash_file "$file")"
+    done
+}
+
+# context_build_index_units <plan_dir> — one row per work unit, when an
+# inventory exists. Optional, like every other document below: a plan gets
+# its inventory after its description, and a snapshot of the early state is
+# valid. An `if` rather than `[ -f ... ] &&`: a failing AND-list is only safe
+# while it is not the last statement of its body.
+context_build_index_units() {
+    local plan_dir="$1" row file
+    if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+        plan_inventory_rows "$plan_dir/work-unit-inventory.md" |
+            while IFS= read -r row; do
+                plan_inventory_split "$row"
+                file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
+                [ -f "$file" ] || continue
+                printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
+                    "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
+            done
+    fi
+}
+
+# context_build_index_extras <plan_dir> — the fixed-name plan documents that
+# may or may not exist, one row each when present.
+context_build_index_extras() {
+    local plan_dir="$1" extra_id extra_file
+    for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md planning-bugs:planning-bugs.json \
+                    fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
+        extra_file="$plan_dir/${extra_id#*:}"
+        [ -f "$extra_file" ] || continue
+        printf '%s\t%s\t%s\t%s\n' "${extra_id%%:*}" "$extra_file" "${extra_id%%:*}" \
+            "$(context_hash_file "$extra_file")"
+    done
+    if [ -f "$plan_dir/work-unit-inventory.md" ]; then
+        printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"
+    fi
+    if [ -f "$plan_dir/progress.md" ]; then
+        printf 'progress\t%s\tprogress\t%s\n' "$plan_dir/progress.md" "$(context_hash_file "$plan_dir/progress.md")"
+    fi
+    if [ -f "$plan_dir/adversarial-review.md" ]; then
+        printf 'adversarial-review\t%s\tadversarial-review\t%s\n' "$plan_dir/adversarial-review.md" "$(context_hash_file "$plan_dir/adversarial-review.md")"
+    fi
+}
+
+# context_build_index_source — the canonical skill source, when this run has
+# one (CONTEXT_SOURCE_ROOT is set only for a checkout, never an installed copy).
+context_build_index_source() {
+    [ -n "${CONTEXT_SOURCE_ROOT:-}" ] && [ -f "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" ] || return 0
+    printf 'source:SKILL.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/SKILL.md")"
+    if [ -f "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" ]; then
+        printf 'source:REVIEWER.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md")"
+    else
+        # Generated, never committed (MAINTAINER.md section 2.16): the
+        # omission is stated so an absent entry reads as a bootstrap
+        # gap, not as a file that does not exist anywhere.
+        printf 'source:REVIEWER.md\t%s\tsource\tabsent - generate with planning/scripts/generate-reviewer.sh\n' '-'
+    fi
+}
+
 context_build_index() {
     local plan_dir="$1" output="$2"
     {
@@ -296,59 +375,10 @@ context_build_index() {
         plan_file="$(context_resolve_document "$plan_dir" plan)"
         printf 'entry_id\tpath\tkind\thash\n'
         printf 'plan\t%s\tplan\t%s\n' "$plan_file" "$(context_hash_file "$plan_file")"
-        find "$plan_dir" -type f -name 'goal.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
-            printf 'goal:%s\t%s\tgoal\t%s\n' "$(basename "$(dirname "$file")")" "$file" "$(context_hash_file "$file")"
-            goal_progress="$(dirname "$file")/progress.md"
-            [ -f "$goal_progress" ] || continue
-            printf 'goal-progress:%s\t%s\tgoal-progress\t%s\n' \
-                "$(basename "$(dirname "$file")")" "$goal_progress" \
-                "$(context_hash_file "$goal_progress")"
-        done
-        find "$plan_dir" -type f -path '*/steps/*.md' -not -name '*-testing.md' -not -path '*/context/*' | sort | while IFS= read -r file; do
-            goal="$(basename "$(dirname "$(dirname "$file")")")"; step="$(basename "$file" .md)"
-            printf 'step:%s/%s\t%s\tstep\t%s\n' "$goal" "$step" "$file" "$(context_hash_file "$file")"
-        done
-        # Optional, like every other document below: a plan gets its inventory
-        # after its description, and a snapshot of the early state is valid.
-        # An `if` rather than `[ -f ... ] &&`: a failing AND-list is only safe
-        # while it is not the last statement of its body.
-        if [ -f "$plan_dir/work-unit-inventory.md" ]; then
-            plan_inventory_rows "$plan_dir/work-unit-inventory.md" |
-                while IFS= read -r row; do
-                    plan_inventory_split "$row"
-                    file="$plan_dir/$plan_inventory_goal/steps/$plan_inventory_step.md"
-                    [ -f "$file" ] || continue
-                    printf 'unit:%s\t%s\tunit\t%s\n' "$plan_inventory_id" "$file" \
-                        "$(context_hash_entry "$plan_dir" "unit:$plan_inventory_id")"
-                done
-        fi
-        for extra_id in coverage:work-unit-inventory.md stories:ui-user-stories.md bugs:bugs.md planning-bugs:planning-bugs.json \
-                        fixes:fixes.md fix-keys:fix-keys.json approval:approval.json; do
-            extra_file="$plan_dir/${extra_id#*:}"
-            [ -f "$extra_file" ] || continue
-            printf '%s\t%s\t%s\t%s\n' "${extra_id%%:*}" "$extra_file" "${extra_id%%:*}" \
-                "$(context_hash_file "$extra_file")"
-        done
-        if [ -f "$plan_dir/work-unit-inventory.md" ]; then
-            printf 'inventory\t%s\tinventory\t%s\n' "$plan_dir/work-unit-inventory.md" "$(context_hash_file "$plan_dir/work-unit-inventory.md")"
-        fi
-        if [ -f "$plan_dir/progress.md" ]; then
-            printf 'progress\t%s\tprogress\t%s\n' "$plan_dir/progress.md" "$(context_hash_file "$plan_dir/progress.md")"
-        fi
-        if [ -f "$plan_dir/adversarial-review.md" ]; then
-            printf 'adversarial-review\t%s\tadversarial-review\t%s\n' "$plan_dir/adversarial-review.md" "$(context_hash_file "$plan_dir/adversarial-review.md")"
-        fi
-        if [ -n "${CONTEXT_SOURCE_ROOT:-}" ] && [ -f "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" ]; then
-            printf 'source:SKILL.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/SKILL.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/SKILL.md")"
-            if [ -f "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" ]; then
-                printf 'source:REVIEWER.md\t%s\tsource\t%s\n' "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md" "$(context_hash_file "$CONTEXT_SOURCE_ROOT/planning/REVIEWER.md")"
-            else
-                # Generated, never committed (MAINTAINER.md section 2.16): the
-                # omission is stated so an absent entry reads as a bootstrap
-                # gap, not as a file that does not exist anywhere.
-                printf 'source:REVIEWER.md\t%s\tsource\tabsent - generate with planning/scripts/generate-reviewer.sh\n' '-'
-            fi
-        fi
+        context_build_index_goals_and_steps "$plan_dir"
+        context_build_index_units "$plan_dir"
+        context_build_index_extras "$plan_dir"
+        context_build_index_source
     } > "$output"
 }
 

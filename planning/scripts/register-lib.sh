@@ -18,24 +18,28 @@ reg_require_jq() {
     }
 }
 
-reg_findings() {
-    reg_require_jq
-    local kind="$1" file="$2"
-    rjq -r --arg kind "$kind" '
-        def st_enum:
-            if $kind == "bug"
-            then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
-            else ["open","done","blocked","partly","decided","dropped","obsolete"] end;
-        (if $kind == "todo" and has("todos")
-         then (
-             (.tasks // []) as $tasks_ids_source
-             | ($tasks_ids_source | map(.id)) as $task_ids
-             | ((.todos // []) | map(.id)) as $todo_ids
-             | ($todo_ids - $task_ids) as $only_in_todos
-             | if ($only_in_todos | length) > 0
-               then "register carries a .todos array whose id(s) \($only_in_todos | join(", ")) do not exist in .tasks -- a fold that drops the .todos key without moving these loses them (B69)"
-               else "register carries a .todos array - fold its entries into .tasks and drop the key" end
-         ) else empty end),
+# reg_findings_todos_fold_program: the .todos-legacy-shape check, alone,
+# because it applies only to $kind == "todo" and stands apart from the
+# per-entry checks every other finding shares.
+reg_findings_todos_fold_program() {
+    printf '%s\n' '
+        if $kind == "todo" and has("todos")
+        then (
+            (.tasks // []) as $tasks_ids_source
+            | ($tasks_ids_source | map(.id)) as $task_ids
+            | ((.todos // []) | map(.id)) as $todo_ids
+            | ($todo_ids - $task_ids) as $only_in_todos
+            | if ($only_in_todos | length) > 0
+              then "register carries a .todos array whose id(s) \($only_in_todos | join(", ")) do not exist in .tasks -- a fold that drops the .todos key without moving these loses them (B69)"
+              else "register carries a .todos array - fold its entries into .tasks and drop the key" end
+        ) else empty end'
+}
+
+# reg_findings_entry_program: the per-entry structural checks shared by bugs
+# and tasks alike (status, severity/priority enums, timestamps, bug-only
+# reproduce/mechanism/verification requirements).
+reg_findings_entry_program() {
+    printf '%s\n' '
         ((if $kind == "bug" then .bugs else .tasks end) // []) as $items
         | ($items | map(.id)) as $ids
         | [
@@ -69,8 +73,19 @@ reg_findings() {
                  then "\($e.id): fixed without verification" else empty end)
             )
           ]
-        | .[]
-    ' "$file"
+        | .[]'
+}
+
+reg_findings() {
+    reg_require_jq
+    local kind="$1" file="$2"
+    rjq -r --arg kind "$kind" \
+        'def st_enum:
+            if $kind == "bug"
+            then ["reported","confirmed","fixed","not-a-defect","wont-fix","obsolete"]
+            else ["open","done","blocked","partly","decided","dropped","obsolete"] end;'"
+        $(reg_findings_todos_fold_program),
+        $(reg_findings_entry_program)" "$file"
 }
 
 # reg_sort <kind> <file>: reorder entries worst-first in place (temp+rename).

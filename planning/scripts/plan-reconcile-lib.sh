@@ -41,42 +41,46 @@ plan_prune_csv_cell() {
     printf '%s' "$out"
 }
 
+# plan_prune_work_unit_row <unit> <rline> — one inventory table row, pruned of
+# <unit>: a unit row for it is dropped entirely, a dependency or coverage
+# reference to it is stripped from its cell, and a coverage row left with no
+# ids is dropped (with a stderr note; T59, B68). Emits the (possibly
+# unchanged) row, or nothing to drop it.
+plan_prune_work_unit_row() {
+    local unit="$1" rline="$2" deps_raw ids_raw out
+    if [[ $rline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]]; then
+        if [ "$(plan_table_cell "$rline" 2)" = "$unit" ]; then
+            return
+        fi
+        deps_raw="$(plan_table_cell "$rline" 8)"
+        out="$(plan_prune_csv_cell "$deps_raw" "$unit")"
+        if [ "$out" != "$deps_raw" ]; then
+            [ -n "$out" ] || out="—"
+            rline="$(plan_table_set_cell "$rline" 8 "$out")"
+        fi
+    elif [[ $rline == \|* ]]; then
+        ids_raw="$(plan_table_cell "$rline" 3)"
+        out="$(plan_prune_csv_cell "$ids_raw" "$unit")"
+        if [ "$out" != "$ids_raw" ]; then
+            if [ -z "$out" ]; then
+                printf 'plan: coverage row has no remaining ids after removing %s; row dropped\n' "$unit" >&2
+                return
+            fi
+            printf 'plan: pruned coverage id %s; remaining in row: %s\n' "$unit" "$out" >&2
+            rline="$(plan_table_set_cell "$rline" 3 "$out")"
+        fi
+    fi
+    printf '%s\n' "$rline"
+}
+
 plan_prune_work_unit() {
     local inventory="$1" unit="$2" temporary
     [ -f "$inventory" ] || plan_die "work-unit inventory not found: $inventory" 66
     temporary="${inventory}.tmp.$$"
     trap 'rm -f "$temporary"' RETURN
     if ! (
-        # Unit rows: drop the removed unit, prune it from Depends (cell 8).
-        # Other table rows: prune from the comma list in cell 3; a row whose
-        # list empties is dropped with a stderr note, exactly as before.
         while IFS= read -r rline || [ -n "$rline" ]; do
-            if [[ $rline =~ ^\|[[:space:]]*W[0-9][0-9]+[[:space:]]*\| ]]; then
-                if [ "$(plan_table_cell "$rline" 2)" = "$unit" ]; then
-                    continue
-                fi
-                deps_raw="$(plan_table_cell "$rline" 8)"
-                out="$(plan_prune_csv_cell "$deps_raw" "$unit")"
-                if [ "$out" != "$deps_raw" ]; then
-                    [ -n "$out" ] || out="—"
-                    rline="$(plan_table_set_cell "$rline" 8 "$out")"
-                fi
-            elif [[ $rline == \|* ]]; then
-                ids_raw="$(plan_table_cell "$rline" 3)"
-                out="$(plan_prune_csv_cell "$ids_raw" "$unit")"
-                if [ "$out" != "$ids_raw" ]; then
-                    # T59: a shrunk coverage row is named with what survives,
-                    # exactly like a dropped one — the silent one-way shrink
-                    # is what made remove+readd reads invisible (B68).
-                    if [ -z "$out" ]; then
-                        printf 'plan: coverage row has no remaining ids after removing %s; row dropped\n' "$unit" >&2
-                        continue
-                    fi
-                    printf 'plan: pruned coverage id %s; remaining in row: %s\n' "$unit" "$out" >&2
-                    rline="$(plan_table_set_cell "$rline" 3 "$out")"
-                fi
-            fi
-            printf '%s\n' "$rline"
+            plan_prune_work_unit_row "$unit" "$rline"
         done < "$inventory"
     ) > "$temporary"; then
         rm -f "$temporary"

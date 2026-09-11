@@ -257,8 +257,13 @@ context_page_records() {
     ' "$input"
 }
 
-context_read_command() {
-    local file file_hash content bounded start=0 emitted more page token_body token_rest total_records truncated
+# context_read_resolve — resolve $document_id to $file/$file_hash/$view,
+# validate $token against them, and compute $content and $start. Assigns into
+# the caller's locals (bash dynamic scoping, the plan_map_value idiom already
+# used throughout this codebase) rather than its own, since context_read_command
+# declares them local and every one of them feeds its later paging step.
+context_read_resolve() {
+    local token_body token_rest view_status
     [ "$document_selector_count" -eq 1 ] || { printf 'usage: read requires exactly one --document or --unit\n' >&2; exit 2; }
     context_entry_id "$document_id" >/dev/null
     [ -n "$view" ] || view="$(context_default_view "$document_id")"
@@ -293,6 +298,11 @@ context_read_command() {
     view_status=0
     content="$(context_view_text "$file" "$view" "$row_text")" || view_status=$?
     [ "$view_status" -ne 64 ] || exit 64
+}
+
+context_read_command() {
+    local file file_hash content bounded start=0 emitted more page total_records truncated
+    context_read_resolve
     if [ "$read_only" -eq 0 ]; then
         context_with_lock "$plan_dir" context_register_processed_entry "$plan_dir" "$document_id"
     fi
@@ -323,36 +333,58 @@ context_read_command() {
     fi
     context_read_cleanup
     if [ "$format" = json ]; then
-        # `excerpt` carries what the text format says in its excerpt= line: the
-        # summary view is a fixed head slice applied before paging, so it can
-        # withhold most of a document while next_token is legitimately null. A
-        # consumer reading only next_token would treat that as a complete
-        # document. Not a resume token, because a fixed slice cannot be resumed;
-        # the remedy is --view full.
-        local excerpt_json=null
-        if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
-            excerpt_json="$(printf '{"shown_lines":%s,"document_lines":%s,"complete":false,"read_all_with":"--view full"}' \
-                "$shown_lines" "$document_lines")"
-        fi
-        printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","returned_records":%s,"total_records":%s,"truncated":%s,"content":"%s","next_token":%s,"excerpt":%s}\n' \
-            "$document_id" "$view" "$emitted" "$total_records" "$truncated" "$bounded" \
-            "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')" \
-            "$excerpt_json"
+        context_read_emit_json "$document_id" "$view" "$emitted" "$total_records" "$truncated" \
+            "$bounded" "$file_hash" "$start" "$more" "$shown_lines" "$document_lines"
     else
-        printf 'entry_id=%s\nview=%s\nreturned_records=%s\ntotal_records=%s\ntruncated=%s\n' \
-            "$document_id" "$view" "$emitted" "$total_records" "$truncated" >&2
-        printf '%s\n' "$bounded"
-        [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
-        # The summary view is a fixed excerpt of the head of the file, so it
-        # truncates BEFORE paging and the page reports no withheld records. A
-        # reader following the documented rule -- no next_token means the
-        # document is fully read -- therefore concludes it has read a plan when
-        # it has seen the first few lines. Reviewers are steered to this view by
-        # default, so the excerpt has to say what it is.
-        if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
-            printf 'excerpt=summary shows %s of %s line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.\n' \
-                "$shown_lines" "$document_lines"
-        fi
+        context_read_emit_text "$document_id" "$view" "$emitted" "$total_records" "$truncated" \
+            "$bounded" "$file_hash" "$start" "$more" "$shown_lines" "$document_lines"
+    fi
+}
+
+# context_read_emit_json <document_id> <view> <emitted> <total_records>
+# <truncated> <bounded> <file_hash> <start> <more> <shown_lines>
+# <document_lines> — the read command's JSON-format output.
+#
+# `excerpt` carries what the text format says in its excerpt= line: the
+# summary view is a fixed head slice applied before paging, so it can
+# withhold most of a document while next_token is legitimately null. A
+# consumer reading only next_token would treat that as a complete
+# document. Not a resume token, because a fixed slice cannot be resumed;
+# the remedy is --view full.
+context_read_emit_json() {
+    local document_id="$1" view="$2" emitted="$3" total_records="$4" truncated="$5" \
+        bounded="$6" file_hash="$7" start="$8" more="$9" shown_lines="${10}" document_lines="${11}"
+    local excerpt_json=null
+    if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
+        excerpt_json="$(printf '{"shown_lines":%s,"document_lines":%s,"complete":false,"read_all_with":"--view full"}' \
+            "$shown_lines" "$document_lines")"
+    fi
+    printf '{"command":"read","status":"ok","entry_id":"%s","view":"%s","returned_records":%s,"total_records":%s,"truncated":%s,"content":"%s","next_token":%s,"excerpt":%s}\n' \
+        "$document_id" "$view" "$emitted" "$total_records" "$truncated" "$bounded" \
+        "$([ "$more" -eq 1 ] && printf '"continue:%s:%s:%s"' "$file_hash" "$view" "$((start + emitted))" || printf 'null')" \
+        "$excerpt_json"
+}
+
+# context_read_emit_text <document_id> <view> <emitted> <total_records>
+# <truncated> <bounded> <file_hash> <start> <more> <shown_lines>
+# <document_lines> — the read command's text-format output.
+#
+# The summary view is a fixed excerpt of the head of the file, so it
+# truncates BEFORE paging and the page reports no withheld records. A
+# reader following the documented rule -- no next_token means the
+# document is fully read -- therefore concludes it has read a plan when
+# it has seen the first few lines. Reviewers are steered to this view by
+# default, so the excerpt has to say what it is.
+context_read_emit_text() {
+    local document_id="$1" view="$2" emitted="$3" total_records="$4" truncated="$5" \
+        bounded="$6" file_hash="$7" start="$8" more="$9" shown_lines="${10}" document_lines="${11}"
+    printf 'entry_id=%s\nview=%s\nreturned_records=%s\ntotal_records=%s\ntruncated=%s\n' \
+        "$document_id" "$view" "$emitted" "$total_records" "$truncated" >&2
+    printf '%s\n' "$bounded"
+    [ "$more" -eq 0 ] || printf 'next_token=continue:%s:%s:%s\n' "$file_hash" "$view" "$((start + emitted))"
+    if [ "$view" = summary ] && [ "$more" -eq 0 ] && [ "$shown_lines" -lt "$document_lines" ]; then
+        printf 'excerpt=summary shows %s of %s line(s); this is not the whole document. Re-read with --view full (which pages, and reports next_token until nothing is withheld) before drawing a conclusion from it.\n' \
+            "$shown_lines" "$document_lines"
     fi
 }
 
@@ -379,6 +411,14 @@ context_check_command() {
     else
         status=fresh
     fi
+    context_check_emit "$generation" "$status" "$changed" "$changed_ids" "$affected_ids"
+}
+
+# context_check_emit <generation> <status> <changed> <changed_ids>
+# <affected_ids> — the check command's json/text output, split out of
+# context_check_command to stay under CODE-STYLE §3's function cap.
+context_check_emit() {
+    local generation="$1" status="$2" changed="$3" changed_ids="$4" affected_ids="$5"
     if [ "$format" = json ]; then
         local changed_json='[]' id first=1 entry_json=null
         [ -n "$entry_id" ] && entry_json="\"$entry_id\""
