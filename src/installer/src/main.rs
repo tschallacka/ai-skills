@@ -19,6 +19,7 @@ mod install;
 mod manifest;
 mod mcp;
 mod permissions;
+mod integration;
 mod plan_migration;
 mod plugins;
 mod requirements;
@@ -148,6 +149,7 @@ struct InstallArgs {
     source: Option<PathBuf>,
     target: Option<PathBuf>,
     agent: Option<String>,
+    integration: Vec<String>,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -156,6 +158,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
     let mut agent: Option<String> = None;
+    let mut integration = Vec::new();
 
     let mut i = 0;
     while i < argv.len() {
@@ -177,6 +180,10 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 i += 1;
                 agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
             }
+            "--integration" => {
+                i += 1;
+                integration.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
+            }
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -187,7 +194,71 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         source,
         target,
         agent,
+        integration,
     })
+}
+
+/// A resolved `--integration` selection: any number of `skill=mode` choices
+/// plus at most one run-wide bare-mode default -- ported from
+/// installer/src/05-config.sh's `record_integration`/`record_skill_integration`
+/// and `INTEGRATION_SELECTION`/`INTEGRATION_DEFAULT`. A later `--integration`
+/// for the same skill overwrites an earlier one (the usual last-flag-wins CLI
+/// convention); install.sh gets the same result through a different
+/// mechanism (bash 3.2 has no associative arrays, so it prepends records to a
+/// list and reads the first match), so this does not reproduce that
+/// mechanism, only its outcome.
+#[derive(Default)]
+struct IntegrationSelection {
+    per_skill: std::collections::HashMap<String, String>,
+    default_mode: Option<String>,
+}
+
+impl IntegrationSelection {
+    fn choice_for(&self, skill: &str) -> Option<&str> {
+        self.per_skill
+            .get(skill)
+            .map(String::as_str)
+            .or(self.default_mode.as_deref())
+    }
+}
+
+/// Parses and validates every `--integration` argument against `source`'s
+/// own declared modes -- a `skill=mode` naming a mode that skill does not
+/// offer is refused by name, same as install.sh's `record_skill_integration`
+/// refusing at the door rather than failing silently mid-install.
+fn build_integration_selection(
+    source: &Path,
+    raw: &[String],
+) -> Result<IntegrationSelection, String> {
+    let mut selection = IntegrationSelection::default();
+    for arg in raw {
+        let (skill, mode) = match arg.split_once('=') {
+            Some((s, m)) => (Some(s.to_string()), m.to_string()),
+            None => (None, arg.clone()),
+        };
+        if mode.is_empty() {
+            return Err("--integration needs a mode, or skill=mode".to_string());
+        }
+        if let Some(skill) = &skill {
+            let offered = integration::modes(source, skill);
+            if offered.is_empty() {
+                return Err(format!("{skill} offers no integration modes to choose between"));
+            }
+            if !offered.contains(&mode) {
+                return Err(format!(
+                    "{skill} has no {mode} integration; it offers: {}",
+                    offered.join(" ")
+                ));
+            }
+        }
+        match skill {
+            Some(skill) => {
+                selection.per_skill.insert(skill, mode);
+            }
+            None => selection.default_mode = Some(mode),
+        }
+    }
+    Ok(selection)
 }
 
 /// `--agent NAME` resolves to that agent's own directory under $HOME
@@ -258,6 +329,7 @@ fn install_selected_skills(
     source: &Path,
     target: &Path,
     skills: &[String],
+    integration_selection: &IntegrationSelection,
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
     for skill in skills {
@@ -267,11 +339,60 @@ fn install_selected_skills(
             println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
             continue;
         }
-        install::install_skill(source, skill, target).map_err(|e| e.to_string())?;
+        install::install_skill(source, skill, target, integration_selection.choice_for(skill))
+            .map_err(|e| e.to_string())?;
         println!("installed {skill} -> {}", target.join(skill).display());
         installed.push(skill.clone());
     }
     Ok(installed)
+}
+
+/// Registers (or removes) each installed skill's mcp adapter with the
+/// target agent's own CLI/config -- ported from
+/// installer/src/72-mcp-registration.sh's `mcp_registration_step`, run once
+/// after the whole install loop, for every installed skill that declares any
+/// integration mode at all (almost none do). Silently does nothing when
+/// `kind` is not one `mcp.rs` knows how to register against, same as
+/// `run_post_install_steps`.
+fn run_mcp_registration_step(kind: Option<&str>, source: &Path, target: &Path, skills: &[String]) {
+    let Some(kind) = kind else { return };
+    if !matches!(kind, "claude" | "opencode" | "codex") {
+        return;
+    }
+    let Some(home) = home_dir_opt() else { return };
+    let mut announced = false;
+    for skill in skills {
+        if integration::modes(source, skill).is_empty() {
+            continue;
+        }
+        if !announced {
+            println!();
+            println!("== MCP registration ==");
+            announced = true;
+        }
+        let dir = target.join(skill);
+        match integration::mcp_adapter_path(source, skill, &dir) {
+            Some(path) => {
+                let path_str = path.to_string_lossy().to_string();
+                match mcp::register_for_kind(kind, skill, &path_str, &home) {
+                    Ok(mcp::RegisterOutcome::Registered) => {
+                        println!("  {kind}: registered MCP server {skill}")
+                    }
+                    Ok(mcp::RegisterOutcome::Manual) => {
+                        for line in mcp::manual_instructions(kind, skill, &path_str) {
+                            println!("  {line}");
+                        }
+                    }
+                    Err(e) => println!("  {kind}: {e}"),
+                }
+            }
+            None => match mcp::unregister_for_kind(kind, skill, &dir, &home) {
+                Ok(true) => println!("  {kind}: removed MCP server {skill}"),
+                Ok(false) => {}
+                Err(e) => println!("  {kind}: {e}"),
+            },
+        }
+    }
 }
 
 /// The permission grants, plan migration and vendor plugins install.sh
@@ -292,6 +413,7 @@ fn run_post_install_steps(kind: Option<&str>, source: &Path, target: &Path, skil
     if skills.iter().any(|s| s == "planning") {
         run_planning_post_install(kind, target, &home);
     }
+    run_mcp_registration_step(Some(kind), source, target, skills);
     if skills.iter().any(|s| s == "interactive-shell") {
         run_interactive_shell_post_install(kind, source, target, &home);
     }
@@ -406,7 +528,8 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         ));
     }
 
-    let installed = install_selected_skills(&source, &target, &skills)?;
+    let integration_selection = build_integration_selection(&source, &args.integration)?;
+    let installed = install_selected_skills(&source, &target, &skills, &integration_selection)?;
     run_post_install_steps(kind.as_deref(), &source, &target, &installed);
     Ok(ExitCode::SUCCESS)
 }
@@ -923,6 +1046,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut source: Option<PathBuf> = None;
     let mut target: Option<PathBuf> = None;
     let mut agent: Option<String> = None;
+    let mut integration_args = Vec::new();
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -938,12 +1062,17 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 i += 1;
                 agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
             }
+            "--integration" => {
+                i += 1;
+                integration_args.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
+            }
             other => return Err(format!("interactive: unknown option: {other}")),
         }
         i += 1;
     }
     let source = resolve_source(source)?;
     let (target, kind) = resolve_target_and_kind(target, agent)?;
+    let integration_selection = build_integration_selection(&source, &integration_args)?;
 
     let names = discover::discover_skills(&source).map_err(|e| e.to_string())?;
     let skills = names
@@ -973,7 +1102,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(selected) => {
-            let installed = install_selected_skills(&source, &target, &selected)?;
+            let installed =
+                install_selected_skills(&source, &target, &selected, &integration_selection)?;
             run_post_install_steps(kind.as_deref(), &source, &target, &installed);
             Ok(ExitCode::SUCCESS)
         }
