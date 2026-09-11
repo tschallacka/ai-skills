@@ -25,6 +25,7 @@ mod integration;
 mod plan_migration;
 mod plugins;
 mod requirements;
+mod skill_manifest;
 mod tools;
 mod ui;
 

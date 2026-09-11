@@ -17,23 +17,24 @@
 //! `dev_build` gates whether a raw dev checkout's own maintainer-only
 //! content ships along with a skill -- install.sh's default is `prod`
 //! (`--dev-build` opts out), driven by a hand-maintained `skill_files()`
-//! manifest (installer/src/50-manifest.sh) this installer has no equivalent
-//! of. Rather than replicate that manifest file-for-file (a second copy to
-//! keep in sync, the exact problem `skill_files()` centralizing it was
-//! meant to solve), `should_ship` reads the same `# MODE: DEV` header
-//! marker build-release.sh's own `declares_prod` reads, plus an entire
-//! `tests/` directory dropped outright (install.sh never ships one). This
-//! is a heuristic approximation of `skill_files()`, not a byte-identical
-//! port -- it does not know a per-skill hand-curated exception exists
-//! unless that exception also happens to be MODE-marked or under `tests/`.
-//! It matters only when `--source` names a raw checkout directly: a
-//! `build-release.sh`-produced tarball (what `bootstrap.sh` actually
-//! downloads) already contains prod-only content, so this filter is a
-//! no-op against the common end-user path either way.
+//! manifest (installer/src/50-manifest.sh). This installer gets install.sh's
+//! own, exact answer whenever it can: `skill_manifest::skill_files_via_install_sh`
+//! extracts `skill_files()` (and its one helper) out of a real `install.sh`
+//! sitting next to `source_root` and runs them with bash itself, so the
+//! file list is install.sh's own, byte-for-byte, not a re-derivation of it.
+//! `collect_relative_files`'s own `should_ship` (`# MODE: DEV` header /
+//! `tests/` directory) is the fallback for when that is not possible -- no
+//! `install.sh` next to `--source` (a `build-release.sh` tarball, which
+//! never ships one; `bootstrap.sh` downloads the skill payload alone), or
+//! no `bash` on PATH. That tarball is the common end-user path and is
+//! already prod-only content, so the fallback is a no-op there either way;
+//! the exact path only matters -- and only engages -- when `--source`
+//! names a raw checkout directly.
 
 use crate::backup;
 use crate::digest;
 use crate::integration;
+use crate::skill_manifest;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -71,7 +72,7 @@ pub fn install_skill(
     fs::create_dir_all(&dest_dir)?;
 
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), integration_choice);
-    let relative_paths = collect_relative_files(&source_dir, &PathBuf::new(), dev_build)?;
+    let relative_paths = relative_paths_for(source_root, skill, dev_build)?;
 
     // A symlinked destination file (or the digest manifest itself) is left
     // for manual review rather than silently replaced -- ported from
@@ -124,12 +125,40 @@ pub fn install_skill(
     Ok(())
 }
 
-/// Public wrapper around `collect_relative_files` for `cli_mode.rs`'s own
+/// Public wrapper around `relative_paths_for` for `cli_mode.rs`'s own
 /// independent collision-checking install path (install.sh's
 /// `cli_install_skill`), which needs the same "what would this skill ship"
 /// answer without going through the backup/digest machinery this module's
 /// own `install_skill` wraps it in.
 pub fn skill_relative_files(source_root: &Path, skill: &str, dev_build: bool) -> io::Result<Vec<String>> {
+    relative_paths_for(source_root, skill, dev_build)
+}
+
+/// install.sh's own `skill_files()` answer when it can be gotten (a real
+/// `install.sh` sits next to `source_root`), else `collect_relative_files`'s
+/// MODE-marker heuristic. A path the exact answer names but that does not
+/// actually exist on disk is dropped with a note on stderr rather than
+/// failing the whole install -- install.sh's own interactive install_skill
+/// has no existence check either (only its CLI-mode handlers do, where a
+/// missing source is a documented `die`), so a missing file here reads as
+/// "this row does not apply on this host" the same way a platform-gated
+/// binary row already does.
+fn relative_paths_for(source_root: &Path, skill: &str, dev_build: bool) -> io::Result<Vec<String>> {
+    if let Some(exact) = skill_manifest::skill_files_via_install_sh(source_root, skill, dev_build) {
+        let source_dir = source_root.join(skill);
+        return Ok(exact
+            .into_iter()
+            .filter(|relative| {
+                let exists = source_dir.join(relative).is_file();
+                if !exists {
+                    eprintln!(
+                        "{skill}: install.sh's own manifest names {relative}, which does not exist here; skipping"
+                    );
+                }
+                exists
+            })
+            .collect());
+    }
     collect_relative_files(&source_root.join(skill), &PathBuf::new(), dev_build)
 }
 
