@@ -695,7 +695,37 @@ fn install_selected_skills(
             dev_build,
         )
         .map_err(|e| e.to_string())?;
-        let line = format!("installed {skill} -> {}", target.join(skill).display());
+        let mut line = format!("installed {skill} -> {}", target.join(skill).display());
+        // Ported suffixes from install.sh's own Installed: line
+        // (summary_soft_note/summary_integration_note, 62-summary.sh):
+        // every unmet soft requirement gets its own warning, and a skill
+        // offering more than one integration mode names which it got and
+        // why. summary_dev_build_note has no port -- it names binaries that
+        // came from a repo-root dev build location distinct from the
+        // shipped one, a second binary source this installer's own
+        // dev_build flag (which instead widens skill_files' own package
+        // selection) has no equivalent of.
+        for (req, met) in &status.requirements {
+            if *met || req.strength != requirements::Strength::Soft {
+                continue;
+            }
+            line.push_str(&format!(
+                "   (warning: {} missing -- {})",
+                requirements::requirement_label(req),
+                req.why
+            ));
+        }
+        if !integration::modes(source, skill).is_empty() {
+            let dest = target.join(skill);
+            let choice = integration_selection.choice_for(skill);
+            let mode = integration::resolve_mode(source, skill, Some(&dest), choice);
+            let source_label = match integration::mode_source(source, skill, &mode, Some(&dest), choice) {
+                "explicit" => "--integration".to_string(),
+                "detected" => "carried forward from the existing install".to_string(),
+                _ => "default, no prior install found".to_string(),
+            };
+            line.push_str(&format!("\n             integration mode: {mode} ({source_label})"));
+        }
         println!("{line}");
         summary.installed.push(line);
         installed.push(skill.clone());

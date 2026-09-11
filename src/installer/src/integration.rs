@@ -159,6 +159,31 @@ pub fn resolve_mode(
     "skill".to_string()
 }
 
+/// Where `resolve_mode`'s answer came from, for the install summary --
+/// ported from `integration_mode_source_for` (T109: an install that
+/// silently carries a mode forward is only progress over a silent wrong
+/// default if it SAYS what it did and why). Takes the mode `resolve_mode`
+/// already resolved rather than re-resolving its own, same reasoning as
+/// bash's own version: `installed_mode`'s disagreement warning belongs to
+/// that one authoritative call.
+pub fn mode_source(
+    source_root: &Path,
+    skill: &str,
+    resolved: &str,
+    destination: Option<&Path>,
+    explicit: Option<&str>,
+) -> &'static str {
+    if explicit.is_some() {
+        return "explicit";
+    }
+    if let Some(destination) = destination {
+        if installed_mode(source_root, skill, destination).as_deref() == Some(resolved) {
+            return "detected";
+        }
+    }
+    "default"
+}
+
 /// Does `relative` (forward-slash, source-tree-relative) belong in `mode`?
 /// Only `bin/` paths carry a mode; everything else always installs.
 pub fn file_allowed(source_root: &Path, skill: &str, relative: &str, mode: &str) -> bool {
@@ -332,5 +357,40 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_integration(dir.path(), "ai-text-editor", SAMPLE);
         assert_eq!(resolve_mode(dir.path(), "ai-text-editor", None, None), "skill");
+    }
+
+    #[test]
+    fn mode_source_is_explicit_when_a_choice_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        write_integration(dir.path(), "ai-text-editor", SAMPLE);
+        assert_eq!(
+            mode_source(dir.path(), "ai-text-editor", "mcp", None, Some("mcp")),
+            "explicit"
+        );
+    }
+
+    #[test]
+    fn mode_source_is_detected_when_it_matches_whats_already_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        write_integration(dir.path(), "ai-text-editor", SAMPLE);
+        let dest = tempfile::tempdir().unwrap();
+        let bin = dest.path().join("bin/x86_64-unknown-linux-musl");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("ai-text-editor-mcp"), "").unwrap();
+        assert_eq!(
+            mode_source(dir.path(), "ai-text-editor", "mcp", Some(dest.path()), None),
+            "detected"
+        );
+    }
+
+    #[test]
+    fn mode_source_is_default_on_a_first_install_with_no_explicit_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        write_integration(dir.path(), "ai-text-editor", SAMPLE);
+        let dest = tempfile::tempdir().unwrap();
+        assert_eq!(
+            mode_source(dir.path(), "ai-text-editor", "skill", Some(dest.path()), None),
+            "default"
+        );
     }
 }
