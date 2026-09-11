@@ -27,6 +27,7 @@
     "bug-report",
     "chat",
     "interactive-shell",
+    "tui-hint-plugin",
     "git-worktrees",
     "git-merge-resolving",
     "planning/bin",

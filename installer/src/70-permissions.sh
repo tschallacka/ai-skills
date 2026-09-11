@@ -734,6 +734,124 @@ interactive_shell_appprofiles_step() {
     echo "  app profiles: installed $copied file(s) to $destination" >&2
 }
 
+# The files a Claude Code root actually needs from tui-hint-plugin/ -- not
+# README.md, opencode/, or tests/, none of which the plugin loader reads.
+tui_hint_plugin_claude_files() {
+    cat <<'EOF'
+.claude-plugin/plugin.json
+hooks/hooks.json
+hooks/lib.sh
+hooks/pre-tool-use.sh
+EOF
+}
+
+# Installed the same way agent-identity-plugin/ is: whatever this run's
+# checkout ships is copied verbatim into the target root, not registered as
+# a selectable skill in SKILL_NAMES (nothing chooses it directly; it rides
+# with interactive-shell).
+install_tui_hint_plugin_claude() {
+    local root="$1" relative source destination_file
+    local destination="$root/tui-hint-plugin"
+    while IFS= read -r relative; do
+        [ -n "$relative" ] || continue
+        source="$SOURCE_ROOT/tui-hint-plugin/$relative"
+        [ -f "$source" ] || continue
+        destination_file="$destination/$relative"
+        mkdir -p "$(dirname "$destination_file")"
+        cp -p "$source" "$destination_file"
+    done < <(tui_hint_plugin_claude_files)
+    chmod +x "$destination"/hooks/*.sh 2>/dev/null || true
+}
+
+# opencode has no per-root plugin directory the way a Claude Code root does
+# -- plugins are declared globally in opencode.jsonc's own "plugin" array
+# (a bare npm package name, or a local file path -- see
+# .agents/knowledge/opencode-plugin-loading-and-advisory-injection.md). The
+# .js file is copied once to a stable location under this installer's own
+# XDG directory, independent of which root(s) were selected, and that path
+# is added to the array if not already present.
+opencode_register_plugin_entry() { # <cfg> <destination> <created:0|1>
+    local cfg="$1" destination="$2" created="$3"
+    local doc added tmpfile
+    doc="$(rjq '.' "$cfg" 2>/dev/null || true)"
+    [ -n "$doc" ] || doc='{}'
+    added='false'
+    printf '%s' "$doc" | rjq -e --arg entry "$destination" \
+        '(.plugin // []) | index($entry) != null' >/dev/null 2>&1 || added='true'
+
+    tmpfile="$(mktemp "$cfg.tmp.XXXXXX")" || die "cannot write next to $cfg"
+    cp -p "$cfg" "$tmpfile"
+    if ! printf '%s' "$doc" | rjq --arg entry "$destination" '
+        (if type == "object" then . else {} end) as $data
+        | ($data.plugin | if type == "array" then . else [] end) as $existing
+        | $data | .plugin = ($existing + (if ($existing | index($entry)) then [] else [$entry] end))' \
+        > "$tmpfile"; then
+        rm -f "$tmpfile"
+        die "rjq failed to update $cfg"
+    fi
+    mv "$tmpfile" "$cfg"
+
+    if [ "$added" = true ]; then
+        echo "  opencode: added $destination to the plugin array" >&2
+    else
+        echo "  opencode: plugin already registered" >&2
+    fi
+}
+
+install_tui_hint_plugin_opencode() {
+    local source="$SOURCE_ROOT/tui-hint-plugin/opencode/tui-hint-plugin.js"
+    local destination="${XDG_CONFIG_HOME:-$HOME/.config}/tsch-ai-skills/tui-hint-plugin/tui-hint-plugin.js"
+    local cfg created=0
+    [ -f "$source" ] || return 0
+    mkdir -p "$(dirname "$destination")" || { echo "  opencode: cannot create $(dirname "$destination")/" >&2; return 0; }
+    cp -p "$source" "$destination" || { echo "  opencode: cannot write $destination" >&2; return 0; }
+
+    cfg="$(opencode_configfile)"
+    if [ ! -f "$cfg" ]; then
+        mkdir -p "$(dirname "$cfg")" || { echo "  opencode: cannot create $(dirname "$cfg")/" >&2; return 0; }
+        printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$cfg" \
+            || { echo "  opencode: cannot write $cfg" >&2; return 0; }
+        echo "  opencode: created $cfg" >&2
+        created=1
+    fi
+    if ! command -v rjq >/dev/null 2>&1; then
+        echo "  opencode: rjq is not installed; add \"$destination\" to $cfg's \"plugin\" array by hand." >&2
+        return 0
+    fi
+    if [ "$created" -eq 0 ] && [ -s "$cfg" ] && ! rjq -e '.' "$cfg" >/dev/null 2>&1; then
+        echo "  opencode: cannot safely rewrite $cfg (comments or trailing commas); add \"$destination\" to its \"plugin\" array by hand." >&2
+        return 0
+    fi
+    [ "$created" -eq 1 ] || backup_file "$cfg"
+
+    opencode_register_plugin_entry "$cfg" "$destination" "$created"
+}
+
+# Every root a tui-hint-relevant skill was actually selected for. Claude
+# Code gets its own copy of the plugin directory per root (the loader reads
+# it from there); opencode's registration is global, so it is done at most
+# once regardless of how many opencode roots were selected.
+tui_hint_plugin_step() {
+    local root kind opencode_done=0
+    contains interactive-shell "${SELECTED_SKILLS[@]}" || return 0
+    echo >&2
+    echo "== tui-hint plugin ==" >&2
+    for root in "${SELECTED_TARGET_PATHS[@]}"; do
+        kind="$(agent_kind_for_root "$root")"
+        case "$kind" in
+            claude)
+                install_tui_hint_plugin_claude "$root"
+                echo "  Installed: $root/tui-hint-plugin (reminds an agent of a shipped app profile before it runs a Bash command headlessly)" >&2
+                ;;
+            opencode)
+                [ "$opencode_done" -eq 1 ] && continue
+                install_tui_hint_plugin_opencode
+                opencode_done=1
+                ;;
+        esac
+    done
+}
+
 # ---------------------------------------------------------------
 # 13b. Step 4: ai-text-editor tool steering
 # ---------------------------------------------------------------
