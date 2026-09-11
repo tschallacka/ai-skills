@@ -200,17 +200,25 @@ fn bundled_rjq_path(source_root: &Path) -> Option<PathBuf> {
     is_executable(&path).then_some(path)
 }
 
-/// A tool is available when it is on PATH, or -- for rjq only -- when this
-/// release bundled one for the running host, or (last resort) when a system
-/// `jq` is on PATH: rjq is a jq-compatible reimplementation, so wherever
-/// rjq itself would satisfy this requirement, jq does too. Every other tool
-/// has no such fallback: install.sh's own generated `runtime_tool_verify()`
-/// is a plain `command -v` for everything but rjq.
+/// A tool is available when it is on PATH, or -- for rjq only -- via two
+/// further rungs, checked in the order install.sh itself checks them:
+///
+/// 1. this release's own bundled artifact first, same as
+///    `prepend_bundled_rjq` putting `planning/bin/<triple>/` ahead of PATH
+///    before any dependency check runs, so a bundled rjq wins even over a
+///    different rjq already on PATH;
+/// 2. PATH itself second;
+/// 3. a system `jq` last, since rjq is a jq-compatible reimplementation --
+///    wherever rjq would satisfy this requirement, jq does too, but only
+///    once install.sh's own two rungs have both come up empty.
+///
+/// Every other tool has no such fallback: install.sh's own generated
+/// `runtime_tool_verify()` is a plain `command -v` for everything but rjq.
 fn tool_available(source_root: &Path, tool: &str) -> bool {
     if tool != "rjq" {
         return tool_on_path(tool);
     }
-    tool_on_path("rjq") || bundled_rjq_path(source_root).is_some() || tool_on_path("jq")
+    bundled_rjq_path(source_root).is_some() || tool_on_path("rjq") || tool_on_path("jq")
 }
 
 pub fn requirement_met(source_root: &Path, req: &Requirement) -> bool {
