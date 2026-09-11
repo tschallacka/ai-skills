@@ -179,7 +179,9 @@ scripts/create-work-unit-inventory.sh
 scripts/plan-content.sh
 scripts/overview-state.sh
 scripts/plan-content-diff-lib.sh
+scripts/plan-content-lib.sh
 scripts/plan-context-lib.sh
+scripts/plan-context-commands-lib.sh
 scripts/plan-context.sh
 scripts/plan-context-wrapper.sh
 scripts/plan-env.sh
