@@ -16,6 +16,7 @@ mod digest;
 mod discover;
 mod install;
 mod manifest;
+mod permissions;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -29,6 +30,9 @@ Usage:
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR]
+  installer grant-claude-permissions --scripts DIR --plans DIR --tmp DIR
+                     grant Claude Code read/write on the planning skill's own
+                     scripts, plan root, and tmp directory
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -59,6 +63,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         }
         Some("list") => run_list(&argv[1..]),
         Some("install") => run_install(&argv[1..]),
+        Some("grant-claude-permissions") => run_grant_claude_permissions(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -210,6 +215,55 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     for skill in &skills {
         install::install_skill(&source, skill, &target).map_err(|e| e.to_string())?;
         println!("installed {skill} -> {}", target.join(skill).display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_grant_claude_permissions(argv: &[String]) -> Result<ExitCode, String> {
+    let mut scripts: Option<String> = None;
+    let mut plans: Option<String> = None;
+    let mut tmp: Option<String> = None;
+
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--scripts" => {
+                i += 1;
+                scripts = Some(argv.get(i).ok_or("--scripts needs a value")?.clone());
+            }
+            "--plans" => {
+                i += 1;
+                plans = Some(argv.get(i).ok_or("--plans needs a value")?.clone());
+            }
+            "--tmp" => {
+                i += 1;
+                tmp = Some(argv.get(i).ok_or("--tmp needs a value")?.clone());
+            }
+            other => return Err(format!("grant-claude-permissions: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    let scripts = scripts.ok_or("grant-claude-permissions: --scripts is required")?;
+    let plans = plans.ok_or("grant-claude-permissions: --plans is required")?;
+    let tmp = tmp.ok_or("grant-claude-permissions: --tmp is required")?;
+    let home = std::env::var("HOME")
+        .map_err(|_| "grant-claude-permissions: needs $HOME set".to_string())?;
+
+    match permissions::claude_planning_permissions(&scripts, &plans, &tmp, Path::new(&home))
+        .map_err(|e| e.to_string())?
+    {
+        permissions::PermissionOutcome::NoConfigFile => {
+            println!("claude-code: no settings.json found; skipped");
+        }
+        permissions::PermissionOutcome::AlreadyPresent => {
+            println!("claude-code: permissions already present");
+        }
+        permissions::PermissionOutcome::Added(entries) => {
+            println!("claude-code: added to permissions.allow:");
+            for entry in entries {
+                println!("  - {entry}");
+            }
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
