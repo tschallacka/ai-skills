@@ -22,10 +22,10 @@
 //! PATH also satisfies the requirement when neither rjq nor a bundled
 //! artifact is found. `tool_available` is where all three rungs live; every
 //! other tool is a plain PATH lookup. Install hints
-//! (`runtime_requirement_install_hint`) are not ported: they belong to the
-//! picker's ACTIONS pane (`d`, reverify/hint), which stays unported along
-//! with integration-mode cycling (T95) until this installer has a reason to
-//! read tools.tsv too.
+//! (`runtime_requirement_install_hint`) live in `tools.rs`, not here, which
+//! reads `installer/tools.tsv` for the picker's `d` key -- `d`/`r`/`m`
+//! (dependency hints, reverify, integration-mode cycling) are all ported;
+//! see `ui::model::PickerState`.
 
 use std::fs;
 use std::path::{Path, PathBuf};

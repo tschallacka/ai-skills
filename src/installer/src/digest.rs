@@ -18,7 +18,7 @@ pub fn content_digest(path: &Path) -> io::Result<String> {
     Ok(blake3::hash(&bytes).to_hex().to_string())
 }
 
-fn manifest_path(skill_dest: &Path) -> std::path::PathBuf {
+pub fn manifest_path(skill_dest: &Path) -> std::path::PathBuf {
     skill_dest.join(".filehashes")
 }
 

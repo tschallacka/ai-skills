@@ -62,10 +62,39 @@ pub fn install_skill(
         ));
     }
     let dest_dir = target_root.join(skill);
+    if dest_dir.is_symlink() {
+        return Err(io::Error::other(format!(
+            "existing symlink requires manual review: {}",
+            dest_dir.display()
+        )));
+    }
     fs::create_dir_all(&dest_dir)?;
 
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), integration_choice);
     let relative_paths = collect_relative_files(&source_dir, &PathBuf::new(), dev_build)?;
+
+    // A symlinked destination file (or the digest manifest itself) is left
+    // for manual review rather than silently replaced -- ported from
+    // install.sh's own `[ -L "$destination_file" ]`/`[ -L "$destination/.
+    // version" ]` refusal (installer/src/60-install.sh). Checked for every
+    // file BEFORE any write happens, matching bash's own two-pass shape:
+    // a collision found partway through must not leave a half-written skill.
+    for relative in &relative_paths {
+        let dest_file = dest_dir.join(relative);
+        if dest_file.is_symlink() {
+            return Err(io::Error::other(format!(
+                "existing symlink requires manual review: {}",
+                dest_file.display()
+            )));
+        }
+    }
+    if digest::manifest_path(&dest_dir).is_symlink() {
+        return Err(io::Error::other(format!(
+            "existing symlink requires manual review: {}",
+            digest::manifest_path(&dest_dir).display()
+        )));
+    }
+
     let mut installed_paths = Vec::with_capacity(relative_paths.len());
     for relative in &relative_paths {
         if !integration::file_allowed(source_root, skill, relative, &mode) {
@@ -494,5 +523,39 @@ mod tests {
 
         install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
         assert!(target_root.path().join("todo/scripts/run.sh").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_skill_directory_is_refused_not_silently_converted() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        let target_root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), target_root.path().join("todo")).unwrap();
+
+        let err =
+            install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+        assert!(target_root.path().join("todo").is_symlink());
+        assert!(!elsewhere.path().join("SKILL.md").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_destination_file_is_refused_not_silently_converted() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        let target_root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(target_root.path().join("todo")).unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let bogus_target = elsewhere.path().join("not-really-skill-md");
+        write(&bogus_target, "not the real file");
+        std::os::unix::fs::symlink(&bogus_target, target_root.path().join("todo/SKILL.md")).unwrap();
+
+        let err =
+            install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+        assert!(target_root.path().join("todo/SKILL.md").is_symlink());
     }
 }
