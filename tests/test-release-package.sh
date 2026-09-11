@@ -88,6 +88,23 @@ tarball="$work/dist/ai-skills-$version.tar.gz"
 
 {
     printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+    # tui-hint-plugin/editor-gate-plugin: neither is a skill (no skill_files()
+    # entry) and most of their files have no comment syntax a MODE marker
+    # could sit in (.json, .js), so this list is a third, deliberate copy of
+    # the same file set installer/build-release.sh's own
+    # tui_hint_plugin_files/editor_gate_plugin_files hardcode -- same
+    # reasoning as the five names on the line above.
+    printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
+    printf 'tui-hint-plugin/hooks/hooks.json\n'
+    printf 'tui-hint-plugin/hooks/lib.sh\n'
+    printf 'tui-hint-plugin/hooks/pre-tool-use.sh\n'
+    printf 'tui-hint-plugin/opencode/tui-hint-plugin.js\n'
+    printf 'editor-gate-plugin/.claude-plugin/plugin.json\n'
+    printf 'editor-gate-plugin/hooks/hooks.json\n'
+    printf 'editor-gate-plugin/hooks/lib.sh\n'
+    printf 'editor-gate-plugin/hooks/editor-token\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         declares_prod "$path" && printf '%s\n' "$path"

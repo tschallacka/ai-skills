@@ -193,12 +193,32 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
 /// (manifest::AGENTS), matching install.sh's TARGET_PATHS; `--target DIR`
 /// names a directory outright. Exactly one of the two selects where skills
 /// land.
-fn resolve_target(target: Option<PathBuf>, agent: Option<String>) -> Result<PathBuf, String> {
+/// `--agent NAME` resolves to that agent's own directory under $HOME
+/// (manifest::AGENTS), matching install.sh's TARGET_PATHS; `--target DIR`
+/// names a directory outright. Exactly one of the two selects where skills
+/// land. Also returns the resolved agent *kind* when known -- either named
+/// directly by `--agent`, or inferred from an explicit `--target` that
+/// happens to match one of AGENTS' own paths under $HOME, the same way
+/// install.sh's `agent_kind_for_root` works by path alone regardless of how
+/// the path was chosen. `None` means a custom target this installer has no
+/// grants for, same as install.sh's "custom" row.
+fn resolve_target_and_kind(
+    target: Option<PathBuf>,
+    agent: Option<String>,
+) -> Result<(PathBuf, Option<String>), String> {
     match (target, agent) {
         (Some(_), Some(_)) => {
             Err("install: --target and --agent are mutually exclusive".to_string())
         }
-        (Some(t), None) => Ok(t),
+        (Some(t), None) => {
+            let kind = home_dir_opt().and_then(|home| {
+                manifest::AGENTS
+                    .iter()
+                    .find(|a| home.join(a.home_suffix) == t)
+                    .map(|a| a.kind.to_string())
+            });
+            Ok((t, kind))
+        }
         (None, Some(kind)) => {
             let known = manifest::known_agent(&kind).ok_or_else(|| {
                 let choices: Vec<_> = manifest::AGENTS
@@ -212,9 +232,133 @@ fn resolve_target(target: Option<PathBuf>, agent: Option<String>) -> Result<Path
             })?;
             let home = std::env::var("HOME")
                 .map_err(|_| "install: --agent needs $HOME set".to_string())?;
-            Ok(PathBuf::from(home).join(known.home_suffix))
+            Ok((
+                PathBuf::from(home).join(known.home_suffix),
+                Some(known.kind.to_string()),
+            ))
         }
         (None, None) => Err("install: --target or --agent is required".to_string()),
+    }
+}
+
+fn home_dir_opt() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+fn install_selected_skills(source: &Path, target: &Path, skills: &[String]) -> Result<(), String> {
+    for skill in skills {
+        install::install_skill(source, skill, target).map_err(|e| e.to_string())?;
+        println!("installed {skill} -> {}", target.join(skill).display());
+    }
+    Ok(())
+}
+
+/// The permission grants, plan migration and vendor plugins install.sh
+/// bundles with a skill's own install step (sections 12-13 of
+/// 70-permissions.sh/65-plan-migration.sh), run here for the same skills
+/// just installed. Silently does nothing beyond the install itself when
+/// `kind` is unknown (a custom --target, or an agent this installer has no
+/// auto-editable grant for) -- the standalone grant-permissions/mcp-register/
+/// migrate-plans/install-*-plugin subcommands remain the manual fallback,
+/// same role install.sh's print_manual_permissions plays for a "custom" row.
+fn run_post_install_steps(kind: Option<&str>, source: &Path, target: &Path, skills: &[String]) {
+    let Some(kind) = kind else { return };
+    if !matches!(kind, "claude" | "opencode" | "codex") {
+        return;
+    }
+    let Some(home) = home_dir_opt() else { return };
+
+    if skills.iter().any(|s| s == "planning") {
+        run_planning_post_install(kind, target, &home);
+    }
+    if skills.iter().any(|s| s == "interactive-shell") {
+        run_interactive_shell_post_install(kind, source, target, &home);
+    }
+    if kind == "claude" && skills.iter().any(|s| s == "ai-text-editor") {
+        match plugins::install_editor_gate_plugin(source, target) {
+            Ok(destination) => println!(
+                "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token)",
+                destination.display()
+            ),
+            Err(e) => println!("editor-gate-plugin: {e}"),
+        }
+    }
+}
+
+fn run_planning_post_install(kind: &str, target: &Path, home: &Path) {
+    println!("== planning runtime permissions ==");
+    let scripts = target.join("planning").join("scripts");
+    let plans = plan_migration::default_root(home);
+    let tmp = std::env::temp_dir().join("planning-agent");
+    let scripts = scripts.to_string_lossy();
+    let plans_str = plans.to_string_lossy();
+    let tmp_str = tmp.to_string_lossy();
+    match kind {
+        "claude" => {
+            match permissions::claude_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                Ok(outcome) => {
+                    print_permission_outcome("claude-code", "permissions already present", outcome)
+                }
+                Err(e) => println!("claude-code: {e}"),
+            }
+        }
+        "opencode" => {
+            match permissions::opencode_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                Ok(outcome) => print_opencode_outcome("permissions already present", outcome),
+                Err(e) => println!("opencode: {e}"),
+            }
+        }
+        "codex" => {
+            match permissions::codex_planning_permissions(&scripts, &plans_str, &tmp_str, home) {
+                Ok(outcome) => print_codex_outcome("writable_roots already present", outcome),
+                Err(e) => println!("codex: {e}"),
+            }
+        }
+        _ => {}
+    }
+    match plan_migration::migrate_legacy_plans(&[target.to_path_buf()], home) {
+        Ok(outcome) => {
+            for plan in &outcome.migrated {
+                println!("Migrated plan: -> {}", plan.display());
+            }
+            for (plan, reason) in &outcome.blocked {
+                println!("Plan migration blocked: {}: {reason}", plan.display());
+            }
+        }
+        Err(e) => println!("migrate-plans: {e}"),
+    }
+}
+
+fn run_interactive_shell_post_install(kind: &str, source: &Path, target: &Path, home: &Path) {
+    println!("== interactive-shell execution permission ==");
+    if kind == "claude" {
+        let bins = target.join("interactive-shell").join("bin");
+        match permissions::claude_interactive_shell_permissions(&bins.to_string_lossy(), home) {
+            Ok(outcome) => print_permission_outcome(
+                "claude-code",
+                "interactive-shell grant already in place",
+                outcome,
+            ),
+            Err(e) => println!("claude-code: {e}"),
+        }
+        match plugins::install_tui_hint_plugin_claude(source, target) {
+            Ok(destination) => println!("Installed: {}", destination.display()),
+            Err(e) => println!("tui-hint-plugin: {e}"),
+        }
+    } else if kind == "opencode" {
+        match plugins::install_tui_hint_plugin_opencode(source, home) {
+            Ok(plugins::OpencodePluginOutcome::Registered) => {
+                println!("opencode: added the tui-hint-plugin to the plugin array")
+            }
+            Ok(plugins::OpencodePluginOutcome::AlreadyRegistered) => {
+                println!("opencode: tui-hint-plugin already registered")
+            }
+            Ok(plugins::OpencodePluginOutcome::NotShipped) => {}
+            Ok(plugins::OpencodePluginOutcome::NotStrictJson) => {
+                println!("opencode: config is not strict JSON; register tui-hint-plugin by hand")
+            }
+            Err(e) => println!("tui-hint-plugin: {e}"),
+        }
     }
 }
 
@@ -227,7 +371,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         return Err("install: --all or at least one --skill is required".to_string());
     }
     let source = resolve_source(args.source)?;
-    let target = resolve_target(args.target, args.agent)?;
+    let (target, kind) = resolve_target_and_kind(args.target, args.agent)?;
 
     let skills = if args.all {
         discover::discover_skills(&source).map_err(|e| e.to_string())?
@@ -241,13 +385,10 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         ));
     }
 
-    for skill in &skills {
-        install::install_skill(&source, skill, &target).map_err(|e| e.to_string())?;
-        println!("installed {skill} -> {}", target.join(skill).display());
-    }
+    install_selected_skills(&source, &target, &skills)?;
+    run_post_install_steps(kind.as_deref(), &source, &target, &skills);
     Ok(ExitCode::SUCCESS)
 }
-
 enum GrantTarget {
     Planning {
         scripts: String,
@@ -781,7 +922,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
         i += 1;
     }
     let source = resolve_source(source)?;
-    let target = resolve_target(target, agent)?;
+    let (target, kind) = resolve_target_and_kind(target, agent)?;
 
     let names = discover::discover_skills(&source).map_err(|e| e.to_string())?;
     let skills = names
@@ -809,10 +950,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(selected) => {
-            for skill in &selected {
-                install::install_skill(&source, skill, &target).map_err(|e| e.to_string())?;
-                println!("installed {skill} -> {}", target.join(skill).display());
-            }
+            install_selected_skills(&source, &target, &selected)?;
+            run_post_install_steps(kind.as_deref(), &source, &target, &selected);
             Ok(ExitCode::SUCCESS)
         }
     }

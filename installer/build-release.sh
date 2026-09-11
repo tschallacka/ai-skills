@@ -159,9 +159,44 @@ EOF
     done
 }
 
+# The exact files installer/src/70-permissions.sh's tui_hint_plugin_claude_files/
+# editor_gate_plugin_files (bash) name, and src/installer/src/plugins.rs's
+# TUI_HINT_PLUGIN_CLAUDE_FILES/EDITOR_GATE_PLUGIN_FILES (Rust) already carry.
+#
+# Neither existing mechanism above covers these: they are not a skill (no
+# entry in skill_files()) and most of their files have no comment syntax a
+# MODE marker could sit in (.json, .js). Under `curl … | bash`, install.sh
+# never notices, because SOURCE_ROOT there is GitHub's own whole-repository
+# source archive (download_source(), 45-source.sh) -- every file in the repo,
+# markers or not. installer/build-release.sh's tarball is the opposite by
+# design (only what a marker or skill_files() actually lists), and
+# installer/bootstrap.sh downloads exactly that tarball, so leaving these two
+# plugin directories out of collect() silently degrades the Rust installer's
+# tui-hint-plugin/editor-gate-plugin steps to a no-op with no error --
+# caught by running a real install from a real packaged release and finding
+# neither plugin on disk despite "Installed: …" having printed.
+tui_hint_plugin_files() {
+    printf 'tui-hint-plugin/.claude-plugin/plugin.json\n'
+    printf 'tui-hint-plugin/hooks/hooks.json\n'
+    printf 'tui-hint-plugin/hooks/lib.sh\n'
+    printf 'tui-hint-plugin/hooks/pre-tool-use.sh\n'
+    printf 'tui-hint-plugin/opencode/tui-hint-plugin.js\n'
+}
+
+editor_gate_plugin_files() {
+    printf 'editor-gate-plugin/.claude-plugin/plugin.json\n'
+    printf 'editor-gate-plugin/hooks/hooks.json\n'
+    printf 'editor-gate-plugin/hooks/lib.sh\n'
+    printf 'editor-gate-plugin/hooks/editor-token\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-bash.sh\n'
+    printf 'editor-gate-plugin/hooks/pre-tool-use-edit-write.sh\n'
+}
+
 collect() {
     {
         printf 'install.sh\ninstall-ui.sh\nREADME.md\nLICENSE\npackage.json\n'
+        tui_hint_plugin_files
+        editor_gate_plugin_files
         local path
         while IFS= read -r path; do
             [ -n "$path" ] || continue
