@@ -20,6 +20,7 @@ mod manifest;
 mod mcp;
 mod permissions;
 mod plan_migration;
+mod plugins;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -33,7 +34,7 @@ Usage:
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR]
-  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR)
+  installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
   installer mcp-register --agent NAME --name NAME --path PATH
@@ -43,6 +44,12 @@ Usage:
   installer migrate-plans --target-root DIR [--target-root DIR ...]
                      move plans out of each DIR's old planning/plans into
                      the single portable plan root
+  installer install-tui-hint-plugin --agent claude|opencode --source DIR [--target DIR]
+  installer install-editor-gate-plugin --source DIR --target DIR
+                     install the vendor-shipped plugin that rides with
+                     interactive-shell / ai-text-editor
+  installer set-claude-env --key KEY --value VALUE
+                     merge one env.KEY setting into Claude's settings.json
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -78,6 +85,9 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("mcp-register") => run_mcp_register(&argv[1..]),
         Some("mcp-unregister") => run_mcp_unregister(&argv[1..]),
         Some("migrate-plans") => run_migrate_plans(&argv[1..]),
+        Some("install-tui-hint-plugin") => run_install_tui_hint_plugin(&argv[1..]),
+        Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
+        Some("set-claude-env") => run_set_claude_env(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -242,6 +252,9 @@ enum GrantTarget {
     Worktrees {
         worktrees: String,
     },
+    Bins {
+        bins: String,
+    },
 }
 
 struct GrantArgs {
@@ -255,6 +268,7 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
     let mut plans: Option<String> = None;
     let mut tmp: Option<String> = None;
     let mut worktrees: Option<String> = None;
+    let mut bins: Option<String> = None;
 
     let mut i = 0;
     while i < argv.len() {
@@ -272,20 +286,22 @@ fn parse_grant_args(argv: &[String]) -> Result<GrantArgs, String> {
             "--plans" => plans = Some(value!()),
             "--tmp" => tmp = Some(value!()),
             "--worktrees" => worktrees = Some(value!()),
+            "--bins" => bins = Some(value!()),
             other => return Err(format!("grant-permissions: unknown option: {other}")),
         }
         i += 1;
     }
     let agent = agent.ok_or("grant-permissions: --agent is required")?;
-    let target = match (scripts, plans, tmp, worktrees) {
-        (Some(scripts), Some(plans), Some(tmp), None) => GrantTarget::Planning {
+    let target = match (scripts, plans, tmp, worktrees, bins) {
+        (Some(scripts), Some(plans), Some(tmp), None, None) => GrantTarget::Planning {
             scripts,
             plans,
             tmp,
         },
-        (None, None, None, Some(worktrees)) => GrantTarget::Worktrees { worktrees },
+        (None, None, None, Some(worktrees), None) => GrantTarget::Worktrees { worktrees },
+        (None, None, None, None, Some(bins)) => GrantTarget::Bins { bins },
         _ => return Err(
-            "grant-permissions: pass either --scripts/--plans/--tmp together, or --worktrees alone"
+            "grant-permissions: pass exactly one of --scripts/--plans/--tmp together, --worktrees, or --bins"
                 .to_string(),
         ),
     };
@@ -386,6 +402,20 @@ fn run_grant_permissions(argv: &[String]) -> Result<ExitCode, String> {
             let outcome = permissions::claude_worktrees_permissions(worktrees, &home)
                 .map_err(|e| e.to_string())?;
             print_permission_outcome("claude-code", "worktree grant already in place", outcome);
+        }
+        ("claude", GrantTarget::Bins { bins }) => {
+            let outcome = permissions::claude_interactive_shell_permissions(bins, &home)
+                .map_err(|e| e.to_string())?;
+            print_permission_outcome(
+                "claude-code",
+                "interactive-shell grant already in place",
+                outcome,
+            );
+        }
+        (_, GrantTarget::Bins { .. }) => {
+            return Err(
+                "grant-permissions: --bins is only auto-editable for --agent claude".to_string(),
+            )
         }
         (
             "opencode",
@@ -584,5 +614,140 @@ fn run_migrate_plans(argv: &[String]) -> Result<ExitCode, String> {
         println!("Plan migration blocked: {}: {reason}", plan.display());
     }
     println!("Portable plan root ready: {}", outcome.plan_root.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+struct PluginArgs {
+    agent: Option<String>,
+    source: PathBuf,
+    target: Option<PathBuf>,
+}
+
+fn parse_plugin_args(command: &str, argv: &[String]) -> Result<PluginArgs, String> {
+    let mut agent: Option<String> = None;
+    let mut source: Option<PathBuf> = None;
+    let mut target: Option<PathBuf> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--agent" => {
+                i += 1;
+                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+            }
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            "--target" => {
+                i += 1;
+                target = Some(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
+            }
+            other => return Err(format!("{command}: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    Ok(PluginArgs {
+        agent,
+        source: source.ok_or(format!("{command}: --source is required"))?,
+        target,
+    })
+}
+
+fn run_install_tui_hint_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-tui-hint-plugin", argv)?;
+    let agent = args
+        .agent
+        .ok_or("install-tui-hint-plugin: --agent is required")?;
+    match agent.as_str() {
+        "claude" => {
+            let target = args
+                .target
+                .ok_or("install-tui-hint-plugin: --target is required for --agent claude")?;
+            let destination = plugins::install_tui_hint_plugin_claude(&args.source, &target)
+                .map_err(|e| e.to_string())?;
+            println!(
+                "Installed: {} (reminds an agent of a shipped app profile before it runs a Bash command headlessly)",
+                destination.display()
+            );
+        }
+        "opencode" => {
+            let home = std::env::var("HOME")
+                .map(PathBuf::from)
+                .map_err(|_| "install-tui-hint-plugin: needs $HOME set".to_string())?;
+            match plugins::install_tui_hint_plugin_opencode(&args.source, &home)
+                .map_err(|e| e.to_string())?
+            {
+                plugins::OpencodePluginOutcome::NotShipped => {
+                    println!("opencode: this checkout does not ship the opencode tui-hint-plugin variant");
+                }
+                plugins::OpencodePluginOutcome::NotStrictJson => {
+                    println!("opencode: config is not strict JSON; register the plugin by hand");
+                }
+                plugins::OpencodePluginOutcome::AlreadyRegistered => {
+                    println!("opencode: plugin already registered");
+                }
+                plugins::OpencodePluginOutcome::Registered => {
+                    println!("opencode: added the plugin to the plugin array");
+                }
+            }
+        }
+        other => {
+            return Err(format!(
+            "install-tui-hint-plugin: unknown --agent {other}; known agents are: claude, opencode"
+        ))
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_install_editor_gate_plugin(argv: &[String]) -> Result<ExitCode, String> {
+    let args = parse_plugin_args("install-editor-gate-plugin", argv)?;
+    let target = args
+        .target
+        .ok_or("install-editor-gate-plugin: --target is required")?;
+    let destination =
+        plugins::install_editor_gate_plugin(&args.source, &target).map_err(|e| e.to_string())?;
+    println!(
+        "Installed: {} (gates sed -i/perl -i/heredoc writes behind a minted token; see editor-gate-plugin/README.md)",
+        destination.display()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_set_claude_env(argv: &[String]) -> Result<ExitCode, String> {
+    let mut key: Option<String> = None;
+    let mut value: Option<String> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--key" => {
+                i += 1;
+                key = Some(argv.get(i).ok_or("--key needs a value")?.clone());
+            }
+            "--value" => {
+                i += 1;
+                value = Some(argv.get(i).ok_or("--value needs a value")?.clone());
+            }
+            other => return Err(format!("set-claude-env: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    let key = key.ok_or("set-claude-env: --key is required")?;
+    let value = value.ok_or("set-claude-env: --value is required")?;
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "set-claude-env: needs $HOME set".to_string())?;
+
+    match permissions::claude_env_setting(&key, &value, &home).map_err(|e| e.to_string())? {
+        permissions::EnvSettingOutcome::NoConfigFile => {
+            println!("claude-code: no settings.json found; skipped");
+        }
+        permissions::EnvSettingOutcome::AlreadySet => {
+            println!("claude-code: env.{key} is already \"{value}\"");
+        }
+        permissions::EnvSettingOutcome::Set => {
+            println!("claude-code: set env.{key} to \"{value}\"");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }

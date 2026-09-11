@@ -88,6 +88,50 @@ pub fn claude_worktrees_permissions(worktrees: &str, home: &Path) -> io::Result<
     merge_allow_entries(&cfg, &entries)
 }
 
+/// A denied Bash call does not read as "ask for permission" to an agent --
+/// it reads as "this tool does not work", after which the agent falls back
+/// to a headless invocation that cannot observe the program at all. `bins`
+/// is the installed interactive-shell skill's own `bin/` directory.
+pub fn claude_interactive_shell_permissions(
+    bins: &str,
+    home: &Path,
+) -> io::Result<PermissionOutcome> {
+    let cfg = claude_settings_path(home);
+    if !cfg.is_file() {
+        return Ok(PermissionOutcome::NoConfigFile);
+    }
+    let bins = strip_trailing_slashes(bins);
+    merge_allow_entries(&cfg, &[format!("Bash({bins}/**:*)")])
+}
+
+pub enum EnvSettingOutcome {
+    NoConfigFile,
+    AlreadySet,
+    Set,
+}
+
+/// One `env.KEY` merged into Claude's settings.json -- same write discipline
+/// as the permission editors above (backup, defensive read, atomic rename).
+pub fn claude_env_setting(key: &str, value: &str, home: &Path) -> io::Result<EnvSettingOutcome> {
+    let cfg = claude_settings_path(home);
+    if !cfg.is_file() {
+        return Ok(EnvSettingOutcome::NoConfigFile);
+    }
+    backup::backup_file(&cfg)?;
+    let raw = fs::read_to_string(&cfg)?;
+    let mut doc = as_object(serde_json::from_str(&raw).ok());
+    let mut env = as_object(doc.get("env").cloned());
+    let already_set = env.get(key).and_then(Value::as_str) == Some(value);
+    env.insert(key.to_string(), Value::String(value.to_string()));
+    doc.insert("env".to_string(), Value::Object(env));
+    write_preserving_mode(&cfg, &serde_json::to_string_pretty(&Value::Object(doc))?)?;
+    Ok(if already_set {
+        EnvSettingOutcome::AlreadySet
+    } else {
+        EnvSettingOutcome::Set
+    })
+}
+
 /// A JSON document read as an object, same as install.sh's `objectify`:
 /// anything that isn't already an object (a scalar, an array, or a file that
 /// failed to parse at all) reads as `{}` rather than refusing.
@@ -188,7 +232,7 @@ pub(crate) fn opencode_configfile(home: &Path) -> PathBuf {
 /// otherwise -- mirrors install.sh's `opencode_prepare_config`. Returns
 /// `None` (having touched nothing) when an existing, non-empty file is not
 /// strict JSON.
-fn opencode_prepare_config(cfg: &Path) -> io::Result<Option<()>> {
+pub(crate) fn opencode_prepare_config(cfg: &Path) -> io::Result<Option<()>> {
     if !cfg.is_file() {
         if let Some(parent) = cfg.parent() {
             fs::create_dir_all(parent)?;
