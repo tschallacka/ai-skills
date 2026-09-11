@@ -3816,6 +3816,7 @@ scripts/plan-root
 scripts/rebuild-plan-progress
 scripts/register-command
 scripts/register-read
+scripts/register-rebuild
 scripts/remove-coverage
 scripts/remove-plan
 scripts/remove-work-unit

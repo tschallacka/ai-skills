@@ -150,6 +150,7 @@ planning/scripts/plan-root	scripts/plan-root	rustification	review-approved	backu
 planning/scripts/rebuild-plan-progress	scripts/rebuild-plan-progress	rustification	review-approved	backup-then-replace	false
 planning/scripts/register-command	scripts/register-command	rustification	review-approved	backup-then-replace	false
 planning/scripts/register-read	scripts/register-read	rustification	review-approved	backup-then-replace	false
+planning/scripts/register-rebuild	scripts/register-rebuild	rustification	review-approved	backup-then-replace	false
 planning/scripts/remove-coverage	scripts/remove-coverage	rustification	review-approved	backup-then-replace	false
 planning/scripts/remove-plan	scripts/remove-plan	rustification	review-approved	backup-then-replace	false
 planning/scripts/remove-work-unit	scripts/remove-work-unit	rustification	review-approved	backup-then-replace	false

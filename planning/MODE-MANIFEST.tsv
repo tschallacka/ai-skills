@@ -56,11 +56,3 @@ scripts/lib/table/plan_render_csv_table_awk.sh	NEVER
 scripts/lib/table/plan_render_csv_table_die.sh	NEVER
 scripts/lib/table/plan_review_finding_ids.sh	NEVER
 scripts/lib/table/plan_table_cell.sh	NEVER
-# The compiled Rust replacement for register-rebuild.sh (src/register-rebuild),
-# not yet listed by skill_files() at all -- planning/rust-migration.tsv's own
-# row for it says "in scope; decide install/package status explicitly", an
-# open question for this repo's maintainers, not a settled "ship it". Default
-# to NOT shipping an undecided item rather than the installer silently
-# deciding it via should_ship's "an unmarked binary always ships" rule.
-# Revisit once rust-migration.tsv resolves it.
-scripts/register-rebuild	NEVER
