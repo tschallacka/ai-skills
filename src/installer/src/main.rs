@@ -19,6 +19,7 @@ mod install;
 mod manifest;
 mod mcp;
 mod permissions;
+mod cli_mode;
 mod integration;
 mod plan_migration;
 mod plugins;
@@ -62,6 +63,13 @@ Usage:
                      interactive-shell / ai-text-editor
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
+  installer print-skill-files planning [--source DIR]
+                     machine-facing: planning's own self-update tooling
+  installer resolve-source planning RELATIVE [--source DIR]
+  installer install-skill SKILL --target DIR --approval yes|no
+                     [--source DIR] [--dev-build]
+                     refuses on any unmanaged collision instead of backing
+                     up (exit 2 declined, 3 collision, 0 installed)
   installer interactive (--target DIR | --agent NAME) [--source DIR]
                      [--integration MODE|SKILL=MODE ...] [--yes] [--dev-build]
                      full-screen skill picker; installs the confirmed
@@ -105,6 +113,9 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("install-tui-hint-plugin") => run_install_tui_hint_plugin(&argv[1..]),
         Some("install-editor-gate-plugin") => run_install_editor_gate_plugin(&argv[1..]),
         Some("set-claude-env") => run_set_claude_env(&argv[1..]),
+        Some("print-skill-files") => run_print_skill_files(&argv[1..]),
+        Some("resolve-source") => run_resolve_source(&argv[1..]),
+        Some("install-skill") => run_install_skill_cli(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -1423,6 +1434,107 @@ fn run_set_claude_env(argv: &[String]) -> Result<ExitCode, String> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `installer print-skill-files <skill> [--source DIR]` -- ported from
+/// install.sh's `--print-skill-files <skill> --format=tsv` (the format flag
+/// is not carried over: tsv is the only format this ever produced, so a
+/// flag that could only ever have one value is not worth requiring).
+fn run_print_skill_files(argv: &[String]) -> Result<ExitCode, String> {
+    let mut source: Option<PathBuf> = None;
+    let mut skill: Option<String> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            other if skill.is_none() && !other.starts_with("--") => skill = Some(other.to_string()),
+            other => return Err(format!("print-skill-files: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    let skill = skill.ok_or("print-skill-files: a skill name is required")?;
+    let source = resolve_source(source)?;
+    print!("{}", cli_mode::print_skill_files(&source, &skill)?);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `installer resolve-source <skill> <relative> [--source DIR]` -- ported
+/// from install.sh's `--resolve-source <skill> <relative>`.
+fn run_resolve_source(argv: &[String]) -> Result<ExitCode, String> {
+    let mut source: Option<PathBuf> = None;
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            other => positional.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let [skill, relative] = positional.as_slice() else {
+        return Err("resolve-source: needs a skill and a relative path".to_string());
+    };
+    let source = resolve_source(source)?;
+    let resolved = cli_mode::resolve_source_file(&source, skill, relative)?;
+    println!("{}", resolved.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `installer install-skill <skill> --target DIR --approval yes|no
+/// [--source DIR] [--dev-build]` -- ported from install.sh's
+/// `--install-skill <skill> --target DIR --approval yes|no`. Exit codes
+/// mirror install.sh's own documented contract for this entry point: 0
+/// installed, 2 approval declined, 3 an unsafe or unmanaged collision.
+fn run_install_skill_cli(argv: &[String]) -> Result<ExitCode, String> {
+    let mut source: Option<PathBuf> = None;
+    let mut target: Option<PathBuf> = None;
+    let mut approval: Option<String> = None;
+    let mut dev_build = false;
+    let mut skill: Option<String> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--source" => {
+                i += 1;
+                source = Some(PathBuf::from(argv.get(i).ok_or("--source needs a value")?));
+            }
+            "--target" => {
+                i += 1;
+                target = Some(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
+            }
+            "--approval" => {
+                i += 1;
+                approval = Some(argv.get(i).ok_or("--approval needs yes or no")?.clone());
+            }
+            "--dev-build" => dev_build = true,
+            other if skill.is_none() && !other.starts_with("--") => skill = Some(other.to_string()),
+            other => return Err(format!("install-skill: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    let skill = skill.ok_or("install-skill: a skill name is required")?;
+    let target = target.ok_or("install-skill: --target is required")?;
+    let approval = approval.ok_or("install-skill: --approval is required")?;
+    let approval_yes = match approval.as_str() {
+        "yes" => true,
+        "no" => false,
+        _ => return Err("--approval must be yes or no".to_string()),
+    };
+    let source = resolve_source(source)?;
+    match cli_mode::install_skill_cli(&source, &skill, &target, approval_yes, dev_build)? {
+        cli_mode::CliInstallOutcome::Installed(dest) => {
+            println!("Installed: {}", dest.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        cli_mode::CliInstallOutcome::ApprovalDeclined => Ok(ExitCode::from(2)),
+        cli_mode::CliInstallOutcome::Collision => Ok(ExitCode::from(3)),
+    }
 }
 
 fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {

@@ -124,6 +124,15 @@ pub fn install_skill(
     Ok(())
 }
 
+/// Public wrapper around `collect_relative_files` for `cli_mode.rs`'s own
+/// independent collision-checking install path (install.sh's
+/// `cli_install_skill`), which needs the same "what would this skill ship"
+/// answer without going through the backup/digest machinery this module's
+/// own `install_skill` wraps it in.
+pub fn skill_relative_files(source_root: &Path, skill: &str, dev_build: bool) -> io::Result<Vec<String>> {
+    collect_relative_files(&source_root.join(skill), &PathBuf::new(), dev_build)
+}
+
 /// Relative paths (forward-slash joined, regardless of host) of every FILE
 /// under `dir`, recursively. Symlinks are neither a file nor a directory
 /// here: this is an early slice and install.sh's own tree has none under a
