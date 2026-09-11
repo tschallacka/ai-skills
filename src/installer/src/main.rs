@@ -39,8 +39,12 @@ Usage:
   installer install (--target DIR | --agent NAME)
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR] [--integration MODE|SKILL=MODE ...] [--yes]
+                     [--dev-build]
                      runs the planning/worktrees/interactive-shell/editor
-                     permission prompts unless --yes auto-answers them
+                     permission prompts unless --yes auto-answers them;
+                     --dev-build also ships MODE:DEV-marked files (tests,
+                     maintainer docs) instead of filtering them out, for
+                     installing straight from a raw checkout during dev
   installer grant-permissions --agent NAME (--scripts DIR --plans DIR --tmp DIR | --worktrees DIR | --bins DIR)
                      grant that agent read/write on the planning skill's own
                      scripts/plan-root/tmp directory, or on a worktree root
@@ -58,7 +62,7 @@ Usage:
   installer set-claude-env --key KEY --value VALUE
                      merge one env.KEY setting into Claude's settings.json
   installer interactive (--target DIR | --agent NAME) [--source DIR]
-                     [--integration MODE|SKILL=MODE ...] [--yes]
+                     [--integration MODE|SKILL=MODE ...] [--yes] [--dev-build]
                      full-screen skill picker; installs the confirmed
                      selection, or does nothing if the user quits
   installer --help
@@ -156,6 +160,7 @@ struct InstallArgs {
     agent: Option<String>,
     integration: Vec<String>,
     yes: bool,
+    dev_build: bool,
 }
 
 fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
@@ -166,6 +171,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut agent: Option<String> = None;
     let mut integration = Vec::new();
     let mut yes = false;
+    let mut dev_build = false;
 
     let mut i = 0;
     while i < argv.len() {
@@ -192,6 +198,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
                 integration.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
             }
             "--yes" => yes = true,
+            "--dev-build" => dev_build = true,
             other => return Err(format!("install: unknown option: {other}")),
         }
         i += 1;
@@ -204,6 +211,7 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         agent,
         integration,
         yes,
+        dev_build,
     })
 }
 
@@ -381,6 +389,7 @@ fn install_selected_skills(
     target: &Path,
     skills: &[String],
     integration_selection: &IntegrationSelection,
+    dev_build: bool,
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
     for skill in skills {
@@ -390,8 +399,14 @@ fn install_selected_skills(
             println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
             continue;
         }
-        install::install_skill(source, skill, target, integration_selection.choice_for(skill))
-            .map_err(|e| e.to_string())?;
+        install::install_skill(
+            source,
+            skill,
+            target,
+            integration_selection.choice_for(skill),
+            dev_build,
+        )
+        .map_err(|e| e.to_string())?;
         println!("installed {skill} -> {}", target.join(skill).display());
         installed.push(skill.clone());
     }
@@ -717,7 +732,13 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     }
 
     let integration_selection = build_integration_selection(&source, &args.integration)?;
-    let installed = install_selected_skills(&source, &target, &skills, &integration_selection)?;
+    let installed = install_selected_skills(
+        &source,
+        &target,
+        &skills,
+        &integration_selection,
+        args.dev_build,
+    )?;
     let mut confirms = Confirms::new(args.yes);
     run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
     Ok(ExitCode::SUCCESS)
@@ -1237,6 +1258,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
     let mut agent: Option<String> = None;
     let mut integration_args = Vec::new();
     let mut yes = false;
+    let mut dev_build = false;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -1257,6 +1279,7 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 integration_args.push(argv.get(i).ok_or("--integration needs a mode, or skill=mode")?.clone());
             }
             "--yes" => yes = true,
+            "--dev-build" => dev_build = true,
             other => return Err(format!("interactive: unknown option: {other}")),
         }
         i += 1;
@@ -1308,7 +1331,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             for (name, mode) in &selected {
                 picked.per_skill.insert(name.clone(), mode.clone());
             }
-            let installed = install_selected_skills(&source, &target, &names, &picked)?;
+            let installed =
+                install_selected_skills(&source, &target, &names, &picked, dev_build)?;
             let mut confirms = Confirms::new(yes);
             run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
             Ok(ExitCode::SUCCESS)

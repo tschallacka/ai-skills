@@ -13,6 +13,23 @@
 //! record_digests/unmodified_since_install/backup_file solve
 //! (installer/src/60-install.sh), ported with a different digest (blake3,
 //! not cksum) since this manifest is this installer's own.
+//!
+//! `dev_build` gates whether a raw dev checkout's own maintainer-only
+//! content ships along with a skill -- install.sh's default is `prod`
+//! (`--dev-build` opts out), driven by a hand-maintained `skill_files()`
+//! manifest (installer/src/50-manifest.sh) this installer has no equivalent
+//! of. Rather than replicate that manifest file-for-file (a second copy to
+//! keep in sync, the exact problem `skill_files()` centralizing it was
+//! meant to solve), `should_ship` reads the same `# MODE: DEV` header
+//! marker build-release.sh's own `declares_prod` reads, plus an entire
+//! `tests/` directory dropped outright (install.sh never ships one). This
+//! is a heuristic approximation of `skill_files()`, not a byte-identical
+//! port -- it does not know a per-skill hand-curated exception exists
+//! unless that exception also happens to be MODE-marked or under `tests/`.
+//! It matters only when `--source` names a raw checkout directly: a
+//! `build-release.sh`-produced tarball (what `bootstrap.sh` actually
+//! downloads) already contains prod-only content, so this filter is a
+//! no-op against the common end-user path either way.
 
 use crate::backup;
 use crate::digest;
@@ -35,6 +52,7 @@ pub fn install_skill(
     skill: &str,
     target_root: &Path,
     integration_choice: Option<&str>,
+    dev_build: bool,
 ) -> io::Result<()> {
     let source_dir = source_root.join(skill);
     if !source_dir.is_dir() {
@@ -47,7 +65,7 @@ pub fn install_skill(
     fs::create_dir_all(&dest_dir)?;
 
     let mode = integration::resolve_mode(source_root, skill, Some(&dest_dir), integration_choice);
-    let relative_paths = collect_relative_files(&source_dir, &PathBuf::new())?;
+    let relative_paths = collect_relative_files(&source_dir, &PathBuf::new(), dev_build)?;
     let mut installed_paths = Vec::with_capacity(relative_paths.len());
     for relative in &relative_paths {
         if !integration::file_allowed(source_root, skill, relative, &mode) {
@@ -82,7 +100,7 @@ pub fn install_skill(
 /// here: this is an early slice and install.sh's own tree has none under a
 /// skill directory, so refusing silently on one would be a worse surprise
 /// than not handling it at all yet.
-fn collect_relative_files(dir: &Path, prefix: &Path) -> io::Result<Vec<String>> {
+fn collect_relative_files(dir: &Path, prefix: &Path, dev_build: bool) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
@@ -90,12 +108,33 @@ fn collect_relative_files(dir: &Path, prefix: &Path) -> io::Result<Vec<String>> 
         let file_type = entry.file_type()?;
         let relative = prefix.join(entry.file_name());
         if file_type.is_dir() {
-            out.extend(collect_relative_files(&entry.path(), &relative)?);
-        } else if file_type.is_file() {
+            if !dev_build && entry.file_name() == "tests" {
+                continue;
+            }
+            out.extend(collect_relative_files(&entry.path(), &relative, dev_build)?);
+        } else if file_type.is_file() && (dev_build || should_ship(&entry.path())) {
             out.push(relative.to_string_lossy().replace('\\', "/"));
         }
     }
     Ok(out)
+}
+
+/// Ships unless the file's own header (first 25 lines, same window
+/// build-release.sh's `declares_prod` reads) explicitly says `# MODE: DEV`
+/// or `<!-- MODE: DEV -->`. Everything else ships: an explicit `# MODE:
+/// PROD` marker, and -- unlike `declares_prod`, which defaults an unmarked
+/// file to NOT prod -- a file with no marker at all, since most files this
+/// installer would otherwise silently drop (JSON schemas, TSVs, prebuilt
+/// binaries) have no comment syntax to carry one and were always meant to
+/// ship. `declares_prod` can default the other way because build-release.sh
+/// pairs it with a hand-maintained inclusion list (`skill_files()`) for
+/// every real skill; this has no such list to fall back on.
+fn should_ship(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return true; // not read as text (e.g. a binary) -- never DEV-marked
+    };
+    let header: String = content.lines().take(25).collect::<Vec<_>>().join("\n");
+    !(header.contains("# MODE: DEV") || header.contains("<!-- MODE: DEV -->"))
 }
 
 fn files_equal(a: &Path, b: &Path) -> io::Result<bool> {
@@ -144,7 +183,7 @@ mod tests {
         );
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -160,7 +199,7 @@ mod tests {
     fn missing_skill_directory_is_refused_not_silently_skipped() {
         let source_root = tempfile::tempdir().unwrap();
         let target_root = tempfile::tempdir().unwrap();
-        let err = install_skill(source_root.path(), "nope", target_root.path(), None).unwrap_err();
+        let err = install_skill(source_root.path(), "nope", target_root.path(), None, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
     }
 
@@ -170,7 +209,7 @@ mod tests {
         write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
         let target_root = tempfile::tempdir().unwrap();
 
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         let leftovers: Vec<_> = fs::read_dir(target_root.path().join("todo"))
             .unwrap()
@@ -190,7 +229,7 @@ mod tests {
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
 
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         let mode = fs::metadata(target_root.path().join("todo/scripts/run.sh"))
             .unwrap()
@@ -204,10 +243,10 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "v1\n");
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         write(&source_root.path().join("todo/SKILL.md"), "v2\n");
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -229,7 +268,7 @@ mod tests {
         let source_root = tempfile::tempdir().unwrap();
         write(&source_root.path().join("todo/SKILL.md"), "v1\n");
         let target_root = tempfile::tempdir().unwrap();
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         // The user edits the installed copy directly.
         fs::write(
@@ -239,7 +278,7 @@ mod tests {
         .unwrap();
 
         write(&source_root.path().join("todo/SKILL.md"), "v2\n");
-        install_skill(source_root.path(), "todo", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
 
         assert_eq!(
             fs::read_to_string(target_root.path().join("todo/SKILL.md")).unwrap(),
@@ -287,6 +326,7 @@ mod tests {
             "ai-text-editor",
             target_root.path(),
             Some("skill"),
+            false,
         )
         .unwrap();
 
@@ -323,6 +363,7 @@ mod tests {
             "ai-text-editor",
             target_root.path(),
             Some("skill"),
+            false,
         )
         .unwrap();
         assert!(target_root
@@ -335,6 +376,7 @@ mod tests {
             "ai-text-editor",
             target_root.path(),
             Some("mcp"),
+            false,
         )
         .unwrap();
 
@@ -371,12 +413,13 @@ mod tests {
             "ai-text-editor",
             target_root.path(),
             Some("mcp"),
+            false,
         )
         .unwrap();
 
         // No explicit choice this time -- the mcp install already on disk
         // must survive, not silently revert to the `skill` default (T109).
-        install_skill(source_root.path(), "ai-text-editor", target_root.path(), None).unwrap();
+        install_skill(source_root.path(), "ai-text-editor", target_root.path(), None, false).unwrap();
 
         assert!(target_root
             .path()
@@ -386,5 +429,70 @@ mod tests {
             .path()
             .join("ai-text-editor/bin/x86_64-unknown-linux-musl/ai-text-editor")
             .is_file());
+    }
+
+    #[test]
+    fn a_dev_marked_file_is_dropped_by_default_but_shipped_with_dev_build() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &source_root.path().join("todo/maintainer-notes.md"),
+            "<!-- MODE: DEV -->\nnotes for the next maintainer\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(target_root.path().join("todo/SKILL.md").is_file());
+        assert!(!target_root.path().join("todo/maintainer-notes.md").is_file());
+
+        let dev_target = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        assert!(dev_target.path().join("todo/maintainer-notes.md").is_file());
+    }
+
+    #[test]
+    fn an_entire_tests_directory_is_dropped_by_default_but_shipped_with_dev_build() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &source_root.path().join("todo/tests/test-todo.sh"),
+            "#!/bin/sh\necho ok\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(!target_root.path().join("todo/tests").exists());
+
+        let dev_target = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        assert!(dev_target.path().join("todo/tests/test-todo.sh").is_file());
+    }
+
+    #[test]
+    fn a_file_with_no_marker_at_all_still_ships() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &source_root.path().join("todo/schema.json"),
+            "{\"type\": \"object\"}",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(target_root.path().join("todo/schema.json").is_file());
+    }
+
+    #[test]
+    fn a_prod_marked_file_ships_by_default() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(
+            &source_root.path().join("todo/scripts/run.sh"),
+            "#!/bin/sh\n# MODE: PROD\necho ok\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(target_root.path().join("todo/scripts/run.sh").is_file());
     }
 }
