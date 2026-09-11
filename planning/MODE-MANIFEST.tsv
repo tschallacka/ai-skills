@@ -1,28 +1,58 @@
 # MODE: DEV
 # MODE-MANIFEST.tsv -- lists this skill's own files whose install package
-# tier (DEV ships only in a --package dev build; PROD ships in both, since
-# dev is the inclusive superset) cannot be declared with the usual embedded
-# `# MODE: DEV` / `<!-- MODE: DEV -->` marker, because the format has no
-# comment syntax to carry one.
+# tier cannot be declared with the usual embedded `# MODE: DEV` /
+# `<!-- MODE: DEV -->` marker: either the format has no comment syntax to
+# carry one (DEV/PROD rows), or the file must never ship at all, in either
+# package tier -- a compiler input or a maintainer-only inventory file,
+# which an unmarked file's default-to-ship behavior cannot express, and
+# which `--package dev` alone cannot express either, since it bypasses the
+# marker scan entirely rather than reading it (NEVER rows).
+#
+# mode is one of:
+#   DEV     ships only in a --package dev build (dev is the inclusive
+#           superset of prod, so this is the marker file's usual DEV)
+#   PROD    always ships (the usual PROD marker / no-marker default)
+#   NEVER   ships in neither tier
+# A row whose path ends in `/` is a directory prefix, applying to every file
+# under it, so a source tree does not need every file enumerated by hand.
 #
 # Read ONLY by src/installer/src/install.rs's own collect_relative_files, as
 # an override consulted before a file's own header -- NOT read by
 # install.sh/skill_files() or installer/build-release.sh, which already solve
-# this same "no comment syntax" problem their own way (build-release.sh's
-# listed_by_installer() takes such files straight from skill_files() itself).
-# This manifest is deliberately scoped to the Rust installer only; its
-# entries describe the same real files skill_files()'s planning dev arm
-# lists, not a shared source with it.
+# this same "no comment syntax"/"never ships" problem their own way
+# (build-release.sh's listed_by_installer() takes such files straight from
+# skill_files() itself; the bash test suite's own unshipped_reason()/exempt()
+# functions name rust-migration.tsv and the specific scripts/lib/* files
+# below the same way this file's NEVER rows do). This manifest is
+# deliberately scoped to the Rust installer only; its entries describe the
+# same real files, not a shared source with either bash mechanism.
 #
 # TODO: once this pattern is proven out, promote MODE-MANIFEST.tsv from an
 # exceptions-only override to the DEFAULT classification mechanism for every
-# file (not just the ones a marker cannot carry), and retire the in-file
-# marker convention for install-tier purposes. Not done yet: markers remain
-# load-bearing for installer/build-release.sh's declares_prod() and for
-# tests/test-mode-markers.sh's own cross-check, so that is a separate,
+# file (not just the ones a marker cannot carry or express), and retire the
+# in-file marker convention for install-tier purposes. Not done yet: markers
+# remain load-bearing for installer/build-release.sh's declares_prod() and
+# for tests/test-mode-markers.sh's own cross-check, so that is a separate,
 # larger migration touching the bash build tooling, not a Rust-only change.
 #
 # path	mode
 .gitignore	DEV
 PACKAGE-MAP.tsv	DEV
 skill-source.txt	DEV
+rust-migration.tsv	NEVER
+# These 11 are the only scripts/lib/* sources skill_files() genuinely never
+# lists, in either arm -- every other file under scripts/lib/ IS named in its
+# dev arm and ships normally, so this is exact files, not the whole
+# directory (a NEVER prefix on scripts/lib/ was tried and wrongly excluded
+# those ~58 other files too).
+scripts/lib/core/plan_count_units.sh	NEVER
+scripts/lib/core/plan_cycle_count.sh	NEVER
+scripts/lib/core/plan_progress_is_complete.sh	NEVER
+scripts/lib/core/plan_skill_provenance.sh	NEVER
+scripts/lib/core/plan_warn_skill_drift.sh	NEVER
+scripts/lib/crypt/plan_bin_dir.sh	NEVER
+scripts/lib/progress/plan_count_progress_rows.sh	NEVER
+scripts/lib/table/plan_render_csv_table_awk.sh	NEVER
+scripts/lib/table/plan_render_csv_table_die.sh	NEVER
+scripts/lib/table/plan_review_finding_ids.sh	NEVER
+scripts/lib/table/plan_table_cell.sh	NEVER

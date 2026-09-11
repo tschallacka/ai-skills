@@ -24,9 +24,12 @@
 //!      triple subdirectory (`installer_platform::current()`), not every
 //!      platform's binaries -- a directory-layout convention, not anything
 //!      read out of install.sh;
-//!   2. `load_mode_manifest`'s per-skill `MODE-MANIFEST.tsv` override, for
-//!      the handful of files whose format has no comment syntax to carry a
-//!      marker;
+//!   2. `load_mode_manifest`'s per-skill `MODE-MANIFEST.tsv` override
+//!      (`ModeOverride::Dev`/`Prod`/`Never`, exact path or `dir/` prefix),
+//!      for files whose format has no comment syntax to carry a marker, or
+//!      that must never ship at all (a compiler input, a maintainer-only
+//!      inventory) -- something an unmarked file's should_ship default, and
+//!      `package_dev` alone bypassing the marker scan, cannot express;
 //!   3. `should_ship`'s own `# MODE: DEV` header scan for everything else,
 //!      plus a whole-`tests/`-directory exclusion for `package_dev`.
 //!
@@ -154,15 +157,52 @@ fn relative_paths_for(source_root: &Path, skill: &str, package_dev: bool) -> io:
     collect_relative_files(&skill_dir, &PathBuf::new(), package_dev, &overrides)
 }
 
-/// `<skill>/MODE-MANIFEST.tsv`'s `path\tmode` rows (`mode` is `DEV` or
-/// `PROD`; anything else, and a line with no tab at all, is skipped rather
-/// than rejected -- this is a maintainer-edited file, not a validated
-/// format) as `path -> is_dev_only`. Empty when the skill has no such file,
-/// which is every skill but the ones that have needed one so far.
-fn load_mode_manifest(skill_dir: &Path) -> HashMap<String, bool> {
-    let mut out = HashMap::new();
+/// `MODE-MANIFEST.tsv`'s three possible overrides for a file `should_ship`
+/// would otherwise decide by header: `Dev` ships only in a `--package dev`
+/// build (the usual `# MODE: DEV` meaning), `Prod` always ships (the usual
+/// `# MODE: PROD`/no-marker default), and `Never` ships in neither tier --
+/// a compiler input or maintainer-only inventory file `should_ship` has no
+/// way to say "not even in dev" for, since an unmarked file always ships
+/// somewhere and `package_dev` alone bypasses the marker scan entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModeOverride {
+    Dev,
+    Prod,
+    Never,
+}
+
+/// `<skill>/MODE-MANIFEST.tsv`'s overrides, in two forms: an exact relative
+/// path, or a directory prefix (a row whose path ends in `/`) applying to
+/// everything under it -- `scripts/lib/` is one row rather than enumerating
+/// every compiler-input source file by hand, and a name added under it
+/// later needs no new row.
+#[derive(Default)]
+struct ModeManifest {
+    exact: HashMap<String, ModeOverride>,
+    prefixes: Vec<(String, ModeOverride)>,
+}
+
+impl ModeManifest {
+    fn lookup(&self, relative: &str) -> Option<ModeOverride> {
+        if let Some(mode) = self.exact.get(relative) {
+            return Some(*mode);
+        }
+        self.prefixes
+            .iter()
+            .find(|(prefix, _)| relative.starts_with(prefix.as_str()))
+            .map(|(_, mode)| *mode)
+    }
+}
+
+/// Parses `<skill>/MODE-MANIFEST.tsv`'s `path\tmode` rows (`mode` is `DEV`,
+/// `PROD`, or `NEVER`; anything else, and a line with no tab at all, is
+/// skipped rather than rejected -- this is a maintainer-edited file, not a
+/// validated format). Empty when the skill has no such file, which is
+/// every skill but the ones that have needed one so far.
+fn load_mode_manifest(skill_dir: &Path) -> ModeManifest {
+    let mut manifest = ModeManifest::default();
     let Ok(content) = fs::read_to_string(skill_dir.join(MODE_MANIFEST_FILENAME)) else {
-        return out;
+        return manifest;
     };
     for line in content.lines() {
         let line = line.trim();
@@ -172,14 +212,21 @@ fn load_mode_manifest(skill_dir: &Path) -> HashMap<String, bool> {
         let Some((path, mode)) = line.split_once('\t') else {
             continue;
         };
-        let dev_only = match mode.trim() {
-            "DEV" => true,
-            "PROD" => false,
+        let path = path.trim();
+        let mode = match mode.trim() {
+            "DEV" => ModeOverride::Dev,
+            "PROD" => ModeOverride::Prod,
+            "NEVER" => ModeOverride::Never,
             _ => continue,
         };
-        out.insert(path.trim().to_string(), dev_only);
+        match path.strip_suffix('/') {
+            Some(prefix) => manifest.prefixes.push((format!("{prefix}/"), mode)),
+            None => {
+                manifest.exact.insert(path.to_string(), mode);
+            }
+        }
     }
-    out
+    manifest
 }
 
 /// Relative paths (forward-slash joined, regardless of host) of every FILE
@@ -200,7 +247,7 @@ fn collect_relative_files(
     dir: &Path,
     prefix: &Path,
     package_dev: bool,
-    overrides: &HashMap<String, bool>,
+    overrides: &ModeManifest,
 ) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
@@ -230,12 +277,11 @@ fn collect_relative_files(
             out.extend(collect_relative_files(&entry.path(), &relative, package_dev, overrides)?);
         } else if file_type.is_file() {
             let relative = relative.to_string_lossy().replace('\\', "/");
-            let ship = if package_dev {
-                true
-            } else if let Some(dev_only) = overrides.get(&relative) {
-                !dev_only
-            } else {
-                should_ship(&entry.path())
+            let ship = match overrides.lookup(&relative) {
+                Some(ModeOverride::Dev) => package_dev,
+                Some(ModeOverride::Prod) => true,
+                Some(ModeOverride::Never) => false,
+                None => package_dev || should_ship(&entry.path()),
             };
             if ship {
                 out.push(relative);
@@ -661,6 +707,44 @@ mod tests {
         let dev_target = tempfile::tempdir().unwrap();
         install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
         assert!(dev_target.path().join("todo/.gitignore").is_file());
+    }
+
+    #[test]
+    fn a_never_override_ships_in_neither_package_tier() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(&source_root.path().join("todo/migration-notes.tsv"), "a\tb\n");
+        write(
+            &source_root.path().join("todo/MODE-MANIFEST.tsv"),
+            "# MODE: DEV\nmigration-notes.tsv\tNEVER\n",
+        );
+        let target_root = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", target_root.path(), None, false).unwrap();
+        assert!(!target_root.path().join("todo/migration-notes.tsv").exists());
+
+        let dev_target = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        assert!(
+            !dev_target.path().join("todo/migration-notes.tsv").exists(),
+            "NEVER must survive package_dev's usual ship-everything default, not just should_ship's marker scan"
+        );
+    }
+
+    #[test]
+    fn a_never_override_prefix_excludes_every_file_under_that_directory() {
+        let source_root = tempfile::tempdir().unwrap();
+        write(&source_root.path().join("todo/SKILL.md"), "# todo\n");
+        write(&source_root.path().join("todo/scripts/lib/a.sh"), "a\n");
+        write(&source_root.path().join("todo/scripts/lib/nested/b.sh"), "b\n");
+        write(&source_root.path().join("todo/scripts/run.sh"), "#!/bin/sh\n");
+        write(
+            &source_root.path().join("todo/MODE-MANIFEST.tsv"),
+            "# MODE: DEV\nscripts/lib/\tNEVER\n",
+        );
+        let dev_target = tempfile::tempdir().unwrap();
+        install_skill(source_root.path(), "todo", dev_target.path(), None, true).unwrap();
+        assert!(!dev_target.path().join("todo/scripts/lib").exists());
+        assert!(dev_target.path().join("todo/scripts/run.sh").is_file());
     }
 
     #[cfg(unix)]
