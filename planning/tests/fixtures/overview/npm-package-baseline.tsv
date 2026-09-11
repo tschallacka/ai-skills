@@ -261,7 +261,7 @@ package/todo/schema.2.0.0-alpha.1.json	2968
 package/tui-hint-plugin/.claude-plugin/plugin.json	387
 package/tui-hint-plugin/README.md	3720
 package/tui-hint-plugin/hooks/hooks.json	214
-package/tui-hint-plugin/hooks/lib.sh	5439
+package/tui-hint-plugin/hooks/lib.sh	5969
 package/tui-hint-plugin/hooks/pre-tool-use.sh	3053
 package/tui-hint-plugin/opencode/tui-hint-plugin.js	6697
 package/tui-hint-plugin/tests/test-tui-hint-matching.sh	2925

@@ -86,28 +86,13 @@ tui_hint_profile_has_marker() { # <profile file>
     [ "$first_line" = "$TUI_HINT_MARKER" ]
 }
 
-# Finds the profile (by basename, without .md) that a stripped command line
-# invokes, searching one directory. When $require_marker is 1, a candidate
-# file must carry the literal marker line (appprofiles.d/ is agent-writable
-# and so not self-trusting the way the vendor directory is); when 0, the
-# directory itself is the trust boundary and no marker is required.
-tui_hint_match_profile() { # <profiles dir> <stripped command line> <require_marker: 0|1>
+# Scans every profile in $dir that declares its own ### Invocation patterns
+# (a filename that is not simply its leading command word -- a git
+# subcommand, e.g.) for one whose pattern matches $command. Split out of
+# tui_hint_match_profile to keep both under CODE-STYLE.md's 40-line cap.
+tui_hint_match_declared_invocation() { # <profiles dir> <stripped command line> <require_marker: 0|1>
     local dir="$1" command="$2" require_marker="$3"
-    local first_word candidate base file patterns pattern
-    [ -d "$dir" ] || return 1
-
-    first_word="$(tui_hint_first_word "$command")"
-    [ -n "$first_word" ] || return 1
-    candidate="$dir/$first_word.md"
-    if [ -f "$candidate" ] && [ "$first_word" != FORMAT ]; then
-        if [ "$require_marker" -eq 1 ] && ! tui_hint_profile_has_marker "$candidate"; then
-            : # unmarked memory-dir file: not self-trusting, fall through
-        elif ! grep -q -F -- '### Invocation' "$candidate"; then
-            printf '%s\n' "$first_word"
-            return 0
-        fi
-    fi
-
+    local file base patterns pattern
     while IFS= read -r file; do
         [ -n "$file" ] || continue
         base="${file##*/}"
@@ -131,6 +116,30 @@ tui_hint_match_profile() { # <profiles dir> <stripped command line> <require_mar
 $patterns
 EOF
     done < <(grep -l -F -- '### Invocation' "$dir"/*.md 2>/dev/null)
-
     return 1
+}
+
+# Finds the profile (by basename, without .md) that a stripped command line
+# invokes, searching one directory. When $require_marker is 1, a candidate
+# file must carry the literal marker line (appprofiles.d/ is agent-writable
+# and so not self-trusting the way the vendor directory is); when 0, the
+# directory itself is the trust boundary and no marker is required.
+tui_hint_match_profile() { # <profiles dir> <stripped command line> <require_marker: 0|1>
+    local dir="$1" command="$2" require_marker="$3"
+    local first_word candidate
+    [ -d "$dir" ] || return 1
+
+    first_word="$(tui_hint_first_word "$command")"
+    [ -n "$first_word" ] || return 1
+    candidate="$dir/$first_word.md"
+    if [ -f "$candidate" ] && [ "$first_word" != FORMAT ]; then
+        if [ "$require_marker" -eq 1 ] && ! tui_hint_profile_has_marker "$candidate"; then
+            : # unmarked memory-dir file: not self-trusting, fall through
+        elif ! grep -q -F -- '### Invocation' "$candidate"; then
+            printf '%s\n' "$first_word"
+            return 0
+        fi
+    fi
+
+    tui_hint_match_declared_invocation "$dir" "$command" "$require_marker"
 }
