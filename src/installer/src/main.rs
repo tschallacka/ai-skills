@@ -19,6 +19,7 @@ mod install;
 mod manifest;
 mod mcp;
 mod permissions;
+mod plan_migration;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -39,6 +40,9 @@ Usage:
                      register PATH as an mcp-mode stdio server named NAME
   installer mcp-unregister --agent NAME --name NAME --dir DIR
                      remove NAME's registration, only if it points inside DIR
+  installer migrate-plans --target-root DIR [--target-root DIR ...]
+                     move plans out of each DIR's old planning/plans into
+                     the single portable plan root
   installer --help
 
 --agent NAME is one of: claude, codex, opencode, universal, openclaw, cline
@@ -73,6 +77,7 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
         Some("grant-permissions") => run_grant_permissions(&argv[1..]),
         Some("mcp-register") => run_mcp_register(&argv[1..]),
         Some("mcp-unregister") => run_mcp_unregister(&argv[1..]),
+        Some("migrate-plans") => run_migrate_plans(&argv[1..]),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -545,5 +550,39 @@ fn run_mcp_unregister(argv: &[String]) -> Result<ExitCode, String> {
             args.agent, args.name
         );
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_migrate_plans(argv: &[String]) -> Result<ExitCode, String> {
+    let mut target_roots = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--target-root" => {
+                i += 1;
+                target_roots.push(PathBuf::from(
+                    argv.get(i).ok_or("--target-root needs a value")?,
+                ));
+            }
+            other => return Err(format!("migrate-plans: unknown option: {other}")),
+        }
+        i += 1;
+    }
+    if target_roots.is_empty() {
+        return Err("migrate-plans: at least one --target-root is required".to_string());
+    }
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| "migrate-plans: needs $HOME set".to_string())?;
+
+    let outcome =
+        plan_migration::migrate_legacy_plans(&target_roots, &home).map_err(|e| e.to_string())?;
+    for plan in &outcome.migrated {
+        println!("Migrated plan: -> {}", plan.display());
+    }
+    for (plan, reason) in &outcome.blocked {
+        println!("Plan migration blocked: {}: {reason}", plan.display());
+    }
+    println!("Portable plan root ready: {}", outcome.plan_root.display());
     Ok(ExitCode::SUCCESS)
 }
