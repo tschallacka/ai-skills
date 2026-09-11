@@ -442,6 +442,11 @@ fn home_dir_opt() -> Option<PathBuf> {
 /// (`PickerState::toggle` refuses to select one); this is the same rule
 /// applied to a name that arrived directly via `--skill`/`--all`, which never
 /// passed through the picker at all.
+///
+/// `manifest::skill_unsupported_here` is checked first, same order as
+/// install.sh's own per-skill loop: a platform-unsupported skill has no
+/// requirements worth checking and nothing worth replaying, so it gets its
+/// own reason rather than being reported as a missing-tool block.
 fn install_selected_skills(
     source: &Path,
     target: &Path,
@@ -451,6 +456,10 @@ fn install_selected_skills(
 ) -> Result<Vec<String>, String> {
     let mut installed = Vec::with_capacity(skills.len());
     for skill in skills {
+        if let Some(reason) = manifest::skill_unsupported_here(skill) {
+            println!("Skipped: {skill} -- {reason}, nothing was written");
+            continue;
+        }
         let status = requirements::skill_status(source, skill);
         if status.state == requirements::SkillState::Blocked {
             let reason = status.blocker.unwrap_or_else(|| "a required tool".to_string());
