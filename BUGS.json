@@ -328,6 +328,25 @@
       "updated_at": "2026-09-11T01:29:33Z"
     },
     {
+      "id": "B320",
+      "title": "registers-guard.sh diffed against master's current tip, blocking every landing while master moved",
+      "status": "fixed",
+      "severity": "blocking",
+      "priority": "urgent",
+      "parent": null,
+      "reproduce": "Compare git diff --name-only origin/master..origin/registers (two-dot) against git diff --name-only origin/master...origin/registers (three-dot) on the registers branch at any point where master has moved via ordinary PRs since registers last synced.",
+      "observed": "Every registers.yml landing run failed from 2026-09-10T13:13Z onward: the guard's two-dot diff showed 257 files different (everything master touched in the meantime) instead of the 2 register files registers actually changed, so it refused every pending entry as a stray-file violation.",
+      "expected": "The guard should refuse only when the registers branch itself touched something besides BUGS.json/TODO.json, regardless of how far master has moved in the meantime.",
+      "mechanism": "registers-guard.sh's changed_paths() ran git diff --name-only \"$base..HEAD\", a raw two-dot tree comparison, instead of \"$base...HEAD\", the three-dot merge-base-relative diff. registers-sync.yml backs off syncing registers to master whenever registers carries a pending entry, so master moves independently via ordinary PRs during that window; the two-dot diff then attributes every one of those unrelated changes to the registers push.",
+      "surfaces": [],
+      "fix": "Changed the diff to three-dot ($base...HEAD) in registers-guard.sh. PR #152 (commit 568de2e, merged as 16dcf634).",
+      "verification": "Added a regression test (case 8, test-registers-guard.sh) using real git branches: master gains an unrelated commit while registers gains only a register-only commit off the old base; asserted the guard allows it. Verified the test fails on the two-dot diff and passes on three-dot. Confirmed directly against the real branches (257 files two-dot vs 2 three-dot) before the fix, then rebased the 121-commit registers backlog onto the fixed master and force-pushed; registers.yml landed successfully on the next push for the first time since 2026-09-10T13:13Z.",
+      "found_by": "",
+      "notes": null,
+      "created_at": "2026-09-11T08:43:46Z",
+      "updated_at": "2026-09-11T08:43:46Z"
+    },
+    {
       "id": "B33",
       "title": "Declaring chat's runtimes puts python3 into the generated install.sh, which the python3-shipped gate bans",
       "status": "fixed",
