@@ -50,8 +50,8 @@ while the editor'"'"'s expected_text refuses on mismatch and its journal
 survives a git checkout that had discarded a shell rewrite.'
 
 payload="$(cat)"
-tool_name="$(printf '%s' "$payload" | rjq -r '.tool_name // empty')"
-command_line="$(printf '%s' "$payload" | rjq -r '.tool_input.command // empty')"
+tool_name="$(editor_gate_json_field tool_name <<<"$payload" || true)"
+command_line="$(editor_gate_json_field command <<<"$payload" || true)"
 
 if [ "$tool_name" != "Bash" ] || [ -z "$command_line" ]; then
     printf '{}'
@@ -73,10 +73,11 @@ if token="$(printf '%s' "$command_line" | grep -Eo 'EDIT_OK=[0-9a-f]{32}' | head
         printf '{}'
         exit 0
     fi
-    rjq -n -c --arg reason "Token rejected: $reason
-$MESSAGE" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+    escaped="$(editor_gate_json_escape "Token rejected: $reason
+$MESSAGE")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$escaped"
     exit 0
 fi
 
-rjq -n -c --arg reason "$MESSAGE" \
-    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+escaped="$(editor_gate_json_escape "$MESSAGE")"
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}' "$escaped"

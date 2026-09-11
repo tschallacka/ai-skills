@@ -71,4 +71,24 @@ else
     t_assert_eq 'a placeholder-length --why is refused' no no
 fi
 
+# B319: the hook's own JSON in/out has no rjq dependency -- these run with
+# rjq deliberately hidden from PATH, so a regression back to calling it
+# would fail the same way it did for a real end user, and for this plugin's
+# hard gate specifically would mean failing OPEN on exactly the commands it
+# exists to catch.
+PATH="/usr/bin:/bin"
+
+t_assert_eq 'editor_gate_json_field extracts a plain string value' \
+    "$(printf '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | editor_gate_json_field tool_name)" \
+    'Bash'
+t_assert_eq 'editor_gate_json_field extracts a nested string value by its own key' \
+    "$(printf '{"tool_name":"Bash","tool_input":{"command":"'"$SED_I"' s/a/b/ f"}}' | editor_gate_json_field command)" \
+    "$SED_I s/a/b/ f"
+t_assert_eq 'editor_gate_json_escape escapes a quote and a backslash' \
+    "$(editor_gate_json_escape 'a "quoted" \path')" \
+    'a \"quoted\" \\path'
+t_assert_eq 'a value round-trips through escape then field-extraction unchanged' \
+    "$(printf '{"x":"%s"}' "$(editor_gate_json_escape 'weird "value" with \backslash')" | editor_gate_json_field x)" \
+    'weird "value" with \backslash'
+
 t_end

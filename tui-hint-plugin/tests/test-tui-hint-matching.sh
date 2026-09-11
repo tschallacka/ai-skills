@@ -61,4 +61,27 @@ t_assert_eq 'an unmarked file in an agent-writable dir is never trusted' \
 t_assert_eq 'require_marker=0 trusts the directory itself, marker or not' \
     "$(match "$work" 'unmarked-tool --x' 0)" 'unmarked-tool'
 
+# B319: the hook's own JSON in/out has no rjq dependency -- these run with
+# rjq deliberately hidden from PATH, so a regression back to calling it
+# would fail the same way it did for a real end user with neither
+# ai-text-editor nor interactive-shell (the skills this plugin rides with)
+# ever declaring rjq as a runtime requirement.
+PATH="/usr/bin:/bin"
+
+t_assert_eq 'tui_hint_json_field extracts a plain string value' \
+    "$(printf '{"tool_name":"Bash","tool_input":{"command":"mc"}}' | tui_hint_json_field tool_name)" \
+    'Bash'
+t_assert_eq 'tui_hint_json_field extracts a nested string value by its own key' \
+    "$(printf '{"tool_name":"Bash","tool_input":{"command":"mc /root"}}' | tui_hint_json_field command)" \
+    'mc /root'
+t_assert_eq 'tui_hint_json_field unescapes a quote in the value' \
+    "$(printf '{"command":"echo \\"hi\\""}' | tui_hint_json_field command)" \
+    'echo "hi"'
+t_assert_eq 'tui_hint_json_escape escapes a quote and a backslash' \
+    "$(tui_hint_json_escape 'a "quoted" \path')" \
+    'a \"quoted\" \\path'
+t_assert_eq 'a value round-trips through escape then field-extraction unchanged' \
+    "$(printf '{"x":"%s"}' "$(tui_hint_json_escape 'weird "value" with \backslash')" | tui_hint_json_field x)" \
+    'weird "value" with \backslash'
+
 t_end
