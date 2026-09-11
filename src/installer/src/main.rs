@@ -21,6 +21,7 @@ mod mcp;
 mod permissions;
 mod plan_migration;
 mod plugins;
+mod requirements;
 mod ui;
 
 use std::path::{Path, PathBuf};
@@ -245,12 +246,32 @@ fn home_dir_opt() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
 }
 
-fn install_selected_skills(source: &Path, target: &Path, skills: &[String]) -> Result<(), String> {
+/// A skill missing a hard requirement is skipped rather than installed and
+/// then left half-usable -- same rule as install.sh's
+/// summary_blocked_block/RUNTIME_BLOCKED_SKILLS: "Skipped: %s -- a hard
+/// requirement is missing, nothing was written". The interactive picker
+/// already keeps a Blocked skill out of `skills` before this is called
+/// (`PickerState::toggle` refuses to select one); this is the same rule
+/// applied to a name that arrived directly via `--skill`/`--all`, which never
+/// passed through the picker at all.
+fn install_selected_skills(
+    source: &Path,
+    target: &Path,
+    skills: &[String],
+) -> Result<Vec<String>, String> {
+    let mut installed = Vec::with_capacity(skills.len());
     for skill in skills {
+        let status = requirements::skill_status(source, skill);
+        if status.state == requirements::SkillState::Blocked {
+            let reason = status.blocker.unwrap_or_else(|| "a required tool".to_string());
+            println!("Skipped: {skill} -- {reason} is required and missing; nothing was written");
+            continue;
+        }
         install::install_skill(source, skill, target).map_err(|e| e.to_string())?;
         println!("installed {skill} -> {}", target.join(skill).display());
+        installed.push(skill.clone());
     }
-    Ok(())
+    Ok(installed)
 }
 
 /// The permission grants, plan migration and vendor plugins install.sh
@@ -385,8 +406,8 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         ));
     }
 
-    install_selected_skills(&source, &target, &skills)?;
-    run_post_install_steps(kind.as_deref(), &source, &target, &skills);
+    let installed = install_selected_skills(&source, &target, &skills)?;
+    run_post_install_steps(kind.as_deref(), &source, &target, &installed);
     Ok(ExitCode::SUCCESS)
 }
 enum GrantTarget {
@@ -932,10 +953,12 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
                 .map(|s| s.description.to_string())
                 .unwrap_or_default();
             let installed = target.join(&name).join("SKILL.md").is_file();
+            let status = requirements::skill_status(&source, &name);
             ui::model::SkillEntry {
                 name,
                 description,
                 installed,
+                status,
             }
         })
         .collect();
@@ -950,8 +973,8 @@ fn run_interactive(argv: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some(selected) => {
-            install_selected_skills(&source, &target, &selected)?;
-            run_post_install_steps(kind.as_deref(), &source, &target, &selected);
+            let installed = install_selected_skills(&source, &target, &selected)?;
+            run_post_install_steps(kind.as_deref(), &source, &target, &installed);
             Ok(ExitCode::SUCCESS)
         }
     }

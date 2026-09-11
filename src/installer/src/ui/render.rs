@@ -16,6 +16,7 @@
 
 use super::layout::Layout;
 use super::model::{Focus, PickerState};
+use crate::requirements::SkillState;
 
 fn pad(text: &str, width: usize) -> String {
     if text.len() > width {
@@ -76,16 +77,26 @@ fn hint_bar(cols: usize) -> String {
     )
 }
 
+/// The state suffix is appended after the name rather than inserted before
+/// it, so an Ok skill's row (the common case, and the only case in most
+/// existing frame-shape tests) renders byte-identical to before this state
+/// tag existed.
 fn list_row(state: &PickerState, index: usize, width: usize) -> String {
     let cursor = if index == state.cursor { '>' } else { ' ' };
     let checkbox = if state.selected[index] { "[x]" } else { "[ ]" };
     let name = &state.skills[index].name;
-    pad(&format!("{cursor}{checkbox} {name}"), width)
+    let suffix = match state.skills[index].status.state {
+        SkillState::Ok => "",
+        SkillState::Degraded => " ~",
+        SkillState::Blocked => " !",
+    };
+    pad(&format!("{cursor}{checkbox} {name}{suffix}"), width)
 }
 
-/// Name, description, and install status; no dependency table or ACTIONS
-/// pane yet (iui_info_status's DEPENDENCIES/ACTIONS sections stay unported
-/// until runtime_requirements and integration.tsv have a Rust model).
+/// Name, description, install status, and (when requires.tsv named any)
+/// DEPENDENCIES -- no ACTIONS pane yet (iui_info_status's `d`/`r`/`m` hint
+/// carousel and integration-mode cycling stay unported until integration.tsv
+/// has a Rust model).
 pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let skill = &state.skills[state.cursor];
@@ -104,6 +115,32 @@ pub(crate) fn info_lines(state: &PickerState, width: usize) -> Vec<String> {
         ),
         width,
     ));
+    lines.push(pad(
+        &format!(
+            "  state          {}",
+            match skill.status.state {
+                SkillState::Ok => "ok",
+                SkillState::Degraded => "degraded",
+                SkillState::Blocked => "blocked",
+            }
+        ),
+        width,
+    ));
+    if !skill.status.requirements.is_empty() {
+        lines.push(pad("", width));
+        lines.push(pad("DEPENDENCIES", width));
+        for (req, met) in &skill.status.requirements {
+            let label = crate::requirements::requirement_label(req);
+            let mark = if *met { "ok" } else { "missing" };
+            let strength = match req.strength {
+                crate::requirements::Strength::Hard => "hard",
+                crate::requirements::Strength::Soft => "soft",
+            };
+            for line in wrap(&format!("  {label} ({strength}): {mark} -- {}", req.why), width) {
+                lines.push(pad(&line, width));
+            }
+        }
+    }
     if !state.message.is_empty() {
         lines.push(pad("", width));
         for message in &state.message {
@@ -223,6 +260,7 @@ fn render_narrow(state: &PickerState, layout: &Layout, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::requirements::SkillStatus;
     use crate::ui::layout;
     use crate::ui::model::SkillEntry;
 
@@ -233,6 +271,11 @@ mod tests {
                 name: n.to_string(),
                 description: format!("{n} does things."),
                 installed: false,
+                status: SkillStatus {
+                    state: SkillState::Ok,
+                    blocker: None,
+                    requirements: Vec::new(),
+                },
             })
             .collect()
     }

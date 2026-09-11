@@ -2,15 +2,19 @@
 // PACKAGE: PROD
 //! Picker state -- selection, cursor, scroll, focus -- ported in spirit from
 //! installer/src/35-ui-model.sh's IUI_* state, trimmed to what this slice
-//! actually drives: no dependency/requirement table (runtime_requirements
-//! is not ported), no integration-mode cycling (T95, needs integration.tsv),
-//! no per-tool cache. Every skill is treated as installable; the ACTIONS
-//! pane (d/r/m) and the blocked/degraded state tag do not exist yet.
+//! actually drives: [[requirements]] supplies the per-skill ok/degraded/
+//! blocked state and DEPENDENCIES section, but there is still no
+//! integration-mode cycling (T95, needs integration.tsv) and no ACTIONS pane
+//! (d/r/m -- install-hint text, reverify, mode cycling) since none of those
+//! read from a model this installer has yet.
+
+use crate::requirements::{SkillState, SkillStatus};
 
 pub struct SkillEntry {
     pub name: String,
     pub description: String,
     pub installed: bool,
+    pub status: SkillStatus,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -32,11 +36,13 @@ pub struct PickerState {
 }
 
 impl PickerState {
-    /// Everything starts selected, same as install.sh's numbered menu
-    /// default of "all" and the picker's own iui_load_installer_skills.
+    /// Everything installable starts selected, same as install.sh's numbered
+    /// menu default of "all" -- but a Blocked skill is preselected through
+    /// `toggle`, same as iui_load_installer_skills does, so it cannot end up
+    /// selected: iui_toggle refuses it the same way a later keypress would.
     pub fn new(skills: Vec<SkillEntry>) -> Self {
-        let selected = vec![true; skills.len()];
-        PickerState {
+        let selected = vec![false; skills.len()];
+        let mut state = PickerState {
             skills,
             selected,
             cursor: 0,
@@ -46,17 +52,47 @@ impl PickerState {
             message: Vec::new(),
             done: false,
             confirmed: false,
+        };
+        for i in 0..state.skills.len() {
+            state.toggle(i);
         }
+        state.message.clear();
+        state
     }
 
+    /// Deselecting is always allowed; selecting a Blocked skill is refused
+    /// with the reason instead of allowed and then rejected by the install
+    /// itself -- same rule as installer/src/35-ui-model.sh's iui_toggle.
     pub fn toggle(&mut self, index: usize) {
+        let Some(skill) = self.skills.get(index) else {
+            return;
+        };
+        let currently_selected = self.selected.get(index).copied().unwrap_or(false);
+        if !currently_selected && skill.status.state == SkillState::Blocked {
+            let reason = skill
+                .status
+                .blocker
+                .clone()
+                .unwrap_or_else(|| "a required tool".to_string());
+            self.message = vec![format!(
+                "{} is blocked: {reason} is missing",
+                skill.name
+            )];
+            return;
+        }
         if let Some(slot) = self.selected.get_mut(index) {
             *slot = !*slot;
         }
     }
 
+    /// Same rule as the `a` key in install.sh's iui_handle_key: deselect
+    /// everything first, then toggle each one back on, so a Blocked skill
+    /// stays out through the same refusal `toggle` gives a direct keypress.
     pub fn select_all(&mut self) {
-        self.selected.iter_mut().for_each(|s| *s = true);
+        for i in 0..self.skills.len() {
+            self.selected[i] = false;
+            self.toggle(i);
+        }
     }
 
     pub fn select_none(&mut self) {
@@ -149,6 +185,22 @@ impl PickerState {
 mod tests {
     use super::*;
 
+    fn ok_status() -> SkillStatus {
+        SkillStatus {
+            state: SkillState::Ok,
+            blocker: None,
+            requirements: Vec::new(),
+        }
+    }
+
+    fn blocked_status(blocker: &str) -> SkillStatus {
+        SkillStatus {
+            state: SkillState::Blocked,
+            blocker: Some(blocker.to_string()),
+            requirements: Vec::new(),
+        }
+    }
+
     fn skills(names: &[&str]) -> Vec<SkillEntry> {
         names
             .iter()
@@ -156,6 +208,7 @@ mod tests {
                 name: n.to_string(),
                 description: format!("{n} description"),
                 installed: false,
+                status: ok_status(),
             })
             .collect()
     }
@@ -252,5 +305,35 @@ mod tests {
         assert_eq!(state.info_scroll, 0);
         state.toggle_focus();
         assert_eq!(state.focus, Focus::List);
+    }
+
+    #[test]
+    fn a_blocked_skill_starts_unselected_and_cannot_be_toggled_on() {
+        let mut list = skills(&["a", "b"]);
+        list[1].status = blocked_status("rjq");
+        let mut state = PickerState::new(list);
+        assert_eq!(state.selected, vec![true, false]);
+        state.toggle(1);
+        assert_eq!(state.selected, vec![true, false]);
+        assert!(state.message[0].contains("b"));
+        assert!(state.message[0].contains("rjq"));
+    }
+
+    #[test]
+    fn deselecting_a_blocked_skill_is_still_allowed() {
+        let mut list = skills(&["a"]);
+        list[0].status = blocked_status("rjq");
+        let state = PickerState::new(list);
+        assert_eq!(state.selected, vec![false]);
+    }
+
+    #[test]
+    fn select_all_skips_a_blocked_skill() {
+        let mut list = skills(&["a", "b"]);
+        list[1].status = blocked_status("rjq");
+        let mut state = PickerState::new(list);
+        state.select_none();
+        state.select_all();
+        assert_eq!(state.selected, vec![true, false]);
     }
 }
