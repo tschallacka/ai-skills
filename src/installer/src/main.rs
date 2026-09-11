@@ -36,7 +36,7 @@ installer — installs skills from the release tree it ships inside.
 Usage:
   installer --platform                     print the resolved target triple
   installer list [--source DIR]            print every discovered skill
-  installer install (--target DIR | --agent NAME)
+  installer install (--target DIR [--target DIR ...] | --agent NAME [--agent NAME ...])
                      (--all | --skill NAME [--skill NAME ...])
                      [--source DIR] [--integration MODE|SKILL=MODE ...]
                      [--editor-integration skill|mcp] [--yes]
@@ -157,8 +157,10 @@ struct InstallArgs {
     skills: Vec<String>,
     all: bool,
     source: Option<PathBuf>,
-    target: Option<PathBuf>,
-    agent: Option<String>,
+    /// Repeatable: `run_install` installs into every resolved root, matching
+    /// install.sh's own multi-root `SELECTED_TARGET_PATHS`.
+    targets: Vec<PathBuf>,
+    agents: Vec<String>,
     integration: Vec<String>,
     yes: bool,
     dev_build: bool,
@@ -168,8 +170,8 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
     let mut skills = Vec::new();
     let mut all = false;
     let mut source: Option<PathBuf> = None;
-    let mut target: Option<PathBuf> = None;
-    let mut agent: Option<String> = None;
+    let mut targets: Vec<PathBuf> = Vec::new();
+    let mut agents: Vec<String> = Vec::new();
     let mut integration = Vec::new();
     let mut yes = false;
     let mut dev_build = false;
@@ -188,11 +190,11 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
             }
             "--target" => {
                 i += 1;
-                target = Some(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
+                targets.push(PathBuf::from(argv.get(i).ok_or("--target needs a value")?));
             }
             "--agent" => {
                 i += 1;
-                agent = Some(argv.get(i).ok_or("--agent needs a value")?.clone());
+                agents.push(argv.get(i).ok_or("--agent needs a value")?.clone());
             }
             "--integration" => {
                 i += 1;
@@ -213,8 +215,8 @@ fn parse_install_args(argv: &[String]) -> Result<InstallArgs, String> {
         skills,
         all,
         source,
-        target,
-        agent,
+        targets,
+        agents,
         integration,
         yes,
         dev_build,
@@ -387,6 +389,45 @@ fn resolve_target_and_kind(
         }
         (None, None) => Err("install: --target or --agent is required".to_string()),
     }
+}
+
+/// The multi-root form `run_install` uses: `--target`/`--agent` are each
+/// repeatable there (not in `interactive`, whose picker has no root-
+/// selection UI of its own to drive more than one), matching install.sh's
+/// own `SELECTED_TARGET_PATHS` array and its main loop's `for root in
+/// SELECTED_TARGET_PATHS; do for skill in SELECTED_SKILLS; do install_skill`
+/// nesting -- every skill installs into every named root. Still mutually
+/// exclusive as families (`--target` and `--agent` cannot both be given),
+/// same as the single-root form. A duplicate root (typed twice, or two
+/// `--agent` names that happen to share a home directory) collapses to one
+/// entry so nothing installs, registers, or prompts twice for the same
+/// destination.
+fn resolve_targets_and_kinds(
+    targets: Vec<PathBuf>,
+    agents: Vec<String>,
+) -> Result<Vec<(PathBuf, Option<String>)>, String> {
+    if !targets.is_empty() && !agents.is_empty() {
+        return Err("install: --target and --agent are mutually exclusive".to_string());
+    }
+    let mut resolved = Vec::new();
+    if !targets.is_empty() {
+        for t in targets {
+            resolved.push(resolve_target_and_kind(Some(t), None)?);
+        }
+    } else if !agents.is_empty() {
+        for a in agents {
+            resolved.push(resolve_target_and_kind(None, Some(a))?);
+        }
+    } else {
+        return Err("install: --target or --agent is required".to_string());
+    }
+    let mut deduped: Vec<(PathBuf, Option<String>)> = Vec::new();
+    for entry in resolved {
+        if !deduped.iter().any(|(p, _)| *p == entry.0) {
+            deduped.push(entry);
+        }
+    }
+    Ok(deduped)
 }
 
 fn home_dir_opt() -> Option<PathBuf> {
@@ -734,7 +775,7 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
         return Err("install: --all or at least one --skill is required".to_string());
     }
     let source = resolve_source(args.source)?;
-    let (target, kind) = resolve_target_and_kind(args.target, args.agent)?;
+    let roots = resolve_targets_and_kinds(args.targets, args.agents)?;
 
     let skills = if args.all {
         discover::discover_skills(&source).map_err(|e| e.to_string())?
@@ -749,15 +790,20 @@ fn run_install(argv: &[String]) -> Result<ExitCode, String> {
     }
 
     let integration_selection = build_integration_selection(&source, &args.integration)?;
-    let installed = install_selected_skills(
-        &source,
-        &target,
-        &skills,
-        &integration_selection,
-        args.dev_build,
-    )?;
+    // One shared Confirms across every root, matching install.sh's single
+    // run-wide YES/YES_ALL: an "a" (all) answer for the first root's prompt
+    // must still auto-answer every later root's prompts too.
     let mut confirms = Confirms::new(args.yes);
-    run_post_install_steps(kind.as_deref(), &source, &target, &installed, &mut confirms);
+    for (target, kind) in &roots {
+        let installed = install_selected_skills(
+            &source,
+            target,
+            &skills,
+            &integration_selection,
+            args.dev_build,
+        )?;
+        run_post_install_steps(kind.as_deref(), &source, target, &installed, &mut confirms);
+    }
     Ok(ExitCode::SUCCESS)
 }
 enum GrantTarget {
