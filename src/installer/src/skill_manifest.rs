@@ -423,6 +423,10 @@ fn interpret(stmts: &[Stmt], source_root: &Path, package_dev: bool) -> Option<Ve
                         (e.file_type().ok()?.is_file() && name.ends_with(".sh")).then_some(name)
                     })
                     .collect();
+                // Sorted, unlike WalkDir below: bash's own `"$dir/"*.sh`
+                // glob expansion (the construct this ports) sorts its
+                // matches lexicographically, so matching that means
+                // sorting here too.
                 names.sort();
                 out.extend(names.into_iter().map(|n| format!("{prefix}{n}")));
             }
@@ -431,9 +435,16 @@ fn interpret(stmts: &[Stmt], source_root: &Path, package_dev: bool) -> Option<Ve
                 if !scan_dir.is_dir() {
                     continue;
                 }
+                // Deliberately NOT sorted: bash's own `find . -type f -print`
+                // (install.sh's own construct this ports) does not sort
+                // either, and `std::fs::read_dir` is a thin wrapper over the
+                // same underlying `readdir()` bash's `find` walks -- so
+                // leaving this in raw read_dir order, recursing into a
+                // directory depth-first as it is encountered (exactly what
+                // `walk_files` below does), reproduces `find`'s own
+                // unsorted traversal order rather than merely its file set.
                 let mut files = Vec::new();
                 walk_files(&scan_dir, Path::new(""), &mut files);
-                files.sort();
                 out.extend(files.into_iter().map(|rel| format!("{prefix}{rel}")));
             }
         }
@@ -650,4 +661,89 @@ mod tests {
         assert!(skill_files_via_install_sh(dir.path(), "gadget", false).is_none());
     }
 
+    /// Cross-checks every real skill this repository ships, on both
+    /// packages, against install.sh's own `skill_files()` -- run with an
+    /// actual `bash` subprocess ONLY here, as a regression oracle this test
+    /// compares the production (no-bash) parser's answer against. Compares
+    /// the FILE SET, not order: `Stmt::WalkDir` deliberately preserves raw
+    /// directory-read order to mirror bash's own unsorted `find` (see its
+    /// own comment in `interpret`), which is real but not a contract
+    /// anything downstream relies on, and asserting it in a portable unit
+    /// test would be asserting a filesystem implementation detail rather
+    /// than this parser's own correctness. `bash` missing on PATH skips
+    /// this test rather than failing it: it is a stronger check on top of
+    /// the unit tests above, not the only coverage this parser has.
+    #[test]
+    fn matches_install_shs_own_file_set_for_every_real_skill_in_this_repo() {
+        let repo_root = {
+            let mut dir = std::env::current_dir().unwrap();
+            loop {
+                if dir.join("install.sh").is_file() {
+                    break dir;
+                }
+                assert!(dir.pop(), "could not find install.sh above the test's cwd");
+            }
+        };
+        let has_bash = std::env::split_paths(&std::env::var("PATH").unwrap_or_default())
+            .any(|dir| dir.join("bash").is_file());
+        if !has_bash {
+            return;
+        }
+        let content = fs::read_to_string(repo_root.join("install.sh")).unwrap();
+        let skill_files_fn = extract_function(&content, "skill_files").unwrap();
+        let skill_artifact_files_fn = extract_function(&content, "skill_artifact_files").unwrap();
+
+        let mut checked_any = false;
+        for entry in fs::read_dir(&repo_root).unwrap().filter_map(|e| e.ok()) {
+            if !entry.file_type().unwrap().is_dir() {
+                continue;
+            }
+            let skill = entry.file_name().to_string_lossy().to_string();
+            if !entry.path().join("SKILL.md").is_file() {
+                continue;
+            }
+            for package_dev in [false, true] {
+                let package = if package_dev { "dev" } else { "prod" };
+                let mut script = String::new();
+                script.push_str(&skill_artifact_files_fn);
+                script.push('\n');
+                script.push_str(&skill_files_fn);
+                script.push('\n');
+                script.push_str("skill_files \"$1\" \"$2\"\n");
+                let output = std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(&script)
+                    .arg("skill_manifest")
+                    .arg(&skill)
+                    .arg(package)
+                    .env("SOURCE_ROOT", &repo_root)
+                    .env("DEV_BUILD", "0")
+                    .output()
+                    .unwrap();
+                if !output.status.success() {
+                    // Not every top-level SKILL.md directory has its own
+                    // skill_files() arm (e.g. a skill this host cannot
+                    // build a binary for at all) -- bash's own answer is
+                    // itself absent here, so there is nothing to compare.
+                    continue;
+                }
+                let mut expected: Vec<String> = String::from_utf8(output.stdout)
+                    .unwrap()
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                expected.sort();
+
+                let mut actual = skill_files_via_install_sh(&repo_root, &skill, package_dev)
+                    .unwrap_or_else(|| panic!("{skill} ({package}): parser returned None"));
+                actual.sort();
+
+                assert_eq!(actual, expected, "{skill} ({package})");
+                checked_any = true;
+            }
+        }
+        assert!(checked_any, "found no real skill to cross-check against");
+    }
 }
